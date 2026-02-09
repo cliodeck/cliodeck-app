@@ -1,0 +1,109 @@
+.report-issue-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.report-issue-content {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-issue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.report-issue-header h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
+}
+
+.report-issue-body {
+  padding: var(--spacing-lg);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.report-issue-body .form-field select {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.report-issue-body .form-field select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.report-issue-body .form-field textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  resize: vertical;
+  min-height: 120px;
+}
+
+.report-issue-body .form-field textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.report-success {
+  padding: var(--spacing-md);
+  background-color: var(--color-success-bg);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-success);
+  font-size: var(--font-size-sm);
+}
+
+.report-issue-footer {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg);
+  border-top: 1px solid var(--border-color);
+}
+
+.report-issue-footer button {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: all var(--transition-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+}

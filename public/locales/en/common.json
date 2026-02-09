@@ -939,5 +939,19 @@
       "modelTooSmall": "Current model may be too small for this mode",
       "contextTooSmall": "Context window may be insufficient"
     }
+  },
+  "report": {
+    "title": "Report an issue",
+    "type": "Type",
+    "typeBug": "Bug report",
+    "typeFeature": "Feature request",
+    "typeQuestion": "Question",
+    "issueTitle": "Title",
+    "issueTitlePlaceholder": "Summarize the issue in one sentence",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe the issue in detail...",
+    "submit": "Open on GitHub",
+    "submitted": "The form has been opened in your browser. Click 'Submit new issue' on GitHub to confirm.",
+    "systemInfo": "System Information"
   }
 }

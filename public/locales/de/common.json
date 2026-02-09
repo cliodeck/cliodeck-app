@@ -865,5 +865,19 @@
       "modelTooSmall": "Das aktuelle Modell ist möglicherweise zu klein für diesen Modus",
       "contextTooSmall": "Das Kontextfenster könnte unzureichend sein"
     }
+  },
+  "report": {
+    "title": "Problem melden",
+    "type": "Typ",
+    "typeBug": "Fehlerbericht",
+    "typeFeature": "Funktionswunsch",
+    "typeQuestion": "Frage",
+    "issueTitle": "Titel",
+    "issueTitlePlaceholder": "Fassen Sie das Problem in einem Satz zusammen",
+    "description": "Beschreibung",
+    "descriptionPlaceholder": "Beschreiben Sie das Problem im Detail...",
+    "submit": "Auf GitHub öffnen",
+    "submitted": "Das Formular wurde in Ihrem Browser geöffnet. Klicken Sie auf 'Submit new issue' auf GitHub, um zu bestätigen.",
+    "systemInfo": "Systeminformationen"
   }
 }

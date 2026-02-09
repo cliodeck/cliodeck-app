@@ -10,6 +10,7 @@ import { BeamerConfig } from './BeamerConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
+import { ReportIssueModal } from '../Report/ReportIssueModal';
 import './ProjectPanel.css';
 
 export const ProjectPanel: React.FC = () => {
@@ -29,6 +30,7 @@ export const ProjectPanel: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPDFExportModal, setShowPDFExportModal] = useState(false);
   const [showWordExportModal, setShowWordExportModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectType, setNewProjectType] = useState<'article' | 'book' | 'presentation'>('article');
   const [newProjectPath, setNewProjectPath] = useState('');
@@ -185,7 +187,7 @@ export const ProjectPanel: React.FC = () => {
             </button>
             <button
               className="toolbar-btn"
-              onClick={() => window.electron.shell.openExternal('https://github.com/cliodeck/cliodeck-app/issues')}
+              onClick={() => setShowReportModal(true)}
               title={t("project.reportIssue")}
             >
               <Bug size={20} strokeWidth={1} />
@@ -423,6 +425,12 @@ export const ProjectPanel: React.FC = () => {
       <WordExportModal
         isOpen={showWordExportModal}
         onClose={() => setShowWordExportModal(false)}
+      />
+
+      {/* Report Issue Modal */}
+      <ReportIssueModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
       />
     </div>
   );
