@@ -4,6 +4,7 @@
  * et la disponibilité des services.
  */
 
+import fs from 'fs';
 import { OllamaClient, GENERATION_PRESETS } from './OllamaClient.js';
 import { EmbeddedLLMClient, DEFAULT_EMBEDDED_MODEL } from './EmbeddedLLMClient.js';
 import type { SearchResult } from '../../types/pdf-document.js';
@@ -70,20 +71,25 @@ export class LLMProviderManager {
     console.log(`   Configured provider: ${this.config.provider}`);
     console.log(`   Embedded model path: ${this.config.embeddedModelPath || 'not set'}`);
 
-    // Initialiser le modèle embarqué si un chemin est fourni
+    // Initialiser le modèle embarqué si un chemin est fourni et le fichier existe
     if (this.config.embeddedModelPath) {
-      try {
-        const success = await this.embeddedClient.initialize(
-          this.config.embeddedModelPath,
-          this.config.embeddedModelId
-        );
-        this.embeddedAvailable = success;
-        if (success) {
-          console.log('✅ [PROVIDER] Embedded model loaded successfully');
-        }
-      } catch (error) {
-        console.warn('⚠️ [PROVIDER] Could not load embedded model:', error);
+      if (!fs.existsSync(this.config.embeddedModelPath)) {
+        console.log(`⏭️ [PROVIDER] Embedded model not found, skipping: ${this.config.embeddedModelPath}`);
         this.embeddedAvailable = false;
+      } else {
+        try {
+          const success = await this.embeddedClient.initialize(
+            this.config.embeddedModelPath,
+            this.config.embeddedModelId
+          );
+          this.embeddedAvailable = success;
+          if (success) {
+            console.log('✅ [PROVIDER] Embedded model loaded successfully');
+          }
+        } catch (error) {
+          console.warn('⚠️ [PROVIDER] Could not load embedded model:', error);
+          this.embeddedAvailable = false;
+        }
       }
     }
 

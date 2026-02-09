@@ -112,12 +112,14 @@ class PDFService {
         ollamaEmbeddingModel: config.ollamaEmbeddingModel,
       });
 
-      // Initialiser le manager (charge le modèle embarqué si disponible)
-      await this.llmProviderManager.initialize();
+      // Start LLM initialization (runs in parallel with VectorStore)
+      const llmInitPromise = this.llmProviderManager.initialize();
 
       // Initialiser VectorStore (Enhanced ou Standard selon config)
       const useEnhancedSearch =
         ragConfig.useHNSWIndex !== false || ragConfig.useHybridSearch !== false;
+
+      let vsInitPromise: Promise<void> | undefined;
 
       if (useEnhancedSearch) {
         console.log('🚀 [PDF-SERVICE] Using EnhancedVectorStore (HNSW + BM25)');
@@ -128,8 +130,17 @@ class PDFService {
           this.vectorStore.setRebuildProgressCallback(onRebuildProgress);
         }
 
-        await this.vectorStore.initialize();
+        vsInitPromise = this.vectorStore.initialize();
+      } else {
+        console.log('📊 [PDF-SERVICE] Using standard VectorStore (linear search)');
+        this.vectorStore = new VectorStore(projectPath);
+      }
 
+      // Wait for both LLM and VectorStore to finish initializing in parallel
+      await Promise.all([llmInitPromise, vsInitPromise].filter(Boolean));
+
+      // Post-init: configure enhanced vector store (after initialization is complete)
+      if (useEnhancedSearch && this.vectorStore instanceof EnhancedVectorStore) {
         // Check if indexes need to be rebuilt - run in background to avoid blocking UI
         if (this.vectorStore.needsRebuild()) {
           console.log('🔨 [PDF-SERVICE] Indexes need rebuild, starting rebuild in background...');
@@ -148,9 +159,6 @@ class PDFService {
         if (ragConfig.useHybridSearch !== undefined) {
           this.vectorStore.setUseHybrid(ragConfig.useHybridSearch);
         }
-      } else {
-        console.log('📊 [PDF-SERVICE] Using standard VectorStore (linear search)');
-        this.vectorStore = new VectorStore(projectPath);
       }
 
       // Convertir le nouveau format de config en ancien format pour le summarizer

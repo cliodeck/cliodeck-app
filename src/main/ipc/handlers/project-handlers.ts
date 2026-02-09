@@ -85,16 +85,18 @@ export function setupProjectHandlers() {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
           console.log('🔧 Initializing services for project:', projectPath);
-          await historyService.init(projectPath);
-          modeService.init(projectPath);
 
-          // Initialize PDF service with rebuild progress callback
+          // Initialize independent services in parallel
+          await Promise.all([
+            historyService.init(projectPath),
+            Promise.resolve(modeService.init(projectPath)),
+            tropyService.init(projectPath),
+          ]);
+
+          // Initialize PDF service (depends on config, must run after)
           await pdfService.init(projectPath, (progress) => {
             event.sender.send('project:rebuild-progress', progress);
           });
-
-          // Initialize Tropy service
-          await tropyService.init(projectPath);
 
           console.log('✅ All services initialized successfully');
         }
