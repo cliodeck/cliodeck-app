@@ -1,0 +1,200 @@
+/**
+ * Similarity Card Styles
+ */
+
+.similarity-card {
+  background: var(--bg-secondary, #1e1e1e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+/* Header */
+.similarity-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.similarity-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.similarity-card-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+
+.similarity-card-authors {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.similarity-card-score {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.similarity-card-score.similarity-high {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.similarity-card-score.similarity-medium {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
+.similarity-card-score.similarity-low {
+  background: rgba(100, 100, 100, 0.2);
+  color: var(--text-secondary, #888);
+}
+
+/* Preview toggle */
+.similarity-card-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: 8px;
+}
+
+.similarity-card-preview-toggle:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.05));
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Preview content */
+.similarity-card-preview {
+  background: var(--bg-tertiary, #252525);
+  border-radius: 4px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.similarity-card-preview-text {
+  font-size: 11px;
+  color: var(--text-secondary, #aaa);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.similarity-card-page {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-secondary, #666);
+}
+
+/* Actions */
+.similarity-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.similarity-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary, #252525);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  color: var(--text-secondary, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.similarity-card-action:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
+  border-color: var(--accent-color, #4a9eff);
+  color: var(--accent-color, #4a9eff);
+}
+
+/* Source type badge */
+.similarity-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.similarity-card-badge.badge-secondary {
+  background: rgba(74, 158, 255, 0.15);
+  color: #4a9eff;
+}
+
+.similarity-card-badge.badge-primary {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+/* Primary source specific styling */
+.similarity-card.primary-source {
+  border-left: 3px solid #f59e0b;
+}
+
+.similarity-card.secondary-source {
+  border-left: 3px solid #4a9eff;
+}
+
+/* Primary source metadata */
+.similarity-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+}
+
+.similarity-card-archive {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.similarity-card-archive::before {
+  content: "📁";
+  font-size: 9px;
+}
+
+.similarity-card-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.similarity-card-date::before {
+  content: "📅";
+  font-size: 9px;
+}

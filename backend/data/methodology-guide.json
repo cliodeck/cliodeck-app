@@ -1,0 +1,235 @@
+{
+  "features": {
+    "chat": {
+      "title": "Assistant IA avec RAG",
+      "description": "L'assistant IA utilise vos documents PDF indexés pour répondre à vos questions avec des sources précises.",
+      "capabilities": [
+        "Recherche sémantique dans votre corpus de documents",
+        "Réponses contextualisées avec citations de pages",
+        "Synthèse de multiples sources",
+        "Conversation avec historique (mémorisation du contexte)"
+      ],
+      "limitations": [
+        "Ne peut accéder qu'aux documents que vous avez indexés",
+        "La qualité dépend de la qualité des PDFs (OCR, extraction de texte)",
+        "Peut produire des hallucinations si les sources sont ambiguës",
+        "Ne remplace pas la lecture critique des sources primaires",
+        "Limité par la fenêtre de contexte du modèle (4096 tokens par défaut)"
+      ],
+      "bestPractices": [
+        "Vérifiez toujours les citations en retournant aux sources",
+        "Indexez des documents de qualité (bon OCR, texte extractible)",
+        "Posez des questions précises et contextualisées",
+        "Utilisez le RAG pour explorer, pas pour remplacer votre analyse",
+        "Croisez les réponses avec vos propres lectures"
+      ],
+      "academicContext": "Le RAG (Retrieval-Augmented Generation) est un outil d'exploration et de synthèse préliminaire. Il ne dispense pas de la lecture critique des sources. Toute information utilisée dans vos travaux doit être vérifiée dans les documents originaux."
+    },
+    "pdfIndex": {
+      "title": "Indexation de PDFs",
+      "description": "Convertit vos documents PDF en base vectorielle interrogeable par l'IA.",
+      "capabilities": [
+        "Extraction automatique du texte des PDFs",
+        "Découpage en chunks sémantiques (500 tokens par défaut)",
+        "Création d'embeddings vectoriels pour recherche sémantique",
+        "Extraction automatique des métadonnées (titre, auteur, année)",
+        "Détection et extraction des citations bibliographiques"
+      ],
+      "limitations": [
+        "Nécessite des PDFs avec texte extractible (pas seulement des images)",
+        "L'OCR automatique n'est pas toujours parfait (caractères spéciaux, langues anciennes)",
+        "La qualité du chunking affecte la pertinence des résultats",
+        "Les embeddings ne capturent pas toujours les nuances sémantiques",
+        "Processus gourmand en ressources (CPU/mémoire) pour gros corpus"
+      ],
+      "bestPractices": [
+        "Utilisez des PDFs de bonne qualité (texte selectionnable)",
+        "Vérifiez les métadonnées extraites et corrigez si nécessaire",
+        "Indexez par thématiques cohérentes (ne mélangez pas tout)",
+        "Re-indexez si vous modifiez significativement le corpus",
+        "Gardez une copie de sauvegarde de vos PDFs originaux"
+      ],
+      "academicContext": "L'indexation crée une représentation vectorielle de vos sources. Cette représentation est utile pour la recherche exploratoire, mais ne remplace pas l'organisation thématique traditionnelle (notes, fiches de lecture, etc.)."
+    },
+    "bibliography": {
+      "title": "Gestion Bibliographique (BibTeX)",
+      "description": "Importe et gère vos références bibliographiques au format BibTeX.",
+      "capabilities": [
+        "Import de fichiers .bib (Zotero, Mendeley, JabRef, etc.)",
+        "Visualisation et recherche dans vos références",
+        "Association PDFs ↔ entrées bibliographiques",
+        "Génération automatique de citations formatées",
+        "Export de bibliographies filtrées"
+      ],
+      "limitations": [
+        "Format BibTeX uniquement (pas de support direct EndNote, RIS, etc.)",
+        "Nécessite que vos clés BibTeX soient uniques",
+        "L'association PDF ↔ bib se fait manuellement lors de l'indexation",
+        "Pas de gestion des doublons automatique",
+        "Pas d'intégration directe avec Zotero/Mendeley (import/export seulement)"
+      ],
+      "bestPractices": [
+        "Maintenez un fichier .bib propre et structuré (utilisez Zotero/JabRef)",
+        "Utilisez des clés BibTeX cohérentes (ex: auteur_annee_mot)",
+        "Exportez régulièrement depuis votre gestionnaire de références",
+        "Associez systématiquement PDFs et entrées bib lors de l'indexation",
+        "Validez votre .bib avant import (syntaxe correcte)"
+      ],
+      "academicContext": "BibTeX est le standard de facto en milieu académique. ClioDesk s'intègre dans votre workflow existant (Zotero → BibTeX → ClioDesk) sans le remplacer."
+    },
+    "corpus": {
+      "title": "Exploration de Corpus",
+      "description": "Analyse thématique et visualisation de votre corpus de documents.",
+      "capabilities": [
+        "Détection automatique de topics (LDA, NMF)",
+        "Visualisation des thèmes dominants",
+        "Timeline d'évolution thématique",
+        "Graphe de relations entre documents",
+        "Extraction de termes-clés par document"
+      ],
+      "limitations": [
+        "Nécessite un corpus d'au moins 10-15 documents pour être pertinent",
+        "Les topics générés sont des approximations statistiques",
+        "Sensible à la qualité du preprocessing (stopwords, langue)",
+        "Ne remplace pas une lecture humaine pour comprendre les thèmes",
+        "Résultats peuvent varier selon les paramètres (nombre de topics, n-grams)"
+      ],
+      "bestPractices": [
+        "Utilisez sur des corpus thématiquement cohérents",
+        "Expérimentez avec différents nombres de topics (5-20)",
+        "Interprétez les résultats avec votre connaissance du domaine",
+        "Utilisez comme outil exploratoire, pas comme vérité absolue",
+        "Combinez avec vos propres catégorisations thématiques"
+      ],
+      "academicContext": "Le topic modeling est une technique de distant reading. Il révèle des patterns macro que la lecture traditionnelle pourrait manquer, mais ne remplace pas le close reading nécessaire à l'analyse historique."
+    },
+    "journal": {
+      "title": "Journal de Recherche",
+      "description": "Traçabilité complète de votre processus de recherche et d'écriture.",
+      "capabilities": [
+        "Historique automatique de toutes les sessions de travail",
+        "Logs des sauvegardes de documents (avec diffs)",
+        "Traçabilité des opérations IA (requêtes, sources utilisées)",
+        "Historique persistant des conversations",
+        "Export formaté pour annexes académiques (Markdown, LaTeX, JSON)"
+      ],
+      "limitations": [
+        "Ne capture que les actions dans ClioDesk (pas vos notes externes)",
+        "Pas de synchronisation cloud (données locales uniquement)",
+        "L'export LaTeX nécessite post-traitement manuel",
+        "Taille de la base peut croître significativement sur longs projets",
+        "Pas de chiffrement des données (sensible pour données confidentielles)"
+      ],
+      "bestPractices": [
+        "Consultez régulièrement pour suivre votre progression",
+        "Exportez périodiquement pour sauvegardes",
+        "Utilisez les exports pour documenter votre méthodologie",
+        "Intégrez dans vos annexes de thèse/mémoire",
+        "Nettoyez les sessions obsolètes pour réduire la taille de la DB"
+      ],
+      "academicContext": "La traçabilité méthodologique est de plus en plus exigée en sciences humaines numériques. Le journal permet de documenter votre processus de recherche assistée par IA de manière transparente et reproductible."
+    },
+    "editor": {
+      "title": "Éditeur Markdown",
+      "description": "Éditeur de texte académique avec syntaxe Markdown et prévisualisation.",
+      "capabilities": [
+        "Syntaxe Markdown complète (titres, listes, liens, images)",
+        "Prévisualisation en temps réel",
+        "Support LaTeX inline (équations mathématiques)",
+        "Export PDF avec mise en page académique",
+        "Gestion de projets multi-fichiers"
+      ],
+      "limitations": [
+        "Pas de support des styles Word complexes",
+        "Pas de gestion collaborative en temps réel",
+        "Export PDF basique (personnalisation limitée)",
+        "Pas de vérification orthographique intégrée",
+        "Pas de support des notes de bas de page automatisées"
+      ],
+      "bestPractices": [
+        "Utilisez Markdown pour structurer clairement vos textes",
+        "Combinez avec Pandoc pour exports avancés (docx, LaTeX)",
+        "Gardez vos fichiers .md sous contrôle de version (Git)",
+        "Organisez vos projets par chapitres/sections",
+        "Exportez régulièrement en PDF pour vérifier le rendu"
+      ],
+      "academicContext": "Markdown est idéal pour l'écriture académique : focus sur le contenu, séparation contenu/mise en forme, interopérabilité, et pérennité des formats texte."
+    }
+  },
+  "faq": [
+    {
+      "question": "Est-ce que l'IA peut remplacer ma lecture des sources ?",
+      "answer": "Non. L'IA est un outil d'exploration et de synthèse préliminaire. Vous devez toujours vérifier les citations dans les sources originales et effectuer une lecture critique. L'IA peut accélérer la découverte de passages pertinents, mais pas remplacer l'analyse historique.",
+      "category": "méthodologie"
+    },
+    {
+      "question": "Mes données sont-elles envoyées sur internet ?",
+      "answer": "Non si vous utilisez Ollama en local. ClioDesk fonctionne entièrement hors ligne avec des modèles locaux. Vos PDFs, notes et conversations restent sur votre machine. Si vous configurez une API externe (OpenAI, Anthropic), alors oui, les requêtes sont envoyées.",
+      "category": "confidentialité"
+    },
+    {
+      "question": "Comment citer l'usage de ClioDesk dans mes travaux ?",
+      "answer": "Documentez votre méthodologie dans une section dédiée. Exportez le journal de recherche et incluez-le en annexe. Mentionnez clairement : (1) quels documents ont été indexés, (2) quels modèles IA utilisés, (3) comment vous avez vérifié les informations. Transparence méthodologique est essentielle.",
+      "category": "académique"
+    },
+    {
+      "question": "Quelle taille de corpus est recommandée ?",
+      "answer": "Pour le RAG : pas de limite stricte, mais 20-200 documents est optimal. En dessous de 10, le RAG apporte peu. Au-dessus de 500, les performances peuvent dégrader. Pour le topic modeling : minimum 15-20 documents, optimal 50-200.",
+      "category": "technique"
+    },
+    {
+      "question": "Le RAG fonctionne-t-il avec des documents en vieux français / latin ?",
+      "answer": "Dépend du modèle d'embeddings. Les modèles multilingues modernes (multilingual-e5) gèrent assez bien le français moderne. Pour vieux français/latin : résultats variables. Testez d'abord sur un petit échantillon. L'OCR peut aussi poser problème sur textes anciens.",
+      "category": "technique"
+    },
+    {
+      "question": "Comment améliorer la qualité des réponses de l'IA ?",
+      "answer": "1) Indexez des PDFs de qualité (bon OCR), 2) Posez des questions précises et contextualisées, 3) Utilisez le paramètre 'topK' pour augmenter le nombre de sources, 4) Essayez différents modèles (llama3.1 vs mistral), 5) Vérifiez toujours les sources citées.",
+      "category": "méthodologie"
+    },
+    {
+      "question": "Puis-je collaborer avec d'autres chercheurs sur ClioDesk ?",
+      "answer": "Pas de collaboration en temps réel intégrée. Mais vous pouvez : 1) Partager vos fichiers .md via Git, 2) Exporter/importer les PDFs et .bib, 3) Partager les exports du journal. Pour vrais projets collaboratifs, combinez ClioDesk (travail individuel) + Overleaf/Google Docs (écriture collaborative).",
+      "category": "workflow"
+    },
+    {
+      "question": "Le journal de recherche prend-il beaucoup de place ?",
+      "answer": "Environ 1-5 MB pour une session de travail typique (quelques heures). Pour un projet de thèse complet (2-3 ans), comptez 50-200 MB. Les logs détaillés (conversations complètes) sont les plus volumineux. Vous pouvez exporter et nettoyer les anciennes sessions.",
+      "category": "technique"
+    }
+  ],
+  "glossary": {
+    "RAG": "Retrieval-Augmented Generation : Technique qui combine recherche dans une base documentaire + génération de texte par LLM. Permet au modèle de s'appuyer sur vos sources plutôt que sa mémoire interne.",
+    "Embeddings": "Représentation vectorielle du sens d'un texte. Permet de calculer la similarité sémantique entre documents/requêtes. Base du RAG.",
+    "Chunking": "Découpage d'un document en petits morceaux (chunks) pour l'indexation. Chunk trop petit = perte de contexte. Chunk trop grand = perte de précision.",
+    "LLM": "Large Language Model : Modèle d'IA entraîné sur d'énormes corpus de texte (GPT, Llama, Mistral, etc.). Capacité de comprendre et générer du texte.",
+    "Ollama": "Plateforme pour exécuter des LLMs localement sur votre machine, sans dépendre d'APIs cloud. Open-source et gratuit.",
+    "Topic Modeling": "Technique statistique (LDA, NMF) pour découvrir des thèmes latents dans un corpus. Distant reading.",
+    "Vector Store": "Base de données optimisée pour stocker et chercher des vecteurs (embeddings). SQLite + extension vectorielle dans ClioDesk.",
+    "BibTeX": "Format de fichier texte pour gérer des bibliographies. Standard LaTeX, supporté par Zotero, JabRef, Mendeley.",
+    "Markdown": "Langage de balisage léger pour formater du texte (# titres, **gras**, etc.). Interopérable et pérenne.",
+    "Similarity Score": "Score de 0 à 1 indiquant la proximité sémantique entre une requête et un document. Plus proche de 1 = plus pertinent."
+  },
+  "resources": [
+    {
+      "title": "Documentation Ollama",
+      "url": "https://ollama.ai/docs",
+      "description": "Guide complet pour installer et utiliser des LLMs locaux"
+    },
+    {
+      "title": "Guide Markdown",
+      "url": "https://www.markdownguide.org/",
+      "description": "Syntaxe complète Markdown pour l'écriture académique"
+    },
+    {
+      "title": "BibTeX Guide",
+      "url": "https://www.bibtex.com/g/bibtex-format/",
+      "description": "Format et syntaxe BibTeX pour bibliographies"
+    },
+    {
+      "title": "Topic Modeling for Humanists",
+      "url": "https://tedunderwood.com/2012/04/07/topic-modeling-made-just-simple-enough/",
+      "description": "Introduction au topic modeling pour chercheurs en sciences humaines"
+    }
+  ]
+}

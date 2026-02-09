@@ -1,0 +1,537 @@
+/* Journal Panel Container */
+.journal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-app);
+  overflow: hidden;
+}
+
+/* Header */
+.journal-header {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: var(--bg-panel);
+  min-height: 50px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.journal-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  color: var(--text-secondary);
+}
+
+.journal-stats-compact {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+}
+
+.journal-stats-compact span {
+  display: flex;
+  align-items: center;
+}
+
+/* Loading */
+.journal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1rem;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top: 3px solid var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error */
+.journal-error {
+  background-color: var(--color-danger-bg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  margin: var(--spacing-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.journal-error p {
+  margin: 0;
+  color: var(--color-warning);
+}
+
+.journal-error button {
+  background: transparent;
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.journal-error button:hover {
+  background-color: var(--color-warning);
+  color: var(--bg-app);
+}
+
+/* Scope Selector */
+.journal-scope-selector {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem var(--spacing-lg);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  gap: 1rem;
+}
+
+.scope-buttons {
+  display: flex;
+  gap: 0.25rem;
+  background-color: var(--bg-app);
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+}
+
+.scope-buttons button {
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: all var(--transition-normal);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.scope-buttons button:hover {
+  color: var(--text-secondary);
+}
+
+.scope-buttons button.active {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.hide-empty-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.hide-empty-checkbox input {
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.hide-empty-checkbox:hover {
+  color: var(--text-secondary);
+}
+
+/* View Tabs */
+.journal-view-tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem var(--spacing-lg);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.journal-view-tabs button {
+  background: transparent;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-normal);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.journal-view-tabs button:hover:not(:disabled) {
+  background-color: var(--bg-card-hover);
+}
+
+.journal-view-tabs button.active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.journal-view-tabs button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Content */
+.journal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-lg);
+}
+
+/* Empty State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.empty-state .help-text {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  color: var(--text-disabled);
+}
+
+/* Sessions List */
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.session-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  background-color: var(--bg-panel);
+}
+
+.session-card:hover {
+  background-color: var(--bg-card-hover);
+  border-color: var(--color-accent);
+}
+
+.session-card.selected {
+  background-color: var(--color-accent-active);
+  border-color: var(--color-accent);
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.session-date {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.session-time {
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+}
+
+.session-info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+}
+
+.session-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.session-actions button {
+  flex: 1;
+  background-color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--text-primary);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all var(--transition-normal);
+}
+
+.session-actions button:hover {
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+/* Timeline */
+.session-timeline h3,
+.ai-operations-table h3,
+.chat-history-view h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 1rem 0;
+  color: var(--text-secondary);
+}
+
+/* Vertical Timeline */
+.timeline-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.timeline-item {
+  display: flex;
+  gap: 1rem;
+  position: relative;
+}
+
+.timeline-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+  border: 2px solid var(--bg-app);
+  z-index: 1;
+  margin-top: 8px;
+}
+
+.timeline-line {
+  width: 2px;
+  flex: 1;
+  background-color: var(--border-color);
+  margin-top: 4px;
+  min-height: 40px;
+}
+
+.timeline-content {
+  flex: 1;
+  padding-bottom: 1.5rem;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+  gap: 1rem;
+}
+
+.timeline-event-type {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.timeline-time {
+  color: var(--text-tertiary);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.timeline-data {
+  color: var(--text-tertiary);
+  font-family: monospace;
+  font-size: 0.75rem;
+  background-color: var(--bg-panel);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  word-break: break-all;
+}
+
+.timeline-description {
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* Event Display (human-readable format) */
+.event-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.event-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.event-description {
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+}
+
+/* AI Operations Table */
+.ai-operations-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ai-operations-table th,
+.ai-operations-table td {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.ai-operations-table th {
+  background-color: var(--bg-panel);
+  font-weight: 500;
+}
+
+.ai-operations-table button {
+  background-color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--text-primary);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.ai-operations-table button:hover {
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.expanded-row td {
+  background-color: var(--bg-card-hover);
+  padding: 0;
+}
+
+.operation-details {
+  padding: 1rem;
+}
+
+.detail-section {
+  margin-bottom: 1rem;
+}
+
+.detail-section h4 {
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin: 0 0 0.5rem 0;
+  color: var(--text-secondary);
+}
+
+.detail-section pre {
+  background-color: var(--bg-app);
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: 0.8rem;
+  margin: 0;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.detail-section.error pre {
+  background-color: var(--color-danger-bg);
+  color: var(--color-warning);
+  border-color: var(--color-danger);
+}
+
+/* Chat History */
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.chat-message {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+}
+
+.chat-message.user {
+  background-color: var(--bg-card);
+  border-color: var(--color-accent);
+}
+
+.chat-message.assistant {
+  background-color: var(--bg-panel);
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.message-role {
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.message-time {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+.message-content {
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.message-sources {
+  font-size: 0.85rem;
+  background-color: var(--bg-app);
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.message-sources strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.message-sources ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: var(--text-secondary);
+}
+
+.message-sources li {
+  margin-bottom: 0.25rem;
+}
+
+/* Remove old variables - using direct colors instead */

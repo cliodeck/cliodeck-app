@@ -1,0 +1,117 @@
+.bib-import-mode-modal {
+  min-width: 500px;
+  max-width: 600px;
+}
+
+.modal-info {
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.modal-info strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.modal-question {
+  margin-bottom: 1.5rem;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.import-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--surface-variant);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.import-option-btn:hover {
+  border-color: var(--primary-color);
+  background: var(--surface-hover);
+}
+
+.import-option-btn .option-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.import-option-btn .option-content {
+  flex: 1;
+}
+
+.import-option-btn h4 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.import-option-btn p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.first-import {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.first-import p {
+  margin-bottom: 24px;
+  color: var(--text-secondary);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.btn-cancel {
+  padding: 8px 20px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel:hover {
+  background: var(--surface-variant);
+  border-color: var(--text-secondary);
+}
+
+.btn-primary {
+  padding: 8px 24px;
+  background: var(--primary-color);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}

@@ -1,0 +1,33 @@
+# BERTopic pour topic modeling
+# Note: bertopic tire numba par défaut, mais on peut l'utiliser sans
+bertopic>=0.16.0
+
+# FastAPI pour l'API REST
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# urllib3 compatible avec LibreSSL (macOS)
+# urllib3 v2 nécessite OpenSSL 1.1.1+, mais macOS utilise LibreSSL
+urllib3>=1.26.0,<2.0.0
+
+# Dépendances scientifiques (compatibles Python 3.9+)
+# IMPORTANT: NumPy 2.x n'est pas compatible avec les versions compilées de hdbscan, umap, etc.
+numpy>=1.24.0,<2.0.0
+scikit-learn>=1.3.0
+
+# UMAP sans numba (évite les problèmes de compilation llvmlite)
+# On installe umap-learn[plot] qui inclut les dépendances nécessaires SAUF numba
+umap-learn[plot]>=0.5.3
+
+# HDBSCAN pour le clustering (wheel précompilé disponible sur PyPI)
+hdbscan>=0.8.33
+
+# Sentence Transformers pour les embeddings
+sentence-transformers>=2.2.0
+
+# Pour parser les requêtes JSON
+pydantic>=2.5.0
+
+# Exclusion explicite de numba et llvmlite (pas nécessaires et posent problème sur macOS)
+# Ces packages nécessitent LLVM qui n'est pas toujours disponible
+# BERTopic et UMAP fonctionnent sans eux, juste un peu plus lentement

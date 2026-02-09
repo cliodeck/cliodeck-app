@@ -1,0 +1,230 @@
+/* Mode Selector */
+.mode-selector {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mode-selector-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.mode-selector-trigger:hover {
+  background: var(--bg-input-hover);
+  border-color: var(--border-color-hover);
+}
+
+.mode-selector-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-chevron {
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.mode-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Compatibility Warning */
+.mode-compatibility-warning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--color-warning-text, #b45309);
+  background: var(--color-warning-bg, rgba(251, 191, 36, 0.1));
+  border-radius: var(--radius-sm);
+}
+
+/* Dropdown */
+.mode-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  width: 320px;
+  max-height: 400px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: modeDropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes modeDropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Category Tabs */
+.mode-categories {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.mode-category-tab {
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.mode-category-tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-input);
+}
+
+.mode-category-tab.active {
+  color: var(--text-primary);
+  background: var(--color-accent);
+}
+
+/* Mode List */
+.mode-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.mode-item:hover {
+  background: var(--bg-input);
+}
+
+.mode-item.active {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.mode-item-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+
+.mode-item.active .mode-item-icon {
+  color: var(--color-accent);
+}
+
+.mode-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-item-name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.mode-item-description {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.3;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Source Badge */
+.mode-source-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  font-size: 9px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.mode-source-global {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.mode-source-project {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--color-success);
+}
+
+/* Mode List Scrollbar */
+.mode-list::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+}
+
+.mode-list::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+.mode-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-sm);
+}
+
+/* Mode badge on message bubbles */
+.message-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.message-mode-badge svg {
+  flex-shrink: 0;
+}

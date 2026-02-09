@@ -1,0 +1,65 @@
+.file-tree {
+  width: 100%;
+  user-select: none;
+}
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  transition: background-color var(--transition-fast);
+  border-radius: var(--radius-sm);
+  margin: 2px 0;
+}
+
+.file-tree-item:hover {
+  background-color: var(--bg-card-hover);
+}
+
+.file-tree-item.file:hover {
+  background-color: var(--bg-card-hover);
+}
+
+.file-tree-icon {
+  margin-right: var(--spacing-sm);
+  font-size: var(--icon-md);
+  display: flex;
+  align-items: center;
+}
+
+.file-tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-loading {
+  margin-left: var(--spacing-sm);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.file-tree-children {
+  /* Children are indented via paddingLeft in DirectoryNode */
+}
+
+.file-tree-loading-container,
+.file-tree-error,
+.file-tree-empty {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.file-tree-error {
+  color: var(--color-warning);
+}
+
+.file-tree-empty {
+  font-style: italic;
+}

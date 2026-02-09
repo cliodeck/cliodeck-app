@@ -1,0 +1,237 @@
+.pdf-index-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-app);
+}
+
+/* Header */
+.pdf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: var(--bg-panel);
+  min-height: 50px;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.header-icon {
+  font-size: var(--icon-md);
+}
+
+.header-title h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.add-btn {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  font-size: var(--icon-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-normal);
+}
+
+.add-btn:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* Stats */
+.pdf-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: var(--icon-md);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-divider {
+  color: var(--border-color);
+  font-size: var(--icon-sm);
+}
+
+/* Controls */
+.pdf-controls {
+  padding: var(--spacing-sm);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+/* Search Box */
+.pdf-index-panel .search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  transition: border-color var(--transition-normal);
+}
+
+.pdf-index-panel .search-box:focus-within {
+  border-color: var(--border-color-focus);
+}
+
+.pdf-index-panel .search-icon {
+  font-size: var(--icon-xs);
+  color: var(--text-tertiary);
+}
+
+.pdf-index-panel .search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.pdf-index-panel .search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Sort Controls */
+.pdf-index-panel .sort-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.pdf-index-panel .sort-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.pdf-index-panel .sort-select {
+  flex: 1;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+}
+
+.pdf-index-panel .sort-select:focus {
+  border-color: var(--border-color-focus);
+}
+
+.pdf-index-panel .sort-order-btn {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  font-size: var(--icon-xs);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-normal);
+}
+
+.pdf-index-panel .sort-order-btn:hover {
+  background-color: var(--border-color);
+}
+
+/* Document Count */
+.document-count {
+  padding: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.document-count .filter-indicator {
+  color: var(--color-accent);
+}
+
+/* Content */
+.pdf-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Empty State */
+.pdf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: var(--spacing-lg);
+}
+
+.pdf-empty .empty-icon {
+  font-size: var(--icon-xl);
+  margin-bottom: var(--spacing-lg);
+  opacity: 0.5;
+}
+
+.pdf-empty h4 {
+  margin: 0 0 var(--spacing-sm) 0;
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+.pdf-empty p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+/* Drag and Drop */
+.pdf-content.drag-over {
+  border: 2px dashed var(--color-accent);
+  background-color: rgba(0, 122, 204, 0.05);
+}

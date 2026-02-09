@@ -1,0 +1,232 @@
+/**
+ * Similarity Options Modal Styles
+ */
+
+.similarity-options-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.similarity-options-modal {
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background: var(--bg-secondary, #1e1e1e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.similarity-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.similarity-options-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.similarity-options-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.similarity-options-close:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Content */
+.similarity-options-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.similarity-option-group {
+  margin-bottom: 24px;
+}
+
+.similarity-option-group:last-child {
+  margin-bottom: 0;
+}
+
+.similarity-option-label-wrapper {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.similarity-option-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.similarity-option-description {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  line-height: 1.4;
+  margin: 0 0 12px 0;
+}
+
+/* Granularity buttons */
+.similarity-option-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.similarity-option-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  background: var(--bg-tertiary, #252525);
+  border: 2px solid var(--border-color, #333);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.similarity-option-btn:hover {
+  border-color: var(--border-hover, #444);
+}
+
+.similarity-option-btn.active {
+  border-color: var(--accent-color, #4a9eff);
+  background: rgba(74, 158, 255, 0.1);
+}
+
+.similarity-option-btn-icon {
+  font-size: 24px;
+}
+
+.similarity-option-btn-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Slider */
+.similarity-option-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.similarity-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-tertiary, #252525);
+  border-radius: 2px;
+  outline: none;
+}
+
+.similarity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent-color, #4a9eff);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.similarity-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.similarity-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--accent-color, #4a9eff);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.similarity-slider-value {
+  min-width: 40px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-color, #4a9eff);
+  text-align: right;
+}
+
+/* Toggle */
+.similarity-option-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.similarity-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-color, #4a9eff);
+  cursor: pointer;
+}
+
+.similarity-toggle-label {
+  font-size: 13px;
+  color: var(--text-primary, #e0e0e0);
+  cursor: pointer;
+}
+
+/* Footer */
+.similarity-options-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.similarity-options-done {
+  padding: 8px 20px;
+  background: var(--accent-color, #4a9eff);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.similarity-options-done:hover {
+  background: var(--accent-color-hover, #3a8eef);
+}

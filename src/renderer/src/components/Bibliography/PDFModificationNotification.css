@@ -1,0 +1,210 @@
+/* PDF Modification Notification */
+
+.pdf-modification-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  max-width: 500px;
+  background-color: var(--notification-bg);
+  border: 1px solid var(--notification-border);
+  border-left: 4px solid var(--warning-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.notification-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.notification-icon {
+  flex-shrink: 0;
+  color: var(--warning-color);
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.notification-message {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.notification-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.notification-btn-primary {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.notification-btn-primary:hover {
+  background-color: var(--primary-dark);
+}
+
+.notification-btn-secondary {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.notification-btn-secondary:hover {
+  background-color: var(--hover-bg);
+}
+
+.notification-btn-close {
+  background: none;
+  color: var(--text-muted);
+  padding: 0.5rem;
+}
+
+.notification-btn-close:hover {
+  background-color: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.notification-btn-small {
+  padding: 0.375rem 0.625rem;
+  font-size: 0.8rem;
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.notification-btn-small:hover {
+  background-color: var(--primary-dark);
+}
+
+/* Details Section */
+.notification-details {
+  border-top: 1px solid var(--border-color);
+  padding: 0.75rem 1rem;
+  background-color: var(--bg-secondary);
+  border-radius: 0 0 8px 8px;
+}
+
+.modified-pdfs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modified-pdf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.modified-pdf-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.modified-pdf-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modified-pdf-path {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dark mode */
+.dark .pdf-modification-notification {
+  --notification-bg: #1f1f1f;
+  --notification-border: #333;
+  --card-bg: #2a2a2a;
+  --bg-secondary: #252525;
+  --hover-bg: rgba(255, 255, 255, 0.05);
+  --primary-dark: #2563eb;
+}
+
+/* Light mode */
+.light .pdf-modification-notification {
+  --notification-bg: #ffffff;
+  --notification-border: #e5e7eb;
+  --card-bg: #f9fafb;
+  --bg-secondary: #f3f4f6;
+  --hover-bg: rgba(0, 0, 0, 0.05);
+  --primary-dark: #1d4ed8;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .pdf-modification-notification {
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    max-width: none;
+  }
+
+  .notification-header {
+    flex-wrap: wrap;
+  }
+
+  .notification-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+  }
+}

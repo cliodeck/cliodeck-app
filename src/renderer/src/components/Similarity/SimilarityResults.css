@@ -1,0 +1,126 @@
+/**
+ * Similarity Results Styles
+ */
+
+.similarity-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Segment item */
+.similarity-segment {
+  background: var(--bg-tertiary, #252525);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.similarity-segment.selected {
+  border-color: var(--accent-color, #4a9eff);
+}
+
+.similarity-segment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.similarity-segment-header:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.05));
+}
+
+.similarity-segment-chevron {
+  color: var(--text-secondary, #888);
+  flex-shrink: 0;
+}
+
+.similarity-segment-icon {
+  color: var(--text-secondary, #888);
+  flex-shrink: 0;
+}
+
+.similarity-segment-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.similarity-segment-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.similarity-segment-meta {
+  font-size: 10px;
+  color: var(--text-secondary, #666);
+}
+
+.similarity-segment-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.similarity-segment-badge.badge-empty {
+  background: rgba(100, 100, 100, 0.2);
+  color: var(--text-secondary, #888);
+}
+
+.similarity-segment-badge.badge-partial {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
+.similarity-segment-badge.badge-good {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+/* Segment content (expanded) */
+.similarity-segment-content {
+  padding: 0 12px 12px 12px;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.similarity-recommendations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+/* No recommendations */
+.similarity-no-recommendations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  text-align: center;
+}
+
+.similarity-no-recommendations-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+  opacity: 0.6;
+}
+
+.similarity-no-recommendations-text {
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+}

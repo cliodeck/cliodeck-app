@@ -1,0 +1,80 @@
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-app);
+}
+
+/* Toolbar */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-md);
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 42px;
+}
+
+.toolbar-section {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+}
+
+.toolbar-section-right {
+  margin-left: auto;
+}
+
+.toolbar-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  padding: var(--spacing-sm) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolbar-btn:hover {
+  background-color: var(--bg-card);
+}
+
+.toolbar-btn.active {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.toolbar-btn strong,
+.toolbar-btn em {
+  font-style: normal;
+  font-weight: normal;
+}
+
+/* Editor Content */
+.editor-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Resize Handle */
+.editor-resize-handle {
+  width: 1px;
+  background-color: var(--border-color);
+  cursor: col-resize;
+  transition: background-color var(--transition-normal);
+}
+
+.editor-resize-handle:hover {
+  background-color: var(--color-accent);
+}
+
+.editor-resize-handle:active {
+  background-color: var(--color-accent-active);
+}

@@ -1,0 +1,112 @@
+.message-input {
+  padding: var(--spacing-md);
+  background-color: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+}
+
+.input-container {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: flex-end;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  transition: border-color var(--transition-normal);
+}
+
+.input-container:focus-within {
+  border-color: var(--color-accent);
+}
+
+.input-textarea {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.input-textarea::placeholder {
+  color: var(--text-disabled);
+}
+
+.input-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.input-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.input-btn {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  font-size: var(--icon-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-normal), transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.input-btn:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+}
+
+.input-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.input-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cancel-btn {
+  background-color: var(--color-danger);
+}
+
+.cancel-btn:hover {
+  background-color: var(--color-danger-hover);
+}
+
+/* Input Hint */
+.input-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-disabled);
+  text-align: center;
+}
+
+/* Scrollbar for textarea */
+.input-textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.input-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input-textarea::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-xs);
+}
+
+.input-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}

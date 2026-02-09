@@ -1,0 +1,223 @@
+.primary-sources-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+/* Scrollable content area */
+.primary-sources-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Add horizontal padding to sections inside scrollable area */
+.primary-sources-content > .collapsible-section {
+  padding: 0 12px;
+}
+
+/* Header Toolbar */
+.primary-sources-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.primary-sources-header .toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.primary-sources-header .toolbar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.primary-sources-header .toolbar-btn.active {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+.primary-sources-header .toolbar-btn.syncing {
+  color: var(--color-accent);
+}
+
+.primary-sources-header .toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary-sources-header .toolbar-btn .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-color);
+  margin: 0 4px;
+}
+
+/* Sync Progress */
+.sync-progress {
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sync-progress-bar {
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.sync-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.sync-progress-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Project Info */
+.tropy-project-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.tropy-project-info .project-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tropy-project-info .source-count {
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.tropy-project-info .watching-badge {
+  padding: 2px 6px;
+  background: var(--color-success-light);
+  color: var(--color-success);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* Search Box */
+.search-box {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.search-box .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+}
+
+.search-box input {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.search-box input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-light);
+}
+
+.search-box input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Transcription Status */
+.transcription-status {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.transcription-status .status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.transcription-status .with-transcription {
+  color: var(--color-success);
+}
+
+.transcription-status .without-transcription {
+  color: var(--text-tertiary);
+}
+
+/* Empty State */
+.primary-sources-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.primary-sources-empty svg {
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.primary-sources-empty h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.primary-sources-empty p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}

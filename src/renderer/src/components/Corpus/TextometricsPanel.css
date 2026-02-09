@@ -1,0 +1,250 @@
+.textometrics-panel {
+  width: 100%;
+  padding: var(--spacing-md) 0;
+}
+
+/* Loading & Error States */
+.textometrics-loading,
+.textometrics-error,
+.textometrics-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl) var(--spacing-lg);
+  text-align: center;
+}
+
+.textometrics-loading .loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--border-color);
+  border-top-color: var(--color-accent);
+  border-radius: var(--radius-round);
+  animation: spin 0.8s linear infinite;
+  margin-bottom: var(--spacing-md);
+}
+
+.textometrics-error .error-message {
+  color: var(--color-danger);
+  margin-bottom: var(--spacing-md);
+}
+
+/* Statistics Grid */
+.textometrics-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.textometrics-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.textometrics-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.textometrics-stat-card .stat-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-bottom: var(--spacing-sm);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.textometrics-stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-accent);
+  margin-bottom: 5px;
+}
+
+.textometrics-stat-card .stat-description {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 5px;
+}
+
+/* Controls */
+.textometrics-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.btn-refresh,
+.btn-analyze {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  color: var(--text-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  transition: background var(--transition-normal), transform var(--transition-fast);
+}
+
+.btn-refresh:hover,
+.btn-analyze:hover {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+}
+
+.btn-refresh:active,
+.btn-analyze:active {
+  transform: translateY(0);
+}
+
+/* Tabs */
+.textometrics-tabs {
+  display: flex;
+  gap: 5px;
+  margin-bottom: var(--spacing-lg);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.tab-button {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  transition: all var(--transition-normal);
+  margin-bottom: -2px;
+}
+
+.tab-button:hover {
+  color: var(--text-secondary);
+  background: var(--bg-card);
+}
+
+.tab-button.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+/* Content */
+.textometrics-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+}
+
+.textometrics-content h4 {
+  margin-top: 0;
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+/* Tables */
+.word-frequency-table table,
+.ngram-frequency-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+
+.word-frequency-table thead,
+.ngram-frequency-table thead {
+  background: var(--bg-panel);
+}
+
+.word-frequency-table th,
+.ngram-frequency-table th {
+  padding: var(--spacing-md);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border-bottom: 2px solid var(--border-color);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.word-frequency-table td,
+.ngram-frequency-table td {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.word-frequency-table tbody tr:hover,
+.ngram-frequency-table tbody tr:hover {
+  background: var(--bg-card-hover);
+}
+
+.word-frequency-table .rank,
+.ngram-frequency-table .rank {
+  color: var(--text-muted);
+  font-weight: 600;
+  width: 60px;
+}
+
+.word-frequency-table .word,
+.ngram-frequency-table .ngram {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+}
+
+.word-frequency-table .count,
+.ngram-frequency-table .count {
+  color: var(--text-tertiary);
+  text-align: right;
+  width: 100px;
+}
+
+.word-frequency-table .frequency {
+  color: var(--text-tertiary);
+  text-align: right;
+  width: 100px;
+}
+
+.word-frequency-table .bar-cell,
+.ngram-frequency-table .bar-cell {
+  width: 200px;
+  padding: var(--spacing-md) var(--spacing-md);
+}
+
+.frequency-bar {
+  height: 20px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: var(--radius-sm);
+  transition: width var(--transition-slow) ease;
+  min-width: 2px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .textometrics-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .word-frequency-table .bar-cell,
+  .ngram-frequency-table .bar-cell {
+    display: none;
+  }
+
+  .textometrics-tabs {
+    overflow-x: auto;
+  }
+
+  .tab-button {
+    white-space: nowrap;
+  }
+}

@@ -1,0 +1,7 @@
+# Contraintes pour éviter l'installation de packages problématiques sur macOS
+# Ces packages nécessitent LLVM qui peut ne pas être disponible
+
+# Empêcher l'installation de numba et llvmlite
+# BERTopic et UMAP fonctionnent sans eux (juste un peu plus lentement)
+numba
+llvmlite

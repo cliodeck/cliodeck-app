@@ -1,0 +1,344 @@
+/* Orphan PDF Modal */
+
+.orphan-pdf-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-height: 70vh;
+}
+
+/* Summary Section */
+.orphan-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-stat.highlight {
+  background-color: var(--warning-bg);
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.summary-stat.highlight .stat-value {
+  color: var(--warning-color);
+}
+
+/* Scanning State */
+.scanning-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  gap: 1rem;
+}
+
+.scanning-state .spinning {
+  animation: spin 1s linear infinite;
+  color: var(--primary-color);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scanning-state p {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+/* No Orphans State */
+.no-orphans-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  gap: 1rem;
+  text-align: center;
+}
+
+.no-orphans-state svg {
+  color: var(--success-color);
+}
+
+.no-orphans-state h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.no-orphans-state p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  max-width: 400px;
+}
+
+/* Actions Bar */
+.orphan-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.selection-info {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.btn-small {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Orphan List */
+.orphan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.orphan-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: var(--card-bg);
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.orphan-item:hover {
+  border-color: var(--primary-color);
+  background-color: var(--hover-bg);
+}
+
+.orphan-item.selected {
+  border-color: var(--primary-color);
+  background-color: var(--selected-bg);
+}
+
+.orphan-checkbox {
+  display: flex;
+  align-items: center;
+}
+
+.orphan-checkbox input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.orphan-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.orphan-filename {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.orphan-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.orphan-size {
+  font-weight: 500;
+}
+
+.orphan-separator {
+  color: var(--border-color);
+}
+
+.orphan-date {
+  font-family: 'Courier New', monospace;
+}
+
+.orphan-path {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+  opacity: 0.8;
+}
+
+/* Warning Message */
+.orphan-warning {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: var(--warning-bg);
+  border: 1px solid var(--warning-color);
+  border-radius: 6px;
+  align-items: flex-start;
+}
+
+.orphan-warning svg {
+  flex-shrink: 0;
+  color: var(--warning-color);
+  margin-top: 0.125rem;
+}
+
+.warning-text {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.warning-text strong {
+  color: var(--warning-color);
+}
+
+/* Footer */
+.orphan-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.btn-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--warning-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: var(--warning-dark);
+}
+
+.btn-warning:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--error-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: var(--error-dark);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dark mode */
+.dark .orphan-pdf-modal {
+  --card-bg: #1f1f1f;
+  --bg-secondary: #2a2a2a;
+  --hover-bg: rgba(59, 130, 246, 0.1);
+  --selected-bg: rgba(59, 130, 246, 0.15);
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-color: #f59e0b;
+  --warning-dark: #d97706;
+  --error-dark: #dc2626;
+}
+
+/* Light mode */
+.light .orphan-pdf-modal {
+  --card-bg: #ffffff;
+  --bg-secondary: #f9fafb;
+  --hover-bg: rgba(59, 130, 246, 0.05);
+  --selected-bg: rgba(59, 130, 246, 0.1);
+  --warning-bg: rgba(245, 158, 11, 0.05);
+  --warning-color: #d97706;
+  --warning-dark: #b45309;
+  --error-dark: #b91c1c;
+}
+
+/* Scrollbar styling */
+.orphan-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.orphan-list::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+.orphan-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.orphan-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

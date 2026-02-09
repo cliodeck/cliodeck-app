@@ -1,0 +1,399 @@
+.config-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--text-secondary);
+}
+
+.config-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.config-header h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.save-message {
+  padding: 8px 16px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  animation: fadeIn var(--transition-slow) ease-in;
+}
+
+.save-message.success {
+  color: var(--color-success);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid var(--color-success);
+}
+
+.save-message.error {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sync-button {
+  padding: 10px 20px;
+  background: var(--color-accent);
+  color: var(--text-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  transition: background var(--transition-normal);
+  margin-top: var(--spacing-md);
+}
+
+.sync-button:hover {
+  background: var(--color-accent-hover);
+}
+
+.sync-button:disabled {
+  background: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.config-btn {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.config-btn.primary {
+  background: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.config-btn.primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.config-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.config-btn.secondary {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.config-btn.secondary:hover {
+  background: var(--bg-input-hover);
+}
+
+.config-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-md) var(--spacing-lg);
+}
+
+/* Section */
+.config-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--section-gap);
+}
+
+.config-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--item-padding-vertical) var(--spacing-lg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.config-section-header:hover {
+  background: var(--bg-panel-hover);
+}
+
+.config-section-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.expand-icon {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.config-section-content {
+  padding: var(--spacing-sm) var(--spacing-lg) var(--spacing-lg) var(--spacing-lg);
+  border-top: 1px solid var(--border-color);
+}
+
+/* Field */
+.config-field {
+  margin-top: var(--spacing-lg);
+}
+
+.config-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.config-help {
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.config-input,
+.config-select {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.config-input:focus,
+.config-select:focus {
+  outline: none;
+  border-color: var(--border-color-focus);
+}
+
+.config-input-group {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.config-slider {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.config-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border-radius: var(--radius-round);
+  cursor: pointer;
+}
+
+.config-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border-radius: var(--radius-round);
+  cursor: pointer;
+  border: none;
+}
+
+.config-number {
+  width: 80px;
+  padding: 6px var(--spacing-sm);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  text-align: center;
+}
+
+.config-number:focus {
+  outline: none;
+  border-color: var(--border-color-focus);
+}
+
+.config-btn-small {
+  padding: 6px var(--spacing-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.config-btn-small:hover {
+  background: var(--bg-input-hover);
+  border-color: var(--border-color-hover);
+}
+
+.config-description {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.config-description small {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.config-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-accent);
+  text-decoration: none;
+  font-size: var(--font-size-xs);
+  transition: color var(--transition-normal);
+  margin-left: var(--spacing-md);
+}
+
+.config-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.database-path-display {
+  margin-top: 4px;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+/* Topic Modeling Section */
+.topic-modeling-status {
+  margin: var(--spacing-sm) 0;
+}
+
+.topic-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.topic-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.topic-status-success .topic-status-dot {
+  background-color: var(--color-success);
+}
+
+.topic-status-warning .topic-status-dot {
+  background-color: var(--color-warning, #f59e0b);
+}
+
+.topic-status-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.topic-status-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 16px;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.topic-status-path {
+  font-family: 'Consolas', 'Monaco', monospace;
+  word-break: break-all;
+  color: var(--text-muted);
+}
+
+.topic-status-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: #ef4444;
+}
+
+.topic-modeling-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.topic-install-progress {
+  margin-top: var(--spacing-md);
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.topic-progress-log {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topic-progress-message {
+  font-size: var(--font-size-xs);
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
