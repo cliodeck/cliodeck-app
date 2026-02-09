@@ -5,12 +5,13 @@ package-lock.json
 # Build output
 dist/
 release/
+out/
 *.js.map
+*.tsbuildinfo
 
 # Environment
 .env
-.env.local
-.env.production
+.env.*
 
 # IDE
 .vscode/
@@ -22,10 +23,14 @@ release/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
 
 # Electron
-out/
-*.log
+*.asar
 
 # Database (dev)
 *.db
@@ -42,5 +47,15 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.tsbuildinfo
-.DS_Store
+
+# Tesseract trained data (downloadable)
+*.traineddata
+
+# Claude Code local settings
+.claude/
+
+# Coverage
+coverage/
+
+# Native module build artifacts
+build/Release/
