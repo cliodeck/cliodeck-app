@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation } from 'lucide-react';
+import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
@@ -182,6 +182,13 @@ export const ProjectPanel: React.FC = () => {
               disabled={!currentProject}
             >
               <FileType size={20} strokeWidth={1} />
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => window.electron.shell.openExternal('https://github.com/cliodeck/cliodeck-app/issues')}
+              title={t("project.reportIssue")}
+            >
+              <Bug size={20} strokeWidth={1} />
             </button>
           </div>
         </div>

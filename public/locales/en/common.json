@@ -254,6 +254,7 @@
     "newProject": "New project",
     "openProject": "Open a project",
     "closeProject": "Close project",
+    "reportIssue": "Report an issue",
     "currentProject": "Current project",
     "recentProjects": "Recent projects",
     "noProjectOpen": "No project open",
