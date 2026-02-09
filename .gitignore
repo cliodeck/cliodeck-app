@@ -43,3 +43,4 @@ __pycache__/
 *.pyo
 *.pyd
 *.tsbuildinfo
+.DS_Store
