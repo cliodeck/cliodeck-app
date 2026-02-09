@@ -1,2 +1,45 @@
-backend/.DS_Store
-/node_modules
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+release/
+*.js.map
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Electron
+out/
+*.log
+
+# Database (dev)
+*.db
+*.db-shm
+*.db-wal
+
+# Config
+config.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.tsbuildinfo
