@@ -18,7 +18,7 @@ export const MessageList: React.FC<MessageListProps> = memo(({ messages }) => {
   }, [messages, currentStreamingMessage]);
 
   return (
-    <div className="message-list">
+    <div className="message-list" role="log" aria-live="polite" aria-label="Chat messages">
       {messages.map((message) => (
         <MessageBubble key={message.id} message={message} />
       ))}

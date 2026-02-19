@@ -247,12 +247,12 @@ class TropyService {
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
-    // Import OllamaClient dynamically to avoid circular dependencies
+    // Import LLMProviderManager dynamically to avoid circular dependencies
     const { pdfService } = await import('./pdf-service.js');
-    const ollamaClient = pdfService.getOllamaClient();
+    const llmProvider = pdfService.getLLMProviderManager();
 
-    if (!ollamaClient) {
-      console.warn('⚠️ [TROPY-SERVICE] OllamaClient not available, skipping embedding generation');
+    if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
+      console.warn('⚠️ [TROPY-SERVICE] No embedding provider available, skipping embedding generation');
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
@@ -358,7 +358,7 @@ class TropyService {
               startPosition: rawChunk.startPosition,
               endPosition: rawChunk.endPosition,
             };
-            const embedding = await ollamaClient.generateEmbedding(sourceChunk.content);
+            const embedding = await llmProvider.generateEmbedding(sourceChunk.content);
             this.vectorStore!.saveChunk(sourceChunk, embedding);
             chunksCreated++;
           } catch (error) {
@@ -644,21 +644,21 @@ class TropyService {
     const threshold = passedThreshold > 0.05 ? 0.005 : passedThreshold;
 
     try {
-      // Import OllamaClient dynamically to avoid circular dependencies
+      // Import LLMProviderManager dynamically to avoid circular dependencies
       const { pdfService } = await import('./pdf-service.js');
-      const ollamaClient = pdfService.getOllamaClient();
+      const llmProvider = pdfService.getLLMProviderManager();
 
-      if (!ollamaClient) {
-        console.warn('⚠️ [TROPY-SERVICE] OllamaClient not available, cannot generate embedding');
+      if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
+        console.warn('⚠️ [TROPY-SERVICE] No embedding provider available, cannot generate embedding');
         return [];
       }
 
       // Expand query for multilingual search (FR + EN)
-      const expandedQuery = await this.expandQueryMultilingual(query, ollamaClient);
+      const expandedQuery = await this.expandQueryMultilingual(query, llmProvider);
       console.log(`📜 [TROPY-SERVICE] Expanded query: "${expandedQuery}"`);
 
-      // Generate embedding for the expanded query
-      const queryEmbedding = await ollamaClient.generateEmbedding(expandedQuery);
+      // Generate embedding for the expanded query (with query prefix for embedded models)
+      const queryEmbedding = await llmProvider.generateQueryEmbedding(expandedQuery);
       console.log(`📜 [TROPY-SERVICE] Query embedding generated, dimension: ${queryEmbedding.length}`);
 
       // Search using hybrid search (HNSW + BM25) - pass both embedding and text
@@ -728,24 +728,25 @@ class TropyService {
     const useEntities = options?.useEntities ?? true;
 
     try {
-      // Import OllamaClient dynamically
+      // Import LLMProviderManager dynamically
       const { pdfService } = await import('./pdf-service.js');
-      const ollamaClient = pdfService.getOllamaClient();
+      const llmProvider = pdfService.getLLMProviderManager();
+      const ollamaClient = pdfService.getOllamaClient(); // Still needed for NER
 
-      if (!ollamaClient) {
-        console.warn('⚠️ [TROPY-SERVICE] OllamaClient not available');
+      if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
+        console.warn('⚠️ [TROPY-SERVICE] No embedding provider available');
         return [];
       }
 
-      // Initialize NER service if needed
-      if (!this.nerService && useEntities) {
+      // Initialize NER service if needed (requires OllamaClient for text generation)
+      if (!this.nerService && useEntities && ollamaClient) {
         this.nerService = createNERService(ollamaClient);
         console.log('🏷️ [TROPY-SERVICE] NER service initialized');
       }
 
-      // Generate query embedding
-      const expandedQuery = await this.expandQueryMultilingual(query, ollamaClient);
-      const queryEmbedding = await ollamaClient.generateEmbedding(expandedQuery);
+      // Generate query embedding (with query prefix for embedded models)
+      const expandedQuery = await this.expandQueryMultilingual(query, llmProvider);
+      const queryEmbedding = await llmProvider.generateQueryEmbedding(expandedQuery);
 
       // If not using entities, fallback to hybrid search
       if (!useEntities || !this.nerService) {

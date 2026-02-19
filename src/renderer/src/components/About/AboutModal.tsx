@@ -68,9 +68,15 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="about-modal" onClick={onClose}>
-      <div className="about-content" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="about-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="about-header">
-          <h3>{t('about.title')}</h3>
+          <h3 id="about-modal-title">{t('about.title')}</h3>
           <button className="close-btn" onClick={onClose}>
             <X size={20} />
           </button>

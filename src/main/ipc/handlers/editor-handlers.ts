@@ -6,9 +6,16 @@ import path from 'path';
 import { projectManager } from '../../services/project-manager.js';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import {
+  validate,
+  StringPathSchema,
+  EditorSaveFileSchema,
+  EditorInsertTextSchema,
+} from '../utils/validation.js';
 
 export function setupEditorHandlers() {
-  ipcMain.handle('editor:load-file', async (_event, filePath: string) => {
+  ipcMain.handle('editor:load-file', async (_event, rawFilePath: unknown) => {
+    const filePath = validate(StringPathSchema, rawFilePath);
     console.log('📞 IPC Call: editor:load-file', { filePath });
     try {
       const { readFile } = await import('fs/promises');
@@ -23,7 +30,8 @@ export function setupEditorHandlers() {
 
   ipcMain.handle(
     'editor:save-file',
-    async (_event, filePath: string, content: string, previousContent?: string) => {
+    async (_event, rawFilePath: unknown, rawContent: unknown, rawPreviousContent?: unknown) => {
+      const { filePath, content, previousContent } = validate(EditorSaveFileSchema, { filePath: rawFilePath, content: rawContent, previousContent: rawPreviousContent });
       console.log('📞 IPC Call: editor:save-file', { filePath, contentLength: content.length });
       try {
         const { writeFile } = await import('fs/promises');
@@ -72,7 +80,8 @@ export function setupEditorHandlers() {
     }
   );
 
-  ipcMain.handle('editor:insert-text', async (event, text: string, metadata?: { modeId?: string; model?: string }) => {
+  ipcMain.handle('editor:insert-text', async (event, rawText: unknown, rawMetadata?: unknown) => {
+    const { text, metadata } = validate(EditorInsertTextSchema, { text: rawText, metadata: rawMetadata });
     console.log('📞 IPC Call: editor:insert-text', { textLength: text.length, metadata });
     // Wrap text with cliodeck-gen provenance tags if mode metadata is provided
     let wrappedText = text;

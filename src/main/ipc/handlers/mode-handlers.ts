@@ -4,6 +4,14 @@
 import { ipcMain } from 'electron';
 import { modeService } from '../../services/mode-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import {
+  validate,
+  StringIdSchema,
+  ModeSaveSchema,
+  ModeDeleteSchema,
+  ModeImportSchema,
+  ModeExportSchema,
+} from '../utils/validation.js';
 
 export function setupModeHandlers() {
   // List all available modes (builtin + global + project)
@@ -20,7 +28,8 @@ export function setupModeHandlers() {
   });
 
   // Get a specific mode by ID
-  ipcMain.handle('mode:get', async (_event, modeId: string) => {
+  ipcMain.handle('mode:get', async (_event, rawModeId: unknown) => {
+    const modeId = validate(StringIdSchema, rawModeId);
     console.log('📞 IPC Call: mode:get', { modeId });
     try {
       const mode = await modeService.getModeManager().getMode(modeId);
@@ -48,7 +57,8 @@ export function setupModeHandlers() {
   });
 
   // Set the active mode
-  ipcMain.handle('mode:set-active', async (_event, modeId: string) => {
+  ipcMain.handle('mode:set-active', async (_event, rawModeId: unknown) => {
+    const modeId = validate(StringIdSchema, rawModeId);
     console.log('📞 IPC Call: mode:set-active', { modeId });
     try {
       modeService.setActiveMode(modeId);
@@ -60,10 +70,11 @@ export function setupModeHandlers() {
   });
 
   // Save a custom mode (create or update)
-  ipcMain.handle('mode:save', async (_event, mode: any, target: 'global' | 'project') => {
-    console.log('📞 IPC Call: mode:save', { modeId: mode?.metadata?.id, target });
+  ipcMain.handle('mode:save', async (_event, rawMode: unknown, rawTarget: unknown) => {
+    const { mode, target } = validate(ModeSaveSchema, { mode: rawMode, target: rawTarget });
+    console.log('📞 IPC Call: mode:save', { modeId: (mode as any)?.metadata?.id, target });
     try {
-      const filePath = await modeService.getModeManager().saveMode(mode, target);
+      const filePath = await modeService.getModeManager().saveMode(mode as any, target);
       return successResponse({ filePath });
     } catch (error: any) {
       console.error('❌ mode:save error:', error);
@@ -72,7 +83,8 @@ export function setupModeHandlers() {
   });
 
   // Delete a custom mode
-  ipcMain.handle('mode:delete', async (_event, modeId: string, source: 'global' | 'project') => {
+  ipcMain.handle('mode:delete', async (_event, rawModeId: unknown, rawSource: unknown) => {
+    const { modeId, source } = validate(ModeDeleteSchema, { modeId: rawModeId, source: rawSource });
     console.log('📞 IPC Call: mode:delete', { modeId, source });
     try {
       await modeService.getModeManager().deleteMode(modeId, source);
@@ -84,7 +96,8 @@ export function setupModeHandlers() {
   });
 
   // Import a mode from file path
-  ipcMain.handle('mode:import', async (_event, filePath: string, target: 'global' | 'project') => {
+  ipcMain.handle('mode:import', async (_event, rawFilePath: unknown, rawTarget: unknown) => {
+    const { filePath, target } = validate(ModeImportSchema, { filePath: rawFilePath, target: rawTarget });
     console.log('📞 IPC Call: mode:import', { filePath, target });
     try {
       const mode = await modeService.getModeManager().importMode(filePath, target);
@@ -96,7 +109,8 @@ export function setupModeHandlers() {
   });
 
   // Export a mode to file path
-  ipcMain.handle('mode:export', async (_event, modeId: string, outputPath: string) => {
+  ipcMain.handle('mode:export', async (_event, rawModeId: unknown, rawOutputPath: unknown) => {
+    const { modeId, outputPath } = validate(ModeExportSchema, { modeId: rawModeId, outputPath: rawOutputPath });
     console.log('📞 IPC Call: mode:export', { modeId, outputPath });
     try {
       await modeService.getModeManager().exportMode(modeId, outputPath);

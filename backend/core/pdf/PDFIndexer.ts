@@ -9,7 +9,7 @@ import { ChunkDeduplicator } from '../chunking/ChunkDeduplicator.js';
 import { EmbeddingCache } from '../chunking/EmbeddingCache.js';
 import { VectorStore } from '../vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../vector-store/EnhancedVectorStore.js';
-import { OllamaClient } from '../llm/OllamaClient.js';
+// OllamaClient import removed: PDFIndexer now accepts a generic embedding function
 import { CitationExtractor } from '../analysis/CitationExtractor.js';
 import { DocumentSummarizer, type SummarizerConfig } from '../analysis/DocumentSummarizer.js';
 import type { PDFDocument, DocumentChunk } from '../../types/pdf-document.js';
@@ -79,7 +79,7 @@ export class PDFIndexer {
   private deduplicator: ChunkDeduplicator;
   private embeddingCache: EmbeddingCache;
   private vectorStore: VectorStore | EnhancedVectorStore;
-  private ollamaClient: OllamaClient;
+  private generateEmbeddingFn: (text: string) => Promise<Float32Array>;
   private citationExtractor: CitationExtractor;
   private documentSummarizer: DocumentSummarizer | null = null;
   private summarizerConfig: SummarizerConfig;
@@ -87,7 +87,7 @@ export class PDFIndexer {
 
   constructor(
     vectorStore: VectorStore | EnhancedVectorStore,
-    ollamaClient: OllamaClient,
+    generateEmbedding: (text: string) => Promise<Float32Array>,
     chunkingConfig: 'cpuOptimized' | 'standard' | 'large' = 'cpuOptimized',
     summarizerConfig?: SummarizerConfig,
     useAdaptiveChunking: boolean = false,
@@ -99,7 +99,7 @@ export class PDFIndexer {
     this.deduplicator = new ChunkDeduplicator();
     this.embeddingCache = new EmbeddingCache(500);
     this.vectorStore = vectorStore;
-    this.ollamaClient = ollamaClient;
+    this.generateEmbeddingFn = generateEmbedding;
     this.citationExtractor = new CitationExtractor();
 
     // Build options from ragConfig or use defaults
@@ -151,7 +151,7 @@ export class PDFIndexer {
     if (this.options.useSemanticChunking) {
       console.log('🧠 Semantic chunking enabled');
       this.semanticChunker = new SemanticChunker(
-        (text) => this.ollamaClient.generateEmbedding(text),
+        (text) => this.generateEmbeddingFn(text),
         {
           similarityThreshold: this.options.semanticSimilarityThreshold!,
           windowSize: this.options.semanticWindowSize!,
@@ -177,7 +177,7 @@ export class PDFIndexer {
     };
 
     if (this.summarizerConfig.enabled) {
-      this.documentSummarizer = new DocumentSummarizer(this.summarizerConfig, ollamaClient);
+      this.documentSummarizer = new DocumentSummarizer(this.summarizerConfig, undefined, generateEmbedding);
     }
   }
 
@@ -458,7 +458,7 @@ export class PDFIndexer {
 
           // Générer l'embedding
           console.log(`🔍 [INDEXER] Generating embedding ${i + 1}/${chunks.length}...`);
-          const embedding = await this.ollamaClient.generateEmbedding(chunk.content);
+          const embedding = await this.generateEmbeddingFn(chunk.content);
           console.log(`🔍 [INDEXER] Embedding ${i + 1} generated, dimension: ${embedding.length}`);
 
           chunksWithEmbeddings.push({ chunk, embedding });
@@ -496,7 +496,7 @@ export class PDFIndexer {
           const chunk = chunks[i];
 
           // Générer l'embedding
-          const embedding = await this.ollamaClient.generateEmbedding(chunk.content);
+          const embedding = await this.generateEmbeddingFn(chunk.content);
 
           // Sauvegarder le chunk avec son embedding
           this.vectorStore.saveChunk(chunk, embedding);
@@ -607,20 +607,6 @@ export class PDFIndexer {
 
     // Ré-indexer
     await this.indexPDF(document.fileURL, document.bibtexKey);
-  }
-
-  /**
-   * Vérifie si Ollama est disponible
-   */
-  async checkOllamaAvailability(): Promise<boolean> {
-    return await this.ollamaClient.isAvailable();
-  }
-
-  /**
-   * Liste les modèles disponibles
-   */
-  async listAvailableModels() {
-    return await this.ollamaClient.listAvailableModels();
   }
 
   /**

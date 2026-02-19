@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { PrimarySourceList } from './PrimarySourceList';
 import { PrimarySourceStats } from './PrimarySourceStats';
@@ -83,14 +84,14 @@ export const PrimarySourcesPanel: React.FC = () => {
 
         // Validate that it's a valid Tropy project path
         if (!projectPath.endsWith('.tropy') && !projectPath.endsWith('.tpy')) {
-          alert(t('primarySources.invalidProject', 'Please select a .tropy package or .tpy file'));
+          await useDialogStore.getState().showAlert(t('primarySources.invalidProject', 'Please select a .tropy package or .tpy file'));
           return;
         }
 
         const openResult = await openTPYProject(projectPath);
 
         if (!openResult.success) {
-          alert(`Failed to open Tropy project: ${openResult.error}`);
+          await useDialogStore.getState().showAlert(`Failed to open Tropy project: ${openResult.error}`);
         }
       }
     } catch (error) {

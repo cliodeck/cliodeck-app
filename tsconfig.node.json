@@ -11,6 +11,7 @@
     "outDir": "dist",
     "strict": false,
     "resolveJsonModule": true,
+    "types": ["node", "better-sqlite3"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
@@ -19,5 +20,5 @@
     }
   },
   "include": ["src/main/**/*", "src/shared/**/*", "backend/**/*"],
-  "exclude": ["backend/__tests__/**/*"]
+  "exclude": ["backend/__tests__/**/*", "src/main/**/__tests__/**/*"]
 }

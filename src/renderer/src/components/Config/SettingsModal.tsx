@@ -16,9 +16,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   return (
     <div className="settings-modal" onClick={onClose}>
-      <div className="settings-content" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="settings-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="settings-header">
-          <h3>{t('settings.title')}</h3>
+          <h3 id="settings-modal-title">{t('settings.title')}</h3>
           <button className="close-btn" onClick={onClose}>
             <X size={20} />
           </button>

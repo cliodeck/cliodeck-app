@@ -2,6 +2,8 @@
  * Gestionnaire de providers LLM
  * Permet de basculer entre Ollama et le modèle embarqué selon la configuration
  * et la disponibilité des services.
+ *
+ * Supporte le routage des embeddings vers Ollama ou le modèle embarqué.
  */
 
 import fs from 'fs';
@@ -26,6 +28,12 @@ export interface LLMProviderConfig {
   ollamaEmbeddingModel?: string;
   /** Stratégie d'embeddings: 'nomic-fallback', 'mxbai-only', 'custom' */
   embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';
+  /** Chemin vers le modèle d'embedding GGUF embarqué */
+  embeddedEmbeddingModelPath?: string;
+  /** ID du modèle d'embedding embarqué */
+  embeddedEmbeddingModelId?: string;
+  /** Provider pour les embeddings: 'ollama', 'embedded', ou 'auto' */
+  embeddingProvider?: 'ollama' | 'embedded' | 'auto';
 }
 
 export interface ProviderStatus {
@@ -34,6 +42,8 @@ export interface ProviderStatus {
   embeddedAvailable: boolean;
   embeddedModelId: string | null;
   ollamaModel: string;
+  embeddedEmbeddingAvailable: boolean;
+  embeddedEmbeddingModelId: string | null;
 }
 
 export class LLMProviderManager {
@@ -41,6 +51,7 @@ export class LLMProviderManager {
   private embeddedClient: EmbeddedLLMClient;
   private config: LLMProviderConfig;
   private embeddedAvailable = false;
+  private embeddedEmbeddingAvailable = false;
   private activeProvider: 'ollama' | 'embedded' | null = null;
   private initialized = false;
 
@@ -60,7 +71,7 @@ export class LLMProviderManager {
   }
 
   /**
-   * Initialise le manager et charge le modèle embarqué si disponible
+   * Initialise le manager et charge les modèles embarqués si disponibles
    */
   async initialize(): Promise<void> {
     if (this.initialized) {
@@ -70,8 +81,9 @@ export class LLMProviderManager {
     console.log('🔧 [PROVIDER] Initializing LLM Provider Manager...');
     console.log(`   Configured provider: ${this.config.provider}`);
     console.log(`   Embedded model path: ${this.config.embeddedModelPath || 'not set'}`);
+    console.log(`   Embedded embedding model path: ${this.config.embeddedEmbeddingModelPath || 'not set'}`);
 
-    // Initialiser le modèle embarqué si un chemin est fourni et le fichier existe
+    // Initialiser le modèle de génération embarqué si un chemin est fourni et le fichier existe
     if (this.config.embeddedModelPath) {
       if (!fs.existsSync(this.config.embeddedModelPath)) {
         console.log(`⏭️ [PROVIDER] Embedded model not found, skipping: ${this.config.embeddedModelPath}`);
@@ -93,12 +105,34 @@ export class LLMProviderManager {
       }
     }
 
+    // Initialiser le modèle d'embedding embarqué si un chemin est fourni
+    if (this.config.embeddedEmbeddingModelPath) {
+      if (!fs.existsSync(this.config.embeddedEmbeddingModelPath)) {
+        console.log(`⏭️ [PROVIDER] Embedded embedding model not found, skipping: ${this.config.embeddedEmbeddingModelPath}`);
+        this.embeddedEmbeddingAvailable = false;
+      } else {
+        try {
+          const success = await this.embeddedClient.initializeEmbedding(
+            this.config.embeddedEmbeddingModelPath,
+            this.config.embeddedEmbeddingModelId
+          );
+          this.embeddedEmbeddingAvailable = success;
+          if (success) {
+            console.log('✅ [PROVIDER] Embedded embedding model loaded successfully');
+          }
+        } catch (error) {
+          console.warn('⚠️ [PROVIDER] Could not load embedded embedding model:', error);
+          this.embeddedEmbeddingAvailable = false;
+        }
+      }
+    }
+
     this.initialized = true;
 
     // Déterminer le provider actif initial
     await this.getActiveProvider();
 
-    console.log(`✅ [PROVIDER] Initialized. Active provider: ${this.activeProvider || 'none'}`);
+    console.log(`✅ [PROVIDER] Initialized. Active provider: ${this.activeProvider || 'none'}, Embedding: ${this.embeddedEmbeddingAvailable ? 'embedded available' : 'Ollama only'}`);
   }
 
   /**
@@ -145,6 +179,8 @@ export class LLMProviderManager {
       embeddedAvailable: this.embeddedAvailable,
       embeddedModelId: this.embeddedClient.getModelId(),
       ollamaModel: this.ollamaClient.chatModel,
+      embeddedEmbeddingAvailable: this.embeddedEmbeddingAvailable,
+      embeddedEmbeddingModelId: this.embeddedClient.getEmbeddingModelId(),
     };
   }
 
@@ -263,30 +299,101 @@ export class LLMProviderManager {
     }
   }
 
+  // MARK: - Embedding generation
+
   /**
-   * Génère un embedding (toujours via Ollama)
-   * IMPORTANT: Le modèle embarqué Qwen n'est PAS un modèle d'embeddings.
-   * Les embeddings nécessitent Ollama avec nomic-embed-text ou similaire.
+   * Génère un embedding pour un document (indexation).
+   * Route vers Ollama ou le modèle embarqué selon la config et la disponibilité.
    */
   async generateEmbedding(text: string): Promise<Float32Array> {
-    const ollamaAvailable = await this.ollamaClient.isAvailable();
+    const embeddingProvider = this.config.embeddingProvider || 'auto';
 
-    if (!ollamaAvailable) {
+    if (embeddingProvider === 'ollama') {
+      const ollamaAvailable = await this.ollamaClient.isAvailable();
+      if (ollamaAvailable) {
+        return this.ollamaClient.generateEmbedding(text);
+      }
       throw new Error(
-        'Ollama est requis pour générer des embeddings.\n' +
-          'Le modèle embarqué ne supporte que la génération de texte.\n\n' +
-          'Installez et démarrez Ollama: https://ollama.ai'
+        'Ollama est requis pour les embeddings (mode forcé) mais n\'est pas disponible.\n' +
+        'Installez et démarrez Ollama: https://ollama.ai'
       );
     }
 
-    return this.ollamaClient.generateEmbedding(text);
+    if (embeddingProvider === 'embedded') {
+      if (this.embeddedEmbeddingAvailable) {
+        return this.embeddedClient.generateEmbedding(text);
+      }
+      throw new Error(
+        'Le modèle d\'embedding embarqué n\'est pas disponible.\n' +
+        'Téléchargez-le dans Paramètres → LLM.'
+      );
+    }
+
+    // Mode 'auto': essayer Ollama d'abord, puis embarqué
+    const ollamaAvailable = await this.ollamaClient.isAvailable();
+    if (ollamaAvailable) {
+      return this.ollamaClient.generateEmbedding(text);
+    }
+
+    if (this.embeddedEmbeddingAvailable) {
+      return this.embeddedClient.generateEmbedding(text);
+    }
+
+    throw new Error(
+      'Aucun provider d\'embeddings disponible.\n\n' +
+      'Options:\n' +
+      '1. Installez et démarrez Ollama (https://ollama.ai)\n' +
+      '2. Téléchargez le modèle d\'embedding embarqué dans Paramètres → LLM'
+    );
   }
 
   /**
-   * Vérifie si les embeddings sont disponibles (Ollama requis)
+   * Génère un embedding pour une requête de recherche.
+   * Pour Ollama, identique à generateEmbedding.
+   * Pour le modèle embarqué, utilise le préfixe search_query:.
+   */
+  async generateQueryEmbedding(text: string): Promise<Float32Array> {
+    const embeddingProvider = this.config.embeddingProvider || 'auto';
+
+    if (embeddingProvider === 'ollama') {
+      const ollamaAvailable = await this.ollamaClient.isAvailable();
+      if (ollamaAvailable) {
+        return this.ollamaClient.generateEmbedding(text);
+      }
+      throw new Error('Ollama est requis pour les embeddings mais n\'est pas disponible.');
+    }
+
+    if (embeddingProvider === 'embedded') {
+      if (this.embeddedEmbeddingAvailable) {
+        return this.embeddedClient.generateQueryEmbedding(text);
+      }
+      throw new Error('Le modèle d\'embedding embarqué n\'est pas disponible.');
+    }
+
+    // Mode 'auto'
+    const ollamaAvailable = await this.ollamaClient.isAvailable();
+    if (ollamaAvailable) {
+      return this.ollamaClient.generateEmbedding(text);
+    }
+
+    if (this.embeddedEmbeddingAvailable) {
+      return this.embeddedClient.generateQueryEmbedding(text);
+    }
+
+    throw new Error(
+      'Aucun provider d\'embeddings disponible.\n\n' +
+      'Options:\n' +
+      '1. Installez et démarrez Ollama (https://ollama.ai)\n' +
+      '2. Téléchargez le modèle d\'embedding embarqué dans Paramètres → LLM'
+    );
+  }
+
+  /**
+   * Vérifie si les embeddings sont disponibles (Ollama OU embarqué)
    */
   async isEmbeddingAvailable(): Promise<boolean> {
-    return this.ollamaClient.isAvailable();
+    const ollamaAvailable = await this.ollamaClient.isAvailable();
+    return ollamaAvailable || this.embeddedEmbeddingAvailable;
   }
 
   /**
@@ -297,10 +404,17 @@ export class LLMProviderManager {
   }
 
   /**
-   * Vérifie si le modèle embarqué est disponible
+   * Vérifie si le modèle embarqué de génération est disponible
    */
   isEmbeddedAvailable(): boolean {
     return this.embeddedAvailable;
+  }
+
+  /**
+   * Vérifie si le modèle d'embedding embarqué est disponible
+   */
+  isEmbeddedEmbeddingAvailable(): boolean {
+    return this.embeddedEmbeddingAvailable;
   }
 
   /**
@@ -327,7 +441,7 @@ export class LLMProviderManager {
   }
 
   /**
-   * Met à jour le chemin du modèle embarqué et réinitialise
+   * Met à jour le chemin du modèle de génération embarqué et réinitialise
    */
   async setEmbeddedModelPath(path: string, modelId?: string): Promise<boolean> {
     console.log(`🔧 [PROVIDER] Setting embedded model path: ${path}`);
@@ -342,6 +456,15 @@ export class LLMProviderManager {
     const success = await this.embeddedClient.initialize(path, modelId);
     this.embeddedAvailable = success;
 
+    // Recharger le modèle d'embedding si configuré (dispose l'a libéré)
+    if (this.config.embeddedEmbeddingModelPath && fs.existsSync(this.config.embeddedEmbeddingModelPath)) {
+      const embSuccess = await this.embeddedClient.initializeEmbedding(
+        this.config.embeddedEmbeddingModelPath,
+        this.config.embeddedEmbeddingModelId
+      );
+      this.embeddedEmbeddingAvailable = embSuccess;
+    }
+
     // Recalculer le provider actif
     await this.getActiveProvider();
 
@@ -349,15 +472,44 @@ export class LLMProviderManager {
   }
 
   /**
-   * Désactive le modèle embarqué
+   * Met à jour le chemin du modèle d'embedding embarqué
+   */
+  async setEmbeddedEmbeddingModelPath(path: string, modelId?: string): Promise<boolean> {
+    console.log(`🔧 [PROVIDER] Setting embedded embedding model path: ${path}`);
+
+    this.config.embeddedEmbeddingModelPath = path;
+    this.config.embeddedEmbeddingModelId = modelId;
+
+    const success = await this.embeddedClient.initializeEmbedding(path, modelId);
+    this.embeddedEmbeddingAvailable = success;
+
+    return success;
+  }
+
+  /**
+   * Désactive le modèle de génération embarqué
    */
   async disableEmbedded(): Promise<void> {
     await this.embeddedClient.dispose();
     this.embeddedAvailable = false;
+    this.embeddedEmbeddingAvailable = false;
     this.config.embeddedModelPath = undefined;
 
     // Recalculer le provider actif
     await this.getActiveProvider();
+  }
+
+  /**
+   * Désactive le modèle d'embedding embarqué
+   * Note: ne libère pas l'instance Llama car le modèle de génération peut encore l'utiliser
+   */
+  async disableEmbeddedEmbedding(): Promise<void> {
+    // On ne peut pas dispose sélectivement l'embedding sans dispose tout.
+    // Le modèle d'embedding sera libéré au prochain dispose() complet.
+    this.embeddedEmbeddingAvailable = false;
+    this.config.embeddedEmbeddingModelPath = undefined;
+    this.config.embeddedEmbeddingModelId = undefined;
+    console.log('🔧 [PROVIDER] Embedded embedding model disabled');
   }
 
   /**
@@ -366,6 +518,7 @@ export class LLMProviderManager {
   async dispose(): Promise<void> {
     console.log('🧹 [PROVIDER] Disposing LLM Provider Manager...');
     await this.embeddedClient.dispose();
+    this.embeddedEmbeddingAvailable = false;
     this.initialized = false;
     this.activeProvider = null;
   }

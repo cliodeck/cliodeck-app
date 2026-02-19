@@ -1,8 +1,7 @@
-// @ts-nocheck
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibTeXExporter } from '../../../backend/core/bibliography/BibTeXExporter.js';
 import type { Citation } from '../../../backend/types/citation.js';
-import { BibliographyStatsEngine, BibliographyStatistics } from '../../../backend/services/BibliographyStats.js';
+import { BibliographyStatsEngine, type BibliographyStatistics } from '../../../backend/services/BibliographyStats.js';
 
 class BibliographyService {
   private parser: BibTeXParser;

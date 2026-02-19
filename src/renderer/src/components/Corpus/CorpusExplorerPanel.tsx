@@ -6,6 +6,7 @@ import { TopicTimeline } from './TopicTimeline';
 import { TextometricsPanel } from './TextometricsPanel';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import './CorpusExplorerPanel.css';
 
 interface GraphNode {
@@ -220,7 +221,7 @@ export const CorpusExplorerPanel: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error regenerating graph:', err);
-      alert(t('corpus.graphRegenerateError') + ': ' + err.message);
+      await useDialogStore.getState().showAlert(t('corpus.graphRegenerateError') + ': ' + err.message);
     } finally {
       setRegeneratingGraph(false);
     }
@@ -253,18 +254,18 @@ export const CorpusExplorerPanel: React.FC = () => {
         console.error('Failed to load topics:', result.error);
         const errorMsg = result.error || '';
         if (errorMsg.includes('not available') || errorMsg.includes('not start') || errorMsg.includes('timeout')) {
-          alert(t('corpus.topicServiceUnavailable'));
+          await useDialogStore.getState().showAlert(t('corpus.topicServiceUnavailable'));
         } else {
-          alert(t('corpus.topicAnalysisErrorGeneric') + ': ' + errorMsg);
+          await useDialogStore.getState().showAlert(t('corpus.topicAnalysisErrorGeneric') + ': ' + errorMsg);
         }
       }
     } catch (err: any) {
       console.error('Error loading topics:', err);
       const errorMsg = err.message || '';
       if (errorMsg.includes('not available') || errorMsg.includes('not start') || errorMsg.includes('timeout')) {
-        alert(t('corpus.topicServiceUnavailable'));
+        await useDialogStore.getState().showAlert(t('corpus.topicServiceUnavailable'));
       } else {
-        alert(t('corpus.topicAnalysisErrorGeneric') + ': ' + errorMsg);
+        await useDialogStore.getState().showAlert(t('corpus.topicAnalysisErrorGeneric') + ': ' + errorMsg);
       }
     } finally {
       setLoadingTopics(false);

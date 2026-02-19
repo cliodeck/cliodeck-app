@@ -6,7 +6,7 @@ import { pdfExportService } from '../../services/pdf-export.js';
 import { wordExportService } from '../../services/word-export.js';
 import { revealJsExportService } from '../../services/revealjs-export.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
-import { validate, PDFExportSchema, RevealJSExportSchema } from '../utils/validation.js';
+import { validate, PDFExportSchema, RevealJSExportSchema, WordExportSchema, StringPathSchema } from '../utils/validation.js';
 
 export function setupExportHandlers() {
   // PDF Export handlers
@@ -48,7 +48,8 @@ export function setupExportHandlers() {
   });
 
   // Word Export handlers
-  ipcMain.handle('word-export:export', async (event, options: any) => {
+  ipcMain.handle('word-export:export', async (event, rawOptions: unknown) => {
+    const options = validate(WordExportSchema, rawOptions);
     console.log('📞 IPC Call: word-export:export', {
       projectType: options.projectType,
       hasBibliography: !!options.bibliographyPath,
@@ -57,7 +58,7 @@ export function setupExportHandlers() {
     try {
       const window = BrowserWindow.fromWebContents(event.sender);
 
-      const result = await wordExportService.exportToWord(options, (progress) => {
+      const result = await wordExportService.exportToWord(options as any, (progress) => {
         if (window) {
           window.webContents.send('word-export:progress', progress);
         }
@@ -74,7 +75,8 @@ export function setupExportHandlers() {
     }
   });
 
-  ipcMain.handle('word-export:find-template', async (_event, projectPath: string) => {
+  ipcMain.handle('word-export:find-template', async (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
     console.log('📞 IPC Call: word-export:find-template', { projectPath });
     try {
       const templatePath = await wordExportService.findTemplate(projectPath);

@@ -1,5 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+// Security: Whitelist of IPC channels allowed through the generic ipcRenderer bridge.
+// All other channels are blocked to prevent unauthorized IPC communication.
+const ALLOWED_RECEIVE_CHANNELS: string[] = [
+  // Menu shortcuts (from main process application menu)
+  'menu:new-file', 'menu:open-file', 'menu:save-file',
+  'menu:new-project', 'menu:open-project', 'menu:export-pdf',
+  'menu:format-bold', 'menu:format-italic', 'menu:insert-link',
+  'menu:insert-citation', 'menu:insert-table', 'menu:insert-footnote',
+  'menu:insert-blockquote', 'menu:toggle-stats', 'menu:check-citations',
+  'menu:toggle-preview', 'menu:switch-panel', 'menu:import-bibtex',
+  'menu:search-citations', 'menu:connect-zotero', 'menu:open-settings',
+  'menu:about',
+  // Chat status updates
+  'chat:status',
+  // Language sync
+  'language-changed',
+];
+
+const ALLOWED_SEND_CHANNELS: string[] = [
+  'language-changed',
+];
+
 // API exposée au renderer process
 const api = {
   // Projects
@@ -150,49 +172,78 @@ const api = {
     copyFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fs:copy-file', sourcePath, targetPath),
   },
 
-  // Zotero
+  // Zotero (supports both API and local SQLite modes)
   zotero: {
-    testConnection: (userId: string, apiKey: string, groupId?: string) =>
-      ipcRenderer.invoke('zotero:test-connection', userId, apiKey, groupId),
-    listCollections: (userId: string, apiKey: string, groupId?: string) =>
-      ipcRenderer.invoke('zotero:list-collections', userId, apiKey, groupId),
-    sync: (options: {
-      userId: string;
-      apiKey: string;
+    testConnection: (options: {
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
       groupId?: string;
+      dataDirectory?: string;
+    }) => ipcRenderer.invoke('zotero:test-connection', options),
+    listLibraries: (dataDirectory: string) =>
+      ipcRenderer.invoke('zotero:list-libraries', dataDirectory),
+    listCollections: (options: {
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
+      groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
+    }) => ipcRenderer.invoke('zotero:list-collections', options),
+    sync: (options: {
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
+      groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
       collectionKey?: string;
       downloadPDFs: boolean;
       exportBibTeX: boolean;
       targetDirectory?: string;
     }) => ipcRenderer.invoke('zotero:sync', options),
     downloadPDF: (options: {
-      userId: string;
-      apiKey: string;
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
       groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
       attachmentKey: string;
       filename: string;
       targetDirectory: string;
     }) => ipcRenderer.invoke('zotero:download-pdf', options),
     checkUpdates: (options: {
-      userId: string;
-      apiKey: string;
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
       groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
       localCitations: any[];
       collectionKey?: string;
     }) => ipcRenderer.invoke('zotero:check-updates', options),
     applyUpdates: (options: {
-      userId: string;
-      apiKey: string;
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
       groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
       currentCitations: any[];
       diff: any;
       strategy: 'local' | 'remote' | 'manual';
       resolution?: any;
+      collectionKey?: string;
     }) => ipcRenderer.invoke('zotero:apply-updates', options),
     enrichCitations: (options: {
-      userId: string;
-      apiKey: string;
+      mode: 'api' | 'local';
+      userId?: string;
+      apiKey?: string;
       groupId?: string;
+      dataDirectory?: string;
+      libraryID?: number;
       citations: any[];
       collectionKey?: string;
     }) => ipcRenderer.invoke('zotero:enrich-citations', options),
@@ -346,6 +397,48 @@ const api = {
     },
   },
 
+  // Embedded Embedding Model Management
+  embeddedEmbedding: {
+    /** Check if an embedding model is downloaded */
+    isDownloaded: (modelId?: string) =>
+      ipcRenderer.invoke('embedded-embedding:is-downloaded', modelId),
+    /** Get the path to an embedding model (if downloaded) */
+    getModelPath: (modelId?: string) =>
+      ipcRenderer.invoke('embedded-embedding:get-model-path', modelId),
+    /** List all available embedding models with their download status */
+    listModels: () => ipcRenderer.invoke('embedded-embedding:list-models'),
+    /** Get info about a specific embedding model */
+    getModelInfo: (modelId?: string) =>
+      ipcRenderer.invoke('embedded-embedding:get-model-info', modelId),
+    /** Download an embedding model from HuggingFace */
+    download: (modelId?: string) =>
+      ipcRenderer.invoke('embedded-embedding:download', modelId),
+    /** Cancel an ongoing download */
+    cancelDownload: () => ipcRenderer.invoke('embedded-llm:cancel-download'),
+    /** Delete a downloaded embedding model */
+    deleteModel: (modelId?: string) =>
+      ipcRenderer.invoke('embedded-embedding:delete-model', modelId),
+    /** Set the preferred embedding provider */
+    setProvider: (provider: 'ollama' | 'embedded' | 'auto') =>
+      ipcRenderer.invoke('embedded-embedding:set-provider', provider),
+    /** Get the current embedding provider setting */
+    getProvider: () => ipcRenderer.invoke('embedded-embedding:get-provider'),
+    /** Listen for download progress updates */
+    onDownloadProgress: (callback: (progress: {
+      percent: number;
+      downloadedMB: number;
+      totalMB: number;
+      speed: string;
+      eta: string;
+      status: 'pending' | 'downloading' | 'verifying' | 'complete' | 'error' | 'cancelled';
+      message: string;
+    }) => void) => {
+      const listener = (_event: any, progress: any) => callback(progress);
+      ipcRenderer.on('embedded-embedding:download-progress', listener);
+      return () => ipcRenderer.removeListener('embedded-embedding:download-progress', listener);
+    },
+  },
+
   // History / Journal
   history: {
     getSessions: () => ipcRenderer.invoke('history:get-sessions'),
@@ -386,16 +479,26 @@ const api = {
       ipcRenderer.invoke('mode:export', modeId, outputPath),
   },
 
-  // IPC Renderer for menu shortcuts
+  // IPC Renderer for menu shortcuts (filtered by channel whitelist)
   ipcRenderer: {
     on: (channel: string, listener: (...args: any[]) => void) => {
-      ipcRenderer.on(channel, listener);
+      if (ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
+        ipcRenderer.on(channel, listener);
+      } else {
+        console.warn(`[Preload] Blocked ipcRenderer.on() for unauthorized channel: ${channel}`);
+      }
     },
     removeListener: (channel: string, listener: (...args: any[]) => void) => {
-      ipcRenderer.removeListener(channel, listener);
+      if (ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
+        ipcRenderer.removeListener(channel, listener);
+      }
     },
     send: (channel: string, ...args: any[]) => {
-      ipcRenderer.send(channel, ...args);
+      if (ALLOWED_SEND_CHANNELS.includes(channel)) {
+        ipcRenderer.send(channel, ...args);
+      } else {
+        console.warn(`[Preload] Blocked ipcRenderer.send() for unauthorized channel: ${channel}`);
+      }
     },
   },
 

@@ -9,7 +9,16 @@ import { modeService } from '../../services/mode-service.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { tropyService } from '../../services/tropy-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
-import { validate, ProjectCreateSchema, ProjectSaveSchema, BibliographySourceSchema } from '../utils/validation.js';
+import {
+  validate,
+  ProjectCreateSchema,
+  ProjectSaveSchema,
+  BibliographySourceSchema,
+  StringPathSchema,
+  StringIdSchema,
+  ProjectSetCSLPathSchema,
+  ProjectUpdateConfigSchema,
+} from '../utils/validation.js';
 
 export function setupProjectHandlers() {
   ipcMain.handle('project:get-recent', () => {
@@ -19,7 +28,8 @@ export function setupProjectHandlers() {
     return result;
   });
 
-  ipcMain.handle('project:remove-recent', (_event, path: string) => {
+  ipcMain.handle('project:remove-recent', (_event, rawPath: unknown) => {
+    const path = validate(StringPathSchema, rawPath);
     console.log('📞 IPC Call: project:remove-recent', { path });
     configManager.removeRecentProject(path);
     console.log('📤 IPC Response: project:remove-recent success');
@@ -62,7 +72,8 @@ export function setupProjectHandlers() {
 
   // Get project metadata without initializing services (for recent projects list)
   // IMPORTANT: Use getProjectMetadata() to avoid changing currentProject/currentProjectPath
-  ipcMain.handle('project:get-metadata', async (_event, path: string) => {
+  ipcMain.handle('project:get-metadata', async (_event, rawPath: unknown) => {
+    const path = validate(StringPathSchema, rawPath);
     console.log('📞 IPC Call: project:get-metadata', { path });
     try {
       // Use getProjectMetadata to read without affecting current project state
@@ -75,7 +86,8 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:load', async (event, path: string) => {
+  ipcMain.handle('project:load', async (event, rawPath: unknown) => {
+    const path = validate(StringPathSchema, rawPath);
     console.log('📞 IPC Call: project:load', { path });
     try {
       const result = await projectManager.loadProject(path);
@@ -147,7 +159,8 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:get-chapters', async (_event, projectId: string) => {
+  ipcMain.handle('project:get-chapters', async (_event, rawProjectId: unknown) => {
+    const projectId = validate(StringIdSchema, rawProjectId);
     console.log('📞 IPC Call: project:get-chapters', { projectId });
     try {
       const result = await projectManager.getChapters(projectId);
@@ -172,7 +185,8 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:set-csl-path', async (_event, data: { projectPath: string; cslPath?: string }) => {
+  ipcMain.handle('project:set-csl-path', async (_event, rawData: unknown) => {
+    const data = validate(ProjectSetCSLPathSchema, rawData);
     console.log('📞 IPC Call: project:set-csl-path', data);
     try {
       const result = await projectManager.setCSLPath(data);
@@ -184,7 +198,8 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:get-config', async (_event, projectPath: string) => {
+  ipcMain.handle('project:get-config', async (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
     console.log('📞 IPC Call: project:get-config', { projectPath });
     try {
       const config = await projectManager.getConfig(projectPath);
@@ -196,7 +211,8 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:update-config', async (_event, projectPath: string, updates: any) => {
+  ipcMain.handle('project:update-config', async (_event, rawProjectPath: unknown, rawUpdates: unknown) => {
+    const { projectPath, updates } = validate(ProjectUpdateConfigSchema, { projectPath: rawProjectPath, updates: rawUpdates });
     console.log('📞 IPC Call: project:update-config', { projectPath, updates });
     try {
       const result = await projectManager.updateConfig(projectPath, updates);

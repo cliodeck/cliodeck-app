@@ -1,10 +1,52 @@
-// @ts-nocheck
 import { LRUCache } from 'lru-cache';
 import { pdfService } from './pdf-service.js';
 import { BrowserWindow } from 'electron';
 import { historyService } from './history-service.js';
 import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.js';
 import { getSystemPrompt } from '../../../backend/core/llm/SystemPrompts.js';
+import type { PDFDocument, SearchResult } from '../../../backend/types/pdf-document.js';
+
+// ---- Local types for RAG search results ----
+// These represent the enriched search results returned by pdfService.search(),
+// which may include both secondary (PDF) and primary (Tropy) sources with
+// additional fields beyond the base SearchResult type.
+
+/** Minimal document shape as it appears in RAG search results (may be partial after compression). */
+interface RAGDocumentInfo {
+  id: string | undefined;
+  title: string | undefined;
+  author?: string;
+  year?: string | number;
+  summary?: string;
+  bibtexKey?: string | null;
+}
+
+/** Minimal chunk shape as it appears in RAG search results (may be partial after compression). */
+interface RAGChunkInfo {
+  id?: string;
+  content: string;
+  pageNumber?: number;
+  documentId?: string;
+  chunkIndex?: number;
+}
+
+/** A single search result from the RAG pipeline (pdfService.search + compression + graph enrichment). */
+interface RAGSearchResult {
+  document: RAGDocumentInfo;
+  chunk: RAGChunkInfo;
+  similarity: number;
+  sourceType?: 'primary' | 'secondary';
+  isRelatedDoc?: boolean;
+  source?: unknown;
+}
+
+/** Shape of the document map entries used when building the RAG explanation. */
+interface ExplanationDocumentEntry {
+  title: string;
+  similarity: number;
+  sourceType: 'primary' | 'secondary';
+  chunkCount: number;
+}
 
 // Options enrichies pour le RAG
 interface EnrichedRAGOptions {
@@ -133,13 +175,35 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return dotProduct / magnitude;
 }
 
+/** Internal result from performRAGSearch */
+interface RAGSearchOutput {
+  searchResults: RAGSearchResult[];
+  relatedDocuments: PDFDocument[];
+  searchDurationMs: number;
+  cacheHit: boolean;
+}
+
+/** Internal result from compressContext */
+interface CompressionOutput {
+  searchResults: RAGSearchResult[];
+  compressionStats: RAGExplanationContext['compression'] | undefined;
+  compressionDurationMs: number;
+}
+
+/** Internal result from generateResponse */
+interface GenerationOutput {
+  fullResponse: string;
+  promptSize: number;
+  generationDurationMs: number;
+}
+
 class ChatService {
-  private currentStream: any = null;
+  private currentStream: AsyncGenerator<string> | null = null;
   private compressor: ContextCompressor = new ContextCompressor();
 
   // LRU Cache for RAG search results (cache identical queries)
-  // 🚀 OPTIMIZED: Increased capacity (100→200) and TTL (10→30 minutes)
-  private ragCache = new LRUCache<string, any[]>({
+  // OPTIMIZED: Increased capacity (100->200) and TTL (10->30 minutes)
+  private ragCache = new LRUCache<string, RAGSearchResult[]>({
     max: 200, // Store up to 200 different queries
     ttl: 1000 * 60 * 30, // 30 minutes TTL
     updateAgeOnGet: true, // Refresh TTL on access
@@ -149,8 +213,8 @@ class ChatService {
    * Convertit les résultats de recherche en utilisant les résumés au lieu des chunks
    * Si les résumés ne sont pas disponibles, retourne les chunks originaux
    */
-  private convertChunksToSummaries(searchResults: any[]): any[] {
-    const summaryResults: any[] = [];
+  private convertChunksToSummaries(searchResults: RAGSearchResult[]): RAGSearchResult[] {
+    const summaryResults: RAGSearchResult[] = [];
     const seenDocuments = new Set<string>();
     let summariesFound = 0;
 
@@ -221,18 +285,611 @@ class ChatService {
     return relatedDocs;
   }
 
+  /**
+   * Performs the RAG vector search: cache lookup, pdfService.search, filtering,
+   * graph enrichment, and summary conversion.
+   */
+  private async performRAGSearch(
+    message: string,
+    queryHash: string,
+    options: EnrichedRAGOptions
+  ): Promise<RAGSearchOutput> {
+    const searchStart = Date.now();
+    let cacheHit = false;
+
+    // Send status update - searching
+    if (options.window) {
+      options.window.webContents.send('chat:status', {
+        stage: 'searching',
+        message: '🔍 Recherche dans les documents...',
+      });
+    }
+
+    console.log('🔍 [RAG DETAILED DEBUG] Starting RAG search:', {
+      query: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
+      queryLength: message.length,
+      queryHash: queryHash,
+      topK: options.topK,
+      useGraphContext: options.useGraphContext,
+      includeSummaries: options.includeSummaries,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Check cache first (identical queries = instant results)
+    // Include collection filter, source type and document IDs in cache key to avoid mixing results
+    const collectionSuffix = options.collectionKeys?.length ? `-coll:${options.collectionKeys.sort().join(',')}` : '';
+    const sourceTypeSuffix = options.sourceType ? `-src:${options.sourceType}` : '-src:both';
+    const documentIdsSuffix = options.documentIds?.length ? `-docs:${options.documentIds.sort().join(',')}` : '';
+    const cacheKey = `${queryHash}-${options.topK || 5}${collectionSuffix}${sourceTypeSuffix}${documentIdsSuffix}`;
+    const cachedResults = this.ragCache.get(cacheKey);
+
+    let searchResults: RAGSearchResult[];
+
+    if (cachedResults) {
+      console.log(`💾 Cache HIT for query hash ${queryHash} (saved ${Date.now() - searchStart}ms)`);
+      searchResults = cachedResults;
+      cacheHit = true;
+    } else {
+      console.log(`🔍 Cache MISS for query hash ${queryHash}, performing search...`);
+      searchResults = await pdfService.search(message, {
+        topK: options.topK,
+        collectionKeys: options.collectionKeys,
+        sourceType: options.sourceType,
+        documentIds: options.documentIds, // Issue #16: filter by specific documents
+      });
+
+      // Store in cache for future identical queries
+      this.ragCache.set(cacheKey, searchResults);
+      console.log(`💾 Cached ${searchResults.length} results for query hash ${queryHash}`);
+    }
+    const searchDurationMs = Date.now() - searchStart;
+
+    // Filter out results with null documents (orphaned chunks)
+    searchResults = searchResults.filter(r => r.document !== null);
+
+    console.log('🔍 [RAG DETAILED DEBUG] Search completed:', {
+      queryHash: queryHash,
+      resultsCount: searchResults.length,
+      searchDuration: `${searchDurationMs}ms`,
+      topSimilarities: searchResults.slice(0, 5).map(r => r.similarity.toFixed(4)),
+      chunkIds: searchResults.slice(0, 3).map(r => r.chunk.id),
+      documentTitles: searchResults.slice(0, 3).map(r => r.document?.title || 'Unknown'),
+    });
+
+    let relatedDocuments: PDFDocument[] = [];
+
+    if (searchResults.length > 0) {
+      console.log(`📚 Using ${searchResults.length} context chunks for RAG`);
+
+      // Send status update - found sources
+      if (options.window) {
+        options.window.webContents.send('chat:status', {
+          stage: 'found',
+          message: `📚 ${searchResults.length} sources trouvées`,
+        });
+      }
+
+      // Log first result for debugging
+      console.log('🔍 [RAG DEBUG] First result:', {
+        document: searchResults[0].document?.title || 'Unknown',
+        similarity: searchResults[0].similarity,
+        chunkLength: searchResults[0].chunk.content.length
+      });
+
+      // Enrich with graph context
+      relatedDocuments = await this.enrichWithGraph(searchResults, options);
+
+      // Si résumés activés, utiliser résumés au lieu de chunks
+      if (options.includeSummaries) {
+        console.log('📝 Using document summaries instead of chunks');
+        // Remplacer chunks par résumés
+        searchResults = this.convertChunksToSummaries(searchResults);
+        if (relatedDocuments.length > 0) {
+          searchResults = await this.addRelatedDocumentSummaries(
+            searchResults, relatedDocuments, message
+          );
+        }
+      }
+    }
+
+    return { searchResults, relatedDocuments, searchDurationMs, cacheHit };
+  }
+
+  /**
+   * Enriches search results with related documents from the knowledge graph.
+   * Returns the array of related PDFDocuments found.
+   */
+  private async enrichWithGraph(
+    searchResults: RAGSearchResult[],
+    options: EnrichedRAGOptions
+  ): Promise<PDFDocument[]> {
+    if (!options.useGraphContext) {
+      return [];
+    }
+
+    const uniqueDocIds = [...new Set(searchResults.map(r => r.document.id))];
+    const relatedDocIds = await this.getRelatedDocumentsFromGraph(
+      uniqueDocIds,
+      options.additionalGraphDocs || 3
+    );
+
+    console.log(`🔗 Found ${relatedDocIds.size} related documents via graph`);
+
+    // Récupérer les documents complets
+    const vectorStore = pdfService.getVectorStore();
+    if (vectorStore && relatedDocIds.size > 0) {
+      return Array.from(relatedDocIds)
+        .map((id: string) => vectorStore.getDocument(id))
+        .filter((doc): doc is PDFDocument => doc !== null);
+    }
+
+    return [];
+  }
+
+  /**
+   * Adds summaries from graph-related documents to searchResults,
+   * computing real similarity when embedding is available.
+   */
+  private async addRelatedDocumentSummaries(
+    searchResults: RAGSearchResult[],
+    relatedDocuments: PDFDocument[],
+    message: string
+  ): Promise<RAGSearchResult[]> {
+    const embeddingProvider = pdfService.getLLMProviderManager();
+    if (embeddingProvider && await embeddingProvider.isEmbeddingAvailable()) {
+      try {
+        // Générer l'embedding de la requête (avec préfixe query pour modèle embarqué)
+        const queryEmbedding = await embeddingProvider.generateQueryEmbedding(message);
+        console.log(`🔗 Computing real similarity for ${relatedDocuments.length} graph-related documents`);
+
+        for (const doc of relatedDocuments) {
+          if (doc.summary) {
+            try {
+              // Générer l'embedding du résumé et calculer la vraie similarité
+              const summaryEmbedding = await embeddingProvider.generateEmbedding(doc.summary);
+              const realSimilarity = cosineSimilarity(queryEmbedding, summaryEmbedding);
+              console.log(`   📄 ${doc.title}: similarity = ${(realSimilarity * 100).toFixed(1)}%`);
+
+              searchResults.push({
+                document: doc,
+                chunk: { content: doc.summary, pageNumber: 1 },
+                similarity: realSimilarity,
+                isRelatedDoc: true
+              });
+            } catch (embError) {
+              console.warn(`⚠️ Failed to compute similarity for ${doc.title}:`, embError);
+              searchResults.push({
+                document: doc,
+                chunk: { content: doc.summary, pageNumber: 1 },
+                similarity: 0.5,
+                isRelatedDoc: true
+              });
+            }
+          }
+        }
+      } catch (queryEmbError) {
+        console.warn('⚠️ Failed to generate query embedding for graph docs:', queryEmbError);
+        relatedDocuments.forEach(doc => {
+          if (doc.summary) {
+            searchResults.push({
+              document: doc,
+              chunk: { content: doc.summary, pageNumber: 1 },
+              similarity: 0.5,
+              isRelatedDoc: true
+            });
+          }
+        });
+      }
+    } else {
+      console.warn('⚠️ No embedding provider available for similarity computation');
+      relatedDocuments.forEach(doc => {
+        if (doc.summary) {
+          searchResults.push({
+            document: doc,
+            chunk: { content: doc.summary, pageNumber: 1 },
+            similarity: 0.5,
+            isRelatedDoc: true
+          });
+        }
+      });
+    }
+
+    return searchResults;
+  }
+
+  /**
+   * Applies intelligent compression to context chunks (if enabled).
+   * Returns updated search results and compression statistics.
+   */
+  private compressContext(
+    searchResults: RAGSearchResult[],
+    message: string,
+    options: EnrichedRAGOptions
+  ): CompressionOutput {
+    const compressionEnabled = options.enableContextCompression !== false; // Default: true
+    let compressionStats: RAGExplanationContext['compression'] | undefined;
+    let compressionDurationMs = 0;
+
+    if (searchResults.length > 0 && compressionEnabled) {
+      const compressionStart = Date.now();
+      const preCompressionSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
+      const _preCompressionChunks = searchResults.length;
+      console.log(`🗜️  [COMPRESSION] Pre-compression context size: ${preCompressionSize} chars (${searchResults.length} chunks)`);
+
+      // Convert search results to compressor format
+      const chunksForCompression = searchResults.map(r => ({
+        content: r.chunk.content,
+        documentId: r.document.id,
+        documentTitle: r.document.title,
+        pageNumber: r.chunk.pageNumber,
+        similarity: r.similarity,
+      }));
+
+      // Compress with 20k char target
+      const compressionResult = this.compressor.compress(chunksForCompression, message, 20000);
+
+      // Convert back to search result format
+      searchResults = compressionResult.chunks.map(chunk => ({
+        document: {
+          id: chunk.documentId,
+          title: chunk.documentTitle,
+        },
+        chunk: {
+          content: chunk.content,
+          pageNumber: chunk.pageNumber,
+        },
+        similarity: chunk.similarity,
+      }));
+
+      compressionDurationMs = Date.now() - compressionStart;
+
+      // Capturer les stats de compression pour l'explication
+      compressionStats = {
+        enabled: true,
+        originalChunks: compressionResult.stats.originalChunks,
+        finalChunks: compressionResult.stats.compressedChunks,
+        originalSize: compressionResult.stats.originalSize,
+        finalSize: compressionResult.stats.compressedSize,
+        reductionPercent: compressionResult.stats.reductionPercent,
+        strategy: compressionResult.stats.strategy,
+      };
+
+      console.log(`✅ [COMPRESSION] Final stats:`, {
+        strategy: compressionResult.stats.strategy,
+        originalChunks: compressionResult.stats.originalChunks,
+        compressedChunks: compressionResult.stats.compressedChunks,
+        originalSize: compressionResult.stats.originalSize,
+        compressedSize: compressionResult.stats.compressedSize,
+        reduction: `${compressionResult.stats.reductionPercent.toFixed(1)}%`,
+      });
+    } else if (searchResults.length > 0 && !compressionEnabled) {
+      const contextSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
+      compressionStats = {
+        enabled: false,
+        originalChunks: searchResults.length,
+        finalChunks: searchResults.length,
+        originalSize: contextSize,
+        finalSize: contextSize,
+        reductionPercent: 0,
+      };
+      console.log(`⏭️  [COMPRESSION] Skipped (disabled in settings). Context size: ${contextSize} chars (${searchResults.length} chunks)`);
+    }
+
+    return { searchResults, compressionStats, compressionDurationMs };
+  }
+
+  /**
+   * Builds the system prompt based on configuration (Phase 2.3 + Modes).
+   */
+  private buildSystemPrompt(options: EnrichedRAGOptions): string {
+    const systemPromptLanguage = options.systemPromptLanguage || 'fr';
+    const useCustomPrompt = options.useCustomSystemPrompt || false;
+    const customPrompt = options.customSystemPrompt;
+
+    let systemPrompt: string;
+    if (options.noSystemPrompt) {
+      // Free mode: no system prompt
+      systemPrompt = '';
+    } else {
+      systemPrompt = getSystemPrompt(systemPromptLanguage, useCustomPrompt, customPrompt);
+    }
+
+    console.log('🤖 [SYSTEM PROMPT] Configuration:', {
+      language: systemPromptLanguage,
+      noSystemPrompt: options.noSystemPrompt || false,
+      useCustom: useCustomPrompt,
+      hasCustom: !!customPrompt,
+      promptPreview: systemPrompt.substring(0, 100) + '...',
+    });
+
+    return systemPrompt;
+  }
+
+  /**
+   * Performs the actual LLM call (with or without RAG sources), streaming
+   * chunks to the renderer window.
+   */
+  private async generateResponse(
+    message: string,
+    searchResults: RAGSearchResult[],
+    options: EnrichedRAGOptions,
+    systemPrompt: string,
+    queryHash: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    llmProviderManager: any
+  ): Promise<GenerationOutput> {
+    // Récupérer le contexte du projet (convert null to undefined for optional param compatibility)
+    const projectContext = pdfService.getProjectContext() ?? undefined;
+
+    // Build generation options (commun aux deux cas)
+    const generationOptions = {
+      temperature: options.temperature,
+      top_p: options.top_p,
+      top_k: options.top_k,
+      repeat_penalty: options.repeat_penalty,
+      num_ctx: options.numCtx,  // Context window size for Ollama
+    };
+
+    // Send status update - generating
+    if (options.window) {
+      options.window.webContents.send('chat:status', {
+        stage: 'generating',
+        message: '✨ Génération de la réponse...',
+      });
+    }
+
+    // Track generation timing and prompt size for explanation
+    const generationStart = Date.now();
+    let promptSize = 0;
+    let fullResponse = '';
+
+    // Stream la réponse avec contexte RAG si disponible
+    if (searchResults.length > 0) {
+      // Calculate approximate prompt size (for explanation)
+      const contextSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
+      promptSize = message.length + contextSize + systemPrompt.length + (projectContext?.length || 0);
+
+      console.log('✅ [RAG DETAILED DEBUG] Generating response WITH context:', {
+        queryHash: queryHash,
+        contextsUsed: searchResults.length,
+        avgSimilarity: (searchResults.reduce((sum, r) => sum + r.similarity, 0) / searchResults.length).toFixed(4),
+        mode: 'RAG_WITH_SOURCES',
+        projectContextLoaded: !!projectContext,
+        provider: llmProviderManager.getActiveProviderName(),
+        timeout: options.timeout || 600000,
+      });
+
+      // Utiliser LLMProviderManager pour la génération (Ollama ou embarqué)
+      // Cast RAGSearchResult[] to SearchResult[] — the LLM prompt builder only accesses
+      // .document.title, .document.author, .document.year, .chunk.content, .chunk.pageNumber, .similarity
+      const generator = llmProviderManager.generateWithSources(
+        message,
+        searchResults as unknown as SearchResult[],
+        projectContext,
+        {
+          model: options.model,
+          timeout: options.timeout,
+          generationOptions,
+          systemPrompt,
+        }
+      );
+      this.currentStream = generator;
+
+      for await (const chunk of generator) {
+        fullResponse += chunk;
+        // Envoyer le chunk au renderer si une fenêtre est fournie
+        if (options.window) {
+          options.window.webContents.send('chat:stream', chunk);
+        }
+      }
+    } else {
+      console.warn('⚠️  [RAG DETAILED DEBUG] No search results - generating response WITHOUT context');
+      console.warn('⚠️  [RAG DETAILED DEBUG] Fallback mode details:', {
+        queryHash: queryHash,
+        query: message.substring(0, 100),
+        contextRequested: options.context,
+        topK: options.topK,
+        mode: 'FALLBACK_NO_CONTEXT',
+        warning: 'This response will be GENERIC and NOT based on your documents!',
+      });
+
+      // Utiliser LLMProviderManager pour la génération sans sources
+      const generator = llmProviderManager.generateWithoutSources(
+        message,
+        [],
+        {
+          model: options.model,
+          timeout: options.timeout,
+          generationOptions,
+          systemPrompt,
+        }
+      );
+      this.currentStream = generator;
+
+      for await (const chunk of generator) {
+        fullResponse += chunk;
+        // Envoyer le chunk au renderer si une fenêtre est fournie
+        if (options.window) {
+          options.window.webContents.send('chat:stream', chunk);
+        }
+      }
+    }
+
+    const generationDurationMs = Date.now() - generationStart;
+    return { fullResponse, promptSize, generationDurationMs };
+  }
+
+  /**
+   * Logs the user message, assistant response, and RAG operation to the
+   * history service.
+   */
+  private logToHistory(
+    message: string,
+    fullResponse: string,
+    searchResults: RAGSearchResult[],
+    relatedDocuments: PDFDocument[],
+    totalDuration: number,
+    options: EnrichedRAGOptions,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    llmProviderManager: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    activeProvider: any
+  ): void {
+    const hm = historyService.getHistoryManager();
+    if (!hm) return;
+
+    // Build query params for history
+    const queryParams = {
+      model: options.model || llmProviderManager.getActiveProviderName(),
+      topK: options.topK,
+      timeout: options.timeout || 600000,
+      temperature: options.temperature,
+      top_p: options.top_p,
+      top_k: options.top_k,
+      repeat_penalty: options.repeat_penalty,
+      useGraphContext: options.useGraphContext || false,
+      includeSummaries: options.includeSummaries || false,
+      modeId: options.modeId || 'default-assistant',
+    };
+
+    // Log user message with query params
+    hm.logChatMessage({
+      role: 'user',
+      content: message,
+      queryParams,
+    });
+
+    // Log assistant response with sources
+    const sources =
+      searchResults.length > 0
+        ? searchResults.map((r) => ({
+            documentId: r.document?.id || '',
+            documentTitle: r.document?.title || 'Unknown',
+            author: r.document?.author || '',
+            year: r.document?.year || 0,
+            pageNumber: r.chunk.pageNumber,
+            similarity: r.similarity,
+            isRelatedDoc: r.isRelatedDoc || false,
+          }))
+        : undefined;
+
+    hm.logChatMessage({
+      role: 'assistant',
+      content: fullResponse,
+      sources,
+      queryParams,
+    });
+
+    // Log RAG operation if context was used
+    if (options.context && searchResults.length > 0) {
+      hm.logAIOperation({
+        operationType: 'rag_query',
+        durationMs: totalDuration,
+        inputText: message,
+        inputMetadata: {
+          topK: options.topK,
+          useGraphContext: options.useGraphContext || false,
+          includeSummaries: options.includeSummaries || false,
+          sourcesFound: searchResults.length,
+          relatedDocumentsFound: relatedDocuments.length,
+        },
+        modelName: llmProviderManager.getActiveProviderName(),
+        modelParameters: {
+          temperature: options.temperature || 0.1,
+          provider: activeProvider,
+        },
+        outputText: fullResponse,
+        outputMetadata: {
+          sources: sources || [],
+          responseLength: fullResponse.length,
+        },
+        success: true,
+      });
+
+      console.log(
+        `📝 Logged RAG query: ${searchResults.length} sources, ${totalDuration}ms`
+      );
+    }
+  }
+
+  /**
+   * Builds the RAG explanation context object (Explainable AI) from the
+   * collected search, compression, graph, and generation metadata.
+   */
+  private buildExplanation(
+    message: string,
+    searchResults: RAGSearchResult[],
+    relatedDocuments: PDFDocument[],
+    options: EnrichedRAGOptions,
+    searchDurationMs: number,
+    cacheHit: boolean,
+    compressionStats: RAGExplanationContext['compression'] | undefined,
+    compressionDurationMs: number,
+    promptSize: number,
+    generationDurationMs: number,
+    totalDuration: number,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    llmProviderManager: any
+  ): RAGExplanationContext | undefined {
+    if (!options.context || searchResults.length === 0) {
+      return undefined;
+    }
+
+    // Group results by document
+    const documentMap = new Map<string, ExplanationDocumentEntry>();
+    searchResults.forEach((r: RAGSearchResult) => {
+      const docId = r.document?.id || 'unknown';
+      const existing = documentMap.get(docId);
+      if (existing) {
+        existing.chunkCount++;
+        existing.similarity = Math.max(existing.similarity, r.similarity);
+      } else {
+        documentMap.set(docId, {
+          title: r.document?.title || 'Unknown',
+          similarity: r.similarity,
+          sourceType: r.sourceType || 'secondary',
+          chunkCount: 1,
+        });
+      }
+    });
+
+    return {
+      search: {
+        query: message,
+        totalResults: searchResults.length,
+        searchDurationMs,
+        cacheHit,
+        sourceType: options.sourceType || 'both',
+        documents: Array.from(documentMap.values()).slice(0, 10),
+      },
+      compression: compressionStats,
+      graph: options.useGraphContext ? {
+        enabled: true,
+        relatedDocsFound: relatedDocuments.length,
+        documentTitles: relatedDocuments.map(d => d.title || 'Unknown'),
+      } : undefined,
+      llm: {
+        provider: llmProviderManager.getActiveProviderName(),
+        model: llmProviderManager.getActiveModelName(),
+        contextWindow: options.numCtx || 4096,
+        temperature: options.temperature || 0.1,
+        promptSize,
+      },
+      timing: {
+        searchMs: searchDurationMs,
+        compressionMs: compressionDurationMs > 0 ? compressionDurationMs : undefined,
+        generationMs: generationDurationMs,
+        totalMs: totalDuration,
+      },
+    };
+  }
+
   async sendMessage(
     message: string,
     options: EnrichedRAGOptions = {}
   ): Promise<{ response: string; ragUsed: boolean; sourcesCount: number; explanation?: RAGExplanationContext }> {
     const startTime = Date.now();
     const queryHash = hashString(message);
-
-    // Métadonnées pour l'explication (Explainable AI)
-    let explanationContext: RAGExplanationContext | undefined;
-    let searchDurationMs = 0;
-    let compressionDurationMs = 0;
-    let cacheHit = false;
 
     try {
       // Obtenir le LLM Provider Manager (gère Ollama + modèle embarqué)
@@ -260,522 +917,86 @@ class ChatService {
 
       console.log(`🤖 [CHAT] Using LLM provider: ${llmProviderManager.getActiveProviderName()}`);
 
-      let fullResponse = '';
-      let searchResults: any[] = [];
-      let relatedDocuments: any[] = [];
+      // Step 1: RAG search (if context enabled)
+      let searchResults: RAGSearchResult[] = [];
+      let relatedDocuments: PDFDocument[] = [];
+      let searchDurationMs = 0;
+      let cacheHit = false;
 
-      // Si contexte activé, rechercher dans les documents
       if (options.context) {
-        const searchStart = Date.now();
-
-        // 🚀 FEEDBACK: Send status update - searching
-        if (options.window) {
-          options.window.webContents.send('chat:status', {
-            stage: 'searching',
-            message: '🔍 Recherche dans les documents...',
-          });
-        }
-
-        console.log('🔍 [RAG DETAILED DEBUG] Starting RAG search:', {
-          query: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-          queryLength: message.length,
-          queryHash: queryHash,
-          topK: options.topK,
-          useGraphContext: options.useGraphContext,
-          includeSummaries: options.includeSummaries,
-          timestamp: new Date().toISOString(),
-        });
-
-        // Check cache first (identical queries = instant results)
-        // Include collection filter, source type and document IDs in cache key to avoid mixing results
-        const collectionSuffix = options.collectionKeys?.length ? `-coll:${options.collectionKeys.sort().join(',')}` : '';
-        const sourceTypeSuffix = options.sourceType ? `-src:${options.sourceType}` : '-src:both';
-        const documentIdsSuffix = options.documentIds?.length ? `-docs:${options.documentIds.sort().join(',')}` : '';
-        const cacheKey = `${queryHash}-${options.topK || 5}${collectionSuffix}${sourceTypeSuffix}${documentIdsSuffix}`;
-        const cachedResults = this.ragCache.get(cacheKey);
-
-        if (cachedResults) {
-          console.log(`💾 Cache HIT for query hash ${queryHash} (saved ${Date.now() - searchStart}ms)`);
-          searchResults = cachedResults;
-          cacheHit = true;
-        } else {
-          console.log(`🔍 Cache MISS for query hash ${queryHash}, performing search...`);
-          searchResults = await pdfService.search(message, {
-            topK: options.topK,
-            collectionKeys: options.collectionKeys,
-            sourceType: options.sourceType,
-            documentIds: options.documentIds, // Issue #16: filter by specific documents
-          });
-
-          // Store in cache for future identical queries
-          this.ragCache.set(cacheKey, searchResults);
-          console.log(`💾 Cached ${searchResults.length} results for query hash ${queryHash}`);
-        }
-        searchDurationMs = Date.now() - searchStart;
-
-        // Filter out results with null documents (orphaned chunks)
-        searchResults = searchResults.filter(r => r.document !== null);
-
-        console.log('🔍 [RAG DETAILED DEBUG] Search completed:', {
-          queryHash: queryHash,
-          resultsCount: searchResults.length,
-          searchDuration: `${searchDurationMs}ms`,
-          topSimilarities: searchResults.slice(0, 5).map(r => r.similarity.toFixed(4)),
-          chunkIds: searchResults.slice(0, 3).map(r => r.chunk.id),
-          documentTitles: searchResults.slice(0, 3).map(r => r.document?.title || 'Unknown'),
-        });
-
-        if (searchResults.length > 0) {
-          console.log(`📚 Using ${searchResults.length} context chunks for RAG`);
-
-          // 🚀 FEEDBACK: Send status update - found sources
-          if (options.window) {
-            options.window.webContents.send('chat:status', {
-              stage: 'found',
-              message: `📚 ${searchResults.length} sources trouvées`,
-            });
-          }
-
-          // Log first result for debugging
-          console.log('🔍 [RAG DEBUG] First result:', {
-            document: searchResults[0].document?.title || 'Unknown',
-            similarity: searchResults[0].similarity,
-            chunkLength: searchResults[0].chunk.content.length
-          });
-
-          // Si graphe activé, récupérer documents liés
-          if (options.useGraphContext) {
-            const uniqueDocIds = [...new Set(searchResults.map(r => r.document.id))];
-            const relatedDocIds = await this.getRelatedDocumentsFromGraph(
-              uniqueDocIds,
-              options.additionalGraphDocs || 3
-            );
-
-            console.log(`🔗 Found ${relatedDocIds.size} related documents via graph`);
-
-            // Récupérer les documents complets
-            const vectorStore = pdfService.getVectorStore();
-            if (vectorStore && relatedDocIds.size > 0) {
-              relatedDocuments = Array.from(relatedDocIds)
-                .map(id => vectorStore.getDocument(id))
-                .filter(doc => doc !== null);
-            }
-          }
-
-          // Si résumés activés, utiliser résumés au lieu de chunks
-          if (options.includeSummaries) {
-            console.log('📝 Using document summaries instead of chunks');
-            // Remplacer chunks par résumés
-            searchResults = this.convertChunksToSummaries(searchResults);
-            if (relatedDocuments.length > 0) {
-              // Ajouter résumés des documents liés avec vraie similarité
-              const ollamaClient = pdfService.getOllamaClient();
-              if (ollamaClient) {
-                try {
-                  // Générer l'embedding de la requête
-                  const queryEmbedding = await ollamaClient.generateEmbedding(message);
-                  console.log(`🔗 Computing real similarity for ${relatedDocuments.length} graph-related documents`);
-
-                  for (const doc of relatedDocuments) {
-                    if (doc.summary) {
-                      try {
-                        // Générer l'embedding du résumé et calculer la vraie similarité
-                        const summaryEmbedding = await ollamaClient.generateEmbedding(doc.summary);
-                        const realSimilarity = cosineSimilarity(queryEmbedding, summaryEmbedding);
-                        console.log(`   📄 ${doc.title}: similarity = ${(realSimilarity * 100).toFixed(1)}%`);
-
-                        searchResults.push({
-                          document: doc,
-                          chunk: { content: doc.summary, pageNumber: 1 },
-                          similarity: realSimilarity,
-                          isRelatedDoc: true
-                        });
-                      } catch (embError) {
-                        console.warn(`⚠️ Failed to compute similarity for ${doc.title}:`, embError);
-                        // Fallback: utiliser 0.5 au lieu de 0.7 (indique incertitude)
-                        searchResults.push({
-                          document: doc,
-                          chunk: { content: doc.summary, pageNumber: 1 },
-                          similarity: 0.5,
-                          isRelatedDoc: true
-                        });
-                      }
-                    }
-                  }
-                } catch (queryEmbError) {
-                  console.warn('⚠️ Failed to generate query embedding for graph docs:', queryEmbError);
-                  // Fallback: ajouter sans similarité calculée
-                  relatedDocuments.forEach(doc => {
-                    if (doc.summary) {
-                      searchResults.push({
-                        document: doc,
-                        chunk: { content: doc.summary, pageNumber: 1 },
-                        similarity: 0.5, // Score indiquant incertitude
-                        isRelatedDoc: true
-                      });
-                    }
-                  });
-                }
-              } else {
-                // Pas d'OllamaClient, utiliser le fallback
-                console.warn('⚠️ No OllamaClient available for similarity computation');
-                relatedDocuments.forEach(doc => {
-                  if (doc.summary) {
-                    searchResults.push({
-                      document: doc,
-                      chunk: { content: doc.summary, pageNumber: 1 },
-                      similarity: 0.5, // Score indiquant incertitude
-                      isRelatedDoc: true
-                    });
-                  }
-                });
-              }
-            }
-          }
-        }
+        const ragOutput = await this.performRAGSearch(message, queryHash, options);
+        searchResults = ragOutput.searchResults;
+        relatedDocuments = ragOutput.relatedDocuments;
+        searchDurationMs = ragOutput.searchDurationMs;
+        cacheHit = ragOutput.cacheHit;
       }
 
-      // Apply intelligent compression to context chunks (if enabled)
-      const compressionEnabled = options.enableContextCompression !== false; // Default: true
+      // Step 2: Context compression
       let compressionStats: RAGExplanationContext['compression'] | undefined;
+      let compressionDurationMs = 0;
 
-      if (searchResults.length > 0 && compressionEnabled) {
-        const compressionStart = Date.now();
-        const preCompressionSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
-        const preCompressionChunks = searchResults.length;
-        console.log(`🗜️  [COMPRESSION] Pre-compression context size: ${preCompressionSize} chars (${searchResults.length} chunks)`);
-
-        // Convert search results to compressor format
-        const chunksForCompression = searchResults.map(r => ({
-          content: r.chunk.content,
-          documentId: r.document.id,
-          documentTitle: r.document.title,
-          pageNumber: r.chunk.pageNumber,
-          similarity: r.similarity,
-        }));
-
-        // Compress with 20k char target
-        const compressionResult = this.compressor.compress(chunksForCompression, message, 20000);
-
-        // Convert back to search result format
-        searchResults = compressionResult.chunks.map(chunk => ({
-          document: {
-            id: chunk.documentId,
-            title: chunk.documentTitle,
-          },
-          chunk: {
-            content: chunk.content,
-            pageNumber: chunk.pageNumber,
-          },
-          similarity: chunk.similarity,
-        }));
-
-        compressionDurationMs = Date.now() - compressionStart;
-
-        // Capturer les stats de compression pour l'explication
-        compressionStats = {
-          enabled: true,
-          originalChunks: compressionResult.stats.originalChunks,
-          finalChunks: compressionResult.stats.compressedChunks,
-          originalSize: compressionResult.stats.originalSize,
-          finalSize: compressionResult.stats.compressedSize,
-          reductionPercent: compressionResult.stats.reductionPercent,
-          strategy: compressionResult.stats.strategy,
-        };
-
-        console.log(`✅ [COMPRESSION] Final stats:`, {
-          strategy: compressionResult.stats.strategy,
-          originalChunks: compressionResult.stats.originalChunks,
-          compressedChunks: compressionResult.stats.compressedChunks,
-          originalSize: compressionResult.stats.originalSize,
-          compressedSize: compressionResult.stats.compressedSize,
-          reduction: `${compressionResult.stats.reductionPercent.toFixed(1)}%`,
-        });
-      } else if (searchResults.length > 0 && !compressionEnabled) {
-        const contextSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
-        compressionStats = {
-          enabled: false,
-          originalChunks: searchResults.length,
-          finalChunks: searchResults.length,
-          originalSize: contextSize,
-          finalSize: contextSize,
-          reductionPercent: 0,
-        };
-        console.log(`⏭️  [COMPRESSION] Skipped (disabled in settings). Context size: ${contextSize} chars (${searchResults.length} chunks)`);
-      }
-
-      // Récupérer le contexte du projet
-      const projectContext = pdfService.getProjectContext();
-
-      // Build system prompt based on configuration (Phase 2.3 + Modes)
-      let systemPrompt: string;
-      const systemPromptLanguage = options.systemPromptLanguage || 'fr';
-      const useCustomPrompt = options.useCustomSystemPrompt || false;
-      const customPrompt = options.customSystemPrompt;
-      if (options.noSystemPrompt) {
-        // Free mode: no system prompt
-        systemPrompt = '';
-      } else {
-        systemPrompt = getSystemPrompt(systemPromptLanguage, useCustomPrompt, customPrompt);
-      }
-
-      console.log('🤖 [SYSTEM PROMPT] Configuration:', {
-        language: systemPromptLanguage,
-        noSystemPrompt: options.noSystemPrompt || false,
-        useCustom: useCustomPrompt,
-        hasCustom: !!customPrompt,
-        promptPreview: systemPrompt.substring(0, 100) + '...',
-      });
-
-      // Build generation options (commun aux deux cas)
-      const generationOptions = {
-        temperature: options.temperature,
-        top_p: options.top_p,
-        top_k: options.top_k,
-        repeat_penalty: options.repeat_penalty,
-        num_ctx: options.numCtx,  // Context window size for Ollama
-      };
-
-      // 🚀 FEEDBACK: Send status update - generating
-      if (options.window) {
-        options.window.webContents.send('chat:status', {
-          stage: 'generating',
-          message: '✨ Génération de la réponse...',
-        });
-      }
-
-      // Track generation timing and prompt size for explanation
-      const generationStart = Date.now();
-      let promptSize = 0;
-
-      // Stream la réponse avec contexte RAG si disponible
       if (searchResults.length > 0) {
-        // Calculate approximate prompt size (for explanation)
-        const contextSize = searchResults.reduce((sum, r) => sum + r.chunk.content.length, 0);
-        promptSize = message.length + contextSize + systemPrompt.length + (projectContext?.length || 0);
-
-        console.log('✅ [RAG DETAILED DEBUG] Generating response WITH context:', {
-          queryHash: queryHash,
-          contextsUsed: searchResults.length,
-          avgSimilarity: (searchResults.reduce((sum, r) => sum + r.similarity, 0) / searchResults.length).toFixed(4),
-          mode: 'RAG_WITH_SOURCES',
-          projectContextLoaded: !!projectContext,
-          provider: llmProviderManager.getActiveProviderName(),
-          timeout: options.timeout || 600000,
-        });
-
-        // Utiliser LLMProviderManager pour la génération (Ollama ou embarqué)
-        const generator = llmProviderManager.generateWithSources(
-          message,
-          searchResults,
-          projectContext,
-          {
-            model: options.model,
-            timeout: options.timeout,
-            generationOptions,
-            systemPrompt,
-          }
-        );
-        this.currentStream = generator;
-
-        for await (const chunk of generator) {
-          fullResponse += chunk;
-          // Envoyer le chunk au renderer si une fenêtre est fournie
-          if (options.window) {
-            options.window.webContents.send('chat:stream', chunk);
-          }
-        }
-      } else {
-        console.warn('⚠️  [RAG DETAILED DEBUG] No search results - generating response WITHOUT context');
-        console.warn('⚠️  [RAG DETAILED DEBUG] Fallback mode details:', {
-          queryHash: queryHash,
-          query: message.substring(0, 100),
-          contextRequested: options.context,
-          topK: options.topK,
-          mode: 'FALLBACK_NO_CONTEXT',
-          warning: 'This response will be GENERIC and NOT based on your documents!',
-        });
-
-        // Utiliser LLMProviderManager pour la génération sans sources
-        const generator = llmProviderManager.generateWithoutSources(
-          message,
-          [],
-          {
-            model: options.model,
-            timeout: options.timeout,
-            generationOptions,
-            systemPrompt,
-          }
-        );
-        this.currentStream = generator;
-
-        for await (const chunk of generator) {
-          fullResponse += chunk;
-          // Envoyer le chunk au renderer si une fenêtre est fournie
-          if (options.window) {
-            options.window.webContents.send('chat:stream', chunk);
-          }
-        }
+        const compressionOutput = this.compressContext(searchResults, message, options);
+        searchResults = compressionOutput.searchResults;
+        compressionStats = compressionOutput.compressionStats;
+        compressionDurationMs = compressionOutput.compressionDurationMs;
       }
+
+      // Step 3: Build system prompt
+      const systemPrompt = this.buildSystemPrompt(options);
+
+      // Step 4: Generate LLM response
+      const generationOutput = await this.generateResponse(
+        message, searchResults, options, systemPrompt, queryHash, llmProviderManager
+      );
 
       const totalDuration = Date.now() - startTime;
 
       console.log('✅ [RAG DETAILED DEBUG] Chat response completed:', {
         queryHash: queryHash,
-        responseLength: fullResponse.length,
+        responseLength: generationOutput.fullResponse.length,
         totalDuration: `${totalDuration}ms`,
         ragUsed: searchResults.length > 0,
         timestamp: new Date().toISOString(),
       });
 
-      // Log chat messages and AI operation to history
-      const hm = historyService.getHistoryManager();
-      if (hm) {
-        // Build query params for history
-        const queryParams = {
-          model: options.model || llmProviderManager.getActiveProviderName(),
-          topK: options.topK,
-          timeout: options.timeout || 600000,
-          temperature: options.temperature,
-          top_p: options.top_p,
-          top_k: options.top_k,
-          repeat_penalty: options.repeat_penalty,
-          useGraphContext: options.useGraphContext || false,
-          includeSummaries: options.includeSummaries || false,
-          modeId: options.modeId || 'default-assistant',
-        };
+      // Step 5: Log to history
+      this.logToHistory(
+        message, generationOutput.fullResponse, searchResults, relatedDocuments,
+        totalDuration, options, llmProviderManager, activeProvider
+      );
 
-        // Log user message with query params
-        hm.logChatMessage({
-          role: 'user',
-          content: message,
-          queryParams,
-        });
-
-        // Log assistant response with sources
-        const sources =
-          searchResults.length > 0
-            ? searchResults.map((r) => ({
-                documentId: r.document?.id || '',
-                documentTitle: r.document?.title || 'Unknown',
-                author: r.document?.author || '',
-                year: r.document?.year || 0,
-                pageNumber: r.chunk.pageNumber,
-                similarity: r.similarity,
-                isRelatedDoc: r.isRelatedDoc || false,
-              }))
-            : undefined;
-
-        hm.logChatMessage({
-          role: 'assistant',
-          content: fullResponse,
-          sources,
-          queryParams,
-        });
-
-        // Log RAG operation if context was used
-        if (options.context && searchResults.length > 0) {
-          hm.logAIOperation({
-            operationType: 'rag_query',
-            durationMs: totalDuration,
-            inputText: message,
-            inputMetadata: {
-              topK: options.topK,
-              useGraphContext: options.useGraphContext || false,
-              includeSummaries: options.includeSummaries || false,
-              sourcesFound: searchResults.length,
-              relatedDocumentsFound: relatedDocuments.length,
-            },
-            modelName: llmProviderManager.getActiveProviderName(),
-            modelParameters: {
-              temperature: options.temperature || 0.1,
-              provider: activeProvider,
-            },
-            outputText: fullResponse,
-            outputMetadata: {
-              sources: sources || [],
-              responseLength: fullResponse.length,
-            },
-            success: true,
-          });
-
-          console.log(
-            `📝 Logged RAG query: ${searchResults.length} sources, ${totalDuration}ms`
-          );
-        }
-      }
-
-      // Build explanation context (Explainable AI)
-      const generationDurationMs = Date.now() - generationStart;
-      if (options.context && searchResults.length > 0) {
-        // Group results by document
-        const documentMap = new Map<string, { title: string; similarity: number; sourceType: string; chunkCount: number }>();
-        searchResults.forEach(r => {
-          const docId = r.document?.id || 'unknown';
-          const existing = documentMap.get(docId);
-          if (existing) {
-            existing.chunkCount++;
-            existing.similarity = Math.max(existing.similarity, r.similarity);
-          } else {
-            documentMap.set(docId, {
-              title: r.document?.title || 'Unknown',
-              similarity: r.similarity,
-              sourceType: r.sourceType || 'secondary',
-              chunkCount: 1,
-            });
-          }
-        });
-
-        explanationContext = {
-          search: {
-            query: message,
-            totalResults: searchResults.length,
-            searchDurationMs,
-            cacheHit,
-            sourceType: options.sourceType || 'both',
-            documents: Array.from(documentMap.values()).slice(0, 10) as any,
-          },
-          compression: compressionStats,
-          graph: options.useGraphContext ? {
-            enabled: true,
-            relatedDocsFound: relatedDocuments.length,
-            documentTitles: relatedDocuments.map(d => d.title || 'Unknown'),
-          } : undefined,
-          llm: {
-            provider: llmProviderManager.getActiveProviderName(),
-            model: llmProviderManager.getActiveModelName(),
-            contextWindow: options.numCtx || 4096,
-            temperature: options.temperature || 0.1,
-            promptSize,
-          },
-          timing: {
-            searchMs: searchDurationMs,
-            compressionMs: compressionDurationMs > 0 ? compressionDurationMs : undefined,
-            generationMs: generationDurationMs,
-            totalMs: totalDuration,
-          },
-        };
-      }
+      // Step 6: Build explanation context (Explainable AI)
+      const explanationContext = this.buildExplanation(
+        message, searchResults, relatedDocuments, options,
+        searchDurationMs, cacheHit, compressionStats, compressionDurationMs,
+        generationOutput.promptSize, generationOutput.generationDurationMs,
+        totalDuration, llmProviderManager
+      );
 
       return {
-        response: fullResponse,
+        response: generationOutput.fullResponse,
         ragUsed: searchResults.length > 0,
         sourcesCount: searchResults.length,
         explanation: explanationContext,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      const errorClassified = error instanceof Error ? (error as Error & { classified?: boolean }).classified : undefined;
+
       console.error('❌ [RAG DETAILED DEBUG] Chat error:', {
         queryHash: queryHash,
-        error: error.message,
-        stack: error.stack,
-        classified: error.classified, // If error was classified by OllamaClient
+        error: errorMessage,
+        stack: errorStack,
+        classified: errorClassified, // If error was classified by OllamaClient
       });
 
-      // 🚀 FEEDBACK: Send error status to renderer
+      // Send error status to renderer
       if (options.window) {
         options.window.webContents.send('chat:status', {
           stage: 'error',
-          message: error.message || 'Une erreur est survenue',
+          message: errorMessage || 'Une erreur est survenue',
         });
       }
 

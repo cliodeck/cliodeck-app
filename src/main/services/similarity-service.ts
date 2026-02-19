@@ -628,7 +628,7 @@ class SimilarityService {
           archive: result.source.archive,
           collection: result.source.collection,
           date: result.source.date,
-          tags: result.source.tags,
+          tags: (result.source as any).tags,
         });
       }
       // Handle secondary sources (PDFs)
@@ -640,7 +640,7 @@ class SimilarityService {
           similarity: result.similarity,
           chunkPreview: result.chunk?.content?.substring(0, 200) || '',
           zoteroKey: result.document.bibtexKey,
-          pageNumber: result.chunk?.pageNumber,
+          pageNumber: (result.chunk as any)?.pageNumber,
           sourceType: 'secondary',
         });
       }

@@ -91,12 +91,18 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
 
   return (
     <div className="methodology-modal-overlay" onClick={onClose}>
-      <div className="methodology-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="methodology-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="methodology-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="modal-header">
           <div className="modal-title">
             <Book size={24} />
-            <h2>{t('methodology.title')}</h2>
+            <h2 id="methodology-modal-title">{t('methodology.title')}</h2>
           </div>
           <button className="close-btn" onClick={onClose}>
             <X size={20} />

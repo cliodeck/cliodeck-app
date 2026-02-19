@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { PDFExportModal } from '../Export/PDFExportModal';
 import { WordExportModal } from '../Export/WordExportModal';
@@ -42,7 +43,7 @@ export const ProjectPanel: React.FC = () => {
 
   const handleCreateProject = async () => {
     if (!newProjectName || !newProjectPath) {
-      alert(t('project.fillAllFields'));
+      await useDialogStore.getState().showAlert(t('project.fillAllFields'));
       return;
     }
 
@@ -57,7 +58,7 @@ export const ProjectPanel: React.FC = () => {
       setNewProjectType('article');
     } catch (error: any) {
       console.error('Failed to create project:', error);
-      alert(t('project.createError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.createError') + ': ' + error.message);
     } finally {
       setIsCreating(false);
     }
@@ -78,7 +79,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Failed to open project:', error);
-      alert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
     }
   };
 
@@ -102,7 +103,7 @@ export const ProjectPanel: React.FC = () => {
       await loadProject(projectPath);
     } catch (error: any) {
       console.error('Failed to load recent project:', error);
-      alert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
     }
   };
 
@@ -134,7 +135,7 @@ export const ProjectPanel: React.FC = () => {
       await loadFile(filePath);
     } catch (error: any) {
       console.error('Failed to load file:', error);
-      alert(t('toolbar.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('toolbar.openError') + ': ' + error.message);
     }
   };
 
@@ -144,7 +145,7 @@ export const ProjectPanel: React.FC = () => {
         await window.electron.shell.openPath(currentProject.path);
       } catch (error: any) {
         console.error('Failed to open project folder:', error);
-        alert(t('project.openFolderError') + ': ' + error.message);
+        await useDialogStore.getState().showAlert(t('project.openFolderError') + ': ' + error.message);
       }
     }
   };

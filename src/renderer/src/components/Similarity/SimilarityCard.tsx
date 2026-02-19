@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, Quote, ChevronDown, ChevronUp, BookOpen, Archive } from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
 import type { PDFRecommendation } from '../../stores/similarityStore';
 import './SimilarityCard.css';
@@ -76,16 +77,28 @@ export const SimilarityCard: React.FC<SimilarityCardProps> = ({ recommendation }
         // Get document to find file path
         const result = await window.electron.pdf.getDocument(pdfId);
         if (result.success && result.document?.fileURL) {
+          // Check file exists before trying to open
+          const exists = await window.electron.fs.exists(result.document.fileURL);
+          if (!exists) {
+            logger.error('SimilarityCard', 'PDF file not found on disk', { path: result.document.fileURL });
+            await useDialogStore.getState().showAlert(`PDF file not found at: ${result.document.fileURL}`);
+            return;
+          }
           // Open the PDF file with the system default application
-          await window.electron.shell.openPath(result.document.fileURL);
-          logger.component('SimilarityCard', 'PDF opened', { path: result.document.fileURL });
+          const openResult = await window.electron.shell.openPath(result.document.fileURL);
+          if (!openResult.success) {
+            logger.error('SimilarityCard', 'Failed to open PDF with system viewer', { error: openResult.error });
+            await useDialogStore.getState().showAlert(`Failed to open PDF: ${openResult.error}`);
+          } else {
+            logger.component('SimilarityCard', 'PDF opened', { path: result.document.fileURL });
+          }
         } else {
           logger.error('SimilarityCard', 'Document not found or no file path', { pdfId });
-          alert(`Could not find PDF file for: ${title}`);
+          await useDialogStore.getState().showAlert(`Could not find PDF file for: ${title}`);
         }
       } catch (error) {
         logger.error('SimilarityCard', 'Failed to open PDF', error);
-        alert(`Failed to open PDF: ${title}`);
+        await useDialogStore.getState().showAlert(`Failed to open PDF: ${title}`);
       }
     }
   };

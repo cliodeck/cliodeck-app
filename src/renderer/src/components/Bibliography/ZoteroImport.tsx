@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Download, RefreshCw, GitCompare } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { SyncPreviewModal } from './SyncPreviewModal';
 
 interface ZoteroCollection {
@@ -11,12 +12,23 @@ interface ZoteroCollection {
   parentCollection?: string;
 }
 
+interface ZoteroLibraryInfo {
+  libraryID: number;
+  type: 'user' | 'group';
+  name: string;
+  groupID?: number;
+}
+
 export const ZoteroImport: React.FC = () => {
   const { t } = useTranslation('common');
   const currentProject = useProjectStore((state) => state.currentProject);
+  const [zoteroMode, setZoteroMode] = useState<'api' | 'local'>('api');
   const [userId, setUserId] = useState<string>('');
   const [apiKey, setApiKey] = useState<string>('');
+  const [dataDirectory, setDataDirectory] = useState<string>('');
   const [groupId, setGroupId] = useState<string>('');
+  const [libraries, setLibraries] = useState<ZoteroLibraryInfo[]>([]);
+  const [selectedLibraryID, setSelectedLibraryID] = useState<number | undefined>(undefined);
   const [collections, setCollections] = useState<ZoteroCollection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string>('');
   const [isLoadingCollections, setIsLoadingCollections] = useState(false);
@@ -32,40 +44,77 @@ export const ZoteroImport: React.FC = () => {
     return 1 + getCollectionDepth(col.parentCollection);
   };
 
+  // Check if configured based on mode
+  const isConfigured = zoteroMode === 'api'
+    ? (!!userId && !!apiKey)
+    : !!dataDirectory;
+
+  // Build common options for IPC calls
+  const buildOptions = (extra: Record<string, any> = {}): any => {
+    const base = zoteroMode === 'api'
+      ? { mode: 'api', userId, apiKey, groupId: groupId || undefined }
+      : { mode: 'local', dataDirectory, libraryID: selectedLibraryID };
+    return { ...base, ...extra };
+  };
+
   // Load config on mount and when project changes
   useEffect(() => {
     loadZoteroConfig();
   }, [currentProject]);
 
+  // Load libraries when in local mode and configured
+  useEffect(() => {
+    if (zoteroMode === 'local' && dataDirectory) {
+      loadLibraries(dataDirectory);
+    }
+  }, [zoteroMode, dataDirectory]);
+
+  const loadLibraries = async (dir: string) => {
+    try {
+      const result = await window.electron.zotero.listLibraries(dir);
+      if (result.success && result.libraries) {
+        setLibraries(result.libraries);
+      }
+    } catch (error) {
+      console.error('Failed to load Zotero libraries:', error);
+    }
+  };
+
   const loadZoteroConfig = async () => {
     try {
-      // Load global Zotero config (userId and apiKey only - groupId is per-project)
+      // Load global Zotero config
       const globalConfig = await window.electron.config.get('zotero');
       if (globalConfig) {
+        const mode = globalConfig.mode || 'api';
+        setZoteroMode(mode);
         setUserId(globalConfig.userId || '');
         setApiKey(globalConfig.apiKey || '');
+        setDataDirectory(globalConfig.dataDirectory || '');
       }
 
-      // Load project-specific Zotero config (groupId and collectionKey)
+      // Load project-specific Zotero config
       if (currentProject?.path) {
         const projectFilePath = `${currentProject.path}/project.json`;
         const projectConfig = await window.electron.project.getConfig(projectFilePath);
-        // groupId comes from project config only
+
         if (projectConfig?.zotero?.groupId) {
           setGroupId(projectConfig.zotero.groupId);
-          console.log('📁 Using project groupId:', projectConfig.zotero.groupId);
         } else {
-          setGroupId(''); // No groupId = personal library
+          setGroupId('');
+        }
+        if (projectConfig?.zotero?.libraryID !== undefined) {
+          setSelectedLibraryID(projectConfig.zotero.libraryID);
+        } else {
+          setSelectedLibraryID(undefined);
         }
         if (projectConfig?.zotero?.collectionKey) {
           setSelectedCollection(projectConfig.zotero.collectionKey);
-          console.log('📁 Using project collectionKey:', projectConfig.zotero.collectionKey);
         } else {
           setSelectedCollection('');
         }
       } else {
-        // No project open - reset project-specific settings
         setGroupId('');
+        setSelectedLibraryID(undefined);
         setSelectedCollection('');
       }
     } catch (error) {
@@ -73,32 +122,39 @@ export const ZoteroImport: React.FC = () => {
     }
   };
 
+  const handleLibraryChange = (newLibraryID: number | undefined) => {
+    setSelectedLibraryID(newLibraryID);
+    // Reset collections when library changes
+    setCollections([]);
+    setSelectedCollection('');
+  };
+
   const handleLoadCollections = async () => {
-    if (!userId || !apiKey) {
-      alert(t('zotero.import.configureFirst'));
+    if (!isConfigured) {
+      await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
       return;
     }
 
     setIsLoadingCollections(true);
 
     try {
-      const result = await window.electron.zotero.listCollections(userId, apiKey, groupId || undefined);
+      const result = await window.electron.zotero.listCollections(buildOptions());
       if (result.success && result.collections) {
         setCollections(result.collections);
       } else {
-        alert(t('zotero.import.loadCollectionsError'));
+        await useDialogStore.getState().showAlert(t('zotero.import.loadCollectionsError'));
       }
     } catch (error) {
       console.error('Failed to load collections:', error);
-      alert(t('zotero.import.loadCollectionsError'));
+      await useDialogStore.getState().showAlert(t('zotero.import.loadCollectionsError'));
     } finally {
       setIsLoadingCollections(false);
     }
   };
 
   const handleImport = async () => {
-    if (!userId || !apiKey) {
-      alert(t('zotero.import.configureFirst'));
+    if (!isConfigured) {
+      await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
       return;
     }
 
@@ -114,22 +170,13 @@ export const ZoteroImport: React.FC = () => {
         projectJsonPath = `${currentProject.path}/project.json`;
       }
 
-      console.log('🔍 Zotero import - Project paths:', {
-        currentProjectPath: currentProject?.path,
-        targetDirectory,
-        projectJsonPath
-      });
-
       // Sync to get BibTeX
-      const syncResult = await window.electron.zotero.sync({
-        userId,
-        apiKey,
-        groupId: groupId || undefined,
+      const syncResult = await window.electron.zotero.sync(buildOptions({
         collectionKey: selectedCollection || undefined,
         downloadPDFs: false,
         exportBibTeX: true,
         targetDirectory,
-      });
+      }));
 
       if (syncResult.success && syncResult.bibtexPath) {
         // Load the exported BibTeX into bibliography
@@ -140,25 +187,21 @@ export const ZoteroImport: React.FC = () => {
         const citationCount = loadedCitations.length;
 
         // Enrich citations with Zotero attachment information (for PDF download)
-        console.log('🔗 Enriching citations with Zotero attachment info...');
-        const enrichResult = await window.electron.zotero.enrichCitations({
-          userId,
-          apiKey,
-          groupId: groupId || undefined,
+        console.log('Enriching citations with Zotero attachment info...');
+        const enrichResult = await window.electron.zotero.enrichCitations(buildOptions({
           citations: loadedCitations,
           collectionKey: selectedCollection || undefined,
-        });
+        }));
 
         if (enrichResult.success && enrichResult.citations) {
           // Update store with enriched citations
           useBibliographyStore.setState({ citations: enrichResult.citations });
-          console.log(`✅ Enriched ${enrichResult.citations.length} citations with attachment info`);
 
           // Count how many have PDF attachments available
           const withPDFs = enrichResult.citations.filter(
             (c: any) => c.zoteroAttachments && c.zoteroAttachments.length > 0
           ).length;
-          console.log(`📎 ${withPDFs} citations have PDF attachments available in Zotero`);
+          console.log(`${withPDFs} citations have PDF attachments available in Zotero`);
 
           // Save metadata to persist zoteroAttachments across restarts
           if (targetDirectory) {
@@ -167,18 +210,16 @@ export const ZoteroImport: React.FC = () => {
                 projectPath: targetDirectory,
                 citations: enrichResult.citations,
               });
-              console.log('💾 Bibliography metadata saved for persistence');
             } catch (metaError) {
-              console.error('⚠️ Failed to save bibliography metadata:', metaError);
+              console.error('Failed to save bibliography metadata:', metaError);
             }
           }
         } else {
-          console.warn('⚠️ Failed to enrich citations with attachment info:', enrichResult.error);
+          console.warn('Failed to enrich citations with attachment info:', enrichResult.error);
         }
 
         // If we have a project, save the bibliography source configuration
         if (projectJsonPath && currentProject) {
-          // Get just the filename for relative path
           const bibFileName = syncResult.bibtexPath.split('/').pop() || 'bibliography.bib';
 
           await window.electron.project.setBibliographySource({
@@ -187,61 +228,56 @@ export const ZoteroImport: React.FC = () => {
             filePath: bibFileName,
             zoteroCollection: selectedCollection || undefined,
           });
-
-          console.log('✅ Bibliography source saved to project');
         }
 
-        alert(t('zotero.import.success', { count: citationCount }));
+        await useDialogStore.getState().showAlert(t('zotero.import.success', { count: citationCount }));
 
         // Reset selection
         setSelectedCollection('');
       } else {
-        alert(t('zotero.import.error', { error: syncResult.error }));
+        await useDialogStore.getState().showAlert(t('zotero.import.error', { error: syncResult.error }));
       }
     } catch (error) {
       console.error('Import failed:', error);
-      alert(t('zotero.import.genericError'));
+      await useDialogStore.getState().showAlert(t('zotero.import.genericError'));
     } finally {
       setIsImporting(false);
     }
   };
 
   const handleCheckUpdates = async () => {
-    if (!userId || !apiKey) {
-      alert(t('zotero.import.configureFirst'));
+    if (!isConfigured) {
+      await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
       return;
     }
 
     const citations = useBibliographyStore.getState().citations;
     if (citations.length === 0) {
-      alert('No citations in bibliography. Please import first.');
+      await useDialogStore.getState().showAlert('No citations in bibliography. Please import first.');
       return;
     }
 
     setIsCheckingUpdates(true);
 
     try {
-      const result = await window.electron.zotero.checkUpdates({
-        userId,
-        apiKey,
-        groupId: groupId || undefined,
+      const result = await window.electron.zotero.checkUpdates(buildOptions({
         localCitations: citations,
         collectionKey: selectedCollection || undefined,
-      });
+      }));
 
       if (result.success && result.diff) {
         if (result.hasChanges) {
           setSyncDiff(result.diff);
           setShowSyncModal(true);
         } else {
-          alert('Your bibliography is up to date! No changes detected.');
+          await useDialogStore.getState().showAlert('Your bibliography is up to date! No changes detected.');
         }
       } else {
-        alert(`Failed to check updates: ${result.error}`);
+        await useDialogStore.getState().showAlert(`Failed to check updates: ${result.error}`);
       }
     } catch (error) {
       console.error('Failed to check updates:', error);
-      alert(`Error checking updates: ${error}`);
+      await useDialogStore.getState().showAlert(`Error checking updates: ${error}`);
     } finally {
       setIsCheckingUpdates(false);
     }
@@ -255,15 +291,12 @@ export const ZoteroImport: React.FC = () => {
     try {
       const currentCitations = useBibliographyStore.getState().citations;
 
-      const result = await window.electron.zotero.applyUpdates({
-        userId,
-        apiKey,
-        groupId: groupId || undefined,
+      const result = await window.electron.zotero.applyUpdates(buildOptions({
         currentCitations,
         diff: syncDiff,
         strategy,
         resolution,
-      });
+      }));
 
       if (result.success && result.finalCitations) {
         // Update bibliography store with new citations
@@ -276,14 +309,13 @@ export const ZoteroImport: React.FC = () => {
               projectPath: currentProject.path,
               citations: result.finalCitations,
             });
-            console.log('💾 Bibliography metadata saved after sync');
           } catch (metaError) {
-            console.error('⚠️ Failed to save bibliography metadata:', metaError);
+            console.error('Failed to save bibliography metadata:', metaError);
           }
         }
 
         // Show summary
-        alert(
+        await useDialogStore.getState().showAlert(
           `Sync complete!\n\n` +
           `Added: ${result.addedCount}\n` +
           `Modified: ${result.modifiedCount}\n` +
@@ -294,11 +326,11 @@ export const ZoteroImport: React.FC = () => {
         // Clear sync diff
         setSyncDiff(null);
       } else {
-        alert(`Failed to apply updates: ${result.error}`);
+        await useDialogStore.getState().showAlert(`Failed to apply updates: ${result.error}`);
       }
     } catch (error) {
       console.error('Failed to apply sync:', error);
-      alert(`Error applying sync: ${error}`);
+      await useDialogStore.getState().showAlert(`Error applying sync: ${error}`);
     }
   };
 
@@ -306,7 +338,7 @@ export const ZoteroImport: React.FC = () => {
     <div className="zotero-import">
       <div className="zotero-import-header">
         <h4>{t('zotero.import.title')}</h4>
-        {(!userId || !apiKey) && (
+        {!isConfigured && (
           <p className="zotero-warning">
             {t('zotero.import.configWarning')}
           </p>
@@ -319,19 +351,41 @@ export const ZoteroImport: React.FC = () => {
       </div>
 
       <div className="zotero-import-controls">
+        {/* Library selector (local mode only) */}
+        {zoteroMode === 'local' && libraries.length > 0 && (
+          <div className="zotero-library-selector" style={{ marginBottom: '8px' }}>
+            <select
+              value={selectedLibraryID ?? ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                handleLibraryChange(val ? Number(val) : undefined);
+              }}
+              disabled={!isConfigured}
+              className="zotero-select"
+            >
+              <option value="">{t('zotero.import.allLibraries')}</option>
+              {libraries.map((lib) => (
+                <option key={lib.libraryID} value={lib.libraryID}>
+                  {lib.type === 'user' ? t('zotero.import.personalLibrary') : lib.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="zotero-collection-selector">
           <select
             value={selectedCollection}
             onChange={(e) => setSelectedCollection(e.target.value)}
-            disabled={!userId || !apiKey || collections.length === 0}
+            disabled={!isConfigured || collections.length === 0}
             className="zotero-select"
           >
             <option value="">
-              {collections.length === 0 ? t('zotero.import.loadCollections') : t('zotero.import.allCollections')}
+              {collections.length === 0 ? t('zotero.import.loadCollections') : t('zotero.import.allItems')}
             </option>
             {collections.map((col) => {
               const depth = getCollectionDepth(col.key);
-              const indent = '\u00A0\u00A0\u00A0'.repeat(depth); // Non-breaking spaces for indentation
+              const indent = '\u00A0\u00A0\u00A0'.repeat(depth);
               const prefix = depth > 0 ? '└─ ' : '';
               return (
                 <option key={col.key} value={col.key}>
@@ -344,7 +398,7 @@ export const ZoteroImport: React.FC = () => {
           <button
             className="toolbar-btn"
             onClick={handleLoadCollections}
-            disabled={!userId || !apiKey || isLoadingCollections}
+            disabled={!isConfigured || isLoadingCollections}
             title={t('zotero.import.loadCollectionsButton')}
           >
             <RefreshCw size={16} className={isLoadingCollections ? 'spinning' : ''} />
@@ -354,7 +408,7 @@ export const ZoteroImport: React.FC = () => {
         <button
           className="zotero-import-btn"
           onClick={handleImport}
-          disabled={!userId || !apiKey || isImporting}
+          disabled={!isConfigured || isImporting}
         >
           <Download size={16} />
           {isImporting ? t('zotero.import.importing') : t('zotero.import.importButton')}
@@ -363,7 +417,7 @@ export const ZoteroImport: React.FC = () => {
         <button
           className="zotero-update-btn"
           onClick={handleCheckUpdates}
-          disabled={!userId || !apiKey || isCheckingUpdates}
+          disabled={!isConfigured || isCheckingUpdates}
           title={t('zotero.import.checkUpdatesButton')}
         >
           <GitCompare size={16} />

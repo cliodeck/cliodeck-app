@@ -8,6 +8,7 @@ import { SimilarityPanel } from '../Similarity/SimilarityPanel';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -21,9 +22,9 @@ export const EditorPanel: React.FC = () => {
   // Enable auto-save functionality
   useAutoSave();
 
-  const handleNewFile = () => {
+  const handleNewFile = async () => {
     logger.component('EditorPanel', 'handleNewFile clicked');
-    if (window.confirm(t('toolbar.newFileConfirm'))) {
+    if (await useDialogStore.getState().showConfirm(t('toolbar.newFileConfirm'))) {
       setContent('');
       logger.component('EditorPanel', 'New file created');
     }
@@ -47,7 +48,7 @@ export const EditorPanel: React.FC = () => {
       }
     } catch (error) {
       logger.error('EditorPanel', error);
-      alert(t('toolbar.openError'));
+      await useDialogStore.getState().showAlert(t('toolbar.openError'));
     }
   };
 
@@ -74,7 +75,7 @@ export const EditorPanel: React.FC = () => {
         }
       } else {
         logger.error('EditorPanel', error);
-        alert(t('toolbar.saveError'));
+        await useDialogStore.getState().showAlert(t('toolbar.saveError'));
       }
     }
   };
@@ -90,7 +91,7 @@ export const EditorPanel: React.FC = () => {
     insertFormatting('footnote');
   };
 
-  const handleCheckCitations = () => {
+  const handleCheckCitations = async () => {
     logger.component('EditorPanel', 'handleCheckCitations clicked');
     // Extract all citations from content
     const citationMatches = content.match(/\[@([^\]]+)\]/g) || [];
@@ -104,7 +105,7 @@ export const EditorPanel: React.FC = () => {
     const duplicateCitations = citedKeys.filter((key, index) => citedKeys.indexOf(key) !== index);
 
     if (missingCitations.length === 0 && duplicateCitations.length === 0) {
-      alert('Toutes les citations sont valides !');
+      await useDialogStore.getState().showAlert('Toutes les citations sont valides !');
     } else {
       let message = '';
       if (missingCitations.length > 0) {
@@ -113,7 +114,7 @@ export const EditorPanel: React.FC = () => {
       if (duplicateCitations.length > 0) {
         message += `Citations en double:\n${[...new Set(duplicateCitations)].join(', ')}`;
       }
-      alert(message);
+      await useDialogStore.getState().showAlert(message);
     }
   };
 

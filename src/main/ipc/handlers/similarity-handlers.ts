@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { projectManager } from '../../services/project-manager.js';
 import { similarityService, type SimilarityOptions } from '../../services/similarity-service.js';
 import { successResponse, errorResponse, requireProject } from '../utils/error-handler.js';
-import { validate } from '../utils/validation.js';
+import { validate, StringIdSchema } from '../utils/validation.js';
 
 // MARK: - Validation Schemas
 
@@ -91,7 +91,8 @@ export function setupSimilarityHandlers() {
   /**
    * Get results for a specific segment
    */
-  ipcMain.handle('similarity:get-segment-results', async (_event, segmentId: string) => {
+  ipcMain.handle('similarity:get-segment-results', async (_event, rawSegmentId: unknown) => {
+    const segmentId = validate(StringIdSchema, rawSegmentId);
     console.log('📞 IPC Call: similarity:get-segment-results', { segmentId });
 
     try {

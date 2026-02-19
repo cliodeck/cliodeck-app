@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ZoteroAPI, ZoteroItem, ZoteroCollection } from './ZoteroAPI';
+import { ZoteroItem, ZoteroCollection } from './ZoteroAPI';
+import { IZoteroDataSource } from './IZoteroDataSource';
 import { Citation, ZoteroAttachmentInfo } from '../../types/citation';
 import { ZoteroDiffEngine, SyncDiff } from './ZoteroDiffEngine';
 import { ZoteroSyncResolver, ConflictStrategy, SyncResolution, MergeResult } from './ZoteroSyncResolver';
@@ -21,11 +22,11 @@ export interface SyncOptions {
 }
 
 export class ZoteroSync {
-  private api: ZoteroAPI;
+  private api: IZoteroDataSource;
   private diffEngine: ZoteroDiffEngine;
   private resolver: ZoteroSyncResolver;
 
-  constructor(api: ZoteroAPI) {
+  constructor(api: IZoteroDataSource) {
     this.api = api;
     this.diffEngine = new ZoteroDiffEngine();
     this.resolver = new ZoteroSyncResolver();

@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import { ChatMessage, RAGExplanation } from '../../stores/chatStore';
 import { useModeStore } from '../../stores/modeStore';
 import { SourceCard } from './SourceCard';
+import { sanitizeChat } from '../../utils/sanitize';
 import './MessageBubble.css';
 
 interface MessageBubbleProps {
@@ -11,7 +12,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming = false }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message, isStreaming = false }) => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
   const isUser = message.role === 'user';
@@ -25,18 +26,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreami
     return mode?.metadata.name[lang] || message.modeId;
   }, [message.modeId, modes, lang]);
 
-  // Parse markdown for assistant messages
+  // Parse markdown for assistant messages (sanitized to prevent XSS)
   const htmlContent = useMemo(() => {
     if (isUser) return null;
 
     try {
-      return marked.parse(message.content, {
+      const raw = marked.parse(message.content, {
         breaks: true,
         gfm: true,
       });
+      return sanitizeChat(raw as string);
     } catch (error) {
       console.error('Markdown parsing error:', error);
-      return message.content;
+      return sanitizeChat(message.content);
     }
   }, [message.content, isUser]);
 
@@ -198,4 +200,4 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreami
       )}
     </div>
   );
-};
+});

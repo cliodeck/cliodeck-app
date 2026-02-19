@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Archive, FolderOpen, AlertTriangle, X, RefreshCw } from 'lucide-react';
+import { useDialogStore } from '../../stores/dialogStore';
 import './OrphanPDFModal.css';
 
 interface OrphanPDFInfo {
@@ -68,11 +69,11 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
         setSelectedOrphans(allPaths);
       } else {
         console.error('Failed to scan for orphan PDFs:', result.error);
-        alert(`${t('bibliography.orphanPDFScanError')}: ${result.error}`);
+        await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFScanError')}: ${result.error}`);
       }
     } catch (error) {
       console.error('Error scanning for orphan PDFs:', error);
-      alert(`${t('bibliography.orphanPDFScanError')}: ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFScanError')}: ${error}`);
     } finally {
       setScanning(false);
     }
@@ -103,11 +104,11 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
 
   const handleDeleteOrphans = async () => {
     if (selectedOrphans.size === 0) {
-      alert(t('bibliography.noOrphansSelected'));
+      await useDialogStore.getState().showAlert(t('bibliography.noOrphansSelected'));
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await useDialogStore.getState().showConfirm(
       t('bibliography.confirmDeleteOrphans', { count: selectedOrphans.size })
     );
     if (!confirmed) return;
@@ -121,7 +122,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
       );
 
       if (result.success) {
-        alert(
+        await useDialogStore.getState().showAlert(
           t('bibliography.orphanPDFsDeleted', {
             deleted: result.data.deleted,
             failed: result.data.failed.length,
@@ -131,11 +132,11 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
         // Rescan after deletion
         await scanForOrphans();
       } else {
-        alert(`${t('bibliography.orphanPDFDeleteError')}: ${result.error}`);
+        await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFDeleteError')}: ${result.error}`);
       }
     } catch (error) {
       console.error('Error deleting orphan PDFs:', error);
-      alert(`${t('bibliography.orphanPDFDeleteError')}: ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFDeleteError')}: ${error}`);
     } finally {
       setActionInProgress(false);
       setActionType(null);
@@ -144,11 +145,11 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
 
   const handleArchiveOrphans = async () => {
     if (selectedOrphans.size === 0) {
-      alert(t('bibliography.noOrphansSelected'));
+      await useDialogStore.getState().showAlert(t('bibliography.noOrphansSelected'));
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await useDialogStore.getState().showConfirm(
       t('bibliography.confirmArchiveOrphans', { count: selectedOrphans.size })
     );
     if (!confirmed) return;
@@ -164,7 +165,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
       });
 
       if (result.success) {
-        alert(
+        await useDialogStore.getState().showAlert(
           t('bibliography.orphanPDFsArchived', {
             archived: result.data.archived,
             failed: result.data.failed.length,
@@ -175,11 +176,11 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
         // Rescan after archiving
         await scanForOrphans();
       } else {
-        alert(`${t('bibliography.orphanPDFArchiveError')}: ${result.error}`);
+        await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFArchiveError')}: ${result.error}`);
       }
     } catch (error) {
       console.error('Error archiving orphan PDFs:', error);
-      alert(`${t('bibliography.orphanPDFArchiveError')}: ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.orphanPDFArchiveError')}: ${error}`);
     } finally {
       setActionInProgress(false);
       setActionType(null);

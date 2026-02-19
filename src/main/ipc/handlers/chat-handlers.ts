@@ -8,10 +8,11 @@ import { chatService } from '../../services/chat-service.js';
 import { configManager } from '../../services/config-manager.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validate, ChatSendSchema } from '../utils/validation.js';
+import { logger } from '../../utils/logger.js';
 
 export function setupChatHandlers() {
   ipcMain.handle('chat:send', async (event, message: string, options?: any) => {
-    console.log('📞 IPC Call: chat:send', { message: message.substring(0, 50) + '...', options });
+    logger.info('ipc', 'chat:send', { messageLength: message.length, hasOptions: !!options });
     try {
       // Validate input
       const validatedData = validate(ChatSendSchema, { message, options });
@@ -19,20 +20,17 @@ export function setupChatHandlers() {
       // Initialize PDF service for RAG if context is requested
       if (validatedData.options?.context) {
         const projectPath = projectManager.getCurrentProjectPath();
-        console.log('🔍 [RAG DEBUG] Current project path:', projectPath);
+        logger.debug('rag', 'chat:send:context-init', { projectPath });
 
         if (projectPath) {
-          console.log('🔍 [RAG DEBUG] Initializing PDF service for:', projectPath);
-          console.log('✅ [RAG DEBUG] PDF service initialized successfully');
-
           // Test search to verify RAG is working
           const stats = await pdfService.getStatistics();
-          console.log('🔍 [RAG DEBUG] Vector DB statistics:', stats);
+          logger.debug('rag', 'chat:send:vector-db-stats', { ...stats });
         } else {
-          console.warn('⚠️  [RAG DEBUG] No project path - RAG will not be used');
+          logger.warn('rag', 'chat:send:no-project', { reason: 'No project path - RAG will not be used' });
         }
       } else {
-        console.log('🔍 [RAG DEBUG] Context not requested - RAG disabled');
+        logger.debug('rag', 'chat:send:context-disabled', {});
       }
 
       const window = BrowserWindow.fromWebContents(event.sender);
@@ -74,11 +72,16 @@ export function setupChatHandlers() {
         noSystemPrompt: validatedData.options?.noSystemPrompt,
       };
 
-      console.log('🔍 [RAG DEBUG] Enriched options:', enrichedOptions);
+      logger.debug('rag', 'chat:send:enriched-options', {
+        context: enrichedOptions.context,
+        sourceType: enrichedOptions.sourceType,
+        provider: enrichedOptions.provider,
+        modeId: enrichedOptions.modeId,
+      });
 
       const result = await chatService.sendMessage(validatedData.message, enrichedOptions);
 
-      console.log('📤 IPC Response: chat:send', {
+      logger.info('ipc', 'chat:send:response', {
         responseLength: result.response.length,
         ragUsed: result.ragUsed,
         sourcesCount: result.sourcesCount,
@@ -91,17 +94,19 @@ export function setupChatHandlers() {
         explanation: result.explanation,
       });
     } catch (error: any) {
-      console.error('❌ chat:send error:', error);
+      logger.error('ipc', 'chat:send', { error: error instanceof Error ? error.message : String(error) });
       return { ...errorResponse(error), response: '' };
     }
   });
 
   ipcMain.handle('chat:cancel', async () => {
+    logger.info('ipc', 'chat:cancel');
     try {
       chatService.cancelCurrentStream();
+      logger.info('ipc', 'chat:cancel:response', { cancelled: true });
       return successResponse();
     } catch (error: any) {
-      console.error('❌ chat:cancel error:', error);
+      logger.error('ipc', 'chat:cancel', { error: error instanceof Error ? error.message : String(error) });
       return errorResponse(error);
     }
   });

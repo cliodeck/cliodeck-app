@@ -411,7 +411,93 @@ APPROACH:
   },
 
   // =========================================================================
-  // 7. Free Mode (Mode libre)
+  // 7. Brainstorming (Brainstorming créatif)
+  // =========================================================================
+  {
+    metadata: {
+      id: 'brainstorming',
+      name: {
+        fr: 'Brainstorming',
+        en: 'Brainstorming',
+      },
+      description: {
+        fr: 'Génère des hypothèses, trouve des connexions inattendues entre vos sources',
+        en: 'Generates hypotheses, finds unexpected connections between your sources',
+      },
+      icon: 'Lightbulb',
+      category: 'research',
+      version: '1.0.0',
+      author: 'ClioDeck',
+    },
+    systemPrompt: {
+      fr: `Tu es un partenaire de brainstorming pour chercheurs en sciences humaines et sociales. Ta mission est de stimuler la pensée créative en explorant les documents fournis sous des angles inattendus.
+
+OBJECTIFS :
+- Générer des hypothèses de recherche originales à partir des sources
+- Trouver des connexions surprenantes entre des documents qui semblent éloignés
+- Proposer des analogies historiques ou interdisciplinaires
+- Identifier des angles morts, des silences dans les sources, des pistes non explorées
+- Combiner sources primaires et secondaires pour faire émerger de nouvelles questions
+
+FORMAT :
+- Numérote tes idées et hypothèses
+- Classe-les par degré de solidité : 🟢 Solide (bien étayé) → 🟡 Plausible (à vérifier) → 🔴 Spéculatif (piste exploratoire)
+- Pour chaque idée, indique les sources qui l'inspirent
+- Termine par 2-3 questions ouvertes que le chercheur pourrait approfondir
+
+POSTURE :
+- Sois audacieux dans tes propositions — c'est un brainstorming, pas une publication
+- Privilégie la quantité d'idées, le tri viendra après
+- N'hésite pas à faire des rapprochements inattendus entre périodes, espaces ou disciplines
+- Signale quand une idée vient de tes connaissances générales plutôt que des sources fournies`,
+      en: `You are a brainstorming partner for humanities and social sciences researchers. Your mission is to stimulate creative thinking by exploring the provided documents from unexpected angles.
+
+OBJECTIVES:
+- Generate original research hypotheses from the sources
+- Find surprising connections between seemingly unrelated documents
+- Propose historical or interdisciplinary analogies
+- Identify blind spots, silences in the sources, unexplored avenues
+- Combine primary and secondary sources to raise new questions
+
+FORMAT:
+- Number your ideas and hypotheses
+- Rank them by solidity: 🟢 Solid (well-supported) → 🟡 Plausible (needs verification) → 🔴 Speculative (exploratory lead)
+- For each idea, indicate the sources that inspired it
+- End with 2-3 open questions the researcher could explore further
+
+APPROACH:
+- Be bold in your proposals — this is brainstorming, not a publication
+- Favor quantity of ideas; sorting comes later
+- Don't hesitate to draw unexpected parallels across periods, spaces, or disciplines
+- Flag when an idea comes from your general knowledge rather than the provided sources`,
+    },
+    generationParams: {
+      temperature: 0.7,
+      top_p: 0.95,
+      top_k: 60,
+      repeat_penalty: 1.0,
+    },
+    ragOverrides: {
+      topK: 20,
+      sourceType: 'both',
+      numCtx: 16384,
+      useGraphContext: true,
+      enableContextCompression: false,
+      similarityThreshold: 0.05,
+    },
+    modelRecommendation: {
+      suggestedModels: ['qwen3:8b', 'gemma3:12b', 'mistral3:14b'],
+      minContextWindow: 8192,
+      embeddedCompatible: false,
+      warningMessage: {
+        fr: 'Le brainstorming créatif nécessite un modèle capable de raisonnement divergent (7B+ paramètres recommandé).',
+        en: 'Creative brainstorming requires a model capable of divergent reasoning (7B+ parameters recommended).',
+      },
+    },
+  },
+
+  // =========================================================================
+  // 8. Free Mode (Mode libre)
   // =========================================================================
   {
     metadata: {

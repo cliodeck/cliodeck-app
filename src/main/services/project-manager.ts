@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { writeFile, readFile, mkdir, copyFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -79,9 +78,10 @@ export class ProjectManager {
       project.path = projectDir;
 
       return { success: true, project };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Failed to get project metadata:', error);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 
@@ -275,9 +275,10 @@ N'oubliez pas de mentionner les perspectives futures.
       });
 
       return { success: true, project };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Failed to load project:', error);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 
@@ -303,13 +304,14 @@ N'oubliez pas de mentionner les perspectives futures.
 
       console.log('✅ Project saved:', data.path);
       return { success: true };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Failed to save project:', error);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 
-  async getChapters(projectId: string) {
+  async getChapters(_projectId: string) {
     try {
       // Pour l'instant, retourner un chapitre par défaut basé sur document.md
       // Dans une version future, on pourra gérer plusieurs chapitres
@@ -323,9 +325,10 @@ N'oubliez pas de mentionner les perspectives futures.
       ];
 
       return { success: true, chapters };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Failed to get chapters:', error);
-      return { success: false, chapters: [], error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, chapters: [], error: message };
     }
   }
 
@@ -364,9 +367,10 @@ N'oubliez pas de mentionner les perspectives futures.
 
       console.log('✅ Bibliography source configured:', data.type);
       return { success: true };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Failed to set bibliography source:', error);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 
@@ -383,7 +387,7 @@ N'oubliez pas de mentionner les perspectives futures.
       const content = await readFile(projectPath, 'utf-8');
       const project: Project = JSON.parse(content);
       return project;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Failed to get project config:', error);
       return null;
     }
@@ -420,9 +424,10 @@ N'oubliez pas de mentionner les perspectives futures.
       }
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Failed to update project config:', error);
-      return { success: false, error: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 
@@ -464,7 +469,7 @@ N'oubliez pas de mentionner les perspectives futures.
             // Store as relative path (just the filename)
             relativeCslPath = cslFileName;
             console.log('✅ CSL file copied successfully, stored as relative path:', relativeCslPath);
-          } catch (copyError: any) {
+          } catch (copyError: unknown) {
             console.error('❌ Failed to copy CSL file:', copyError);
             // Fall back to using absolute path
             relativeCslPath = data.cslPath;
@@ -487,9 +492,10 @@ N'oubliez pas de mentionner les perspectives futures.
       // Return the absolute path for the UI
       const absolutePath = relativeCslPath ? join(projectDir, relativeCslPath) : undefined;
       return { success: true, cslPath: absolutePath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Failed to set CSL path:', error);
-      return { success: false, error: error.message || 'Unknown error' };
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message || 'Unknown error' };
     }
   }
 }

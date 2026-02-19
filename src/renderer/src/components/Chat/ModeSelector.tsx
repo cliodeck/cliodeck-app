@@ -9,6 +9,7 @@ import {
   Eye,
   PenTool,
   Compass,
+  Lightbulb,
   Sparkles,
 } from 'lucide-react';
 import { useModeStore } from '../../stores/modeStore';
@@ -23,6 +24,7 @@ const ICON_MAP: Record<string, React.FC<{ size?: number }>> = {
   Eye,
   PenTool,
   Compass,
+  Lightbulb,
   Sparkles,
 };
 

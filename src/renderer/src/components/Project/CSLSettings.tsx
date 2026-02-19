@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, X } from 'lucide-react';
+import { useDialogStore } from '../../stores/dialogStore';
 import './CSLSettings.css';
 
 interface CSLSettingsProps {
@@ -38,7 +39,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       }
     } catch (error) {
       console.error('Failed to select CSL file:', error);
-      alert(t('project.cslSelectError') || 'Error selecting CSL file');
+      await useDialogStore.getState().showAlert(t('project.cslSelectError') || 'Error selecting CSL file');
     }
   };
 
@@ -65,7 +66,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       console.log('✅ CSL path saved:', finalPath);
     } catch (error: any) {
       console.error('Failed to save CSL path:', error);
-      alert(t('project.cslSaveError') || 'Error saving CSL path');
+      await useDialogStore.getState().showAlert(t('project.cslSaveError') || 'Error saving CSL path');
     } finally {
       setIsSaving(false);
     }
@@ -87,7 +88,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       console.log('✅ CSL path removed');
     } catch (error) {
       console.error('Failed to remove CSL path:', error);
-      alert(t('project.cslRemoveError') || 'Error removing CSL path');
+      await useDialogStore.getState().showAlert(t('project.cslRemoveError') || 'Error removing CSL path');
     } finally {
       setIsSaving(false);
     }

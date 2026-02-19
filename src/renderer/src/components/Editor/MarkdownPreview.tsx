@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { marked } from 'marked';
 import { useEditorStore } from '../../stores/editorStore';
+import { sanitizePreview } from '../../utils/sanitize';
 import './MarkdownPreview.css';
 
 // Configure marked once, outside the component
@@ -22,13 +23,13 @@ export const MarkdownPreview: React.FC = () => {
 
     try {
       const parsed = marked(content, { async: false });
-      // Handle both string and Promise returns
+      // Handle both string and Promise returns, sanitize to prevent XSS
       if (typeof parsed === 'string') {
-        setHtmlContent(parsed);
+        setHtmlContent(sanitizePreview(parsed));
       } else if (parsed instanceof Promise) {
-        parsed.then(html => setHtmlContent(html as string));
+        parsed.then(html => setHtmlContent(sanitizePreview(html as string)));
       } else {
-        setHtmlContent(String(parsed));
+        setHtmlContent(sanitizePreview(String(parsed)));
       }
     } catch (error) {
       console.error('Markdown parsing error:', error);

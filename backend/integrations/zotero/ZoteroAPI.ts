@@ -1,6 +1,8 @@
 // Zotero Web API v3 Client
 // Documentation: https://www.zotero.org/support/dev/web_api/v3/start
 
+import { IZoteroDataSource } from './IZoteroDataSource';
+
 export interface ZoteroConfig {
   userId: string;
   apiKey: string;
@@ -81,7 +83,7 @@ export interface ZoteroCollection {
   };
 }
 
-export class ZoteroAPI {
+export class ZoteroAPI implements IZoteroDataSource {
   private config: ZoteroConfig;
   private baseURL: string;
 

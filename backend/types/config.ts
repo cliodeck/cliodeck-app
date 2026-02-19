@@ -19,6 +19,14 @@ export interface LLMConfig {
   embeddedModelId?: string;
   /** Path to the downloaded GGUF model file */
   embeddedModelPath?: string;
+
+  // Embedded embedding model configuration
+  /** Provider for embeddings: 'ollama', 'embedded', or 'auto' (try ollama first, then embedded) */
+  embeddingProvider?: 'ollama' | 'embedded' | 'auto';
+  /** ID of the embedded embedding model (e.g., 'nomic-embed-text-v2') */
+  embeddedEmbeddingModelId?: string;
+  /** Path to the downloaded embedded embedding GGUF model file */
+  embeddedEmbeddingModelPath?: string;
 }
 
 export interface SummarizerConfig {
@@ -96,9 +104,14 @@ export interface RAGConfig {
 }
 
 export interface ZoteroConfig {
+  /** 'api' for Web API v3, 'local' for local SQLite database */
+  mode?: 'api' | 'local';
+  // API mode fields
   userId?: string;
   groupId?: string;
   apiKey?: string;
+  // Local mode fields
+  dataDirectory?: string;
 }
 
 export interface EditorConfig {
@@ -127,6 +140,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     // Embedded LLM: auto mode (try Ollama first, fallback to embedded)
     generationProvider: 'auto',
     embeddedModelId: 'qwen2.5-0.5b',
+    // Embedded embeddings: auto mode (try Ollama first, fallback to embedded)
+    embeddingProvider: 'auto',
   },
   rag: {
     topK: 10,

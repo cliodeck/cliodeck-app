@@ -11,6 +11,7 @@ import { TopicModelingSection } from './TopicModelingSection';
 import { ModeManagerSection } from './ModeManagerSection';
 import { ZoteroConfigSection, type ZoteroConfig } from './ZoteroConfigSection';
 import { useEditorStore } from '../../stores/editorStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import './ConfigPanel.css';
 
 export interface RAGConfig {
@@ -244,7 +245,7 @@ export const ConfigPanel: React.FC = () => {
   };
 
   const handleResetConfig = async () => {
-    if (!window.confirm(t('settings.resetConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('settings.resetConfirm'))) {
       return;
     }
 
