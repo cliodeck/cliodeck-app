@@ -10,10 +10,16 @@ export function RebuildProgressModal() {
 
   return (
     <div className="rebuild-modal-overlay">
-      <div className="rebuild-modal">
+      <div
+        className="rebuild-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="rebuild-modal-title"
+        aria-describedby="rebuild-modal-description"
+      >
         <div className="rebuild-modal-header">
-          <h2>Building Search Indexes</h2>
-          <p className="rebuild-modal-subtitle">
+          <h2 id="rebuild-modal-title">Building Search Indexes</h2>
+          <p id="rebuild-modal-description" className="rebuild-modal-subtitle">
             Optimizing search performance for your corpus...
           </p>
         </div>
@@ -22,6 +28,11 @@ export function RebuildProgressModal() {
           <div className="rebuild-progress-bar-container">
             <div
               className="rebuild-progress-bar"
+              role="progressbar"
+              aria-valuenow={progress.percentage}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Index rebuild progress"
               style={{ width: `${progress.percentage}%` }}
             />
           </div>

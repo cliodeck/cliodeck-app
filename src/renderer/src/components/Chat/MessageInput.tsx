@@ -44,6 +44,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           ref={textareaRef}
           className="input-textarea"
           placeholder={t('chat.placeholder')}
+          aria-label={t('chat.placeholder')}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -52,7 +53,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         />
         <div className="input-actions">
           {isProcessing ? (
-            <button className="input-btn cancel-btn" onClick={onCancel} title={t('chat.cancel')}>
+            <button className="input-btn cancel-btn" onClick={onCancel} title={t('chat.cancel')} aria-label={t('chat.cancel')}>
               ⏹️
             </button>
           ) : (
@@ -61,6 +62,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
               onClick={onSend}
               disabled={!value.trim()}
               title={t('chat.send')}
+              aria-label={t('chat.send')}
             >
               ➤
             </button>

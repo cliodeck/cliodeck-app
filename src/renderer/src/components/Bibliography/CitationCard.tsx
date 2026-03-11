@@ -5,13 +5,14 @@ import { PDFSelectionDialog } from './PDFSelectionDialog';
 import { CitationMetadataModal } from './CitationMetadataModal';
 import { TagManager } from './TagManager';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import './CitationCard.css';
 
 interface CitationCardProps {
   citation: Citation;
 }
 
-export const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
+export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation }) => {
   const { t } = useTranslation('common');
   const [isExpanded, setIsExpanded] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
@@ -46,15 +47,15 @@ export const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
 
     // If already indexed, ask if user wants to re-index
     if (isIndexed) {
-      const shouldReindex = window.confirm(t('bibliography.reindexConfirm', { title: citation.title }));
+      const shouldReindex = await useDialogStore.getState().showConfirm(t('bibliography.reindexConfirm', { title: citation.title }));
       if (!shouldReindex) return;
 
       setIsIndexing(true);
       try {
         await reindexPDFFromCitation(citation.id);
-        alert(t('bibliography.pdfReindexed', { title: citation.title }));
+        await useDialogStore.getState().showAlert(t('bibliography.pdfReindexed', { title: citation.title }));
       } catch (error) {
-        alert(`${t('bibliography.indexError')} ${error}`);
+        await useDialogStore.getState().showAlert(`${t('bibliography.indexError')} ${error}`);
       } finally {
         setIsIndexing(false);
       }
@@ -67,16 +68,16 @@ export const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
       try {
         const result = await indexPDFFromCitation(citation.id);
         if (result.alreadyIndexed) {
-          const shouldReindex = window.confirm(t('bibliography.reindexConfirm', { title: citation.title }));
+          const shouldReindex = await useDialogStore.getState().showConfirm(t('bibliography.reindexConfirm', { title: citation.title }));
           if (shouldReindex) {
             await reindexPDFFromCitation(citation.id);
-            alert(t('bibliography.pdfReindexed', { title: citation.title }));
+            await useDialogStore.getState().showAlert(t('bibliography.pdfReindexed', { title: citation.title }));
           }
         } else {
-          alert(`${t('bibliography.pdfIndexed')} ${citation.title}`);
+          await useDialogStore.getState().showAlert(`${t('bibliography.pdfIndexed')} ${citation.title}`);
         }
       } catch (error) {
-        alert(`${t('bibliography.indexError')} ${error}`);
+        await useDialogStore.getState().showAlert(`${t('bibliography.indexError')} ${error}`);
       } finally {
         setIsIndexing(false);
       }
@@ -98,16 +99,16 @@ export const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
   const handleZoteroPDFSelection = async (attachmentKey: string) => {
     setShowPDFSelection(false);
     if (!currentProject?.path) {
-      alert(t('bibliography.noProjectOpen'));
+      await useDialogStore.getState().showAlert(t('bibliography.noProjectOpen'));
       return;
     }
 
     setIsIndexing(true);
     try {
       await downloadAndIndexZoteroPDF(citation.id, attachmentKey, currentProject.path);
-      alert(t('bibliography.pdfDownloadedAndIndexed', { title: citation.title }));
+      await useDialogStore.getState().showAlert(t('bibliography.pdfDownloadedAndIndexed', { title: citation.title }));
     } catch (error) {
-      alert(`${t('bibliography.downloadError')} ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.downloadError')} ${error}`);
     } finally {
       setIsIndexing(false);
     }
@@ -235,4 +236,4 @@ export const CitationCard: React.FC<CitationCardProps> = ({ citation }) => {
       )}
     </>
   );
-};
+});

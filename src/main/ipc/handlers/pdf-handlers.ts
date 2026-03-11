@@ -7,30 +7,40 @@ import { projectManager } from '../../services/project-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse, requireProject } from '../utils/error-handler.js';
-import { validate, PDFSearchSchema } from '../utils/validation.js';
+import {
+  validate,
+  PDFSearchSchema,
+  PDFExtractMetadataSchema,
+  PDFIndexFullSchema,
+  PDFCheckModifiedSchema,
+  StringIdSchema,
+} from '../utils/validation.js';
 import { PDFModificationDetector } from '../../../../backend/services/PDFModificationDetector.js';
+import { logger } from '../../utils/logger.js';
 
 export function setupPDFHandlers() {
-  ipcMain.handle('pdf:extractMetadata', async (_event, filePath: string) => {
-    console.log('📞 IPC Call: pdf:extractMetadata', { filePath });
+  ipcMain.handle('pdf:extractMetadata', async (_event, rawFilePath: unknown) => {
+    const { filePath } = validate(PDFExtractMetadataSchema, { filePath: rawFilePath });
+    logger.info('ipc', 'pdf:extractMetadata', { filePath });
     try {
       const metadata = await pdfService.extractPDFMetadata(filePath);
-      console.log('📤 IPC Response: pdf:extractMetadata success', metadata);
+      logger.info('ipc', 'pdf:extractMetadata:response', { metadata });
       return successResponse({ metadata });
     } catch (error: any) {
-      console.error('❌ pdf:extractMetadata error:', error);
+      logger.error('ipc', 'pdf:extractMetadata', { error: error instanceof Error ? error.message : String(error) });
       return errorResponse(error);
     }
   });
 
-  ipcMain.handle('pdf:index', async (event, filePath: string, bibtexKey?: string, bibliographyMetadata?: { title?: string; author?: string; year?: string }) => {
-    console.log('📞 IPC Call: pdf:index', { filePath, bibtexKey, bibliographyMetadata });
-    const startTime = Date.now();
+  ipcMain.handle('pdf:index', async (event, rawFilePath: unknown, rawBibtexKey?: unknown, rawBibliographyMetadata?: unknown) => {
+    const { filePath, bibtexKey, bibliographyMetadata } = validate(PDFIndexFullSchema, { filePath: rawFilePath, bibtexKey: rawBibtexKey, bibliographyMetadata: rawBibliographyMetadata });
+    logger.info('ipc', 'pdf:index', { filePath, bibtexKey, bibliographyMetadata });
+    const elapsed = logger.startTimer();
 
     try {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
-      console.log('📁 Using project path:', projectPath);
+      logger.debug('ipc', 'pdf:index:project', { projectPath });
 
       // Initialize PDF service for this project
 
@@ -43,7 +53,7 @@ export function setupPDFHandlers() {
         }
       }, bibliographyMetadata);
 
-      const durationMs = Date.now() - startTime;
+      const durationMs = elapsed();
 
       // Log PDF operation to history
       const hm = historyService.getHistoryManager();
@@ -64,20 +74,23 @@ export function setupPDFHandlers() {
           },
         });
 
-        console.log(
-          `📝 Logged PDF import: ${document.title} (${document.pageCount} pages, ${durationMs}ms)`
-        );
+        logger.info('ipc', 'pdf:index:history', {
+          title: document.title,
+          pageCount: document.pageCount,
+          durationMs,
+        });
       }
 
-      console.log('📤 IPC Response: pdf:index success');
+      logger.info('ipc', 'pdf:index:response', { durationMs });
       return successResponse({ document });
     } catch (error: any) {
-      console.error('❌ pdf:index error:', error);
+      logger.error('ipc', 'pdf:index', { error: error instanceof Error ? error.message : String(error) });
       return errorResponse(error);
     }
   });
 
   ipcMain.handle('pdf:search', async (_event, query: string, options?: any) => {
+    logger.info('ipc', 'pdf:search', { query: query.substring(0, 80) });
     try {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
@@ -86,14 +99,16 @@ export function setupPDFHandlers() {
       const validatedData = validate(PDFSearchSchema, { query, options });
 
       const results = await pdfService.search(validatedData.query, validatedData.options);
+      logger.info('ipc', 'pdf:search:response', { resultCount: results.length });
       return successResponse({ results });
     } catch (error: any) {
-      console.error('❌ pdf:search error:', error);
+      logger.error('ipc', 'pdf:search', { error: error instanceof Error ? error.message : String(error) });
       return { ...errorResponse(error), results: [] };
     }
   });
 
-  ipcMain.handle('pdf:delete', async (_event, documentId: string) => {
+  ipcMain.handle('pdf:delete', async (_event, rawDocumentId: unknown) => {
+    const documentId = validate(StringIdSchema, rawDocumentId);
     try {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
@@ -151,7 +166,8 @@ export function setupPDFHandlers() {
     }
   });
 
-  ipcMain.handle('pdf:get-document', async (_event, documentId: string) => {
+  ipcMain.handle('pdf:get-document', async (_event, rawDocumentId: unknown) => {
+    const documentId = validate(StringIdSchema, rawDocumentId);
     console.log('📞 IPC Call: pdf:get-document', { documentId });
     try {
       const projectPath = projectManager.getCurrentProjectPath();
@@ -203,17 +219,15 @@ export function setupPDFHandlers() {
     }
   });
 
-  ipcMain.handle('pdf:check-modified-pdfs', async (_event, options: {
-    citations: any[];
-    projectPath: string;
-  }) => {
+  ipcMain.handle('pdf:check-modified-pdfs', async (_event, rawOptions: unknown) => {
+    const options = validate(PDFCheckModifiedSchema, rawOptions);
     console.log('📞 IPC Call: pdf:check-modified-pdfs', {
       citationCount: options.citations.length,
       projectPath: options.projectPath
     });
     try {
       const detector = new PDFModificationDetector();
-      const result = await detector.detectModifiedPDFs(options.citations);
+      const result = await detector.detectModifiedPDFs(options.citations as any);
       console.log('📤 IPC Response: pdf:check-modified-pdfs', {
         totalChecked: result.totalChecked,
         totalModified: result.totalModified

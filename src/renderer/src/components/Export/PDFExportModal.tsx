@@ -186,9 +186,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
   return (
     <div className="pdf-export-modal" onClick={handleClose}>
-      <div className="pdf-export-content" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="pdf-export-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pdf-export-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="pdf-export-header">
-          <h3>Export PDF</h3>
+          <h3 id="pdf-export-modal-title">Export PDF</h3>
           <button className="close-btn" onClick={handleClose} disabled={isExporting}>
             <X size={20} />
           </button>

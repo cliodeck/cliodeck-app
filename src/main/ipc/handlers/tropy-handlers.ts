@@ -4,6 +4,17 @@
 import { ipcMain } from 'electron';
 import { tropyService } from '../../services/tropy-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import {
+  validate,
+  StringPathSchema,
+  StringIdSchema,
+  OptionalStringSchema,
+  TropySyncSchema,
+  TropyPerformOcrSchema,
+  TropyPerformBatchOcrSchema,
+  TropyImportTranscriptionSchema,
+  TropyUpdateTranscriptionSchema,
+} from '../utils/validation.js';
 
 export function setupTropyHandlers() {
   // MARK: - Project Management
@@ -11,7 +22,8 @@ export function setupTropyHandlers() {
   /**
    * Ouvre un projet Tropy (.tpy) en lecture seule
    */
-  ipcMain.handle('tropy:open-project', async (_event, tpyPath: string) => {
+  ipcMain.handle('tropy:open-project', async (_event, rawTpyPath: unknown) => {
+    const tpyPath = validate(StringPathSchema, rawTpyPath);
     console.log('📞 IPC Call: tropy:open-project', { tpyPath });
     try {
       const result = await tropyService.openProject(tpyPath);
@@ -46,13 +58,9 @@ export function setupTropyHandlers() {
     'tropy:sync',
     async (
       _event,
-      options: {
-        performOCR: boolean;
-        ocrLanguage: string;
-        transcriptionDirectory?: string;
-        forceReindex?: boolean;
-      }
+      rawOptions: unknown
     ) => {
+      const options = validate(TropySyncSchema, rawOptions);
       console.log('📞 IPC Call: tropy:sync', options);
       try {
         const result = await tropyService.sync(options);
@@ -89,7 +97,8 @@ export function setupTropyHandlers() {
   /**
    * Démarre la surveillance du fichier .tpy
    */
-  ipcMain.handle('tropy:start-watching', async (_event, tpyPath?: string) => {
+  ipcMain.handle('tropy:start-watching', async (_event, rawTpyPath?: unknown) => {
+    const tpyPath = validate(OptionalStringSchema, rawTpyPath);
     console.log('📞 IPC Call: tropy:start-watching', { tpyPath });
     try {
       const result = tropyService.startWatching(tpyPath);
@@ -132,7 +141,8 @@ export function setupTropyHandlers() {
   /**
    * Effectue l'OCR sur une image
    */
-  ipcMain.handle('tropy:perform-ocr', async (_event, imagePath: string, language: string) => {
+  ipcMain.handle('tropy:perform-ocr', async (_event, rawImagePath: unknown, rawLanguage: unknown) => {
+    const { imagePath, language } = validate(TropyPerformOcrSchema, { imagePath: rawImagePath, language: rawLanguage });
     console.log('📞 IPC Call: tropy:perform-ocr', { imagePath, language });
     try {
       const result = await tropyService.performOCR(imagePath, language);
@@ -153,7 +163,8 @@ export function setupTropyHandlers() {
    */
   ipcMain.handle(
     'tropy:perform-batch-ocr',
-    async (_event, imagePaths: string[], language: string) => {
+    async (_event, rawImagePaths: unknown, rawLanguage: unknown) => {
+      const { imagePaths, language } = validate(TropyPerformBatchOcrSchema, { imagePaths: rawImagePaths, language: rawLanguage });
       console.log('📞 IPC Call: tropy:perform-batch-ocr', { imageCount: imagePaths.length, language });
       try {
         const result = await tropyService.performBatchOCR(imagePaths, language);
@@ -186,7 +197,8 @@ export function setupTropyHandlers() {
   /**
    * Importe une transcription externe
    */
-  ipcMain.handle('tropy:import-transcription', async (_event, filePath: string, type?: string) => {
+  ipcMain.handle('tropy:import-transcription', async (_event, rawFilePath: unknown, rawType?: unknown) => {
+    const { filePath, type } = validate(TropyImportTranscriptionSchema, { filePath: rawFilePath, type: rawType });
     console.log('📞 IPC Call: tropy:import-transcription', { filePath, type });
     try {
       const result = await tropyService.importTranscription(filePath, type as any);
@@ -222,7 +234,8 @@ export function setupTropyHandlers() {
   /**
    * Récupère une source par son ID
    */
-  ipcMain.handle('tropy:get-source', async (_event, sourceId: string) => {
+  ipcMain.handle('tropy:get-source', async (_event, rawSourceId: unknown) => {
+    const sourceId = validate(StringIdSchema, rawSourceId);
     console.log('📞 IPC Call: tropy:get-source', { sourceId });
     try {
       const source = tropyService.getSource(sourceId);
@@ -240,10 +253,11 @@ export function setupTropyHandlers() {
     'tropy:update-transcription',
     async (
       _event,
-      sourceId: string,
-      transcription: string,
-      source: 'tesseract' | 'transkribus' | 'manual'
+      rawSourceId: unknown,
+      rawTranscription: unknown,
+      rawSource: unknown
     ) => {
+      const { sourceId, transcription, source } = validate(TropyUpdateTranscriptionSchema, { sourceId: rawSourceId, transcription: rawTranscription, source: rawSource });
       console.log('📞 IPC Call: tropy:update-transcription', { sourceId, source });
       try {
         const result = await tropyService.updateSourceTranscription(sourceId, transcription, source);

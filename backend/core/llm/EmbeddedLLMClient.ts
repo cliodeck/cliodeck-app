@@ -2,8 +2,7 @@
  * Client LLM embarqué utilisant node-llama-cpp
  * Modèle par défaut: Qwen2.5-0.5B-Instruct (~491 Mo)
  *
- * IMPORTANT: Ce client ne gère que la génération de texte.
- * Les embeddings restent via OllamaClient (nomic-embed-text).
+ * Supporte la génération de texte ET les embeddings via des modèles GGUF séparés.
  */
 
 import type { SearchResult } from '../../types/pdf-document.js';
@@ -18,10 +17,17 @@ interface LlamaModelInstance {
     contextSize?: number;
     batchSize?: number;
   }) => Promise<LlamaContextInstance>;
+  createEmbeddingContext: () => Promise<LlamaEmbeddingContextInstance>;
+  embeddingVectorSize?: number;
 }
 
 interface LlamaContextInstance {
   getSequence: () => any;
+  dispose: () => Promise<void>;
+}
+
+interface LlamaEmbeddingContextInstance {
+  getEmbeddingFor: (text: string) => Promise<{ vector: number[] }>;
   dispose: () => Promise<void>;
 }
 
@@ -46,8 +52,22 @@ export interface EmbeddedModelInfo {
   description: string;
 }
 
+export interface EmbeddedEmbeddingModelInfo {
+  name: string;
+  filename: string;
+  repo: string;
+  sizeMB: number;
+  contextSize: number;
+  dimensions: number;
+  description: string;
+  taskPrefixes?: {
+    document: string;
+    query: string;
+  };
+}
+
 /**
- * Modèles embarqués disponibles
+ * Modèles embarqués de génération disponibles
  */
 export const EMBEDDED_MODELS: Record<string, EmbeddedModelInfo> = {
   'qwen2.5-0.5b': {
@@ -70,7 +90,29 @@ export const EMBEDDED_MODELS: Record<string, EmbeddedModelInfo> = {
 
 export const DEFAULT_EMBEDDED_MODEL = 'qwen2.5-0.5b';
 
+/**
+ * Modèles embarqués d'embedding disponibles
+ */
+export const EMBEDDED_EMBEDDING_MODELS: Record<string, EmbeddedEmbeddingModelInfo> = {
+  'nomic-embed-text-v2': {
+    name: 'Nomic Embed Text v2 MoE',
+    filename: 'nomic-embed-text-v2-moe.Q4_K_M.gguf',
+    repo: 'nomic-ai/nomic-embed-text-v2-moe-GGUF',
+    sizeMB: 344,
+    contextSize: 8192,
+    dimensions: 768,
+    description: 'Multilingue (~100 langues), 768 dims, compatible nomic-embed-text',
+    taskPrefixes: {
+      document: 'search_document: ',
+      query: 'search_query: ',
+    },
+  },
+};
+
+export const DEFAULT_EMBEDDED_EMBEDDING_MODEL = 'nomic-embed-text-v2';
+
 export class EmbeddedLLMClient {
+  // Generation model state
   private llama: LlamaInstance | null = null;
   private model: LlamaModelInstance | null = null;
   private context: LlamaContextInstance | null = null;
@@ -80,8 +122,19 @@ export class EmbeddedLLMClient {
   private modelId: string | null = null;
   private isGenerating = false; // Prevent concurrent generation
 
+  // Embedding model state (separate from generation model)
+  private embeddingModel: LlamaModelInstance | null = null;
+  private embeddingContext: LlamaEmbeddingContextInstance | null = null;
+  private embeddingModelPath: string | null = null;
+  private embeddingModelId: string | null = null;
+  private embeddingInitialized = false;
+  private embeddingDimensions = 0;
+
+  // Limite de caractères par chunk pour les embeddings
+  private readonly EMBEDDING_MAX_CHUNK_LENGTH = 2000;
+
   /**
-   * Initialise le modèle embarqué
+   * Initialise le modèle de génération embarqué
    * @param modelPath Chemin vers le fichier GGUF
    * @param modelId ID du modèle (pour logging)
    */
@@ -149,11 +202,213 @@ export class EmbeddedLLMClient {
   }
 
   /**
-   * Vérifie si le client est disponible
+   * Initialise le modèle d'embedding embarqué (séparé du modèle de génération)
+   * Réutilise l'instance Llama existante si disponible.
+   */
+  async initializeEmbedding(modelPath: string, modelId?: string): Promise<boolean> {
+    try {
+      // @ts-ignore - Module chargé dynamiquement
+      const nodeLlamaCpp = await import('node-llama-cpp').catch(() => null);
+
+      if (!nodeLlamaCpp) {
+        console.warn('⚠️ [EMBEDDED-EMB] node-llama-cpp not available.');
+        return false;
+      }
+
+      const { getLlama } = nodeLlamaCpp;
+
+      console.log('📐 [EMBEDDED-EMB] Initializing embedded embedding model...');
+      console.log(`   Model path: ${modelPath}`);
+      console.log(`   Model ID: ${modelId || 'unknown'}`);
+
+      // Réutiliser l'instance Llama existante si disponible (singleton)
+      if (!this.llama) {
+        this.llama = (await getLlama()) as unknown as LlamaInstance;
+      }
+
+      this.embeddingModel = await this.llama.loadModel({
+        modelPath: modelPath,
+      });
+
+      this.embeddingContext = await (this.embeddingModel as LlamaModelInstance).createEmbeddingContext();
+      this.embeddingDimensions = (this.embeddingModel as any).embeddingVectorSize || 768;
+      this.embeddingModelPath = modelPath;
+      this.embeddingModelId = modelId || null;
+      this.embeddingInitialized = true;
+
+      console.log(`✅ [EMBEDDED-EMB] Embedding model loaded: ${modelId}, dims=${this.embeddingDimensions}`);
+      return true;
+    } catch (error) {
+      console.error('❌ [EMBEDDED-EMB] Failed to initialize embedding model:', error);
+      this.embeddingInitialized = false;
+
+      // Cleanup
+      try {
+        if (this.embeddingContext) {
+          await this.embeddingContext.dispose();
+        }
+      } catch (disposeError) {
+        console.warn('⚠️ [EMBEDDED-EMB] Error disposing embedding context during cleanup:', disposeError);
+      }
+      this.embeddingModel = null;
+      this.embeddingContext = null;
+      this.embeddingModelPath = null;
+      this.embeddingModelId = null;
+      this.embeddingDimensions = 0;
+
+      return false;
+    }
+  }
+
+  /**
+   * Vérifie si le client de génération est disponible
    */
   async isAvailable(): Promise<boolean> {
     return this.initialized && this.model !== null && this.context !== null;
   }
+
+  /**
+   * Vérifie si le modèle d'embedding est disponible
+   */
+  isEmbeddingAvailable(): boolean {
+    return this.embeddingInitialized && this.embeddingContext !== null;
+  }
+
+  /**
+   * Retourne la dimension des vecteurs d'embedding
+   */
+  getEmbeddingDimensions(): number {
+    return this.embeddingDimensions;
+  }
+
+  /**
+   * Retourne l'ID du modèle d'embedding
+   */
+  getEmbeddingModelId(): string | null {
+    return this.embeddingModelId;
+  }
+
+  // MARK: - Embedding generation
+
+  /**
+   * Découpe un texte en chunks de taille maximale (sentence-aware)
+   */
+  private chunkText(text: string, maxLength: number): string[] {
+    if (text.length <= maxLength) {
+      return [text];
+    }
+
+    const chunks: string[] = [];
+    let currentIndex = 0;
+
+    while (currentIndex < text.length) {
+      let endIndex = Math.min(currentIndex + maxLength, text.length);
+
+      // Try to find sentence boundary if not at end
+      if (endIndex < text.length) {
+        const searchStart = Math.max(currentIndex, endIndex - 200);
+        const searchText = text.substring(searchStart, endIndex);
+        const sentenceEndings = /[.!?;](?=\s|$)/g;
+        let lastMatch = null;
+        let match;
+
+        while ((match = sentenceEndings.exec(searchText)) !== null) {
+          lastMatch = match;
+        }
+
+        if (lastMatch) {
+          endIndex = searchStart + lastMatch.index + 1;
+        }
+      }
+
+      const chunk = text.substring(currentIndex, endIndex).trim();
+      if (chunk) {
+        chunks.push(chunk);
+      }
+      currentIndex = endIndex;
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Moyenne plusieurs embeddings en un seul
+   */
+  private averageEmbeddings(embeddings: Float32Array[]): Float32Array {
+    if (embeddings.length === 0) {
+      throw new Error('Cannot average zero embeddings');
+    }
+
+    if (embeddings.length === 1) {
+      return embeddings[0];
+    }
+
+    const length = embeddings[0].length;
+    const averaged = new Float32Array(length);
+
+    for (let i = 0; i < length; i++) {
+      let sum = 0;
+      for (const embedding of embeddings) {
+        sum += embedding[i];
+      }
+      averaged[i] = sum / embeddings.length;
+    }
+
+    return averaged;
+  }
+
+  /**
+   * Génère un embedding pour un texte (avec chunking automatique si nécessaire)
+   * Utilise le préfixe search_document: pour l'indexation
+   */
+  async generateEmbedding(text: string): Promise<Float32Array> {
+    if (!this.embeddingContext || !this.embeddingInitialized) {
+      throw new Error('Embedded embedding model not initialized. Call initializeEmbedding() first.');
+    }
+
+    const modelInfo = this.embeddingModelId
+      ? EMBEDDED_EMBEDDING_MODELS[this.embeddingModelId]
+      : null;
+    const prefix = modelInfo?.taskPrefixes?.document || '';
+
+    // Si le texte est court, traitement direct
+    if (text.length <= this.EMBEDDING_MAX_CHUNK_LENGTH) {
+      const result = await this.embeddingContext.getEmbeddingFor(prefix + text);
+      return new Float32Array(result.vector);
+    }
+
+    // Chunking automatique pour les textes longs
+    const chunks = this.chunkText(text, this.EMBEDDING_MAX_CHUNK_LENGTH);
+    console.log(`📐 [EMBEDDED-EMB] Text too long (${text.length} chars), splitting into ${chunks.length} chunks`);
+
+    const embeddings: Float32Array[] = [];
+    for (const chunk of chunks) {
+      const result = await this.embeddingContext.getEmbeddingFor(prefix + chunk);
+      embeddings.push(new Float32Array(result.vector));
+    }
+
+    return this.averageEmbeddings(embeddings);
+  }
+
+  /**
+   * Génère un embedding pour une requête de recherche
+   * Utilise le préfixe search_query: pour la recherche
+   */
+  async generateQueryEmbedding(text: string): Promise<Float32Array> {
+    if (!this.embeddingContext || !this.embeddingInitialized) {
+      throw new Error('Embedded embedding model not initialized. Call initializeEmbedding() first.');
+    }
+
+    const modelInfo = this.embeddingModelId
+      ? EMBEDDED_EMBEDDING_MODELS[this.embeddingModelId]
+      : null;
+    const prefix = modelInfo?.taskPrefixes?.query || '';
+
+    const result = await this.embeddingContext.getEmbeddingFor(prefix + text);
+    return new Float32Array(result.vector);
+  }
+
+  // MARK: - Text generation
 
   /**
    * Construit le prompt pour Qwen au format ChatML
@@ -331,6 +586,23 @@ ${userQuery}
       await new Promise((r) => setTimeout(r, 500));
     }
 
+    // Dispose embedding resources
+    try {
+      if (this.embeddingContext) {
+        await this.embeddingContext.dispose();
+      }
+    } catch (error) {
+      console.warn('⚠️ [EMBEDDED] Error disposing embedding context:', error);
+    }
+
+    this.embeddingModel = null;
+    this.embeddingContext = null;
+    this.embeddingModelPath = null;
+    this.embeddingModelId = null;
+    this.embeddingInitialized = false;
+    this.embeddingDimensions = 0;
+
+    // Dispose generation resources
     try {
       if (this.context) {
         await this.context.dispose();

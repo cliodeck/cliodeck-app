@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Trash2, Check, AlertCircle, Loader2, HardDrive } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { useDialogStore } from '../../stores/dialogStore';
 
 interface ModelInfo {
   id: string;
@@ -121,7 +122,7 @@ export const EmbeddedLLMSection: React.FC = () => {
   };
 
   const handleDeleteModel = async (modelId: string) => {
-    if (!window.confirm(t('embeddedLLM.deleteConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('embeddedLLM.deleteConfirm'))) {
       return;
     }
 

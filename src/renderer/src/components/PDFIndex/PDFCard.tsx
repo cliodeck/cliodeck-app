@@ -18,7 +18,7 @@ interface PDFCardProps {
   onDelete: (id: string) => void;
 }
 
-export const PDFCard: React.FC<PDFCardProps> = ({ document, onDelete }) => {
+export const PDFCard: React.FC<PDFCardProps> = React.memo(({ document, onDelete }) => {
   const { t } = useTranslation('common');
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -88,4 +88,4 @@ export const PDFCard: React.FC<PDFCardProps> = ({ document, onDelete }) => {
       )}
     </div>
   );
-};
+});

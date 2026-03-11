@@ -1,19 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MessageCircle, Folder, BookOpen, Network, BookMarked, HelpCircle, Archive } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { BibliographyPanel } from '../Bibliography/BibliographyPanel';
 import { ChatInterface } from '../Chat/ChatInterface';
-import { SettingsModal } from '../Config/SettingsModal';
 import { ProjectPanel } from '../Project/ProjectPanel';
-import { PDFExportModal } from '../Export/PDFExportModal';
-import { CorpusExplorerPanel } from '../Corpus/CorpusExplorerPanel';
-import { JournalPanel } from '../Journal/JournalPanel';
-import { PrimarySourcesPanel } from '../PrimarySources/PrimarySourcesPanel';
-import { MethodologyModal } from '../Methodology/MethodologyModal';
-import { AboutModal } from '../About/AboutModal';
+import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
+
+// Lazy-loaded heavy components (panels)
+const CorpusExplorerPanel = lazy(() =>
+  import('../Corpus/CorpusExplorerPanel').then(m => ({ default: m.CorpusExplorerPanel }))
+);
+const JournalPanel = lazy(() =>
+  import('../Journal/JournalPanel').then(m => ({ default: m.JournalPanel }))
+);
+const PrimarySourcesPanel = lazy(() =>
+  import('../PrimarySources/PrimarySourcesPanel').then(m => ({ default: m.PrimarySourcesPanel }))
+);
+
+// Lazy-loaded modals (only rendered when opened)
+const SettingsModal = lazy(() =>
+  import('../Config/SettingsModal').then(m => ({ default: m.SettingsModal }))
+);
+const PDFExportModal = lazy(() =>
+  import('../Export/PDFExportModal').then(m => ({ default: m.PDFExportModal }))
+);
+const MethodologyModal = lazy(() =>
+  import('../Methodology/MethodologyModal').then(m => ({ default: m.MethodologyModal }))
+);
+const AboutModal = lazy(() =>
+  import('../About/AboutModal').then(m => ({ default: m.AboutModal }))
+);
 
 type LeftPanelView = 'projects' | 'bibliography' | 'primary-sources';
 type RightPanelView = 'chat' | 'corpus' | 'journal';
@@ -126,35 +145,56 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           <Panel defaultSize={20} minSize={15} maxSize={35}>
             <div className="panel left-panel">
               {/* Panel tabs */}
-              <div className="panel-tabs">
+              <div className="panel-tabs" role="tablist" aria-label={t('project.title')}>
                 <button
+                  id="left-tab-projects"
                   className={`panel-tab ${leftView === 'projects' ? 'active' : ''}`}
                   onClick={() => handleLeftViewChange('projects')}
                   title={t('project.title')}
+                  role="tab"
+                  aria-selected={leftView === 'projects'}
+                  aria-controls="left-tabpanel-projects"
                 >
                   <Folder size={20} strokeWidth={1} />
                 </button>
                 <button
+                  id="left-tab-bibliography"
                   className={`panel-tab ${leftView === 'bibliography' ? 'active' : ''}`}
                   onClick={() => handleLeftViewChange('bibliography')}
                   title={t('bibliography.title')}
+                  role="tab"
+                  aria-selected={leftView === 'bibliography'}
+                  aria-controls="left-tabpanel-bibliography"
                 >
                   <BookOpen size={20} strokeWidth={1} />
                 </button>
                 <button
+                  id="left-tab-primary-sources"
                   className={`panel-tab primary-sources-tab ${leftView === 'primary-sources' ? 'active' : ''}`}
                   onClick={() => handleLeftViewChange('primary-sources')}
                   title={t('primarySources.title', 'Primary Sources')}
+                  role="tab"
+                  aria-selected={leftView === 'primary-sources'}
+                  aria-controls="left-tabpanel-primary-sources"
                 >
                   <Archive size={20} strokeWidth={1} />
                 </button>
               </div>
 
               {/* Panel content */}
-              <div className="panel-content">
+              <div
+                className="panel-content"
+                role="tabpanel"
+                id={`left-tabpanel-${leftView}`}
+                aria-labelledby={`left-tab-${leftView}`}
+              >
                 {leftView === 'projects' && (leftPanel || <ProjectPanel />)}
                 {leftView === 'bibliography' && <BibliographyPanel />}
-                {leftView === 'primary-sources' && <PrimarySourcesPanel />}
+                {leftView === 'primary-sources' && (
+                  <Suspense fallback={<PanelLoadingFallback />}>
+                    <PrimarySourcesPanel />
+                  </Suspense>
+                )}
               </div>
             </div>
           </Panel>
@@ -176,35 +216,60 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           <Panel defaultSize={30} minSize={20} maxSize={45}>
             <div className="panel right-panel">
               {/* Panel tabs */}
-              <div className="panel-tabs">
+              <div className="panel-tabs" role="tablist" aria-label={t('chat.title')}>
                 <button
+                  id="right-tab-chat"
                   className={`panel-tab ${rightView === 'chat' ? 'active' : ''}`}
                   onClick={() => handleRightViewChange('chat')}
                   title={t('chat.title')}
+                  role="tab"
+                  aria-selected={rightView === 'chat'}
+                  aria-controls="right-tabpanel-chat"
                 >
                   <MessageCircle size={20} strokeWidth={1} />
                 </button>
                 <button
+                  id="right-tab-corpus"
                   className={`panel-tab ${rightView === 'corpus' ? 'active' : ''}`}
                   onClick={() => handleRightViewChange('corpus')}
                   title={t('corpus.title')}
+                  role="tab"
+                  aria-selected={rightView === 'corpus'}
+                  aria-controls="right-tabpanel-corpus"
                 >
                   <Network size={20} strokeWidth={1} />
                 </button>
                 <button
+                  id="right-tab-journal"
                   className={`panel-tab ${rightView === 'journal' ? 'active' : ''}`}
                   onClick={() => handleRightViewChange('journal')}
                   title={t('journal.title')}
+                  role="tab"
+                  aria-selected={rightView === 'journal'}
+                  aria-controls="right-tabpanel-journal"
                 >
                   <BookMarked size={20} strokeWidth={1} />
                 </button>
               </div>
 
               {/* Panel content */}
-              <div className="panel-content">
+              <div
+                className="panel-content"
+                role="tabpanel"
+                id={`right-tabpanel-${rightView}`}
+                aria-labelledby={`right-tab-${rightView}`}
+              >
                 {rightView === 'chat' && <ChatInterface />}
-                {rightView === 'corpus' && <CorpusExplorerPanel />}
-                {rightView === 'journal' && <JournalPanel />}
+                {rightView === 'corpus' && (
+                  <Suspense fallback={<PanelLoadingFallback />}>
+                    <CorpusExplorerPanel />
+                  </Suspense>
+                )}
+                {rightView === 'journal' && (
+                  <Suspense fallback={<PanelLoadingFallback />}>
+                    <JournalPanel />
+                  </Suspense>
+                )}
               </div>
             </div>
           </Panel>
@@ -212,23 +277,39 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       </div>
 
       {/* PDF Export Modal */}
-      <PDFExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} />
+      {showExportModal && (
+        <Suspense fallback={null}>
+          <PDFExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} />
+        </Suspense>
+      )}
 
       {/* Settings Modal */}
-      <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
+      {showSettingsModal && (
+        <Suspense fallback={null}>
+          <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
+        </Suspense>
+      )}
 
       {/* Methodology Modal */}
-      <MethodologyModal
-        isOpen={showMethodologyModal}
-        onClose={() => {
-          setShowMethodologyModal(false);
-          setMethodologyInitialFeature(undefined);
-        }}
-        initialFeature={methodologyInitialFeature}
-      />
+      {showMethodologyModal && (
+        <Suspense fallback={null}>
+          <MethodologyModal
+            isOpen={showMethodologyModal}
+            onClose={() => {
+              setShowMethodologyModal(false);
+              setMethodologyInitialFeature(undefined);
+            }}
+            initialFeature={methodologyInitialFeature}
+          />
+        </Suspense>
+      )}
 
       {/* About Modal */}
-      <AboutModal isOpen={showAboutModal} onClose={() => setShowAboutModal(false)} />
+      {showAboutModal && (
+        <Suspense fallback={null}>
+          <AboutModal isOpen={showAboutModal} onClose={() => setShowAboutModal(false)} />
+        </Suspense>
+      )}
     </div>
   );
 };

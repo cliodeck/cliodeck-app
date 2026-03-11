@@ -4,7 +4,7 @@
 import { ipcMain } from 'electron';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
-import { validate, HistoryExportReportSchema, HistorySearchEventsSchema } from '../utils/validation.js';
+import { validate, HistoryExportReportSchema, HistorySearchEventsSchema, StringIdSchema } from '../utils/validation.js';
 
 export function setupHistoryHandlers() {
   ipcMain.handle('history:get-sessions', async () => {
@@ -24,7 +24,8 @@ export function setupHistoryHandlers() {
     }
   });
 
-  ipcMain.handle('history:get-events', async (_event, sessionId: string) => {
+  ipcMain.handle('history:get-events', async (_event, rawSessionId: unknown) => {
+    const sessionId = validate(StringIdSchema, rawSessionId);
     console.log('📞 IPC Call: history:get-events', { sessionId });
     try {
       const hm = historyService.getHistoryManager();
@@ -41,7 +42,8 @@ export function setupHistoryHandlers() {
     }
   });
 
-  ipcMain.handle('history:get-chat-history', async (_event, sessionId: string) => {
+  ipcMain.handle('history:get-chat-history', async (_event, rawSessionId: unknown) => {
+    const sessionId = validate(StringIdSchema, rawSessionId);
     console.log('📞 IPC Call: history:get-chat-history', { sessionId });
     try {
       const hm = historyService.getHistoryManager();
@@ -58,7 +60,8 @@ export function setupHistoryHandlers() {
     }
   });
 
-  ipcMain.handle('history:get-ai-operations', async (_event, sessionId: string) => {
+  ipcMain.handle('history:get-ai-operations', async (_event, rawSessionId: unknown) => {
+    const sessionId = validate(StringIdSchema, rawSessionId);
     console.log('📞 IPC Call: history:get-ai-operations', { sessionId });
     try {
       const hm = historyService.getHistoryManager();

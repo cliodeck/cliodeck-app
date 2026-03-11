@@ -8,13 +8,24 @@ interface SourceCardProps {
   index: number;
 }
 
-export const SourceCard: React.FC<SourceCardProps> = ({ source, index }) => {
+export const SourceCard: React.FC<SourceCardProps> = React.memo(({ source, index }) => {
   const { t } = useTranslation('common');
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const handleOpenPDF = () => {
-    // TODO: Call IPC to open PDF at specific page
-    window.electron.pdf.openAtPage(source.documentId, source.pageNumber);
+  const handleOpenPDF = async () => {
+    try {
+      const result = await window.electron.pdf.getDocument(source.documentId);
+      if (result.success && result.document?.fileURL) {
+        const openResult = await window.electron.shell.openPath(result.document.fileURL);
+        if (!openResult.success) {
+          console.error('Failed to open PDF:', openResult.error);
+        }
+      } else {
+        console.error('Document not found:', source.documentId);
+      }
+    } catch (error) {
+      console.error('Failed to open PDF:', error);
+    }
   };
 
   const formatReference = () => {
@@ -58,4 +69,4 @@ export const SourceCard: React.FC<SourceCardProps> = ({ source, index }) => {
       )}
     </div>
   );
-};
+});

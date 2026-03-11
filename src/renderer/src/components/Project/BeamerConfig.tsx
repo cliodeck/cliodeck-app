@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useDialogStore } from '../../stores/dialogStore';
 import './BeamerConfig.css';
 
 export interface BeamerConfigOptions {
@@ -175,7 +176,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
       onConfigChange?.(newConfig);
     } catch (error) {
       console.error('Failed to save Beamer config:', error);
-      alert(t('beamer.saveError'));
+      await useDialogStore.getState().showAlert(t('beamer.saveError'));
     } finally {
       setIsSaving(false);
     }

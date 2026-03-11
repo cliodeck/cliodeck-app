@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { RAGSettingsPanel } from './RAGSettingsPanel';
@@ -53,7 +54,7 @@ export const ChatInterface: React.FC = () => {
     }
   }, [isProcessing, ragStatus]);
 
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     logger.component('ChatInterface', 'handleSend called', { inputValue, isProcessing });
     if (!inputValue.trim() || isProcessing) {
       logger.component('ChatInterface', 'Send blocked - empty input or processing');
@@ -69,23 +70,23 @@ export const ChatInterface: React.FC = () => {
     } catch (error) {
       logger.error('ChatInterface', error);
     }
-  };
+  }, [inputValue, isProcessing, sendMessage]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     logger.component('ChatInterface', 'handleCancel called');
     cancelGeneration();
-  };
+  }, [cancelGeneration]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(async () => {
     logger.component('ChatInterface', 'handleClear called');
-    if (window.confirm(t('chat.clearConfirm'))) {
+    if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'))) {
       clearChat();
     }
-  };
+  }, [clearChat, t]);
 
-  const handleLearnMore = () => {
+  const handleLearnMore = useCallback(() => {
     window.dispatchEvent(new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } }));
-  };
+  }, []);
 
   return (
     <div className="chat-interface">
@@ -134,7 +135,7 @@ export const ChatInterface: React.FC = () => {
         )}
         {/* RAG Status indicator */}
         {ragStatus && (isProcessing || ragStatus.isError) && (
-          <div className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`}>
+          <div className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`} role="status" aria-live="polite">
             {ragStatus.message}
           </div>
         )}

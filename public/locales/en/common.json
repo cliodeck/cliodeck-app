@@ -298,10 +298,19 @@
     "zoteroGroupId": "Group ID",
     "zoteroGroupIdPlaceholder": "Enter Zotero group ID",
     "zoteroGroupIdHelp": "The numeric ID of your Zotero group (found in the group URL)",
+    "zoteroLibrary": "Zotero Library",
+    "zoteroLibraryHelp": "Select the Zotero library to use for this project",
+    "zoteroLibraryLoading": "Loading libraries...",
+    "zoteroLibraryPersonal": "Personal Library",
     "zoteroCollectionKey": "Collection Key",
     "zoteroCollectionKeyPlaceholder": "Enter collection key (optional)",
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
-    "loading": "Opening project..."
+    "loading": "Opening project...",
+    "defaultEditor": "Default editor",
+    "defaultEditorHelp": "Choose the editor used when opening document.md",
+    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
+    "defaultEditorSource": "Monaco (raw Markdown)",
+    "defaultEditorSaveError": "Error saving default editor"
   },
   "export": {
     "pdf": {
@@ -412,6 +421,16 @@
   },
   "zotero": {
     "title": "Zotero Configuration",
+    "mode": "Connection mode",
+    "modeApi": "Online API (requires internet)",
+    "modeLocal": "Local database (reads zotero.sqlite)",
+    "dataDirectory": "Zotero data directory",
+    "dataDirectoryHelp": "Path to your Zotero data directory (usually ~/Zotero). It should contain zotero.sqlite.",
+    "dataDirectoryPlaceholder": "~/Zotero",
+    "browse": "Browse...",
+    "localConnectionOk": "Database accessible",
+    "localConnectionFailed": "Cannot read Zotero database",
+    "enterDataDirectory": "Please select your Zotero data directory",
     "userId": "User ID",
     "userIdHelp": "Your Zotero user ID",
     "apiKey": "API Key",
@@ -426,7 +445,7 @@
     "connectionError": "Unable to connect to Zotero",
     "enterCredentials": "Please enter your user ID and API key",
     "getApiKey": "Get API key",
-    "configDescription": "Connect your Zotero account to import your bibliographic references.",
+    "configDescription": "Connect Zotero to import your bibliographic references.",
     "projectNote": "Zotero group and collection are configured in each project's settings.",
     "import": {
       "title": "Import from Zotero",
@@ -462,7 +481,10 @@
       "error": "Import error: {{error}}",
       "genericError": "An error occurred during import",
       "errorTitle": "❌ Import error",
-      "close": "Close"
+      "close": "Close",
+      "allLibraries": "All libraries",
+      "personalLibrary": "Personal library",
+      "allItems": "All items"
     }
   },
   "suggestions": {
@@ -795,6 +817,11 @@
     "filtered": "filtered",
     "noResults": "No results",
     "tryDifferentSearch": "Try a different search term"
+  },
+  "dialog": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
   },
   "common": {
     "cancel": "Cancel",

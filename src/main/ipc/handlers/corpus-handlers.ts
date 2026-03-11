@@ -5,9 +5,11 @@ import { ipcMain } from 'electron';
 import { projectManager } from '../../services/project-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { successResponse, errorResponse, requireProject } from '../utils/error-handler.js';
+import { validate, CorpusOptionsSchema } from '../utils/validation.js';
 
 export function setupCorpusHandlers() {
-  ipcMain.handle('corpus:get-graph', async (_event, options?: any) => {
+  ipcMain.handle('corpus:get-graph', async (_event, rawOptions?: unknown) => {
+    const options = validate(CorpusOptionsSchema, rawOptions);
     console.log('📞 IPC Call: corpus:get-graph', options);
     try {
       const projectPath = projectManager.getCurrentProjectPath();
@@ -44,7 +46,8 @@ export function setupCorpusHandlers() {
     }
   });
 
-  ipcMain.handle('corpus:analyze-topics', async (_event, options?: any) => {
+  ipcMain.handle('corpus:analyze-topics', async (_event, rawOptions?: unknown) => {
+    const options = validate(CorpusOptionsSchema, rawOptions);
     console.log('📞 IPC Call: corpus:analyze-topics', options);
     try {
       const projectPath = projectManager.getCurrentProjectPath();
@@ -117,7 +120,8 @@ export function setupCorpusHandlers() {
   });
 
   // Textometrics handlers
-  ipcMain.handle('corpus:get-text-statistics', async (_event, options?: any) => {
+  ipcMain.handle('corpus:get-text-statistics', async (_event, rawOptions?: unknown) => {
+    const options = validate(CorpusOptionsSchema, rawOptions);
     console.log('📞 IPC Call: corpus:get-text-statistics', options);
     try {
       const projectPath = projectManager.getCurrentProjectPath();

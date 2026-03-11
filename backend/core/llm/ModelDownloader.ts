@@ -8,7 +8,10 @@ import fs from 'fs';
 import {
   EMBEDDED_MODELS,
   DEFAULT_EMBEDDED_MODEL,
+  EMBEDDED_EMBEDDING_MODELS,
+  DEFAULT_EMBEDDED_EMBEDDING_MODEL,
   type EmbeddedModelInfo,
+  type EmbeddedEmbeddingModelInfo,
 } from './EmbeddedLLMClient.js';
 
 export interface DownloadProgress {
@@ -74,12 +77,28 @@ export class ModelDownloader {
   }
 
   /**
+   * Retourne le registre de modèles pour le type donné
+   */
+  private getModelRegistry(type: 'generation' | 'embedding'): Record<string, EmbeddedModelInfo | EmbeddedEmbeddingModelInfo> {
+    return type === 'embedding' ? EMBEDDED_EMBEDDING_MODELS : EMBEDDED_MODELS;
+  }
+
+  /**
+   * Retourne le modèle par défaut pour le type donné
+   */
+  private getDefaultModelId(type: 'generation' | 'embedding'): string {
+    return type === 'embedding' ? DEFAULT_EMBEDDED_EMBEDDING_MODEL : DEFAULT_EMBEDDED_MODEL;
+  }
+
+  /**
    * Retourne le chemin où le modèle sera/est stocké
    */
-  getModelPath(modelId: string = DEFAULT_EMBEDDED_MODEL): string {
-    const modelInfo = EMBEDDED_MODELS[modelId];
+  getModelPath(modelId?: string, type: 'generation' | 'embedding' = 'generation'): string {
+    const id = modelId || this.getDefaultModelId(type);
+    const registry = this.getModelRegistry(type);
+    const modelInfo = registry[id];
     if (!modelInfo) {
-      throw new Error(`Unknown model: ${modelId}. Available: ${Object.keys(EMBEDDED_MODELS).join(', ')}`);
+      throw new Error(`Unknown ${type} model: ${id}. Available: ${Object.keys(registry).join(', ')}`);
     }
     return path.join(this.modelsDir, modelInfo.filename);
   }
@@ -87,14 +106,16 @@ export class ModelDownloader {
   /**
    * Vérifie si un modèle est déjà téléchargé et valide
    */
-  isModelDownloaded(modelId: string = DEFAULT_EMBEDDED_MODEL): boolean {
+  isModelDownloaded(modelId?: string, type: 'generation' | 'embedding' = 'generation'): boolean {
+    const id = modelId || this.getDefaultModelId(type);
     try {
-      const modelPath = this.getModelPath(modelId);
+      const modelPath = this.getModelPath(id, type);
       if (!fs.existsSync(modelPath)) {
         return false;
       }
 
-      const modelInfo = EMBEDDED_MODELS[modelId];
+      const registry = this.getModelRegistry(type);
+      const modelInfo = registry[id];
       const stats = fs.statSync(modelPath);
       const sizeMB = stats.size / (1024 * 1024);
 
@@ -103,7 +124,7 @@ export class ModelDownloader {
 
       if (!sizeValid) {
         console.warn(
-          `⚠️ [DOWNLOAD] Model ${modelId} exists but size mismatch: ${sizeMB.toFixed(1)} MB vs expected ≥${(modelInfo.sizeMB * 0.98).toFixed(1)} MB`
+          `⚠️ [DOWNLOAD] Model ${id} exists but size mismatch: ${sizeMB.toFixed(1)} MB vs expected ≥${(modelInfo.sizeMB * 0.98).toFixed(1)} MB`
         );
         return false;
       }
@@ -111,13 +132,13 @@ export class ModelDownloader {
       // Validate GGUF magic bytes to ensure file is not corrupted
       const ggufCheck = this.isValidGGUF(modelPath);
       if (!ggufCheck.valid) {
-        console.warn(`⚠️ [DOWNLOAD] Model ${modelId} is corrupted: ${ggufCheck.reason}`);
+        console.warn(`⚠️ [DOWNLOAD] Model ${id} is corrupted: ${ggufCheck.reason}`);
         return false;
       }
 
       return true;
     } catch (error) {
-      console.error(`❌ [DOWNLOAD] Error checking model ${modelId}:`, error);
+      console.error(`❌ [DOWNLOAD] Error checking model ${id}:`, error);
       return false;
     }
   }
@@ -125,9 +146,10 @@ export class ModelDownloader {
   /**
    * Deletes a corrupted model file
    */
-  deleteCorruptedModel(modelId: string = DEFAULT_EMBEDDED_MODEL): boolean {
+  deleteCorruptedModel(modelId?: string, type: 'generation' | 'embedding' = 'generation'): boolean {
+    const id = modelId || this.getDefaultModelId(type);
     try {
-      const modelPath = this.getModelPath(modelId);
+      const modelPath = this.getModelPath(id, type);
       if (fs.existsSync(modelPath)) {
         fs.unlinkSync(modelPath);
         console.log(`🗑️ [DOWNLOAD] Deleted corrupted model: ${modelPath}`);
@@ -135,7 +157,7 @@ export class ModelDownloader {
       }
       return false;
     } catch (error) {
-      console.error(`❌ [DOWNLOAD] Error deleting corrupted model ${modelId}:`, error);
+      console.error(`❌ [DOWNLOAD] Error deleting corrupted model ${id}:`, error);
       return false;
     }
   }
@@ -143,27 +165,46 @@ export class ModelDownloader {
   /**
    * Retourne les infos d'un modèle
    */
-  getModelInfo(modelId: string = DEFAULT_EMBEDDED_MODEL): EmbeddedModelInfo {
-    const info = EMBEDDED_MODELS[modelId];
+  getModelInfo(modelId?: string, type: 'generation' | 'embedding' = 'generation'): EmbeddedModelInfo | EmbeddedEmbeddingModelInfo {
+    const id = modelId || this.getDefaultModelId(type);
+    const registry = this.getModelRegistry(type);
+    const info = registry[id];
     if (!info) {
-      throw new Error(`Unknown model: ${modelId}`);
+      throw new Error(`Unknown ${type} model: ${id}`);
     }
     return info;
   }
 
   /**
-   * Liste tous les modèles disponibles avec leur statut
+   * Liste tous les modèles de génération disponibles avec leur statut
    */
   getAvailableModels(): ModelStatus[] {
     return Object.entries(EMBEDDED_MODELS).map(([id, info]) => {
-      const downloaded = this.isModelDownloaded(id);
+      const downloaded = this.isModelDownloaded(id, 'generation');
       return {
         id,
         name: info.name,
         description: info.description,
         sizeMB: info.sizeMB,
         downloaded,
-        path: downloaded ? this.getModelPath(id) : undefined,
+        path: downloaded ? this.getModelPath(id, 'generation') : undefined,
+      };
+    });
+  }
+
+  /**
+   * Liste tous les modèles d'embedding disponibles avec leur statut
+   */
+  getAvailableEmbeddingModels(): ModelStatus[] {
+    return Object.entries(EMBEDDED_EMBEDDING_MODELS).map(([id, info]) => {
+      const downloaded = this.isModelDownloaded(id, 'embedding');
+      return {
+        id,
+        name: info.name,
+        description: info.description,
+        sizeMB: info.sizeMB,
+        downloaded,
+        path: downloaded ? this.getModelPath(id, 'embedding') : undefined,
       };
     });
   }
@@ -186,22 +227,27 @@ export class ModelDownloader {
    * Télécharge un modèle depuis HuggingFace
    */
   async downloadModel(
-    modelId: string = DEFAULT_EMBEDDED_MODEL,
-    onProgress: (progress: DownloadProgress) => void
+    modelId?: string,
+    onProgress?: (progress: DownloadProgress) => void,
+    type: 'generation' | 'embedding' = 'generation'
   ): Promise<string> {
+    const id = modelId || this.getDefaultModelId(type);
     if (this.isDownloading) {
       throw new Error('A download is already in progress');
     }
 
-    const modelInfo = EMBEDDED_MODELS[modelId];
+    const registry = this.getModelRegistry(type);
+    const modelInfo = registry[id];
     if (!modelInfo) {
-      throw new Error(`Unknown model: ${modelId}`);
+      throw new Error(`Unknown ${type} model: ${id}`);
     }
 
+    const progressCallback = onProgress || (() => {});
+
     // Vérifier si déjà téléchargé
-    if (this.isModelDownloaded(modelId)) {
-      const existingPath = this.getModelPath(modelId);
-      onProgress({
+    if (this.isModelDownloaded(id, type)) {
+      const existingPath = this.getModelPath(id, type);
+      progressCallback({
         percent: 100,
         downloadedMB: modelInfo.sizeMB,
         totalMB: modelInfo.sizeMB,
@@ -214,7 +260,7 @@ export class ModelDownloader {
     }
 
     const url = `https://huggingface.co/${modelInfo.repo}/resolve/main/${modelInfo.filename}`;
-    const destPath = this.getModelPath(modelId);
+    const destPath = this.getModelPath(id, type);
 
     console.log(`📥 [DOWNLOAD] Starting download of ${modelInfo.name}`);
     console.log(`   URL: ${url}`);
@@ -224,7 +270,7 @@ export class ModelDownloader {
     this.abortController = new AbortController();
     const startTime = Date.now();
 
-    onProgress({
+    progressCallback({
       percent: 0,
       downloadedMB: 0,
       totalMB: modelInfo.sizeMB,
@@ -268,7 +314,7 @@ export class ModelDownloader {
         throw new Error('No response body available');
       }
 
-      onProgress({
+      progressCallback({
         percent: 0,
         downloadedMB: 0,
         totalMB: totalSize / (1024 * 1024),
@@ -318,7 +364,7 @@ export class ModelDownloader {
           lastBytes = downloadedSize;
 
           const percent = (downloadedSize / totalSize) * 100;
-          onProgress({
+          progressCallback({
             percent,
             downloadedMB: downloadedSize / (1024 * 1024),
             totalMB: totalSize / (1024 * 1024),
@@ -356,7 +402,7 @@ export class ModelDownloader {
       });
 
       // Vérification du fichier
-      onProgress({
+      progressCallback({
         percent: 100,
         downloadedMB: totalSize / (1024 * 1024),
         totalMB: totalSize / (1024 * 1024),
@@ -404,7 +450,7 @@ export class ModelDownloader {
         throw new Error(`Fichier invalide (GGUF corrompu): ${ggufCheck.reason}`);
       }
 
-      onProgress({
+      progressCallback({
         percent: 100,
         downloadedMB: stats.size / (1024 * 1024),
         totalMB: totalSize / (1024 * 1024),
@@ -429,7 +475,7 @@ export class ModelDownloader {
       }
 
       if (error.name === 'AbortError') {
-        onProgress({
+        progressCallback({
           percent: 0,
           downloadedMB: 0,
           totalMB: modelInfo.sizeMB,
@@ -441,7 +487,7 @@ export class ModelDownloader {
         throw new Error('Téléchargement annulé par l\'utilisateur');
       }
 
-      onProgress({
+      progressCallback({
         percent: 0,
         downloadedMB: 0,
         totalMB: modelInfo.sizeMB,
@@ -474,9 +520,10 @@ export class ModelDownloader {
   /**
    * Supprime un modèle téléchargé
    */
-  deleteModel(modelId: string = DEFAULT_EMBEDDED_MODEL): boolean {
+  deleteModel(modelId?: string, type: 'generation' | 'embedding' = 'generation'): boolean {
+    const id = modelId || this.getDefaultModelId(type);
     try {
-      const modelPath = this.getModelPath(modelId);
+      const modelPath = this.getModelPath(id, type);
       if (fs.existsSync(modelPath)) {
         fs.unlinkSync(modelPath);
         console.log(`🗑️ [DOWNLOAD] Deleted model: ${modelPath}`);
@@ -484,7 +531,7 @@ export class ModelDownloader {
       }
       return false;
     } catch (error) {
-      console.error(`❌ [DOWNLOAD] Error deleting model ${modelId}:`, error);
+      console.error(`❌ [DOWNLOAD] Error deleting model ${id}:`, error);
       return false;
     }
   }
@@ -492,16 +539,26 @@ export class ModelDownloader {
   /**
    * Calcule l'espace disque utilisé par les modèles
    */
-  getUsedSpace(): { totalMB: number; models: Array<{ id: string; sizeMB: number }> } {
-    const models: Array<{ id: string; sizeMB: number }> = [];
+  getUsedSpace(): { totalMB: number; models: Array<{ id: string; sizeMB: number; type: 'generation' | 'embedding' }> } {
+    const models: Array<{ id: string; sizeMB: number; type: 'generation' | 'embedding' }> = [];
     let totalMB = 0;
 
     for (const modelId of Object.keys(EMBEDDED_MODELS)) {
-      if (this.isModelDownloaded(modelId)) {
-        const modelPath = this.getModelPath(modelId);
+      if (this.isModelDownloaded(modelId, 'generation')) {
+        const modelPath = this.getModelPath(modelId, 'generation');
         const stats = fs.statSync(modelPath);
         const sizeMB = stats.size / (1024 * 1024);
-        models.push({ id: modelId, sizeMB });
+        models.push({ id: modelId, sizeMB, type: 'generation' });
+        totalMB += sizeMB;
+      }
+    }
+
+    for (const modelId of Object.keys(EMBEDDED_EMBEDDING_MODELS)) {
+      if (this.isModelDownloaded(modelId, 'embedding')) {
+        const modelPath = this.getModelPath(modelId, 'embedding');
+        const stats = fs.statSync(modelPath);
+        const sizeMB = stats.size / (1024 * 1024);
+        models.push({ id: modelId, sizeMB, type: 'embedding' });
         totalMB += sizeMB;
       }
     }

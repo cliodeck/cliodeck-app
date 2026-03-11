@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, FileStack, Download, BarChart3, Trash2, FileDown } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { ZoteroImport } from './ZoteroImport';
@@ -48,10 +49,19 @@ export const BibliographyPanel: React.FC = () => {
   }, []);
 
   // Count citations with PDFs and citations needing PDFs
-  const citationsWithPDFs = citations.filter((c) => c.file).length;
-  const citationsNeedingPDFs = citations.filter(
-    (c) => !c.file && c.zoteroAttachments && c.zoteroAttachments.length > 0
-  ).length;
+  const citationsWithPDFs = useMemo(
+    () => citations.filter((c) => c.file).length,
+    [citations]
+  );
+  const citationsNeedingPDFs = useMemo(
+    () => citations.filter(
+      (c) => !c.file && c.zoteroAttachments && c.zoteroAttachments.length > 0
+    ).length,
+    [citations]
+  );
+
+  // Memoize getAllTags() to avoid recomputing on every render
+  const allTags = useMemo(() => getAllTags(), [citations, getAllTags]);
 
   const [showModeModal, setShowModeModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -136,7 +146,7 @@ export const BibliographyPanel: React.FC = () => {
       setShowSummaryModal(true);
     } catch (error) {
       console.error('Failed to import BibTeX:', error);
-      alert(`Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`);
+      await useDialogStore.getState().showAlert(`Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -160,18 +170,18 @@ export const BibliographyPanel: React.FC = () => {
     if (batchIndexing.isIndexing) return;
 
     if (citationsWithPDFs === 0) {
-      alert(t('bibliography.noPDFsToIndex'));
+      await useDialogStore.getState().showAlert(t('bibliography.noPDFsToIndex'));
       return;
     }
 
-    const confirm = window.confirm(
+    const confirmed = await useDialogStore.getState().showConfirm(
       t('bibliography.confirmIndexAll', { count: citationsWithPDFs })
     );
-    if (!confirm) return;
+    if (!confirmed) return;
 
     try {
       const result = await indexAllPDFs();
-      alert(
+      await useDialogStore.getState().showAlert(
         t('bibliography.indexAllComplete', {
           indexed: result.indexed,
           skipped: result.skipped,
@@ -180,7 +190,7 @@ export const BibliographyPanel: React.FC = () => {
       );
     } catch (error) {
       console.error('Failed to index all PDFs:', error);
-      alert(`${t('bibliography.indexError')} ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.indexError')} ${error}`);
     }
   };
 
@@ -188,23 +198,23 @@ export const BibliographyPanel: React.FC = () => {
     if (batchIndexing.isIndexing) return;
 
     if (!currentProject) {
-      alert(t('bibliography.noProjectOpen'));
+      await useDialogStore.getState().showAlert(t('bibliography.noProjectOpen'));
       return;
     }
 
     if (citationsNeedingPDFs === 0) {
-      alert(t('bibliography.noMissingPDFs'));
+      await useDialogStore.getState().showAlert(t('bibliography.noMissingPDFs'));
       return;
     }
 
-    const confirm = window.confirm(
+    const confirmed = await useDialogStore.getState().showConfirm(
       t('bibliography.confirmDownloadAll', { count: citationsNeedingPDFs })
     );
-    if (!confirm) return;
+    if (!confirmed) return;
 
     try {
       const result = await downloadAllMissingPDFs(currentProject.path);
-      alert(
+      await useDialogStore.getState().showAlert(
         t('bibliography.downloadAllComplete', {
           downloaded: result.downloaded,
           skipped: result.skipped,
@@ -213,13 +223,13 @@ export const BibliographyPanel: React.FC = () => {
       );
     } catch (error) {
       console.error('Failed to download all PDFs:', error);
-      alert(`${t('bibliography.downloadError')} ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.downloadError')} ${error}`);
     }
   };
 
   const handleExportBibTeX = async () => {
     if (citations.length === 0) {
-      alert(t('bibliography.noCitationsToExport'));
+      await useDialogStore.getState().showAlert(t('bibliography.noCitationsToExport'));
       return;
     }
 
@@ -237,20 +247,20 @@ export const BibliographyPanel: React.FC = () => {
         });
 
         if (exportResult.success) {
-          alert(t('bibliography.exportSuccess', { count: citations.length }));
+          await useDialogStore.getState().showAlert(t('bibliography.exportSuccess', { count: citations.length }));
         } else {
-          alert(`${t('bibliography.exportError')}: ${exportResult.error}`);
+          await useDialogStore.getState().showAlert(`${t('bibliography.exportError')}: ${exportResult.error}`);
         }
       }
     } catch (error) {
       console.error('Failed to export BibTeX:', error);
-      alert(`${t('bibliography.exportError')}: ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.exportError')}: ${error}`);
     }
   };
 
   const handleReindexModifiedPDFs = async (citationIds?: string[]) => {
     if (!currentProject) {
-      alert(t('bibliography.noProjectOpen'));
+      await useDialogStore.getState().showAlert(t('bibliography.noProjectOpen'));
       return;
     }
 
@@ -259,14 +269,14 @@ export const BibliographyPanel: React.FC = () => {
       : modifiedPDFs.map((m) => citations.find((c) => c.id === m.citationId)).filter((c) => c && c.file);
 
     if (toReindex.length === 0) {
-      alert(t('bibliography.noPDFsToReindex'));
+      await useDialogStore.getState().showAlert(t('bibliography.noPDFsToReindex'));
       return;
     }
 
-    const confirm = window.confirm(
+    const confirmed = await useDialogStore.getState().showConfirm(
       t('bibliography.confirmReindexModified', { count: toReindex.length })
     );
-    if (!confirm) return;
+    if (!confirmed) return;
 
     try {
       // Re-index each PDF
@@ -290,10 +300,10 @@ export const BibliographyPanel: React.FC = () => {
       // Dismiss notification
       dismissNotification();
 
-      alert(t('bibliography.reindexComplete', { count: toReindex.length }));
+      await useDialogStore.getState().showAlert(t('bibliography.reindexComplete', { count: toReindex.length }));
     } catch (error) {
       console.error('Failed to re-index modified PDFs:', error);
-      alert(`${t('bibliography.reindexError')}: ${error}`);
+      await useDialogStore.getState().showAlert(`${t('bibliography.reindexError')}: ${error}`);
     }
   };
 
@@ -428,10 +438,10 @@ export const BibliographyPanel: React.FC = () => {
         </div>
 
         {/* Tag Filter */}
-        {getAllTags().length > 0 && (
+        {allTags.length > 0 && (
           <TagFilter
             selectedTags={selectedTags}
-            allTags={getAllTags()}
+            allTags={allTags}
             onTagsChange={setTagsFilter}
             onClear={clearTagsFilter}
           />

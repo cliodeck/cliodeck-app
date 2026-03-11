@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { PDFExportModal } from '../Export/PDFExportModal';
 import { WordExportModal } from '../Export/WordExportModal';
@@ -42,7 +43,7 @@ export const ProjectPanel: React.FC = () => {
 
   const handleCreateProject = async () => {
     if (!newProjectName || !newProjectPath) {
-      alert(t('project.fillAllFields'));
+      await useDialogStore.getState().showAlert(t('project.fillAllFields'));
       return;
     }
 
@@ -57,7 +58,7 @@ export const ProjectPanel: React.FC = () => {
       setNewProjectType('article');
     } catch (error: any) {
       console.error('Failed to create project:', error);
-      alert(t('project.createError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.createError') + ': ' + error.message);
     } finally {
       setIsCreating(false);
     }
@@ -78,7 +79,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Failed to open project:', error);
-      alert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
     }
   };
 
@@ -102,7 +103,7 @@ export const ProjectPanel: React.FC = () => {
       await loadProject(projectPath);
     } catch (error: any) {
       console.error('Failed to load recent project:', error);
-      alert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
     }
   };
 
@@ -134,7 +135,7 @@ export const ProjectPanel: React.FC = () => {
       await loadFile(filePath);
     } catch (error: any) {
       console.error('Failed to load file:', error);
-      alert(t('toolbar.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('toolbar.openError') + ': ' + error.message);
     }
   };
 
@@ -144,7 +145,7 @@ export const ProjectPanel: React.FC = () => {
         await window.electron.shell.openPath(currentProject.path);
       } catch (error: any) {
         console.error('Failed to open project folder:', error);
-        alert(t('project.openFolderError') + ': ' + error.message);
+        await useDialogStore.getState().showAlert(t('project.openFolderError') + ': ' + error.message);
       }
     }
   };
@@ -277,7 +278,7 @@ export const ProjectPanel: React.FC = () => {
               </>
             )}
 
-            {/* Project Settings - CSL */}
+            {/* Project Settings - CSL + Default Editor */}
             {(currentProject.type === 'article' || currentProject.type === 'book' || currentProject.type === 'presentation') && (
               <CollapsibleSection title={t('project.settings')} defaultExpanded={false}>
                 <CSLSettings
@@ -289,6 +290,38 @@ export const ProjectPanel: React.FC = () => {
                     loadProject(projectJsonPath);
                   }}
                 />
+                <div style={{ marginTop: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                    {t('project.defaultEditor')}
+                  </label>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                    {t('project.defaultEditorHelp')}
+                  </p>
+                  <select
+                    value={currentProject.defaultEditor || 'wysiwyg'}
+                    onChange={async (e) => {
+                      const newMode = e.target.value as 'wysiwyg' | 'source';
+                      const projectJsonPath = `${currentProject.path}/project.json`;
+                      try {
+                        await window.electron.project.updateConfig(projectJsonPath, { defaultEditor: newMode });
+                        // Update store directly — no full project reload needed
+                        useProjectStore.setState((state) => ({
+                          currentProject: state.currentProject
+                            ? { ...state.currentProject, defaultEditor: newMode }
+                            : null,
+                        }));
+                        useEditorStore.getState().setEditorMode(newMode);
+                      } catch (err: any) {
+                        console.error('Failed to update default editor:', err);
+                        await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + err.message);
+                      }
+                    }}
+                    style={{ width: '100%', padding: '0.4rem 0.5rem', borderRadius: '4px' }}
+                  >
+                    <option value="wysiwyg">{t('project.defaultEditorWysiwyg')}</option>
+                    <option value="source">{t('project.defaultEditorSource')}</option>
+                  </select>
+                </div>
               </CollapsibleSection>
             )}
 

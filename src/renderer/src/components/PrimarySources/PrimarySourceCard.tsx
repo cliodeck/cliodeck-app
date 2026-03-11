@@ -7,7 +7,7 @@ interface PrimarySourceCardProps {
   source: PrimarySource;
 }
 
-export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = ({ source }) => {
+export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({ source }) => {
   const { selectedSourceId, selectSource } = usePrimarySourcesStore();
   const isSelected = selectedSourceId === source.id;
 
@@ -68,4 +68,4 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = ({ source }) 
       </div>
     </div>
   );
-};
+});

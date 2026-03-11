@@ -13,6 +13,7 @@ import { SimilarityProgress } from './SimilarityProgress';
 import { SimilarityResults } from './SimilarityResults';
 import { SimilarityOptions } from './SimilarityOptions';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
+import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
 import './SimilarityPanel.css';
 
@@ -47,18 +48,18 @@ export const SimilarityPanel: React.FC = () => {
     return null;
   }
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     logger.component('SimilarityPanel', 'Starting analysis');
     if (content.trim().length > 0) {
       analyze(content);
     } else {
-      alert(t('similarity.emptyDocument'));
+      await useDialogStore.getState().showAlert(t('similarity.emptyDocument'));
     }
   };
 
-  const handleClearResults = () => {
+  const handleClearResults = async () => {
     logger.component('SimilarityPanel', 'Clearing results');
-    if (window.confirm(t('similarity.clearConfirm'))) {
+    if (await useDialogStore.getState().showConfirm(t('similarity.clearConfirm'))) {
       clearResults();
     }
   };

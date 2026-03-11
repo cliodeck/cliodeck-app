@@ -1,0 +1,104 @@
+.alert-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: alertFadeIn var(--transition-normal) ease-out;
+}
+
+.alert-dialog {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  min-width: 320px;
+  max-width: 500px;
+  width: 90%;
+  animation: alertSlideIn var(--transition-normal) ease-out;
+}
+
+.alert-dialog-header {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.alert-dialog-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alert-dialog-body {
+  padding: var(--spacing-lg) var(--spacing-xl);
+}
+
+.alert-dialog-message {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.alert-dialog-footer {
+  padding: var(--spacing-md) var(--spacing-xl) var(--spacing-lg);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.alert-dialog-btn-ok {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-sm) var(--spacing-xl);
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--transition-normal);
+  min-width: 80px;
+}
+
+.alert-dialog-btn-ok:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.alert-dialog-btn-ok:active {
+  background-color: var(--color-accent-active);
+}
+
+.alert-dialog-btn-ok:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@keyframes alertFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes alertSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

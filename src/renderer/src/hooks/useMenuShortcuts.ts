@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useBibliographyStore } from '../stores/bibliographyStore';
+import { useDialogStore } from '../stores/dialogStore';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
@@ -111,7 +112,7 @@ export function useMenuShortcuts() {
       toggleStats();
     };
 
-    const handleCheckCitations = () => {
+    const handleCheckCitations = async () => {
       // Extract all citations from content
       const { content } = useEditorStore.getState();
       const citationMatches = content.match(/\[@([^\]]+)\]/g) || [];
@@ -125,7 +126,7 @@ export function useMenuShortcuts() {
       const duplicateCitations = citedKeys.filter((key, index) => citedKeys.indexOf(key) !== index);
 
       if (missingCitations.length === 0 && duplicateCitations.length === 0) {
-        alert('✅ Toutes les citations sont valides !');
+        await useDialogStore.getState().showAlert('✅ Toutes les citations sont valides !');
       } else {
         let message = '';
         if (missingCitations.length > 0) {
@@ -134,7 +135,7 @@ export function useMenuShortcuts() {
         if (duplicateCitations.length > 0) {
           message += `⚠️ Citations en double:\n${[...new Set(duplicateCitations)].join(', ')}`;
         }
-        alert(message);
+        await useDialogStore.getState().showAlert(message);
       }
     };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings } from 'lucide-react';
+import { useDialogStore } from '../../stores/dialogStore';
 import './PresentationConfig.css';
 
 export interface RevealJsConfig {
@@ -67,7 +68,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
       onConfigChange?.(newConfig);
     } catch (error) {
       console.error('Failed to save presentation config:', error);
-      alert('Erreur lors de la sauvegarde de la configuration');
+      await useDialogStore.getState().showAlert('Erreur lors de la sauvegarde de la configuration');
     } finally {
       setIsSaving(false);
     }

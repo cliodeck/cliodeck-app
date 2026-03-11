@@ -234,10 +234,19 @@
     "zoteroGroupId": "Gruppen-ID",
     "zoteroGroupIdPlaceholder": "Zotero Gruppen-ID eingeben",
     "zoteroGroupIdHelp": "Die numerische ID Ihrer Zotero-Gruppe (in der Gruppen-URL zu finden)",
+    "zoteroLibrary": "Zotero-Bibliothek",
+    "zoteroLibraryHelp": "Wählen Sie die Zotero-Bibliothek für dieses Projekt",
+    "zoteroLibraryLoading": "Bibliotheken werden geladen...",
+    "zoteroLibraryPersonal": "Persönliche Bibliothek",
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
-    "loading": "Projekt wird geöffnet..."
+    "loading": "Projekt wird geöffnet...",
+    "defaultEditor": "Standard-Editor",
+    "defaultEditorHelp": "Wählen Sie den Editor, der beim Öffnen von document.md verwendet wird",
+    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
+    "defaultEditorSource": "Monaco (reines Markdown)",
+    "defaultEditorSaveError": "Fehler beim Speichern des Standard-Editors"
   },
   "export": {
     "pdf": {
@@ -346,14 +355,24 @@
   },
   "zotero": {
     "title": "Zotero-Konfiguration",
+    "mode": "Verbindungsmodus",
+    "modeApi": "Online-API (erfordert Internet)",
+    "modeLocal": "Lokale Datenbank (liest zotero.sqlite)",
+    "dataDirectory": "Zotero-Datenverzeichnis",
+    "dataDirectoryHelp": "Pfad zum Zotero-Datenverzeichnis (normalerweise ~/Zotero). Es sollte zotero.sqlite enthalten.",
+    "dataDirectoryPlaceholder": "~/Zotero",
+    "browse": "Durchsuchen...",
+    "localConnectionOk": "Datenbank zugaenglich",
+    "localConnectionFailed": "Kann Zotero-Datenbank nicht lesen",
+    "enterDataDirectory": "Bitte waehlen Sie Ihr Zotero-Datenverzeichnis",
     "userId": "Benutzer-ID",
     "userIdHelp": "Ihre Zotero-Benutzer-ID",
-    "apiKey": "API-Schlüssel",
-    "apiKeyHelp": "Ihr Zotero-API-Schlüssel",
+    "apiKey": "API-Schluessel",
+    "apiKeyHelp": "Ihr Zotero-API-Schluessel",
     "autoSync": "Auto-Sync",
     "testConnection": "Verbindung testen",
     "connectionSuccess": "Zotero-Verbindung erfolgreich!",
-    "connectionError": "Verbindung zu Zotero nicht möglich",
+    "connectionError": "Verbindung zu Zotero nicht moeglich",
     "import": {
       "title": "Import aus Zotero",
       "notConfigured": "Zotero ist nicht konfiguriert",
@@ -388,7 +407,10 @@
       "error": "Importfehler: {{error}}",
       "genericError": "Beim Import ist ein Fehler aufgetreten",
       "errorTitle": "❌ Import-Fehler",
-      "close": "Schließen"
+      "close": "Schließen",
+      "allLibraries": "Alle Bibliotheken",
+      "personalLibrary": "Persönliche Bibliothek",
+      "allItems": "Alle Einträge"
     }
   },
   "suggestions": {
@@ -721,6 +743,11 @@
     "filtered": "gefiltert",
     "noResults": "Keine Ergebnisse",
     "tryDifferentSearch": "Versuchen Sie einen anderen Suchbegriff"
+  },
+  "dialog": {
+    "ok": "OK",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen"
   },
   "common": {
     "cancel": "Abbrechen",

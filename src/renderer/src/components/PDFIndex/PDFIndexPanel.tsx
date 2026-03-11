@@ -5,6 +5,7 @@ import { PDFList } from './PDFList';
 import { IndexingProgress } from './IndexingProgress';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import { PDFRenameModal } from './PDFRenameModal';
 import './PDFIndexPanel.css';
@@ -147,7 +148,7 @@ export const PDFIndexPanel: React.FC = () => {
   const handleAddPDF = async () => {
     // Check if a project is open BEFORE opening file dialog
     if (!currentProject) {
-      alert(t('pdfIndex.noProjectOpen'));
+      await useDialogStore.getState().showAlert(t('pdfIndex.noProjectOpen'));
       return;
     }
 
@@ -194,7 +195,7 @@ export const PDFIndexPanel: React.FC = () => {
       // Check if indexing failed
       if (result && !result.success) {
         const errorMessage = result.error || t('pdfIndex.indexingError');
-        alert(errorMessage);
+        await useDialogStore.getState().showAlert(errorMessage);
         setIndexingState({
           isIndexing: false,
           progress: 0,
@@ -214,7 +215,7 @@ export const PDFIndexPanel: React.FC = () => {
     } catch (error) {
       console.error('Indexing failed:', error);
       const errorMessage = error instanceof Error ? error.message : t('pdfIndex.indexingError');
-      alert(`${t('pdfIndex.indexingError')}: ${errorMessage}`);
+      await useDialogStore.getState().showAlert(`${t('pdfIndex.indexingError')}: ${errorMessage}`);
       setIndexingState({
         isIndexing: false,
         progress: 0,
@@ -224,7 +225,7 @@ export const PDFIndexPanel: React.FC = () => {
   };
 
   const handleDeletePDF = async (documentId: string) => {
-    if (!window.confirm(t('pdfIndex.deleteConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.deleteConfirm'))) {
       return;
     }
 
@@ -248,7 +249,7 @@ export const PDFIndexPanel: React.FC = () => {
 
     // Check if a project is open BEFORE processing dropped files
     if (!currentProject) {
-      alert(t('pdfIndex.noProjectOpen'));
+      await useDialogStore.getState().showAlert(t('pdfIndex.noProjectOpen'));
       return;
     }
 
@@ -266,7 +267,7 @@ export const PDFIndexPanel: React.FC = () => {
   };
 
   const handleCleanOrphanedChunks = async () => {
-    if (!window.confirm(t('pdfIndex.cleanOrphanedConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.cleanOrphanedConfirm'))) {
       return;
     }
 
@@ -276,17 +277,17 @@ export const PDFIndexPanel: React.FC = () => {
 
       if (result.success) {
         console.log('✅ Orphaned chunks cleaned successfully');
-        alert(`✅ ${t('pdfIndex.cleanSuccess')}`);
+        await useDialogStore.getState().showAlert(`${t('pdfIndex.cleanSuccess')}`);
       } else {
         console.error('❌ Failed to clean orphaned chunks:', result.error);
-        alert(`❌ ${t('pdfIndex.cleanError')}:\n${result.error}`);
+        await useDialogStore.getState().showAlert(`${t('pdfIndex.cleanError')}:\n${result.error}`);
       }
 
       // Reload statistics
       await loadStats();
     } catch (error) {
       console.error('Failed to clean orphaned chunks:', error);
-      alert(t('pdfIndex.cleanError'));
+      await useDialogStore.getState().showAlert(t('pdfIndex.cleanError'));
     } finally {
       setIsCleaning(false);
     }

@@ -138,13 +138,12 @@ export class DocumentSummarizer {
     'you',
   ]);
 
-  constructor(config: SummarizerConfig, ollamaClient?: OllamaClient) {
+  private embeddingFunction?: (text: string) => Promise<Float32Array>;
+
+  constructor(config: SummarizerConfig, ollamaClient?: OllamaClient, embeddingFunction?: (text: string) => Promise<Float32Array>) {
     this.config = config;
     this.ollamaClient = ollamaClient;
-
-    if (config.method === 'abstractive' && !ollamaClient) {
-      throw new Error('OllamaClient required for abstractive summarization');
-    }
+    this.embeddingFunction = embeddingFunction;
   }
 
   /**
@@ -161,6 +160,10 @@ export class DocumentSummarizer {
     if (this.config.method === 'extractive') {
       return this.generateExtractiveSummary(fullText);
     } else {
+      if (!this.ollamaClient) {
+        console.warn('⚠️ OllamaClient required for abstractive summarization, falling back to extractive');
+        return this.generateExtractiveSummary(fullText);
+      }
       return this.generateAbstractiveSummary(fullText, metadata);
     }
   }
@@ -171,8 +174,12 @@ export class DocumentSummarizer {
    * @returns Embedding du résumé
    */
   async generateSummaryEmbedding(summary: string): Promise<Float32Array> {
+    if (this.embeddingFunction) {
+      return this.embeddingFunction(summary);
+    }
+
     if (!this.ollamaClient) {
-      throw new Error('OllamaClient required for embedding generation');
+      throw new Error('OllamaClient or embeddingFunction required for embedding generation');
     }
 
     return this.ollamaClient.generateEmbedding(summary);

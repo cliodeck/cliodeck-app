@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { useDialogStore } from '../../stores/dialogStore';
 import './ConfigPanel.css';
 
 export const ActionsSection: React.FC = () => {
@@ -51,12 +52,12 @@ export const ActionsSection: React.FC = () => {
       totalChunks: stats.totalChunks
     });
 
-    if (!window.confirm(confirmMessage)) {
+    if (!await useDialogStore.getState().showConfirm(confirmMessage)) {
       return;
     }
 
     // Double confirmation
-    if (!window.confirm(t('actions.purgeDatabase.finalConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('actions.purgeDatabase.finalConfirm'))) {
       return;
     }
 
@@ -67,17 +68,17 @@ export const ActionsSection: React.FC = () => {
 
       if (result.success) {
         console.log('✅ Database purged successfully');
-        alert(t('actions.purgeDatabase.success'));
+        await useDialogStore.getState().showAlert(t('actions.purgeDatabase.success'));
       } else {
         console.error('❌ Failed to purge database:', result.error);
-        alert(t('actions.purgeDatabase.error', { error: result.error }));
+        await useDialogStore.getState().showAlert(t('actions.purgeDatabase.error', { error: result.error }));
       }
 
       // Reload statistics to show empty database
       await loadStats();
     } catch (error) {
       console.error('Failed to purge database:', error);
-      alert(t('actions.purgeDatabase.error', { error: String(error) }));
+      await useDialogStore.getState().showAlert(t('actions.purgeDatabase.error', { error: String(error) }));
     } finally {
       setIsPurging(false);
     }
@@ -89,12 +90,12 @@ export const ActionsSection: React.FC = () => {
       chunkCount: primaryStats.chunkCount
     });
 
-    if (!window.confirm(confirmMessage)) {
+    if (!await useDialogStore.getState().showConfirm(confirmMessage)) {
       return;
     }
 
     // Double confirmation
-    if (!window.confirm(t('actions.purgePrimaryDatabase.finalConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('actions.purgePrimaryDatabase.finalConfirm'))) {
       return;
     }
 
@@ -104,17 +105,17 @@ export const ActionsSection: React.FC = () => {
 
       if (result.success) {
         console.log('✅ Primary sources database purged successfully');
-        alert(t('actions.purgePrimaryDatabase.success'));
+        await useDialogStore.getState().showAlert(t('actions.purgePrimaryDatabase.success'));
       } else {
         console.error('❌ Failed to purge primary sources database:', result.error);
-        alert(t('actions.purgePrimaryDatabase.error', { error: result.error }));
+        await useDialogStore.getState().showAlert(t('actions.purgePrimaryDatabase.error', { error: result.error }));
       }
 
       // Reload statistics to show empty database
       await loadPrimaryStats();
     } catch (error) {
       console.error('Failed to purge primary sources database:', error);
-      alert(t('actions.purgePrimaryDatabase.error', { error: String(error) }));
+      await useDialogStore.getState().showAlert(t('actions.purgePrimaryDatabase.error', { error: String(error) }));
     } finally {
       setIsPurgingPrimary(false);
     }
@@ -128,10 +129,10 @@ export const ActionsSection: React.FC = () => {
     }
   };
 
-  const handleCopyDatabasePath = () => {
+  const handleCopyDatabasePath = async () => {
     if (stats.databasePath) {
       navigator.clipboard.writeText(stats.databasePath);
-      alert(t('actions.copyPath.success'));
+      await useDialogStore.getState().showAlert(t('actions.copyPath.success'));
     }
   };
 
