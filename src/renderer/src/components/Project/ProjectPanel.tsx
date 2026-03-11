@@ -304,7 +304,13 @@ export const ProjectPanel: React.FC = () => {
                       const projectJsonPath = `${currentProject.path}/project.json`;
                       try {
                         await window.electron.project.updateConfig(projectJsonPath, { defaultEditor: newMode });
-                        await loadProject(projectJsonPath);
+                        // Update store directly — no full project reload needed
+                        useProjectStore.setState((state) => ({
+                          currentProject: state.currentProject
+                            ? { ...state.currentProject, defaultEditor: newMode }
+                            : null,
+                        }));
+                        useEditorStore.getState().setEditorMode(newMode);
                       } catch (err: any) {
                         console.error('Failed to update default editor:', err);
                         await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + err.message);

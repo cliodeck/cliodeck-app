@@ -136,20 +136,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       try {
         const { useEditorStore } = await import('./editorStore');
 
-        // Apply project default editor mode if specified
-        if (project.defaultEditor) {
-          useEditorStore.getState().setEditorMode(project.defaultEditor);
-          console.log('📝 Editor mode set from project default:', project.defaultEditor);
-        }
-
         // Construct path to document.md (or slides.md for presentations)
         const documentPath = project.type === 'presentation'
           ? `${project.path}/slides.md`
           : `${project.path}/document.md`;
 
-        // Use loadFile instead of setContent to track file path
+        // Load file FIRST so content is ready in the store
         await useEditorStore.getState().loadFile(documentPath);
         console.log('📝 Document loaded into editor with path tracking');
+
+        // Apply project default editor mode AFTER content is loaded,
+        // so the editor mounts with the correct content already in the store
+        if (project.defaultEditor) {
+          useEditorStore.getState().setEditorMode(project.defaultEditor);
+          console.log('📝 Editor mode set from project default:', project.defaultEditor);
+        }
       } catch (error) {
         console.error('Failed to load document into editor:', error);
 
