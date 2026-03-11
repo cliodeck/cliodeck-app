@@ -9,6 +9,8 @@ export interface Project {
   type: 'article' | 'book' | 'presentation';
   createdAt: Date;
   lastOpenedAt: Date;
+  defaultEditor?: 'wysiwyg' | 'source';
+  cslPath?: string;
 }
 
 export interface Chapter {
@@ -133,6 +135,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Load document.md into editor
       try {
         const { useEditorStore } = await import('./editorStore');
+
+        // Apply project default editor mode if specified
+        if (project.defaultEditor) {
+          useEditorStore.getState().setEditorMode(project.defaultEditor);
+          console.log('📝 Editor mode set from project default:', project.defaultEditor);
+        }
 
         // Construct path to document.md (or slides.md for presentations)
         const documentPath = project.type === 'presentation'

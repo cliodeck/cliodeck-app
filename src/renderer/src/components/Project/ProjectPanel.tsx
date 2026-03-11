@@ -278,7 +278,7 @@ export const ProjectPanel: React.FC = () => {
               </>
             )}
 
-            {/* Project Settings - CSL */}
+            {/* Project Settings - CSL + Default Editor */}
             {(currentProject.type === 'article' || currentProject.type === 'book' || currentProject.type === 'presentation') && (
               <CollapsibleSection title={t('project.settings')} defaultExpanded={false}>
                 <CSLSettings
@@ -290,6 +290,32 @@ export const ProjectPanel: React.FC = () => {
                     loadProject(projectJsonPath);
                   }}
                 />
+                <div style={{ marginTop: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                    {t('project.defaultEditor')}
+                  </label>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                    {t('project.defaultEditorHelp')}
+                  </p>
+                  <select
+                    value={currentProject.defaultEditor || 'wysiwyg'}
+                    onChange={async (e) => {
+                      const newMode = e.target.value as 'wysiwyg' | 'source';
+                      const projectJsonPath = `${currentProject.path}/project.json`;
+                      try {
+                        await window.electron.project.updateConfig(projectJsonPath, { defaultEditor: newMode });
+                        await loadProject(projectJsonPath);
+                      } catch (err: any) {
+                        console.error('Failed to update default editor:', err);
+                        await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + err.message);
+                      }
+                    }}
+                    style={{ width: '100%', padding: '0.4rem 0.5rem', borderRadius: '4px' }}
+                  >
+                    <option value="wysiwyg">{t('project.defaultEditorWysiwyg')}</option>
+                    <option value="source">{t('project.defaultEditorSource')}</option>
+                  </select>
+                </div>
               </CollapsibleSection>
             )}
 

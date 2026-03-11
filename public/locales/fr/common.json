@@ -305,7 +305,12 @@
     "zoteroCollectionKey": "Cle de collection",
     "zoteroCollectionKeyPlaceholder": "Entrez la cle de collection (optionnel)",
     "zoteroCollectionKeyHelp": "La cle d'une collection specifique (optionnel)",
-    "loading": "Ouverture du projet..."
+    "loading": "Ouverture du projet...",
+    "defaultEditor": "Éditeur par défaut",
+    "defaultEditorHelp": "Choisissez l'éditeur utilisé à l'ouverture de document.md",
+    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
+    "defaultEditorSource": "Monaco (Markdown brut)",
+    "defaultEditorSaveError": "Erreur lors de la sauvegarde de l'éditeur par défaut"
   },
   "export": {
     "pdf": {

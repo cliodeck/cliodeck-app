@@ -305,7 +305,12 @@
     "zoteroCollectionKey": "Collection Key",
     "zoteroCollectionKeyPlaceholder": "Enter collection key (optional)",
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
-    "loading": "Opening project..."
+    "loading": "Opening project...",
+    "defaultEditor": "Default editor",
+    "defaultEditorHelp": "Choose the editor used when opening document.md",
+    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
+    "defaultEditorSource": "Monaco (raw Markdown)",
+    "defaultEditorSaveError": "Error saving default editor"
   },
   "export": {
     "pdf": {

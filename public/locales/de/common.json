@@ -241,7 +241,12 @@
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
-    "loading": "Projekt wird geöffnet..."
+    "loading": "Projekt wird geöffnet...",
+    "defaultEditor": "Standard-Editor",
+    "defaultEditorHelp": "Wählen Sie den Editor, der beim Öffnen von document.md verwendet wird",
+    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
+    "defaultEditorSource": "Monaco (reines Markdown)",
+    "defaultEditorSaveError": "Fehler beim Speichern des Standard-Editors"
   },
   "export": {
     "pdf": {
