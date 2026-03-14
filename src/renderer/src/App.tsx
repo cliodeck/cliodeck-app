@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MainLayout } from './components/Layout/MainLayout';
 import { EditorPanel } from './components/Editor/EditorPanel';
+import { SlideEditorPanel } from './components/Slides/SlideEditorPanel';
 import { RebuildProgressModal } from './components/Project/RebuildProgressModal';
 import { AlertDialog } from './components/common/AlertDialog';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
@@ -24,6 +25,7 @@ function App() {
   const loadProject = useProjectStore((state) => state.loadProject);
   const updateEditorSettings = useEditorStore((state) => state.updateSettings);
   const initializeEditorMode = useEditorStore((state) => state.initializeEditorMode);
+  const currentProjectType = useProjectStore((state) => state.currentProject?.type);
 
   useEffect(() => {
     initializeLanguage();
@@ -83,7 +85,7 @@ function App() {
         // TODO: Send to error tracking service (Sentry, etc.)
       }}
     >
-      <MainLayout centerPanel={<EditorPanel />} />
+      <MainLayout centerPanel={currentProjectType === 'presentation' ? <SlideEditorPanel /> : <EditorPanel />} />
       <RebuildProgressModal />
       <AlertDialog />
       <ConfirmDialog />

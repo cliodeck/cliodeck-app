@@ -114,5 +114,50 @@ export function setupExportHandlers() {
     }
   });
 
+  // Reveal.js Offline Export (self-contained HTML, no CDN)
+  ipcMain.handle('revealjs-export:export-offline', async (event, options: unknown) => {
+    console.log('📞 IPC Call: revealjs-export:export-offline');
+    try {
+      const validatedData = validate(RevealJSExportSchema, options);
+      const window = BrowserWindow.fromWebContents(event.sender);
+
+      const result = await revealJsExportService.exportOffline(validatedData as any, (progress) => {
+        if (window) window.webContents.send('revealjs-export:progress', progress);
+      });
+
+      console.log('📤 IPC Response: revealjs-export:export-offline', { success: result.success });
+      return result;
+    } catch (error: any) {
+      console.error('❌ revealjs-export:export-offline error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  // Reveal.js PDF Export (via hidden BrowserWindow + printToPDF)
+  ipcMain.handle('revealjs-export:export-pdf', async (event, options: unknown) => {
+    console.log('📞 IPC Call: revealjs-export:export-pdf');
+    try {
+      const validatedData = validate(RevealJSExportSchema, options);
+      const window = BrowserWindow.fromWebContents(event.sender);
+
+      // Allow any output path extension for PDF
+      const pdfOptions = {
+        ...validatedData,
+        outputPath: (validatedData.outputPath || '').replace(/\.html$/, '.pdf') ||
+          undefined,
+      } as any;
+
+      const result = await revealJsExportService.exportToPDF(pdfOptions, (progress) => {
+        if (window) window.webContents.send('revealjs-export:progress', progress);
+      });
+
+      console.log('📤 IPC Response: revealjs-export:export-pdf', { success: result.success });
+      return result;
+    } catch (error: any) {
+      console.error('❌ revealjs-export:export-pdf error:', error);
+      return errorResponse(error);
+    }
+  });
+
   console.log('✅ Export handlers registered');
 }

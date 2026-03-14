@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { FileDown, X, AlertCircle, CheckCircle, WifiOff, FileType } from 'lucide-react';
+
+type ExportMode = 'online' | 'offline' | 'pdf';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
@@ -18,6 +20,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [outputPath, setOutputPath] = useState('');
+  const [exportMode, setExportMode] = useState<ExportMode>('online');
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -46,12 +49,13 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
 
   const handleSelectOutputPath = async () => {
     try {
+      const filters = exportMode === 'pdf'
+        ? [{ name: 'PDF', extensions: ['pdf'] }, { name: t('presentation.allFiles'), extensions: ['*'] }]
+        : [{ name: 'HTML', extensions: ['html'] }, { name: t('presentation.allFiles'), extensions: ['*'] }];
+
       const result = await window.electron.dialog.saveFile({
         defaultPath: outputPath,
-        filters: [
-          { name: 'HTML', extensions: ['html'] },
-          { name: t('presentation.allFiles'), extensions: ['*'] },
-        ],
+        filters,
       });
 
       if (!result.canceled && result.filePath) {
@@ -91,7 +95,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         console.warn('No reveal.js config found, using defaults');
       }
 
-      const result = await window.electron.revealJsExport.export({
+      const exportOptions = {
         projectPath: currentProject.path,
         content: content,
         outputPath: outputPath,
@@ -101,7 +105,19 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
           date: new Date().toLocaleDateString(),
         },
         config,
-      });
+      };
+
+      let result;
+      if (exportMode === 'offline') {
+        result = await window.electron.revealJsExport.exportOffline(exportOptions);
+      } else if (exportMode === 'pdf') {
+        result = await window.electron.revealJsExport.exportPDF({
+          ...exportOptions,
+          outputPath: outputPath.replace(/\.html$/, '.pdf'),
+        });
+      } else {
+        result = await window.electron.revealJsExport.export(exportOptions);
+      }
 
       if (result.success) {
         setSuccess(true);
@@ -157,6 +173,46 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
               <li><code style={{ color: '#4ec9b0' }}>F</code> : {t('presentation.controlF').replace('F key: ', '')}</li>
               <li><code style={{ color: '#4ec9b0' }}>ESC</code> : {t('presentation.controlESC').replace('ESC key: ', '')}</li>
             </ul>
+          </div>
+
+          {/* Export mode selector */}
+          <div className="form-field">
+            <label>{t('presentation.exportMode')}</label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {(['online', 'offline', 'pdf'] as ExportMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setExportMode(mode);
+                    // Adjust output extension
+                    setOutputPath((p) => {
+                      const base = p.replace(/\.(html|pdf)$/, '');
+                      return mode === 'pdf' ? `${base}.pdf` : `${base}.html`;
+                    });
+                  }}
+                  disabled={isExporting}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${exportMode === mode ? 'var(--color-accent, #7c6af4)' : 'var(--border-color, #444)'}`,
+                    background: exportMode === mode ? 'var(--color-accent, #7c6af4)' : 'transparent',
+                    color: exportMode === mode ? '#fff' : 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  {mode === 'offline' && <WifiOff size={13} />}
+                  {mode === 'pdf' && <FileType size={13} />}
+                  {t(`presentation.mode.${mode}`)}
+                </button>
+              ))}
+            </div>
+            <small style={{ color: '#888', fontSize: '11px', marginTop: '4px' }}>
+              {t(`presentation.modeDesc.${exportMode}`)}
+            </small>
           </div>
 
           {/* Form Fields */}

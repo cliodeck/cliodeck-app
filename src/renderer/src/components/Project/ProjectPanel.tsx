@@ -8,6 +8,7 @@ import { CollapsibleSection } from '../common/CollapsibleSection';
 import { PDFExportModal } from '../Export/PDFExportModal';
 import { WordExportModal } from '../Export/WordExportModal';
 import { BeamerConfig } from './BeamerConfig';
+import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
@@ -273,7 +274,7 @@ export const ProjectPanel: React.FC = () => {
                 </CollapsibleSection>
 
                 <CollapsibleSection title={t('project.appearance')} defaultExpanded={true}>
-                  <BeamerConfig projectPath={currentProject.path} />
+                  <RevealJsConfig projectPath={currentProject.path} />
                 </CollapsibleSection>
               </>
             )}
@@ -387,9 +388,6 @@ export const ProjectPanel: React.FC = () => {
           <div className="create-project-content" onClick={(e) => e.stopPropagation()}>
             <h3>{t('project.createNewProject')}</h3>
 
-            {/* Project type selector hidden for v1.0 - only article type available */}
-            {/* Book and Presentation types need more testing before release */}
-            {/*
             <div className="form-field">
               <label>{t('project.projectType')}</label>
               <select
@@ -401,7 +399,6 @@ export const ProjectPanel: React.FC = () => {
                 <option value="presentation">{t('project.types.presentation')}</option>
               </select>
             </div>
-            */}
 
             <div className="form-field">
               <label>{t('project.projectName')}</label>

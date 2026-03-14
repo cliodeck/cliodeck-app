@@ -783,7 +783,51 @@
     "exportSuccess": "Export réussi! Présentation créée à:",
     "exporting": "Export en cours...",
     "export": "Exporter",
-    "allFiles": "Tous les fichiers"
+    "allFiles": "Tous les fichiers",
+    "addSlide": "Ajouter une slide (---)",
+    "addNote": "Ajouter une note présentateur (Note:)",
+    "insertCitation": "Insérer une citation [@clé]",
+    "exportMode": "Format d'export",
+    "mode": {
+      "online": "HTML (en ligne)",
+      "offline": "HTML autonome",
+      "pdf": "PDF"
+    },
+    "modeDesc": {
+      "online": "Nécessite une connexion internet pour charger reveal.js depuis le CDN.",
+      "offline": "Télécharge les assets reveal.js et les intègre dans le fichier HTML. Fonctionne sans internet.",
+      "pdf": "Exporte directement en PDF via le moteur de rendu de la présentation."
+    }
+  },
+  "revealjs": {
+    "theme": "Thème",
+    "transition": "Transition",
+    "controls": "Afficher les contrôles de navigation",
+    "progress": "Afficher la barre de progression",
+    "slideNumber": "Afficher le numéro de slide",
+    "history": "Activer l'historique navigateur",
+    "configHint": "Ces paramètres sont sauvegardés dans reveal-config.json et appliqués à l'export."
+  },
+  "slides": {
+    "preview": {
+      "title": "Aperçu RevealJS",
+      "error": "Erreur lors de la génération de l'aperçu."
+    },
+    "generate": {
+      "title": "Générer des slides avec l'IA",
+      "source": "Source",
+      "fullDocument": "Document entier",
+      "selection": "Sélection Monaco",
+      "promptLanguage": "Langue du prompt IA",
+      "generate": "Générer",
+      "cancel": "Annuler",
+      "regenerate": "Régénérer",
+      "replace": "Remplacer slides.md",
+      "append": "Ajouter à la fin",
+      "output": "Résultat",
+      "noContent": "Aucun contenu à transformer.",
+      "unknownError": "Erreur inconnue lors de la génération."
+    }
   },
   "milkdownEditor": {
     "welcome": "Bienvenue",

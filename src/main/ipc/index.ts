@@ -21,6 +21,7 @@ import { setupTopicModelingHandlers } from './handlers/topic-modeling-handlers.j
 import { setupEmbeddedLLMHandlers } from './handlers/embedded-llm-handlers.js';
 import { setupSimilarityHandlers } from './handlers/similarity-handlers.js';
 import { setupTropyHandlers } from './handlers/tropy-handlers.js';
+import { setupSlidesHandlers } from './handlers/slides-handlers.js';
 
 /**
  * Setup all IPC handlers
@@ -62,6 +63,7 @@ export function setupIPCHandlers() {
   setupEmbeddedLLMHandlers();
   setupSimilarityHandlers();
   setupTropyHandlers();
+  setupSlidesHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
 }

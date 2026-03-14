@@ -295,8 +295,22 @@ const api = {
     findTemplate: (projectPath: string) => ipcRenderer.invoke('word-export:find-template', projectPath),
   },
 
-  // Reveal.js Export
+  // Reveal.js Export (online CDN, offline self-contained, PDF)
   revealJsExport: {
+    exportOffline: (options: {
+      projectPath: string;
+      content: string;
+      outputPath?: string;
+      metadata?: { title?: string; author?: string; date?: string };
+      config?: any;
+    }) => ipcRenderer.invoke('revealjs-export:export-offline', options),
+    exportPDF: (options: {
+      projectPath: string;
+      content: string;
+      outputPath?: string;
+      metadata?: { title?: string; author?: string; date?: string };
+      config?: any;
+    }) => ipcRenderer.invoke('revealjs-export:export-pdf', options),
     export: (options: {
       projectPath: string;
       content: string;
@@ -575,6 +589,30 @@ const api = {
       const listener = (_event: any, error: string) => callback(error);
       ipcRenderer.on('tropy:watcher-error', listener);
       return () => ipcRenderer.removeListener('tropy:watcher-error', listener);
+    },
+  },
+
+  // Slides AI Generation + Live Preview
+  slides: {
+    generate: (options: { text: string; language: string; citations?: any[] }) =>
+      ipcRenderer.invoke('slides:generate', options),
+    cancel: () => ipcRenderer.invoke('slides:cancel'),
+    getPreviewHtml: (options: { content: string; config?: any }) =>
+      ipcRenderer.invoke('slides:get-preview-html', options),
+    onStream: (callback: (chunk: string) => void) => {
+      const listener = (_event: any, chunk: string) => callback(chunk);
+      ipcRenderer.on('slides:stream', listener);
+      return () => ipcRenderer.removeListener('slides:stream', listener);
+    },
+    onStreamDone: (callback: (result: { content: string; cancelled?: boolean }) => void) => {
+      const listener = (_event: any, result: any) => callback(result);
+      ipcRenderer.on('slides:stream-done', listener);
+      return () => ipcRenderer.removeListener('slides:stream-done', listener);
+    },
+    onStreamError: (callback: (error: { error: string }) => void) => {
+      const listener = (_event: any, error: any) => callback(error);
+      ipcRenderer.on('slides:stream-error', listener);
+      return () => ipcRenderer.removeListener('slides:stream-error', listener);
     },
   },
 

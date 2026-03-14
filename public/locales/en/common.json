@@ -783,7 +783,51 @@
     "exportSuccess": "Export successful! Presentation created at:",
     "exporting": "Exporting...",
     "export": "Export",
-    "allFiles": "All files"
+    "allFiles": "All files",
+    "addSlide": "Add slide (---)",
+    "addNote": "Add presenter note (Note:)",
+    "insertCitation": "Insert citation [@key]",
+    "exportMode": "Export format",
+    "mode": {
+      "online": "HTML (online)",
+      "offline": "Self-contained HTML",
+      "pdf": "PDF"
+    },
+    "modeDesc": {
+      "online": "Requires an internet connection to load reveal.js from CDN.",
+      "offline": "Downloads reveal.js assets and embeds them in the HTML file. Works offline.",
+      "pdf": "Exports directly to PDF via the presentation rendering engine."
+    }
+  },
+  "revealjs": {
+    "theme": "Theme",
+    "transition": "Transition",
+    "controls": "Show navigation controls",
+    "progress": "Show progress bar",
+    "slideNumber": "Show slide number",
+    "history": "Enable browser history",
+    "configHint": "These settings are saved to reveal-config.json and applied on export."
+  },
+  "slides": {
+    "preview": {
+      "title": "RevealJS Preview",
+      "error": "Error generating preview."
+    },
+    "generate": {
+      "title": "Generate slides with AI",
+      "source": "Source",
+      "fullDocument": "Full document",
+      "selection": "Monaco selection",
+      "promptLanguage": "AI prompt language",
+      "generate": "Generate",
+      "cancel": "Cancel",
+      "regenerate": "Regenerate",
+      "replace": "Replace slides.md",
+      "append": "Append to end",
+      "output": "Result",
+      "noContent": "No content to transform.",
+      "unknownError": "Unknown error during generation."
+    }
   },
   "milkdownEditor": {
     "welcome": "Welcome",

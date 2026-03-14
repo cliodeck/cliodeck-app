@@ -6,6 +6,7 @@ import { z } from 'zod';
 // Project schemas
 export const ProjectCreateSchema = z.object({
   name: z.string().min(1, 'Project name is required'),
+  type: z.enum(['article', 'book', 'presentation']).optional(),
   path: z.string().min(1, 'Project path is required'),
   chapters: z.array(z.string()).optional(),
   bibliographySource: z

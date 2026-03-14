@@ -709,7 +709,51 @@
     "exportSuccess": "Export erfolgreich! Präsentation erstellt unter:",
     "exporting": "Wird exportiert...",
     "export": "Exportieren",
-    "allFiles": "Alle Dateien"
+    "allFiles": "Alle Dateien",
+    "addSlide": "Folie hinzufügen (---)",
+    "addNote": "Präsentationsnotiz hinzufügen (Note:)",
+    "insertCitation": "Zitat einfügen [@schlüssel]",
+    "exportMode": "Exportformat",
+    "mode": {
+      "online": "HTML (online)",
+      "offline": "Eigenständiges HTML",
+      "pdf": "PDF"
+    },
+    "modeDesc": {
+      "online": "Erfordert eine Internetverbindung zum Laden von reveal.js über CDN.",
+      "offline": "Lädt reveal.js-Assets herunter und bettet sie in die HTML-Datei ein. Funktioniert offline.",
+      "pdf": "Exportiert direkt als PDF über die Präsentations-Rendering-Engine."
+    }
+  },
+  "revealjs": {
+    "theme": "Thema",
+    "transition": "Übergang",
+    "controls": "Navigationssteuerung anzeigen",
+    "progress": "Fortschrittsbalken anzeigen",
+    "slideNumber": "Foliennummer anzeigen",
+    "history": "Browser-Verlauf aktivieren",
+    "configHint": "Diese Einstellungen werden in reveal-config.json gespeichert und beim Export angewendet."
+  },
+  "slides": {
+    "preview": {
+      "title": "RevealJS-Vorschau",
+      "error": "Fehler beim Generieren der Vorschau."
+    },
+    "generate": {
+      "title": "Folien mit KI generieren",
+      "source": "Quelle",
+      "fullDocument": "Ganzes Dokument",
+      "selection": "Monaco-Auswahl",
+      "promptLanguage": "KI-Prompt-Sprache",
+      "generate": "Generieren",
+      "cancel": "Abbrechen",
+      "regenerate": "Neu generieren",
+      "replace": "slides.md ersetzen",
+      "append": "Am Ende anhängen",
+      "output": "Ergebnis",
+      "noContent": "Kein Inhalt zum Umwandeln.",
+      "unknownError": "Unbekannter Fehler bei der Generierung."
+    }
   },
   "milkdownEditor": {
     "welcome": "Willkommen",

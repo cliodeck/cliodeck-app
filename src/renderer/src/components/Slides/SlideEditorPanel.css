@@ -1,0 +1,22 @@
+.slide-editor-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-app);
+}
+
+.slide-toolbar {
+  /* inherits .editor-toolbar styles from EditorPanel.css */
+}
+
+.slide-editor-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Dirty indicator on save button */
+.toolbar-btn.dirty {
+  color: var(--color-warning, #f0a500);
+}

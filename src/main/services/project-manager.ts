@@ -126,59 +126,60 @@ export class ProjectManager {
       await writeFile(contextFile, '# Contexte du projet\n\nDécrivez ici le contexte de votre recherche. Ce contexte sera utilisé pour améliorer les réponses de l\'assistant IA.\n\nExemple : "Cette recherche porte sur l\'impact de l\'intelligence artificielle dans l\'éducation supérieure, avec un focus particulier sur la taxonomie de Bloom et les stratégies pédagogiques actives."');
     }
 
-    // For presentations, create slides.md with Beamer syntax
+    // For presentations, create slides.md with reveal.js syntax
     if (projectType === 'presentation') {
       const slidesFile = path.join(projectPath, 'slides.md');
-      const slidesTemplate = `# Introduction
+      const slidesTemplate = `## ${data.name}
 
-Votre contenu ici...
+Auteur · Date
+
+Note: Bienvenue dans cette présentation.
+
+---
+
+## Plan
+
+- Contexte
+- Méthodologie
+- Résultats
+- Conclusion
+
+---
+
+## Contexte
 
 - Point important 1
 - Point important 2
 - Point important 3
 
-# Plan de la présentation
+Note: Détaillez ici le contexte de votre recherche.
 
-1. Contexte
-2. Méthodologie
-3. Résultats
-4. Conclusion
+---
 
-# Section 1: Contexte
-
-## Sous-section
-
-Texte de votre slide...
-
-::: notes
-Ceci est une note pour le présentateur.
-Elle n'apparaîtra pas sur le slide, uniquement dans vos notes.
-:::
-
-# Section 2: Méthodologie
-
-## Approche
+## Méthodologie
 
 - Méthode 1
 - Méthode 2
 - Méthode 3
 
-# Résultats
+---
 
-## Tableau récapitulatif
+## Résultats
 
 | Élément | Valeur |
 |---------|--------|
 | A       | 10     |
 | B       | 20     |
 
-# Conclusion
+Note: Commentez les résultats principaux.
+
+---
+
+## Conclusion
 
 Merci de votre attention !
 
-::: notes
-N'oubliez pas de mentionner les perspectives futures.
-:::
+Note: N'oubliez pas de mentionner les perspectives futures.
 `;
       await writeFile(slidesFile, slidesTemplate);
     }
