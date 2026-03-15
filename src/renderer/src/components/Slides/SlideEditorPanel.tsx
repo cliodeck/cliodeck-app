@@ -1,6 +1,6 @@
 import React, { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Save, Plus, MessageSquare, BookOpen, FileDown, Sparkles, Eye } from 'lucide-react';
+import { Save, Plus, Columns, MessageSquare, BookOpen, FileDown, Sparkles, Eye } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { MarkdownEditor } from '../Editor/MarkdownEditor';
 import { SlideNavigator } from './SlideNavigator';
@@ -46,12 +46,16 @@ export const SlideEditorPanel: React.FC = () => {
     }
   };
 
+  const handleAddSection = () => {
+    insertAtCursor('\n\n---\n\n# Nouvelle section\n\n');
+  };
+
   const handleAddSlide = () => {
     insertAtCursor('\n\n---\n\n## Titre de la slide\n\n');
   };
 
   const handleAddNote = () => {
-    insertAtCursor('\n\nNote: ');
+    insertAtCursor('\n\nNote:\nNotes du présentateur ici.\n');
   };
 
   const handleInsertCitation = () => {
@@ -75,7 +79,10 @@ export const SlideEditorPanel: React.FC = () => {
         </div>
 
         <div className="toolbar-section">
-          <button className="toolbar-btn" onClick={handleAddSlide} title={t('presentation.addSlide')}>
+          <button className="toolbar-btn" onClick={handleAddSection} title={t('presentation.addSection', '# Section (→)')}>
+            <Columns size={18} strokeWidth={1.5} />
+          </button>
+          <button className="toolbar-btn" onClick={handleAddSlide} title={t('presentation.addSlide', '## Slide (↓)')}>
             <Plus size={18} strokeWidth={1.5} />
           </button>
           <button className="toolbar-btn" onClick={handleAddNote} title={t('presentation.addNote')}>

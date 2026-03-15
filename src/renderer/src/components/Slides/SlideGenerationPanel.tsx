@@ -80,7 +80,11 @@ export const SlideGenerationPanel: React.FC = () => {
       setStreamedContent((prev) => prev + chunk);
     });
 
-    const removeDone = window.electron.slides.onStreamDone(({ cancelled }) => {
+    const removeDone = window.electron.slides.onStreamDone(({ content, cancelled }) => {
+      // Replace streamed raw content with the post-processed (normalised) version
+      if (content) {
+        setStreamedContent(content);
+      }
       setIsGenerating(false);
       setIsDone(!cancelled);
     });

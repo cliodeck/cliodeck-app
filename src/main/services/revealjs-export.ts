@@ -19,18 +19,34 @@ interface CdnAsset {
   attrs?: string;
 }
 
-const getCdnAssets = (theme: string): CdnAsset[] => [
+/** CSS assets (loaded in <head>) */
+const getCssAssets = (theme: string): CdnAsset[] => [
   { url: `${CDN_BASE}/dist/reset.css`, tag: 'style' },
   { url: `${CDN_BASE}/dist/reveal.css`, tag: 'style' },
   { url: `${CDN_BASE}/dist/theme/${theme}.css`, tag: 'style', attrs: 'id="theme"' },
   { url: `${CDN_BASE}/plugin/highlight/monokai.css`, tag: 'style' },
-  { url: `${CDN_BASE}/dist/reveal.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/notes/notes.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/markdown/markdown.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/highlight/highlight.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/zoom/zoom.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/search/search.js`, tag: 'script' },
-  { url: `${CDN_BASE}/plugin/math/math.js`, tag: 'script' },
+];
+
+/** JS assets (loaded at end of <body>, before init script) */
+const getJsAssets = (options?: { includeMath?: boolean }): CdnAsset[] => {
+  const assets: CdnAsset[] = [
+    { url: `${CDN_BASE}/dist/reveal.js`, tag: 'script' },
+    { url: `${CDN_BASE}/plugin/notes/notes.js`, tag: 'script' },
+    { url: `${CDN_BASE}/plugin/markdown/markdown.js`, tag: 'script' },
+    { url: `${CDN_BASE}/plugin/highlight/highlight.js`, tag: 'script' },
+    { url: `${CDN_BASE}/plugin/zoom/zoom.js`, tag: 'script' },
+    { url: `${CDN_BASE}/plugin/search/search.js`, tag: 'script' },
+  ];
+  if (options?.includeMath) {
+    assets.push({ url: `${CDN_BASE}/plugin/math/math.js`, tag: 'script' });
+  }
+  return assets;
+};
+
+/** All assets for fetching / caching (offline export) */
+const getAllCdnAssets = (theme: string, options?: { includeMath?: boolean }): CdnAsset[] => [
+  ...getCssAssets(theme),
+  ...getJsAssets(options),
 ];
 
 // MARK: - Types
@@ -81,49 +97,240 @@ interface RevealJsProgress {
   progress: number;
 }
 
-// MARK: - Templates
+// MARK: - Slide parsing (shared between export & preview)
 
 /**
- * Generates the full reveal.js HTML for a given markdown content and options.
- * Uses CDN by default. Pass inlinedAssets to get a fully offline HTML.
+ * Parse markdown content into a 2D slide structure.
+ *
+ *  # Title        → new horizontal section (navigate left/right)
+ *  ## Sub-title   → new vertical slide within the current section (navigate up/down)
+ *  ---            → explicit slide separator (vertical within current section)
+ *  Note: …        → speaker notes (everything after "Note:" until end of slide block)
  */
-export const generatePreviewHtml = (content: string, options: RevealJsExportOptions): string =>
-  getRevealJsHTML(content, options);
+interface ParsedSlide { markdown: string; notes: string }
+type SlideSection = ParsedSlide[];
+
+function parseSlides(content: string): SlideSection[] {
+  const extractNotes = (raw: string): ParsedSlide => {
+    const m = raw.match(/\n\s*Notes?:\s*([\s\S]*)$/im);
+    if (m) return { markdown: raw.slice(0, m.index!).trim(), notes: m[1].trim() };
+    return { markdown: raw.trim(), notes: '' };
+  };
+
+  const sections: SlideSection[] = [];
+  let cur: ParsedSlide[] = [];
+
+  for (const rawSlide of content.split(/\n---\n/)) {
+    const trimmed = rawSlide.trim();
+    if (!trimmed) continue;
+
+    const firstLine = trimmed.split('\n')[0];
+    const startsWithH1 = /^#(?!#)\s+/.test(firstLine);
+    const startsWithH2 = /^##(?!#)\s+/.test(firstLine);
+
+    if (startsWithH1) {
+      if (cur.length) { sections.push(cur); cur = []; }
+      for (const part of trimmed.split(/\n(?=##(?!#)\s)/)) {
+        const p = part.trim();
+        if (p) cur.push(extractNotes(p));
+      }
+    } else if (startsWithH2) {
+      cur.push(extractNotes(trimmed));
+    } else {
+      cur.push(extractNotes(trimmed));
+    }
+  }
+  if (cur.length) sections.push(cur);
+  return sections;
+}
+
+// MARK: - Preview (lightweight, self-contained)
+
+/**
+ * Generates a lightweight, self-contained preview HTML.
+ * No CDN dependencies — works reliably inside Electron iframe srcDoc.
+ * Includes a tiny inline markdown renderer.
+ */
+export function generatePreviewHtml(content: string, _options: RevealJsExportOptions): string {
+  const sections = parseSlides(content);
+  const theme = _options.config?.theme || 'black';
+
+  // Flatten all slides with section/slide indices for the navigation label
+  const flatSlides: { md: string; notes: string; label: string }[] = [];
+  sections.forEach((sec, si) => {
+    sec.forEach((slide, vi) => {
+      const label = sec.length > 1 ? `${si + 1}.${vi + 1}` : `${si + 1}`;
+      flatSlides.push({ md: slide.markdown, notes: slide.notes, label });
+    });
+  });
+
+  if (!flatSlides.length) {
+    flatSlides.push({ md: '*Aucun contenu*', notes: '', label: '1' });
+  }
+
+  // Inline slide divs (markdown rendered by a tiny JS function at runtime)
+  const slideDivs = flatSlides.map((s, i) => {
+    const mdEsc = s.md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const notesEsc = s.notes.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="slide${i === 0 ? ' active' : ''}" data-index="${i}">
+      <span class="slide-num">${s.label}</span>
+      <div class="slide-body" data-md="${mdEsc.replace(/"/g, '&quot;')}"></div>
+      ${s.notes ? `<div class="slide-notes" data-md="${notesEsc.replace(/"/g, '&quot;')}"></div>` : ''}
+    </div>`;
+  }).join('\n');
+
+  const isDark = !['white', 'beige', 'sky', 'serif', 'simple', 'solarized'].includes(theme);
+  const bg = isDark ? '#191919' : '#f5f5f0';
+  const fg = isDark ? '#eee' : '#222';
+  const fgMuted = isDark ? 'rgba(255,255,255,.45)' : 'rgba(0,0,0,.4)';
+  const accent = isDark ? '#42affa' : '#2a76dd';
+  const noteBg = isDark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.04)';
+
+  // Build the inline <script> as a plain string to avoid template-literal
+  // escaping issues with regex backslashes.
+  const PREVIEW_SCRIPT = [
+    'function md(s){',
+    '  s=s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,\'"\');',
+    '  s=s.replace(/```(\\w*)?\\n([\\s\\S]*?)```/g,function(_,l,c){',
+    '    c=c.replace(/</g,"&lt;").replace(/>/g,"&gt;");',
+    '    return "<pre><code>"+c.trim()+"</code></pre>";',
+    '  });',
+    '  var lines=s.split("\\n"),out=[],inUl=false,inOl=false;',
+    '  for(var i=0;i<lines.length;i++){',
+    '    var L=lines[i];',
+    '    if(/^######\\s/.test(L)){L="<h6>"+L.slice(7)+"</h6>";}',
+    '    else if(/^#####\\s/.test(L)){L="<h5>"+L.slice(6)+"</h5>";}',
+    '    else if(/^####\\s/.test(L)){L="<h4>"+L.slice(5)+"</h4>";}',
+    '    else if(/^###\\s/.test(L)){L="<h3>"+L.slice(4)+"</h3>";}',
+    '    else if(/^##\\s/.test(L)){L="<h2>"+L.slice(3)+"</h2>";}',
+    '    else if(/^#\\s/.test(L)){L="<h1>"+L.slice(2)+"</h1>";}',
+    '    else if(/^>\\s?/.test(L)){L="<blockquote>"+L.replace(/^>\\s?/,"")+"</blockquote>";}',
+    '    else if(/^\\s*[-*+]\\s/.test(L)){',
+    '      if(!inUl){out.push("<ul>");inUl=true;}',
+    '      L="<li>"+L.replace(/^\\s*[-*+]\\s/,"")+"</li>";',
+    '    }',
+    '    else if(/^\\s*\\d+\\.\\s/.test(L)){',
+    '      if(!inOl){out.push("<ol>");inOl=true;}',
+    '      L="<li>"+L.replace(/^\\s*\\d+\\.\\s/,"")+"</li>";',
+    '    }',
+    '    else{',
+    '      if(inUl){out.push("</ul>");inUl=false;}',
+    '      if(inOl){out.push("</ol>");inOl=false;}',
+    '      if(L.trim()===""&&!/</.test(L)){L="";}',
+    '      else if(!/^</.test(L)){L="<p>"+L+"</p>";}',
+    '    }',
+    '    out.push(L);',
+    '  }',
+    '  if(inUl)out.push("</ul>");',
+    '  if(inOl)out.push("</ol>");',
+    '  s=out.join("\\n");',
+    '  s=s.replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g,"<img src=\\"$2\\" alt=\\"$1\\">");',
+    '  s=s.replace(/\\[([^\\]]*)\\]\\(([^)]+)\\)/g,"<a href=\\"$2\\">$1</a>");',
+    '  s=s.replace(/`([^`]+)`/g,"<code>$1</code>");',
+    '  s=s.replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>");',
+    '  s=s.replace(/\\*(.+?)\\*/g,"<em>$1</em>");',
+    '  s=s.replace(/<p><\\/p>/g,"");',
+    '  return s;',
+    '}',
+    'document.querySelectorAll("[data-md]").forEach(function(el){',
+    '  el.innerHTML=md(el.getAttribute("data-md"));',
+    '});',
+    'var slides=document.querySelectorAll(".slide");',
+    'var cur=0,total=slides.length;',
+    'function show(n){',
+    '  if(n<0||n>=total)return;',
+    '  slides[cur].classList.remove("active");',
+    '  cur=n;',
+    '  slides[cur].classList.add("active");',
+    '  slides[cur].scrollIntoView({block:"nearest",behavior:"smooth"});',
+    '  document.getElementById("counter").textContent=(cur+1)+" / "+total;',
+    '}',
+    'function go(d){show(cur+d);}',
+    'document.querySelectorAll(".slide").forEach(function(el){',
+    '  el.addEventListener("click",function(){show(+el.getAttribute("data-index"));});',
+    '});',
+  ].join('\n');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:Source Sans Pro,Helvetica,sans-serif;
+  background:${bg};color:${fg}}
+.container{height:100%;display:flex;flex-direction:column}
+.slides{flex:1;overflow-y:auto;padding:12px;scroll-behavior:smooth}
+.slide{background:${isDark ? '#222' : '#fff'};border-radius:6px;padding:28px 32px;
+  margin-bottom:10px;position:relative;min-height:80px;
+  border:2px solid transparent;cursor:pointer;transition:border-color .15s}
+.slide.active{border-color:${accent}}
+.slide-num{position:absolute;top:6px;right:10px;font-size:11px;color:${fgMuted};font-variant-numeric:tabular-nums}
+.slide-body{line-height:1.5}
+.slide-body h1{font-size:1.5em;font-weight:600;margin:.3em 0}
+.slide-body h2{font-size:1.25em;font-weight:600;margin:.3em 0}
+.slide-body h3{font-size:1.1em;font-weight:600;margin:.3em 0}
+.slide-body h4,.slide-body h5,.slide-body h6{font-size:1em;font-weight:600;margin:.2em 0}
+.slide-body p{margin:.4em 0}
+.slide-body ul,.slide-body ol{margin:.4em 0 .4em 1.4em}
+.slide-body li{margin:.15em 0}
+.slide-body code{font-family:monospace;background:${isDark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.06)'};
+  padding:1px 5px;border-radius:3px;font-size:.9em}
+.slide-body pre{background:${isDark ? '#111' : '#f0f0f0'};padding:10px 14px;border-radius:4px;
+  overflow-x:auto;margin:.5em 0;font-size:.85em}
+.slide-body pre code{background:none;padding:0}
+.slide-body blockquote{border-left:3px solid ${accent};padding-left:12px;margin:.5em 0;
+  color:${fgMuted};font-style:italic}
+.slide-body a{color:${accent};text-decoration:none}
+.slide-body img{max-width:100%;border-radius:4px;margin:.3em 0}
+.slide-body table{border-collapse:collapse;margin:.5em 0;width:100%}
+.slide-body th,.slide-body td{border:1px solid ${isDark ? '#555' : '#ccc'};padding:5px 10px;text-align:left}
+.slide-body th{font-weight:600;background:${isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.04)'}}
+.slide-body strong{font-weight:700}
+.slide-body em{font-style:italic}
+.slide-notes{margin-top:8px;padding:8px 12px;font-size:.8em;color:${fgMuted};
+  background:${noteBg};border-radius:4px;border-left:3px solid ${accent}}
+.slide-notes::before{content:'\\1F5D2  Note';display:block;font-size:.75em;font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;opacity:.7}
+.nav{display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:6px 10px;border-top:1px solid ${isDark ? '#333' : '#ddd'};flex-shrink:0}
+.nav button{background:none;border:1px solid ${isDark ? '#555' : '#bbb'};color:${fg};
+  border-radius:4px;padding:3px 12px;cursor:pointer;font-size:12px}
+.nav button:hover{background:${isDark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.05)'}}
+.nav span{font-size:12px;color:${fgMuted};min-width:50px;text-align:center}
+</style></head><body>
+<div class="container">
+  <div class="slides" id="scroller">${slideDivs}</div>
+  <div class="nav">
+    <button onclick="go(-1)">&#9664;</button>
+    <span id="counter">1 / ${flatSlides.length}</span>
+    <button onclick="go(1)">&#9654;</button>
+  </div>
+</div>
+<script>${PREVIEW_SCRIPT}<\/script></body></html>`;
+}
+
+// MARK: - Reveal.js export templates
 
 const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inlinedAssets?: Map<string, string>): string => {
   const config = options.config || {};
   const metadata = options.metadata || {};
 
-  // Convert markdown to slides (split on --- and ## headers)
-  const slides = content.split(/\n---\n/).map(slide => {
-    // Check if slide has speaker notes (Note:)
-    const noteMatch = slide.match(/\nNote:\s*(.+?)(?=\n##|\n---|$)/s);
-    let slideContent = slide;
-    let notes = '';
+  const sections = parseSlides(content);
 
-    if (noteMatch) {
-      notes = noteMatch[1].trim();
-      slideContent = slide.replace(/\nNote:\s*.+?(?=\n##|\n---|$)/s, '');
+  // ── Build slides HTML ─────────────────────────────────────────────────
+  // Notes stay inside the <textarea>; the reveal.js markdown plugin
+  // extracts them via its built-in notesSeparator regex.
+
+  const slideToHTML = (s: ParsedSlide): string => {
+    // Re-assemble the markdown with notes for the reveal.js markdown plugin
+    const fullMd = s.notes ? `${s.markdown}\n\nNote:\n${s.notes}` : s.markdown;
+    return `          <section data-markdown>\n            <textarea data-template>\n${fullMd}\n            </textarea>\n          </section>`;
+  };
+
+  const slidesHTML = sections.map(section => {
+    if (section.length === 1) {
+      return slideToHTML(section[0]);
     }
-
-    return {
-      content: slideContent.trim(),
-      notes: notes
-    };
-  });
-
-  // Build slides HTML
-  const slidesHTML = slides.map(slide => {
-    if (!slide.content) return '';
-
-    let html = `        <section data-markdown>\n          <textarea data-template>\n${slide.content}\n          </textarea>\n`;
-
-    if (slide.notes) {
-      html += `          <aside class="notes">\n${slide.notes}\n          </aside>\n`;
-    }
-
-    html += '        </section>';
-    return html;
+    const inner = section.map(slideToHTML).join('\n');
+    return `        <section>\n${inner}\n        </section>`;
   }).join('\n');
 
   // Build config object
@@ -155,24 +362,44 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
     viewDistance: config.viewDistance || 3,
   };
 
-  // Build asset tags (CDN or inline)
-  const theme = config.theme || 'black';
-  const cdnAssets = getCdnAssets(theme);
+  // Detect whether content uses math ($ delimiters or \( \[ )
+  const usesMath = !inlinedAssets && /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(content);
 
-  const assetTags = cdnAssets.map((asset) => {
+  // Build CSS tags (for <head>)
+  const theme = config.theme || 'black';
+  const cssAssets = getCssAssets(theme);
+  const cssTags = cssAssets.map((asset) => {
     if (inlinedAssets?.has(asset.url)) {
-      const content = inlinedAssets.get(asset.url)!;
+      const assetContent = inlinedAssets.get(asset.url)!;
       const attrsStr = asset.attrs ? ` ${asset.attrs}` : '';
-      return asset.tag === 'style'
-        ? `  <style${attrsStr}>\n${content}\n  </style>`
-        : `  <script${attrsStr}>\n${content}\n  </script>`;
+      return `  <style${attrsStr}>\n${assetContent}\n  </style>`;
     }
-    // Fall back to CDN
     const attrsStr = asset.attrs ? ` ${asset.attrs}` : '';
-    return asset.tag === 'style'
-      ? `  <link rel="stylesheet" href="${asset.url}"${attrsStr ? ' ' + attrsStr : ''}>`
-      : `  <script src="${asset.url}"${attrsStr ? ' ' + attrsStr : ''}></script>`;
+    return `  <link rel="stylesheet" href="${asset.url}"${attrsStr ? ' ' + attrsStr : ''}>`;
   }).join('\n');
+
+  // Build JS tags (for end of <body>)
+  // Exclude math plugin for offline exports (KaTeX loads external CDN resources that fail offline)
+  const jsAssets = getJsAssets({ includeMath: usesMath });
+  const jsTags = jsAssets.map((asset) => {
+    if (inlinedAssets?.has(asset.url)) {
+      const assetContent = inlinedAssets.get(asset.url)!;
+      const attrsStr = asset.attrs ? ` ${asset.attrs}` : '';
+      return `  <script${attrsStr}>\n${assetContent}\n  </script>`;
+    }
+    const attrsStr = asset.attrs ? ` ${asset.attrs}` : '';
+    return `  <script src="${asset.url}"${attrsStr ? ' ' + attrsStr : ''}></script>`;
+  }).join('\n');
+
+  // Build plugins list — only reference globals that are actually loaded
+  const pluginsList = [
+    'RevealMarkdown',
+    'RevealHighlight',
+    'RevealNotes',
+    'RevealZoom',
+    'RevealSearch',
+    ...(usesMath ? ['RevealMath.KaTeX'] : []),
+  ];
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -181,7 +408,7 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>${metadata.title || 'Présentation'}</title>
 
-${assetTags}
+${cssTags}
 
   <style>
     .reveal h1, .reveal h2, .reveal h3, .reveal h4, .reveal h5, .reveal h6 {
@@ -198,20 +425,18 @@ ${slidesHTML}
     </div>
   </div>
 
+${jsTags}
+
   <script>
+    // Build plugins array safely — skip any that failed to load
+    var plugins = [${pluginsList.join(', ')}].filter(function(p) { return p != null; });
+
     Reveal.initialize({
       ...${JSON.stringify(revealConfig, null, 2)
         .split('\n')
         .map((line, i) => i === 0 ? line : '      ' + line)
         .join('\n')},
-      plugins: [
-        RevealMarkdown,
-        RevealHighlight,
-        RevealNotes,
-        RevealZoom,
-        RevealSearch,
-        RevealMath.KaTeX
-      ]
+      plugins: plugins
     });
   </script>
 </body>
@@ -314,7 +539,8 @@ export class RevealJsExportService {
 
       const cacheDir = join(app.getPath('userData'), 'reveal-assets-cache');
       const theme = options.config?.theme || 'black';
-      const assets = getCdnAssets(theme);
+      // Exclude math plugin from offline — KaTeX loads external CDN resources at runtime
+      const assets = getAllCdnAssets(theme, { includeMath: false });
 
       // Fetch all assets (parallelized)
       const contents = await Promise.all(

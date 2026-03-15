@@ -4,7 +4,7 @@ import { RefreshCw, X } from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
 import { useSlidesStore } from '../../stores/slidesStore';
 
-const DEBOUNCE_MS = 900;
+const DEBOUNCE_MS = 600;
 
 export const SlidePreviewPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -74,7 +74,7 @@ export const SlidePreviewPanel: React.FC = () => {
           <iframe
             className="spv-iframe"
             srcDoc={previewHtml}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             title={t('slides.preview.title')}
           />
         )}
