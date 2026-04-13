@@ -100,6 +100,24 @@ cliodeck/
     recipes/                ← NOUVEAU
 ```
 
+## Principes d'ingénierie transversaux (leçons de claw-code)
+
+Principes à appliquer partout où un composant externe, long-lived ou asynchrone est introduit (MCP clients, providers LLM, intégrations Zotero/Tropy/Obsidian, serveur MCP sortant).
+
+1. **State machine explicite pour tout worker** — chaque serveur MCP, chaque provider, chaque intégration expose un état typé (`unconfigured | spawning | handshaking | ready | degraded | failed | stopped`) plutôt qu'un booléen `connected`. L'UI affiche l'état réel avec son `lastError` et `lastReadyAt`.
+2. **Events over scraped prose** — logs et reporting sont des événements typés (discriminated unions TS), pas du texte à reparser. S'applique au log MCP sortant, aux events de sécurité, aux rapports de scan d'intégration.
+3. **Partial success first-class** — aucun composant ne retourne « tout OK » ou « tout KO ». Un scan de vault Obsidian rapporte N notes indexées + M notes ignorées avec raison. 3 serveurs MCP sur 5 opérationnels = mode dégradé visible, pas erreur globale.
+4. **Auto-recovery : oui pour l'infra, non pour le contenu** — un retry silencieux est acceptable sur Ollama/embedding/MCP déconnecté (pannes non-destructives). **Jamais** sur recipe execution, modifications de corpus, export : l'historien est devant l'écran, on ne change pas les choses dans son dos.
+5. **Harness de parité par mock-replay** pour la couche Provider — chaque impl LLM passe N scénarios scriptés (chat, tool call, streaming, embedding) contre un mock HTTP. Garantit l'équivalence *fonctionnelle*, pas seulement la conformité d'interface.
+
+## Ce qu'on ne retient pas de claw-code
+
+- Pilotage headless par Discord (ClioDeck est interactif).
+- Triptyque multi-agents Architect/Executor/Reviewer (voix unique pour l'historien).
+- LSP client (hors sujet pour de l'écriture).
+- Policy engine exécutable pour merge/rebase (ClioDeck gère du texte, pas du code).
+- Philosophie « clawable » (optimiser pour agents) : ClioDeck optimise d'abord pour l'humain.
+
 ## Le pari stratégique
 
 La fusion réussie transforme ClioDeck d'**assistant d'écriture historien** en **environnement de recherche historien complet**, couvrant le cycle Explorer/Brainstormer/Écrire/Exporter. Les quatre extensions (providers, recipes, MCP entrant/sortant, hints) sont les trous où la communauté DH viendra planter des choses — exactement la leçon méta de goose.

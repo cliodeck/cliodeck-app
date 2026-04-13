@@ -98,6 +98,18 @@ Chaque impl passe les tests de contrat 1.1.
 
 **Critère** : 4 PRs mergés, tests de contrat verts pour chaque provider.
 
+### 1.2bis — Harness de parité mock-replay (leçon claw-code)
+
+Avant de déclarer 1.2 terminé, valider l'équivalence *fonctionnelle* entre providers, pas seulement la conformité d'interface.
+
+- `backend/core/llm/providers/__tests__/fixtures/` : scénarios JSON — chat simple, chat streaming, tool call, embedding batch, prompt long (compaction).
+- Capturer une fois les requêtes/réponses réelles contre chaque provider (mode record).
+- Mock HTTP par provider rejouant les fixtures (mode replay).
+- Script `scripts/run-provider-parity.ts` : diff comportemental sur tous les scénarios × tous les providers.
+- Seuils tolérés documentés (streaming timing, ordre de tokens stream, variations LLM acceptables).
+
+**Critère** : `npm run test:provider-parity` vert. Ajout d'un provider futur = ajout d'un dossier, pas de code de test.
+
 ### 1.3 — Registry + config
 
 - `providers/registry.ts` : `getProvider(id): LLMProvider`, lecture depuis config workspace.
@@ -126,6 +138,17 @@ Copier `cliobrain/backend/core/obsidian/` → `cliodeck/backend/integrations/obs
 - UI : panneau Obsidian dans la sidebar (réutiliser composant Zotero comme base).
 
 **Critère** : ouvrir un vault Obsidian réel, voir les notes listées, les indexer, récupérer un chunk dans une recherche RAG.
+
+### 2.1bis — Rapport de scan partiel (principe *partial success*)
+
+Un vault Obsidian réel contient toujours des notes problématiques (frontmatter cassé, wikilinks circulaires, binaires dans .md). L'indexation ne doit jamais être binaire.
+
+- Type `VaultScanReport = { indexed: NoteRef[]; skipped: { note: NoteRef; reason: SkipReason }[]; stats: {...} }`.
+- `SkipReason` est une union discriminée typée, pas un string libre.
+- UI : badge dans le panneau Obsidian, `N indexées / M ignorées` cliquable ouvrant la liste détaillée.
+- Appliquer le même pattern à Zotero et Tropy — rapport typé de ce qui a été scanné / ignoré / erreur.
+
+**Critère** : scan sur vault avec ≥ 3 notes volontairement cassées → 3 entrées `skipped` avec raisons distinctes.
 
 ### 2.2 — Graphe de connaissances
 
@@ -257,6 +280,30 @@ Onglet « Recipes » : liste builtin + user, bouton run avec formulaire inputs, 
 
 `backend/integrations/mcp-clients/manager.ts` : cycle de vie des serveurs MCP stdio/SSE configurés par l'utilisateur. Inspiré du pattern `extension_manager` de goose.
 
+#### 4.4.1bis — State machine explicite des MCP clients (leçon claw-code)
+
+Chaque `MCPClientInstance` expose un état typé, pas un booléen `connected`.
+
+```ts
+type MCPClientState =
+  | 'unconfigured' | 'spawning' | 'handshaking'
+  | 'ready' | 'degraded' | 'failed' | 'stopped';
+
+interface MCPClientInstance {
+  state: MCPClientState;
+  lastError?: { code: string; message: string; at: string };
+  lastReadyAt?: string;
+  tools: ToolDescriptor[];  // vide tant que pas ready
+}
+```
+
+- Transitions exposées comme events typés (`mcpClient:stateChanged`).
+- Auto-recovery une seule fois (leçon *recovery before escalation*, limitée à l'infra) : sur `failed` suite à crash du subprocess, un retry silencieux avant bascule en `failed` définitif.
+- UI : chaque client dans Settings MCP affiche son état + `lastError` + bouton retry manuel.
+- Partial success : si 3 clients sur 5 sont `ready` et 2 `failed`, la recherche Brainstorm fonctionne sur les 3 et affiche un badge « 2 sources indisponibles ».
+
+**Critère** : tuer manuellement un subprocess MCP → transition visible `ready → failed → spawning → ready` (retry) ou `ready → failed` (si retry échoue), UI reflète en temps réel.
+
 #### 4.4.2 — Config par workspace
 
 `.cliodeck/v2/config.json` section `mcpClients: [{ name, transport, command, args, env }]`.
@@ -279,6 +326,26 @@ Settings « MCP Clients » : ajout/suppression serveur, status (connecté/erreur
 - Log dans `.cliodeck/v2/security-events.jsonl`.
 
 **Critère** : test unitaire avec PDF piégé → event loggé, chunk bloqué en mode `block`.
+
+### 4.5bis — Événements de sécurité typés (leçon claw-code — *events over scraped prose*)
+
+Le log `security-events.jsonl` de 4.5 est une union discriminée typée, pas du texte libre.
+
+```ts
+type SecurityEvent =
+  | { kind: 'suspicious_instruction'; source: SourceId; chunk: ChunkId;
+      pattern: string; severity: 'low' | 'medium' | 'high'; at: string }
+  | { kind: 'external_url'; source: SourceId; url: string; at: string }
+  | { kind: 'unusual_encoding'; source: SourceId; detail: string; at: string }
+  | { kind: 'prompt_injection_blocked'; source: SourceId; chunk: ChunkId;
+      mode: 'warn' | 'block'; at: string };
+```
+
+- Schéma partagé `backend/security/events.ts`, utilisé côté backend (émission) ET renderer (agrégation).
+- UI : onglet « Sécurité » dans settings workspace, stats agrégées (« 3 PDFs Zotero contiennent des patterns d'injection »), filtrage par `kind` et `severity`.
+- Même principe appliqué rétroactivement au log MCP sortant (2.5) : `MCPAccessEvent` discriminé au lieu du JSONL ad hoc.
+
+**Critère** : `tsc --noEmit` garantit que chaque consommateur de `security-events.jsonl` traite exhaustivement les variants. UI affiche les stats sans reparser de texte.
 
 ### 4.6 — API OpenAPI interne + CLI
 
@@ -317,6 +384,56 @@ Settings « MCP Clients » : ajout/suppression serveur, status (connecté/erreur
 - Tag `v2.0.0`.
 - CHANGELOG détaillé.
 - Builds macOS (DMG Intel + AS), Linux (AppImage + deb).
+
+---
+
+## PHASE 6 — Principes d'ingénierie transversaux (leçons claw-code)
+
+Ces principes ne sont pas une phase temporelle — ils s'appliquent à **toute** nouvelle unité introduite dans les phases 1 à 5. À valider en revue de PR.
+
+### 6.1 — State machine explicite
+
+Tout composant long-lived (provider LLM, MCP client, intégration Obsidian/Zotero/Tropy, serveur MCP sortant, watcher) expose :
+
+- Un type d'état `T = 'unconfigured' | 'spawning' | 'ready' | 'degraded' | 'failed' | 'stopped'` (ou variante adaptée).
+- Un champ `lastError?` typé.
+- Des transitions émises comme events (pas scrapées depuis des logs).
+
+**Revue de PR** : tout nouveau composant long-lived sans état typé = PR rejeté.
+
+### 6.2 — Events over scraped prose
+
+Logs persistants = JSONL de discriminated unions TS, jamais prose libre.
+
+Cibles connues : `mcp-access.jsonl`, `security-events.jsonl`, `recipes-runs/*.jsonl`, logs de scan d'intégration.
+
+**Revue de PR** : tout nouveau `JSON.stringify({ message: "..." })` dans un log = PR rejeté.
+
+### 6.3 — Partial success first-class
+
+Aucune fonction scan/index/sync ne retourne `void` ou `boolean`. Retour typé : `{ ok: T[]; skipped: { item: U; reason: R }[]; failed: {...}[] }`.
+
+Cibles : scan vault Obsidian, sync Zotero, scan Tropy, indexation MCP clients, run recipe multi-steps.
+
+### 6.4 — Auto-recovery : infra oui, contenu non
+
+**Oui** (retry silencieux unique avec backoff) :
+- Ollama / provider LLM timeout
+- Embedding API unreachable
+- MCP client subprocess crash
+- Zotero/Tropy API rate-limited
+
+**Non** (erreur remontée immédiatement à l'utilisateur) :
+- Recipe execution (toute étape)
+- Modification de corpus (ingestion, indexation d'un nouveau fichier)
+- Export (Pandoc, LaTeX, Word)
+- SourceInspector action (block/warn)
+
+**Revue de PR** : toute nouvelle clause `retry` dans du code touchant le contenu = PR rejeté.
+
+### 6.5 — Terminal est transport, pas vérité
+
+Bien que ClioDeck soit une app GUI, le principe s'applique : l'état d'orchestration (statut workspace, état des clients MCP, progression d'une recipe) vit dans des stores typés (Zustand) ou des événements IPC structurés, **jamais** reconstruit par lecture de sortie subprocess.
 
 ---
 
