@@ -31,6 +31,24 @@ export interface ProviderStatus {
   lastReadyAt?: string;
 }
 
+/**
+ * Optional per-message metadata. Kept narrow on purpose — every field must have
+ * a clear cross-provider meaning. Providers MUST ignore unknown fields.
+ */
+export interface ChatMessageMeta {
+  /**
+   * Marks a message as carrying a RAG citation payload (retrieved chunk,
+   * bibliographic snippet, quoted source). Consumers such as the context
+   * compactor use this to preserve the message verbatim rather than
+   * summarizing it. See fusion step 4.2.
+   */
+  ragCitation?: boolean;
+  /** Optional identifier of the underlying source (for UI / traceability). */
+  sourceId?: string;
+  /** Optional chunk identifier inside the source. */
+  chunkId?: string;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
@@ -38,6 +56,8 @@ export interface ChatMessage {
   name?: string;
   /** Tool call id for tool-role messages. */
   toolCallId?: string;
+  /** Optional cross-provider metadata; providers MUST ignore unknown fields. */
+  meta?: ChatMessageMeta;
 }
 
 export interface ToolDescriptor {
