@@ -84,6 +84,19 @@
   background: var(--bg-secondary, #f9fafb);
 }
 
-.brainstorm-panel__chat-stub {
-  border-style: dashed;
+.brainstorm-panel__chat-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 360px;
+  padding: 12px 12px 0;
+}
+
+.brainstorm-panel__chat-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0 -12px -12px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
 }

@@ -15,12 +15,14 @@ import { ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import { projectManager } from '../../services/project-manager.js';
+import { fusionChatService } from '../../services/fusion-chat-service.js';
 import {
   loadWorkspaceHints,
   writeWorkspaceHints,
 } from '../../../../backend/core/hints/loader.js';
 import { v2Paths } from '../../../../backend/core/workspace/layout.js';
 import { parseRecipe } from '../../../../backend/recipes/schema.js';
+import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 
 const BUILTIN_RECIPES_DIR = path.join(
@@ -86,6 +88,40 @@ export function setupFusionHandlers(): void {
       return errorResponse(e as Error);
     }
   });
+
+  // MARK: - chat (streaming)
+
+  ipcMain.handle(
+    'fusion:chat:start',
+    async (event, rawMessages: unknown, rawOpts: unknown) => {
+      if (!Array.isArray(rawMessages)) {
+        return errorResponse('messages must be an array');
+      }
+      const messages = rawMessages as ChatMessage[];
+      const opts = (rawOpts ?? {}) as {
+        model?: string;
+        temperature?: number;
+        maxTokens?: number;
+      };
+      const sessionId = fusionChatService.start({
+        webContents: event.sender,
+        messages,
+        opts,
+      });
+      return successResponse({ sessionId });
+    }
+  );
+
+  ipcMain.handle(
+    'fusion:chat:cancel',
+    async (_e, rawSessionId: unknown) => {
+      if (typeof rawSessionId !== 'string') {
+        return errorResponse('sessionId must be a string');
+      }
+      const cancelled = fusionChatService.cancel(rawSessionId);
+      return successResponse({ cancelled });
+    }
+  );
 
   // MARK: - vault status (read-only — indexing/search land with chat IPC)
 

@@ -644,7 +644,7 @@ const api = {
     },
   },
 
-  // Fusion (phase 3.0): hints, recipes, vault status.
+  // Fusion (phase 3.0+3.2): hints, recipes, vault status, streamed chat.
   fusion: {
     hints: {
       read: () => ipcRenderer.invoke('fusion:hints:read'),
@@ -656,6 +656,31 @@ const api = {
     },
     vault: {
       status: () => ipcRenderer.invoke('fusion:vault:status'),
+    },
+    chat: {
+      start: (
+        messages: unknown[],
+        opts?: { model?: string; temperature?: number; maxTokens?: number }
+      ) => ipcRenderer.invoke('fusion:chat:start', messages, opts ?? {}),
+      cancel: (sessionId: string) =>
+        ipcRenderer.invoke('fusion:chat:cancel', sessionId),
+      onChunk: (
+        callback: (envelope: {
+          sessionId: string;
+          chunk: {
+            delta: string;
+            done?: boolean;
+            finishReason?: string;
+            usage?: Record<string, number>;
+          };
+          error?: { code: string; message: string };
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:chunk', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:chunk', listener);
+      },
     },
   },
 };

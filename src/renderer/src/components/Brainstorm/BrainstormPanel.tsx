@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Lightbulb, FileText, Database, MessageCircle } from 'lucide-react';
+import { BrainstormChat } from './BrainstormChat';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -169,13 +170,13 @@ export const BrainstormPanel: React.FC = () => {
         </ul>
       </section>
 
-      <section className="brainstorm-panel__section brainstorm-panel__chat-stub">
+      <section className="brainstorm-panel__section brainstorm-panel__chat-section">
         <h3>
           <MessageCircle size={14} /> Chat
         </h3>
-        <p className="brainstorm-panel__muted">
-          Composer arrives in step 3.2 (separate PR).
-        </p>
+        <div className="brainstorm-panel__chat-host">
+          <BrainstormChat />
+        </div>
       </section>
     </div>
   );
