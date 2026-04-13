@@ -19,9 +19,18 @@ import {
   type OllamaEmbeddingProviderConfig,
   type OllamaProviderConfig,
 } from './ollama.js';
+import {
+  OpenAICompatibleEmbeddingProvider,
+  OpenAICompatibleProvider,
+} from './openai-compatible.js';
+import { AnthropicProvider } from './anthropic.js';
+import { MistralEmbeddingProvider, MistralProvider } from './mistral.js';
 
 export type LLMProviderId = 'ollama' | 'openai-compatible' | 'anthropic' | 'mistral';
-export type EmbeddingProviderId = 'ollama';
+export type EmbeddingProviderId =
+  | 'ollama'
+  | 'openai-compatible'
+  | 'mistral';
 
 export interface LLMConfig {
   provider: LLMProviderId;
@@ -35,6 +44,7 @@ export interface EmbeddingConfig {
   model: string;
   dimension: number;
   baseUrl?: string;
+  apiKey?: string;
 }
 
 export interface RegistryConfig {
@@ -78,6 +88,57 @@ registerEmbeddingProvider('ollama', (cfg) =>
     dimension: cfg.dimension,
     baseUrl: cfg.baseUrl,
   } satisfies OllamaEmbeddingProviderConfig)
+);
+
+registerLLMProvider('openai-compatible', (cfg) => {
+  if (!cfg.baseUrl) {
+    throw new Error('openai-compatible provider requires llm.baseUrl');
+  }
+  return new OpenAICompatibleProvider({
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+    apiKey: cfg.apiKey,
+  });
+});
+
+registerEmbeddingProvider('openai-compatible', (cfg) => {
+  if (!cfg.baseUrl) {
+    throw new Error('openai-compatible embedding requires embedding.baseUrl');
+  }
+  return new OpenAICompatibleEmbeddingProvider({
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+    dimension: cfg.dimension,
+    apiKey: cfg.apiKey,
+  });
+});
+
+registerLLMProvider('anthropic', (cfg) => {
+  if (!cfg.apiKey) {
+    throw new Error('anthropic provider requires llm.apiKey');
+  }
+  return new AnthropicProvider({
+    apiKey: cfg.apiKey,
+    model: cfg.model,
+    baseUrl: cfg.baseUrl,
+  });
+});
+
+registerLLMProvider('mistral', (cfg) =>
+  new MistralProvider({
+    model: cfg.model,
+    apiKey: cfg.apiKey,
+    baseUrl: cfg.baseUrl,
+  })
+);
+
+registerEmbeddingProvider('mistral', (cfg) =>
+  new MistralEmbeddingProvider({
+    model: cfg.model,
+    dimension: cfg.dimension,
+    apiKey: cfg.apiKey,
+    baseUrl: cfg.baseUrl,
+  })
 );
 
 export class ProviderRegistry {
