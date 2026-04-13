@@ -22,6 +22,7 @@ import { setupEmbeddedLLMHandlers } from './handlers/embedded-llm-handlers.js';
 import { setupSimilarityHandlers } from './handlers/similarity-handlers.js';
 import { setupTropyHandlers } from './handlers/tropy-handlers.js';
 import { setupSlidesHandlers } from './handlers/slides-handlers.js';
+import { setupFusionHandlers } from './handlers/fusion-handlers.js';
 
 /**
  * Setup all IPC handlers
@@ -64,6 +65,7 @@ export function setupIPCHandlers() {
   setupSimilarityHandlers();
   setupTropyHandlers();
   setupSlidesHandlers();
+  setupFusionHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
 }

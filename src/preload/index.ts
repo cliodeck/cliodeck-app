@@ -643,6 +643,21 @@ const api = {
       return () => ipcRenderer.removeListener('similarity:progress', listener);
     },
   },
+
+  // Fusion (phase 3.0): hints, recipes, vault status.
+  fusion: {
+    hints: {
+      read: () => ipcRenderer.invoke('fusion:hints:read'),
+      write: (markdown: string) =>
+        ipcRenderer.invoke('fusion:hints:write', markdown),
+    },
+    recipes: {
+      list: () => ipcRenderer.invoke('fusion:recipes:list'),
+    },
+    vault: {
+      status: () => ipcRenderer.invoke('fusion:vault:status'),
+    },
+  },
 };
 
 // Exposer l'API au renderer via window.electron

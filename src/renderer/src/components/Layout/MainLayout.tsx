@@ -6,6 +6,9 @@ import { BibliographyPanel } from '../Bibliography/BibliographyPanel';
 import { ChatInterface } from '../Chat/ChatInterface';
 import { ProjectPanel } from '../Project/ProjectPanel';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
+import { WorkspaceModeBar } from './WorkspaceModeBar';
+import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
+import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
 
@@ -48,6 +51,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   centerPanel,
 }) => {
   const { t } = useTranslation('common');
+  const workspaceMode = useWorkspaceModeStore((s) => s.active);
   const [leftView, setLeftView] = useState<LeftPanelView>('projects');
   const [rightView, setRightView] = useState<RightPanelView>('chat');
   const [showExportModal, setShowExportModal] = useState(false);
@@ -138,6 +142,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         <HelpCircle size={12} />
       </button>
 
+      {/* Workspace mode bar (fusion phase 3.1a) */}
+      <WorkspaceModeBar />
+
       {/* Main 3-panel layout */}
       <div className="main-content">
         <PanelGroup direction="horizontal">
@@ -201,11 +208,15 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 
           <PanelResizeHandle className="resize-handle" />
 
-          {/* Center Panel - Markdown Editor */}
+          {/* Center Panel - Markdown Editor (or Brainstorm scaffold) */}
           <Panel defaultSize={50} minSize={30}>
             <div className="panel center-panel">
-              {centerPanel || (
-                <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
+              {workspaceMode === 'brainstorm' ? (
+                <BrainstormPanel />
+              ) : (
+                centerPanel || (
+                  <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
+                )
               )}
             </div>
           </Panel>
