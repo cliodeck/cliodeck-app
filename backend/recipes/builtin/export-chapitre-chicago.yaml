@@ -1,0 +1,36 @@
+name: export-chapitre-chicago
+version: 0.1.0
+description: >
+  Exporte un chapitre rédigé dans ClioDeck au format PDF via Pandoc, style
+  Chicago Author-Date, avec bibliographie Zotero injectée.
+inputs:
+  document_id:
+    type: string
+    required: true
+    description: Identifiant du document ClioDeck à exporter.
+  bibliography_collection:
+    type: string
+    required: false
+    description: Clé de collection Zotero pour la bibliographie.
+  output_path:
+    type: path
+    required: true
+    description: Chemin du PDF de sortie.
+steps:
+  - id: fetch_bibliography
+    kind: search
+    with:
+      source: zotero
+      collection: "{{ inputs.bibliography_collection }}"
+      format: bibtex
+  - id: render
+    kind: export
+    with:
+      document: "{{ inputs.document_id }}"
+      format: pdf
+      engine: pandoc
+      style: chicago-author-date
+      bibliography: "{{ fetch_bibliography }}"
+      output: "{{ inputs.output_path }}"
+outputs:
+  path: "{{ render }}"

@@ -1,0 +1,40 @@
+name: revue-zotero
+version: 0.1.0
+description: >
+  Revue critique d'un dossier Zotero tagué : liste les items, brainstorme
+  les angles d'analyse, produit une note de synthèse.
+inputs:
+  collection:
+    type: string
+    required: true
+    description: Clé de collection Zotero à analyser.
+  tag:
+    type: string
+    required: false
+    description: Tag Zotero à filtrer (optionnel).
+steps:
+  - id: search_items
+    kind: search
+    with:
+      source: zotero
+      collection: "{{ inputs.collection }}"
+      tag: "{{ inputs.tag }}"
+  - id: brainstorm_angles
+    kind: brainstorm
+    with:
+      prompt: |
+        À partir du corpus Zotero suivant, propose 5 angles critiques
+        d'analyse pertinents pour un historien. Cite les items par leur
+        clé Zotero.
+
+        Items: {{ search_items }}
+      maxTokens: 800
+  - id: synthesis
+    kind: write
+    with:
+      prompt: |
+        Rédige une note de synthèse (400 mots) articulant les angles suivants :
+        {{ brainstorm_angles }}
+      maxTokens: 1200
+outputs:
+  synthesis: "{{ synthesis }}"
