@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
+    "test:provider-parity": "vitest run backend/core/llm/providers/__tests__/parity.test.ts",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
