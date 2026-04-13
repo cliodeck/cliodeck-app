@@ -8,16 +8,29 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, X, Trash2 } from 'lucide-react';
-import { useBrainstormChatStore } from '../../stores/brainstormChatStore';
+import { Send, X, Trash2, ArrowRight } from 'lucide-react';
+import { useBrainstormChatStore, type BrainstormMessage } from '../../stores/brainstormChatStore';
 import { useBrainstormChat } from './useBrainstormChat';
+import { useEditorStore } from '../../stores/editorStore';
+import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { appendDraftToContent, messageToDraft } from './messageToDraft';
 import './BrainstormChat.css';
 
 export const BrainstormChat: React.FC = () => {
   const messages = useBrainstormChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const [draft, setDraft] = useState('');
+  const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
+
+  const sendToWrite = (m: BrainstormMessage): void => {
+    const editor = useEditorStore.getState();
+    const block = messageToDraft(m);
+    editor.setContent(appendDraftToContent(editor.content, block));
+    setSentToWriteId(m.id);
+    setWorkspaceMode('write');
+  };
 
   useEffect(() => {
     const el = listRef.current;
@@ -70,6 +83,19 @@ export const BrainstormChat: React.FC = () => {
             </div>
             {m.error && (
               <div className="brainstorm-chat__error">{m.error}</div>
+            )}
+            {m.role === 'assistant' && !m.pending && !m.error && m.content && (
+              <div className="brainstorm-chat__msg-actions">
+                <button
+                  type="button"
+                  className="brainstorm-chat__btn brainstorm-chat__btn--ghost brainstorm-chat__btn--small"
+                  onClick={() => sendToWrite(m)}
+                  title="Insère ce tour comme brouillon dans Write"
+                >
+                  <ArrowRight size={12} />{' '}
+                  {sentToWriteId === m.id ? 'Envoyé' : 'Envoyer vers Write'}
+                </button>
+              </div>
             )}
           </article>
         ))}

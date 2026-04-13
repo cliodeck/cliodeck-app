@@ -186,3 +186,15 @@
 .brainstorm-chat__btn--ghost:hover {
   background: var(--bg-hover, #f3f4f6);
 }
+
+.brainstorm-chat__btn--small {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.brainstorm-chat__msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
