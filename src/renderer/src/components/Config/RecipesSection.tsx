@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, RefreshCw } from 'lucide-react';
+import { BookOpen, Play, RefreshCw } from 'lucide-react';
+import { RecipeRunModal } from './RecipeRunModal';
 
 interface RecipeSummary {
   fileName: string;
@@ -30,6 +31,10 @@ export const RecipesSection: React.FC = () => {
   const [user, setUser] = useState<RecipeSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [runTarget, setRunTarget] = useState<{
+    scope: 'builtin' | 'user';
+    fileName: string;
+  } | null>(null);
 
   const refresh = async (): Promise<void> => {
     const r = api();
@@ -55,6 +60,9 @@ export const RecipesSection: React.FC = () => {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const scopeOf = (items: RecipeSummary[]): 'builtin' | 'user' =>
+    items === builtin ? 'builtin' : 'user';
 
   const renderGroup = (title: string, items: RecipeSummary[]): React.ReactNode => (
     <div style={{ marginBottom: 12 }}>
@@ -93,9 +101,20 @@ export const RecipesSection: React.FC = () => {
               {r.description && (
                 <p style={{ margin: '4px 0 0', fontSize: 12, opacity: 0.8 }}>{r.description}</p>
               )}
-              <p style={{ margin: '4px 0 0', fontSize: 11, opacity: 0.6 }}>
-                <code>{r.fileName}</code> · {r.steps} étapes
-              </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>
+                  <code>{r.fileName}</code> · {r.steps} étapes
+                </p>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setRunTarget({ scope: scopeOf(items), fileName: r.fileName })}
+                  title="Lancer cette recette"
+                  style={{ padding: '2px 8px', fontSize: 12 }}
+                >
+                  <Play size={12} strokeWidth={1} /> Lancer
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -111,8 +130,7 @@ export const RecipesSection: React.FC = () => {
       <p className="config-hint">
         Recettes YAML disponibles — <em>builtin</em> livrées avec l'app,{' '}
         <em>user</em> placées dans <code>.cliodeck/v2/recipes/</code> du projet.
-        L'exécution depuis l'UI arrivera dans une vague suivante ; pour l'instant
-        utilise <code>cliodeck recipe run &lt;nom&gt;</code> en CLI.
+        Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.
       </p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button
@@ -130,6 +148,13 @@ export const RecipesSection: React.FC = () => {
       )}
       {renderGroup('Builtin', builtin)}
       {renderGroup('User', user)}
+      {runTarget && (
+        <RecipeRunModal
+          scope={runTarget.scope}
+          fileName={runTarget.fileName}
+          onClose={() => setRunTarget(null)}
+        />
+      )}
     </section>
   );
 };

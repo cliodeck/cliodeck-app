@@ -86,6 +86,8 @@ export interface RunnerOptions {
   registry: ProviderRegistry;
   workspaceRoot: string;
   stepHandlers?: Partial<Record<StepKind, StepHandler>>;
+  /** Invoked for every RunEvent as it is emitted (for UI streaming). */
+  onEvent?: (event: RunEvent) => void;
 }
 
 function now(): string {
@@ -170,11 +172,13 @@ export class RecipeRunner {
   private readonly registry: ProviderRegistry;
   private readonly workspaceRoot: string;
   private readonly handlers: Record<StepKind, StepHandler>;
+  private readonly onEvent?: (event: RunEvent) => void;
 
   constructor(opts: RunnerOptions) {
     this.registry = opts.registry;
     this.workspaceRoot = opts.workspaceRoot;
     this.handlers = { ...defaultHandlers, ...opts.stepHandlers };
+    this.onEvent = opts.onEvent;
   }
 
   async run(
@@ -192,6 +196,11 @@ export class RecipeRunner {
 
     const emit = (e: RunEvent): void => {
       events.push(e);
+      try {
+        this.onEvent?.(e);
+      } catch {
+        // Subscriber threw — ignore to avoid breaking the run.
+      }
     };
 
     emit({ kind: 'run_started', at: now(), recipe: recipe.name, inputs });

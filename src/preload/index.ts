@@ -653,6 +653,22 @@ const api = {
     },
     recipes: {
       list: () => ipcRenderer.invoke('fusion:recipes:list'),
+      read: (scope: 'builtin' | 'user', fileName: string) =>
+        ipcRenderer.invoke('fusion:recipes:read', scope, fileName),
+      run: (
+        scope: 'builtin' | 'user',
+        fileName: string,
+        inputs: Record<string, unknown>
+      ) => ipcRenderer.invoke('fusion:recipes:run', scope, fileName, inputs),
+      onEvent: (
+        callback: (env: { runId: string; event: unknown }) => void
+      ) => {
+        const listener = (_e: unknown, env: unknown): void =>
+          callback(env as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:recipes:event', listener);
+        return () =>
+          ipcRenderer.removeListener('fusion:recipes:event', listener);
+      },
     },
     vault: {
       status: () => ipcRenderer.invoke('fusion:vault:status'),

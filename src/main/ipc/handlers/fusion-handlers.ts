@@ -32,7 +32,8 @@ import {
   writeWorkspaceConfig,
   type WorkspaceConfig,
 } from '../../../../backend/core/workspace/config.js';
-import { parseRecipe } from '../../../../backend/recipes/schema.js';
+import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js';
+import { RecipeRunner } from '../../../../backend/recipes/runner.js';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
 import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import {
@@ -121,6 +122,100 @@ export function setupFusionHandlers(): void {
       return errorResponse(e as Error);
     }
   });
+
+  ipcMain.handle(
+    'fusion:recipes:read',
+    async (_e, rawScope: unknown, rawFileName: unknown) => {
+      if (rawScope !== 'builtin' && rawScope !== 'user') {
+        return errorResponse('scope must be "builtin" or "user"');
+      }
+      if (typeof rawFileName !== 'string' || !/^[\w.-]+\.ya?ml$/i.test(rawFileName)) {
+        return errorResponse('invalid recipe fileName');
+      }
+      const baseDir =
+        rawScope === 'builtin'
+          ? BUILTIN_RECIPES_DIR
+          : (() => {
+              const root = projectManager.getCurrentProjectPath();
+              return root ? v2Paths(root).recipesDir : null;
+            })();
+      if (!baseDir) return noProject();
+      try {
+        const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
+        const recipe = parseRecipe(raw);
+        return successResponse({ recipe });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    'fusion:recipes:run',
+    async (
+      event,
+      rawScope: unknown,
+      rawFileName: unknown,
+      rawInputs: unknown
+    ) => {
+      const root = projectManager.getCurrentProjectPath();
+      if (!root) return noProject();
+      if (rawScope !== 'builtin' && rawScope !== 'user') {
+        return errorResponse('scope must be "builtin" or "user"');
+      }
+      if (typeof rawFileName !== 'string' || !/^[\w.-]+\.ya?ml$/i.test(rawFileName)) {
+        return errorResponse('invalid recipe fileName');
+      }
+      const inputs = (rawInputs ?? {}) as Record<string, unknown>;
+      const baseDir =
+        rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : v2Paths(root).recipesDir;
+      let recipe: Recipe;
+      try {
+        const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
+        recipe = parseRecipe(raw);
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+
+      const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const cfg = configManager.getLLMConfig();
+      let registry;
+      try {
+        registry = createRegistryFromClioDeckConfig(cfg);
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+
+      const runner = new RecipeRunner({
+        registry,
+        workspaceRoot: root,
+        onEvent: (e) => {
+          try {
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('fusion:recipes:event', { runId, event: e });
+            }
+          } catch {
+            // Renderer gone — keep running regardless.
+          }
+        },
+      });
+
+      try {
+        const result = await runner.run(recipe, inputs);
+        return successResponse({
+          runId,
+          ok: result.ok,
+          outputs: result.outputs,
+          logPath: result.logPath,
+          failedStep: result.failedStep,
+        });
+      } catch (e) {
+        return errorResponse(e as Error);
+      } finally {
+        await registry.dispose().catch(() => undefined);
+      }
+    }
+  );
 
   // MARK: - chat (streaming)
 
