@@ -670,6 +670,26 @@ const api = {
           ipcRenderer.removeListener('fusion:recipes:event', listener);
       },
     },
+    mcp: {
+      list: () => ipcRenderer.invoke('fusion:mcp:list'),
+      add: (client: {
+        name: string;
+        transport: 'stdio' | 'sse';
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+        url?: string;
+      }) => ipcRenderer.invoke('fusion:mcp:add', client),
+      remove: (name: string) => ipcRenderer.invoke('fusion:mcp:remove', name),
+      restart: (name: string) => ipcRenderer.invoke('fusion:mcp:restart', name),
+      callTool: (name: string, tool: string, args: Record<string, unknown>) =>
+        ipcRenderer.invoke('fusion:mcp:call-tool', name, tool, args),
+      onEvent: (callback: (event: unknown) => void) => {
+        const listener = (_e: unknown, ev: unknown): void => callback(ev);
+        ipcRenderer.on('fusion:mcp:event', listener);
+        return () => ipcRenderer.removeListener('fusion:mcp:event', listener);
+      },
+    },
     vault: {
       status: () => ipcRenderer.invoke('fusion:vault:status'),
       setPath: (vaultPath: string) =>

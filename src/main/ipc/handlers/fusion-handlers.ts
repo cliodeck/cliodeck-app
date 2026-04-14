@@ -35,6 +35,8 @@ import {
 import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js';
 import { RecipeRunner } from '../../../../backend/recipes/runner.js';
 import { recipeStepHandlers } from '../../services/recipe-step-handlers.js';
+import { mcpClientsService } from '../../services/mcp-clients-service.js';
+import { BrowserWindow } from 'electron';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
 import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import {
@@ -252,6 +254,108 @@ export function setupFusionHandlers(): void {
       return successResponse({ cancelled });
     }
   );
+
+  // MARK: - MCP clients
+
+  ipcMain.handle('fusion:mcp:list', async () => {
+    return successResponse({ clients: mcpClientsService.list() });
+  });
+
+  ipcMain.handle('fusion:mcp:add', async (_e, rawClient: unknown) => {
+    if (!rawClient || typeof rawClient !== 'object') {
+      return errorResponse('client config must be an object');
+    }
+    const c = rawClient as {
+      name?: unknown;
+      transport?: unknown;
+      command?: unknown;
+      args?: unknown;
+      env?: unknown;
+      url?: unknown;
+    };
+    if (typeof c.name !== 'string' || !c.name.trim()) {
+      return errorResponse('name must be a non-empty string');
+    }
+    if (c.transport !== 'stdio' && c.transport !== 'sse') {
+      return errorResponse('transport must be "stdio" or "sse"');
+    }
+    try {
+      const instance = await mcpClientsService.addClient({
+        name: c.name,
+        transport: c.transport,
+        command: typeof c.command === 'string' ? c.command : undefined,
+        args: Array.isArray(c.args)
+          ? c.args.filter((a): a is string => typeof a === 'string')
+          : undefined,
+        env:
+          c.env && typeof c.env === 'object'
+            ? (c.env as Record<string, string>)
+            : undefined,
+        url: typeof c.url === 'string' ? c.url : undefined,
+      });
+      return successResponse({ instance });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle('fusion:mcp:remove', async (_e, rawName: unknown) => {
+    if (typeof rawName !== 'string') {
+      return errorResponse('name must be a string');
+    }
+    try {
+      await mcpClientsService.removeClient(rawName);
+      return successResponse({});
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle('fusion:mcp:restart', async (_e, rawName: unknown) => {
+    if (typeof rawName !== 'string') {
+      return errorResponse('name must be a string');
+    }
+    try {
+      const instance = await mcpClientsService.restart(rawName);
+      return successResponse({ instance });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle(
+    'fusion:mcp:call-tool',
+    async (
+      _e,
+      rawName: unknown,
+      rawTool: unknown,
+      rawArgs: unknown
+    ) => {
+      if (typeof rawName !== 'string' || typeof rawTool !== 'string') {
+        return errorResponse('name and tool must be strings');
+      }
+      const args =
+        rawArgs && typeof rawArgs === 'object'
+          ? (rawArgs as Record<string, unknown>)
+          : {};
+      const res = await mcpClientsService.callTool(rawName, rawTool, args);
+      return successResponse(res);
+    }
+  );
+
+  // Broadcast manager events to every renderer so all open windows stay
+  // in sync when a client changes state.
+  mcpClientsService.subscribe((event) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        try {
+          w.webContents.send('fusion:mcp:event', event);
+        } catch {
+          // ignore per-window send failure
+        }
+      }
+    }
+  });
 
   // MARK: - vault status (read-only — indexing/search land with chat IPC)
 
