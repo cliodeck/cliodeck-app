@@ -35,6 +35,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
     "test:provider-parity": "vitest run backend/core/llm/providers/__tests__/parity.test.ts",
+    "cliodeck": "node --experimental-strip-types scripts/cliodeck-cli.ts",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
