@@ -1,5 +1,9 @@
 import type { OllamaClient } from '../llm/OllamaClient';
 import type { PDFMetadata } from '../../types/pdf-document';
+import type {
+  EmbeddingProvider,
+  LLMProvider,
+} from '../llm/providers/base';
 
 export interface SummarizerConfig {
   enabled: boolean;
@@ -19,9 +23,28 @@ interface Sentence {
  * - Extractif : sélection de phrases importantes (sans dépendance externe)
  * - Abstractif : génération via LLM (Ollama)
  */
+/**
+ * Optional registry-driven providers (fusion step 1.4b).
+ *
+ * DocumentSummarizer historically took an `OllamaClient` (RAG-coupled
+ * with timeouts, error classification, chunk averaging). The fusion
+ * plan calls for routing through the typed `LLMProvider` /
+ * `EmbeddingProvider` instead. This overload keeps the legacy path
+ * working (existing call sites unchanged) while new callers — tests,
+ * CLI, recipe runners — can pass providers directly. When present,
+ * providers win over `ollamaClient`; no call site has to migrate in a
+ * single step.
+ */
+export interface SummarizerProviders {
+  llm?: LLMProvider;
+  embedding?: EmbeddingProvider;
+}
+
 export class DocumentSummarizer {
   private config: SummarizerConfig;
   private ollamaClient?: OllamaClient;
+  private llm?: LLMProvider;
+  private embeddingProvider?: EmbeddingProvider;
 
   // Mots-clés académiques importants (FR + EN)
   private readonly academicKeywords = [
@@ -140,10 +163,28 @@ export class DocumentSummarizer {
 
   private embeddingFunction?: (text: string) => Promise<Float32Array>;
 
-  constructor(config: SummarizerConfig, ollamaClient?: OllamaClient, embeddingFunction?: (text: string) => Promise<Float32Array>) {
+  constructor(
+    config: SummarizerConfig,
+    ollamaClient?: OllamaClient,
+    embeddingFunction?: (text: string) => Promise<Float32Array>,
+    providers?: SummarizerProviders
+  ) {
     this.config = config;
     this.ollamaClient = ollamaClient;
     this.embeddingFunction = embeddingFunction;
+    this.llm = providers?.llm;
+    this.embeddingProvider = providers?.embedding;
+  }
+
+  /** Test/CLI hook — swap in typed providers after construction. */
+  setProviders(providers: SummarizerProviders): void {
+    if (providers.llm) this.llm = providers.llm;
+    if (providers.embedding) this.embeddingProvider = providers.embedding;
+  }
+
+  /** Returns true when at least one LLM path is reachable. */
+  hasLLM(): boolean {
+    return Boolean(this.llm || this.ollamaClient);
   }
 
   /**
@@ -159,13 +200,14 @@ export class DocumentSummarizer {
 
     if (this.config.method === 'extractive') {
       return this.generateExtractiveSummary(fullText);
-    } else {
-      if (!this.ollamaClient) {
-        console.warn('⚠️ OllamaClient required for abstractive summarization, falling back to extractive');
-        return this.generateExtractiveSummary(fullText);
-      }
-      return this.generateAbstractiveSummary(fullText, metadata);
     }
+    if (!this.hasLLM()) {
+      console.warn(
+        '⚠️ No LLM configured for abstractive summarization, falling back to extractive'
+      );
+      return this.generateExtractiveSummary(fullText);
+    }
+    return this.generateAbstractiveSummary(fullText, metadata);
   }
 
   /**
@@ -177,12 +219,16 @@ export class DocumentSummarizer {
     if (this.embeddingFunction) {
       return this.embeddingFunction(summary);
     }
-
-    if (!this.ollamaClient) {
-      throw new Error('OllamaClient or embeddingFunction required for embedding generation');
+    if (this.embeddingProvider) {
+      const [vec] = await this.embeddingProvider.embed([summary]);
+      return Float32Array.from(vec);
     }
-
-    return this.ollamaClient.generateEmbedding(summary);
+    if (this.ollamaClient) {
+      return this.ollamaClient.generateEmbedding(summary);
+    }
+    throw new Error(
+      'No embedding path configured: set embeddingFunction, embeddingProvider, or ollamaClient'
+    );
   }
 
   // MARK: - Extractive Summarization
@@ -349,8 +395,8 @@ export class DocumentSummarizer {
     fullText: string,
     metadata?: PDFMetadata
   ): Promise<string> {
-    if (!this.ollamaClient) {
-      throw new Error('OllamaClient not configured');
+    if (!this.hasLLM()) {
+      throw new Error('No LLM configured (neither providers.llm nor ollamaClient)');
     }
 
     // Limiter la taille du texte envoyé au LLM (contexte max)
@@ -362,8 +408,12 @@ export class DocumentSummarizer {
     const prompt = this.buildAbstractiveSummaryPrompt(truncatedText, metadata);
 
     try {
-      // Générer le résumé via Ollama (sans contexte RAG, juste le prompt)
-      const summary = await this.ollamaClient.generateResponse(prompt, []);
+      // Prefer the typed LLMProvider when available (fusion 1.4b migration).
+      // Fall back to the legacy OllamaClient path so existing call sites
+      // keep their RAG-specific error classification / timeouts.
+      const summary = this.llm
+        ? await this.llm.complete(prompt)
+        : await this.ollamaClient!.generateResponse(prompt, []);
 
       return summary.trim();
     } catch (error) {
