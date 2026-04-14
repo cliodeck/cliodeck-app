@@ -35,7 +35,7 @@ interface RAGSearchResult {
   document: RAGDocumentInfo;
   chunk: RAGChunkInfo;
   similarity: number;
-  sourceType?: 'primary' | 'secondary';
+  sourceType?: 'primary' | 'secondary' | 'vault';
   isRelatedDoc?: boolean;
   source?: unknown;
 }
@@ -44,7 +44,7 @@ interface RAGSearchResult {
 interface ExplanationDocumentEntry {
   title: string;
   similarity: number;
-  sourceType: 'primary' | 'secondary';
+  sourceType: 'primary' | 'secondary' | 'vault';
   chunkCount: number;
 }
 
@@ -103,7 +103,7 @@ export interface RAGExplanationContext {
     documents: Array<{
       title: string;
       similarity: number;
-      sourceType: 'primary' | 'secondary';
+      sourceType: 'primary' | 'secondary' | 'vault';
       chunkCount: number;
     }>;
     boosting?: {

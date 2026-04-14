@@ -206,6 +206,7 @@ class PDFService {
       retrievalService.configure({
         vectorStore: this.vectorStore,
         llmProviderManager: this.llmProviderManager,
+        workspaceRoot: projectPath,
       });
 
       console.log('✅ PDF Service initialized for project');

@@ -127,6 +127,7 @@ class FusionChatService {
           const hits = await retrievalService.search({
             query: lastUser.content,
             sourceType: 'both',
+            includeVault: true,
           });
           if (hits.length > 0) {
             messages = [
@@ -194,7 +195,12 @@ function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
   ];
   hits.forEach((h, i) => {
     const title = h.document.title || h.document.id || 'Sans titre';
-    const kind = h.sourceType === 'primary' ? 'archive' : 'bibliographie';
+    const kind =
+      h.sourceType === 'primary'
+        ? 'archive'
+        : h.sourceType === 'vault'
+          ? 'note'
+          : 'bibliographie';
     const snippet = h.chunk.content.replace(/\s+/g, ' ').slice(0, 800);
     lines.push(`[${i + 1}] (${kind}) ${title}`);
     lines.push(snippet);

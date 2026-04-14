@@ -12,6 +12,7 @@
  * `fusion-chat-service` to consume this service directly.
  */
 
+import fs from 'fs';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
 import { LLMProviderManager } from '../../../backend/core/llm/LLMProviderManager.js';
@@ -23,6 +24,8 @@ import type {
   PrimarySourceSearchResult,
   PrimarySourceDocument,
 } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import { ObsidianVaultStore } from '../../../backend/integrations/obsidian/ObsidianVaultStore.js';
+import { obsidianStorePath } from '../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
 
@@ -50,9 +53,32 @@ export interface PrimaryMappedSearchResult {
   sourceType: 'primary';
 }
 
+export interface VaultMappedSearchResult {
+  chunk: {
+    id: string;
+    content: string;
+    documentId: string | undefined;
+    chunkIndex: number;
+  };
+  document: {
+    id: string | undefined;
+    title: string | undefined;
+    author: null;
+    bibtexKey: null;
+  };
+  source: {
+    kind: 'obsidian-note';
+    relativePath: string;
+    noteId: string;
+  };
+  similarity: number;
+  sourceType: 'vault';
+}
+
 export type MultiSourceSearchResult =
   | SecondarySearchResult
-  | PrimaryMappedSearchResult;
+  | PrimaryMappedSearchResult
+  | VaultMappedSearchResult;
 
 export interface RetrievalQuery {
   query: string;
@@ -61,6 +87,12 @@ export interface RetrievalQuery {
   sourceType?: SourceType;
   documentIds?: string[];
   collectionKeys?: string[];
+  /**
+   * When true, also search the workspace Obsidian vault (if indexed).
+   * Legacy callers (chat-service) omit this and keep PDF+Tropy-only
+   * behaviour; Brainstorm chat opts in.
+   */
+  includeVault?: boolean;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -100,6 +132,8 @@ class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   private llmProviderManager: LLMProviderManager | null = null;
   private queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
+  private workspaceRoot: string | null = null;
+  private vaultStore: ObsidianVaultStore | null = null;
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
@@ -109,15 +143,39 @@ class RetrievalService {
   configure(deps: {
     vectorStore: VectorStore | EnhancedVectorStore;
     llmProviderManager: LLMProviderManager;
+    workspaceRoot?: string;
   }): void {
     this.vectorStore = deps.vectorStore;
     this.llmProviderManager = deps.llmProviderManager;
+    this.workspaceRoot = deps.workspaceRoot ?? null;
+    // Invalidate any previously opened vault store — the project may have
+    // changed underneath us.
+    this.vaultStore?.close();
+    this.vaultStore = null;
   }
 
   clear(): void {
     this.vectorStore = null;
     this.llmProviderManager = null;
     this.queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
+    this.workspaceRoot = null;
+    this.vaultStore?.close();
+    this.vaultStore = null;
+  }
+
+  private getVaultStore(): ObsidianVaultStore | null {
+    if (this.vaultStore) return this.vaultStore;
+    if (!this.workspaceRoot) return null;
+    const dbPath = obsidianStorePath(this.workspaceRoot);
+    if (!fs.existsSync(dbPath)) return null;
+    try {
+      // `dimension` is only enforced on insert; for search a sentinel is fine.
+      this.vaultStore = new ObsidianVaultStore({ dbPath, dimension: 1 });
+      return this.vaultStore;
+    } catch (e) {
+      console.warn('[retrieval] failed to open Obsidian vault store:', e);
+      return null;
+    }
   }
 
   private ensureReady(): void {
@@ -210,6 +268,23 @@ class RetrievalService {
       }
     }
 
+    if (q.includeVault) {
+      try {
+        const vaultResults = await this.searchVault(q.query, {
+          topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
+        });
+        allSourceResults.push(...vaultResults);
+        console.log(
+          `📓 [PDF-SERVICE] Vault (Obsidian): ${vaultResults.length} results`
+        );
+      } catch (error: unknown) {
+        console.warn(
+          '⚠️ [PDF-SERVICE] Vault search failed (not indexed?):',
+          error
+        );
+      }
+    }
+
     const sortedResults = allSourceResults
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
@@ -222,6 +297,39 @@ class RetrievalService {
     );
 
     return sortedResults;
+  }
+
+  private async searchVault(
+    query: string,
+    options: { topK: number }
+  ): Promise<VaultMappedSearchResult[]> {
+    const store = this.getVaultStore();
+    if (!store) return [];
+    const embedding = await this.getQueryEmbedding(query);
+    const hits = store.search(embedding, query, options.topK);
+    return hits.map(
+      (h): VaultMappedSearchResult => ({
+        chunk: {
+          id: h.chunk.id,
+          content: h.chunk.content,
+          documentId: h.chunk.noteId,
+          chunkIndex: h.chunk.chunkIndex,
+        },
+        document: {
+          id: h.note.id,
+          title: h.note.title || h.note.relativePath,
+          author: null,
+          bibtexKey: null,
+        },
+        source: {
+          kind: 'obsidian-note',
+          relativePath: h.note.relativePath,
+          noteId: h.note.id,
+        },
+        similarity: h.score,
+        sourceType: 'vault',
+      })
+    );
   }
 
   private async searchSecondary(
