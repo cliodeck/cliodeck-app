@@ -105,6 +105,25 @@ class PDFService {
   private ollamaClient: OllamaClient | null = null;
   private llmProviderManager: LLMProviderManager | null = null;
   private currentProjectPath: string | null = null;
+  /**
+   * Optional typed embedding provider (fusion 1.4i). When set, the
+   * embedding function passed to PDFIndexer routes through it instead of
+   * `llmProviderManager.generateEmbedding`. Callers wire this to the
+   * workspace's `EmbeddingProvider` from the phase 1.3 registry so
+   * indexing uses the configured backend uniformly with the rest of the
+   * app. Legacy path preserved for existing init flows.
+   */
+  private embeddingProvider:
+    | import('../../../backend/core/llm/providers/base').EmbeddingProvider
+    | null = null;
+
+  setEmbeddingProvider(
+    p:
+      | import('../../../backend/core/llm/providers/base').EmbeddingProvider
+      | null
+  ): void {
+    this.embeddingProvider = p;
+  }
 
   // Query embedding cache for faster repeated searches
   private queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
@@ -232,8 +251,15 @@ class PDFService {
         customChunkingEnabled: ragConfig.customChunkingEnabled ?? false,
       });
 
-      // Créer la fonction d'embedding qui route via LLMProviderManager
-      const embeddingFn = (text: string) => this.llmProviderManager!.generateEmbedding(text);
+      // Créer la fonction d'embedding. Fusion 1.4i: when an
+      // EmbeddingProvider is wired, use it; else fall back to the
+      // legacy LLMProviderManager path.
+      const embeddingFn = this.embeddingProvider
+        ? async (text: string): Promise<Float32Array> => {
+            const [vec] = await this.embeddingProvider!.embed([text]);
+            return Float32Array.from(vec);
+          }
+        : (text: string) => this.llmProviderManager!.generateEmbedding(text);
 
       // Initialiser PDFIndexer avec configuration complète du RAG
       this.pdfIndexer = new PDFIndexer(

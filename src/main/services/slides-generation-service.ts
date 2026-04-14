@@ -136,6 +136,24 @@ function normaliseToRevealFormat(raw: string): string {
 
 export class SlidesGenerationService {
   private abortController: AbortController | null = null;
+  /**
+   * Optional typed LLM provider (fusion 1.4f). When set, `generateSlides`
+   * streams through `llm.chat()` instead of
+   * `LLMProviderManager.generateWithoutSources`. Callers wire this when
+   * they want slides under a non-Ollama backend (Anthropic/Mistral/etc.);
+   * legacy path preserved for existing IPC callers.
+   */
+  private llm:
+    | import('../../../backend/core/llm/providers/base').LLMProvider
+    | null = null;
+
+  setLLMProvider(
+    llm:
+      | import('../../../backend/core/llm/providers/base').LLMProvider
+      | null
+  ): void {
+    this.llm = llm;
+  }
 
   /**
    * Génère des slides à partir d'un texte source.
@@ -148,9 +166,9 @@ export class SlidesGenerationService {
     window: BrowserWindow,
     citations?: Array<{ id: string; author: string; title: string; year: string }>
   ): Promise<string> {
-    const llmManager = pdfService.getLLMProviderManager();
+    const llmManager = this.llm ? null : pdfService.getLLMProviderManager();
 
-    if (!llmManager) {
+    if (!this.llm && !llmManager) {
       throw new Error('LLM non initialisé. Ouvrez un projet avant de générer des slides.');
     }
 
@@ -196,20 +214,44 @@ export class SlidesGenerationService {
     try {
       logger.info('slides', 'generateSlides:start', { textLength: sourceText.length, language });
 
-      const stream = llmManager.generateWithoutSources(prompt, [], {
-        systemPrompt,
-        generationOptions: {
-          temperature: 0.3,
-        },
-      });
-
-      for await (const chunk of stream) {
-        if (signal.aborted) {
-          logger.info('slides', 'generateSlides:cancelled');
-          break;
+      if (this.llm) {
+        // Fusion 1.4f: stream via the typed provider. Build a single
+        // system+user turn; preserve the same cancellation + per-token
+        // forwarding semantics as the legacy path.
+        const iter = this.llm.chat(
+          [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt },
+          ],
+          { temperature: 0.3, signal }
+        );
+        for await (const chunk of iter) {
+          if (signal.aborted) {
+            logger.info('slides', 'generateSlides:cancelled');
+            break;
+          }
+          if (chunk.delta) {
+            fullResponse += chunk.delta;
+            window.webContents.send('slides:stream', chunk.delta);
+          }
+          if (chunk.done) break;
         }
-        fullResponse += chunk;
-        window.webContents.send('slides:stream', chunk);
+      } else {
+        const stream = llmManager!.generateWithoutSources(prompt, [], {
+          systemPrompt,
+          generationOptions: {
+            temperature: 0.3,
+          },
+        });
+
+        for await (const chunk of stream) {
+          if (signal.aborted) {
+            logger.info('slides', 'generateSlides:cancelled');
+            break;
+          }
+          fullResponse += chunk;
+          window.webContents.send('slides:stream', chunk);
+        }
       }
 
       // Post-process: normalise LLM output to reveal.js format

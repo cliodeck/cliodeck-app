@@ -101,6 +101,21 @@ const DEFAULT_OPTIONS: SimilarityOptions = {
 
 class SimilarityService {
   private abortController: AbortController | null = null;
+  /**
+   * Optional typed LLM provider (fusion 1.4e). When set, `rerankWithLLM`
+   * routes through it instead of `pdfService.getOllamaClient()`. Callers
+   * (IPC handlers wiring the workspace registry, tests) set this before
+   * invoking analysis; falls back to legacy Ollama otherwise.
+   */
+  private llm: import('../../../backend/core/llm/providers/base').LLMProvider | null = null;
+
+  setLLMProvider(
+    llm:
+      | import('../../../backend/core/llm/providers/base').LLMProvider
+      | null
+  ): void {
+    this.llm = llm;
+  }
 
   /**
    * Analyze a document and find similar PDFs for each segment
@@ -671,9 +686,11 @@ class SimilarityService {
     query: string,
     candidates: PDFRecommendation[]
   ): Promise<PDFRecommendation[]> {
-    const ollamaClient = pdfService.getOllamaClient();
-    if (!ollamaClient) {
-      throw new Error('Ollama client not available');
+    // Fusion 1.4e: prefer the typed provider when wired; fall back to
+    // the legacy OllamaClient path so existing call sites are unchanged.
+    const ollamaClient = this.llm ? null : pdfService.getOllamaClient();
+    if (!this.llm && !ollamaClient) {
+      throw new Error('No LLM path available (neither provider nor OllamaClient)');
     }
 
     // Limit candidates to avoid context length issues
@@ -710,7 +727,9 @@ Your ranking:`;
     const startTime = Date.now();
 
     // Use generateResponse (non-streaming) for efficiency
-    const response = await ollamaClient.generateResponse(prompt, []);
+    const response = this.llm
+      ? await this.llm.complete(prompt)
+      : await ollamaClient!.generateResponse(prompt, []);
     const duration = Date.now() - startTime;
 
     console.log('🔄 [SIMILARITY] LLM reranking response:', {

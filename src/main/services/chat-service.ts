@@ -201,6 +201,32 @@ class ChatService {
   private currentStream: AsyncGenerator<string> | null = null;
   private compressor: ContextCompressor = new ContextCompressor();
 
+  /**
+   * Optional typed LLM provider (fusion 1.4h). When set, `generateResponse`
+   * streams through `llm.chat()` using a plain system+user message shape
+   * (sources formatted inside the user turn) instead of
+   * `LLMProviderManager.generateWithSources`. Keeps all the legacy RAG
+   * logging and citation extraction around it; only the token-producing
+   * call changes. When unset, the legacy path runs exactly as before.
+   *
+   * Migration note: the main renderer chat UI still uses the legacy
+   * path; the fusion Brainstorm mode has its own `fusion-chat-service`
+   * wired to the registry. This setter exists so a future IPC handler
+   * can route the main chat through the registry too, once the
+   * workspace-level provider selection UI is in place.
+   */
+  private llm:
+    | import('../../../backend/core/llm/providers/base').LLMProvider
+    | null = null;
+
+  setLLMProvider(
+    llm:
+      | import('../../../backend/core/llm/providers/base').LLMProvider
+      | null
+  ): void {
+    this.llm = llm;
+  }
+
   // LRU Cache for RAG search results (cache identical queries)
   // OPTIMIZED: Increased capacity (100->200) and TTL (10->30 minutes)
   private ragCache = new LRUCache<string, RAGSearchResult[]>({
@@ -642,6 +668,57 @@ class ChatService {
     const generationStart = Date.now();
     let promptSize = 0;
     let fullResponse = '';
+
+    // Fusion 1.4h: route through the typed provider when wired. Preserves
+    // all surrounding RAG plumbing (search, compression, citation
+    // extraction, history); only replaces the token-producing call.
+    if (this.llm) {
+      const sourcesBlock =
+        searchResults.length > 0
+          ? '\n\n[SOURCES]\n' +
+            searchResults
+              .map((r, i) => {
+                const title = r.document?.title ?? 'untitled';
+                const page = r.chunk?.pageNumber;
+                const pageSuffix = typeof page === 'number' ? ` (p.${page})` : '';
+                return `[${i + 1}] ${title}${pageSuffix}\n${r.chunk.content}`;
+              })
+              .join('\n\n')
+          : '';
+
+      const userContent =
+        (projectContext ? `[PROJECT CONTEXT]\n${projectContext}\n\n` : '') +
+        message +
+        sourcesBlock;
+
+      promptSize = systemPrompt.length + userContent.length;
+
+      const iter = this.llm.chat(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        {
+          model: options.model,
+          temperature: options.temperature,
+          topP: options.top_p,
+          topK: options.top_k,
+        }
+      );
+
+      for await (const chunk of iter) {
+        if (chunk.delta) {
+          fullResponse += chunk.delta;
+          if (options.window) {
+            options.window.webContents.send('chat:stream', chunk.delta);
+          }
+        }
+        if (chunk.done) break;
+      }
+
+      const generationDurationMs = Date.now() - generationStart;
+      return { fullResponse, promptSize, generationDurationMs };
+    }
 
     // Stream la réponse avec contexte RAG si disponible
     if (searchResults.length > 0) {
