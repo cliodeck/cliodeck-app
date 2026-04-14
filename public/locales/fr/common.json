@@ -506,7 +506,7 @@
     "clearHistory": "Effacer l'historique",
     "clearConfirm": "Effacer tout l'historique de conversation ?",
     "generating": "Génération en cours...",
-    "newLineHint": "Shift + Enter pour nouvelle ligne",
+    "newLineHint": "Cmd/Ctrl + Enter pour envoyer",
     "you": "Vous",
     "assistant": "Assistant",
     "noContextWarning": "Cette réponse n'est pas basée sur vos documents. Aucun passage pertinent n'a été trouvé dans votre corpus.",

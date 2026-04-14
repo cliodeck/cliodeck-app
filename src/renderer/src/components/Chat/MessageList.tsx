@@ -1,43 +1,52 @@
 import React, { useEffect, useRef, memo } from 'react';
-import { ChatMessage } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
-import { useChatStore } from '../../stores/chatStore';
+import { UnifiedMessage } from './types';
 import './MessageList.css';
 
-interface MessageListProps {
-  messages: ChatMessage[];
+interface MessageListProps<M extends UnifiedMessage> {
+  messages: M[];
+  /** If set, a virtual streaming assistant bubble is appended at the end. */
+  streamingContent?: string;
+  /** True when a generation is running and no partial content has arrived yet. */
+  showTypingIndicator?: boolean;
+  renderExtras?: (message: M) => React.ReactNode;
 }
 
-export const MessageList: React.FC<MessageListProps> = memo(({ messages }) => {
+function MessageListInner<M extends UnifiedMessage>({
+  messages,
+  streamingContent,
+  showTypingIndicator,
+  renderExtras,
+}: MessageListProps<M>): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { isProcessing, currentStreamingMessage } = useChatStore();
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentStreamingMessage]);
+  }, [messages, streamingContent, showTypingIndicator]);
 
   return (
     <div className="message-list" role="log" aria-live="polite" aria-label="Chat messages">
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble
+          key={message.id}
+          message={message}
+          extras={renderExtras ? renderExtras(message) : undefined}
+        />
       ))}
 
-      {/* Streaming message (in-progress) */}
-      {isProcessing && currentStreamingMessage && (
+      {streamingContent && (
         <MessageBubble
           message={{
             id: 'streaming',
             role: 'assistant',
-            content: currentStreamingMessage,
+            content: streamingContent,
             timestamp: new Date(),
           }}
-          isStreaming={true}
+          isStreaming
         />
       )}
 
-      {/* Typing indicator */}
-      {isProcessing && !currentStreamingMessage && (
+      {showTypingIndicator && (
         <div className="typing-indicator">
           <div className="typing-dot"></div>
           <div className="typing-dot"></div>
@@ -48,7 +57,6 @@ export const MessageList: React.FC<MessageListProps> = memo(({ messages }) => {
       <div ref={messagesEndRef} />
     </div>
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison: only re-render if messages array changes
-  return prevProps.messages === nextProps.messages;
-});
+}
+
+export const MessageList = memo(MessageListInner) as typeof MessageListInner;

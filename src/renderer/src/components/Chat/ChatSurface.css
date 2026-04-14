@@ -1,0 +1,109 @@
+.chat-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  background-color: var(--bg-app);
+}
+
+.chat-surface__header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: var(--bg-panel);
+  min-height: 25px;
+}
+
+.chat-surface__title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chat-surface__header-extras {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.chat-surface__header-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-normal);
+}
+
+.chat-surface__header-btn:hover:not(:disabled) {
+  background-color: var(--border-color);
+}
+
+.chat-surface__header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-surface__messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing-lg);
+}
+
+.chat-surface__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: var(--spacing-lg);
+}
+
+.chat-surface__inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.chat-surface__inline-btn:hover {
+  background: var(--bg-hover, var(--border-color));
+}
+
+.brainstorm-chat__error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.brainstorm-chat__msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.chat-surface__banner {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: var(--font-size-sm);
+  border-top: 1px solid #fecaca;
+}

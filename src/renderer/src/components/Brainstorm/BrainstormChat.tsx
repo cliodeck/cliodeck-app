@@ -1,149 +1,102 @@
 /**
- * BrainstormChat (fusion phase 3.2).
+ * BrainstormChat (fusion phase 3.2, unified UI pass).
  *
- * Streamed chat surface for the Brainstorm mode. Minimal by design:
- * vertical message list + composer with send/cancel. No sidebar, no
- * conversation history persistence yet — that belongs to a storage pass
- * after 3.3 (bridge to Write) has shaped the final message envelope.
+ * Thin adapter over the shared ChatSurface: maps BrainstormMessage into
+ * UnifiedMessage and provides the "send to write" action as message extras.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Send, X, Trash2, ArrowRight } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { useBrainstormChatStore, type BrainstormMessage } from '../../stores/brainstormChatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { appendDraftToContent, messageToDraft } from './messageToDraft';
-import './BrainstormChat.css';
+import { ChatSurface } from '../Chat/ChatSurface';
+import { UnifiedMessage } from '../Chat/types';
+
+interface BrainstormUnifiedMessage extends UnifiedMessage {
+  original: BrainstormMessage;
+}
 
 export const BrainstormChat: React.FC = () => {
   const messages = useBrainstormChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
-  const [draft, setDraft] = useState('');
-  const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
+  const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
 
-  const sendToWrite = (m: BrainstormMessage): void => {
-    const editor = useEditorStore.getState();
-    const block = messageToDraft(m);
-    editor.setContent(appendDraftToContent(editor.content, block));
-    setSentToWriteId(m.id);
-    setWorkspaceMode('write');
-  };
+  const sendToWrite = useCallback(
+    (m: BrainstormMessage): void => {
+      const editor = useEditorStore.getState();
+      const block = messageToDraft(m);
+      editor.setContent(appendDraftToContent(editor.content, block));
+      setSentToWriteId(m.id);
+      setWorkspaceMode('write');
+    },
+    [setWorkspaceMode]
+  );
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  const unifiedMessages = useMemo<BrainstormUnifiedMessage[]>(
+    () =>
+      messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        pending: m.pending,
+        isError: !!m.error,
+        badge: m.ragCitation ? 'citation' : undefined,
+        original: m,
+      })),
+    [messages]
+  );
 
-  const onSubmit = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!draft.trim() || isStreaming) return;
-    const text = draft;
-    setDraft('');
-    await send(text);
-  };
+  const handleSend = useCallback(
+    async (text: string) => {
+      await send(text);
+    },
+    [send]
+  );
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // Cmd/Ctrl+Enter sends; bare Enter is newline (historian writes paragraphs).
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      void onSubmit(e);
-    }
+  const emptyState = (
+    <p style={{ maxWidth: 420 }}>
+      Commencez une exploration libre. Les <code>.cliohints</code> et les sources indexées
+      seront injectés automatiquement.
+    </p>
+  );
+
+  const renderExtras = (m: BrainstormUnifiedMessage): React.ReactNode => {
+    const orig = m.original;
+    return (
+      <>
+        {orig.error && <div className="brainstorm-chat__error">{orig.error}</div>}
+        {m.role === 'assistant' && !orig.pending && !orig.error && orig.content && (
+          <div className="brainstorm-chat__msg-actions">
+            <button
+              type="button"
+              className="chat-surface__inline-btn"
+              onClick={() => sendToWrite(orig)}
+              title="Insère ce tour comme brouillon dans Write"
+            >
+              <ArrowRight size={12} />{' '}
+              {sentToWriteId === orig.id ? 'Envoyé' : 'Envoyer vers Write'}
+            </button>
+          </div>
+        )}
+      </>
+    );
   };
 
   return (
-    <div className="brainstorm-chat">
-      <div className="brainstorm-chat__messages" ref={listRef}>
-        {messages.length === 0 && (
-          <div className="brainstorm-chat__empty">
-            Commencez une exploration libre. Les <code>.cliohints</code> et
-            les sources indexées seront injectés automatiquement.
-          </div>
-        )}
-        {messages.map((m) => (
-          <article
-            key={m.id}
-            className={`brainstorm-chat__msg brainstorm-chat__msg--${m.role}${
-              m.pending ? ' brainstorm-chat__msg--pending' : ''
-            }`}
-          >
-            <header className="brainstorm-chat__role">
-              {m.role === 'user' ? 'Vous' : m.role === 'assistant' ? 'Assistant' : 'Système'}
-              {m.ragCitation && (
-                <span className="brainstorm-chat__badge">citation</span>
-              )}
-              {m.error && (
-                <span className="brainstorm-chat__error-badge">erreur</span>
-              )}
-            </header>
-            <div className="brainstorm-chat__content">
-              {m.content || (m.pending ? '…' : '')}
-            </div>
-            {m.error && (
-              <div className="brainstorm-chat__error">{m.error}</div>
-            )}
-            {m.role === 'assistant' && !m.pending && !m.error && m.content && (
-              <div className="brainstorm-chat__msg-actions">
-                <button
-                  type="button"
-                  className="brainstorm-chat__btn brainstorm-chat__btn--ghost brainstorm-chat__btn--small"
-                  onClick={() => sendToWrite(m)}
-                  title="Insère ce tour comme brouillon dans Write"
-                >
-                  <ArrowRight size={12} />{' '}
-                  {sentToWriteId === m.id ? 'Envoyé' : 'Envoyer vers Write'}
-                </button>
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
-
-      {error && !isStreaming && (
-        <div className="brainstorm-chat__banner">{error}</div>
-      )}
-
-      <form className="brainstorm-chat__composer" onSubmit={onSubmit}>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Question, hypothèse, piste à explorer… (Cmd/Ctrl + Enter pour envoyer)"
-          rows={3}
-          disabled={isStreaming}
-        />
-        <div className="brainstorm-chat__actions">
-          {messages.length > 0 && !isStreaming && (
-            <button
-              type="button"
-              className="brainstorm-chat__btn brainstorm-chat__btn--ghost"
-              onClick={reset}
-              title="Réinitialiser la conversation"
-            >
-              <Trash2 size={14} /> Reset
-            </button>
-          )}
-          {isStreaming ? (
-            <button
-              type="button"
-              className="brainstorm-chat__btn brainstorm-chat__btn--danger"
-              onClick={() => void cancel()}
-            >
-              <X size={14} /> Annuler
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="brainstorm-chat__btn brainstorm-chat__btn--primary"
-              disabled={!draft.trim()}
-            >
-              <Send size={14} /> Envoyer
-            </button>
-          )}
-        </div>
-      </form>
-    </div>
+    <ChatSurface
+      messages={unifiedMessages}
+      isProcessing={isStreaming}
+      onSend={handleSend}
+      onCancel={() => void cancel()}
+      onClear={messages.length > 0 ? reset : undefined}
+      emptyState={emptyState}
+      banner={error && !isStreaming ? error : undefined}
+      placeholder="Question, hypothèse, piste à explorer… (Cmd/Ctrl + Enter pour envoyer)"
+      renderMessageExtras={renderExtras}
+    />
   );
 };
