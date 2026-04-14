@@ -26,6 +26,7 @@ import { cmdRecipeList, cmdRecipeRun } from './cli/recipe.js';
 import { cmdSearch } from './cli/search.js';
 import { cmdHintsShow, cmdHintsSet } from './cli/hints.js';
 import { cmdImportCliobrain } from './cli/migrate.js';
+import { cmdRagBenchmark } from './cli/rag-benchmark.js';
 
 const USAGE = `cliodeck — headless operations on a workspace
 
@@ -36,6 +37,8 @@ Usage:
   cliodeck hints show     --workspace <path>
   cliodeck hints set      --workspace <path> [--file path | content]
   cliodeck import-cliobrain <workspace> [--overwrite] [--name <label>]
+  cliodeck rag-benchmark   --corpus <docs.json> --queries <queries.json>
+                            [--retriever bm25] [--topK 10]
 `;
 
 export async function runCli(argv: string[]): Promise<number> {
@@ -67,6 +70,9 @@ export async function runCli(argv: string[]): Promise<number> {
     }
     if (cmd === 'import-cliobrain') {
       return await cmdImportCliobrain(parseArgs(argv.slice(1)));
+    }
+    if (cmd === 'rag-benchmark') {
+      return await cmdRagBenchmark(parseArgs(argv.slice(1)));
     }
 
     process.stderr.write(USAGE);

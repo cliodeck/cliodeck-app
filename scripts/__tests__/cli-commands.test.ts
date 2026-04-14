@@ -115,4 +115,51 @@ describe('cliodeck CLI (4.6)', () => {
     expect(code).toBe(2);
     expect(stderr()).toMatch(/cliodeck —/);
   });
+
+  it('rag-benchmark runs the harness on a synthetic fixture', async () => {
+    const corpusPath = path.join(tmp, 'corpus.json');
+    const queriesPath = path.join(tmp, 'queries.json');
+    await fs.writeFile(
+      corpusPath,
+      JSON.stringify([
+        {
+          id: 'd1',
+          chunks: [{ id: 'd1-c1', content: 'Bataille de Verdun en 1916.' }],
+        },
+        {
+          id: 'd2',
+          chunks: [{ id: 'd2-c1', content: 'Recette ratatouille tomates.' }],
+        },
+      ])
+    );
+    await fs.writeFile(
+      queriesPath,
+      JSON.stringify([
+        { id: 'q1', text: 'Verdun 1916', relevant: ['d1-c1'] },
+        { id: 'q2', text: 'ratatouille', relevant: ['d2-c1'] },
+      ])
+    );
+    const code = await runCli([
+      'rag-benchmark',
+      '--corpus',
+      corpusPath,
+      '--queries',
+      queriesPath,
+    ]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      retriever: string;
+      recall: Record<string, number>;
+      mrr: number;
+    };
+    expect(parsed.retriever).toBe('bm25');
+    expect(parsed.mrr).toBe(1);
+    expect(parsed.recall[1]).toBe(1);
+  });
+
+  it('rag-benchmark missing flags returns usage error 2', async () => {
+    const code = await runCli(['rag-benchmark']);
+    expect(code).toBe(2);
+    expect(stderr()).toMatch(/usage/);
+  });
 });
