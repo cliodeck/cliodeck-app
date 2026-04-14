@@ -255,6 +255,9 @@ export class MCPClientManager {
       name: slot.cfg.name,
       tools,
     });
+    // Each successful 'ready' transition resets the retry budget so a future
+    // independent crash incident gets its own silent retry.
+    slot.retryUsed = false;
     this.transition(slot, 'ready');
     return slot.instance;
   }

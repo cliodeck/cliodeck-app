@@ -144,7 +144,7 @@ describe('MCPClientManager (4.4)', () => {
     }
   });
 
-  it('auto-recovers once on crash, then fails on a second crash', async () => {
+  it('auto-recovers once on crash, then fails if the retry itself fails', async () => {
     vi.useFakeTimers();
     const events: MCPClientEvent[] = [];
     const crashCallbacks: Array<(err: MCPClientError) => void> = [];
@@ -152,7 +152,12 @@ describe('MCPClientManager (4.4)', () => {
 
     const factory = () => {
       factoryCalls += 1;
-      const fake = makeFake({ tools: [{ name: 't' }] });
+      // First handle works; the retry handle fails to connect so the
+      // retry never reaches 'ready' — retryUsed stays true → failed.
+      const fake =
+        factoryCalls === 1
+          ? makeFake({ tools: [{ name: 't' }] })
+          : makeFake({ connectThrows: 'retry failed' });
       crashCallbacks.push((err) => fake.triggerCrash(err));
       return fake.handle;
     };
@@ -166,21 +171,13 @@ describe('MCPClientManager (4.4)', () => {
     expect(mgr.get('flaky')?.state).toBe('ready');
     expect(factoryCalls).toBe(1);
 
-    // First crash: silent retry kicks in.
+    // Crash: silent retry kicks in but the retry itself fails — no budget
+    // left within this incident (retryUsed wasn't reset by a ready
+    // transition), so we end up in 'failed'.
     crashCallbacks[0]({
       code: 'subprocess_exit',
       message: 'exit 1',
       at: 't0',
-    });
-    await vi.runAllTimersAsync();
-    expect(mgr.get('flaky')?.state).toBe('ready');
-    expect(factoryCalls).toBe(2);
-
-    // Second crash on the same slot: no retry left — should bounce to failed.
-    crashCallbacks[1]({
-      code: 'subprocess_exit',
-      message: 'exit 1',
-      at: 't1',
     });
     await vi.runAllTimersAsync();
     expect(mgr.get('flaky')?.state).toBe('failed');
@@ -215,6 +212,51 @@ describe('MCPClientManager (4.4)', () => {
     await mgr.stop('alive');
     expect(close).toHaveBeenCalled();
     expect(mgr.get('alive')?.state).toBe('stopped');
+  });
+
+  it('resets the retry budget on each successful ready transition', async () => {
+    vi.useFakeTimers();
+    const crashCallbacks: Array<(err: MCPClientError) => void> = [];
+    let factoryCalls = 0;
+
+    const factory = () => {
+      factoryCalls += 1;
+      const fake = makeFake({ tools: [{ name: 't' }] });
+      crashCallbacks.push((err) => fake.triggerCrash(err));
+      return fake.handle;
+    };
+    const mgr = new MCPClientManager({
+      factory,
+      retryDelayMs: 5,
+    });
+    mgr.register(cfg('resilient'));
+    await mgr.start('resilient');
+    expect(mgr.get('resilient')?.state).toBe('ready');
+    expect(factoryCalls).toBe(1);
+
+    // First incident: crash → silent retry → ready again.
+    crashCallbacks[0]({
+      code: 'subprocess_exit',
+      message: 'exit 1',
+      at: 't0',
+    });
+    await vi.runAllTimersAsync();
+    expect(mgr.get('resilient')?.state).toBe('ready');
+    expect(factoryCalls).toBe(2);
+
+    // Second independent incident: the earlier successful ready should have
+    // reset the retry budget → we get another silent retry back to ready,
+    // NOT a bounce to 'failed'.
+    crashCallbacks[1]({
+      code: 'subprocess_exit',
+      message: 'exit 2',
+      at: 't1',
+    });
+    await vi.runAllTimersAsync();
+    expect(mgr.get('resilient')?.state).toBe('ready');
+    expect(factoryCalls).toBe(3);
+
+    vi.useRealTimers();
   });
 
   it('register duplicate name throws', () => {
