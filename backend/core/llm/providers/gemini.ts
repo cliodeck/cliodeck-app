@@ -40,12 +40,27 @@ export interface GeminiEmbeddingConfig {
   baseUrl?: string;
 }
 
-interface GeminiPart {
-  text: string;
-}
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | {
+      functionResponse: {
+        name: string;
+        response: Record<string, unknown>;
+      };
+    };
+
 interface GeminiContent {
   role: 'user' | 'model';
   parts: GeminiPart[];
+}
+
+interface GeminiTool {
+  functionDeclarations: Array<{
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  }>;
 }
 
 function now(): string {
@@ -64,19 +79,60 @@ function toGeminiPayload(messages: ChatMessage[]): {
 } {
   const systems: string[] = [];
   const contents: GeminiContent[] = [];
+  // Gemini routes tool calls/responses by *name*, not by id (no id field
+  // in the protocol). We track id→name so a `tool` message can resolve
+  // its responding function name correctly.
+  const idToName = new Map<string, string>();
+
+  const pushPart = (role: 'user' | 'model', part: GeminiPart): void => {
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) {
+      last.parts.push(part);
+    } else {
+      contents.push({ role, parts: [part] });
+    }
+  };
+
   for (const m of messages) {
     if (m.role === 'system') {
       systems.push(m.content);
       continue;
     }
+    if (m.role === 'tool') {
+      const fnName = (m.toolCallId && idToName.get(m.toolCallId)) || m.name;
+      if (!fnName) continue;
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(m.content);
+      } catch {
+        parsed = { result: m.content };
+      }
+      pushPart('user', {
+        functionResponse: { name: fnName, response: parsed },
+      });
+      continue;
+    }
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      if (m.content.trim()) {
+        pushPart('model', { text: m.content });
+      }
+      for (const tc of m.toolCalls) {
+        idToName.set(tc.id, tc.name);
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = tc.arguments ? JSON.parse(tc.arguments) : {};
+        } catch {
+          parsed = {};
+        }
+        pushPart('model', {
+          functionCall: { name: tc.name, args: parsed },
+        });
+      }
+      continue;
+    }
     if (m.role !== 'user' && m.role !== 'assistant') continue;
     const role: 'user' | 'model' = m.role === 'assistant' ? 'model' : 'user';
-    const last = contents[contents.length - 1];
-    if (last && last.role === role) {
-      last.parts.push({ text: m.content });
-    } else {
-      contents.push({ role, parts: [{ text: m.content }] });
-    }
+    pushPart(role, { text: m.content });
   }
   return {
     systemInstruction: systems.length
@@ -105,7 +161,7 @@ export class GeminiProvider implements LLMProvider {
   readonly capabilities: ProviderCapabilities = {
     chat: true,
     streaming: true,
-    tools: false,
+    tools: true,
     embeddings: false,
   };
 
@@ -173,9 +229,21 @@ export class GeminiProvider implements LLMProvider {
   ): AsyncIterable<ChatChunk> {
     const model = opts.model ?? this.model;
     const { systemInstruction, contents } = toGeminiPayload(messages);
+    const tools: GeminiTool[] | undefined = opts.tools?.length
+      ? [
+          {
+            functionDeclarations: opts.tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            })),
+          },
+        ]
+      : undefined;
     const body = {
       contents,
       ...(systemInstruction ? { systemInstruction } : {}),
+      ...(tools ? { tools } : {}),
       generationConfig: {
         temperature: opts.temperature,
         topP: opts.topP,
@@ -219,6 +287,7 @@ export class GeminiProvider implements LLMProvider {
     let buf = '';
     let usage: ChatChunk['usage'] | undefined;
     let finishReason: ChatChunk['finishReason'] = 'stop';
+    let callCounter = 0;
 
     try {
       while (true) {
@@ -238,7 +307,15 @@ export class GeminiProvider implements LLMProvider {
           try {
             const obj = JSON.parse(payload) as {
               candidates?: Array<{
-                content?: { parts?: Array<{ text?: string }> };
+                content?: {
+                  parts?: Array<{
+                    text?: string;
+                    functionCall?: {
+                      name?: string;
+                      args?: Record<string, unknown>;
+                    };
+                  }>;
+                };
                 finishReason?: string;
               }>;
               usageMetadata?: {
@@ -248,11 +325,23 @@ export class GeminiProvider implements LLMProvider {
               };
             };
             const cand = obj.candidates?.[0];
-            const text = cand?.content?.parts
-              ?.map((p) => p.text ?? '')
-              .join('');
-            if (text) {
-              yield { delta: text };
+            const parts = cand?.content?.parts ?? [];
+            for (const part of parts) {
+              if (part.text) {
+                yield { delta: part.text };
+              } else if (part.functionCall?.name) {
+                // Gemini doesn't emit a call id; synthesise a stable one
+                // so downstream code can route the matching response.
+                const id = `gemini-fc-${++callCounter}`;
+                yield {
+                  delta: '',
+                  toolCall: {
+                    id,
+                    name: part.functionCall.name,
+                    arguments: JSON.stringify(part.functionCall.args ?? {}),
+                  },
+                };
+              }
             }
             if (cand?.finishReason) {
               finishReason = mapFinishReason(cand.finishReason);
