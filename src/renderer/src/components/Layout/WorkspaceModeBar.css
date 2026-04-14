@@ -2,8 +2,8 @@
   display: flex;
   gap: 4px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: var(--bg-secondary, #f9fafb);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-panel);
   align-items: center;
 }
 
@@ -15,7 +15,7 @@
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary, #6b7280);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -23,16 +23,16 @@
 }
 
 .workspace-mode-bar__tab:hover {
-  background: var(--bg-hover, #f3f4f6);
-  color: var(--text-primary, #111827);
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
 }
 
 .workspace-mode-bar__tab--active {
-  background: var(--accent-bg, #eef2ff);
-  color: var(--accent-text, #4338ca);
-  border-color: var(--accent-border, #c7d2fe);
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--text-primary);
+  border-color: var(--color-accent);
 }
 
 .workspace-mode-bar__tab--active:hover {
-  background: var(--accent-bg, #eef2ff);
+  background: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
