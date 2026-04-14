@@ -59,7 +59,7 @@ export class OllamaProvider implements LLMProvider {
   readonly capabilities: ProviderCapabilities = {
     chat: true,
     streaming: true,
-    tools: false,
+    tools: true,
     embeddings: false,
   };
 
@@ -118,7 +118,26 @@ export class OllamaProvider implements LLMProvider {
     const model = opts.model ?? this.model;
     const body = {
       model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: messages.map((m) => {
+        const base: Record<string, unknown> = {
+          role: m.role,
+          content: m.content,
+        };
+        if (m.role === 'assistant' && m.toolCalls?.length) {
+          // Ollama requires `arguments` as an object, not a JSON string.
+          base.content = m.content ?? '';
+          base.tool_calls = m.toolCalls.map((tc) => {
+            let parsed: unknown = {};
+            try {
+              parsed = tc.arguments ? JSON.parse(tc.arguments) : {};
+            } catch {
+              parsed = {};
+            }
+            return { function: { name: tc.name, arguments: parsed } };
+          });
+        }
+        return base;
+      }),
       stream: true,
       options: {
         temperature: opts.temperature,
@@ -127,6 +146,18 @@ export class OllamaProvider implements LLMProvider {
         num_predict: opts.maxTokens,
         stop: opts.stop,
       },
+      ...(opts.tools
+        ? {
+            tools: opts.tools.map((t) => ({
+              type: 'function',
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+              },
+            })),
+          }
+        : {}),
     };
 
     let res: Response;
@@ -158,6 +189,8 @@ export class OllamaProvider implements LLMProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    let toolCallCounter = 0;
+    let sawToolCall = false;
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -170,17 +203,51 @@ export class OllamaProvider implements LLMProvider {
           if (!line) continue;
           try {
             const obj = JSON.parse(line) as {
-              message?: { content?: string };
+              message?: {
+                content?: string;
+                tool_calls?: Array<{
+                  function?: {
+                    name?: string;
+                    arguments?: Record<string, unknown> | string;
+                  };
+                }>;
+              };
               done?: boolean;
+              done_reason?: string;
               prompt_eval_count?: number;
               eval_count?: number;
             };
             const delta = obj.message?.content ?? '';
+            const tcs = obj.message?.tool_calls;
+            if (tcs?.length) {
+              for (const tc of tcs) {
+                if (!tc.function?.name) continue;
+                sawToolCall = true;
+                const rawArgs = tc.function.arguments;
+                const argsJson =
+                  typeof rawArgs === 'string'
+                    ? rawArgs
+                    : JSON.stringify(rawArgs ?? {});
+                yield {
+                  delta: '',
+                  toolCall: {
+                    id: `ollama-tc-${++toolCallCounter}`,
+                    name: tc.function.name,
+                    arguments: argsJson,
+                  },
+                };
+              }
+            }
             if (obj.done) {
+              const finishReason: ChatChunk['finishReason'] = sawToolCall
+                ? 'tool_call'
+                : obj.done_reason === 'length'
+                  ? 'length'
+                  : 'stop';
               yield {
                 delta,
                 done: true,
-                finishReason: 'stop',
+                finishReason,
                 usage: {
                   promptTokens: obj.prompt_eval_count,
                   completionTokens: obj.eval_count,
