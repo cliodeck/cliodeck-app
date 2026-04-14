@@ -45,6 +45,10 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
     onChange({ ...config, includeSummaries: value });
   };
 
+  const handleIncludeObsidianVaultChange = (value: boolean) => {
+    onChange({ ...config, includeObsidianVault: value });
+  };
+
   const handleEnableTopicModelingChange = (value: boolean) => {
     onChange({ ...config, enableTopicModeling: value });
   };
@@ -414,6 +418,31 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
                 Si activé, utilise les résumés de documents au lieu des chunks détaillés
                 <br />
                 ⚠️ Nécessite que la génération de résumés soit activée
+              </small>
+            </div>
+          </div>
+
+          {/* Include Obsidian vault in RAG */}
+          <div className="config-field">
+            <label className="config-label">
+              Inclure le vault Obsidian
+              <span className="config-help">
+                Aussi interroger les notes Obsidian indexées (en plus des PDFs et archives Tropy)
+              </span>
+            </label>
+            <div className="config-input-group">
+              <input
+                type="checkbox"
+                checked={config.includeObsidianVault === true}
+                onChange={(e) => handleIncludeObsidianVaultChange(e.target.checked)}
+                className="config-checkbox"
+              />
+              <span>{config.includeObsidianVault ? 'Activé' : 'Désactivé'}</span>
+            </div>
+            <div className="config-description">
+              <small>
+                Le chat Brainstorm interroge toujours le vault s'il est lié.
+                Cette option ajoute aussi le vault aux recherches du chat RAG classique.
               </small>
             </div>
           </div>

@@ -301,6 +301,7 @@ class PDFService {
       documentIds?: string[];
       collectionKeys?: string[];
       sourceType?: SourceType;
+      includeVault?: boolean;
     }
   ) {
     this.ensureInitialized();
@@ -311,6 +312,7 @@ class PDFService {
       documentIds: options?.documentIds,
       collectionKeys: options?.collectionKeys,
       sourceType: options?.sourceType,
+      includeVault: options?.includeVault,
     });
   }
 

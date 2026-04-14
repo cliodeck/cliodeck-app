@@ -69,6 +69,9 @@ export interface RAGConfig {
 
   // === Context Compression ===
   enableContextCompression?: boolean; // Enable context compression before sending to LLM (default: true)
+
+  // === Obsidian vault as RAG source ===
+  includeObsidianVault?: boolean;
 }
 
 export interface LLMConfig {

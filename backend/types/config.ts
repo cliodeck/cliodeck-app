@@ -105,6 +105,10 @@ export interface RAGConfig {
 
   // === Context Compression ===
   enableContextCompression?: boolean; // Enable context compression before sending to LLM (default: true)
+
+  // === Obsidian vault as RAG source ===
+  /** Include the workspace Obsidian vault (if indexed) in the retrieval pipeline. */
+  includeObsidianVault?: boolean;
 }
 
 export interface ZoteroConfig {

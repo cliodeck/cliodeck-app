@@ -1,5 +1,6 @@
 import { LRUCache } from 'lru-cache';
 import { pdfService } from './pdf-service.js';
+import { configManager } from './config-manager.js';
 import { BrowserWindow } from 'electron';
 import { historyService } from './history-service.js';
 import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.js';
@@ -357,11 +358,13 @@ class ChatService {
       cacheHit = true;
     } else {
       console.log(`🔍 Cache MISS for query hash ${queryHash}, performing search...`);
+      const ragCfg = configManager.getRAGConfig();
       searchResults = await pdfService.search(message, {
         topK: options.topK,
         collectionKeys: options.collectionKeys,
         sourceType: options.sourceType,
         documentIds: options.documentIds, // Issue #16: filter by specific documents
+        includeVault: ragCfg.includeObsidianVault === true,
       });
 
       // Store in cache for future identical queries
