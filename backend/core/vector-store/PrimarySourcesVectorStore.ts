@@ -1534,6 +1534,7 @@ export class PrimarySourcesVectorStore {
       DATE: 0,
       ORGANIZATION: 0,
       EVENT: 0,
+      CONCEPT: 0,
     };
 
     for (const row of byTypeRows) {
@@ -1586,6 +1587,7 @@ export class PrimarySourcesVectorStore {
     DATE: 1.3,
     LOCATION: 1.2,
     ORGANIZATION: 1.1,
+    CONCEPT: 1.0,
   };
 
   /**

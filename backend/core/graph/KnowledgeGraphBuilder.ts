@@ -134,10 +134,14 @@ export class KnowledgeGraphBuilder {
     for (const doc of docs) {
       const nodeId = `doc:${doc.id}`;
       if (!graph.hasNode(nodeId)) {
+        // TODO(2.4a): `sourceType` lives on `SourceDocument` (step 2.4a
+        // scaffold), not yet on the legacy `PDFDocument`. Cast until the
+        // vector-store swap promotes the field.
+        const sourceType = (doc as unknown as { sourceType?: string }).sourceType;
         graph.addNode(nodeId, {
           label: doc.title,
-          type: doc.sourceType === 'obsidian-note' ? 'note' : 'document',
-          metadata: { author: doc.author, year: doc.year, sourceType: doc.sourceType },
+          type: sourceType === 'obsidian-note' ? 'note' : 'document',
+          metadata: { author: doc.author, year: doc.year, sourceType },
           size: 3,
         });
       }
@@ -146,7 +150,10 @@ export class KnowledgeGraphBuilder {
 
   private addEntityNodes(graph: Graph, minMentions: number, maxEntities: number): void {
     // Only include entities with enough mentions, ranked by mention count
-    const rows = this.vectorStore.database.prepare(`
+    const rows = // TODO(2.4a): replace with a typed `getDatabase()` accessor once VectorStore
+// is generalised. Until then, the graph builder reaches into the private
+// db to keep its ported queries intact — pragmatic, not the final shape.
+(this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT e.*, COUNT(em.id) as mention_count
       FROM entities e
       LEFT JOIN entity_mentions em ON e.id = em.entity_id
@@ -170,7 +177,10 @@ export class KnowledgeGraphBuilder {
       }
 
       // Link entity to documents via mentions
-      const mentions = this.vectorStore.database.prepare(
+      const mentions = // TODO(2.4a): replace with a typed `getDatabase()` accessor once VectorStore
+// is generalised. Until then, the graph builder reaches into the private
+// db to keep its ported queries intact — pragmatic, not the final shape.
+(this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(
         'SELECT DISTINCT document_id FROM entity_mentions WHERE entity_id = ?'
       ).all(row.id) as any[];
 
@@ -195,7 +205,10 @@ export class KnowledgeGraphBuilder {
 
   private addCoOccurrenceEdges(graph: Graph, minWeight: number): void {
     // Find entities that co-occur in the same chunk, filtered by minimum weight
-    const coOccurrences = this.vectorStore.database.prepare(`
+    const coOccurrences = // TODO(2.4a): replace with a typed `getDatabase()` accessor once VectorStore
+// is generalised. Until then, the graph builder reaches into the private
+// db to keep its ported queries intact — pragmatic, not the final shape.
+(this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT em1.entity_id as e1, em2.entity_id as e2, COUNT(*) as weight
       FROM entity_mentions em1
       JOIN entity_mentions em2 ON em1.chunk_id = em2.chunk_id AND em1.entity_id < em2.entity_id
@@ -223,7 +236,10 @@ export class KnowledgeGraphBuilder {
   }
 
   private addVaultLinkEdges(graph: Graph): void {
-    const links = this.vectorStore.database.prepare(`
+    const links = // TODO(2.4a): replace with a typed `getDatabase()` accessor once VectorStore
+// is generalised. Until then, the graph builder reaches into the private
+// db to keep its ported queries intact — pragmatic, not the final shape.
+(this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT vl.source_note_id, vl.target_relative_path, vn_target.id as target_note_id
       FROM vault_links vl
       LEFT JOIN vault_notes vn_target ON (
@@ -256,7 +272,10 @@ export class KnowledgeGraphBuilder {
   }
 
   private addTagNodes(graph: Graph): void {
-    const tagRows = this.vectorStore.database.prepare(`
+    const tagRows = // TODO(2.4a): replace with a typed `getDatabase()` accessor once VectorStore
+// is generalised. Until then, the graph builder reaches into the private
+// db to keep its ported queries intact — pragmatic, not the final shape.
+(this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT id, tags_json FROM vault_notes WHERE tags_json IS NOT NULL
     `).all() as any[];
 

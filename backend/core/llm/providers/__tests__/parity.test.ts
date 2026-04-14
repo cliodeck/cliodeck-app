@@ -40,7 +40,7 @@ const realFetch = globalThis.fetch;
 
 function install(): void {
   globalThis.fetch = (async (
-    input: RequestInfo | URL,
+    input: Parameters<typeof fetch>[0],
     init?: RequestInit
   ) => {
     const url = typeof input === 'string' ? input : input.toString();

@@ -41,8 +41,8 @@ function authHeaders(apiKey?: string): Record<string, string> {
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
-  readonly id = 'openai-compatible';
-  readonly name = 'OpenAI-compatible';
+  readonly id: string = 'openai-compatible';
+  readonly name: string = 'OpenAI-compatible';
   readonly capabilities: ProviderCapabilities = {
     chat: true,
     streaming: true,
@@ -261,8 +261,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
 }
 
 export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
-  readonly id = 'openai-compatible-embedding';
-  readonly name = 'OpenAI-compatible Embeddings';
+  readonly id: string = 'openai-compatible-embedding';
+  readonly name: string = 'OpenAI-compatible Embeddings';
   readonly dimension: number;
   readonly model: string;
 
