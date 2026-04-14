@@ -24,6 +24,7 @@ import type { WebContents } from 'electron';
 import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
 import { projectManager } from './project-manager.js';
+import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
 import {
   loadWorkspaceHints,
   prependAsSystemMessage,
@@ -113,6 +114,35 @@ class FusionChatService {
 
     let messages = args.messages;
     const projectPath = projectManager.getCurrentProjectPath();
+
+    // RAG retrieval (fusion B2): find context chunks for the last user turn
+    // and prepend them as a system message so the Brainstorm chat hits the
+    // vector DB like the legacy RAG chat does. Fails soft: any error here
+    // (no project, retrieval not configured, search failure) skips context
+    // rather than aborting the stream.
+    if (projectPath) {
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+      if (lastUser?.content?.trim()) {
+        try {
+          const hits = await retrievalService.search({
+            query: lastUser.content,
+            sourceType: 'both',
+          });
+          if (hits.length > 0) {
+            messages = [
+              { role: 'system', content: formatContextAsSystemPrompt(hits) },
+              ...messages,
+            ];
+          }
+        } catch (e) {
+          console.warn(
+            '[fusion-chat] retrieval skipped:',
+            e instanceof Error ? e.message : e
+          );
+        }
+      }
+    }
+
     if (projectPath) {
       try {
         const hints = await loadWorkspaceHints(projectPath);
@@ -150,3 +180,25 @@ class FusionChatService {
 }
 
 export const fusionChatService = new FusionChatService();
+
+/**
+ * Render a set of retrieval hits as a system-prompt block. Kept minimal
+ * (title + snippet, numbered) — the full explainable-AI panel lives in
+ * the legacy chat and will be ported to Brainstorm once B3 lands.
+ */
+function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
+  const lines: string[] = [
+    'Contexte extrait du corpus indexé (sources citées ci-dessous).',
+    "Utilise prioritairement ces extraits pour répondre ; indique clairement si l'information n'y figure pas.",
+    '',
+  ];
+  hits.forEach((h, i) => {
+    const title = h.document.title || h.document.id || 'Sans titre';
+    const kind = h.sourceType === 'primary' ? 'archive' : 'bibliographie';
+    const snippet = h.chunk.content.replace(/\s+/g, ' ').slice(0, 800);
+    lines.push(`[${i + 1}] (${kind}) ${title}`);
+    lines.push(snippet);
+    lines.push('');
+  });
+  return lines.join('\n').trimEnd();
+}
