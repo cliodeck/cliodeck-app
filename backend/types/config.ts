@@ -12,6 +12,15 @@ export interface LLMConfig {
   geminiAPIKey?: string;
   geminiModel?: string;
 
+  /**
+   * When true and the selected `backend` is a cloud provider with an
+   * embeddings endpoint (gemini / openai / mistral), use that provider
+   * for embeddings too instead of Ollama. Useful for users who don't
+   * have a local Ollama. Changing this WILL invalidate the vector index
+   * (dimensions differ across providers) — the user must re-index.
+   */
+  useCloudEmbeddings?: boolean;
+
   // Embedding strategy
   /** Embedding model strategy: 'nomic-fallback' (nomic with mxbai fallback), 'mxbai-only', 'custom' */
   embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';

@@ -30,18 +30,48 @@ export function clioDeckConfigToRegistryConfig(
   cfg: ClioDeckLLMConfig,
   opts: AdapterOptions = {}
 ): RegistryConfig {
-  const embeddingModel = cfg.ollamaEmbeddingModel || 'nomic-embed-text';
-  const dimension =
+  const ollamaEmbeddingModel = cfg.ollamaEmbeddingModel || 'nomic-embed-text';
+  const ollamaDimension =
     opts.dimensionOverride ??
-    OLLAMA_EMBEDDING_DIMS[embeddingModel.split(':')[0]] ??
+    OLLAMA_EMBEDDING_DIMS[ollamaEmbeddingModel.split(':')[0]] ??
     768;
 
-  const embedding = {
+  const ollamaEmbedding = {
     provider: 'ollama' as const,
-    model: embeddingModel,
-    dimension,
+    model: ollamaEmbeddingModel,
+    dimension: ollamaDimension,
     baseUrl: cfg.ollamaURL,
   };
+
+  // Cloud-provider embedding fallbacks — only used when `useCloudEmbeddings`
+  // is set AND the selected backend is a cloud provider that supports
+  // embeddings. Anthropic has no embeddings API and stays on Ollama.
+  const cloudEmbedding: RegistryConfig['embedding'] | null =
+    cfg.useCloudEmbeddings && cfg.backend === 'gemini' && cfg.geminiAPIKey
+      ? {
+          provider: 'gemini',
+          model: 'text-embedding-004',
+          dimension: opts.dimensionOverride ?? 768,
+          apiKey: cfg.geminiAPIKey,
+        }
+      : cfg.useCloudEmbeddings && cfg.backend === 'openai' && cfg.openaiAPIKey
+        ? {
+            provider: 'openai-compatible',
+            model: 'text-embedding-3-small',
+            dimension: opts.dimensionOverride ?? 1536,
+            apiKey: cfg.openaiAPIKey,
+            baseUrl: 'https://api.openai.com/v1',
+          }
+        : cfg.useCloudEmbeddings && cfg.backend === 'mistral' && cfg.mistralAPIKey
+          ? {
+              provider: 'mistral',
+              model: 'mistral-embed',
+              dimension: opts.dimensionOverride ?? 1024,
+              apiKey: cfg.mistralAPIKey,
+            }
+          : null;
+
+  const embedding = cloudEmbedding ?? ollamaEmbedding;
 
   switch (cfg.backend) {
     case 'claude':

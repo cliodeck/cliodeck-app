@@ -89,6 +89,7 @@ export interface LLMConfig {
   mistralModel?: string;
   geminiAPIKey?: string;
   geminiModel?: string;
+  useCloudEmbeddings?: boolean;
 }
 
 export const ConfigPanel: React.FC = () => {

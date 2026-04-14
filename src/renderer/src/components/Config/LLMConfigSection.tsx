@@ -201,6 +201,37 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             </>
           )}
 
+          {backend !== 'ollama' && backend !== 'claude' && (
+            <div className="config-field">
+              <label className="config-label">
+                Utiliser ce fournisseur pour les embeddings aussi
+                <span className="config-help">
+                  Par défaut les embeddings passent par Ollama. Cochez si
+                  vous n'avez pas d'Ollama local. Changer cette option
+                  invalide l'index vectoriel (dimensions différentes) —
+                  il faudra réindexer vos PDFs.
+                </span>
+              </label>
+              <div className="config-input-group">
+                <input
+                  type="checkbox"
+                  checked={config.useCloudEmbeddings === true}
+                  onChange={(e) => handleFieldChange('useCloudEmbeddings', e.target.checked)}
+                  className="config-checkbox"
+                />
+                <span>
+                  {config.useCloudEmbeddings
+                    ? backend === 'gemini'
+                      ? 'text-embedding-004 (768 dim)'
+                      : backend === 'openai'
+                        ? 'text-embedding-3-small (1536 dim)'
+                        : 'mistral-embed (1024 dim)'
+                    : 'Ollama (local)'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Ollama URL */}
           <div className="config-field">
             <label className="config-label">
