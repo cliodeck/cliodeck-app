@@ -698,6 +698,24 @@ const api = {
         ipcRenderer.on('fusion:chat:chunk', listener);
         return () => ipcRenderer.removeListener('fusion:chat:chunk', listener);
       },
+      onContext: (
+        callback: (envelope: {
+          sessionId: string;
+          sources: Array<{
+            kind: 'archive' | 'bibliographie' | 'note';
+            sourceType: 'primary' | 'secondary' | 'vault';
+            title: string;
+            snippet: string;
+            similarity: number;
+            relativePath?: string;
+          }>;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:context', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:context', listener);
+      },
     },
   },
 };

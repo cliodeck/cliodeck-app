@@ -8,7 +8,10 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { useBrainstormChatStore } from '../../stores/brainstormChatStore';
+import {
+  useBrainstormChatStore,
+  type BrainstormSource,
+} from '../../stores/brainstormChatStore';
 
 interface FusionChatApi {
   start(
@@ -26,6 +29,9 @@ interface FusionChatApi {
       };
       error?: { code: string; message: string };
     }) => void
+  ): () => void;
+  onContext(
+    cb: (env: { sessionId: string; sources: BrainstormSource[] }) => void
   ): () => void;
 }
 
@@ -48,11 +54,14 @@ export function useBrainstormChat(): UseBrainstormChat {
   // Remember the current assistant id per active session so we don't mix
   // them up when the user sends fast follow-ups.
   const assistantIdBySession = useRef<Map<string, string>>(new Map());
+  // Context can arrive before beginAssistant — buffer until the assistant
+  // message exists so we can attach sources to it.
+  const pendingSources = useRef<Map<string, BrainstormSource[]>>(new Map());
 
   useEffect(() => {
     const chat = api();
     if (!chat) return;
-    const unsub = chat.onChunk((env) => {
+    const unsubChunk = chat.onChunk((env) => {
       const aId = assistantIdBySession.current.get(env.sessionId);
       if (!aId) return;
       if (env.error) {
@@ -70,7 +79,18 @@ export function useBrainstormChat(): UseBrainstormChat {
         assistantIdBySession.current.delete(env.sessionId);
       }
     });
-    return unsub;
+    const unsubCtx = chat.onContext((env) => {
+      const aId = assistantIdBySession.current.get(env.sessionId);
+      if (aId) {
+        store.setSources(aId, env.sources);
+      } else {
+        pendingSources.current.set(env.sessionId, env.sources);
+      }
+    });
+    return () => {
+      unsubChunk();
+      unsubCtx();
+    };
     // store methods are stable references (zustand), deps intentionally minimal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -102,6 +122,12 @@ export function useBrainstormChat(): UseBrainstormChat {
       }
       const aId = store.beginAssistant(res.sessionId);
       assistantIdBySession.current.set(res.sessionId, aId);
+      // Flush any context event that raced ahead of beginAssistant.
+      const buffered = pendingSources.current.get(res.sessionId);
+      if (buffered) {
+        store.setSources(aId, buffered);
+        pendingSources.current.delete(res.sessionId);
+      }
     },
     [store]
   );

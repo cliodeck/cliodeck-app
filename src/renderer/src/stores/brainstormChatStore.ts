@@ -14,6 +14,15 @@
 
 import { create } from 'zustand';
 
+export interface BrainstormSource {
+  kind: 'archive' | 'bibliographie' | 'note';
+  sourceType: 'primary' | 'secondary' | 'vault';
+  title: string;
+  snippet: string;
+  similarity: number;
+  relativePath?: string;
+}
+
 export interface BrainstormMessage {
   id: string;
   role: 'system' | 'user' | 'assistant';
@@ -23,6 +32,8 @@ export interface BrainstormMessage {
   ragCitation?: boolean;
   finishReason?: string;
   error?: string;
+  /** Retrieval hits attached to the assistant turn (RAG sources). */
+  sources?: BrainstormSource[];
 }
 
 interface State {
@@ -35,6 +46,7 @@ interface State {
   appendUser: (content: string) => string;
   beginAssistant: (sessionId: string) => string;
   appendDelta: (assistantId: string, delta: string) => void;
+  setSources: (assistantId: string, sources: BrainstormSource[]) => void;
   finishAssistant: (
     assistantId: string,
     finishReason?: string,
@@ -81,6 +93,14 @@ export const useBrainstormChatStore = create<State>((set) => ({
     set((s) => ({
       messages: s.messages.map((m) =>
         m.id === assistantId ? { ...m, content: m.content + delta } : m
+      ),
+    }));
+  },
+
+  setSources: (assistantId, sources) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === assistantId ? { ...m, sources } : m
       ),
     }));
   },

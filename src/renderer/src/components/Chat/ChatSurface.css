@@ -101,6 +101,73 @@
   justify-content: flex-end;
 }
 
+.brainstorm-chat__sources {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.brainstorm-chat__sources > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  user-select: none;
+}
+
+.brainstorm-chat__sources > ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.brainstorm-chat__source {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.brainstorm-chat__source-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.brainstorm-chat__source-kind {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--text-primary);
+}
+
+.brainstorm-chat__source--vault .brainstorm-chat__source-kind {
+  background: color-mix(in srgb, #22c55e 25%, transparent);
+}
+
+.brainstorm-chat__source--primary .brainstorm-chat__source-kind {
+  background: color-mix(in srgb, #f59e0b 25%, transparent);
+}
+
+.brainstorm-chat__source-score {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.brainstorm-chat__source-snippet {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
 .chat-surface__banner {
   padding: var(--spacing-sm) var(--spacing-lg);
   background: color-mix(in srgb, var(--color-danger) 20%, transparent);

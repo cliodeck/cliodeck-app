@@ -25,6 +25,39 @@ import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
 import { projectManager } from './project-manager.js';
 import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
+
+export interface BrainstormSource {
+  kind: 'archive' | 'bibliographie' | 'note';
+  sourceType: 'primary' | 'secondary' | 'vault';
+  title: string;
+  snippet: string;
+  similarity: number;
+  relativePath?: string;
+}
+
+function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
+  return hits.map((h) => {
+    const kind: BrainstormSource['kind'] =
+      h.sourceType === 'primary'
+        ? 'archive'
+        : h.sourceType === 'vault'
+          ? 'note'
+          : 'bibliographie';
+    const vaultSrc =
+      h.sourceType === 'vault'
+        ? (h.source as { relativePath?: string } | undefined)
+        : undefined;
+    const title = h.document.title || vaultSrc?.relativePath || 'Sans titre';
+    return {
+      kind,
+      sourceType: h.sourceType,
+      title,
+      snippet: h.chunk.content.replace(/\s+/g, ' ').slice(0, 400),
+      similarity: h.similarity,
+      relativePath: vaultSrc?.relativePath,
+    };
+  });
+}
 import {
   loadWorkspaceHints,
   prependAsSystemMessage,
@@ -134,6 +167,18 @@ class FusionChatService {
               { role: 'system', content: formatContextAsSystemPrompt(hits) },
               ...messages,
             ];
+            // Surface the hits to the renderer so the Brainstorm chat can
+            // render them as cards alongside the assistant reply.
+            try {
+              if (!args.webContents.isDestroyed()) {
+                args.webContents.send('fusion:chat:context', {
+                  sessionId,
+                  sources: hitsToSources(hits),
+                });
+              }
+            } catch {
+              // Renderer gone — continue streaming anyway.
+            }
           }
         } catch (e) {
           console.warn(

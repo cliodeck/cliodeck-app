@@ -66,9 +66,31 @@ export const BrainstormChat: React.FC = () => {
 
   const renderExtras = (m: BrainstormUnifiedMessage): React.ReactNode => {
     const orig = m.original;
+    const sources = orig.sources ?? [];
     return (
       <>
         {orig.error && <div className="brainstorm-chat__error">{orig.error}</div>}
+        {m.role === 'assistant' && sources.length > 0 && (
+          <details className="brainstorm-chat__sources">
+            <summary>
+              📚 Sources ({sources.length})
+            </summary>
+            <ul>
+              {sources.map((s, i) => (
+                <li key={i} className={`brainstorm-chat__source brainstorm-chat__source--${s.sourceType}`}>
+                  <div className="brainstorm-chat__source-head">
+                    <span className="brainstorm-chat__source-kind">{s.kind}</span>
+                    <strong>{s.title}</strong>
+                    <span className="brainstorm-chat__source-score">
+                      {(s.similarity * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <p className="brainstorm-chat__source-snippet">{s.snippet}</p>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         {m.role === 'assistant' && !orig.pending && !orig.error && orig.content && (
           <div className="brainstorm-chat__msg-actions">
             <button
