@@ -169,17 +169,25 @@ export class ConfigManager {
     const claudeAPIKey = secureStorage.getKey('llm.claudeAPIKey');
     const openaiAPIKey = secureStorage.getKey('llm.openaiAPIKey');
     const mistralAPIKey = secureStorage.getKey('llm.mistralAPIKey');
+    const geminiAPIKey = secureStorage.getKey('llm.geminiAPIKey');
     return {
       ...config,
       ...(claudeAPIKey ? { claudeAPIKey } : {}),
       ...(openaiAPIKey ? { openaiAPIKey } : {}),
       ...(mistralAPIKey ? { mistralAPIKey } : {}),
+      ...(geminiAPIKey ? { geminiAPIKey } : {}),
     };
   }
 
   setLLMConfig(config: Partial<LLMConfig>): void {
     // Extract API keys and route them to secure storage
-    const { claudeAPIKey, openaiAPIKey, mistralAPIKey, ...rest } = config;
+    const {
+      claudeAPIKey,
+      openaiAPIKey,
+      mistralAPIKey,
+      geminiAPIKey,
+      ...rest
+    } = config;
 
     if (claudeAPIKey !== undefined) {
       secureStorage.setKey('llm.claudeAPIKey', claudeAPIKey);
@@ -190,6 +198,9 @@ export class ConfigManager {
     if (mistralAPIKey !== undefined) {
       secureStorage.setKey('llm.mistralAPIKey', mistralAPIKey);
     }
+    if (geminiAPIKey !== undefined) {
+      secureStorage.setKey('llm.geminiAPIKey', geminiAPIKey);
+    }
 
     // Only write non-sensitive fields to the main config store
     const current = this.getStore().get('llm');
@@ -198,6 +209,7 @@ export class ConfigManager {
       claudeAPIKey: _c,
       openaiAPIKey: _o,
       mistralAPIKey: _m,
+      geminiAPIKey: _g,
       ...currentClean
     } = current;
     this.getStore().set('llm', { ...currentClean, ...rest });

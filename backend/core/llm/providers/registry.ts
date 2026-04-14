@@ -25,12 +25,19 @@ import {
 } from './openai-compatible.js';
 import { AnthropicProvider } from './anthropic.js';
 import { MistralEmbeddingProvider, MistralProvider } from './mistral.js';
+import { GeminiEmbeddingProvider, GeminiProvider } from './gemini.js';
 
-export type LLMProviderId = 'ollama' | 'openai-compatible' | 'anthropic' | 'mistral';
+export type LLMProviderId =
+  | 'ollama'
+  | 'openai-compatible'
+  | 'anthropic'
+  | 'mistral'
+  | 'gemini';
 export type EmbeddingProviderId =
   | 'ollama'
   | 'openai-compatible'
-  | 'mistral';
+  | 'mistral'
+  | 'gemini';
 
 export interface LLMConfig {
   provider: LLMProviderId;
@@ -140,6 +147,29 @@ registerEmbeddingProvider('mistral', (cfg) =>
     baseUrl: cfg.baseUrl,
   })
 );
+
+registerLLMProvider('gemini', (cfg) => {
+  if (!cfg.apiKey) {
+    throw new Error('gemini provider requires llm.apiKey');
+  }
+  return new GeminiProvider({
+    apiKey: cfg.apiKey,
+    model: cfg.model,
+    baseUrl: cfg.baseUrl,
+  });
+});
+
+registerEmbeddingProvider('gemini', (cfg) => {
+  if (!cfg.apiKey) {
+    throw new Error('gemini embedding requires embedding.apiKey');
+  }
+  return new GeminiEmbeddingProvider({
+    apiKey: cfg.apiKey,
+    model: cfg.model,
+    dimension: cfg.dimension,
+    baseUrl: cfg.baseUrl,
+  });
+});
 
 export class ProviderRegistry {
   private llm: LLMProvider | null = null;

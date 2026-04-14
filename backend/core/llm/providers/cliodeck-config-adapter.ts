@@ -90,6 +90,21 @@ export function clioDeckConfigToRegistryConfig(
         embedding,
       };
 
+    case 'gemini':
+      if (!cfg.geminiAPIKey) {
+        throw new Error(
+          'Gemini backend selected but no geminiAPIKey set in config.'
+        );
+      }
+      return {
+        llm: {
+          provider: 'gemini',
+          model: cfg.geminiModel || 'gemini-2.0-flash',
+          apiKey: cfg.geminiAPIKey,
+        },
+        embedding,
+      };
+
     case 'ollama':
     default:
       return {

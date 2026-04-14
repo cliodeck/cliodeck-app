@@ -72,7 +72,7 @@ export interface RAGConfig {
 }
 
 export interface LLMConfig {
-  backend: 'ollama' | 'claude' | 'openai' | 'mistral';
+  backend: 'ollama' | 'claude' | 'openai' | 'mistral' | 'gemini';
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
@@ -84,6 +84,8 @@ export interface LLMConfig {
   openaiModel?: string;
   mistralAPIKey?: string;
   mistralModel?: string;
+  geminiAPIKey?: string;
+  geminiModel?: string;
 }
 
 export const ConfigPanel: React.FC = () => {

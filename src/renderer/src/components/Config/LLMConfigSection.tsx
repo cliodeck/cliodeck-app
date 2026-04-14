@@ -46,6 +46,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <option value="claude">Anthropic Claude (API cloud)</option>
               <option value="openai">OpenAI (API cloud)</option>
               <option value="mistral">Mistral (API cloud)</option>
+              <option value="gemini">Google Gemini (API cloud)</option>
             </select>
           </div>
 
@@ -155,6 +156,45 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                     Exemples : <code>mistral-large-latest</code>,{' '}
                     <code>mistral-small-latest</code>, <code>open-mistral-nemo</code>.
                     Particulièrement bon en français.
+                  </small>
+                </div>
+              </div>
+            </>
+          )}
+
+          {backend === 'gemini' && (
+            <>
+              <div className="config-field">
+                <label className="config-label">
+                  Clé API Google AI Studio
+                  <span className="config-help">
+                    Stockée chiffrée via le keyring système. À créer sur{' '}
+                    <code>aistudio.google.com</code>.
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  value={config.geminiAPIKey ?? ''}
+                  onChange={(e) => handleFieldChange('geminiAPIKey', e.target.value)}
+                  className="config-input"
+                  placeholder="AIza…"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="config-field">
+                <label className="config-label">Modèle Gemini</label>
+                <input
+                  type="text"
+                  value={config.geminiModel ?? ''}
+                  onChange={(e) => handleFieldChange('geminiModel', e.target.value)}
+                  className="config-input"
+                  placeholder="gemini-2.0-flash"
+                />
+                <div className="config-description">
+                  <small>
+                    Exemples : <code>gemini-2.0-flash</code>,{' '}
+                    <code>gemini-2.0-flash-lite</code>,{' '}
+                    <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code>.
                   </small>
                 </div>
               </div>
