@@ -22,10 +22,106 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     onChange({ ...config, [field]: value });
   };
 
+  const backend = config.backend ?? 'ollama';
+
   return (
     <CollapsibleSection title={t('llm.title')} defaultExpanded={false}>
       <div className="config-section">
         <div className="config-section-content">
+          {/* Backend selector */}
+          <div className="config-field">
+            <label className="config-label">
+              Backend de génération
+              <span className="config-help">
+                Choisis le fournisseur LLM utilisé pour la génération.
+                Les embeddings restent toujours via Ollama (rapide, local).
+              </span>
+            </label>
+            <select
+              value={backend}
+              onChange={(e) => handleFieldChange('backend', e.target.value)}
+              className="config-input"
+            >
+              <option value="ollama">Ollama (local)</option>
+              <option value="claude">Anthropic Claude (API cloud)</option>
+              <option value="openai">OpenAI (API cloud)</option>
+            </select>
+          </div>
+
+          {backend === 'claude' && (
+            <>
+              <div className="config-field">
+                <label className="config-label">
+                  Clé API Anthropic
+                  <span className="config-help">
+                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  value={config.claudeAPIKey ?? ''}
+                  onChange={(e) => handleFieldChange('claudeAPIKey', e.target.value)}
+                  className="config-input"
+                  placeholder="sk-ant-…"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="config-field">
+                <label className="config-label">Modèle Claude</label>
+                <input
+                  type="text"
+                  value={config.claudeModel ?? ''}
+                  onChange={(e) => handleFieldChange('claudeModel', e.target.value)}
+                  className="config-input"
+                  placeholder="claude-sonnet-4-6"
+                />
+                <div className="config-description">
+                  <small>
+                    Recommandés : <code>claude-opus-4-6</code>,{' '}
+                    <code>claude-sonnet-4-6</code>, <code>claude-haiku-4-5-20251001</code>
+                  </small>
+                </div>
+              </div>
+            </>
+          )}
+
+          {backend === 'openai' && (
+            <>
+              <div className="config-field">
+                <label className="config-label">
+                  Clé API OpenAI
+                  <span className="config-help">
+                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  value={config.openaiAPIKey ?? ''}
+                  onChange={(e) => handleFieldChange('openaiAPIKey', e.target.value)}
+                  className="config-input"
+                  placeholder="sk-…"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="config-field">
+                <label className="config-label">Modèle OpenAI</label>
+                <input
+                  type="text"
+                  value={config.openaiModel ?? ''}
+                  onChange={(e) => handleFieldChange('openaiModel', e.target.value)}
+                  className="config-input"
+                  placeholder="gpt-4o-mini"
+                />
+                <div className="config-description">
+                  <small>
+                    Exemples : <code>gpt-4o</code>, <code>gpt-4o-mini</code>,{' '}
+                    <code>gpt-4-turbo</code>, <code>o1-mini</code>
+                  </small>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* Ollama URL */}
           <div className="config-field">
             <label className="config-label">

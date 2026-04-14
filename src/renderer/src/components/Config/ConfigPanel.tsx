@@ -77,6 +77,11 @@ export interface LLMConfig {
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
   embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';
+  // Cloud providers — keys persisted via secureStorage by config-manager.
+  claudeAPIKey?: string;
+  claudeModel?: string;
+  openaiAPIKey?: string;
+  openaiModel?: string;
 }
 
 export const ConfigPanel: React.FC = () => {
