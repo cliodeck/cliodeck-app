@@ -10,6 +10,7 @@ import { LanguageConfigSection } from './LanguageConfigSection';
 import { TopicModelingSection } from './TopicModelingSection';
 import { ModeManagerSection } from './ModeManagerSection';
 import { ZoteroConfigSection, type ZoteroConfig } from './ZoteroConfigSection';
+import { WorkspaceHintsSection } from './WorkspaceHintsSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import './ConfigPanel.css';
@@ -342,6 +343,8 @@ export const ConfigPanel: React.FC = () => {
         />
 
         <TopicModelingSection />
+
+        <WorkspaceHintsSection />
       </div>
     </div>
   );
