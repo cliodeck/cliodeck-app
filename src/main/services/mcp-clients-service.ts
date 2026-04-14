@@ -29,8 +29,9 @@ import {
   type MCPClientConfig as WorkspaceClientConfig,
   type WorkspaceConfig,
 } from '../../../backend/core/workspace/config.js';
-import { ensureV2Directories } from '../../../backend/core/workspace/layout.js';
+import { ensureV2Directories, v2Paths } from '../../../backend/core/workspace/layout.js';
 import path from 'path';
+import { createWriteStream, type WriteStream } from 'node:fs';
 
 export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
   if (w.transport === 'stdio') {
@@ -60,6 +61,16 @@ class MCPClientsService {
   private manager: MCPClientManager | null = null;
   private workspaceRoot: string | null = null;
   private listeners = new Set<(e: MCPClientEvent) => void>();
+  private auditLogStream: WriteStream | null = null;
+
+  private writeAuditLog(e: MCPClientEvent): void {
+    if (!this.auditLogStream) return;
+    try {
+      this.auditLogStream.write(JSON.stringify(e) + '\n');
+    } catch (err) {
+      console.warn('[mcp-clients] failed to write audit log entry:', err);
+    }
+  }
 
   private async readOrInitConfig(root: string): Promise<WorkspaceConfig> {
     await ensureV2Directories(root);
@@ -75,9 +86,24 @@ class MCPClientsService {
   async loadProject(root: string): Promise<void> {
     await this.unload();
     this.workspaceRoot = root;
+
+    try {
+      await ensureV2Directories(root);
+      this.auditLogStream = createWriteStream(v2Paths(root).mcpAccessLog, {
+        flags: 'a',
+      });
+      this.auditLogStream.on('error', (err) => {
+        console.warn('[mcp-clients] audit log stream error:', err);
+      });
+    } catch (err) {
+      console.warn('[mcp-clients] failed to open audit log stream:', err);
+      this.auditLogStream = null;
+    }
+
     this.manager = new MCPClientManager({
       factory: realMCPClientFactory,
       onEvent: (e) => {
+        this.writeAuditLog(e);
         this.listeners.forEach((l) => {
           try {
             l(e);
@@ -106,6 +132,14 @@ class MCPClientsService {
     await this.manager?.stopAll();
     this.manager = null;
     this.workspaceRoot = null;
+    if (this.auditLogStream) {
+      try {
+        this.auditLogStream.end();
+      } catch (err) {
+        console.warn('[mcp-clients] failed to close audit log stream:', err);
+      }
+      this.auditLogStream = null;
+    }
   }
 
   list(): MCPClientInstance[] {
