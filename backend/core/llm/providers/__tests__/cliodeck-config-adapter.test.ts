@@ -55,4 +55,86 @@ describe('ClioDeck LLMConfig → Registry adapter (3.2)', () => {
     const reg = createRegistryFromClioDeckConfig(base);
     expect(reg.getLLM().id).toBe('ollama');
   });
+
+  it('routes mistral backend to mistral provider', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'mistral',
+      mistralAPIKey: 'mst-test',
+      mistralModel: 'mistral-large-latest',
+    });
+    expect(r.llm.provider).toBe('mistral');
+    expect(r.llm.model).toBe('mistral-large-latest');
+    expect(r.llm.apiKey).toBe('mst-test');
+  });
+
+  it('routes gemini backend to gemini provider', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'gemini',
+      geminiAPIKey: 'AIza-test',
+      geminiModel: 'gemini-2.0-flash',
+    });
+    expect(r.llm.provider).toBe('gemini');
+    expect(r.llm.model).toBe('gemini-2.0-flash');
+    expect(r.llm.apiKey).toBe('AIza-test');
+  });
+
+  it('keeps embeddings on ollama by default even when backend is cloud', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'gemini',
+      geminiAPIKey: 'AIza-test',
+    });
+    expect(r.embedding.provider).toBe('ollama');
+    expect(r.embedding.dimension).toBe(1024);
+  });
+
+  it('switches embeddings to gemini when useCloudEmbeddings is set', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'gemini',
+      geminiAPIKey: 'AIza-test',
+      useCloudEmbeddings: true,
+    });
+    expect(r.embedding.provider).toBe('gemini');
+    expect(r.embedding.model).toBe('text-embedding-004');
+    expect(r.embedding.dimension).toBe(768);
+    expect(r.embedding.apiKey).toBe('AIza-test');
+  });
+
+  it('switches embeddings to openai-compatible with OpenAI baseUrl when useCloudEmbeddings is set', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'openai',
+      openaiAPIKey: 'sk-test',
+      useCloudEmbeddings: true,
+    });
+    expect(r.embedding.provider).toBe('openai-compatible');
+    expect(r.embedding.model).toBe('text-embedding-3-small');
+    expect(r.embedding.dimension).toBe(1536);
+    expect(r.embedding.baseUrl).toBe('https://api.openai.com/v1');
+  });
+
+  it('switches embeddings to mistral when useCloudEmbeddings is set', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'mistral',
+      mistralAPIKey: 'mst-test',
+      useCloudEmbeddings: true,
+    });
+    expect(r.embedding.provider).toBe('mistral');
+    expect(r.embedding.model).toBe('mistral-embed');
+    expect(r.embedding.dimension).toBe(1024);
+  });
+
+  it('keeps embeddings on ollama when useCloudEmbeddings is true but backend has no embedding API (claude)', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'claude',
+      claudeAPIKey: 'sk-ant-test',
+      useCloudEmbeddings: true,
+    });
+    expect(r.embedding.provider).toBe('ollama');
+  });
 });

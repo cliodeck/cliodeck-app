@@ -32,7 +32,7 @@ import {
 import { ensureV2Directories } from '../../../backend/core/workspace/layout.js';
 import path from 'path';
 
-function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
+export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
   if (w.transport === 'stdio') {
     if (!w.command) {
       throw new Error(`MCP client "${w.name}": stdio transport requires a command`);

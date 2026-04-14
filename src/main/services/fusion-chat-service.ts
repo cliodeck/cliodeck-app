@@ -37,7 +37,7 @@ export interface BrainstormSource {
   relativePath?: string;
 }
 
-function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
+export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
   return hits.map((h) => {
     const kind: BrainstormSource['kind'] =
       h.sourceType === 'primary'
