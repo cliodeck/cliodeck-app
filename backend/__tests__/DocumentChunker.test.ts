@@ -69,7 +69,9 @@ describe('DocumentChunker', () => {
 
   describe('createSemanticChunks', () => {
     it('should respect paragraph boundaries', () => {
-      const chunker = new DocumentChunker(CHUNKING_CONFIGS.standard);
+      // Use a small-min config so the ~13-word fixture actually produces a chunk
+      // (CHUNKING_CONFIGS.standard has minChunkSize=100, which would swallow this input).
+      const chunker = new DocumentChunker({ maxChunkSize: 50, overlapSize: 5, minChunkSize: 3 });
 
       const pages: DocumentPage[] = [
         {
