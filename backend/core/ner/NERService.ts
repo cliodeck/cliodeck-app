@@ -18,6 +18,7 @@ import type {
   ExtractedEntity,
   NERExtractionResult,
 } from '../../types/entity';
+import type { LLMProvider } from '../llm/providers/base';
 
 export type NERLanguage = 'fr' | 'en' | 'de';
 
@@ -139,8 +140,24 @@ const MAX_TEXT_LENGTH = 3000;
 
 // MARK: - NERService
 
+/**
+ * Optional registry-driven provider (fusion step 1.4c).
+ *
+ * NERService historically took an `OllamaClient` and streamed via
+ * `generateResponseStream`. The new optional `providers.llm` uses
+ * `LLMProvider.complete()` (under the hood it accumulates the stream),
+ * so new call sites — recipes, CLI, MCP tools — can pass a provider
+ * selected at the workspace level instead of binding to Ollama
+ * directly. Legacy OllamaClient callers keep their RAG-specific
+ * timeout / error classification.
+ */
+export interface NERProviders {
+  llm?: LLMProvider;
+}
+
 export class NERService {
   private ollamaClient: OllamaClient;
+  private llm?: LLMProvider;
   private normalizer: EntityNormalizer;
   private modelOverride?: string;
   private language: NERLanguage;
@@ -148,9 +165,11 @@ export class NERService {
   constructor(
     ollamaClient: OllamaClient,
     modelOverride?: string,
-    language: NERLanguage = 'fr'
+    language: NERLanguage = 'fr',
+    providers?: NERProviders
   ) {
     this.ollamaClient = ollamaClient;
+    this.llm = providers?.llm;
     this.normalizer = entityNormalizer;
     this.modelOverride = modelOverride;
     this.language = language;
@@ -158,6 +177,10 @@ export class NERService {
 
   setLanguage(language: NERLanguage): void {
     this.language = language;
+  }
+
+  setProviders(providers: NERProviders): void {
+    if (providers.llm) this.llm = providers.llm;
   }
 
   /**
@@ -217,16 +240,13 @@ export class NERService {
       const prompt = NER_QUERY_PROMPTS[this.language].replace('{QUERY}', query);
 
       // Use lower temperature for consistency
-      let response = '';
-      for await (const chunk of this.ollamaClient.generateResponseStream(
-        prompt,
-        [],
-        this.modelOverride,
-        30000, // 30s timeout for queries
-        { ...GENERATION_PRESETS.deterministic }
-      )) {
-        response += chunk;
-      }
+      const response = await this.runPrompt(prompt, {
+        ollama: {
+          timeoutMs: 30000,
+          options: { ...GENERATION_PRESETS.deterministic },
+        },
+        provider: { temperature: 0 },
+      });
 
       const entities = this.parseEntitiesFromResponse(response);
 
@@ -244,19 +264,60 @@ export class NERService {
    */
   private async extractFromChunk(text: string): Promise<ExtractedEntity[]> {
     const prompt = NER_PROMPTS[this.language].replace('{TEXT}', text);
+    const response = await this.runPrompt(prompt, {
+      ollama: {
+        timeoutMs: 120000, // 2 min for long texts
+        options: { ...GENERATION_PRESETS.academic, temperature: 0.1 },
+      },
+      provider: { temperature: 0.1 },
+    });
+    return this.parseEntitiesFromResponse(response);
+  }
 
+  /**
+   * Unified LLM invocation. Prefers the typed provider when set (fusion
+   * 1.4c); falls back to OllamaClient.generateResponseStream so existing
+   * timeout + error classification behaviour is preserved for callers
+   * that haven't migrated.
+   */
+  private async runPrompt(
+    prompt: string,
+    opts: {
+      ollama: {
+        timeoutMs: number;
+        options: Partial<typeof GENERATION_PRESETS.academic> & { num_ctx?: number };
+      };
+      provider: { temperature?: number; maxTokens?: number };
+    }
+  ): Promise<string> {
+    if (this.llm) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(
+        () => ctrl.abort(),
+        opts.ollama.timeoutMs
+      );
+      try {
+        return await this.llm.complete(prompt, {
+          model: this.modelOverride,
+          temperature: opts.provider.temperature,
+          maxTokens: opts.provider.maxTokens,
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     let response = '';
     for await (const chunk of this.ollamaClient.generateResponseStream(
       prompt,
       [],
       this.modelOverride,
-      120000, // 2 min timeout for long texts
-      { ...GENERATION_PRESETS.academic, temperature: 0.1 }
+      opts.ollama.timeoutMs,
+      opts.ollama.options
     )) {
       response += chunk;
     }
-
-    return this.parseEntitiesFromResponse(response);
+    return response;
   }
 
   /**
