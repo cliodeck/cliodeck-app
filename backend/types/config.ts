@@ -1,5 +1,5 @@
 export interface LLMConfig {
-  backend: 'ollama' | 'claude' | 'openai';
+  backend: 'ollama' | 'claude' | 'openai' | 'mistral';
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
@@ -7,6 +7,8 @@ export interface LLMConfig {
   claudeModel?: string;
   openaiAPIKey?: string;
   openaiModel?: string;
+  mistralAPIKey?: string;
+  mistralModel?: string;
 
   // Embedding strategy
   /** Embedding model strategy: 'nomic-fallback' (nomic with mxbai fallback), 'mxbai-only', 'custom' */

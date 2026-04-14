@@ -75,6 +75,21 @@ export function clioDeckConfigToRegistryConfig(
         embedding,
       };
 
+    case 'mistral':
+      if (!cfg.mistralAPIKey) {
+        throw new Error(
+          'Mistral backend selected but no mistralAPIKey set in config.'
+        );
+      }
+      return {
+        llm: {
+          provider: 'mistral',
+          model: cfg.mistralModel || 'mistral-large-latest',
+          apiKey: cfg.mistralAPIKey,
+        },
+        embedding,
+      };
+
     case 'ollama':
     default:
       return {

@@ -45,6 +45,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <option value="ollama">Ollama (local)</option>
               <option value="claude">Anthropic Claude (API cloud)</option>
               <option value="openai">OpenAI (API cloud)</option>
+              <option value="mistral">Mistral (API cloud)</option>
             </select>
           </div>
 
@@ -116,6 +117,44 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                   <small>
                     Exemples : <code>gpt-4o</code>, <code>gpt-4o-mini</code>,{' '}
                     <code>gpt-4-turbo</code>, <code>o1-mini</code>
+                  </small>
+                </div>
+              </div>
+            </>
+          )}
+
+          {backend === 'mistral' && (
+            <>
+              <div className="config-field">
+                <label className="config-label">
+                  Clé API Mistral
+                  <span className="config-help">
+                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  value={config.mistralAPIKey ?? ''}
+                  onChange={(e) => handleFieldChange('mistralAPIKey', e.target.value)}
+                  className="config-input"
+                  placeholder="…"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="config-field">
+                <label className="config-label">Modèle Mistral</label>
+                <input
+                  type="text"
+                  value={config.mistralModel ?? ''}
+                  onChange={(e) => handleFieldChange('mistralModel', e.target.value)}
+                  className="config-input"
+                  placeholder="mistral-large-latest"
+                />
+                <div className="config-description">
+                  <small>
+                    Exemples : <code>mistral-large-latest</code>,{' '}
+                    <code>mistral-small-latest</code>, <code>open-mistral-nemo</code>.
+                    Particulièrement bon en français.
                   </small>
                 </div>
               </div>
