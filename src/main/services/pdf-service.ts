@@ -6,43 +6,14 @@ import { LLMProviderManager, type LLMProvider } from '../../../backend/core/llm/
 import { KnowledgeGraphBuilder, type GraphNode, type GraphEdge } from '../../../backend/core/analysis/KnowledgeGraphBuilder.js';
 import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../backend/core/analysis/TopicModelingService.js';
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
-import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
-import type { SearchResult, PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
-import type { PrimarySourceSearchResult, PrimarySourceDocument } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
 import { configManager } from './config-manager.js';
-import { tropyService } from './tropy-service.js';
+import { retrievalService, type SourceType } from './retrieval-service.js';
 import path from 'path';
 import fs from 'fs';
 
-// Source type for multi-source search
-export type SourceType = 'secondary' | 'primary' | 'both';
-
-/** A secondary source search result, augmented with sourceType marker */
-interface SecondarySearchResult extends SearchResult {
-  sourceType: 'secondary';
-}
-
-/** A primary source search result mapped to a common format, with sourceType marker */
-interface PrimaryMappedSearchResult {
-  chunk: {
-    id: string;
-    content: string;
-    documentId: string | undefined;
-    chunkIndex: number;
-  };
-  document: {
-    id: string | undefined;
-    title: string | undefined;
-    author: string | undefined;
-    bibtexKey: null;
-  };
-  source: PrimarySourceDocument | undefined;
-  similarity: number;
-  sourceType: 'primary';
-}
-
-/** Union of all search result types returned by multi-source search */
-type MultiSourceSearchResult = SecondarySearchResult | PrimaryMappedSearchResult;
+// Re-exported for back-compat with existing imports of pdf-service.
+export type { SourceType };
 
 /** Options for building a knowledge graph */
 interface KnowledgeGraphOptions {
@@ -58,45 +29,6 @@ interface AnalyzeTopicsOptions {
   nrTopics?: number | 'auto';
   language?: 'french' | 'english' | 'multilingual';
   nGramRange?: [number, number];
-}
-
-// Dictionnaire de termes académiques FR→EN pour query expansion
-const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {
-  'taxonomie de bloom': ['bloom\'s taxonomy', 'bloom taxonomy', 'blooms taxonomy'],
-  'zone proximale développement': ['zone of proximal development', 'zpd', 'vygotsky'],
-  'apprentissage significatif': ['meaningful learning', 'significant learning'],
-  'constructivisme': ['constructivism', 'constructivist'],
-  'socioconstructivisme': ['social constructivism', 'socioconstructivism'],
-  'métacognition': ['metacognition', 'metacognitive'],
-  'pédagogie active': ['active learning', 'active pedagogy'],
-  // Ajoutez d'autres termes selon vos besoins
-};
-
-/**
- * Détecte et traduit les termes académiques français en anglais
- */
-function expandQueryMultilingual(query: string): string[] {
-  const queries = [query]; // Version originale
-  const lowerQuery = query.toLowerCase();
-
-  // Chercher des termes connus à traduire
-  for (const [frTerm, enTranslations] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
-    if (lowerQuery.includes(frTerm)) {
-      // Ajouter chaque traduction anglaise
-      enTranslations.forEach(enTerm => {
-        const translatedQuery = query.replace(new RegExp(frTerm, 'gi'), enTerm);
-        queries.push(translatedQuery);
-      });
-    }
-  }
-
-  console.log('🌐 [MULTILINGUAL] Query expansion:', {
-    original: query,
-    expanded: queries,
-    count: queries.length
-  });
-
-  return queries;
 }
 
 class PDFService {
@@ -124,9 +56,6 @@ class PDFService {
   ): void {
     this.embeddingProvider = p;
   }
-
-  // Query embedding cache for faster repeated searches
-  private queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
 
   /**
    * Initialise le PDF Service pour un projet spécifique
@@ -273,6 +202,12 @@ class PDFService {
 
       this.currentProjectPath = projectPath;
 
+      // Wire the shared RetrievalService to this project's store/providers.
+      retrievalService.configure({
+        vectorStore: this.vectorStore,
+        llmProviderManager: this.llmProviderManager,
+      });
+
       console.log('✅ PDF Service initialized for project');
       console.log(`   Project: ${projectPath}`);
       console.log(`   VectorStore DB: ${projectPath}/.cliodeck/vectors.db`);
@@ -301,24 +236,6 @@ class PDFService {
     } catch (_e: unknown) {
       console.warn('⚠️  [WARMUP] Failed - first query may be slower');
     }
-  }
-
-  /**
-   * Get query embedding with caching
-   * Returns cached embedding if available, otherwise generates and caches
-   * Uses generateQueryEmbedding for proper query prefixing with embedded models
-   */
-  private async getQueryEmbedding(query: string): Promise<Float32Array> {
-    // Check cache first
-    const cached = this.queryEmbeddingCache.get(query);
-    if (cached) {
-      return cached;
-    }
-
-    // Generate and cache (uses query prefix for embedded models)
-    const embedding = await this.llmProviderManager!.generateQueryEmbedding(query);
-    this.queryEmbeddingCache.set(query, embedding);
-    return embedding;
   }
 
   /**
@@ -371,204 +288,29 @@ class PDFService {
     return document;
   }
 
-  async search(query: string, options?: { topK?: number; threshold?: number; documentIds?: string[]; collectionKeys?: string[]; sourceType?: SourceType }) {
-    this.ensureInitialized();
-
-    const sourceType = options?.sourceType || 'both';
-    const searchStart = Date.now();
-    const ragConfig = configManager.getRAGConfig();
-    const topK = options?.topK || ragConfig.topK;
-    const threshold = options?.threshold || ragConfig.similarityThreshold;
-
-    console.log(`🔍 [PDF-SERVICE] Multi-source search: sourceType=${sourceType}, topK=${topK}`);
-
-    // Container for all results (both sources)
-    const allSourceResults: MultiSourceSearchResult[] = [];
-
-    // Search secondary sources (bibliography/PDFs) if needed
-    if (sourceType === 'secondary' || sourceType === 'both') {
-      const secondaryResults = await this.searchSecondary(query, {
-        topK: sourceType === 'both' ? Math.ceil(topK * 0.6) : topK,
-        threshold,
-        documentIds: options?.documentIds,
-        collectionKeys: options?.collectionKeys,
-      });
-      // Mark results with source type
-      allSourceResults.push(...secondaryResults.map((r: SearchResult): SecondarySearchResult => ({
-        ...r,
-        sourceType: 'secondary' as const,
-      })));
-      console.log(`📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`);
-    }
-
-    // Search primary sources (Tropy archives) if needed
-    if (sourceType === 'primary' || sourceType === 'both') {
-      try {
-        const primaryResults = await tropyService.search(query, {
-          topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
-          threshold,
-        });
-        // Map primary source results to match the expected format
-        const mappedPrimaryResults: PrimaryMappedSearchResult[] = primaryResults.map((r: PrimarySourceSearchResult & { source?: PrimarySourceDocument }): PrimaryMappedSearchResult => ({
-          chunk: {
-            id: r.chunk.id,
-            content: r.chunk.content,
-            documentId: r.chunk.sourceId,
-            chunkIndex: r.chunk.chunkIndex,
-          },
-          document: {
-            id: r.source?.id,
-            title: r.source?.title,
-            author: r.source?.creator,
-            bibtexKey: null, // Primary sources don't have bibtexKey
-          },
-          source: r.source,
-          similarity: r.similarity,
-          sourceType: 'primary' as const,
-        }));
-        allSourceResults.push(...mappedPrimaryResults);
-        console.log(`📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`);
-      } catch (error: unknown) {
-        console.warn('⚠️ [PDF-SERVICE] Primary source search failed (Tropy not initialized?):', error);
-        // Continue with secondary sources only
-      }
-    }
-
-    // Sort all results by similarity and take top K
-    const sortedResults = allSourceResults
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
-
-    console.log(`🔍 [PDF-SERVICE] Final combined results: ${sortedResults.length} (from ${allSourceResults.length} total)`);
-    console.log(`🔍 [PDF-SERVICE] Total search duration: ${Date.now() - searchStart}ms`);
-
-    return sortedResults;
-  }
-
   /**
-   * Search in secondary sources (bibliography/PDFs)
-   * This is the original search logic, refactored into a separate method
+   * Thin facade: delegates to RetrievalService (fusion B1). Legacy callers
+   * keep the same signature and result shape.
    */
-  private async searchSecondary(query: string, options?: { topK?: number; threshold?: number; documentIds?: string[]; collectionKeys?: string[] }) {
-    const searchStart = Date.now();
-    const ragConfig = configManager.getRAGConfig();
-    const topK = options?.topK || ragConfig.topK;
-    const threshold = options?.threshold || ragConfig.similarityThreshold;
-
-    // Resolve collection filter to document IDs
-    let documentIdsFilter = options?.documentIds;
-
-    if (options?.collectionKeys && options.collectionKeys.length > 0) {
-      const docsInCollections = this.vectorStore!.getDocumentIdsInCollections(
-        options.collectionKeys,
-        true // recursive: include subcollections
-      );
-
-      console.log(`🔍 [PDF-SERVICE] Collection filter: ${options.collectionKeys.length} collection(s) -> ${docsInCollections.length} document(s)`);
-
-      // Intersect with existing documentIds filter if provided
-      if (documentIdsFilter && documentIdsFilter.length > 0) {
-        documentIdsFilter = documentIdsFilter.filter((id) => docsInCollections.includes(id));
-        console.log(`🔍 [PDF-SERVICE] After intersection with documentIds: ${documentIdsFilter.length} document(s)`);
-      } else {
-        documentIdsFilter = docsInCollections;
-      }
-
-      // If no documents match the collection filter, return empty results
-      if (documentIdsFilter.length === 0) {
-        console.log('🔍 [PDF-SERVICE] No documents match the collection filter, returning empty results');
-        return [];
-      }
+  async search(
+    query: string,
+    options?: {
+      topK?: number;
+      threshold?: number;
+      documentIds?: string[];
+      collectionKeys?: string[];
+      sourceType?: SourceType;
     }
-
-    // 🆕 Query expansion multilingue
-    const expandedQueries = expandQueryMultilingual(query);
-    const allResults = new Map<string, SearchResult>(); // chunk.id → meilleur résultat
-
-    // 🚀 PARALLEL: Generate all embeddings in parallel (using cache)
-    const embeddingStart = Date.now();
-    console.log(`🔍 [PDF-SERVICE] Generating ${expandedQueries.length} embeddings in parallel...`);
-
-    const embeddingPromises = expandedQueries.map(q => this.getQueryEmbedding(q));
-    const embeddings = await Promise.all(embeddingPromises);
-
-    const embeddingDuration = Date.now() - embeddingStart;
-    console.log(`✅ [PDF-SERVICE] All embeddings generated in ${embeddingDuration}ms`);
-
-    // Log cache stats periodically
-    const cacheStats = this.queryEmbeddingCache.getStats();
-    if ((cacheStats.hits + cacheStats.misses) % 10 === 0) {
-      console.log(`💾 [EMB CACHE] Stats: ${cacheStats.hits} hits, ${cacheStats.misses} misses (${cacheStats.hitRate})`);
-    }
-
-    // 🚀 PARALLEL: Search with all embeddings in parallel
-    const searchStart2 = Date.now();
-    const searchPromises = embeddings.map((queryEmbedding, i) => {
-      const expandedQuery = expandedQueries[i];
-
-      if (this.vectorStore instanceof EnhancedVectorStore) {
-        return this.vectorStore.search(
-          expandedQuery,
-          queryEmbedding,
-          topK,
-          documentIdsFilter
-        );
-      } else {
-        return Promise.resolve(this.vectorStore!.search(
-          queryEmbedding,
-          topK,
-          documentIdsFilter
-        ));
-      }
+  ) {
+    this.ensureInitialized();
+    return retrievalService.search({
+      query,
+      topK: options?.topK,
+      threshold: options?.threshold,
+      documentIds: options?.documentIds,
+      collectionKeys: options?.collectionKeys,
+      sourceType: options?.sourceType,
     });
-
-    const allSearchResults = await Promise.all(searchPromises);
-    const searchDuration = Date.now() - searchStart2;
-    console.log(`✅ [PDF-SERVICE] All searches completed in ${searchDuration}ms`);
-
-    // Merge results (keep best score per chunk)
-    for (let i = 0; i < allSearchResults.length; i++) {
-      const results = allSearchResults[i];
-      for (const result of results) {
-        const chunkId = result.chunk.id;
-        const existing = allResults.get(chunkId);
-
-        if (!existing || result.similarity > existing.similarity) {
-          allResults.set(chunkId, result);
-        }
-      }
-    }
-
-    console.log(`🔍 [PDF-SERVICE] Merged ${allResults.size} unique chunks from ${expandedQueries.length} query variants`);
-
-    // Convertir Map en array et trier par similarité
-    let mergedResults = Array.from(allResults.values())
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK); // Garder seulement top K résultats
-
-    // Filter by similarity threshold
-    let filteredResults = mergedResults.filter(r => r.similarity >= threshold);
-
-    // 🆕 Fallback automatique pour recherche multilingue
-    if (filteredResults.length === 0 && mergedResults.length > 0) {
-      const minFallbackResults = Math.min(3, mergedResults.length);
-      console.warn('⚠️  [PDF-SERVICE DEBUG] All results filtered out by threshold!');
-      console.warn('⚠️  [PDF-SERVICE DEBUG] Applying fallback: keeping top', minFallbackResults, 'results');
-      console.warn('⚠️  [PDF-SERVICE DEBUG] Best similarity:', mergedResults[0]?.similarity.toFixed(4));
-      console.warn('⚠️  [PDF-SERVICE DEBUG] This may indicate cross-language search (e.g., FR query → EN docs)');
-
-      filteredResults = mergedResults.slice(0, minFallbackResults);
-    }
-
-    console.log('🔍 [PDF-SERVICE DEBUG] Secondary search results:', {
-      totalUniqueChunks: mergedResults.length,
-      filteredResults: filteredResults.length,
-      threshold: threshold,
-      fallbackApplied: filteredResults.length > 0 && filteredResults.length < mergedResults.filter(r => r.similarity >= threshold).length,
-      totalDuration: `${Date.now() - searchStart}ms`,
-    });
-
-    return filteredResults;
   }
 
   async getAllDocuments() {
