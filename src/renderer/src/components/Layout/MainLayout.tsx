@@ -54,6 +54,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   const workspaceMode = useWorkspaceModeStore((s) => s.active);
   const [leftView, setLeftView] = useState<LeftPanelView>('projects');
   const [rightView, setRightView] = useState<RightPanelView>('chat');
+  const isBrainstorm = workspaceMode === 'brainstorm';
+
+  // In Brainstorm mode the center panel already hosts the chat surface, so
+  // the right-panel chat tab would be a duplicate. Hide it and bounce away.
+  useEffect(() => {
+    if (isBrainstorm && rightView === 'chat') setRightView('corpus');
+  }, [isBrainstorm, rightView]);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
@@ -228,17 +235,19 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             <div className="panel right-panel">
               {/* Panel tabs */}
               <div className="panel-tabs" role="tablist" aria-label={t('chat.title')}>
-                <button
-                  id="right-tab-chat"
-                  className={`panel-tab ${rightView === 'chat' ? 'active' : ''}`}
-                  onClick={() => handleRightViewChange('chat')}
-                  title={t('chat.title')}
-                  role="tab"
-                  aria-selected={rightView === 'chat'}
-                  aria-controls="right-tabpanel-chat"
-                >
-                  <MessageCircle size={20} strokeWidth={1} />
-                </button>
+                {!isBrainstorm && (
+                  <button
+                    id="right-tab-chat"
+                    className={`panel-tab ${rightView === 'chat' ? 'active' : ''}`}
+                    onClick={() => handleRightViewChange('chat')}
+                    title={t('chat.title')}
+                    role="tab"
+                    aria-selected={rightView === 'chat'}
+                    aria-controls="right-tabpanel-chat"
+                  >
+                    <MessageCircle size={20} strokeWidth={1} />
+                  </button>
+                )}
                 <button
                   id="right-tab-corpus"
                   className={`panel-tab ${rightView === 'corpus' ? 'active' : ''}`}
@@ -270,7 +279,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 id={`right-tabpanel-${rightView}`}
                 aria-labelledby={`right-tab-${rightView}`}
               >
-                {rightView === 'chat' && <ChatInterface />}
+                {rightView === 'chat' && !isBrainstorm && <ChatInterface />}
                 {rightView === 'corpus' && (
                   <Suspense fallback={<PanelLoadingFallback />}>
                     <CorpusExplorerPanel />
