@@ -14,16 +14,49 @@
 import { ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import { projectManager } from '../../services/project-manager.js';
+import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
 import {
   loadWorkspaceHints,
   writeWorkspaceHints,
 } from '../../../../backend/core/hints/loader.js';
-import { v2Paths } from '../../../../backend/core/workspace/layout.js';
+import {
+  ensureV2Directories,
+  v2Paths,
+} from '../../../../backend/core/workspace/layout.js';
+import {
+  defaultWorkspaceConfig,
+  readWorkspaceConfig,
+  writeWorkspaceConfig,
+  type WorkspaceConfig,
+} from '../../../../backend/core/workspace/config.js';
 import { parseRecipe } from '../../../../backend/recipes/schema.js';
+import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
+import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
+import {
+  ObsidianVaultIndexer,
+  obsidianStorePath,
+} from '../../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
+import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+
+interface VaultConfigBlock {
+  path?: string;
+}
+
+async function readOrInitWorkspaceConfig(root: string): Promise<WorkspaceConfig> {
+  await ensureV2Directories(root);
+  try {
+    return await readWorkspaceConfig(root);
+  } catch {
+    const fresh = defaultWorkspaceConfig(path.basename(root));
+    await writeWorkspaceConfig(root, fresh);
+    return fresh;
+  }
+}
 
 const BUILTIN_RECIPES_DIR = path.join(
   process.cwd(),
@@ -129,12 +162,7 @@ export function setupFusionHandlers(): void {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
     try {
-      const dbPath = path.join(
-        root,
-        '.cliodeck',
-        'v2',
-        'obsidian-vectors.db'
-      );
+      const dbPath = obsidianStorePath(root);
       let exists = false;
       try {
         await fs.access(dbPath);
@@ -142,7 +170,112 @@ export function setupFusionHandlers(): void {
       } catch {
         exists = false;
       }
-      return successResponse({ indexed: exists, dbPath });
+      let vaultPath: string | null = null;
+      try {
+        const cfg = await readWorkspaceConfig(root);
+        vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path ?? null;
+      } catch {
+        // v2 config not initialised yet.
+      }
+      return successResponse({ indexed: exists, dbPath, vaultPath });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle('fusion:vault:set-path', async (_e, rawPath: unknown) => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    if (typeof rawPath !== 'string' || !rawPath.trim()) {
+      return errorResponse('vault path must be a non-empty string');
+    }
+    const vaultPath = rawPath.trim();
+    try {
+      const stat = await fs.stat(vaultPath);
+      if (!stat.isDirectory()) {
+        return errorResponse('vault path is not a directory');
+      }
+    } catch {
+      return errorResponse('vault path does not exist');
+    }
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      cfg.vault = { ...((cfg.vault as VaultConfigBlock) ?? {}), path: vaultPath };
+      await writeWorkspaceConfig(root, cfg);
+      return successResponse({ vaultPath });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle('fusion:vault:unlink', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      delete cfg.vault;
+      await writeWorkspaceConfig(root, cfg);
+      const dbPath = obsidianStorePath(root);
+      try {
+        await fs.unlink(dbPath);
+      } catch {
+        // db already gone — fine.
+      }
+      return successResponse({});
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle('fusion:vault:index', async (event, rawOpts: unknown) => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    const opts = (rawOpts ?? {}) as { force?: boolean };
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
+      if (!vaultPath) {
+        return errorResponse('no_vault_configured');
+      }
+      if (!fsSync.existsSync(vaultPath)) {
+        return errorResponse('vault path no longer exists');
+      }
+
+      const llmCfg = configManager.getLLMConfig();
+      const registry = createRegistryFromClioDeckConfig(llmCfg);
+      const embedder = registry.getEmbedding();
+
+      const reader = new ObsidianVaultReader(vaultPath);
+      const store = new ObsidianVaultStore({
+        dbPath: obsidianStorePath(root),
+        dimension: embedder.dimension,
+      });
+
+      try {
+        const report = await reader.scan().then(() =>
+          new ObsidianVaultIndexer(reader, store, embedder).indexAll({
+            force: !!opts.force,
+            onProgress: (p) => {
+              try {
+                if (!event.sender.isDestroyed()) {
+                  event.sender.send('fusion:vault:progress', p);
+                }
+              } catch {
+                // Renderer gone — continue indexing anyway.
+              }
+            },
+          })
+        );
+        return successResponse({
+          indexed: report.indexed.length,
+          skipped: report.skipped.length,
+          failed: report.failed.length,
+          vaultName: reader.getVaultName(),
+        });
+      } finally {
+        store.close();
+        await registry.dispose().catch(() => undefined);
+      }
     } catch (e) {
       return errorResponse(e as Error);
     }

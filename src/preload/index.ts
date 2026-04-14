@@ -656,6 +656,23 @@ const api = {
     },
     vault: {
       status: () => ipcRenderer.invoke('fusion:vault:status'),
+      setPath: (vaultPath: string) =>
+        ipcRenderer.invoke('fusion:vault:set-path', vaultPath),
+      unlink: () => ipcRenderer.invoke('fusion:vault:unlink'),
+      index: (opts?: { force?: boolean }) =>
+        ipcRenderer.invoke('fusion:vault:index', opts ?? {}),
+      onProgress: (
+        callback: (p: {
+          stage: string;
+          processed: number;
+          total: number;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, p: unknown): void =>
+          callback(p as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:vault:progress', listener);
+        return () => ipcRenderer.removeListener('fusion:vault:progress', listener);
+      },
     },
     chat: {
       start: (
