@@ -115,6 +115,37 @@ fusion branch reference the step numbers defined there.
   harness (recall@K, MRR, latency percentiles, before/after diff).
   Gates the future vector-store unification swap per ADR 0001.
 
+#### UI + integration polish (post-initial-fusion work)
+- **Unified chat UI** — shared `ChatSurface` component drives both the
+  legacy RAG chat and the Brainstorm chat. Same message bubble,
+  composer, and send-key (Cmd/Ctrl+Enter) in both modes.
+- **Brainstorm wired to RAG** — extracted `RetrievalService` from
+  `pdf-service`. Brainstorm chat now hits the full hybrid pipeline
+  (HNSW + BM25 over PDFs, Tropy primaries, optionally Obsidian vault)
+  and streams retrieval hits to the renderer for display as source
+  cards below each assistant turn.
+- **Settings additions** — editor for `.cliohints`, read-only recipes
+  browser with a "Run" button, Obsidian vault config (pick / index /
+  re-index / unlink with progress), opt-in toggle to include the
+  vault in the legacy chat too.
+- **More LLM backends** — UI selector + adapter routing for Anthropic
+  Claude, OpenAI, Mistral, and Google Gemini (new `GeminiProvider` +
+  `GeminiEmbeddingProvider` with dedicated contract tests). API keys
+  flow through the existing secureStorage keyring.
+- **Cloud embeddings** — `useCloudEmbeddings` flag routes embeddings
+  to the same cloud provider (Gemini / OpenAI / Mistral) instead of
+  Ollama, for users without a local Ollama.
+- **Recipe execution** — `fusion:recipes:run` IPC streams `RunEvent`
+  payloads; settings modal renders inputs form, live event log,
+  outputs panel. Real step handlers wired: search →
+  `retrievalService`, graph → `KnowledgeGraphBuilder`, export →
+  `pdfExportService` (Pandoc). Brainstorm/write steps use the LLM
+  via the provider registry.
+- **Theme alignment** — new fusion UIs (BrainstormPanel, ChatSurface,
+  WorkspaceModeBar) now use the real dark-theme tokens (`--bg-app`,
+  `--text-primary`, `--color-accent`, `--color-danger`) instead of
+  hardcoded light fallbacks.
+
 ### Developer experience
 
 - 250+ new tests covering every module introduced by the fusion, with
@@ -131,10 +162,12 @@ fusion branch reference the step numbers defined there.
   the benchmark confirms no quality regression.
 - MCP server ships one tool (`search_obsidian`); Zotero / Tropy /
   graph / entity-context tools arrive in follow-up commits.
-- MCP clients: real SDK factory (stdio spawning, SSE) is scaffolded
-  but not wired to a configuration UI yet.
-- `.cliohints` editor UI ships in the settings panel in a follow-up;
-  CLI + file edit works today.
+- MCP clients: the `WorkspaceConfig.mcpClients` schema is in place but
+  no runtime lifecycle (spawning, tool exposure to the LLM, settings
+  UI) yet — tracked as a follow-up milestone.
+- Recipe `export` step reads the project's `document.md` only; the
+  `document_id` input is accepted but ignored until multi-document
+  projects land.
 
 ## [1.0.0-beta.2] - 2025-01-20
 

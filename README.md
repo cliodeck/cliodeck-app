@@ -29,14 +29,15 @@ ClioDeck v2 organises work into four top-level modes that share the same project
 ## Key features
 
 - **Four-mode workflow** — Brainstorm / Write / Analyze / Export share the same workspace.
-- **Typed LLM provider layer** — Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM, OpenAI), Anthropic, Mistral. Switch backend in 3 clicks, no code change.
+- **Typed LLM provider layer** — Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM, OpenAI), Anthropic Claude, Mistral, Google Gemini. Switch backend in 3 clicks, no code change. API keys stored in the OS keyring via `secureStorage`.
+- **Cloud embeddings** — optional: when you pick a cloud LLM backend, use the same provider for embeddings too (Gemini `text-embedding-004`, OpenAI `text-embedding-3-small`, Mistral `mistral-embed`) so you don't need a local Ollama.
 - **RAG-powered assistant** — hybrid search (HNSW + BM25 + RRF K=60), context compression with RAG citations preserved verbatim, query-aware reranking.
 - **Zotero integration** — sync bibliography, download PDFs, manage tags and metadata.
 - **Tropy integration** — import and search primary sources with OCR + multilingual NER (fr / en / de).
 - **Obsidian vault integration** — index notes (frontmatter, wikilinks, tags) into a parallel SQLite+FTS5 store, searchable from Brainstorm.
-- **ClioRecipes** — YAML workflows chaining brainstorm → search → graph → write → export steps. Four builtin recipes ship for common historian tasks (Zotero review, Tropy thematic analysis, chapter brainstorm, Chicago export).
+- **ClioRecipes** — YAML workflows chaining brainstorm → search → graph → write → export steps. Four builtin recipes ship for common historian tasks (Zotero review, Tropy thematic analysis, chapter brainstorm, Chicago export). Run them from Settings → Recipes with a typed inputs form and live event log.
 - **MCP server (inactive by default)** — expose your corpus to Claude Desktop / Cursor over stdio with a typed, auditable JSONL access log.
-- **MCP clients** — consume external MCP servers (Gallica, HAL, Isidore, Europeana, Transkribus) with explicit lifecycle state, one-shot silent recovery, and partial-success reporting.
+- **MCP clients** (scaffold) — schema is in place (`WorkspaceConfig.mcpClients` with stdio + SSE transports); runtime lifecycle + UI land in a follow-up.
 - **Source inspector** — scans RAG chunks for prompt-injection patterns before they reach the model (warn / block modes).
 - **`.cliohints`** — durable workspace context injected into every prompt (style guide, period focus, language preference).
 - **Headless CLI** — `cliodeck recipe run`, `cliodeck search`, `cliodeck hints`, `cliodeck import-cliobrain` for batch / CI workflows.
