@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['**/__tests__/**/*.test.ts'],
+    include: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
+    // Per-file override via `// @vitest-environment jsdom` docblock in each
+    // .test.tsx. Vitest 4 dropped environmentMatchGlobs in favor of docblocks
+    // or test projects; docblocks keep the backend suite fast on node.
+    setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
