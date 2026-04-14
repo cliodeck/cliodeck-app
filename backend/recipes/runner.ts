@@ -111,7 +111,19 @@ function interpolate(
     }
     const scope = ctx.priorOutputs[parts[0]];
     if (scope == null) return '';
-    if (parts.length === 1) return String(scope);
+    if (parts.length === 1) {
+      // Convention: rich step outputs (objects) should expose a `markdown`
+      // field for human-readable rendering when referenced as `{{ stepId }}`.
+      // Without this, objects stringify to "[object Object]" in prompts.
+      if (
+        typeof scope === 'object' &&
+        scope !== null &&
+        typeof (scope as { markdown?: unknown }).markdown === 'string'
+      ) {
+        return (scope as { markdown: string }).markdown;
+      }
+      return String(scope);
+    }
     if (typeof scope === 'object' && scope !== null) {
       const v = (scope as Record<string, unknown>)[parts[1]];
       return v == null ? '' : String(v);

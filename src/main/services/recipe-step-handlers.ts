@@ -74,18 +74,35 @@ const searchHandler: StepHandler = async (step, _ctx): Promise<StepResult> => {
     collectionKeys,
   });
 
+  const results = hits.map((h) => ({
+    title: h.document.title ?? 'Sans titre',
+    similarity: h.similarity,
+    sourceType: h.sourceType,
+    snippet: h.chunk.content.replace(/\s+/g, ' ').slice(0, 300),
+    documentId: h.chunk.documentId ?? null,
+  }));
+
+  // `markdown` is the human-readable rendering consumed when a downstream
+  // step interpolates `{{ stepId }}` directly (e.g. a brainstorm prompt).
+  // See runner.ts `interpolate()` — convention: objects with a string
+  // `markdown` field render as that string for length-1 template paths.
+  const markdown =
+    results.length === 0
+      ? '_Aucun résultat._'
+      : results
+          .map((r, i) => {
+            const pct = Math.round(r.similarity * 100);
+            return `${i + 1}. **${r.title}** — ${r.sourceType} · sim ${pct}%\n   > ${r.snippet}`;
+          })
+          .join('\n');
+
   return {
     output: {
       source,
       query,
       count: hits.length,
-      results: hits.map((h) => ({
-        title: h.document.title ?? 'Sans titre',
-        similarity: h.similarity,
-        sourceType: h.sourceType,
-        snippet: h.chunk.content.replace(/\s+/g, ' ').slice(0, 300),
-        documentId: h.chunk.documentId ?? null,
-      })),
+      results,
+      markdown,
     },
   };
 };
@@ -152,9 +169,20 @@ const exportHandler: StepHandler = async (
   if (!outputPath) {
     throw new Error('export step: missing "with.output" path');
   }
-  // Resolve document content: for now we read <project>/document.md; the
-  // `document_id` input is accepted but reserved for multi-doc projects.
-  const docPath = path.join(ctx.workspaceRoot, 'document.md');
+  // Resolve document content. `document_id` (when provided) is treated as a
+  // workspace-relative path — this lets multi-doc projects target a specific
+  // Markdown file. When absent/empty we fall back to `<workspace>/document.md`
+  // for backward compatibility. We reject paths that escape the workspace
+  // (simple string check via path.relative — good enough for trusted local
+  // recipes, and cheaper than resolving symlinks).
+  const documentRelPath = asString(step.with.document_id).trim() || 'document.md';
+  const docPath = path.join(ctx.workspaceRoot, documentRelPath);
+  const rel = path.relative(ctx.workspaceRoot, docPath);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(
+      `export step: document_id "${documentRelPath}" escapes the workspace`
+    );
+  }
   let content: string;
   try {
     content = await fs.readFile(docPath, 'utf8');

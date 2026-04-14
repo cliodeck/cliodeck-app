@@ -154,6 +154,52 @@ steps:
     expect(fail.error.code).toBe('input_validation');
   });
 
+  it('renders object outputs with a `markdown` field via {{ stepId }}', async () => {
+    let capturedPrompt = '';
+    const recipe = parseRecipe(`
+name: md-render
+version: 1
+steps:
+  - id: lookup
+    kind: search
+    with: { q: unused }
+  - id: think
+    kind: brainstorm
+    with: { prompt: "items: {{ lookup }}" }
+`);
+    const registry = {
+      getLLM: () => ({
+        id: 'f',
+        name: 'f',
+        capabilities: { chat: true, streaming: false, tools: false, embeddings: false },
+        getStatus: () => ({ state: 'ready' as const }),
+        healthCheck: async () => ({ state: 'ready' as const }),
+        chat: async function* () {
+          yield { delta: '', done: true, finishReason: 'stop' as const };
+        },
+        complete: async (prompt: string) => {
+          capturedPrompt = prompt;
+          return 'OK';
+        },
+        dispose: async () => undefined,
+      }),
+    } as unknown as ProviderRegistry;
+
+    const runner = new RecipeRunner({
+      registry,
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: async () => ({
+          output: { markdown: 'rendered', other: 'data' },
+        }),
+      },
+    });
+    const res = await runner.run(recipe, {});
+    expect(res.ok).toBe(true);
+    expect(capturedPrompt).toContain('items: rendered');
+    expect(capturedPrompt).not.toContain('[object Object]');
+  });
+
   it('interpolates prior step outputs into later prompts', async () => {
     let capturedPrompt = '';
     const recipe = parseRecipe(`
