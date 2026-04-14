@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Check, Loader2, X } from 'lucide-react';
 import { useBrainstormChatStore, type BrainstormMessage } from '../../stores/brainstormChatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { useEditorStore } from '../../stores/editorStore';
@@ -67,6 +67,7 @@ export const BrainstormChat: React.FC = () => {
   const renderExtras = (m: BrainstormUnifiedMessage): React.ReactNode => {
     const orig = m.original;
     const sources = orig.sources ?? [];
+    const toolCalls = orig.toolCalls ?? [];
     return (
       <>
         {orig.error && <div className="brainstorm-chat__error">{orig.error}</div>}
@@ -90,6 +91,38 @@ export const BrainstormChat: React.FC = () => {
               ))}
             </ul>
           </details>
+        )}
+        {m.role === 'assistant' && toolCalls.length > 0 && (
+          <ul className="brainstorm-chat__tool-calls">
+            {toolCalls.map((tc) => {
+              const isDone = tc.status === 'done';
+              const failed = isDone && tc.ok === false;
+              const cls = failed
+                ? 'brainstorm-chat__tool-call brainstorm-chat__tool-call--error'
+                : isDone
+                  ? 'brainstorm-chat__tool-call brainstorm-chat__tool-call--done'
+                  : 'brainstorm-chat__tool-call brainstorm-chat__tool-call--running';
+              return (
+                <li key={tc.id} className={cls} title={tc.errorMessage}>
+                  <span className="brainstorm-chat__tool-call-icon">
+                    {!isDone && <Loader2 size={11} className="brainstorm-chat__spin" />}
+                    {isDone && !failed && <Check size={11} />}
+                    {failed && <X size={11} />}
+                  </span>
+                  <span className="brainstorm-chat__tool-call-arrow">
+                    {isDone ? '' : '→'}
+                  </span>
+                  <code className="brainstorm-chat__tool-call-name">{tc.name}</code>
+                  {!isDone && <span className="brainstorm-chat__tool-call-ellipsis">…</span>}
+                  {isDone && typeof tc.durationMs === 'number' && (
+                    <span className="brainstorm-chat__tool-call-duration">
+                      ({tc.durationMs}ms)
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         )}
         {m.role === 'assistant' && !orig.pending && !orig.error && orig.content && (
           <div className="brainstorm-chat__msg-actions">

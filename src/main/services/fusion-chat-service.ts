@@ -290,7 +290,8 @@ class FusionChatService {
           },
         ];
 
-        for (const call of pendingToolCalls) {
+        for (let i = 0; i < pendingToolCalls.length; i++) {
+          const call = pendingToolCalls[i];
           const clientName = toolScope.get(call.name);
           const bareTool = clientName
             ? call.name.slice(clientName.length + 2) // strip "clientName__"
@@ -301,6 +302,21 @@ class FusionChatService {
           } catch {
             // malformed JSON — pass through empty args
           }
+          const callId = `${sessionId}-${turn}-${i}`;
+          const startedAt = Date.now();
+          try {
+            if (!args.webContents.isDestroyed()) {
+              args.webContents.send('fusion:chat:tool-call', {
+                sessionId,
+                callId,
+                name: bareTool,
+                status: 'started',
+                startedAt,
+              });
+            }
+          } catch {
+            // renderer gone
+          }
           const res = clientName
             ? await mcpClientsService.callTool(clientName, bareTool, parsedArgs)
             : {
@@ -310,6 +326,21 @@ class FusionChatService {
                   message: `No client owns tool ${call.name}`,
                 },
               };
+          try {
+            if (!args.webContents.isDestroyed()) {
+              args.webContents.send('fusion:chat:tool-call', {
+                sessionId,
+                callId,
+                name: bareTool,
+                status: 'done',
+                durationMs: Date.now() - startedAt,
+                ok: res.ok,
+                errorMessage: res.ok ? undefined : res.error?.message,
+              });
+            }
+          } catch {
+            // renderer gone
+          }
           const body = res.ok
             ? JSON.stringify(res.result ?? {})
             : `Error: ${res.error?.message ?? 'unknown'}`;

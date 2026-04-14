@@ -11,7 +11,19 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   useBrainstormChatStore,
   type BrainstormSource,
+  type BrainstormToolCall,
 } from '../../stores/brainstormChatStore';
+
+interface ToolCallEnv {
+  sessionId: string;
+  callId: string;
+  name: string;
+  status: 'started' | 'done';
+  startedAt?: number;
+  durationMs?: number;
+  ok?: boolean;
+  errorMessage?: string;
+}
 
 interface FusionChatApi {
   start(
@@ -33,6 +45,7 @@ interface FusionChatApi {
   onContext(
     cb: (env: { sessionId: string; sources: BrainstormSource[] }) => void
   ): () => void;
+  onToolCall(cb: (env: ToolCallEnv) => void): () => void;
 }
 
 function api(): FusionChatApi | null {
@@ -57,6 +70,8 @@ export function useBrainstormChat(): UseBrainstormChat {
   // Context can arrive before beginAssistant — buffer until the assistant
   // message exists so we can attach sources to it.
   const pendingSources = useRef<Map<string, BrainstormSource[]>>(new Map());
+  // Tool-call events may arrive before beginAssistant — buffer by sessionId.
+  const pendingToolCalls = useRef<Map<string, ToolCallEnv[]>>(new Map());
 
   useEffect(() => {
     const chat = api();
@@ -87,9 +102,38 @@ export function useBrainstormChat(): UseBrainstormChat {
         pendingSources.current.set(env.sessionId, env.sources);
       }
     });
+    const applyToolCallEnv = (aId: string, env: ToolCallEnv): void => {
+      if (env.status === 'started') {
+        const tc: BrainstormToolCall = {
+          id: env.callId,
+          name: env.name,
+          status: 'started',
+          startedAt: env.startedAt,
+        };
+        store.addToolCall(aId, tc);
+      } else {
+        store.updateToolCall(aId, env.callId, {
+          status: 'done',
+          durationMs: env.durationMs,
+          ok: env.ok,
+          errorMessage: env.errorMessage,
+        });
+      }
+    };
+    const unsubTool = chat.onToolCall((env) => {
+      const aId = assistantIdBySession.current.get(env.sessionId);
+      if (aId) {
+        applyToolCallEnv(aId, env);
+      } else {
+        const arr = pendingToolCalls.current.get(env.sessionId) ?? [];
+        arr.push(env);
+        pendingToolCalls.current.set(env.sessionId, arr);
+      }
+    });
     return () => {
       unsubChunk();
       unsubCtx();
+      unsubTool();
     };
     // store methods are stable references (zustand), deps intentionally minimal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,6 +171,27 @@ export function useBrainstormChat(): UseBrainstormChat {
       if (buffered) {
         store.setSources(aId, buffered);
         pendingSources.current.delete(res.sessionId);
+      }
+      const bufferedTools = pendingToolCalls.current.get(res.sessionId);
+      if (bufferedTools) {
+        for (const env of bufferedTools) {
+          if (env.status === 'started') {
+            store.addToolCall(aId, {
+              id: env.callId,
+              name: env.name,
+              status: 'started',
+              startedAt: env.startedAt,
+            });
+          } else {
+            store.updateToolCall(aId, env.callId, {
+              status: 'done',
+              durationMs: env.durationMs,
+              ok: env.ok,
+              errorMessage: env.errorMessage,
+            });
+          }
+        }
+        pendingToolCalls.current.delete(res.sessionId);
       }
     },
     [store]

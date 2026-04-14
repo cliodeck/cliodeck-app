@@ -734,6 +734,23 @@ const api = {
         ipcRenderer.on('fusion:chat:chunk', listener);
         return () => ipcRenderer.removeListener('fusion:chat:chunk', listener);
       },
+      onToolCall: (
+        callback: (env: {
+          sessionId: string;
+          callId: string;
+          name: string;
+          status: 'started' | 'done';
+          startedAt?: number;
+          durationMs?: number;
+          ok?: boolean;
+          errorMessage?: string;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:tool-call', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:tool-call', listener);
+      },
       onContext: (
         callback: (envelope: {
           sessionId: string;

@@ -34,6 +34,18 @@ export interface BrainstormMessage {
   error?: string;
   /** Retrieval hits attached to the assistant turn (RAG sources). */
   sources?: BrainstormSource[];
+  /** Tool calls performed during this assistant turn (in order). */
+  toolCalls?: BrainstormToolCall[];
+}
+
+export interface BrainstormToolCall {
+  id: string;
+  name: string;
+  status: 'started' | 'done';
+  startedAt?: number;
+  durationMs?: number;
+  ok?: boolean;
+  errorMessage?: string;
 }
 
 interface State {
@@ -47,6 +59,12 @@ interface State {
   beginAssistant: (sessionId: string) => string;
   appendDelta: (assistantId: string, delta: string) => void;
   setSources: (assistantId: string, sources: BrainstormSource[]) => void;
+  addToolCall: (assistantId: string, toolCall: BrainstormToolCall) => void;
+  updateToolCall: (
+    assistantId: string,
+    callId: string,
+    patch: Partial<BrainstormToolCall>
+  ) => void;
   finishAssistant: (
     assistantId: string,
     finishReason?: string,
@@ -102,6 +120,30 @@ export const useBrainstormChatStore = create<State>((set) => ({
       messages: s.messages.map((m) =>
         m.id === assistantId ? { ...m, sources } : m
       ),
+    }));
+  },
+
+  addToolCall: (assistantId, toolCall) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === assistantId
+          ? { ...m, toolCalls: [...(m.toolCalls ?? []), toolCall] }
+          : m
+      ),
+    }));
+  },
+
+  updateToolCall: (assistantId, callId, patch) => {
+    set((s) => ({
+      messages: s.messages.map((m) => {
+        if (m.id !== assistantId || !m.toolCalls) return m;
+        return {
+          ...m,
+          toolCalls: m.toolCalls.map((tc) =>
+            tc.id === callId ? { ...tc, ...patch } : tc
+          ),
+        };
+      }),
     }));
   },
 
