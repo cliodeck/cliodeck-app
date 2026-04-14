@@ -33,11 +33,23 @@ function now(): string {
   return new Date().toISOString();
 }
 
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string };
+
 interface AnthropicMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | AnthropicContentBlock[];
 }
 
+/**
+ * Map cross-provider messages to Anthropic's format.
+ *   - system → top-level `system` field
+ *   - user / assistant → plain messages
+ *   - tool → Anthropic's `user` message carrying a `tool_result` block
+ *     (matches the provider's own convention for returning tool output)
+ */
 function toAnthropicMessages(messages: ChatMessage[]): {
   system?: string;
   messages: AnthropicMessage[];
@@ -49,8 +61,19 @@ function toAnthropicMessages(messages: ChatMessage[]): {
       systems.push(m.content);
     } else if (m.role === 'user' || m.role === 'assistant') {
       out.push({ role: m.role, content: m.content });
+    } else if (m.role === 'tool') {
+      if (!m.toolCallId) continue;
+      out.push({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: m.toolCallId,
+            content: m.content,
+          },
+        ],
+      });
     }
-    // tool role: not supported in this minimal impl yet (capabilities.tools=false).
   }
   return {
     system: systems.length ? systems.join('\n\n') : undefined,
@@ -64,7 +87,7 @@ export class AnthropicProvider implements LLMProvider {
   readonly capabilities: ProviderCapabilities = {
     chat: true,
     streaming: true,
-    tools: false, // wire tool_use blocks in a follow-up
+    tools: true,
     embeddings: false,
   };
 
@@ -148,6 +171,13 @@ export class AnthropicProvider implements LLMProvider {
     opts: ChatOptions = {}
   ): AsyncIterable<ChatChunk> {
     const { system, messages: msgs } = toAnthropicMessages(messages);
+    const tools = opts.tools?.length
+      ? opts.tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: t.parameters,
+        }))
+      : undefined;
     const body = {
       model: opts.model ?? this.model,
       max_tokens: opts.maxTokens ?? 1024,
@@ -157,6 +187,7 @@ export class AnthropicProvider implements LLMProvider {
       stop_sequences: opts.stop,
       stream: true,
       ...(system ? { system } : {}),
+      ...(tools ? { tools } : {}),
       messages: msgs,
     };
 
@@ -192,6 +223,14 @@ export class AnthropicProvider implements LLMProvider {
     let usage: ChatChunk['usage'] | undefined;
     let finishReason: ChatChunk['finishReason'] = 'stop';
 
+    // Track partial tool_use blocks — Anthropic streams the name in
+    // content_block_start and accumulates arguments across
+    // input_json_delta events, flushed on content_block_stop.
+    const pendingToolUse = new Map<
+      number,
+      { id: string; name: string; argsJson: string }
+    >();
+
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -210,9 +249,16 @@ export class AnthropicProvider implements LLMProvider {
           try {
             const obj = JSON.parse(payload) as {
               type: string;
+              index?: number;
+              content_block?: {
+                type?: string;
+                id?: string;
+                name?: string;
+              };
               delta?: {
                 type?: string;
                 text?: string;
+                partial_json?: string;
                 stop_reason?: string;
               };
               message?: {
@@ -220,12 +266,51 @@ export class AnthropicProvider implements LLMProvider {
               };
               usage?: { output_tokens?: number };
             };
-            if (obj.type === 'content_block_delta' && obj.delta?.text) {
+            if (
+              obj.type === 'content_block_start' &&
+              obj.content_block?.type === 'tool_use' &&
+              obj.content_block.id &&
+              obj.content_block.name &&
+              obj.index != null
+            ) {
+              pendingToolUse.set(obj.index, {
+                id: obj.content_block.id,
+                name: obj.content_block.name,
+                argsJson: '',
+              });
+            } else if (
+              obj.type === 'content_block_delta' &&
+              obj.delta?.type === 'input_json_delta' &&
+              obj.index != null
+            ) {
+              const p = pendingToolUse.get(obj.index);
+              if (p && obj.delta.partial_json) {
+                p.argsJson += obj.delta.partial_json;
+              }
+            } else if (obj.type === 'content_block_delta' && obj.delta?.text) {
               yield { delta: obj.delta.text };
+            } else if (obj.type === 'content_block_stop' && obj.index != null) {
+              const p = pendingToolUse.get(obj.index);
+              if (p) {
+                yield {
+                  delta: '',
+                  toolCall: {
+                    id: p.id,
+                    name: p.name,
+                    arguments: p.argsJson || '{}',
+                  },
+                };
+                pendingToolUse.delete(obj.index);
+              }
             } else if (obj.type === 'message_delta') {
               if (obj.delta?.stop_reason) {
+                const r = obj.delta.stop_reason;
                 finishReason =
-                  obj.delta.stop_reason === 'max_tokens' ? 'length' : 'stop';
+                  r === 'tool_use'
+                    ? 'tool_call'
+                    : r === 'max_tokens'
+                      ? 'length'
+                      : 'stop';
               }
               if (obj.usage?.output_tokens != null) {
                 usage = {

@@ -25,6 +25,8 @@ import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
 import { projectManager } from './project-manager.js';
 import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
+import { mcpClientsService } from './mcp-clients-service.js';
+import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -200,16 +202,123 @@ class FusionChatService {
 
     const llm = registry.getLLM();
 
-    try {
-      for await (const chunk of llm.chat(messages, {
-        model: args.opts?.model,
-        temperature: args.opts?.temperature,
-        maxTokens: args.opts?.maxTokens,
-        signal: controller.signal,
-      })) {
-        send({ sessionId, chunk });
-        if (chunk.done) break;
+    // Collect tools from every ready MCP client — each tool is scoped
+    // by its client name so we can dispatch the invocation later.
+    const toolScope = new Map<string, string>(); // namespaced tool name → client name
+    const tools: ToolDescriptor[] = [];
+    if (llm.capabilities.tools) {
+      for (const client of mcpClientsService.list()) {
+        if (client.state !== 'ready') continue;
+        for (const t of client.tools) {
+          const namespaced = `${client.name}__${t.name}`;
+          toolScope.set(namespaced, client.name);
+          tools.push({
+            name: namespaced,
+            description: `[${client.name}] ${t.description ?? ''}`.trim(),
+            parameters:
+              (t.inputSchema as Record<string, unknown>) ??
+              ({ type: 'object', properties: {} } as Record<string, unknown>),
+          });
+        }
       }
+    }
+
+    const MAX_TURNS = 6;
+    try {
+      for (let turn = 0; turn < MAX_TURNS; turn++) {
+        const pendingToolCalls: Array<{
+          id: string;
+          name: string;
+          arguments: string;
+        }> = [];
+        let sawToolCall = false;
+        let terminalDone = false;
+
+        for await (const chunk of llm.chat(messages, {
+          model: args.opts?.model,
+          temperature: args.opts?.temperature,
+          maxTokens: args.opts?.maxTokens,
+          tools: tools.length ? tools : undefined,
+          signal: controller.signal,
+        })) {
+          if (chunk.toolCall) {
+            pendingToolCalls.push(chunk.toolCall);
+            sawToolCall = true;
+          }
+          // Suppress the terminal done chunk while we're mid-agent-loop
+          // so the renderer only sees ONE done at the very end.
+          if (chunk.done && sawToolCall) {
+            terminalDone = true;
+            break;
+          }
+          send({ sessionId, chunk });
+          if (chunk.done) {
+            terminalDone = true;
+            break;
+          }
+        }
+
+        if (!sawToolCall || pendingToolCalls.length === 0) break;
+        if (!terminalDone) {
+          // Stream ended without a done chunk — shouldn't happen with the
+          // providers we ship, but stop the loop rather than spin.
+          send({
+            sessionId,
+            chunk: { delta: '', done: true, finishReason: 'error' },
+            error: {
+              code: 'stream_incomplete',
+              message: 'LLM stream ended without a terminal chunk',
+            },
+          });
+          return;
+        }
+
+        // Feed an assistant-role placeholder that records the tool calls
+        // (Anthropic requires tool_use blocks before tool_result), then
+        // one tool-role message per result.
+        const toolCallsSummary = pendingToolCalls
+          .map(
+            (c) =>
+              `[tool_call name="${c.name}" id="${c.id}" args=${c.arguments}]`
+          )
+          .join('\n');
+        messages = [
+          ...messages,
+          { role: 'assistant', content: toolCallsSummary },
+        ];
+
+        for (const call of pendingToolCalls) {
+          const clientName = toolScope.get(call.name);
+          const bareTool = clientName
+            ? call.name.slice(clientName.length + 2) // strip "clientName__"
+            : call.name;
+          let parsedArgs: Record<string, unknown> = {};
+          try {
+            parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
+          } catch {
+            // malformed JSON — pass through empty args
+          }
+          const res = clientName
+            ? await mcpClientsService.callTool(clientName, bareTool, parsedArgs)
+            : {
+                ok: false,
+                error: {
+                  code: 'unknown_tool',
+                  message: `No client owns tool ${call.name}`,
+                },
+              };
+          const body = res.ok
+            ? JSON.stringify(res.result ?? {})
+            : `Error: ${res.error?.message ?? 'unknown'}`;
+          messages = [
+            ...messages,
+            { role: 'tool', toolCallId: call.id, content: body },
+          ];
+        }
+        // Loop back: call llm.chat again with the updated history.
+      }
+      // Force a terminal done if the loop unwound without one.
+      send({ sessionId, chunk: { delta: '', done: true, finishReason: 'stop' } });
     } catch (e) {
       send({
         sessionId,
