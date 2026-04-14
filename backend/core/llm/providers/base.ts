@@ -56,6 +56,17 @@ export interface ChatMessage {
   name?: string;
   /** Tool call id for tool-role messages. */
   toolCallId?: string;
+  /**
+   * For assistant messages that triggered tool calls. Providers map this
+   * to their own structured representation (OpenAI's tool_calls array,
+   * Anthropic's tool_use content blocks, Gemini's functionCall parts).
+   * `arguments` is the JSON-stringified argument object.
+   */
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
   /** Optional cross-provider metadata; providers MUST ignore unknown fields. */
   meta?: ChatMessageMeta;
 }

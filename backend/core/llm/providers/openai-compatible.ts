@@ -91,12 +91,24 @@ export class OpenAICompatibleProvider implements LLMProvider {
   ): AsyncIterable<ChatChunk> {
     const body = {
       model: opts.model ?? this.model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-        ...(m.name ? { name: m.name } : {}),
-        ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
-      })),
+      messages: messages.map((m) => {
+        const base: Record<string, unknown> = {
+          role: m.role,
+          content: m.content,
+        };
+        if (m.name) base.name = m.name;
+        if (m.toolCallId) base.tool_call_id = m.toolCallId;
+        if (m.role === 'assistant' && m.toolCalls?.length) {
+          base.tool_calls = m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.arguments || '{}' },
+          }));
+          // OpenAI requires content to be string|null when tool_calls present.
+          if (!m.content) base.content = null;
+        }
+        return base;
+      }),
       temperature: opts.temperature,
       top_p: opts.topP,
       max_tokens: opts.maxTokens,
@@ -145,12 +157,33 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+
+    // OpenAI streams tool_calls in fragments: the first delta carries the
+    // function name + id, subsequent deltas append to `arguments`. Multiple
+    // parallel calls are indexed by `index`. Accumulate here and emit one
+    // toolCall ChatChunk per call when finish_reason='tool_calls' arrives.
+    const pendingToolCalls = new Map<
+      number,
+      { id: string; name: string; argsJson: string }
+    >();
+    let finalUsage: ChatChunk['usage'] | undefined;
+
+    const flushToolCalls = function* (): Generator<ChatChunk> {
+      for (const [, p] of pendingToolCalls) {
+        if (!p.name) continue;
+        yield {
+          delta: '',
+          toolCall: { id: p.id, name: p.name, arguments: p.argsJson || '{}' },
+        };
+      }
+      pendingToolCalls.clear();
+    };
+
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        // SSE: events separated by double newline; each event has "data: ..." line(s).
         let sep: number;
         while ((sep = buf.indexOf('\n\n')) >= 0) {
           const event = buf.slice(0, sep);
@@ -158,12 +191,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
           for (const line of event.split('\n')) {
             if (!line.startsWith('data:')) continue;
             const payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') {
-              if (payload === '[DONE]') {
-                yield { delta: '', done: true, finishReason: 'stop' };
-                return;
-              }
-              continue;
+            if (!payload) continue;
+            if (payload === '[DONE]') {
+              yield* flushToolCalls();
+              yield {
+                delta: '',
+                done: true,
+                finishReason: 'stop',
+                usage: finalUsage,
+              };
+              return;
             }
             try {
               const obj = JSON.parse(payload) as {
@@ -171,6 +208,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
                   delta?: {
                     content?: string;
                     tool_calls?: Array<{
+                      index?: number;
                       id?: string;
                       function?: { name?: string; arguments?: string };
                     }>;
@@ -185,20 +223,36 @@ export class OpenAICompatibleProvider implements LLMProvider {
               };
               const choice = obj.choices?.[0];
               const delta = choice?.delta?.content ?? '';
-              const tc = choice?.delta?.tool_calls?.[0];
+              const tcs = choice?.delta?.tool_calls;
               const finishReason = choice?.finish_reason;
-              if (tc?.function?.name || tc?.function?.arguments) {
-                yield {
-                  delta,
-                  toolCall: {
-                    id: tc.id ?? '',
-                    name: tc.function.name ?? '',
-                    arguments: tc.function.arguments ?? '',
-                  },
+              if (obj.usage) {
+                finalUsage = {
+                  promptTokens: obj.usage.prompt_tokens,
+                  completionTokens: obj.usage.completion_tokens,
+                  totalTokens: obj.usage.total_tokens,
                 };
-              } else if (finishReason) {
+              }
+              if (tcs?.length) {
+                for (const tc of tcs) {
+                  const idx = tc.index ?? 0;
+                  const slot = pendingToolCalls.get(idx) ?? {
+                    id: '',
+                    name: '',
+                    argsJson: '',
+                  };
+                  if (tc.id) slot.id = tc.id;
+                  if (tc.function?.name) slot.name = tc.function.name;
+                  if (tc.function?.arguments) {
+                    slot.argsJson += tc.function.arguments;
+                  }
+                  pendingToolCalls.set(idx, slot);
+                }
+              }
+              if (delta) yield { delta };
+              if (finishReason) {
+                yield* flushToolCalls();
                 yield {
-                  delta,
+                  delta: '',
                   done: true,
                   finishReason:
                     finishReason === 'length'
@@ -206,16 +260,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
                       : finishReason === 'tool_calls'
                         ? 'tool_call'
                         : 'stop',
-                  usage: obj.usage
-                    ? {
-                        promptTokens: obj.usage.prompt_tokens,
-                        completionTokens: obj.usage.completion_tokens,
-                        totalTokens: obj.usage.total_tokens,
-                      }
-                    : undefined,
+                  usage: finalUsage,
                 };
-              } else if (delta) {
-                yield { delta };
+                return;
               }
             } catch {
               // skip malformed SSE payload
@@ -223,7 +270,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
           }
         }
       }
-      yield { delta: '', done: true, finishReason: 'stop' };
+      yield* flushToolCalls();
+      yield { delta: '', done: true, finishReason: 'stop', usage: finalUsage };
     } catch (e) {
       const cancelled = opts.signal?.aborted;
       yield {

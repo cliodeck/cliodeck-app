@@ -274,17 +274,20 @@ class FusionChatService {
         }
 
         // Feed an assistant-role placeholder that records the tool calls
-        // (Anthropic requires tool_use blocks before tool_result), then
-        // one tool-role message per result.
-        const toolCallsSummary = pendingToolCalls
-          .map(
-            (c) =>
-              `[tool_call name="${c.name}" id="${c.id}" args=${c.arguments}]`
-          )
-          .join('\n');
+        // via the structured `toolCalls` field. Each provider maps it to
+        // its own format (Anthropic tool_use blocks, OpenAI tool_calls
+        // array, Gemini functionCall parts).
         messages = [
           ...messages,
-          { role: 'assistant', content: toolCallsSummary },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: pendingToolCalls.map((c) => ({
+              id: c.id,
+              name: c.name,
+              arguments: c.arguments,
+            })),
+          },
         ];
 
         for (const call of pendingToolCalls) {
