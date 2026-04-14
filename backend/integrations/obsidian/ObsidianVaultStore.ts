@@ -363,6 +363,63 @@ export class ObsidianVaultStore {
     return hits;
   }
 
+  /**
+   * Lexical-only search (FTS5 BM25). Used by callers that don't have an
+   * embedding provider on hand — notably the MCP server tool, which
+   * shouldn't depend on a running Ollama just to answer a search query.
+   */
+  searchLexical(queryText: string, topK = 10): ObsidianSearchHit[] {
+    if (!queryText.trim()) return [];
+    let rows: Array<{ id: string; bm: number }>;
+    try {
+      rows = this.db
+        .prepare(
+          `SELECT f.id, bm25(chunks_fts) AS bm
+           FROM chunks_fts f
+           WHERE chunks_fts MATCH ?
+           ORDER BY bm
+           LIMIT ?`
+        )
+        .all(escapeFts(queryText), topK) as Array<{ id: string; bm: number }>;
+    } catch {
+      return [];
+    }
+    if (!rows.length) return [];
+    const ids = rows.map((r) => r.id);
+    const chunkRows = this.db
+      .prepare(
+        `SELECT id, note_id, chunk_index, content, section_title, start_position, end_position
+         FROM chunks WHERE id IN (${ids.map(() => '?').join(',')})`
+      )
+      .all(...ids) as RawChunkRow[];
+    const byId = new Map<string, RawChunkRow>();
+    for (const r of chunkRows) byId.set(r.id, r);
+
+    const noteStmt = this.db.prepare('SELECT * FROM notes WHERE id = ?');
+    const hits: ObsidianSearchHit[] = [];
+    for (const r of rows) {
+      const c = byId.get(r.id);
+      if (!c) continue;
+      const noteRow = noteStmt.get(c.note_id) as RawNoteRow | undefined;
+      if (!noteRow) continue;
+      hits.push({
+        chunk: {
+          id: c.id,
+          noteId: c.note_id,
+          chunkIndex: c.chunk_index,
+          content: c.content,
+          sectionTitle: c.section_title ?? undefined,
+          startPosition: c.start_position,
+          endPosition: c.end_position,
+        },
+        note: rowToNote(noteRow),
+        score: -r.bm,
+        signals: { dense: 0, lexical: -r.bm },
+      });
+    }
+    return hits;
+  }
+
   close(): void {
     this.db.close();
   }
