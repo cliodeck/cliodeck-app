@@ -34,6 +34,7 @@ import {
 } from '../../../../backend/core/workspace/config.js';
 import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js';
 import { RecipeRunner } from '../../../../backend/recipes/runner.js';
+import { recipeStepHandlers } from '../../services/recipe-step-handlers.js';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
 import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import {
@@ -189,6 +190,7 @@ export function setupFusionHandlers(): void {
       const runner = new RecipeRunner({
         registry,
         workspaceRoot: root,
+        stepHandlers: recipeStepHandlers,
         onEvent: (e) => {
           try {
             if (!event.sender.isDestroyed()) {
