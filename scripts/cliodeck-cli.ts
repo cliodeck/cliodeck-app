@@ -25,6 +25,7 @@ import { parseArgs } from './cli/args.js';
 import { cmdRecipeList, cmdRecipeRun } from './cli/recipe.js';
 import { cmdSearch } from './cli/search.js';
 import { cmdHintsShow, cmdHintsSet } from './cli/hints.js';
+import { cmdImportCliobrain } from './cli/migrate.js';
 
 const USAGE = `cliodeck — headless operations on a workspace
 
@@ -34,6 +35,7 @@ Usage:
   cliodeck search "query" --workspace <path> [--topK 10]
   cliodeck hints show     --workspace <path>
   cliodeck hints set      --workspace <path> [--file path | content]
+  cliodeck import-cliobrain <workspace> [--overwrite] [--name <label>]
 `;
 
 export async function runCli(argv: string[]): Promise<number> {
@@ -62,6 +64,9 @@ export async function runCli(argv: string[]): Promise<number> {
 
     if (cmd === 'search') {
       return await cmdSearch(parseArgs(argv.slice(1)));
+    }
+    if (cmd === 'import-cliobrain') {
+      return await cmdImportCliobrain(parseArgs(argv.slice(1)));
     }
 
     process.stderr.write(USAGE);
