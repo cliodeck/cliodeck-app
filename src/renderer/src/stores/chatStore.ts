@@ -375,10 +375,3 @@ export const useChatStore = create<State>((set) => ({
     }));
   },
 }));
-
-/**
- * Deprecated alias — kept for one release to minimize diff noise.
- * New code should import `useChatStore` directly.
- * @deprecated use `useChatStore`
- */
-export const useBrainstormChatStore = useChatStore;

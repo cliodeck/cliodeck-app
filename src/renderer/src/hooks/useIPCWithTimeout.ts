@@ -92,26 +92,6 @@ export const usePDFIPC = () => {
   };
 };
 
-export const useChatIPC = () => {
-  const { callWithTimeout } = useIPCWithTimeout();
-
-  return {
-    sendMessage: (message: string, options?: any) =>
-      callWithTimeout(
-        () => window.electron.chat.send(message, options),
-        'chat:send',
-        TIMEOUTS.SLOW // RAG queries can be slow
-      ),
-
-    cancelMessage: () =>
-      callWithTimeout(
-        () => window.electron.chat.cancel(),
-        'chat:cancel',
-        TIMEOUTS.FAST
-      ),
-  };
-};
-
 export const useCorpusIPC = () => {
   const { callWithTimeout } = useIPCWithTimeout();
 

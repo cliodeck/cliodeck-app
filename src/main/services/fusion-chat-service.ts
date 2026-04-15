@@ -198,18 +198,6 @@ class FusionChatService {
     const controller = new AbortController();
     this.active.set(sessionId, controller);
 
-    // [DEBUG fusion-chat empty-response] trace entry so we can see when
-    // pump() is actually kicked off relative to the renderer IPC reply.
-    console.log('[fusion-chat] start', {
-      sessionId,
-      messages: args.messages.length,
-      model: args.opts?.model,
-      hasRetrievalOpts: !!args.retrievalOptions,
-      sourceType: args.retrievalOptions?.sourceType,
-      includeVault: args.retrievalOptions?.includeVault,
-      systemPrompt: args.systemPrompt,
-    });
-
     // Fire and forget — the stream pumps chunks via webContents.
     void this.pump(sessionId, controller, args)
       .catch((e) => {
@@ -218,7 +206,6 @@ class FusionChatService {
         console.error('[fusion-chat] pump crashed', sessionId, e);
       })
       .finally(() => {
-        console.log('[fusion-chat] pump done', sessionId);
         this.active.delete(sessionId);
       });
 

@@ -32,25 +32,25 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
       </button>
 
       {showExplanation && (
-        <div className="explanation-content">
+        <div className="explanation-content" data-testid="explanation-content">
           <div className="explanation-section">
-            <h4>🔎 Recherche</h4>
+            <h4>{t('chat.explanation.searchHeading', '🔎 Recherche')}</h4>
             <ul>
-              <li><strong>Résultats trouvés:</strong> {explanation.search.totalResults} chunks</li>
-              <li><strong>Durée:</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && '(cache)'}</li>
-              <li><strong>Type de sources:</strong> {
-                explanation.search.sourceType === 'primary' ? 'Archives (Tropy)' :
-                explanation.search.sourceType === 'secondary' ? 'Bibliographie (PDFs)' : 'Toutes'
+              <li><strong>{t('chat.explanation.resultsFound', 'Résultats trouvés:')}</strong> {explanation.search.totalResults} {t('chat.explanation.chunks', 'chunks')}</li>
+              <li><strong>{t('chat.explanation.duration', 'Durée:')}</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && t('chat.explanation.cacheHitSuffix', '(cache)')}</li>
+              <li><strong>{t('chat.explanation.sourceTypeLabel', 'Type de sources:')}</strong> {
+                explanation.search.sourceType === 'primary' ? t('chat.explanation.sourceTypePrimary', 'Archives (Tropy)') :
+                explanation.search.sourceType === 'secondary' ? t('chat.explanation.sourceTypeSecondary', 'Bibliographie (PDFs)') : t('chat.explanation.sourceTypeAll', 'Toutes')
               }</li>
             </ul>
             {explanation.search.documents.length > 0 && (
               <details className="explanation-documents">
-                <summary>Documents consultés ({explanation.search.documents.length})</summary>
+                <summary>{t('chat.explanation.documentsConsulted', 'Documents consultés')} ({explanation.search.documents.length})</summary>
                 <ul>
                   {explanation.search.documents.map((doc, i) => (
                     <li key={i}>
                       <strong>{doc.title}</strong>
-                      <span className="doc-meta"> ({doc.chunkCount} chunks, score: {(doc.similarity * 100).toFixed(1)}%)</span>
+                      <span className="doc-meta"> ({doc.chunkCount} {t('chat.explanation.chunks', 'chunks')}, {t('chat.explanation.score', 'score')}: {(doc.similarity * 100).toFixed(1)}%)</span>
                     </li>
                   ))}
                 </ul>
@@ -60,16 +60,16 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 
           {explanation.compression && (
             <div className="explanation-section">
-              <h4>🗜️ Compression</h4>
+              <h4>{t('chat.explanation.compressionHeading', '🗜️ Compression')}</h4>
               <ul>
-                <li><strong>État:</strong> {explanation.compression.enabled ? 'Activée' : 'Désactivée'}</li>
+                <li><strong>{t('chat.explanation.state', 'État:')}</strong> {explanation.compression.enabled ? t('chat.explanation.enabled', 'Activée') : t('chat.explanation.disabled', 'Désactivée')}</li>
                 {explanation.compression.enabled && (
                   <>
-                    <li><strong>Chunks:</strong> {explanation.compression.originalChunks} → {explanation.compression.finalChunks}</li>
-                    <li><strong>Taille:</strong> {(explanation.compression.originalSize / 1000).toFixed(1)}k → {(explanation.compression.finalSize / 1000).toFixed(1)}k caractères</li>
-                    <li><strong>Réduction:</strong> {explanation.compression.reductionPercent.toFixed(1)}%</li>
+                    <li><strong>{t('chat.explanation.chunksLabel', 'Chunks:')}</strong> {explanation.compression.originalChunks} → {explanation.compression.finalChunks}</li>
+                    <li><strong>{t('chat.explanation.size', 'Taille:')}</strong> {(explanation.compression.originalSize / 1000).toFixed(1)}k → {(explanation.compression.finalSize / 1000).toFixed(1)}k {t('chat.explanation.chars', 'caractères')}</li>
+                    <li><strong>{t('chat.explanation.reduction', 'Réduction:')}</strong> {explanation.compression.reductionPercent.toFixed(1)}%</li>
                     {explanation.compression.strategy && (
-                      <li><strong>Stratégie:</strong> {explanation.compression.strategy}</li>
+                      <li><strong>{t('chat.explanation.strategy', 'Stratégie:')}</strong> {explanation.compression.strategy}</li>
                     )}
                   </>
                 )}
@@ -79,36 +79,36 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 
           {explanation.graph?.enabled && (
             <div className="explanation-section">
-              <h4>🔗 Graphe de connaissances</h4>
+              <h4>{t('chat.explanation.graphHeading', '🔗 Graphe de connaissances')}</h4>
               <ul>
-                <li><strong>Documents liés:</strong> {explanation.graph.relatedDocsFound}</li>
+                <li><strong>{t('chat.explanation.relatedDocs', 'Documents liés:')}</strong> {explanation.graph.relatedDocsFound}</li>
                 {explanation.graph.documentTitles.length > 0 && (
-                  <li><strong>Titres:</strong> {explanation.graph.documentTitles.join(', ')}</li>
+                  <li><strong>{t('chat.explanation.titles', 'Titres:')}</strong> {explanation.graph.documentTitles.join(', ')}</li>
                 )}
               </ul>
             </div>
           )}
 
           <div className="explanation-section">
-            <h4>🤖 Génération</h4>
+            <h4>{t('chat.explanation.generationHeading', '🤖 Génération')}</h4>
             <ul>
-              <li><strong>Fournisseur:</strong> {explanation.llm.provider}</li>
-              <li><strong>Modèle:</strong> {explanation.llm.model}</li>
-              <li><strong>Fenêtre de contexte:</strong> {explanation.llm.contextWindow} tokens</li>
-              <li><strong>Température:</strong> {explanation.llm.temperature}</li>
-              <li><strong>Taille du prompt:</strong> {(explanation.llm.promptSize / 1000).toFixed(1)}k caractères</li>
+              <li><strong>{t('chat.explanation.provider', 'Fournisseur:')}</strong> {explanation.llm.provider}</li>
+              <li><strong>{t('chat.explanation.model', 'Modèle:')}</strong> {explanation.llm.model}</li>
+              <li><strong>{t('chat.explanation.contextWindow', 'Fenêtre de contexte:')}</strong> {explanation.llm.contextWindow} tokens</li>
+              <li><strong>{t('chat.explanation.temperature', 'Température:')}</strong> {explanation.llm.temperature}</li>
+              <li><strong>{t('chat.explanation.promptSize', 'Taille du prompt:')}</strong> {(explanation.llm.promptSize / 1000).toFixed(1)}k {t('chat.explanation.chars', 'caractères')}</li>
             </ul>
           </div>
 
           <div className="explanation-section">
-            <h4>⏱️ Temps d'exécution</h4>
+            <h4>{t('chat.explanation.timingHeading', '⏱️ Temps d\'exécution')}</h4>
             <ul>
-              <li><strong>Recherche:</strong> {explanation.timing.searchMs}ms</li>
+              <li><strong>{t('chat.explanation.searchTime', 'Recherche:')}</strong> {explanation.timing.searchMs}ms</li>
               {explanation.timing.compressionMs && (
-                <li><strong>Compression:</strong> {explanation.timing.compressionMs}ms</li>
+                <li><strong>{t('chat.explanation.compressionTime', 'Compression:')}</strong> {explanation.timing.compressionMs}ms</li>
               )}
-              <li><strong>Génération:</strong> {explanation.timing.generationMs}ms</li>
-              <li><strong>Total:</strong> {explanation.timing.totalMs}ms</li>
+              <li><strong>{t('chat.explanation.generationTime', 'Génération:')}</strong> {explanation.timing.generationMs}ms</li>
+              <li><strong>{t('chat.explanation.totalTime', 'Total:')}</strong> {explanation.timing.totalMs}ms</li>
             </ul>
           </div>
         </div>

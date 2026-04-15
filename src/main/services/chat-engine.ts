@@ -332,16 +332,6 @@ export async function runChatTurn<TSource = unknown>(
   try {
     generationStart = Date.now();
     let firstFrameSeen = false;
-    // [DEBUG fusion-chat empty-response] summarise the exact payload headed
-    // to the provider so we can tell apart "never called provider" from
-    // "provider returned 0 chunks".
-    console.log('[chat-engine] provider.chat →', {
-      provider: args.provider.id,
-      model: args.opts?.model ?? args.provider.name,
-      messageCount: messages.length,
-      toolCount: args.tools?.length ?? 0,
-      maxTurns,
-    });
     for (let turn = 0; turn < maxTurns; turn++) {
       const pendingToolCalls: ChatEngineToolCall[] = [];
       let sawToolCall = false;
@@ -386,13 +376,6 @@ export async function runChatTurn<TSource = unknown>(
         hooks.onChunk?.(chunk);
       }
 
-      console.log('[chat-engine] turn complete', {
-        turn,
-        chunkCount,
-        sawToolCall,
-        pendingToolCalls: pendingToolCalls.length,
-        terminalDone,
-      });
       if (!sawToolCall || pendingToolCalls.length === 0) {
         if (!terminalDone) {
           // Stream ended without a done chunk — synthesize one.

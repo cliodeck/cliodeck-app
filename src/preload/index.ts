@@ -12,8 +12,6 @@ const ALLOWED_RECEIVE_CHANNELS: string[] = [
   'menu:toggle-preview', 'menu:switch-panel', 'menu:import-bibtex',
   'menu:search-citations', 'menu:connect-zotero', 'menu:open-settings',
   'menu:about',
-  // Chat status updates
-  'chat:status',
   // Language sync
   'language-changed',
 ];
@@ -80,16 +78,6 @@ const api = {
       ipcRenderer.on('pdf:indexing-progress', listener);
       return () => ipcRenderer.removeListener('pdf:indexing-progress', listener);
     },
-  },
-
-  // Chat RAG
-  chat: {
-    send: (message: string, options?: any) =>
-      ipcRenderer.invoke('chat:send', message, options),
-    onStream: (callback: (chunk: string) => void) => {
-      ipcRenderer.on('chat:stream', (_event, chunk) => callback(chunk));
-    },
-    cancel: () => ipcRenderer.invoke('chat:cancel'),
   },
 
   // Bibliography

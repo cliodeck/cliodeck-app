@@ -17,6 +17,12 @@ vi.mock('../RAGSettingsPanel', () => ({
 vi.mock('../ModeSelector', () => ({
   ModeSelector: () => null,
 }));
+// The projection hook reaches into modeStore + ragQueryStore which require
+// window.electron surfaces we don't stub here. For the projection-specific
+// test we override via setChatSettings directly.
+vi.mock('../useChatSettingsProjection', () => ({
+  useChatSettingsProjection: () => undefined,
+}));
 vi.mock('../../Methodology/HelperTooltip', () => ({
   HelperTooltip: () => null,
 }));
@@ -36,10 +42,13 @@ interface MockApi {
   onStatus: ReturnType<typeof vi.fn>;
   // Test handles:
   _emitChunk: ChunkCb;
+  _emitStatus: (env: { sessionId: string; status: { phase: string; label?: string } }) => void;
 }
 
 function installFusionMock(): MockApi {
   let chunkCb: ChunkCb = () => {};
+  let statusCb: (env: { sessionId: string; status: { phase: string; label?: string } }) => void =
+    () => {};
   const api = {
     start: vi.fn(async () => ({ success: true, sessionId: 'sess-test-1' })),
     cancel: vi.fn(async () => ({ success: true, cancelled: true })),
@@ -50,13 +59,19 @@ function installFusionMock(): MockApi {
     onContext: vi.fn(() => () => undefined),
     onToolCall: vi.fn(() => () => undefined),
     onExplanation: vi.fn(() => () => undefined),
-    onStatus: vi.fn(() => () => undefined),
+    onStatus: vi.fn((cb: typeof statusCb) => {
+      statusCb = cb;
+      return () => undefined;
+    }),
   };
   (window as unknown as { electron: { fusion: { chat: unknown } } }).electron = {
     fusion: { chat: api },
   } as never;
   Object.defineProperty(api, '_emitChunk', {
     get: () => chunkCb,
+  });
+  Object.defineProperty(api, '_emitStatus', {
+    get: () => statusCb,
   });
   return api as unknown as MockApi;
 }
@@ -98,6 +113,69 @@ describe('ChatInterface (fusion step 4b)', () => {
       expect(
         msgs.some((m) => m.role === 'assistant' && m.content === 'Salut !' && !m.pending)
       ).toBe(true);
+    });
+  });
+
+  it('renders a polite status banner while fusion:chat:status streams retrieving/generating', async () => {
+    const api = installFusionMock();
+    render(<ChatInterface />);
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'question' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => expect(api.start).toHaveBeenCalled());
+
+    act(() => {
+      api._emitStatus({
+        sessionId: 'sess-test-1',
+        status: { phase: 'retrieving', label: 'Recherche en cours' },
+      });
+    });
+    await waitFor(() => {
+      const banner = screen.getByRole('status');
+      expect(banner).toHaveAttribute('aria-live', 'polite');
+      expect(banner.textContent).toContain('Recherche');
+    });
+
+    act(() => {
+      api._emitStatus({
+        sessionId: 'sess-test-1',
+        status: { phase: 'generating', label: 'Génération' },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toContain('Génération');
+    });
+  });
+
+  it('forwards chatSettings (modeId + retrieval source toggles) in the start payload', async () => {
+    const api = installFusionMock();
+    // Seed chatSettings directly — the projection hook is mocked out.
+    useChatStore.getState().setChatSettings({
+      modeId: 'analytical',
+      customSystemPrompt: 'Stay factual.',
+      retrieval: {
+        topK: 5,
+        sourceType: 'primary',
+        includeVault: true,
+      },
+    });
+    render(<ChatInterface />);
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'ping' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1));
+    const [, startOpts] = api.start.mock.calls[0];
+    expect(startOpts.systemPrompt).toBeDefined();
+    expect(startOpts.systemPrompt.modeId).toBe('analytical');
+    expect(startOpts.systemPrompt.customText).toBe('Stay factual.');
+    expect(startOpts.retrievalOptions).toMatchObject({
+      sourceType: 'primary',
+      includeVault: true,
+      topK: 5,
     });
   });
 });

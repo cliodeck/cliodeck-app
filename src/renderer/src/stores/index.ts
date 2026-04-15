@@ -3,7 +3,7 @@
 export { useProjectStore } from './projectStore';
 export type { Project, Chapter } from './projectStore';
 
-export { useChatStore, useBrainstormChatStore } from './chatStore';
+export { useChatStore } from './chatStore';
 export type {
   ChatMessage,
   ChatSource,

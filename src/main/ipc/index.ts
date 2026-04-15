@@ -8,7 +8,6 @@
 import { setupConfigHandlers } from './handlers/config-handlers.js';
 import { setupProjectHandlers } from './handlers/project-handlers.js';
 import { setupPDFHandlers } from './handlers/pdf-handlers.js';
-import { setupChatHandlers } from './handlers/chat-handlers.js';
 import { setupBibliographyHandlers } from './handlers/bibliography-handlers.js';
 import { setupEditorHandlers } from './handlers/editor-handlers.js';
 import { setupFilesystemHandlers } from './handlers/filesystem-handlers.js';
@@ -53,7 +52,6 @@ export function setupIPCHandlers() {
   setupConfigHandlers();
   setupProjectHandlers();
   setupPDFHandlers();
-  setupChatHandlers();
   setupBibliographyHandlers();
   setupEditorHandlers();
   setupFilesystemHandlers();

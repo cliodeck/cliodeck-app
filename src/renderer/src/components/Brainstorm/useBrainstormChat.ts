@@ -2,14 +2,14 @@
  * useBrainstormChat (fusion phase 3.2).
  *
  * Glue hook: subscribes to the `fusion:chat:chunk` stream, dispatches into
- * `useBrainstormChatStore`, and exposes a `send(content)` / `cancel()`
+ * `useChatStore`, and exposes a `send(content)` / `cancel()`
  * pair for the UI. Hook is separate from the store so unit tests can
  * stimulate the store directly with synthesized envelopes.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
 import {
-  useChatStore as useBrainstormChatStore,
+  useChatStore,
   type BrainstormSource,
   type BrainstormToolCall,
 } from '../../stores/chatStore';
@@ -79,7 +79,7 @@ export interface UseBrainstormChat {
 }
 
 export function useBrainstormChat(): UseBrainstormChat {
-  const store = useBrainstormChatStore();
+  const store = useChatStore();
   // Remember the current assistant id per active session so we don't mix
   // them up when the user sends fast follow-ups.
   const assistantIdBySession = useRef<Map<string, string>>(new Map());
@@ -178,7 +178,7 @@ export function useBrainstormChat(): UseBrainstormChat {
       }
       // Capture user message, then prep the assistant placeholder before
       // firing IPC — chunks may land before the IPC promise resolves.
-      const priorMessages = useBrainstormChatStore.getState().messages;
+      const priorMessages = useChatStore.getState().messages;
       store.appendUser(trimmed);
 
       const payload = [
@@ -188,7 +188,7 @@ export function useBrainstormChat(): UseBrainstormChat {
       // Pull the persisted chat settings off the store and forward them
       // every turn. Undefined fields are fine — the main-side handler
       // treats the whole bag as optional.
-      const settings = useBrainstormChatStore.getState().chatSettings;
+      const settings = useChatStore.getState().chatSettings;
       const startOpts: Parameters<typeof chat.start>[1] = {};
       if (settings.retrieval) startOpts.retrievalOptions = settings.retrieval;
       if (settings.modeId || settings.customSystemPrompt) {
@@ -242,7 +242,7 @@ export function useBrainstormChat(): UseBrainstormChat {
   );
 
   const cancel = useCallback(async () => {
-    const sid = useBrainstormChatStore.getState().sessionId;
+    const sid = useChatStore.getState().sessionId;
     if (!sid) return;
     const chat = api();
     await chat?.cancel(sid);
