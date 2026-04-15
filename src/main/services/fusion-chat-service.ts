@@ -1,23 +1,15 @@
 /**
- * Fusion chat service (phase 3.2).
+ * Fusion chat service (phase 3.2, refactored to use `ChatEngine`).
  *
  * Drives a streamed Brainstorm chat through the typed `ProviderRegistry`
  * (built from the user-level `LLMConfig` via the cliodeck adapter), with
  * automatic `.cliohints` injection. Each session has an `AbortController`
  * the renderer can trigger via `cancel(sessionId)`.
  *
- * Chunk streaming uses Electron's `webContents.send` to avoid creating
- * dynamic IPC channels: every chunk goes to the single
- * `fusion:chat:chunk` channel with `{ sessionId, chunk }` payload, and
- * the renderer demultiplexes by sessionId.
- *
- * Honest scope for 3.2:
- *   - Registry built per-call (no caching across messages); fine for the
- *     scaffold, will be promoted to a workspace-scoped singleton when 3.3
- *     introduces the bridge to Write.
- *   - Context compaction (4.2) NOT yet wired in — a TODO marker is
- *     deliberate so a follow-up commit hooks it once chat history grows
- *     beyond a single round.
+ * The LLM turn loop (streaming, tool-use agent, retrieval injection) lives
+ * in `chat-engine.ts` so the eventual legacy chat migration can share it.
+ * This file is now strictly the Electron/IPC transport layer + wiring
+ * (provider registry, `.cliohints`, MCP tools, retrieval adapter).
  */
 
 import type { WebContents } from 'electron';
@@ -27,6 +19,11 @@ import { projectManager } from './project-manager.js';
 import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
+import {
+  runChatTurn,
+  type ChatEngineRetriever,
+  type ChatEngineToolHandler,
+} from './chat-engine.js';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -121,14 +118,19 @@ class FusionChatService {
     controller: AbortController,
     args: ChatStartArgs
   ): Promise<void> {
-    const send = (envelope: ChatStreamEnvelope): void => {
+    const safeSend = (channel: string, payload: unknown): void => {
       try {
         if (!args.webContents.isDestroyed()) {
-          args.webContents.send('fusion:chat:chunk', envelope);
+          args.webContents.send(channel, payload);
         }
       } catch {
         // Renderer gone — abandon silently.
       }
+    };
+    const sendChunk = (chunk: ChatChunk, error?: { code: string; message: string }): void => {
+      const envelope: ChatStreamEnvelope = { sessionId, chunk };
+      if (error) envelope.error = error;
+      safeSend('fusion:chat:chunk', envelope);
     };
 
     let registry;
@@ -136,61 +138,21 @@ class FusionChatService {
       const cfg = configManager.getLLMConfig();
       registry = createRegistryFromClioDeckConfig(cfg);
     } catch (e) {
-      send({
-        sessionId,
-        chunk: { delta: '', done: true, finishReason: 'error' },
-        error: {
+      sendChunk(
+        { delta: '', done: true, finishReason: 'error' },
+        {
           code: 'config_error',
           message: e instanceof Error ? e.message : String(e),
-        },
-      });
+        }
+      );
       return;
     }
 
     let messages = args.messages;
     const projectPath = projectManager.getCurrentProjectPath();
 
-    // RAG retrieval (fusion B2): find context chunks for the last user turn
-    // and prepend them as a system message so the Brainstorm chat hits the
-    // vector DB like the legacy RAG chat does. Fails soft: any error here
-    // (no project, retrieval not configured, search failure) skips context
-    // rather than aborting the stream.
-    if (projectPath) {
-      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-      if (lastUser?.content?.trim()) {
-        try {
-          const hits = await retrievalService.search({
-            query: lastUser.content,
-            sourceType: 'both',
-            includeVault: true,
-          });
-          if (hits.length > 0) {
-            messages = [
-              { role: 'system', content: formatContextAsSystemPrompt(hits) },
-              ...messages,
-            ];
-            // Surface the hits to the renderer so the Brainstorm chat can
-            // render them as cards alongside the assistant reply.
-            try {
-              if (!args.webContents.isDestroyed()) {
-                args.webContents.send('fusion:chat:context', {
-                  sessionId,
-                  sources: hitsToSources(hits),
-                });
-              }
-            } catch {
-              // Renderer gone — continue streaming anyway.
-            }
-          }
-        } catch (e) {
-          console.warn(
-            '[fusion-chat] retrieval skipped:',
-            e instanceof Error ? e.message : e
-          );
-        }
-      }
-    }
-
+    // Workspace hints — prepend before handing off to the engine so the
+    // engine's retrieval-injected system message stacks on top cleanly.
     if (projectPath) {
       try {
         const hints = await loadWorkspaceHints(projectPath);
@@ -202,8 +164,7 @@ class FusionChatService {
 
     const llm = registry.getLLM();
 
-    // Collect tools from every ready MCP client — each tool is scoped
-    // by its client name so we can dispatch the invocation later.
+    // --- Assemble MCP tool catalog + dispatcher ---------------------------
     const toolScope = new Map<string, string>(); // namespaced tool name → client name
     const tools: ToolDescriptor[] = [];
     if (llm.capabilities.tools) {
@@ -223,143 +184,81 @@ class FusionChatService {
       }
     }
 
-    const MAX_TURNS = 6;
-    try {
-      for (let turn = 0; turn < MAX_TURNS; turn++) {
-        const pendingToolCalls: Array<{
-          id: string;
-          name: string;
-          arguments: string;
-        }> = [];
-        let sawToolCall = false;
-        let terminalDone = false;
-
-        for await (const chunk of llm.chat(messages, {
-          model: args.opts?.model,
-          temperature: args.opts?.temperature,
-          maxTokens: args.opts?.maxTokens,
-          tools: tools.length ? tools : undefined,
-          signal: controller.signal,
-        })) {
-          if (chunk.toolCall) {
-            pendingToolCalls.push(chunk.toolCall);
-            sawToolCall = true;
-          }
-          // Suppress the terminal done chunk while we're mid-agent-loop
-          // so the renderer only sees ONE done at the very end.
-          if (chunk.done && sawToolCall) {
-            terminalDone = true;
-            break;
-          }
-          send({ sessionId, chunk });
-          if (chunk.done) {
-            terminalDone = true;
-            break;
-          }
+    const toolHandler: ChatEngineToolHandler = {
+      async call(name, toolArgs) {
+        const clientName = toolScope.get(name);
+        if (!clientName) {
+          return {
+            ok: false,
+            error: { code: 'unknown_tool', message: `No client owns tool ${name}` },
+          };
         }
+        const bare = name.slice(clientName.length + 2); // strip "clientName__"
+        return mcpClientsService.callTool(clientName, bare, toolArgs);
+      },
+    };
 
-        if (!sawToolCall || pendingToolCalls.length === 0) break;
-        if (!terminalDone) {
-          // Stream ended without a done chunk — shouldn't happen with the
-          // providers we ship, but stop the loop rather than spin.
-          send({
-            sessionId,
-            chunk: { delta: '', done: true, finishReason: 'error' },
-            error: {
-              code: 'stream_incomplete',
-              message: 'LLM stream ended without a terminal chunk',
-            },
-          });
-          return;
-        }
-
-        // Feed an assistant-role placeholder that records the tool calls
-        // via the structured `toolCalls` field. Each provider maps it to
-        // its own format (Anthropic tool_use blocks, OpenAI tool_calls
-        // array, Gemini functionCall parts).
-        messages = [
-          ...messages,
-          {
-            role: 'assistant',
-            content: '',
-            toolCalls: pendingToolCalls.map((c) => ({
-              id: c.id,
-              name: c.name,
-              arguments: c.arguments,
-            })),
+    // --- Retrieval adapter -------------------------------------------------
+    const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
+      ? {
+          async search(lastUser) {
+            const hits = await retrievalService.search({
+              query: lastUser,
+              sourceType: 'both',
+              includeVault: true,
+            });
+            if (hits.length === 0) return null;
+            return {
+              systemPrompt: formatContextAsSystemPrompt(hits),
+              sources: hitsToSources(hits),
+            };
           },
-        ];
-
-        for (let i = 0; i < pendingToolCalls.length; i++) {
-          const call = pendingToolCalls[i];
-          const clientName = toolScope.get(call.name);
-          const bareTool = clientName
-            ? call.name.slice(clientName.length + 2) // strip "clientName__"
-            : call.name;
-          let parsedArgs: Record<string, unknown> = {};
-          try {
-            parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
-          } catch {
-            // malformed JSON — pass through empty args
-          }
-          const callId = `${sessionId}-${turn}-${i}`;
-          const startedAt = Date.now();
-          try {
-            if (!args.webContents.isDestroyed()) {
-              args.webContents.send('fusion:chat:tool-call', {
-                sessionId,
-                callId,
-                name: bareTool,
-                status: 'started',
-                startedAt,
-              });
-            }
-          } catch {
-            // renderer gone
-          }
-          const res = clientName
-            ? await mcpClientsService.callTool(clientName, bareTool, parsedArgs)
-            : {
-                ok: false,
-                error: {
-                  code: 'unknown_tool',
-                  message: `No client owns tool ${call.name}`,
-                },
-              };
-          try {
-            if (!args.webContents.isDestroyed()) {
-              args.webContents.send('fusion:chat:tool-call', {
-                sessionId,
-                callId,
-                name: bareTool,
-                status: 'done',
-                durationMs: Date.now() - startedAt,
-                ok: res.ok,
-                errorMessage: res.ok ? undefined : res.error?.message,
-              });
-            }
-          } catch {
-            // renderer gone
-          }
-          const body = res.ok
-            ? JSON.stringify(res.result ?? {})
-            : `Error: ${res.error?.message ?? 'unknown'}`;
-          messages = [
-            ...messages,
-            { role: 'tool', toolCallId: call.id, content: body },
-          ];
         }
-        // Loop back: call llm.chat again with the updated history.
-      }
-      // Force a terminal done if the loop unwound without one.
-      send({ sessionId, chunk: { delta: '', done: true, finishReason: 'stop' } });
-    } catch (e) {
-      send({
-        sessionId,
-        chunk: { delta: '', done: true, finishReason: 'error' },
-        error: {
-          code: 'stream_error',
-          message: e instanceof Error ? e.message : String(e),
+      : undefined;
+
+    try {
+      await runChatTurn<BrainstormSource>({
+        provider: llm,
+        messages,
+        signal: controller.signal,
+        opts: args.opts,
+        tools,
+        toolHandler,
+        retriever,
+        hooks: {
+          onChunk: (chunk) => sendChunk(chunk),
+          onDone: (chunk) => sendChunk(chunk),
+          onError: (err) =>
+            sendChunk({ delta: '', done: true, finishReason: 'error' }, err),
+          onSources: (sources) => {
+            safeSend('fusion:chat:context', { sessionId, sources });
+          },
+          onToolCallStart: (ev) => {
+            // Preserve the legacy IPC shape (bareTool without client prefix,
+            // sessionId-scoped callId) for the renderer.
+            const clientName = toolScope.get(ev.name);
+            const bareTool = clientName ? ev.name.slice(clientName.length + 2) : ev.name;
+            safeSend('fusion:chat:tool-call', {
+              sessionId,
+              callId: `${sessionId}-${ev.callId}`,
+              name: bareTool,
+              status: 'started',
+              startedAt: ev.startedAt,
+            });
+          },
+          onToolCallEnd: (ev) => {
+            const clientName = toolScope.get(ev.name);
+            const bareTool = clientName ? ev.name.slice(clientName.length + 2) : ev.name;
+            safeSend('fusion:chat:tool-call', {
+              sessionId,
+              callId: `${sessionId}-${ev.callId}`,
+              name: bareTool,
+              status: 'done',
+              durationMs: ev.durationMs,
+              ok: ev.ok,
+              errorMessage: ev.errorMessage,
+            });
+          },
         },
       });
     } finally {

@@ -1,0 +1,78 @@
+/**
+ * PdfIndexer — extracted from pdf-service.ts as part of the fusion
+ * split (see CLAUDE.md §2). Builds and owns the lower-level
+ * `backend/core/pdf/PDFIndexer`, wiring the embedding function to
+ * either a fusion 1.4i `EmbeddingProvider` or the legacy
+ * `LLMProviderManager.generateEmbedding` path. Kept intentionally thin;
+ * the PDF parsing / chunking itself still lives in the backend indexer.
+ */
+import { PDFIndexer as BackendPDFIndexer, type IndexingProgress } from '../../../../backend/core/pdf/PDFIndexer.js';
+import type { LLMProviderManager } from '../../../../backend/core/llm/LLMProviderManager.js';
+import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
+import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
+import type { RAGConfig } from '../../../../backend/types/config.js';
+import type { VectorStore } from '../../../../backend/core/vector-store/VectorStore.js';
+import type { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
+
+export type { IndexingProgress };
+
+type AnyVectorStore = VectorStore | EnhancedVectorStore;
+
+// Matches the legacy summarizer object built in pdf-service.ts. Kept as
+// a structural type to avoid exporting an internal shape from the
+// backend indexer.
+interface SummarizerConfigLike {
+  enabled: boolean;
+  method: 'abstractive' | 'extractive';
+  maxLength: number;
+  llmModel?: string;
+}
+
+export interface PdfIndexerDeps {
+  vectorStore: AnyVectorStore;
+  llmProviderManager: LLMProviderManager;
+  embeddingProvider: EmbeddingProvider | null;
+  ragConfig: RAGConfig;
+  summarizerConfig: SummarizerConfigLike;
+}
+
+export class PdfIndexer {
+  private readonly backend: BackendPDFIndexer;
+  private readonly vectorStore: AnyVectorStore;
+
+  constructor(deps: PdfIndexerDeps) {
+    this.vectorStore = deps.vectorStore;
+
+    const embeddingFn = deps.embeddingProvider
+      ? async (text: string): Promise<Float32Array> => {
+          const [vec] = await deps.embeddingProvider!.embed([text]);
+          return Float32Array.from(vec);
+        }
+      : (text: string) => deps.llmProviderManager.generateEmbedding(text);
+
+    this.backend = new BackendPDFIndexer(
+      deps.vectorStore,
+      embeddingFn,
+      deps.ragConfig.chunkingConfig,
+      // @ts-expect-error structural summarizer config; backend accepts same shape
+      deps.summarizerConfig,
+      deps.ragConfig.useAdaptiveChunking !== false,
+      deps.ragConfig
+    );
+  }
+
+  async indexPDF(
+    filePath: string,
+    bibtexKey?: string,
+    onProgress?: (progress: IndexingProgress) => void,
+    bibliographyMetadata?: { title?: string; author?: string; year?: string },
+    collectionKeys?: string[]
+  ): Promise<PDFDocument> {
+    const document = await this.backend.indexPDF(filePath, bibtexKey, onProgress, bibliographyMetadata);
+    if (collectionKeys && collectionKeys.length > 0) {
+      this.vectorStore.setDocumentCollections(document.id, collectionKeys);
+      console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${collectionKeys.length} collection(s)`);
+    }
+    return document;
+  }
+}

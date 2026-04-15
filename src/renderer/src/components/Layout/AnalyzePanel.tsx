@@ -7,14 +7,22 @@
  * this is pure routing / composition.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Network, GitCompareArrows, BarChart3 } from 'lucide-react';
-import { CorpusExplorerPanel } from '../Corpus/CorpusExplorerPanel';
-import { TextometricsPanel } from '../Corpus/TextometricsPanel';
-import { SimilarityPanel } from '../Similarity/SimilarityPanel';
+import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import './AnalyzePanel.css';
+
+const CorpusExplorerPanel = lazy(() =>
+  import('../Corpus/CorpusExplorerPanel').then((m) => ({ default: m.CorpusExplorerPanel })),
+);
+const TextometricsPanel = lazy(() =>
+  import('../Corpus/TextometricsPanel').then((m) => ({ default: m.TextometricsPanel })),
+);
+const SimilarityPanel = lazy(() =>
+  import('../Similarity/SimilarityPanel').then((m) => ({ default: m.SimilarityPanel })),
+);
 
 type AnalyzeTab = 'corpus' | 'similarity' | 'textometrics';
 
@@ -62,9 +70,11 @@ export const AnalyzePanel: React.FC = () => {
       </div>
 
       <div className="analyze-panel__body" role="tabpanel">
-        {tab === 'corpus' && <CorpusExplorerPanel />}
-        {tab === 'similarity' && <SimilarityPanel />}
-        {tab === 'textometrics' && <TextometricsPanel />}
+        <Suspense fallback={<PanelLoadingFallback />}>
+          {tab === 'corpus' && <CorpusExplorerPanel />}
+          {tab === 'similarity' && <SimilarityPanel />}
+          {tab === 'textometrics' && <TextometricsPanel />}
+        </Suspense>
       </div>
     </div>
   );

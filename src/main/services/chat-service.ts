@@ -1,3 +1,12 @@
+/**
+ * @deprecated Prefer `ChatEngine` (`./chat-engine.ts`) for new work.
+ *
+ * This legacy RAG chat service still drives the Explore mode and owns
+ * explainable-AI plumbing the engine does not yet expose. Its LLM turn
+ * loop will be migrated onto `runChatTurn` once the legacy tests have
+ * been rewritten to drop the `better-sqlite3` native-binding dependency
+ * (see docs/fusion-cliobrain-implementation-plan.md).
+ */
 import { LRUCache } from 'lru-cache';
 import { pdfService } from './pdf-service.js';
 import { configManager } from './config-manager.js';

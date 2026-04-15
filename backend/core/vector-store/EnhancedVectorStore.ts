@@ -459,6 +459,10 @@ export class EnhancedVectorStore {
     return this.vectorStore.getDocument(documentId);
   }
 
+  getDocumentById(documentId: string): any {
+    return this.vectorStore.getDocumentById(documentId);
+  }
+
   getAllDocuments(): any[] {
     return this.vectorStore.getAllDocuments();
   }

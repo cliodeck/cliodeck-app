@@ -1,9 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import ForceGraph2D from 'react-force-graph-2d';
 import { CollapsibleSection } from '../common/CollapsibleSection';
-import { TopicTimeline } from './TopicTimeline';
-import { TextometricsPanel } from './TextometricsPanel';
+
+// Heavy, recharts-based sub-panels — defer until the user scrolls to them.
+const TopicTimeline = lazy(() =>
+  import('./TopicTimeline').then((m) => ({ default: m.TopicTimeline })),
+);
+const TextometricsPanel = lazy(() =>
+  import('./TextometricsPanel').then((m) => ({ default: m.TextometricsPanel })),
+);
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -780,7 +786,9 @@ export const CorpusExplorerPanel: React.FC = () => {
 
       {/* Textométrie */}
       <CollapsibleSection title={t('corpus.textometrics')} defaultExpanded={false}>
-        <TextometricsPanel />
+        <Suspense fallback={null}>
+          <TextometricsPanel />
+        </Suspense>
       </CollapsibleSection>
 
       {/* Topics */}
@@ -858,7 +866,9 @@ export const CorpusExplorerPanel: React.FC = () => {
                 <h4 style={{ margin: '10px 0', fontSize: '14px', fontWeight: 500 }}>
                   {t('corpus.topicTimeline')}
                 </h4>
-                <TopicTimeline timelineData={topicTimeline} topics={topicAnalysis.topics} />
+                <Suspense fallback={null}>
+                  <TopicTimeline timelineData={topicTimeline} topics={topicAnalysis.topics} />
+                </Suspense>
               </div>
             )}
 

@@ -64,7 +64,7 @@ export const BrainstormChat: React.FC = () => {
     </p>
   );
 
-  const renderExtras = (m: BrainstormUnifiedMessage): React.ReactNode => {
+  const renderExtras = useCallback((m: BrainstormUnifiedMessage): React.ReactNode => {
     const orig = m.original;
     const sources = orig.sources ?? [];
     const toolCalls = orig.toolCalls ?? [];
@@ -139,7 +139,7 @@ export const BrainstormChat: React.FC = () => {
         )}
       </>
     );
-  };
+  }, [sendToWrite, sentToWriteId]);
 
   return (
     <ChatSurface

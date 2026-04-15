@@ -1,6 +1,8 @@
-import { PDFIndexer, type IndexingProgress } from '../../../backend/core/pdf/PDFIndexer.js';
+import { type IndexingProgress } from '../../../backend/core/pdf/PDFIndexer.js';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
+import { PdfVectorStore } from './pdf/PdfVectorStore.js';
+import { PdfIndexer } from './pdf/PdfIndexer.js';
 import { OllamaClient } from '../../../backend/core/llm/OllamaClient.js';
 import { LLMProviderManager, type LLMProvider } from '../../../backend/core/llm/LLMProviderManager.js';
 import { KnowledgeGraphBuilder, type GraphNode, type GraphEdge } from '../../../backend/core/analysis/KnowledgeGraphBuilder.js';
@@ -32,7 +34,7 @@ interface AnalyzeTopicsOptions {
 }
 
 class PDFService {
-  private pdfIndexer: PDFIndexer | null = null;
+  private pdfIndexer: PdfIndexer | null = null;
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   private ollamaClient: OllamaClient | null = null;
   private llmProviderManager: LLMProviderManager | null = null;
@@ -111,50 +113,20 @@ class PDFService {
       const llmInitPromise = this.llmProviderManager.initialize();
 
       // Initialiser VectorStore (Enhanced ou Standard selon config)
-      const useEnhancedSearch =
-        ragConfig.useHNSWIndex !== false || ragConfig.useHybridSearch !== false;
-
-      let vsInitPromise: Promise<void> | undefined;
-
-      if (useEnhancedSearch) {
-        console.log('🚀 [PDF-SERVICE] Using EnhancedVectorStore (HNSW + BM25)');
-        this.vectorStore = new EnhancedVectorStore(projectPath);
-
-        // Set rebuild progress callback if provided
-        if (onRebuildProgress) {
-          this.vectorStore.setRebuildProgressCallback(onRebuildProgress);
-        }
-
-        vsInitPromise = this.vectorStore.initialize();
-      } else {
-        console.log('📊 [PDF-SERVICE] Using standard VectorStore (linear search)');
-        this.vectorStore = new VectorStore(projectPath);
-      }
+      const { store, initPromise: vsInitPromise } = PdfVectorStore.create(
+        projectPath,
+        ragConfig,
+        { onRebuildProgress }
+      );
+      this.vectorStore = store;
 
       // Wait for both LLM and VectorStore to finish initializing in parallel
       await Promise.all([llmInitPromise, vsInitPromise].filter(Boolean));
 
-      // Post-init: configure enhanced vector store (after initialization is complete)
-      if (useEnhancedSearch && this.vectorStore instanceof EnhancedVectorStore) {
-        // Check if indexes need to be rebuilt - run in background to avoid blocking UI
-        if (this.vectorStore.needsRebuild()) {
-          console.log('🔨 [PDF-SERVICE] Indexes need rebuild, starting rebuild in background...');
-          // Don't await - let it run in background
-          this.vectorStore.rebuildIndexes().then(() => {
-            console.log('✅ [PDF-SERVICE] Indexes rebuilt successfully');
-          }).catch((error: unknown) => {
-            console.error('❌ [PDF-SERVICE] Rebuild failed:', error);
-          });
-        }
-
-        // Configure search modes
-        if (ragConfig.useHNSWIndex !== undefined) {
-          this.vectorStore.setUseHNSW(ragConfig.useHNSWIndex);
-        }
-        if (ragConfig.useHybridSearch !== undefined) {
-          this.vectorStore.setUseHybrid(ragConfig.useHybridSearch);
-        }
-      }
+      // Post-init: configure search modes on the enhanced store. Any
+      // rebuild is deferred until after warmup (see below) so we don't
+      // run embedding warmup + a large batched rebuild concurrently.
+      PdfVectorStore.configureEnhanced(this.vectorStore, ragConfig);
 
       // Convertir le nouveau format de config en ancien format pour le summarizer
       // Support pour compatibilité ascendante et descendante
@@ -180,25 +152,16 @@ class PDFService {
         customChunkingEnabled: ragConfig.customChunkingEnabled ?? false,
       });
 
-      // Créer la fonction d'embedding. Fusion 1.4i: when an
-      // EmbeddingProvider is wired, use it; else fall back to the
-      // legacy LLMProviderManager path.
-      const embeddingFn = this.embeddingProvider
-        ? async (text: string): Promise<Float32Array> => {
-            const [vec] = await this.embeddingProvider!.embed([text]);
-            return Float32Array.from(vec);
-          }
-        : (text: string) => this.llmProviderManager!.generateEmbedding(text);
-
-      // Initialiser PDFIndexer avec configuration complète du RAG
-      this.pdfIndexer = new PDFIndexer(
-        this.vectorStore,
-        embeddingFn,
-        ragConfig.chunkingConfig,
+      // Initialiser l'indexeur (façade — la fonction d'embedding et la
+      // construction du backend PDFIndexer vivent maintenant dans
+      // ./pdf/PdfIndexer.ts).
+      this.pdfIndexer = new PdfIndexer({
+        vectorStore: this.vectorStore,
+        llmProviderManager: this.llmProviderManager,
+        embeddingProvider: this.embeddingProvider,
+        ragConfig,
         summarizerConfig,
-        ragConfig.useAdaptiveChunking !== false, // Enable by default
-        ragConfig // Pass full RAG config for optimization features
-      );
+      });
 
       this.currentProjectPath = projectPath;
 
@@ -216,8 +179,16 @@ class PDFService {
       console.log(`   Chat Model: ${config.ollamaChatModel}`);
       console.log(`   Embedding Model: ${config.ollamaEmbeddingModel}`);
 
-      // Warmup embedding model (Phase 6) - run in background
-      this.warmupEmbeddingModel();
+      // Warmup embedding model (Phase 6), then trigger any pending
+      // HNSW/BM25 rebuild. Serialized to avoid the warmup embedding
+      // call racing with a batched rebuild that also hits the embedder.
+      const storeForRebuild = this.vectorStore;
+      void this.warmupEmbeddingModel().then(() => {
+        if (storeForRebuild) {
+          return PdfVectorStore.maybeRebuild(storeForRebuild);
+        }
+        return undefined;
+      });
     } catch (error: unknown) {
       console.error('❌ Failed to initialize PDF Service:', error);
       throw error;
@@ -278,15 +249,13 @@ class PDFService {
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
     this.ensureInitialized();
-    const document = await this.pdfIndexer!.indexPDF(filePath, bibtexKey, onProgress, bibliographyMetadata);
-
-    // Link document to collections if provided
-    if (collectionKeys && collectionKeys.length > 0) {
-      this.vectorStore!.setDocumentCollections(document.id, collectionKeys);
-      console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${collectionKeys.length} collection(s)`);
-    }
-
-    return document;
+    return this.pdfIndexer!.indexPDF(
+      filePath,
+      bibtexKey,
+      onProgress,
+      bibliographyMetadata,
+      collectionKeys
+    );
   }
 
   /**
@@ -326,8 +295,9 @@ class PDFService {
    */
   async getDocument(documentId: string) {
     this.ensureInitialized();
-    const documents = this.vectorStore!.getAllDocuments();
-    return documents.find((doc) => doc.id === documentId) || null;
+    // Indexed lookup — avoids hydrating the full document list (+ N
+    // chunk-count queries) just to find one by id.
+    return PdfVectorStore.getDocumentById(this.vectorStore!, documentId) || null;
   }
 
   async deleteDocument(documentId: string) {
@@ -542,24 +512,24 @@ class PDFService {
 
     console.log(`📊 Analyzing text statistics for ${documents.length} documents...`);
 
-    // Récupérer le texte de chaque document
-    const corpusDocuments: Array<{ id: string; text: string }> = [];
-
-    for (const doc of documents) {
+    // Stream doc-by-doc: build the corpus list lazily without keeping
+    // intermediate per-chunk arrays or emitting a per-doc log line per
+    // document (which quickly gets expensive for large corpora). The
+    // previous code also forced a full `reduce` over every doc.text
+    // just for a summary log; that's been dropped.
+    const corpusDocuments: Array<{ id: string; text: string }> = new Array(documents.length);
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i];
       const chunks = this.vectorStore!.getChunksForDocument(doc.id);
-      console.log(`   Document ${doc.id.substring(0, 8)}: ${chunks.length} chunks`);
-
-      const fullText = chunks.map((chunkWithEmbedding) => chunkWithEmbedding.chunk.content).join(' ');
-      console.log(`   Text length: ${fullText.length} characters`);
-
-      corpusDocuments.push({
-        id: doc.id,
-        text: fullText,
-      });
+      // Single pass: accumulate content into one string per doc without
+      // an intermediate `.map()` array.
+      let text = '';
+      for (let c = 0; c < chunks.length; c++) {
+        if (c > 0) text += ' ';
+        text += chunks[c].chunk.content;
+      }
+      corpusDocuments[i] = { id: doc.id, text };
     }
-
-    console.log(`📊 Total corpus documents prepared: ${corpusDocuments.length}`);
-    console.log(`📊 Total text length: ${corpusDocuments.reduce((sum, doc) => sum + doc.text.length, 0)} characters`);
 
     // Analyser avec le service textométrique
     const textometricsService = new TextometricsService();
@@ -599,17 +569,21 @@ class PDFService {
       throw new Error('Topic modeling requires at least 5 documents');
     }
 
-    // Récupérer les embeddings et textes
-    const embeddings: Float32Array[] = [];
-    const texts: string[] = [];
-    const documentIds: string[] = [];
-
-    // D'abord, déterminer la dimension d'embedding la plus commune
+    // Single-pass collection: in one iteration we both tally embedding
+    // dimensions *and* stash the candidate (text, embedding, id) for
+    // each document. The previous implementation iterated the corpus
+    // twice (once just to pick the dominant dim, once to actually
+    // build the arrays) which meant fetching per-chunk rows from
+    // SQLite twice for every document lacking a summary embedding.
+    interface Candidate { id: string; text: string; embedding: Float32Array }
+    const candidates: Candidate[] = [];
     const dimensionCounts = new Map<number, number>();
 
     for (const doc of documents) {
-      let embedding: Float32Array | null = null;
+      const text = doc.summary || doc.title;
+      if (!text) continue;
 
+      let embedding: Float32Array | null = null;
       if (doc.summaryEmbedding) {
         embedding = doc.summaryEmbedding;
       } else {
@@ -619,16 +593,16 @@ class PDFService {
         }
       }
 
-      if (embedding && embedding.length > 0) {
-        const count = dimensionCounts.get(embedding.length) || 0;
-        dimensionCounts.set(embedding.length, count + 1);
-      }
+      if (!embedding || embedding.length === 0) continue;
+
+      dimensionCounts.set(embedding.length, (dimensionCounts.get(embedding.length) || 0) + 1);
+      candidates.push({ id: doc.id, text, embedding });
     }
 
-    // Trouver la dimension la plus fréquente
+    // Pick the dominant dimension (ties broken by first-seen via Map order).
     let expectedDimension = 0;
     let maxCount = 0;
-    for (const [dim, count] of dimensionCounts.entries()) {
+    for (const [dim, count] of dimensionCounts) {
       if (count > maxCount) {
         maxCount = count;
         expectedDimension = dim;
@@ -640,41 +614,30 @@ class PDFService {
       console.warn(`⚠️ Found ${dimensionCounts.size} different embedding dimensions:`, Array.from(dimensionCounts.entries()));
     }
 
-    // Maintenant collecter les embeddings avec la bonne dimension
-    for (const doc of documents) {
-      // Utiliser le résumé si disponible, sinon le titre
-      const text = doc.summary || doc.title;
-      let embedding: Float32Array | null = null;
-
-      // Essayer d'utiliser l'embedding du résumé
-      if (doc.summaryEmbedding) {
-        embedding = doc.summaryEmbedding;
-      } else {
-        // Sinon, utiliser l'embedding du premier chunk
-        const chunks = this.vectorStore!.getChunksForDocument(doc.id);
-        if (chunks.length > 0 && chunks[0].embedding) {
-          embedding = chunks[0].embedding;
-        }
+    // Filter candidates to the dominant dimension and drop any with
+    // NaN/null components.
+    const embeddings: Float32Array[] = [];
+    const texts: string[] = [];
+    const documentIds: string[] = [];
+    for (const cand of candidates) {
+      if (cand.embedding.length !== expectedDimension) {
+        console.warn(`⚠️ Skipping document ${cand.id}: wrong embedding dimension (expected ${expectedDimension}, got ${cand.embedding.length})`);
+        continue;
       }
-
-      if (text && embedding) {
-        // Vérifier la dimension
-        if (embedding.length !== expectedDimension) {
-          console.warn(`⚠️ Skipping document ${doc.id}: wrong embedding dimension (expected ${expectedDimension}, got ${embedding.length})`);
-          continue;
-        }
-
-        // Valider que l'embedding est complet (pas de valeurs null/undefined)
-        const isValid = embedding.length > 0 && !Array.from(embedding).some(v => v === null || v === undefined || isNaN(v));
-
-        if (isValid) {
-          embeddings.push(embedding);
-          texts.push(text);
-          documentIds.push(doc.id);
-        } else {
-          console.warn(`⚠️ Skipping document ${doc.id}: invalid embedding (contains null/NaN values)`);
-        }
+      // Early-exit scan for invalid values — avoids Array.from on
+      // large Float32Arrays.
+      let invalid = false;
+      for (let i = 0; i < cand.embedding.length; i++) {
+        const v = cand.embedding[i];
+        if (v === null || v === undefined || Number.isNaN(v)) { invalid = true; break; }
       }
+      if (invalid) {
+        console.warn(`⚠️ Skipping document ${cand.id}: invalid embedding (contains null/NaN values)`);
+        continue;
+      }
+      embeddings.push(cand.embedding);
+      texts.push(cand.text);
+      documentIds.push(cand.id);
     }
 
     if (embeddings.length < 5) {

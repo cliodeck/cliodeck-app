@@ -54,6 +54,34 @@ describe('VectorStore', () => {
       expect(retrieved?.author).toBe('Test Author');
     });
 
+    it('getDocumentById should return the same row as getDocument and null when missing', () => {
+      const doc: PDFDocument = {
+        id: 'doc-byid',
+        fileURL: '/test/byid.pdf',
+        title: 'Indexed Lookup',
+        author: 'A',
+        year: '2024',
+        pageCount: 3,
+        metadata: { keywords: [] },
+        createdAt: new Date(),
+        indexedAt: new Date(),
+        lastAccessedAt: new Date(),
+        get displayString() {
+          return this.title;
+        },
+      };
+
+      vectorStore.saveDocument(doc);
+
+      const viaGet = vectorStore.getDocument('doc-byid');
+      const viaById = vectorStore.getDocumentById('doc-byid');
+      expect(viaById).toBeDefined();
+      expect(viaById?.id).toBe('doc-byid');
+      expect(viaById?.title).toBe(viaGet?.title);
+
+      expect(vectorStore.getDocumentById('does-not-exist')).toBeNull();
+    });
+
     it('should list all documents', () => {
       const docs: PDFDocument[] = [
         {

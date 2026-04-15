@@ -1,8 +1,15 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MainLayout } from './components/Layout/MainLayout';
 import { EditorPanel } from './components/Editor/EditorPanel';
-import { SlideEditorPanel } from './components/Slides/SlideEditorPanel';
+
+// Slide editor is only used for presentation projects — keep it off the main
+// bundle so the default Write mode loads faster.
+const SlideEditorPanel = lazy(() =>
+  import('./components/Slides/SlideEditorPanel').then((m) => ({
+    default: m.SlideEditorPanel,
+  })),
+);
 import { RebuildProgressModal } from './components/Project/RebuildProgressModal';
 import { AlertDialog } from './components/common/AlertDialog';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
@@ -85,7 +92,17 @@ function App() {
         // TODO: Send to error tracking service (Sentry, etc.)
       }}
     >
-      <MainLayout centerPanel={currentProjectType === 'presentation' ? <SlideEditorPanel /> : <EditorPanel />} />
+      <MainLayout
+        centerPanel={
+          currentProjectType === 'presentation' ? (
+            <Suspense fallback={null}>
+              <SlideEditorPanel />
+            </Suspense>
+          ) : (
+            <EditorPanel />
+          )
+        }
+      />
       <RebuildProgressModal />
       <AlertDialog />
       <ConfirmDialog />

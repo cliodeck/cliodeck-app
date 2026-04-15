@@ -29,6 +29,23 @@ import { obsidianStorePath } from '../../../backend/integrations/obsidian/Obsidi
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
 
+/**
+ * Hot-path logging gate. The retrieval pipeline emits a high volume of
+ * per-query diagnostics; in production we want warnings/errors only. Set
+ * `CLIODECK_RAG_DEBUG=1` in the env to restore the verbose trace.
+ */
+const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
+
+/**
+ * Module-scope embedding cache. The embedding of a query string is
+ * invariant across project changes (same text → same vector for a given
+ * provider), so we deliberately keep this cache across `configure()` /
+ * `clear()` calls. Provider-scoped invalidation is available via
+ * `queryEmbeddingCache.invalidateProvider(providerId)` when a provider's
+ * embedding model actually changes.
+ */
+const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
+
 export type SourceType = 'secondary' | 'primary' | 'both';
 
 export interface SecondarySearchResult extends SearchResult {
@@ -119,26 +136,43 @@ function expandQueryMultilingual(query: string): string[] {
     }
   }
 
-  console.log('🌐 [MULTILINGUAL] Query expansion:', {
-    original: query,
-    expanded: queries,
-    count: queries.length,
-  });
+  if (DEBUG) {
+    console.log('🌐 [MULTILINGUAL] Query expansion:', {
+      original: query,
+      expanded: queries,
+      count: queries.length,
+    });
+  }
 
   return queries;
+}
+
+/** Mean-pool a non-empty list of embeddings into a single vector. */
+function meanPoolEmbeddings(embeddings: Float32Array[]): Float32Array {
+  const dim = embeddings[0].length;
+  const pooled = new Float32Array(dim);
+  for (const emb of embeddings) {
+    for (let i = 0; i < dim; i++) pooled[i] += emb[i];
+  }
+  const n = embeddings.length;
+  for (let i = 0; i < dim; i++) pooled[i] /= n;
+  return pooled;
 }
 
 class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   private llmProviderManager: LLMProviderManager | null = null;
-  private queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
   private workspaceRoot: string | null = null;
   private vaultStore: ObsidianVaultStore | null = null;
+  private warmupStarted = false;
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
    * pdf-service.init() so the two services share the same vector store
    * and provider manager instances.
+   *
+   * Note: the embedding cache is module-scoped and is intentionally NOT
+   * reset here — query embeddings don't depend on which project is open.
    */
   configure(deps: {
     vectorStore: VectorStore | EnhancedVectorStore;
@@ -152,15 +186,59 @@ class RetrievalService {
     // changed underneath us.
     this.vaultStore?.close();
     this.vaultStore = null;
+
+    // Fire-and-forget warmup: pre-embed frequent FR↔EN translations so the
+    // first real query hits a warm cache. Only runs once per process.
+    if (!this.warmupStarted) {
+      this.warmupStarted = true;
+      void this.warmupDictionaryEmbeddings();
+    }
   }
 
   clear(): void {
     this.vectorStore = null;
     this.llmProviderManager = null;
-    this.queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
+    // Embedding cache persists across clear() — see constructor comment.
     this.workspaceRoot = null;
     this.vaultStore?.close();
     this.vaultStore = null;
+  }
+
+  private getProviderId(): string | undefined {
+    // Best-effort: embeddingProvider > provider. Typed loosely because
+    // the concrete shape lives in LLMProviderManager internals.
+    const mgr = this.llmProviderManager as unknown as {
+      config?: { embeddingProvider?: string; provider?: string };
+    } | null;
+    return mgr?.config?.embeddingProvider || mgr?.config?.provider;
+  }
+
+  private async warmupDictionaryEmbeddings(): Promise<void> {
+    try {
+      const terms: string[] = [];
+      for (const [fr, ens] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
+        terms.push(fr, ...ens);
+      }
+      const providerId = this.getProviderId();
+      for (const term of terms) {
+        if (queryEmbeddingCache.has(term, providerId)) continue;
+        try {
+          const emb = await this.llmProviderManager!.generateQueryEmbedding(term);
+          queryEmbeddingCache.set(term, emb, providerId);
+        } catch {
+          // Warmup is best-effort: a provider may be unavailable at boot.
+          // Abort silently; real queries will retry on demand.
+          return;
+        }
+      }
+      if (DEBUG) {
+        console.log(
+          `💾 [EMB CACHE] Warmup pre-embedded ${terms.length} dictionary terms`
+        );
+      }
+    } catch (err) {
+      console.warn('[retrieval] dictionary warmup failed:', err);
+    }
   }
 
   private getVaultStore(): ObsidianVaultStore | null {
@@ -187,10 +265,11 @@ class RetrievalService {
   }
 
   private async getQueryEmbedding(query: string): Promise<Float32Array> {
-    const cached = this.queryEmbeddingCache.get(query);
+    const providerId = this.getProviderId();
+    const cached = queryEmbeddingCache.get(query, providerId);
     if (cached) return cached;
     const embedding = await this.llmProviderManager!.generateQueryEmbedding(query);
-    this.queryEmbeddingCache.set(query, embedding);
+    queryEmbeddingCache.set(query, embedding, providerId);
     return embedding;
   }
 
@@ -203,9 +282,11 @@ class RetrievalService {
     const topK = q.topK || ragConfig.topK;
     const threshold = q.threshold || ragConfig.similarityThreshold;
 
-    console.log(
-      `🔍 [PDF-SERVICE] Multi-source search: sourceType=${sourceType}, topK=${topK}`
-    );
+    if (DEBUG) {
+      console.log(
+        `🔍 [PDF-SERVICE] Multi-source search: sourceType=${sourceType}, topK=${topK}`
+      );
+    }
 
     const allSourceResults: MultiSourceSearchResult[] = [];
 
@@ -224,9 +305,11 @@ class RetrievalService {
           })
         )
       );
-      console.log(
-        `📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`
-      );
+      if (DEBUG) {
+        console.log(
+          `📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`
+        );
+      }
     }
 
     if (sourceType === 'primary' || sourceType === 'both') {
@@ -257,9 +340,11 @@ class RetrievalService {
           })
         );
         allSourceResults.push(...mappedPrimaryResults);
-        console.log(
-          `📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`
-        );
+        if (DEBUG) {
+          console.log(
+            `📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`
+          );
+        }
       } catch (error: unknown) {
         console.warn(
           '⚠️ [PDF-SERVICE] Primary source search failed (Tropy not initialized?):',
@@ -274,9 +359,11 @@ class RetrievalService {
           topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
         });
         allSourceResults.push(...vaultResults);
-        console.log(
-          `📓 [PDF-SERVICE] Vault (Obsidian): ${vaultResults.length} results`
-        );
+        if (DEBUG) {
+          console.log(
+            `📓 [PDF-SERVICE] Vault (Obsidian): ${vaultResults.length} results`
+          );
+        }
       } catch (error: unknown) {
         console.warn(
           '⚠️ [PDF-SERVICE] Vault search failed (not indexed?):',
@@ -289,12 +376,14 @@ class RetrievalService {
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
 
-    console.log(
-      `🔍 [PDF-SERVICE] Final combined results: ${sortedResults.length} (from ${allSourceResults.length} total)`
-    );
-    console.log(
-      `🔍 [PDF-SERVICE] Total search duration: ${Date.now() - searchStart}ms`
-    );
+    if (DEBUG) {
+      console.log(
+        `🔍 [PDF-SERVICE] Final combined results: ${sortedResults.length} (from ${allSourceResults.length} total)`
+      );
+      console.log(
+        `🔍 [PDF-SERVICE] Total search duration: ${Date.now() - searchStart}ms`
+      );
+    }
 
     return sortedResults;
   }
@@ -354,25 +443,31 @@ class RetrievalService {
         true
       );
 
-      console.log(
-        `🔍 [PDF-SERVICE] Collection filter: ${options.collectionKeys.length} collection(s) -> ${docsInCollections.length} document(s)`
-      );
+      if (DEBUG) {
+        console.log(
+          `🔍 [PDF-SERVICE] Collection filter: ${options.collectionKeys.length} collection(s) -> ${docsInCollections.length} document(s)`
+        );
+      }
 
       if (documentIdsFilter && documentIdsFilter.length > 0) {
         documentIdsFilter = documentIdsFilter.filter((id) =>
           docsInCollections.includes(id)
         );
-        console.log(
-          `🔍 [PDF-SERVICE] After intersection with documentIds: ${documentIdsFilter.length} document(s)`
-        );
+        if (DEBUG) {
+          console.log(
+            `🔍 [PDF-SERVICE] After intersection with documentIds: ${documentIdsFilter.length} document(s)`
+          );
+        }
       } else {
         documentIdsFilter = docsInCollections;
       }
 
       if (documentIdsFilter.length === 0) {
-        console.log(
-          '🔍 [PDF-SERVICE] No documents match the collection filter, returning empty results'
-        );
+        if (DEBUG) {
+          console.log(
+            '🔍 [PDF-SERVICE] No documents match the collection filter, returning empty results'
+          );
+        }
         return [];
       }
     }
@@ -381,62 +476,103 @@ class RetrievalService {
     const allResults = new Map<string, SearchResult>();
 
     const embeddingStart = Date.now();
-    console.log(
-      `🔍 [PDF-SERVICE] Generating ${expandedQueries.length} embeddings in parallel...`
+    if (DEBUG) {
+      console.log(
+        `🔍 [PDF-SERVICE] Generating ${expandedQueries.length} embeddings in parallel...`
+      );
+    }
+
+    const embeddings = await Promise.all(
+      expandedQueries.map((q) => this.getQueryEmbedding(q))
     );
 
-    const embeddingPromises = expandedQueries.map((q) => this.getQueryEmbedding(q));
-    const embeddings = await Promise.all(embeddingPromises);
+    if (DEBUG) {
+      console.log(
+        `✅ [PDF-SERVICE] All embeddings generated in ${Date.now() - embeddingStart}ms`
+      );
+    }
 
-    const embeddingDuration = Date.now() - embeddingStart;
-    console.log(
-      `✅ [PDF-SERVICE] All embeddings generated in ${embeddingDuration}ms`
-    );
-
-    const cacheStats = this.queryEmbeddingCache.getStats();
-    if ((cacheStats.hits + cacheStats.misses) % 10 === 0) {
+    const cacheStats = queryEmbeddingCache.getStats();
+    if (DEBUG && (cacheStats.hits + cacheStats.misses) % 10 === 0) {
       console.log(
         `💾 [EMB CACHE] Stats: ${cacheStats.hits} hits, ${cacheStats.misses} misses (${cacheStats.hitRate})`
       );
     }
 
     const searchStart2 = Date.now();
-    const searchPromises = embeddings.map((queryEmbedding, i) => {
-      const expandedQuery = expandedQueries[i];
+
+    // Strategy:
+    //   - 1 variant: run a single HNSW+BM25 search (no pooling overhead).
+    //   - N variants: run ONE HNSW search on the mean-pooled embedding
+    //     (semantic center of the variants), and — for EnhancedVectorStore
+    //     — fire a cheap BM25-driven search per variant to preserve lexical
+    //     recall of translated terms. Dedup keeps the best similarity.
+    if (expandedQueries.length === 1) {
+      const queryEmbedding = embeddings[0];
+      const results =
+        this.vectorStore instanceof EnhancedVectorStore
+          ? await this.vectorStore.search(
+              expandedQueries[0],
+              queryEmbedding,
+              topK,
+              documentIdsFilter
+            )
+          : this.vectorStore!.search(queryEmbedding, topK, documentIdsFilter);
+      for (const result of results) {
+        allResults.set(result.chunk.id, result);
+      }
+    } else {
+      const pooledEmbedding = meanPoolEmbeddings(embeddings);
+
       if (this.vectorStore instanceof EnhancedVectorStore) {
-        return this.vectorStore.search(
-          expandedQuery,
-          queryEmbedding,
+        // Pooled HNSW (semantic) + per-variant BM25-capable search (lexical).
+        // The hybrid store internally blends HNSW+BM25; passing the variant
+        // text preserves BM25 recall for translated terms without N HNSW hits.
+        const store = this.vectorStore;
+        const pooledPromise = store.search(
+          expandedQueries[0],
+          pooledEmbedding,
           topK,
           documentIdsFilter
         );
-      } else {
-        return Promise.resolve(
-          this.vectorStore!.search(queryEmbedding, topK, documentIdsFilter)
+        const variantPromises = expandedQueries.map((eq) =>
+          store.search(eq, pooledEmbedding, topK, documentIdsFilter)
         );
-      }
-    });
-
-    const allSearchResults = await Promise.all(searchPromises);
-    const searchDuration = Date.now() - searchStart2;
-    console.log(
-      `✅ [PDF-SERVICE] All searches completed in ${searchDuration}ms`
-    );
-
-    for (let i = 0; i < allSearchResults.length; i++) {
-      const results = allSearchResults[i];
-      for (const result of results) {
-        const chunkId = result.chunk.id;
-        const existing = allResults.get(chunkId);
-        if (!existing || result.similarity > existing.similarity) {
-          allResults.set(chunkId, result);
+        const [pooledResults, ...variantResults] = await Promise.all([
+          pooledPromise,
+          ...variantPromises,
+        ]);
+        const buckets = [pooledResults, ...variantResults];
+        for (const results of buckets) {
+          for (const result of results) {
+            const existing = allResults.get(result.chunk.id);
+            if (!existing || result.similarity > existing.similarity) {
+              allResults.set(result.chunk.id, result);
+            }
+          }
+        }
+      } else {
+        // Plain VectorStore is HNSW-only: a single pooled search is strictly
+        // cheaper than N, and the variants add no lexical signal here.
+        const results = this.vectorStore!.search(
+          pooledEmbedding,
+          topK,
+          documentIdsFilter
+        );
+        for (const result of results) {
+          allResults.set(result.chunk.id, result);
         }
       }
     }
 
-    console.log(
-      `🔍 [PDF-SERVICE] Merged ${allResults.size} unique chunks from ${expandedQueries.length} query variants`
-    );
+    if (DEBUG) {
+      console.log(
+        `✅ [PDF-SERVICE] All searches completed in ${Date.now() - searchStart2}ms`
+      );
+      console.log(
+        `🔍 [PDF-SERVICE] Merged ${allResults.size} unique chunks from ${expandedQueries.length} query variants`
+      );
+    }
 
     const mergedResults = Array.from(allResults.values())
       .sort((a, b) => b.similarity - a.similarity)
@@ -463,16 +599,18 @@ class RetrievalService {
       filteredResults = mergedResults.slice(0, minFallbackResults);
     }
 
-    console.log('🔍 [PDF-SERVICE DEBUG] Secondary search results:', {
-      totalUniqueChunks: mergedResults.length,
-      filteredResults: filteredResults.length,
-      threshold: threshold,
-      fallbackApplied:
-        filteredResults.length > 0 &&
-        filteredResults.length <
-          mergedResults.filter((r) => r.similarity >= threshold).length,
-      totalDuration: `${Date.now() - searchStart}ms`,
-    });
+    if (DEBUG) {
+      console.log('🔍 [PDF-SERVICE DEBUG] Secondary search results:', {
+        totalUniqueChunks: mergedResults.length,
+        filteredResults: filteredResults.length,
+        threshold: threshold,
+        fallbackApplied:
+          filteredResults.length > 0 &&
+          filteredResults.length <
+            mergedResults.filter((r) => r.similarity >= threshold).length,
+        totalDuration: `${Date.now() - searchStart}ms`,
+      });
+    }
 
     return filteredResults;
   }

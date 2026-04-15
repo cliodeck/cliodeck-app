@@ -1,19 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
-import { PDFExportModal } from '../Export/PDFExportModal';
-import { WordExportModal } from '../Export/WordExportModal';
 import { BeamerConfig } from './BeamerConfig';
 import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
-import { ReportIssueModal } from '../Report/ReportIssueModal';
 import './ProjectPanel.css';
+
+// Modals are only rendered when opened — keep them off the main chunk.
+const PDFExportModal = lazy(() =>
+  import('../Export/PDFExportModal').then((m) => ({ default: m.PDFExportModal })),
+);
+const WordExportModal = lazy(() =>
+  import('../Export/WordExportModal').then((m) => ({ default: m.WordExportModal })),
+);
+const ReportIssueModal = lazy(() =>
+  import('../Report/ReportIssueModal').then((m) => ({ default: m.ReportIssueModal })),
+);
 
 export const ProjectPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -446,22 +454,34 @@ export const ProjectPanel: React.FC = () => {
       )}
 
       {/* PDF Export Modal (for all project types including presentations) */}
-      <PDFExportModal
-        isOpen={showPDFExportModal}
-        onClose={() => setShowPDFExportModal(false)}
-      />
+      {showPDFExportModal && (
+        <Suspense fallback={null}>
+          <PDFExportModal
+            isOpen={showPDFExportModal}
+            onClose={() => setShowPDFExportModal(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Word Export Modal */}
-      <WordExportModal
-        isOpen={showWordExportModal}
-        onClose={() => setShowWordExportModal(false)}
-      />
+      {showWordExportModal && (
+        <Suspense fallback={null}>
+          <WordExportModal
+            isOpen={showWordExportModal}
+            onClose={() => setShowWordExportModal(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Report Issue Modal */}
-      <ReportIssueModal
-        isOpen={showReportModal}
-        onClose={() => setShowReportModal(false)}
-      />
+      {showReportModal && (
+        <Suspense fallback={null}>
+          <ReportIssueModal
+            isOpen={showReportModal}
+            onClose={() => setShowReportModal(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

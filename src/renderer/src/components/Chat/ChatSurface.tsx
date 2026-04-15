@@ -22,6 +22,49 @@ interface ChatSurfaceProps<M extends UnifiedMessage> {
   footer?: React.ReactNode;
 }
 
+/**
+ * Sub-component that owns its own `inputValue` state so keystrokes in the
+ * composer do NOT re-render the parent ChatSurface (and therefore do not
+ * re-render MessageList / MessageBubble on every keypress).
+ */
+interface ComposerProps {
+  onSend: (text: string) => void | Promise<void>;
+  onCancel?: () => void;
+  isProcessing: boolean;
+  placeholder?: string;
+}
+
+const Composer: React.FC<ComposerProps> = ({
+  onSend,
+  onCancel,
+  isProcessing,
+  placeholder,
+}) => {
+  const [inputValue, setInputValue] = useState('');
+
+  const handleSend = useCallback(async () => {
+    const text = inputValue.trim();
+    if (!text || isProcessing) return;
+    setInputValue('');
+    await onSend(text);
+  }, [inputValue, isProcessing, onSend]);
+
+  const handleCancel = useCallback(() => {
+    onCancel?.();
+  }, [onCancel]);
+
+  return (
+    <MessageInput
+      value={inputValue}
+      onChange={setInputValue}
+      onSend={handleSend}
+      onCancel={handleCancel}
+      isProcessing={isProcessing}
+      placeholder={placeholder}
+    />
+  );
+};
+
 export function ChatSurface<M extends UnifiedMessage>({
   title,
   headerExtras,
@@ -38,18 +81,6 @@ export function ChatSurface<M extends UnifiedMessage>({
   footer,
 }: ChatSurfaceProps<M>): React.ReactElement {
   const { t } = useTranslation('common');
-  const [inputValue, setInputValue] = useState('');
-
-  const handleSend = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isProcessing) return;
-    setInputValue('');
-    await onSend(text);
-  }, [inputValue, isProcessing, onSend]);
-
-  const handleCancel = useCallback(() => {
-    onCancel?.();
-  }, [onCancel]);
 
   const showTypingIndicator = isProcessing && !streamingContent;
 
@@ -88,11 +119,9 @@ export function ChatSurface<M extends UnifiedMessage>({
 
       {banner && <div className="chat-surface__banner">{banner}</div>}
 
-      <MessageInput
-        value={inputValue}
-        onChange={setInputValue}
-        onSend={handleSend}
-        onCancel={handleCancel}
+      <Composer
+        onSend={onSend}
+        onCancel={onCancel}
         isProcessing={isProcessing}
         placeholder={placeholder}
       />

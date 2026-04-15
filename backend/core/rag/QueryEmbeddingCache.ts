@@ -20,10 +20,10 @@ export class QueryEmbeddingCache {
   private stats = { hits: 0, misses: 0 };
 
   /**
-   * @param maxSize Maximum number of embeddings to cache (default 500)
-   * @param ttlMinutes Time-to-live in minutes (default 60)
+   * @param maxSize Maximum number of embeddings to cache (default 2000)
+   * @param ttlMinutes Time-to-live in minutes (default 10)
    */
-  constructor(maxSize = 500, ttlMinutes = 60) {
+  constructor(maxSize = 2000, ttlMinutes = 10) {
     this.cache = new LRUCache({
       max: maxSize,
       ttl: 1000 * 60 * ttlMinutes,
@@ -41,10 +41,20 @@ export class QueryEmbeddingCache {
   }
 
   /**
+   * Build a namespaced cache key. When providerId is omitted, a shared
+   * "default" namespace is used (backward compatible with callers that
+   * do not pass a provider).
+   */
+  private makeKey(query: string, providerId?: string): string {
+    const ns = providerId ?? 'default';
+    return `${ns}:${this.hashQuery(query)}`;
+  }
+
+  /**
    * Get cached embedding for a query
    */
-  get(query: string): Float32Array | undefined {
-    const key = this.hashQuery(query);
+  get(query: string, providerId?: string): Float32Array | undefined {
+    const key = this.makeKey(query, providerId);
     const result = this.cache.get(key);
 
     if (result) {
@@ -59,16 +69,16 @@ export class QueryEmbeddingCache {
   /**
    * Cache an embedding for a query
    */
-  set(query: string, embedding: Float32Array): void {
-    const key = this.hashQuery(query);
+  set(query: string, embedding: Float32Array, providerId?: string): void {
+    const key = this.makeKey(query, providerId);
     this.cache.set(key, embedding);
   }
 
   /**
    * Check if query is cached (without updating stats)
    */
-  has(query: string): boolean {
-    return this.cache.has(this.hashQuery(query));
+  has(query: string, providerId?: string): boolean {
+    return this.cache.has(this.makeKey(query, providerId));
   }
 
   /**
@@ -90,6 +100,23 @@ export class QueryEmbeddingCache {
   clear(): void {
     this.cache.clear();
     this.stats = { hits: 0, misses: 0 };
+  }
+
+  /**
+   * Purge only entries for a given provider. Entries keyed under other
+   * providers (or the "default" namespace) are preserved. Stats are
+   * left untouched so cross-provider hit/miss tracking remains
+   * meaningful.
+   */
+  invalidateProvider(providerId: string): void {
+    const prefix = `${providerId}:`;
+    const toDelete: string[] = [];
+    for (const key of this.cache.keys()) {
+      if (typeof key === 'string' && key.startsWith(prefix)) {
+        toDelete.push(key);
+      }
+    }
+    for (const key of toDelete) this.cache.delete(key);
   }
 
   /**

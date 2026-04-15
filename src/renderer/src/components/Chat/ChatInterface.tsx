@@ -122,6 +122,11 @@ export const ChatInterface: React.FC = () => {
       </div>
     ) : undefined;
 
+  const renderRAGExtras = useCallback(
+    (m: ChatUnifiedMessage) => <RAGMessageExtras message={m.original} />,
+    [],
+  );
+
   const headerExtras = (
     <>
       <HelperTooltip content={t('chat.helpText')} onLearnMore={handleLearnMore} />
@@ -142,7 +147,7 @@ export const ChatInterface: React.FC = () => {
         onClear={handleClear}
         emptyState={emptyState}
         banner={banner}
-        renderMessageExtras={(m) => <RAGMessageExtras message={m.original} />}
+        renderMessageExtras={renderRAGExtras}
       />
       <RAGSettingsPanel />
     </>

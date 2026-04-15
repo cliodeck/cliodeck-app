@@ -310,6 +310,14 @@ export class VectorStore {
     return this.parseDocument(row as any);
   }
 
+  /**
+   * Indexed lookup by id (SELECT WHERE id = ?). Prefer this over
+   * `getAllDocuments().find()` which scans and hydrates the whole table.
+   */
+  getDocumentById(id: string): PDFDocument | null {
+    return this.getDocument(id);
+  }
+
   getAllDocuments(): PDFDocument[] {
     const stmt = this.db.prepare('SELECT * FROM documents ORDER BY indexed_at DESC');
     const rows = stmt.all();

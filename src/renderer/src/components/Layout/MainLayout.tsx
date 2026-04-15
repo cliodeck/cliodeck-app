@@ -8,8 +8,6 @@ import { ProjectPanel } from '../Project/ProjectPanel';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { WorkspaceModeBar } from './WorkspaceModeBar';
 import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
-import { AnalyzePanel } from './AnalyzePanel';
-import { ExportHub } from './ExportHub';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
@@ -23,6 +21,14 @@ const JournalPanel = lazy(() =>
 );
 const PrimarySourcesPanel = lazy(() =>
   import('../PrimarySources/PrimarySourcesPanel').then(m => ({ default: m.PrimarySourcesPanel }))
+);
+
+// Lazy-loaded mode surfaces (only rendered when that workspace mode is active)
+const AnalyzePanel = lazy(() =>
+  import('./AnalyzePanel').then(m => ({ default: m.AnalyzePanel }))
+);
+const ExportHub = lazy(() =>
+  import('./ExportHub').then(m => ({ default: m.ExportHub }))
 );
 
 // Lazy-loaded modals (only rendered when opened)
@@ -232,9 +238,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
               {workspaceMode === 'brainstorm' ? (
                 <BrainstormPanel />
               ) : workspaceMode === 'analyze' ? (
-                <AnalyzePanel />
+                <Suspense fallback={<PanelLoadingFallback />}>
+                  <AnalyzePanel />
+                </Suspense>
               ) : workspaceMode === 'export' ? (
-                <ExportHub />
+                <Suspense fallback={<PanelLoadingFallback />}>
+                  <ExportHub />
+                </Suspense>
               ) : (
                 centerPanel || (
                   <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
