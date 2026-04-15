@@ -9,6 +9,7 @@
 import { VectorStore } from '../../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 import type { RAGConfig } from '../../../../backend/types/config.js';
+import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
 
 export type AnyVectorStore = VectorStore | EnhancedVectorStore;
 
@@ -90,8 +91,8 @@ export class PdfVectorStore {
    * Indexed lookup by id. Prefer this over `getAllDocuments().find()`
    * which hydrates every row (including per-doc chunk-count queries).
    */
-  static getDocumentById(store: AnyVectorStore, id: string): unknown {
+  static getDocumentById(store: AnyVectorStore, id: string): PDFDocument | null {
     // Both VectorStore and EnhancedVectorStore now expose getDocumentById.
-    return (store as { getDocumentById: (id: string) => unknown }).getDocumentById(id);
+    return (store as { getDocumentById: (id: string) => PDFDocument | null }).getDocumentById(id);
   }
 }

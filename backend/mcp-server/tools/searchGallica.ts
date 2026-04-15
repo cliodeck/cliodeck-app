@@ -214,7 +214,7 @@ export function registerSearchGallica(
           at: new Date().toISOString(),
           name: TOOL_NAME,
           input: { query, topK: k, dateFrom, dateTo, docType },
-          output: { itemCount: hits.length, elapsedMs: Date.now() - start },
+          output: { itemCount: hits.length },
         });
 
         return {

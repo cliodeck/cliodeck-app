@@ -7,7 +7,7 @@ import type { Citation } from '../../../backend/types/citation.js';
  */
 export interface CitationPipelineOptions {
   style?: string;
-  locale?: 'fr-FR' | 'en-US';
+  locale?: string;
   /**
    * Resolver: bibKey -> Citation | undefined. Typically wraps
    * `bibliographyService.getByCitationKey`. Passed in (rather than

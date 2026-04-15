@@ -31,7 +31,7 @@ export interface FormatResult {
   bibliography: string[];
 }
 
-type Locale = 'fr-FR' | 'en-US';
+type Locale = string;
 type StyleId = string; // filename without .csl
 
 /**

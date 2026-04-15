@@ -303,7 +303,7 @@ export function setupFusionHandlers(): void {
 
     // 1. Whitelist validation (command + env shape).
     const check = validateMcpAddRequest(normalized);
-    if (!check.ok) {
+    if (check.ok === false) {
       if (auditPath) {
         await appendMcpAudit(auditPath, {
           ts: new Date().toISOString(),

@@ -12,7 +12,7 @@ describe('redactForAudit', () => {
       kind: 'tool_call',
       name: 'search_obsidian',
       input: { query: 'témoin anonyme X', topK: 5 },
-    }) as {
+    }) as unknown as {
       input: { query: { sha256: string; length: number }; topK: number };
     };
     expect(out.input.query).toEqual({
@@ -23,8 +23,8 @@ describe('redactForAudit', () => {
   });
 
   it('produces a stable hash for the same value', () => {
-    const a = redactForAudit({ query: 'same' }) as { query: { sha256: string } };
-    const b = redactForAudit({ query: 'same' }) as { query: { sha256: string } };
+    const a = redactForAudit({ query: 'same' }) as unknown as { query: { sha256: string } };
+    const b = redactForAudit({ query: 'same' }) as unknown as { query: { sha256: string } };
     expect(a.query.sha256).toBe(b.query.sha256);
   });
 
@@ -46,7 +46,7 @@ describe('redactForAudit', () => {
         { title: 'keep', snippet: 's1', content: 'c1', context: 'ctx' },
       ],
       probe: { text: 't', value: 'v', entity: 'Marie X' },
-    }) as {
+    }) as unknown as {
       hits: Array<{
         title: string;
         snippet: { sha256: string; length: number };
@@ -76,7 +76,7 @@ describe('redactForAudit', () => {
         command: 'node',
         env: { OPENAI_API_KEY: 'sk-real-secret', DEBUG: '1' },
       },
-    }) as {
+    }) as unknown as {
       name: string;
       config: {
         transport: string;

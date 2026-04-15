@@ -23,7 +23,7 @@ export interface ExportOptions {
   citation?: {
     useEngine?: boolean;
     style?: string;
-    locale?: 'fr-FR' | 'en-US';
+    locale?: string;
   };
   metadata?: {
     title?: string;

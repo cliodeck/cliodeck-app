@@ -54,7 +54,6 @@ export class PdfIndexer {
       deps.vectorStore,
       embeddingFn,
       deps.ragConfig.chunkingConfig,
-      // @ts-expect-error structural summarizer config; backend accepts same shape
       deps.summarizerConfig,
       deps.ragConfig.useAdaptiveChunking !== false,
       deps.ragConfig
