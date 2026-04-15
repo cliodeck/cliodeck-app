@@ -139,6 +139,25 @@ export interface FusionChatSystemPromptOptions {
   modeId?: string;
   /** Free-form override; takes precedence over the resolved mode text. */
   customText?: string;
+  /**
+   * Free-mode switch (legacy parity with `chat-service.noSystemPrompt`).
+   * When true — or when `modeId === 'free-mode'` — the service injects NO
+   * system prompt: no `.cliohints`, no resolved mode text, no custom text.
+   * The outgoing message list contains only the caller-supplied messages.
+   */
+  noPrompt?: boolean;
+}
+
+/**
+ * True when the caller asked for free-mode (no system prompt at all).
+ * Centralised so the hints-skip branch and the mode-resolution-skip branch
+ * stay in sync.
+ */
+export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boolean {
+  if (!sp) return false;
+  if (sp.noPrompt === true) return true;
+  if (sp.modeId === 'free-mode' || sp.modeId === 'free') return true;
+  return false;
 }
 
 export interface ChatStartArgs {
@@ -228,10 +247,14 @@ class FusionChatService {
 
     let messages = args.messages;
     const projectPath = projectManager.getCurrentProjectPath();
+    const freeMode = isFreeMode(args.systemPrompt);
 
     // Workspace hints — prepend before handing off to the engine so the
     // engine's retrieval-injected system message stacks on top cleanly.
-    if (projectPath) {
+    // Free-mode short-circuits hint injection to match legacy parity
+    // (`chat-service.noSystemPrompt`): the caller wants a truly unprompted
+    // conversation.
+    if (projectPath && !freeMode) {
       try {
         const hints = await loadWorkspaceHints(projectPath);
         messages = prependAsSystemMessage(messages, hints);
@@ -324,26 +347,36 @@ class FusionChatService {
     //   3. nothing — fall back to whatever the provider / registry defaults do
     // `.cliohints` were already prepended above and sit *below* the system
     // override inside the message list.
-    let resolvedSystemText: string | undefined = args.systemPrompt?.customText;
-    if (!resolvedSystemText && args.systemPrompt?.modeId) {
-      try {
-        const mode = await modeService
-          .getModeManager()
-          .getMode(args.systemPrompt.modeId);
-        // Default to the FR prompt — matches the `chat-service` default.
-        // Renderer can pass `customText` if it wants a different locale.
-        resolvedSystemText = mode?.systemPrompt?.fr || mode?.systemPrompt?.en;
-      } catch (e) {
-        console.warn('[fusion-chat] mode resolution failed:', e);
+    let resolvedSystemText: string | undefined;
+    let systemPromptConfig: ChatEngineSystemPromptConfig | undefined;
+    if (freeMode) {
+      // Free-mode: engine must NOT inject any system message. Leave
+      // `systemPromptConfig` undefined so `runChatTurn` skips its
+      // customText branch entirely.
+      resolvedSystemText = undefined;
+      systemPromptConfig = undefined;
+    } else {
+      resolvedSystemText = args.systemPrompt?.customText;
+      if (!resolvedSystemText && args.systemPrompt?.modeId) {
+        try {
+          const mode = await modeService
+            .getModeManager()
+            .getMode(args.systemPrompt.modeId);
+          // Default to the FR prompt — matches the `chat-service` default.
+          // Renderer can pass `customText` if it wants a different locale.
+          resolvedSystemText = mode?.systemPrompt?.fr || mode?.systemPrompt?.en;
+        } catch (e) {
+          console.warn('[fusion-chat] mode resolution failed:', e);
+        }
       }
+      systemPromptConfig =
+        resolvedSystemText || args.systemPrompt?.modeId
+          ? {
+              customText: resolvedSystemText,
+              modeId: args.systemPrompt?.modeId,
+            }
+          : undefined;
     }
-    const systemPromptConfig: ChatEngineSystemPromptConfig | undefined =
-      resolvedSystemText || args.systemPrompt?.modeId
-        ? {
-            customText: resolvedSystemText,
-            modeId: args.systemPrompt?.modeId,
-          }
-        : undefined;
 
     try {
       await runChatTurn<BrainstormSource>({
@@ -357,6 +390,9 @@ class FusionChatService {
         retrievalOptions: args.retrievalOptions,
         systemPrompt: systemPromptConfig,
         hooks: {
+          onStatus: (status) => {
+            safeSend('fusion:chat:status', { sessionId, status });
+          },
           onChunk: (chunk) => sendChunk(chunk),
           onDone: (chunk) => sendChunk(chunk),
           onError: (err) =>

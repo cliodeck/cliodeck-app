@@ -1,6 +1,89 @@
 import { describe, it, expect } from 'vitest';
-import { hitsToSources } from '../fusion-chat-service.js';
+import { hitsToSources, isFreeMode } from '../fusion-chat-service.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
+import { runChatTurn } from '../chat-engine.js';
+import type {
+  ChatChunk,
+  ChatMessage,
+  LLMProvider,
+} from '../../../../backend/core/llm/providers/base.js';
+
+function makeFakeProvider(chunks: ChatChunk[]): {
+  provider: LLMProvider;
+  seenMessages: ChatMessage[][];
+} {
+  const seenMessages: ChatMessage[][] = [];
+  const provider = {
+    id: 'fake',
+    name: 'Fake',
+    capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+    getStatus: () => ({ state: 'ready' }) as never,
+    healthCheck: async () => ({ state: 'ready' }) as never,
+    chat: async function* (msgs: ChatMessage[]) {
+      seenMessages.push(msgs);
+      for (const c of chunks) yield c;
+    },
+    complete: async () => '',
+    dispose: async () => undefined,
+  } as unknown as LLMProvider;
+  return { provider, seenMessages };
+}
+
+describe('isFreeMode', () => {
+  it('returns false for undefined / empty configs', () => {
+    expect(isFreeMode(undefined)).toBe(false);
+    expect(isFreeMode({})).toBe(false);
+  });
+
+  it('returns true when noPrompt flag is set', () => {
+    expect(isFreeMode({ noPrompt: true })).toBe(true);
+  });
+
+  it('recognises the built-in free-mode id (and legacy "free" alias)', () => {
+    expect(isFreeMode({ modeId: 'free-mode' })).toBe(true);
+    expect(isFreeMode({ modeId: 'free' })).toBe(true);
+  });
+
+  it('returns false for any other modeId', () => {
+    expect(isFreeMode({ modeId: 'summary' })).toBe(false);
+  });
+});
+
+describe('fusion free-mode — chat-engine contract', () => {
+  // Guards the engine-level invariant fusion-chat-service relies on for
+  // free-mode: when the service passes `systemPrompt: undefined` (because
+  // `isFreeMode` short-circuited hints + mode resolution), `runChatTurn`
+  // must forward the user messages verbatim, with no leading system role.
+  it('produces a message list without any system role', async () => {
+    const { provider, seenMessages } = makeFakeProvider([
+      { delta: 'hi', done: false },
+      { delta: '', done: true, finishReason: 'stop' },
+    ]);
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      // No systemPrompt, no retriever → free-mode analogue.
+    });
+    expect(seenMessages).toHaveLength(1);
+    const roles = seenMessages[0].map((m) => m.role);
+    expect(roles).toEqual(['user']);
+    expect(roles).not.toContain('system');
+  });
+
+  it('does inject a system message when customText is provided (sanity check)', async () => {
+    const { provider, seenMessages } = makeFakeProvider([
+      { delta: 'hi', done: false },
+      { delta: '', done: true, finishReason: 'stop' },
+    ]);
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      systemPrompt: { customText: 'You are a historian.' },
+    });
+    const roles = seenMessages[0].map((m) => m.role);
+    expect(roles[0]).toBe('system');
+  });
+});
 
 describe('hitsToSources', () => {
   it('returns an empty array for empty input', () => {

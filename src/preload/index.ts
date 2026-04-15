@@ -794,6 +794,20 @@ const api = {
         ipcRenderer.on('fusion:chat:explanation', listener);
         return () => ipcRenderer.removeListener('fusion:chat:explanation', listener);
       },
+      onStatus: (
+        callback: (envelope: {
+          sessionId: string;
+          status: {
+            phase: 'retrieving' | 'compressing' | 'generating' | 'done';
+            label?: string;
+          };
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:status', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:status', listener);
+      },
       onContext: (
         callback: (envelope: {
           sessionId: string;

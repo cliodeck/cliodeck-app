@@ -72,7 +72,24 @@ export interface ChatEngineToolEvent {
   index: number;
 }
 
+/**
+ * Coarse-grained pipeline phases emitted via `onStatus`. Mirrors the legacy
+ * `chat:status` banner stages so the Write-side renderer keeps receiving the
+ * same user-visible signal after the fusion swap:
+ *  - `retrieving`   — retriever started.
+ *  - `compressing`  — compaction/compression step active (reserved).
+ *  - `generating`   — first LLM frame observed.
+ *  - `done`         — terminal chunk emitted (also covered by `onDone`).
+ */
+export interface ChatEngineStatusEvent {
+  phase: 'retrieving' | 'compressing' | 'generating' | 'done';
+  /** Optional human-readable label (legacy-parity UI banner text). */
+  label?: string;
+}
+
 export interface ChatEngineHooks {
+  /** Pipeline-phase transitions for status banners. */
+  onStatus?(status: ChatEngineStatusEvent): void;
   /** A non-terminal streaming chunk (delta or tool-call notification). */
   onChunk?(chunk: ChatChunk): void;
   /** Terminal chunk — emitted exactly once per turn, at the very end. */
@@ -207,10 +224,19 @@ export async function runChatTurn<TSource = unknown>(
     messages = [{ role: 'system', content: customText }, ...messages];
   }
 
+  const safeStatus = (status: ChatEngineStatusEvent): void => {
+    try {
+      hooks.onStatus?.(status);
+    } catch {
+      // UI hook failure must not abort the stream.
+    }
+  };
+
   // --- Retrieval injection -------------------------------------------------
   if (args.retriever) {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser?.content?.trim()) {
+      safeStatus({ phase: 'retrieving' });
       try {
         const result = await args.retriever.search(
           lastUser.content,
@@ -231,6 +257,7 @@ export async function runChatTurn<TSource = unknown>(
             try {
               hooks.onSearchStats?.(result.explanation);
               if (result.explanation.compression) {
+                safeStatus({ phase: 'compressing' });
                 hooks.onCompressionStats?.(result.explanation.compression);
               }
             } catch {
@@ -301,6 +328,7 @@ export async function runChatTurn<TSource = unknown>(
   // --- Agent loop ----------------------------------------------------------
   try {
     generationStart = Date.now();
+    let firstFrameSeen = false;
     for (let turn = 0; turn < maxTurns; turn++) {
       const pendingToolCalls: ChatEngineToolCall[] = [];
       let sawToolCall = false;
@@ -332,8 +360,13 @@ export async function runChatTurn<TSource = unknown>(
           if (chunk.usage) lastUsage = chunk.usage;
           generationMs = Date.now() - generationStart;
           emitExplanation();
+          safeStatus({ phase: 'done' });
           hooks.onDone?.(chunk);
           break;
+        }
+        if (!firstFrameSeen) {
+          firstFrameSeen = true;
+          safeStatus({ phase: 'generating' });
         }
         hooks.onChunk?.(chunk);
       }
@@ -343,6 +376,7 @@ export async function runChatTurn<TSource = unknown>(
           // Stream ended without a done chunk — synthesize one.
           generationMs = Date.now() - generationStart;
           emitExplanation();
+          safeStatus({ phase: 'done' });
           hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
         }
         return;
@@ -431,6 +465,7 @@ export async function runChatTurn<TSource = unknown>(
     // Loop unwound without a natural terminal — emit a stop.
     generationMs = Date.now() - generationStart;
     emitExplanation();
+    safeStatus({ phase: 'done' });
     hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
   } catch (e) {
     emitError('stream_error', e instanceof Error ? e.message : String(e));
