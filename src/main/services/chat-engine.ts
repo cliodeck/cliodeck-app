@@ -329,16 +329,32 @@ export async function runChatTurn<TSource = unknown>(
   };
 
   // --- Agent loop ----------------------------------------------------------
+  let totalChunkCount = 0;
+  let finalFinishReason: string | undefined;
+  let turnsUsed = 0;
+  const turnStart = Date.now();
+  const logTurnDone = (): void => {
+    console.log('[chat-engine] turn done', {
+      provider: args.provider.id,
+      model: args.opts?.model ?? args.provider.name,
+      turns: turnsUsed,
+      chunkCount: totalChunkCount,
+      finishReason: finalFinishReason,
+      durationMs: Date.now() - turnStart,
+      tokensIn: lastUsage?.promptTokens,
+      tokensOut: lastUsage?.completionTokens,
+    });
+  };
   try {
     generationStart = Date.now();
     let firstFrameSeen = false;
     for (let turn = 0; turn < maxTurns; turn++) {
+      turnsUsed = turn + 1;
       const pendingToolCalls: ChatEngineToolCall[] = [];
       let sawToolCall = false;
       let terminalDone = false;
       let lastDoneChunk: ChatChunk | null = null;
 
-      let chunkCount = 0;
       for await (const chunk of args.provider.chat(messages, {
         model: args.opts?.model,
         temperature: args.opts?.temperature,
@@ -346,7 +362,7 @@ export async function runChatTurn<TSource = unknown>(
         tools: args.tools && args.tools.length ? args.tools : undefined,
         signal: args.signal,
       })) {
-        chunkCount++;
+        totalChunkCount++;
         if (chunk.toolCall) {
           pendingToolCalls.push(chunk.toolCall);
           sawToolCall = true;
@@ -363,10 +379,12 @@ export async function runChatTurn<TSource = unknown>(
           terminalDone = true;
           lastDoneChunk = chunk;
           if (chunk.usage) lastUsage = chunk.usage;
+          finalFinishReason = chunk.finishReason;
           generationMs = Date.now() - generationStart;
           emitExplanation();
           safeStatus({ phase: 'done' });
           hooks.onDone?.(chunk);
+          logTurnDone();
           break;
         }
         if (!firstFrameSeen) {
@@ -379,27 +397,33 @@ export async function runChatTurn<TSource = unknown>(
       if (!sawToolCall || pendingToolCalls.length === 0) {
         if (!terminalDone) {
           // Stream ended without a done chunk — synthesize one.
+          finalFinishReason = 'stop';
           generationMs = Date.now() - generationStart;
           emitExplanation();
           safeStatus({ phase: 'done' });
           hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
+          logTurnDone();
         }
         return;
       }
 
       if (!terminalDone) {
+        finalFinishReason = 'error';
         emitError(
           'stream_incomplete',
           'LLM stream ended without a terminal chunk'
         );
+        logTurnDone();
         return;
       }
 
       if (!args.toolHandler) {
+        finalFinishReason = 'error';
         emitError(
           'no_tool_handler',
           'Provider requested a tool call but no toolHandler was configured'
         );
+        logTurnDone();
         return;
       }
 
@@ -468,11 +492,15 @@ export async function runChatTurn<TSource = unknown>(
       void lastDoneChunk;
     }
     // Loop unwound without a natural terminal — emit a stop.
+    finalFinishReason = 'stop';
     generationMs = Date.now() - generationStart;
     emitExplanation();
     safeStatus({ phase: 'done' });
     hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
+    logTurnDone();
   } catch (e) {
+    finalFinishReason = 'error';
     emitError('stream_error', e instanceof Error ? e.message : String(e));
+    logTurnDone();
   }
 }

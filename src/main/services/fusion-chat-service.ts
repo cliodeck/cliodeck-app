@@ -157,6 +157,43 @@ export interface FusionChatSystemPromptOptions {
  * Centralised so the hints-skip branch and the mode-resolution-skip branch
  * stay in sync.
  */
+/**
+ * Pure adapter: translate an engine-level `ChatEngineRetrievalOptions` into
+ * the narrower argument bag `RetrievalService.searchWithStats` understands.
+ *
+ * Honors the full 7-case truth table from `getResolvedSourceType`
+ * (ragQueryStore.ts:190-209):
+ *   biblio only          → { sourceType: 'secondary', includeVault: false }
+ *   primary only         → { sourceType: 'primary',   includeVault: false }
+ *   notes only           → { sourceType: 'vault',     includeVault: true  }
+ *   biblio + primary     → { sourceType: 'both',      includeVault: false }
+ *   biblio + notes       → { sourceType: 'secondary', includeVault: true  }
+ *   primary + notes      → { sourceType: 'primary',   includeVault: true  }
+ *   all three            → { sourceType: 'both',      includeVault: true  }
+ *
+ * For the vault-only case we also force `includeVault = true` (redundant but
+ * explicit: `retrieval-service` already treats `sourceType === 'vault'` as
+ * vault-only regardless of the flag).
+ *
+ * When the caller omits `includeVault` entirely — which shouldn't happen on
+ * the renderer path since `useChatSettingsProjection` always resolves both
+ * fields — we default to `false` (strict) EXCEPT for vault-only, preserving
+ * the "never silently widen the scope" invariant the UI contract relies on.
+ */
+export function resolveRetrievalArgs(options?: ChatEngineRetrievalOptions): {
+  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
+  includeVault: boolean;
+} {
+  const st = options?.sourceType;
+  const sourceType: 'primary' | 'secondary' | 'both' | 'vault' =
+    st === 'vault' || st === 'primary' || st === 'secondary' || st === 'both'
+      ? st
+      : 'both';
+  const includeVault =
+    sourceType === 'vault' ? true : options?.includeVault === true;
+  return { sourceType, includeVault };
+}
+
 export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boolean {
   if (!sp) return false;
   if (sp.noPrompt === true) return true;
@@ -322,29 +359,13 @@ class FusionChatService {
     const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
       ? {
           async search(lastUser, options?: ChatEngineRetrievalOptions) {
-            // Translate the engine-level sourceType (which allows 'vault')
-            // into RetrievalService's narrower primary|secondary|both plus
-            // an explicit `includeVault` flag. Brainstorm default keeps
-            // primary + secondary + vault (matches the prior behaviour).
-            const st = options?.sourceType;
-            // `retrieval-service` now natively understands 'vault' as
-            // "Obsidian only" (primary+secondary skipped). For the three
-            // mixed cases we forward `includeVault` verbatim; when the
-            // caller omits the flag we default to vault-on for Brainstorm
-            // parity with prior behaviour.
-            const rsSourceType: 'primary' | 'secondary' | 'both' | 'vault' =
-              st === 'vault' || st === 'primary' || st === 'secondary' || st === 'both'
-                ? st
-                : 'both';
-            const includeVault =
-              rsSourceType === 'vault'
-                ? true
-                : options?.includeVault !== undefined
-                  ? options.includeVault
-                  : true;
+            // Strict routing per the 7-case truth table (see
+            // `resolveRetrievalArgs`). `retrieval-service` natively
+            // short-circuits `sourceType === 'vault'` to Obsidian only.
+            const { sourceType, includeVault } = resolveRetrievalArgs(options);
             const { hits, stats } = await retrievalService.searchWithStats({
               query: lastUser,
-              sourceType: rsSourceType,
+              sourceType,
               includeVault,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
@@ -463,6 +484,11 @@ class FusionChatService {
       });
     } finally {
       await registry.dispose().catch(() => undefined);
+      console.log('[fusion-chat] turn done', {
+        sessionId,
+        sources: recordedSources.length,
+        assistantChars: assistantText.length,
+      });
       this.recordJournalEntry({
         userMessage: args.messages[args.messages.length - 1],
         assistantText,
