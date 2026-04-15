@@ -505,6 +505,9 @@
   },
   "chat": {
     "title": "Chat",
+    "settings": {
+      "toggle": "Chat settings"
+    },
     "askQuestion": "Ask a question",
     "placeholder": "Ask a question about your documents...",
     "send": "Send (Enter)",

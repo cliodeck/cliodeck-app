@@ -7,7 +7,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Loader2, X } from 'lucide-react';
+import { ArrowRight, Check, Loader2, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
@@ -15,6 +15,9 @@ import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { appendDraftToContent, messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
+import { ModeSelector } from '../Chat/ModeSelector';
+import { RAGSettingsPanel } from '../Chat/RAGSettingsPanel';
+import { useChatSettingsProjection } from '../Chat/useChatSettingsProjection';
 import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
 // RAGExplanation type alias lives in chatStore.
@@ -31,6 +34,11 @@ export const BrainstormChat: React.FC = () => {
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Project RAG params + active mode onto chatStore.chatSettings so every
+  // `fusion.chat.start` from Brainstorm picks up current filters.
+  useChatSettingsProjection();
 
   const sendToWrite = useCallback(
     (m: BrainstormMessage): void => {
@@ -184,17 +192,74 @@ export const BrainstormChat: React.FC = () => {
     );
   }, [sendToWrite, sentToWriteId, activeSource]);
 
+  const settingsLabel = t('chat.settings.toggle', 'Chat settings');
+
   return (
-    <ChatSurface
-      messages={unifiedMessages}
-      isProcessing={isStreaming}
-      onSend={handleSend}
-      onCancel={() => void cancel()}
-      onClear={messages.length > 0 ? reset : undefined}
-      emptyState={emptyState}
-      banner={error && !isStreaming ? error : undefined}
-      placeholder={t('chat.brainstorm.placeholder')}
-      renderMessageExtras={renderExtras}
-    />
+    <div className="brainstorm-chat__root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div
+        className="brainstorm-chat__settings-bar"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '4px 8px',
+          borderBottom: '1px solid var(--border-color)',
+          background: 'var(--bg-panel)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsSettingsOpen((v) => !v)}
+          aria-expanded={isSettingsOpen}
+          aria-label={settingsLabel}
+          title={settingsLabel}
+          data-testid="brainstorm-settings-toggle"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 8px',
+            fontSize: 12,
+            background: 'transparent',
+            border: '1px solid var(--border-color)',
+            borderRadius: 4,
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          <SlidersHorizontal size={13} />
+          <span>{settingsLabel}</span>
+        </button>
+        {isSettingsOpen && <ModeSelector />}
+      </div>
+      {isSettingsOpen && (
+        <div
+          className="brainstorm-chat__settings-panel"
+          data-testid="brainstorm-settings-panel"
+          style={{
+            padding: 8,
+            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-app)',
+            maxHeight: '40%',
+            overflowY: 'auto',
+          }}
+        >
+          <RAGSettingsPanel />
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <ChatSurface
+          messages={unifiedMessages}
+          isProcessing={isStreaming}
+          onSend={handleSend}
+          onCancel={() => void cancel()}
+          onClear={messages.length > 0 ? reset : undefined}
+          emptyState={emptyState}
+          banner={error && !isStreaming ? error : undefined}
+          placeholder={t('chat.brainstorm.placeholder')}
+          renderMessageExtras={renderExtras}
+        />
+      </div>
+    </div>
   );
 };

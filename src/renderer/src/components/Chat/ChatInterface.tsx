@@ -3,17 +3,16 @@ import { useTranslation } from 'react-i18next';
 import {
   type ChatMessage,
   useChatStore,
-  type BrainstormChatRetrievalSettings,
 } from '../../stores/chatStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
-import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
 import { ChatSurface } from './ChatSurface';
 import { RAGMessageExtras } from './RAGMessageExtras';
 import { ModeSelector } from './ModeSelector';
 import { RAGSettingsPanel } from './RAGSettingsPanel';
+import { useChatSettingsProjection } from './useChatSettingsProjection';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import { UnifiedMessage } from './types';
 import { logger } from '../../utils/logger';
@@ -36,14 +35,16 @@ export const ChatInterface: React.FC = () => {
   const messages = useChatStore((s) => s.messages);
   const pendingAssistantId = useChatStore((s) => s.pendingAssistantId);
   const resetChat = useChatStore((s) => s.reset);
-  const setChatSettings = useChatStore((s) => s.setChatSettings);
   const { send, cancel } = useBrainstormChat();
   const { indexedFilePaths, refreshIndexedPDFs } = useBibliographyStore();
-  const { modes, activeMode, activeModeId } = useModeStore();
-  const ragParams = useRAGQueryStore((s) => s.params);
+  const { modes } = useModeStore();
   const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(
     null
   );
+
+  // Project RAG params + active mode onto chatStore.chatSettings so every
+  // `fusion.chat.start` picks up current filters.
+  useChatSettingsProjection();
 
   const indexedCount = indexedFilePaths.size;
   const isProcessing = pendingAssistantId !== null;
@@ -51,40 +52,6 @@ export const ChatInterface: React.FC = () => {
   useEffect(() => {
     refreshIndexedPDFs();
   }, [refreshIndexedPDFs]);
-
-  // Project the RAG settings + active mode onto the store so every
-  // `send(...)` picks up the current filters / mode without per-call wiring.
-  useEffect(() => {
-    const retrieval: BrainstormChatRetrievalSettings = {
-      topK: ragParams.topK,
-      documentIds:
-        ragParams.selectedDocumentIds && ragParams.selectedDocumentIds.length > 0
-          ? ragParams.selectedDocumentIds
-          : undefined,
-      collectionKeys:
-        ragParams.selectedCollectionKeys && ragParams.selectedCollectionKeys.length > 0
-          ? ragParams.selectedCollectionKeys
-          : undefined,
-      sourceType: ragParams.sourceType,
-    };
-    let customSystemPrompt: string | undefined;
-    let modeIdForPrompt: string | undefined = activeModeId;
-    if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
-      if (activeModeId === 'free-mode') {
-        // Free mode: signal "no system prompt" by sending an empty string.
-        customSystemPrompt = '';
-      } else {
-        const promptLang =
-          (ragParams.systemPromptLanguage as 'fr' | 'en') || lang;
-        customSystemPrompt = activeMode.systemPrompt[promptLang];
-      }
-    }
-    setChatSettings({
-      modeId: modeIdForPrompt,
-      customSystemPrompt,
-      retrieval,
-    });
-  }, [ragParams, activeMode, activeModeId, lang, setChatSettings]);
 
   // Status banner: subscribe to the fusion status stream.
   useEffect(() => {
