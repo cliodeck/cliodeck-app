@@ -56,10 +56,14 @@ async function fetchJson<T>(
 export class OllamaProvider implements LLMProvider {
   readonly id = 'ollama';
   readonly name = 'Ollama';
+  // tools: most Ollama-served models (llama3.2, mistral-small, etc.) handle
+  // function-calling poorly — they either loop on malformed tool_calls or
+  // return an empty stream, producing 0-token assistant messages. Flipped
+  // off until per-model opt-in is added (see CLAUDE.md §6).
   readonly capabilities: ProviderCapabilities = {
     chat: true,
     streaming: true,
-    tools: true,
+    tools: false,
     embeddings: false,
   };
 
