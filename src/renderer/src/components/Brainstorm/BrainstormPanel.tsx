@@ -1,20 +1,21 @@
 /**
- * BrainstormPanel (fusion phase 3.1b — scaffold).
+ * BrainstormPanel (fusion phase 3.1b).
  *
- * The first user-facing surface for the new mode. Intentionally minimal:
- *   - shows the workspace `.cliohints` (read-only here; editor lives in
- *     Settings later);
- *   - lists builtin + user recipes from the IPC bridge;
- *   - shows whether the Obsidian vault is indexed;
- *   - placeholder for the chat composer (3.2, separate PR).
- *
- * Purpose of this scaffold is to *prove the IPC wiring works end-to-end*
- * — open a project, see hints/recipes/vault status, no errors. The real
- * chat surface arrives next.
+ * Historian-facing layout:
+ *   - Chat sits at the top, full space (above the fold).
+ *   - Workspace hints, Obsidian vault status and recipes live below, in a
+ *     collapsible "Project context" drawer (collapsed by default) so the
+ *     technical scaffolding doesn't greet the user in place of the chat.
  */
 
 import React, { useEffect, useState } from 'react';
-import { Lightbulb, FileText, Database, MessageCircle } from 'lucide-react';
+import {
+  FileText,
+  Database,
+  ChevronDown,
+  ChevronRight,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import { BrainstormChat } from './BrainstormChat';
 import { useProjectStore } from '../../stores/projectStore';
 import './BrainstormPanel.css';
@@ -71,6 +72,7 @@ export const BrainstormPanel: React.FC = () => {
   const [vault, setVault] = useState<VaultStatus | null>(null);
   const [status, setStatus] = useState<LoadStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
 
   useEffect(() => {
@@ -138,14 +140,10 @@ export const BrainstormPanel: React.FC = () => {
     };
   }, [currentProjectPath]);
 
+  const recipeCount = builtin.length + user.length;
+
   return (
     <div className="brainstorm-panel">
-      <header className="brainstorm-panel__header">
-        <Lightbulb size={20} />
-        <h2>Brainstorm</h2>
-        <span className="brainstorm-panel__badge">scaffold</span>
-      </header>
-
       {status === 'no_project' && (
         <div className="brainstorm-panel__notice" role="status">
           Open a project to start brainstorming.
@@ -158,61 +156,102 @@ export const BrainstormPanel: React.FC = () => {
         </div>
       )}
 
-      <section className="brainstorm-panel__section">
-        <h3>
-          <FileText size={14} /> Workspace hints
-        </h3>
-        {hints?.present ? (
-          <pre className="brainstorm-panel__hints">{hints.normalized}</pre>
-        ) : (
-          <p className="brainstorm-panel__muted">
-            No <code>.cliohints</code> set. Add one at{' '}
-            <code>{hints?.sourcePath ?? '.cliodeck/v2/hints.md'}</code> to
-            inject durable context into every prompt.
-          </p>
-        )}
+      {/* Chat — above the fold, takes all available vertical space. */}
+      <section className="brainstorm-panel__chat">
+        <BrainstormChat />
       </section>
 
-      <section className="brainstorm-panel__section">
-        <h3>
-          <Database size={14} /> Obsidian vault
-        </h3>
-        {vault ? (
-          <p className="brainstorm-panel__muted">
-            {vault.indexed
-              ? `Index ready at ${vault.dbPath}`
-              : 'Not indexed yet — link a vault from Settings.'}
-          </p>
-        ) : (
-          <p className="brainstorm-panel__muted">checking…</p>
-        )}
-      </section>
-
-      <section className="brainstorm-panel__section">
-        <h3>Recipes ({builtin.length + user.length})</h3>
-        <ul className="brainstorm-panel__recipes">
-          {[...builtin, ...user].map((r) => (
-            <li key={r.fileName}>
-              <strong>{r.name}</strong>{' '}
-              <span className="brainstorm-panel__muted">v{r.version}</span>
-              <p className="brainstorm-panel__muted">
-                {r.description || '—'} · {r.steps} steps
-              </p>
-            </li>
-          ))}
-          {builtin.length + user.length === 0 && (
-            <li className="brainstorm-panel__muted">No recipes available.</li>
+      {/* Collapsible drawer: hints / vault / recipes */}
+      <section
+        className={`brainstorm-panel__drawer ${
+          contextOpen ? 'is-open' : 'is-closed'
+        }`}
+      >
+        <button
+          type="button"
+          className="brainstorm-panel__drawer-toggle"
+          onClick={() => setContextOpen((v) => !v)}
+          aria-expanded={contextOpen}
+          aria-controls="brainstorm-context-drawer"
+        >
+          {contextOpen ? (
+            <ChevronDown size={14} />
+          ) : (
+            <ChevronRight size={14} />
           )}
-        </ul>
-      </section>
+          <SettingsIcon size={14} />
+          <span className="brainstorm-panel__drawer-title">
+            Contexte du projet
+          </span>
+          {!contextOpen && recipeCount > 0 && (
+            <span className="brainstorm-panel__drawer-count">
+              {recipeCount} recettes
+            </span>
+          )}
+        </button>
 
-      <section className="brainstorm-panel__section brainstorm-panel__chat-section">
-        <h3>
-          <MessageCircle size={14} /> Chat
-        </h3>
-        <div className="brainstorm-panel__chat-host">
-          <BrainstormChat />
-        </div>
+        {contextOpen && (
+          <div
+            id="brainstorm-context-drawer"
+            className="brainstorm-panel__drawer-body"
+          >
+            <div className="brainstorm-panel__section">
+              <h3>
+                <FileText size={14} /> Workspace hints
+              </h3>
+              {hints?.present ? (
+                <pre className="brainstorm-panel__hints">
+                  {hints.normalized}
+                </pre>
+              ) : (
+                <p className="brainstorm-panel__muted">
+                  No <code>.cliohints</code> set. Add one at{' '}
+                  <code>
+                    {hints?.sourcePath ?? '.cliodeck/v2/hints.md'}
+                  </code>{' '}
+                  to inject durable context into every prompt.
+                </p>
+              )}
+            </div>
+
+            <div className="brainstorm-panel__section">
+              <h3>
+                <Database size={14} /> Obsidian vault
+              </h3>
+              {vault ? (
+                <p className="brainstorm-panel__muted">
+                  {vault.indexed
+                    ? `Index ready at ${vault.dbPath}`
+                    : 'Not indexed yet — link a vault from Settings.'}
+                </p>
+              ) : (
+                <p className="brainstorm-panel__muted">checking…</p>
+              )}
+            </div>
+
+            <div className="brainstorm-panel__section">
+              <h3>Recipes ({recipeCount})</h3>
+              <ul className="brainstorm-panel__recipes">
+                {[...builtin, ...user].map((r) => (
+                  <li key={r.fileName}>
+                    <strong>{r.name}</strong>{' '}
+                    <span className="brainstorm-panel__muted">
+                      v{r.version}
+                    </span>
+                    <p className="brainstorm-panel__muted">
+                      {r.description || '—'} · {r.steps} steps
+                    </p>
+                  </li>
+                ))}
+                {recipeCount === 0 && (
+                  <li className="brainstorm-panel__muted">
+                    No recipes available.
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

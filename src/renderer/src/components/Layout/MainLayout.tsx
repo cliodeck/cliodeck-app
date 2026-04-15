@@ -54,15 +54,21 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 }) => {
   const { t } = useTranslation('common');
   const workspaceMode = useWorkspaceModeStore((s) => s.active);
+  const rightViewByMode = useWorkspaceModeStore((s) => s.rightViewByMode);
+  const persistRightView = useWorkspaceModeStore((s) => s.setRightView);
   const [leftView, setLeftView] = useState<LeftPanelView>('projects');
-  const [rightView, setRightView] = useState<RightPanelView>('chat');
   const isBrainstorm = workspaceMode === 'brainstorm';
 
-  // In Brainstorm mode the center panel already hosts the chat surface, so
-  // the right-panel chat tab would be a duplicate. Hide it and bounce away.
-  useEffect(() => {
-    if (isBrainstorm && rightView === 'chat') setRightView('corpus');
-  }, [isBrainstorm, rightView]);
+  // Per-mode memory: restore whichever right-tab the user last used in
+  // this mode. If that tab is the (hidden) chat tab in Brainstorm, fall
+  // back to corpus so we don't render a tab that doesn't exist.
+  const storedRightView = rightViewByMode[workspaceMode];
+  const rightView: RightPanelView =
+    isBrainstorm && storedRightView === 'chat' ? 'corpus' : storedRightView;
+
+  const setRightView = (view: RightPanelView) => {
+    persistRightView(workspaceMode, view);
+  };
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
@@ -84,6 +90,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     const handleSwitchPanel = (event: Event) => {
       const customEvent = event as CustomEvent;
       const panel = customEvent.detail;
+      // Read store fresh each event so menu shortcuts target the *current*
+      // workspace mode even though this effect is set up once.
+      const { active, setRightView: persist } = useWorkspaceModeStore.getState();
 
       switch (panel) {
         case 'projects':
@@ -96,13 +105,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           setLeftView('primary-sources');
           break;
         case 'chat':
-          setRightView('chat');
+          persist(active, 'chat');
           break;
         case 'corpus':
-          setRightView('corpus');
+          persist(active, 'corpus');
           break;
         case 'journal':
-          setRightView('journal');
+          persist(active, 'journal');
           break;
       }
     };

@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { MCPAccessEvent } from './events.js';
+import { redactForAudit } from './audit.js';
 
 export class MCPAccessLogger {
   private opened = false;
@@ -38,7 +39,13 @@ export class MCPAccessLogger {
   log(event: MCPAccessEvent): void {
     if (!this.opened) this.open();
     try {
-      fs.appendFileSync(this.logPath, JSON.stringify(event) + '\n', 'utf8');
+      // Redaction is applied centrally here so every call site — current
+      // tools and any future one — is covered without a per-tool audit.
+      // Sensitive free-text fields (query, entity, snippet, context, …)
+      // are reduced to a `{ sha256, length }` marker; structural metadata
+      // (tool name, timestamps, topK, error codes) stays readable.
+      const redacted = redactForAudit(event);
+      fs.appendFileSync(this.logPath, JSON.stringify(redacted) + '\n', 'utf8');
     } catch (e) {
       console.error('[MCPAccessLogger] append failed:', e);
     }

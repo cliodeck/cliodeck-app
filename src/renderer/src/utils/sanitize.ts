@@ -1,6 +1,21 @@
 import DOMPurify from 'dompurify';
 
 /**
+ * Force `rel="noopener noreferrer"` on any <a target="_blank"> that survives
+ * sanitization. Without this, a renderer-side bug or loose ALLOWED_ATTR list
+ * could yield tabnabbing (window.opener access) — defence in depth on top of
+ * the main-process setWindowOpenHandler deny.
+ */
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (
+    node.tagName === 'A' &&
+    node.getAttribute('target') === '_blank'
+  ) {
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
+/**
  * DOMPurify configuration for chat messages (assistant responses).
  * Allows standard markdown-generated HTML tags but strips scripts and event handlers.
  */

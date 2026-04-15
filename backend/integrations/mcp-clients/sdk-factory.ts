@@ -19,6 +19,7 @@ import type {
   MCPToolDescriptor,
 } from './types.js';
 import type { MCPClientHandle, MCPClientFactory } from './manager.js';
+import { buildMCPSpawnEnv } from './env-filter.js';
 
 const CLIENT_INFO = { name: 'cliodeck', version: '2.0.0' };
 
@@ -60,7 +61,7 @@ export const realMCPClientFactory: MCPClientFactory = (
         const stdio = new StdioClientTransport({
           command: cfg.config.command,
           args: cfg.config.args ?? [],
-          env: cfg.config.env,
+          env: buildMCPSpawnEnv(cfg.config.env),
           cwd: cfg.config.cwd,
         });
         stdio.onerror = (err: Error): void =>

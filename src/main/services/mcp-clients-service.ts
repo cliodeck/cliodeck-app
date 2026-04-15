@@ -32,6 +32,7 @@ import {
 import { ensureV2Directories, v2Paths } from '../../../backend/core/workspace/layout.js';
 import path from 'path';
 import { createWriteStream, type WriteStream } from 'node:fs';
+import { redactForAudit } from '../../../backend/mcp-server/audit.js';
 
 export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
   if (w.transport === 'stdio') {
@@ -66,7 +67,12 @@ class MCPClientsService {
   private writeAuditLog(e: MCPClientEvent): void {
     if (!this.auditLogStream) return;
     try {
-      this.auditLogStream.write(JSON.stringify(e) + '\n');
+      // Reuse the central redaction helper so the file written by this
+      // service stays in the same shape as the one written by the MCP
+      // server logger (same key filtering, same env masking) — one audit
+      // file, one contract.
+      const redacted = redactForAudit(e);
+      this.auditLogStream.write(JSON.stringify(redacted) + '\n');
     } catch (err) {
       console.warn('[mcp-clients] failed to write audit log entry:', err);
     }

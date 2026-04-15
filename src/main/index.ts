@@ -33,8 +33,14 @@ function createWindow() {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
     },
   });
+
+  // Deny all window.open / target=_blank attempts at the main-process level.
+  // Links that should open externally must go through a dedicated IPC path.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // En dev : charger depuis Vite
   // En production : charger depuis dist
