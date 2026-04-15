@@ -696,7 +696,16 @@
     "providerAutoDesc": "Tries Ollama first, uses embedded model if Ollama is not available",
     "providerOllamaDesc": "Uses Ollama exclusively for generation (requires Ollama running)",
     "providerEmbeddedDesc": "Uses the embedded Qwen model (requires download in settings)",
-    "notDownloaded": "not downloaded"
+    "notDownloaded": "not downloaded",
+    "sources": "Sources",
+    "includeBibliography": "Bibliography",
+    "includeBibliographyHint": "Zotero PDFs and references",
+    "includePrimary": "Primary sources",
+    "includePrimaryHint": "Tropy archives",
+    "includeNotes": "Notes",
+    "includeNotesHint": "Obsidian notes",
+    "searchIn": "Searching in: {{list}}",
+    "noSourceWarning": "Select at least one source."
   },
   "beamer": {
     "title": "Beamer Configuration",

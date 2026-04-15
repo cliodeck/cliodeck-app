@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useRAGQueryStore, type LLMProvider } from '../../stores/ragQueryStore';
 import { CollectionMultiSelect } from './CollectionMultiSelect';
@@ -239,44 +239,64 @@ export const RAGSettingsPanel: React.FC = () => {
           </div>
           )}
 
-          {/* Source Type Selection */}
+          {/* Source Family Toggles — three independent checkboxes covering
+              the three families of ClioDeck sources. Any combination is
+              valid; selecting none surfaces a warning but still projects a
+              permissive fallback so the turn doesn't silently die. */}
           <div className="setting-group">
-            <label htmlFor="source-type-select">{t('ragSettings.sourceType', 'Source Type')}</label>
-            <div className="source-type-selector">
-              <button
-                className={`source-type-btn secondary ${params.sourceType === 'secondary' ? 'active' : ''}`}
-                onClick={() => setParams({ sourceType: 'secondary' })}
-                title={t('ragSettings.secondaryDesc', 'Bibliography (PDFs from Zotero)')}
-              >
-                <span className="source-icon"><BookOpen size={16} /></span>
-                <span>{t('ragSettings.secondary', 'Bibliography')}</span>
-              </button>
-              <button
-                className={`source-type-btn primary ${params.sourceType === 'primary' ? 'active' : ''}`}
-                onClick={() => setParams({ sourceType: 'primary' })}
-                title={t('ragSettings.primaryDesc', 'Primary Sources (Tropy archives)')}
-              >
-                <span className="source-icon"><Scroll size={16} /></span>
-                <span>{t('ragSettings.primary', 'Archives')}</span>
-              </button>
-              <button
-                className={`source-type-btn both ${params.sourceType === 'both' ? 'active' : ''}`}
-                onClick={() => setParams({ sourceType: 'both' })}
-                title={t('ragSettings.bothDesc', 'Search in both sources')}
-              >
-                <span className="source-icon"><BookOpen size={14} /><Scroll size={14} /></span>
-                <span>{t('ragSettings.both', 'Both')}</span>
-              </button>
+            <label>{t('ragSettings.sources', 'Sources')}</label>
+            <div className="source-toggle-list" role="group" aria-label="Sources">
+              <label className="source-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={params.includeBibliography}
+                  onChange={(e) => setParams({ includeBibliography: e.target.checked })}
+                  aria-label={t('ragSettings.includeBibliography', 'Bibliography')}
+                />
+                <BookOpen size={14} />
+                <span>{t('ragSettings.includeBibliography', 'Bibliography')}</span>
+              </label>
+              <label className="source-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={params.includePrimary}
+                  onChange={(e) => setParams({ includePrimary: e.target.checked })}
+                  aria-label={t('ragSettings.includePrimary', 'Primary sources')}
+                />
+                <Scroll size={14} />
+                <span>{t('ragSettings.includePrimary', 'Primary sources')}</span>
+              </label>
+              <label className="source-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={params.includeNotes}
+                  onChange={(e) => setParams({ includeNotes: e.target.checked })}
+                  aria-label={t('ragSettings.includeNotes', 'Notes')}
+                />
+                <FileText size={14} />
+                <span>{t('ragSettings.includeNotes', 'Notes')}</span>
+              </label>
             </div>
             <small className="setting-hint">
-              {params.sourceType === 'secondary' && t('ragSettings.secondaryHint', 'Search only in bibliography (PDFs)')}
-              {params.sourceType === 'primary' && t('ragSettings.primaryHint', 'Search only in primary sources (Tropy)')}
-              {params.sourceType === 'both' && t('ragSettings.bothHint', 'Search in all sources')}
+              {(() => {
+                const parts: string[] = [];
+                if (params.includeBibliography) parts.push(t('ragSettings.includeBibliography', 'Bibliography'));
+                if (params.includePrimary) parts.push(t('ragSettings.includePrimary', 'Primary sources'));
+                if (params.includeNotes) parts.push(t('ragSettings.includeNotes', 'Notes'));
+                if (parts.length === 0) {
+                  return (
+                    <span style={{ color: 'var(--color-danger)' }}>
+                      <AlertTriangle size={12} /> {t('ragSettings.noSourceWarning', 'Select at least one source.')}
+                    </span>
+                  );
+                }
+                return t('ragSettings.searchIn', 'Searching in: {{list}}', { list: parts.join(', ') });
+              })()}
             </small>
           </div>
 
-          {/* Collection Filter (only for secondary sources) */}
-          {(params.sourceType === 'secondary' || params.sourceType === 'both') && (
+          {/* Collection Filter (only when bibliography is enabled) */}
+          {params.includeBibliography && (
           <div className="setting-group">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <label htmlFor="collection-filter">
@@ -318,8 +338,8 @@ export const RAGSettingsPanel: React.FC = () => {
           </div>
           )}
 
-          {/* Issue #16: Document Filter (only for secondary sources) */}
-          {(params.sourceType === 'secondary' || params.sourceType === 'both') && (
+          {/* Issue #16: Document Filter (only when bibliography is enabled) */}
+          {params.includeBibliography && (
           <div className="setting-group">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <label htmlFor="document-filter">

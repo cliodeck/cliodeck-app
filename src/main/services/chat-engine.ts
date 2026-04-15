@@ -138,6 +138,9 @@ export interface ChatEngineRetrievalOptions {
   documentIds?: string[];
   collectionKeys?: string[];
   sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /** Opt-in to Obsidian vault alongside primary/secondary. Ignored when
+   *  `sourceType === 'vault'` (vault-only). */
+  includeVault?: boolean;
   topK?: number;
 }
 

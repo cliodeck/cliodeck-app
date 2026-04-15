@@ -184,6 +184,35 @@
   font-weight: 500;
 }
 
+.source-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.source-toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.source-toggle-item:hover {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+
+.source-toggle-item input[type='checkbox'] {
+  margin: 0;
+  cursor: pointer;
+}
+
 .advanced-toggle {
   padding: var(--spacing-sm) 0;
   background: transparent;

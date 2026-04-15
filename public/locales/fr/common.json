@@ -696,7 +696,16 @@
     "providerAutoDesc": "Essaie d'abord Ollama, utilise le modèle embarqué si Ollama n'est pas disponible",
     "providerOllamaDesc": "Utilise exclusivement Ollama pour la génération (nécessite Ollama actif)",
     "providerEmbeddedDesc": "Utilise le modèle embarqué Qwen (nécessite le téléchargement dans les paramètres)",
-    "notDownloaded": "non téléchargé"
+    "notDownloaded": "non téléchargé",
+    "sources": "Sources",
+    "includeBibliography": "Bibliographie",
+    "includeBibliographyHint": "PDFs et références Zotero",
+    "includePrimary": "Sources primaires",
+    "includePrimaryHint": "Archives Tropy",
+    "includeNotes": "Notes",
+    "includeNotesHint": "Notes Obsidian",
+    "searchIn": "Recherche dans : {{list}}",
+    "noSourceWarning": "Sélectionnez au moins une source."
   },
   "beamer": {
     "title": "Configuration Beamer",

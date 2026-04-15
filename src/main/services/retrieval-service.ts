@@ -46,7 +46,14 @@ const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
  */
 const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
 
-export type SourceType = 'secondary' | 'primary' | 'both';
+/**
+ * 'secondary' = bibliography (PDFs), 'primary' = Tropy archives,
+ * 'both'      = both bibliography + primary corpora,
+ * 'vault'     = Obsidian vault only (skip primary and secondary).
+ * Note: non-vault values compose with the separate `includeVault` opt-in
+ * to mix notes in alongside primary/secondary.
+ */
+export type SourceType = 'secondary' | 'primary' | 'both' | 'vault';
 
 export interface SecondarySearchResult extends SearchResult {
   sourceType: 'secondary';
@@ -334,6 +341,9 @@ class RetrievalService {
       }
     }
 
+    // Collapse 'vault' into 'both' for the stats envelope (vault shows as a
+    // separate corpus in the hit list itself). The stats type stays on the
+    // narrower PDF+Tropy triad to avoid breaking downstream consumers.
     const sourceType: 'primary' | 'secondary' | 'both' =
       q.sourceType === 'primary' || q.sourceType === 'secondary' ? q.sourceType : 'both';
 
@@ -433,7 +443,8 @@ class RetrievalService {
       }
     }
 
-    if (q.includeVault) {
+    // Vault-only mode implies vault inclusion regardless of the flag.
+    if (q.includeVault || sourceType === 'vault') {
       try {
         const vaultResults = await this.searchVault(q.query, {
           topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,

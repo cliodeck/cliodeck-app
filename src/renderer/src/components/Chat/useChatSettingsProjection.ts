@@ -16,7 +16,7 @@ import {
   type BrainstormChatRetrievalSettings,
 } from '../../stores/chatStore';
 import { useModeStore } from '../../stores/modeStore';
-import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { useRAGQueryStore, getResolvedSourceType } from '../../stores/ragQueryStore';
 
 export function useChatSettingsProjection(): void {
   const { i18n } = useTranslation('common');
@@ -26,6 +26,11 @@ export function useChatSettingsProjection(): void {
   const ragParams = useRAGQueryStore((s) => s.params);
 
   useEffect(() => {
+    // Resolve the three independent source toggles into the (sourceType,
+    // includeVault) pair understood by the retrieval pipeline. When all
+    // three toggles are off we still project a permissive fallback so
+    // retrieval never silently breaks — the UI surfaces the warning.
+    const resolved = getResolvedSourceType(ragParams);
     const retrieval: BrainstormChatRetrievalSettings = {
       topK: ragParams.topK,
       documentIds:
@@ -36,7 +41,8 @@ export function useChatSettingsProjection(): void {
         ragParams.selectedCollectionKeys && ragParams.selectedCollectionKeys.length > 0
           ? ragParams.selectedCollectionKeys
           : undefined,
-      sourceType: ragParams.sourceType,
+      sourceType: resolved.sourceType,
+      includeVault: resolved.includeVault,
     };
     let customSystemPrompt: string | undefined;
     const modeIdForPrompt: string | undefined = activeModeId;

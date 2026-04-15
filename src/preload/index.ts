@@ -742,6 +742,7 @@ const api = {
             documentIds?: string[];
             collectionKeys?: string[];
             sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+            includeVault?: boolean;
             topK?: number;
           };
           systemPrompt?: { modeId?: string; customText?: string };

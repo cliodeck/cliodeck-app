@@ -48,11 +48,33 @@ describe('BrainstormChat settings panel', () => {
 
   it('projection hook syncs ragQueryStore.params into chatStore.chatSettings', () => {
     render(<BrainstormChat />);
+    // Primary-only: bibliography + notes off, primary on — resolver should
+    // project `sourceType: 'primary'` with vault disabled.
     act(() => {
-      useRAGQueryStore.getState().setParams({ topK: 17, sourceType: 'primary' });
+      useRAGQueryStore.getState().setParams({
+        topK: 17,
+        includeBibliography: false,
+        includePrimary: true,
+        includeNotes: false,
+      });
     });
     const settings = useChatStore.getState().chatSettings;
     expect(settings.retrieval?.topK).toBe(17);
     expect(settings.retrieval?.sourceType).toBe('primary');
+    expect(settings.retrieval?.includeVault).toBe(false);
+  });
+
+  it('projection maps bibliography+notes → secondary + includeVault', () => {
+    render(<BrainstormChat />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: true,
+        includePrimary: false,
+        includeNotes: true,
+      });
+    });
+    const settings = useChatStore.getState().chatSettings;
+    expect(settings.retrieval?.sourceType).toBe('secondary');
+    expect(settings.retrieval?.includeVault).toBe(true);
   });
 });

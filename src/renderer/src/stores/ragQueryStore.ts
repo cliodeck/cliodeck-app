@@ -4,7 +4,25 @@ import { persist } from 'zustand/middleware';
 // MARK: - Types
 
 export type LLMProvider = 'ollama' | 'embedded' | 'auto';
-export type SourceType = 'secondary' | 'primary' | 'both';
+/**
+ * @deprecated — retained only for soft-migration of persisted values. The
+ * runtime now uses three independent booleans (includeBibliography /
+ * includePrimary / includeNotes); the resolved effective `sourceType` is
+ * derived via `getResolvedSourceType()`.
+ */
+export type SourceType = 'secondary' | 'primary' | 'both' | 'vault';
+
+/**
+ * Resolved filter bag for the retrieval pipeline. Derived from the three
+ * independent source toggles via `getResolvedSourceType()`.
+ */
+export interface ResolvedSourceSelection {
+  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
+  includeVault: boolean;
+  /** True when the user turned every toggle off — caller should decide
+   *  whether to fall back to "all sources" or block send. */
+  isEmpty: boolean;
+}
 
 export interface RAGQueryParams {
   // Provider selection
@@ -18,8 +36,13 @@ export interface RAGQueryParams {
   // Context window size (num_ctx for Ollama)
   numCtx: number; // Context window in tokens (0 = use model default)
 
-  // Source type selection (primary = Tropy, secondary = bibliography/PDFs)
-  sourceType: SourceType;
+  // Independent source-family toggles:
+  //   bibliography = PDFs / Zotero      (retrieval "secondary")
+  //   primary      = Tropy archives     (retrieval "primary")
+  //   notes        = Obsidian vault     (retrieval "vault" / includeVault)
+  includeBibliography: boolean;
+  includePrimary: boolean;
+  includeNotes: boolean;
 
   // Collection filtering (Zotero collections)
   selectedCollectionKeys: string[]; // Empty = all collections (no filter)
@@ -101,8 +124,10 @@ const DEFAULT_PARAMS: RAGQueryParams = {
   // Context window (0 = use model's default, which is often 2048 in Ollama)
   numCtx: 4096,
 
-  // Source type (default: search both primary and secondary sources)
-  sourceType: 'both',
+  // Independent source toggles — defaults: search every family
+  includeBibliography: true,
+  includePrimary: true,
+  includeNotes: true,
 
   // Collection filtering (empty = no filter, search all)
   selectedCollectionKeys: [],
@@ -145,6 +170,44 @@ function sortCollectionsHierarchically(
   return result;
 }
 
+/**
+ * Map the three independent toggles to the filter bag expected by the
+ * retrieval pipeline (`sourceType` understood by `fusion-chat-service` +
+ * `retrieval-service`, plus a separate `includeVault` opt-in).
+ *
+ * Truth table (b = bibliography, p = primary, n = notes):
+ *   b p n → { sourceType: 'both',      includeVault: true  }
+ *   b p   → { sourceType: 'both',      includeVault: false }
+ *   b   n → { sourceType: 'secondary', includeVault: true  }
+ *     p n → { sourceType: 'primary',   includeVault: true  }
+ *   b     → { sourceType: 'secondary', includeVault: false }
+ *     p   → { sourceType: 'primary',   includeVault: false }
+ *       n → { sourceType: 'vault',     includeVault: true  }
+ *   none  → { sourceType: 'both',      includeVault: true, isEmpty: true }
+ *           (fallback "all sources" so a misclick never kills the turn;
+ *            the UI surfaces a warning and callers may choose to block)
+ */
+export function getResolvedSourceType(params: RAGQueryParams): ResolvedSourceSelection {
+  const b = params.includeBibliography;
+  const p = params.includePrimary;
+  const n = params.includeNotes;
+  if (!b && !p && !n) {
+    return { sourceType: 'both', includeVault: true, isEmpty: true };
+  }
+  if (b && p) {
+    return { sourceType: 'both', includeVault: n, isEmpty: false };
+  }
+  if (b && !p) {
+    return { sourceType: 'secondary', includeVault: n, isEmpty: false };
+  }
+  if (!b && p) {
+    return { sourceType: 'primary', includeVault: n, isEmpty: false };
+  }
+  // notes-only — fusion-chat-service maps `sourceType === 'vault'` to
+  // "search Obsidian only" with `includeVault` implicit.
+  return { sourceType: 'vault', includeVault: true, isEmpty: false };
+}
+
 // MARK: - Store
 
 export const useRAGQueryStore = create<RAGQueryState>()(
@@ -181,7 +244,9 @@ export const useRAGQueryStore = create<RAGQueryState>()(
               topK: ragConfig.topK || DEFAULT_PARAMS.topK,
               timeout: DEFAULT_PARAMS.timeout,
               numCtx: ragConfig.numCtx || DEFAULT_PARAMS.numCtx,
-              sourceType: DEFAULT_PARAMS.sourceType,
+              includeBibliography: DEFAULT_PARAMS.includeBibliography,
+              includePrimary: DEFAULT_PARAMS.includePrimary,
+              includeNotes: DEFAULT_PARAMS.includeNotes,
               selectedCollectionKeys: DEFAULT_PARAMS.selectedCollectionKeys,
               selectedDocumentIds: DEFAULT_PARAMS.selectedDocumentIds, // Issue #16
               temperature: DEFAULT_PARAMS.temperature,
@@ -343,6 +408,45 @@ export const useRAGQueryStore = create<RAGQueryState>()(
       name: 'rag-query-params', // localStorage key
       // Only persist params, not UI state or available models
       partialize: (state) => ({ params: state.params }),
+      version: 2,
+      migrate: (persisted: unknown, _fromVersion: number) => {
+        // Soft migration: pre-v2 stored `params.sourceType` as
+        // 'secondary' | 'primary' | 'both'. Translate into the new
+        // three-toggle shape and drop the legacy field.
+        if (!persisted || typeof persisted !== 'object') return persisted as never;
+        const state = persisted as { params?: Partial<RAGQueryParams> & { sourceType?: string } };
+        const p = state.params ?? {};
+        if (p.sourceType !== undefined &&
+            (p.includeBibliography === undefined ||
+             p.includePrimary === undefined ||
+             p.includeNotes === undefined)) {
+          const legacy = p.sourceType;
+          // Notes were previously "default on" via the vault flag elsewhere —
+          // preserve that so a migrated user doesn't silently lose vault hits.
+          const includeNotes = p.includeNotes ?? true;
+          let includeBibliography = true;
+          let includePrimary = true;
+          if (legacy === 'secondary') {
+            includeBibliography = true;
+            includePrimary = false;
+          } else if (legacy === 'primary') {
+            includeBibliography = false;
+            includePrimary = true;
+          } else if (legacy === 'vault') {
+            includeBibliography = false;
+            includePrimary = false;
+          }
+          // 'both' / unknown → leave both true.
+          state.params = {
+            ...p,
+            includeBibliography,
+            includePrimary,
+            includeNotes,
+          } as Partial<RAGQueryParams>;
+          delete (state.params as { sourceType?: string }).sourceType;
+        }
+        return state as never;
+      },
     }
   )
 );

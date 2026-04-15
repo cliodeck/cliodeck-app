@@ -131,6 +131,9 @@ export interface FusionChatRetrievalOptions {
   documentIds?: string[];
   collectionKeys?: string[];
   sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /** Opt-in to Obsidian vault alongside primary/secondary. Ignored when
+   *  `sourceType === 'vault'` (vault-only). */
+  includeVault?: boolean;
   topK?: number;
 }
 
@@ -308,17 +311,21 @@ class FusionChatService {
             // an explicit `includeVault` flag. Brainstorm default keeps
             // primary + secondary + vault (matches the prior behaviour).
             const st = options?.sourceType;
-            let rsSourceType: 'primary' | 'secondary' | 'both' = 'both';
-            let includeVault = true;
-            if (st === 'vault') {
-              rsSourceType = 'both';
-              includeVault = true;
-            } else if (st === 'primary' || st === 'secondary' || st === 'both') {
-              rsSourceType = st;
-              // Preserve Brainstorm's vault-by-default behaviour unless the
-              // caller explicitly restricts to a single corpus.
-              includeVault = st === 'both';
-            }
+            // `retrieval-service` now natively understands 'vault' as
+            // "Obsidian only" (primary+secondary skipped). For the three
+            // mixed cases we forward `includeVault` verbatim; when the
+            // caller omits the flag we default to vault-on for Brainstorm
+            // parity with prior behaviour.
+            const rsSourceType: 'primary' | 'secondary' | 'both' | 'vault' =
+              st === 'vault' || st === 'primary' || st === 'secondary' || st === 'both'
+                ? st
+                : 'both';
+            const includeVault =
+              rsSourceType === 'vault'
+                ? true
+                : options?.includeVault !== undefined
+                  ? options.includeVault
+                  : true;
             const { hits, stats } = await retrievalService.searchWithStats({
               query: lastUser,
               sourceType: rsSourceType,

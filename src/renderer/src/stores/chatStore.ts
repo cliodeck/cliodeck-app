@@ -103,6 +103,13 @@ export interface BrainstormChatRetrievalSettings {
   documentIds?: string[];
   collectionKeys?: string[];
   sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /**
+   * Opt-in to the Obsidian vault even when `sourceType` is not 'vault'.
+   * Lets the user mix notes with primary/secondary without forcing a
+   * vault-only search. `sourceType === 'vault'` implies vault-only and
+   * this flag is ignored.
+   */
+  includeVault?: boolean;
   topK?: number;
 }
 
