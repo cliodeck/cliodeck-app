@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import {
+  ExportCitationSection,
+  loadDefaultCitationValue,
+  type ExportCitationValue,
+} from './ExportCitationSection';
 import './PDFExportModal.css';
 
 interface PDFExportModalProps {
@@ -23,6 +28,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
+  const [citation, setCitation] = useState<ExportCitationValue>({
+    useEngine: false,
+    style: 'chicago-note-bibliography',
+    locale: 'fr-FR',
+  });
 
   // Check dependencies on mount
   useEffect(() => {
@@ -38,6 +48,18 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       setOutputPath(`${currentProject.path}/${currentProject.name}.pdf`);
     }
   }, [currentProject, isOpen]);
+
+  // Load citation defaults from workspace config when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void loadDefaultCitationValue().then((v) => {
+      if (!cancelled) setCitation(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Listen for progress updates
   useEffect(() => {
@@ -150,6 +172,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           date: new Date().toLocaleDateString('fr-FR'),
         },
         beamerConfig,
+        citation: {
+          useEngine: citation.useEngine,
+          style: citation.style,
+          locale: citation.locale,
+        },
       });
 
       if (result.success) {
@@ -258,6 +285,12 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
               </ul>
             </div>
           )}
+
+          <ExportCitationSection
+            value={citation}
+            onChange={setCitation}
+            disabled={isExporting}
+          />
 
           <div className="form-field">
             <label>Fichier de sortie</label>

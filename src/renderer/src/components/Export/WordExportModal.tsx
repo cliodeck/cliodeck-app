@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import {
+  ExportCitationSection,
+  loadDefaultCitationValue,
+  type ExportCitationValue,
+} from './ExportCitationSection';
 import './PDFExportModal.css'; // Reuse the same CSS
 
 interface WordExportModalProps {
@@ -22,6 +27,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [success, setSuccess] = useState(false);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
+  const [citation, setCitation] = useState<ExportCitationValue>({
+    useEngine: false,
+    style: 'chicago-note-bibliography',
+    locale: 'fr-FR',
+  });
 
   // Initialize with project data
   useEffect(() => {
@@ -33,6 +43,18 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       checkForTemplate();
     }
   }, [currentProject, isOpen]);
+
+  // Load citation defaults from workspace config when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void loadDefaultCitationValue().then((v) => {
+      if (!cancelled) setCitation(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Listen for progress updates
   useEffect(() => {
@@ -126,6 +148,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           author: author || 'ClioDesk',
           date: new Date().toLocaleDateString('fr-FR'),
         },
+        citation: {
+          useEngine: citation.useEngine,
+          style: citation.style,
+          locale: citation.locale,
+        },
       });
 
       if (result.success) {
@@ -208,6 +235,12 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
               💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: '#4ec9b0' }}>abstract.md</code> de votre projet
             </div>
           )}
+
+          <ExportCitationSection
+            value={citation}
+            onChange={setCitation}
+            disabled={isExporting}
+          />
 
           <div className="form-field">
             <label>Fichier de sortie</label>

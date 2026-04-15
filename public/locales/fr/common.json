@@ -339,7 +339,13 @@
       "error": "Erreur lors de l'export"
     },
     "exportToPDF": "Exporter en PDF",
-    "exportToWord": "Exporter en Word"
+    "exportToWord": "Exporter en Word",
+    "citation": {
+      "toggle": "Formater les citations avec CSL (Chicago, MLA…)",
+      "style": "Style",
+      "locale": "Locale",
+      "help": "Les marqueurs [@key] deviendront des notes de bas de page numérotées et la bibliographie sera ajoutée à la fin."
+    }
   },
   "rag": {
     "title": "Configuration RAG",

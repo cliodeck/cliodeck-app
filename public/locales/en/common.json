@@ -339,7 +339,13 @@
       "error": "Export error"
     },
     "exportToPDF": "Export to PDF",
-    "exportToWord": "Export to Word"
+    "exportToWord": "Export to Word",
+    "citation": {
+      "toggle": "Format citations with CSL (Chicago, MLA…)",
+      "style": "Style",
+      "locale": "Locale",
+      "help": "[@key] markers become numbered footnotes and a bibliography is appended at the end."
+    }
   },
   "rag": {
     "title": "RAG Configuration",
