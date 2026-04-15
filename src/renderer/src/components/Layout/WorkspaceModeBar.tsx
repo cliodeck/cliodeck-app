@@ -11,6 +11,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Lightbulb, Pen, BarChart3, Share2 } from 'lucide-react';
 import {
   useWorkspaceModeStore,
@@ -26,19 +27,13 @@ const ICONS: Record<WorkspaceMode, React.ComponentType<{ size?: number }>> = {
   export: Share2,
 };
 
-const LABELS: Record<WorkspaceMode, string> = {
-  brainstorm: 'Brainstorm',
-  write: 'Write',
-  analyze: 'Analyze',
-  export: 'Export',
-};
-
 export const WorkspaceModeBar: React.FC = () => {
+  const { t } = useTranslation('common');
   const active = useWorkspaceModeStore((s) => s.active);
   const setActive = useWorkspaceModeStore((s) => s.setActive);
 
   return (
-    <nav className="workspace-mode-bar" aria-label="Workspace mode">
+    <nav className="workspace-mode-bar" aria-label={t('workspaceMode.brainstorm')}>
       {WORKSPACE_MODES.map((m) => {
         const Icon = ICONS[m];
         const isActive = m === active;
@@ -53,7 +48,7 @@ export const WorkspaceModeBar: React.FC = () => {
             aria-pressed={isActive}
           >
             <Icon size={16} />
-            <span>{LABELS[m]}</span>
+            <span>{t(`workspaceMode.${m}`)}</span>
           </button>
         );
       })}

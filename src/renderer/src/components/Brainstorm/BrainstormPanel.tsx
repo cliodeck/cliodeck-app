@@ -16,6 +16,7 @@
 import React, { useEffect, useState } from 'react';
 import { Lightbulb, FileText, Database, MessageCircle } from 'lucide-react';
 import { BrainstormChat } from './BrainstormChat';
+import { useProjectStore } from '../../stores/projectStore';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -61,22 +62,43 @@ declare global {
   }
 }
 
+type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
+
 export const BrainstormPanel: React.FC = () => {
   const [hints, setHints] = useState<HintsState | null>(null);
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
   const [vault, setVault] = useState<VaultStatus | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!currentProjectPath) {
+      setStatus('no_project');
+      setHints(null);
+      setBuiltin([]);
+      setUser([]);
+      setVault(null);
+      setLoadError(null);
+      return;
+    }
+
+    setStatus('loading');
+    setLoadError(null);
+
     (async () => {
       try {
         const fusion = window.electron.fusion;
         if (!fusion) {
-          setLoadError(
-            'Fusion API not exposed by preload — rebuild the preload bundle.'
-          );
+          if (!cancelled) {
+            setLoadError(
+              'Fusion API not exposed by preload — rebuild the preload bundle.'
+            );
+            setStatus('idle');
+          }
           return;
         }
         const [h, r, v] = await Promise.all([
@@ -86,9 +108,15 @@ export const BrainstormPanel: React.FC = () => {
         ]);
         if (cancelled) return;
 
-        if (h.success && h.hints) setHints(h.hints);
-        else if (h.error === 'no_project') setLoadError('Open a project first.');
-        else if (h.error) setLoadError(`Hints: ${h.error}`);
+        if (h.success && h.hints) {
+          setHints(h.hints);
+        } else if (h.error === 'no_project') {
+          // Project was closed between reads — reflect it cleanly.
+          setStatus('no_project');
+          return;
+        } else if (h.error) {
+          setLoadError(`Hints: ${h.error}`);
+        }
 
         if (r.success) {
           setBuiltin(r.builtin ?? []);
@@ -97,16 +125,18 @@ export const BrainstormPanel: React.FC = () => {
         if (v.success) {
           setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '' });
         }
+        setStatus('ready');
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
+          setStatus('idle');
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentProjectPath]);
 
   return (
     <div className="brainstorm-panel">
@@ -116,7 +146,13 @@ export const BrainstormPanel: React.FC = () => {
         <span className="brainstorm-panel__badge">scaffold</span>
       </header>
 
-      {loadError && (
+      {status === 'no_project' && (
+        <div className="brainstorm-panel__notice" role="status">
+          Open a project to start brainstorming.
+        </div>
+      )}
+
+      {loadError && status !== 'no_project' && (
         <div className="brainstorm-panel__error" role="alert">
           {loadError}
         </div>

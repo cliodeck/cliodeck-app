@@ -1024,5 +1024,41 @@
     "submit": "Ouvrir sur GitHub",
     "submitted": "Le formulaire a été ouvert dans votre navigateur. Cliquez sur 'Submit new issue' sur GitHub pour valider.",
     "systemInfo": "Informations système"
+  },
+  "workspaceMode": {
+    "brainstorm": "Brainstormer",
+    "write": "Écrire",
+    "analyze": "Analyser",
+    "export": "Exporter"
+  },
+  "analyze": {
+    "title": "Analyser",
+    "subtitle": "Explorez votre corpus, mesurez la similarité et faites émerger les thèmes.",
+    "tabs": {
+      "corpus": "Explorateur de corpus",
+      "similarity": "Similarité",
+      "textometrics": "Textométrie"
+    },
+    "placeholder": {
+      "title": "Bientôt",
+      "body": "Cette vue analytique n'est pas encore branchée — voir TODO dans MainLayout."
+    }
+  },
+  "exportHub": {
+    "title": "Exporter",
+    "subtitle": "Choisissez un format de sortie pour le document courant.",
+    "pdf": {
+      "title": "PDF",
+      "description": "PDF mis en page via Pandoc + XeLaTeX."
+    },
+    "word": {
+      "title": "Word (.docx)",
+      "description": "DOCX éditable avec prise en charge des modèles."
+    },
+    "presentation": {
+      "title": "Présentation",
+      "description": "Diapositives (en ligne, hors-ligne ou PDF)."
+    },
+    "action": "Ouvrir l'exportateur"
   }
 }

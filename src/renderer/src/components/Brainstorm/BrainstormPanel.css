@@ -41,6 +41,14 @@
   border: 1px solid var(--color-danger);
 }
 
+.brainstorm-panel__notice {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
 .brainstorm-panel__section {
   border: 1px solid var(--border-color);
   border-radius: 6px;

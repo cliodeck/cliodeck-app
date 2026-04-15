@@ -8,6 +8,8 @@ import { ProjectPanel } from '../Project/ProjectPanel';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { WorkspaceModeBar } from './WorkspaceModeBar';
 import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
+import { AnalyzePanel } from './AnalyzePanel';
+import { ExportHub } from './ExportHub';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
@@ -220,6 +222,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             <div className="panel center-panel">
               {workspaceMode === 'brainstorm' ? (
                 <BrainstormPanel />
+              ) : workspaceMode === 'analyze' ? (
+                <AnalyzePanel />
+              ) : workspaceMode === 'export' ? (
+                <ExportHub />
               ) : (
                 centerPanel || (
                   <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>

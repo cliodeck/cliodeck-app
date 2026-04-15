@@ -1024,5 +1024,41 @@
     "submit": "Open on GitHub",
     "submitted": "The form has been opened in your browser. Click 'Submit new issue' on GitHub to confirm.",
     "systemInfo": "System Information"
+  },
+  "workspaceMode": {
+    "brainstorm": "Brainstorm",
+    "write": "Write",
+    "analyze": "Analyze",
+    "export": "Export"
+  },
+  "analyze": {
+    "title": "Analyze",
+    "subtitle": "Explore your corpus, measure similarity, and surface themes.",
+    "tabs": {
+      "corpus": "Corpus Explorer",
+      "similarity": "Similarity",
+      "textometrics": "Textometrics"
+    },
+    "placeholder": {
+      "title": "Coming soon",
+      "body": "This analytical view is not wired yet — see TODO in MainLayout."
+    }
+  },
+  "exportHub": {
+    "title": "Export",
+    "subtitle": "Choose an output format for the current document.",
+    "pdf": {
+      "title": "PDF",
+      "description": "Typeset PDF via Pandoc + XeLaTeX."
+    },
+    "word": {
+      "title": "Word (.docx)",
+      "description": "Editable DOCX with template support."
+    },
+    "presentation": {
+      "title": "Presentation",
+      "description": "Slides (online, offline, or PDF)."
+    },
+    "action": "Open exporter"
   }
 }
