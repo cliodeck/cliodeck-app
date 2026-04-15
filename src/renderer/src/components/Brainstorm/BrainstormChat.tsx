@@ -15,6 +15,8 @@ import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { appendDraftToContent, messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
 import { UnifiedMessage } from '../Chat/types';
+import { ExplanationPanel } from '../Chat/ExplanationPanel';
+import type { RAGExplanation } from '../../stores/chatStore';
 
 interface BrainstormUnifiedMessage extends UnifiedMessage {
   original: BrainstormMessage;
@@ -157,6 +159,11 @@ export const BrainstormChat: React.FC = () => {
               );
             })}
           </ul>
+        )}
+        {m.role === 'assistant' && orig.explanation && (
+          <ExplanationPanel
+            explanation={orig.explanation as unknown as RAGExplanation}
+          />
         )}
         {m.role === 'assistant' && !orig.pending && !orig.error && orig.content && (
           <div className="brainstorm-chat__msg-actions">

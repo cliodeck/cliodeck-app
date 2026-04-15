@@ -772,6 +772,17 @@ const api = {
         ipcRenderer.on('fusion:chat:tool-call', listener);
         return () => ipcRenderer.removeListener('fusion:chat:tool-call', listener);
       },
+      onExplanation: (
+        callback: (envelope: {
+          sessionId: string;
+          explanation: unknown;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:explanation', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:explanation', listener);
+      },
       onContext: (
         callback: (envelope: {
           sessionId: string;

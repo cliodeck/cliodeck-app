@@ -13,6 +13,7 @@ import {
   type BrainstormSource,
   type BrainstormToolCall,
 } from '../../stores/brainstormChatStore';
+import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {
   sessionId: string;
@@ -46,6 +47,9 @@ interface FusionChatApi {
     cb: (env: { sessionId: string; sources: BrainstormSource[] }) => void
   ): () => void;
   onToolCall(cb: (env: ToolCallEnv) => void): () => void;
+  onExplanation?(
+    cb: (env: { sessionId: string; explanation: RAGExplanation }) => void
+  ): () => void;
 }
 
 function api(): FusionChatApi | null {
@@ -72,6 +76,8 @@ export function useBrainstormChat(): UseBrainstormChat {
   const pendingSources = useRef<Map<string, BrainstormSource[]>>(new Map());
   // Tool-call events may arrive before beginAssistant — buffer by sessionId.
   const pendingToolCalls = useRef<Map<string, ToolCallEnv[]>>(new Map());
+  // Explanation may arrive before beginAssistant (unlikely) or after — buffer.
+  const pendingExplanation = useRef<Map<string, RAGExplanation>>(new Map());
 
   useEffect(() => {
     const chat = api();
@@ -130,10 +136,19 @@ export function useBrainstormChat(): UseBrainstormChat {
         pendingToolCalls.current.set(env.sessionId, arr);
       }
     });
+    const unsubExpl = chat.onExplanation?.((env) => {
+      const aId = assistantIdBySession.current.get(env.sessionId);
+      if (aId) {
+        store.setExplanation(aId, env.explanation);
+      } else {
+        pendingExplanation.current.set(env.sessionId, env.explanation);
+      }
+    });
     return () => {
       unsubChunk();
       unsubCtx();
       unsubTool();
+      unsubExpl?.();
     };
     // store methods are stable references (zustand), deps intentionally minimal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,6 +207,11 @@ export function useBrainstormChat(): UseBrainstormChat {
           }
         }
         pendingToolCalls.current.delete(res.sessionId);
+      }
+      const bufferedExpl = pendingExplanation.current.get(res.sessionId);
+      if (bufferedExpl) {
+        store.setExplanation(aId, bufferedExpl);
+        pendingExplanation.current.delete(res.sessionId);
       }
     },
     [store]

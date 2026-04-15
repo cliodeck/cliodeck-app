@@ -22,6 +22,7 @@ import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js
 import {
   brainstormSourceToUnified,
   type UnifiedSource,
+  type RAGExplanation,
 } from '../../../backend/types/chat-source.js';
 import {
   runChatTurn,
@@ -251,7 +252,7 @@ class FusionChatService {
     const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
       ? {
           async search(lastUser) {
-            const hits = await retrievalService.search({
+            const { hits, stats } = await retrievalService.searchWithStats({
               query: lastUser,
               sourceType: 'both',
               includeVault: true,
@@ -260,6 +261,10 @@ class FusionChatService {
             return {
               systemPrompt: formatContextAsSystemPrompt(hits),
               sources: hitsToSources(hits),
+              explanation: {
+                search: stats.search,
+                timing: stats.timing,
+              },
             };
           },
         }
@@ -281,6 +286,9 @@ class FusionChatService {
             sendChunk({ delta: '', done: true, finishReason: 'error' }, err),
           onSources: (sources) => {
             safeSend('fusion:chat:context', { sessionId, sources });
+          },
+          onExplanation: (explanation: RAGExplanation) => {
+            safeSend('fusion:chat:explanation', { sessionId, explanation });
           },
           onToolCallStart: (ev) => {
             // Preserve the legacy IPC shape (bareTool without client prefix,

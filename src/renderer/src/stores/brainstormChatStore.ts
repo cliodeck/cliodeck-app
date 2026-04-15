@@ -85,6 +85,7 @@ interface State {
   beginAssistant: (sessionId: string) => string;
   appendDelta: (assistantId: string, delta: string) => void;
   setSources: (assistantId: string, sources: BrainstormSource[]) => void;
+  setExplanation: (assistantId: string, explanation: RAGExplanation) => void;
   addToolCall: (assistantId: string, toolCall: BrainstormToolCall) => void;
   updateToolCall: (
     assistantId: string,
@@ -145,6 +146,14 @@ export const useBrainstormChatStore = create<State>((set) => ({
     set((s) => ({
       messages: s.messages.map((m) =>
         m.id === assistantId ? { ...m, sources } : m
+      ),
+    }));
+  },
+
+  setExplanation: (assistantId, explanation) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === assistantId ? { ...m, explanation } : m
       ),
     }));
   },

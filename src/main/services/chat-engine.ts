@@ -26,6 +26,32 @@ import type {
   LLMProvider,
   ToolDescriptor,
 } from '../../../backend/core/llm/providers/base.js';
+import type { RAGExplanation } from '../../../backend/types/chat-source.js';
+
+/**
+ * Partial `RAGExplanation` that a retriever may pre-populate. The engine
+ * merges it with LLM / timing stats collected during the stream to build
+ * the final explanation object.
+ */
+export interface PartialRAGExplanation {
+  search?: RAGExplanation['search'];
+  compression?: RAGExplanation['compression'];
+  graph?: RAGExplanation['graph'];
+  /** Timing fields the retriever already knows (search/compression). */
+  timing?: Partial<RAGExplanation['timing']>;
+}
+
+export interface ChatEngineLLMStats {
+  provider: string;
+  model: string;
+  contextWindow: number;
+  temperature: number;
+  promptSize: number;
+  /** From provider-reported `usage` on the terminal chunk, when available. */
+  tokensIn?: number;
+  tokensOut?: number;
+  durationMs: number;
+}
 
 export interface ChatEngineToolCall {
   id: string;
@@ -65,6 +91,24 @@ export interface ChatEngineHooks {
   ): void;
   /** Called once with the retrieval hits, if a retriever ran. */
   onSources?<T>(sources: T[]): void;
+  /** Retrieval stats (search/compression/graph), if the retriever produced them. */
+  onSearchStats?(stats: PartialRAGExplanation): void;
+  /** Alias for `onSearchStats` scoped to the compression slice, when convenient. */
+  onCompressionStats?(stats: NonNullable<RAGExplanation['compression']>): void;
+  /** LLM-side stats once the terminal chunk is seen. */
+  onLLMStats?(stats: ChatEngineLLMStats): void;
+  /** Final explainable-AI payload, emitted just before the terminal `onDone`. */
+  onExplanation?(explanation: RAGExplanation): void;
+}
+
+export interface ChatEngineRetrieverResult<TSource> {
+  systemPrompt: string;
+  sources: TSource[];
+  /**
+   * Optional partial explainable-AI payload. When present, the engine
+   * augments it with LLM/timing stats and forwards via `onExplanation`.
+   */
+  explanation?: PartialRAGExplanation;
 }
 
 export interface ChatEngineRetriever<TSource> {
@@ -73,10 +117,7 @@ export interface ChatEngineRetriever<TSource> {
    * Return both a formatted system-prompt string to prepend and the raw
    * source objects to surface to the UI. Throw (or return empty) to skip.
    */
-  search(lastUser: string): Promise<{
-    systemPrompt: string;
-    sources: TSource[];
-  } | null>;
+  search(lastUser: string): Promise<ChatEngineRetrieverResult<TSource> | null>;
 }
 
 export interface ChatEngineToolHandler {
@@ -111,6 +152,12 @@ export async function runChatTurn<TSource = unknown>(
 ): Promise<void> {
   const hooks = args.hooks ?? {};
   const maxTurns = args.maxTurns ?? 6;
+  const startedAt = Date.now();
+  let retrievalExplanation: PartialRAGExplanation | undefined;
+  let promptSize = 0;
+  let generationStart = 0;
+  let generationMs = 0;
+  let lastUsage: ChatChunk['usage'] | undefined;
   const emitError = (code: string, message: string): void => {
     hooks.onError?.({ code, message });
     hooks.onDone?.({ delta: '', done: true, finishReason: 'error' });
@@ -133,6 +180,17 @@ export async function runChatTurn<TSource = unknown>(
           } catch {
             // UI hook failure must not abort the stream.
           }
+          if (result.explanation) {
+            retrievalExplanation = result.explanation;
+            try {
+              hooks.onSearchStats?.(result.explanation);
+              if (result.explanation.compression) {
+                hooks.onCompressionStats?.(result.explanation.compression);
+              }
+            } catch {
+              // UI hook failure must not abort the stream.
+            }
+          }
         }
       } catch (e) {
         // Fail soft — proceed without context.
@@ -144,8 +202,59 @@ export async function runChatTurn<TSource = unknown>(
     }
   }
 
+  // Compute an approximation of the prompt byte-size after retrieval
+  // injection. Used as the `promptSize` field of the explanation payload.
+  for (const m of messages) {
+    if (typeof m.content === 'string') promptSize += m.content.length;
+  }
+
+  const emitExplanation = (): void => {
+    if (!hooks.onExplanation) return;
+    if (!retrievalExplanation || !retrievalExplanation.search) return;
+    const totalMs = Date.now() - startedAt;
+    const llmStats: ChatEngineLLMStats = {
+      provider: args.provider.id,
+      model: args.opts?.model ?? args.provider.name,
+      contextWindow: 0,
+      temperature: args.opts?.temperature ?? 0,
+      promptSize,
+      tokensIn: lastUsage?.promptTokens,
+      tokensOut: lastUsage?.completionTokens,
+      durationMs: generationMs,
+    };
+    try {
+      hooks.onLLMStats?.(llmStats);
+    } catch {
+      // UI hook failure must not abort the stream.
+    }
+    const explanation: RAGExplanation = {
+      search: retrievalExplanation.search,
+      compression: retrievalExplanation.compression,
+      graph: retrievalExplanation.graph,
+      llm: {
+        provider: llmStats.provider,
+        model: llmStats.model,
+        contextWindow: llmStats.contextWindow,
+        temperature: llmStats.temperature,
+        promptSize: llmStats.promptSize,
+      },
+      timing: {
+        searchMs: retrievalExplanation.timing?.searchMs ?? 0,
+        compressionMs: retrievalExplanation.timing?.compressionMs,
+        generationMs,
+        totalMs,
+      },
+    };
+    try {
+      hooks.onExplanation(explanation);
+    } catch {
+      // UI hook failure must not abort the stream.
+    }
+  };
+
   // --- Agent loop ----------------------------------------------------------
   try {
+    generationStart = Date.now();
     for (let turn = 0; turn < maxTurns; turn++) {
       const pendingToolCalls: ChatEngineToolCall[] = [];
       let sawToolCall = false;
@@ -168,11 +277,15 @@ export async function runChatTurn<TSource = unknown>(
         if (chunk.done && sawToolCall) {
           terminalDone = true;
           lastDoneChunk = chunk;
+          if (chunk.usage) lastUsage = chunk.usage;
           break;
         }
         if (chunk.done) {
           terminalDone = true;
           lastDoneChunk = chunk;
+          if (chunk.usage) lastUsage = chunk.usage;
+          generationMs = Date.now() - generationStart;
+          emitExplanation();
           hooks.onDone?.(chunk);
           break;
         }
@@ -182,6 +295,8 @@ export async function runChatTurn<TSource = unknown>(
       if (!sawToolCall || pendingToolCalls.length === 0) {
         if (!terminalDone) {
           // Stream ended without a done chunk — synthesize one.
+          generationMs = Date.now() - generationStart;
+          emitExplanation();
           hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
         }
         return;
@@ -268,6 +383,8 @@ export async function runChatTurn<TSource = unknown>(
       void lastDoneChunk;
     }
     // Loop unwound without a natural terminal — emit a stop.
+    generationMs = Date.now() - generationStart;
+    emitExplanation();
     hooks.onDone?.({ delta: '', done: true, finishReason: 'stop' });
   } catch (e) {
     emitError('stream_error', e instanceof Error ? e.message : String(e));

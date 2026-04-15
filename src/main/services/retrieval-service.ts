@@ -97,6 +97,36 @@ export type MultiSourceSearchResult =
   | PrimaryMappedSearchResult
   | VaultMappedSearchResult;
 
+/**
+ * Partial RAG-explanation payload produced alongside retrieval hits. Only
+ * the `search` slice is populated here (plus a `timing.searchMs`); the
+ * compression/graph/llm slices are filled by downstream stages. Mirrors
+ * the `RAGExplanation` type in `backend/types/chat-source.ts`.
+ */
+export interface RetrievalSearchStats {
+  search: {
+    query: string;
+    totalResults: number;
+    searchDurationMs: number;
+    cacheHit: boolean;
+    sourceType: 'primary' | 'secondary' | 'both';
+    documents: Array<{
+      title: string;
+      similarity: number;
+      sourceType: string;
+      chunkCount: number;
+    }>;
+  };
+  timing: {
+    searchMs: number;
+  };
+}
+
+export interface RetrievalSearchWithStatsResult {
+  hits: MultiSourceSearchResult[];
+  stats: RetrievalSearchStats;
+}
+
 export interface RetrievalQuery {
   query: string;
   topK?: number;
@@ -271,6 +301,56 @@ class RetrievalService {
     const embedding = await this.llmProviderManager!.generateQueryEmbedding(query);
     queryEmbeddingCache.set(query, embedding, providerId);
     return embedding;
+  }
+
+  /**
+   * Opt-in variant of `search` that also returns explainable-AI stats
+   * (per-document aggregate, timing, cache hit, source type). Existing
+   * callers of `search` are untouched; Brainstorm chat uses this to feed
+   * the Explainable-AI panel.
+   */
+  async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
+    const t0 = Date.now();
+    const hits = await this.search(q);
+    const searchMs = Date.now() - t0;
+
+    const documentMap = new Map<
+      string,
+      { title: string; similarity: number; sourceType: string; chunkCount: number }
+    >();
+    for (const r of hits) {
+      const docId = r.document?.id || 'unknown';
+      const existing = documentMap.get(docId);
+      if (existing) {
+        existing.chunkCount++;
+        if (r.similarity > existing.similarity) existing.similarity = r.similarity;
+      } else {
+        documentMap.set(docId, {
+          title: r.document?.title || 'Sans titre',
+          similarity: r.similarity,
+          sourceType: r.sourceType,
+          chunkCount: 1,
+        });
+      }
+    }
+
+    const sourceType: 'primary' | 'secondary' | 'both' =
+      q.sourceType === 'primary' || q.sourceType === 'secondary' ? q.sourceType : 'both';
+
+    return {
+      hits,
+      stats: {
+        search: {
+          query: q.query,
+          totalResults: hits.length,
+          searchDurationMs: searchMs,
+          cacheHit: false,
+          sourceType,
+          documents: Array.from(documentMap.values()).slice(0, 10),
+        },
+        timing: { searchMs },
+      },
+    };
   }
 
   async search(q: RetrievalQuery): Promise<MultiSourceSearchResult[]> {
