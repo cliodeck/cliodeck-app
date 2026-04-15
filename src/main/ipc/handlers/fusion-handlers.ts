@@ -11,10 +11,15 @@
  * uncaught exception.
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
+import {
+  validateMcpAddRequest,
+  confirmMcpAdd,
+  appendMcpAudit,
+} from './mcp-add-guard.js';
 import { projectManager } from '../../services/project-manager.js';
 import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
@@ -261,7 +266,7 @@ export function setupFusionHandlers(): void {
     return successResponse({ clients: mcpClientsService.list() });
   });
 
-  ipcMain.handle('fusion:mcp:add', async (_e, rawClient: unknown) => {
+  ipcMain.handle('fusion:mcp:add', async (event, rawClient: unknown) => {
     if (!rawClient || typeof rawClient !== 'object') {
       return errorResponse('client config must be an object');
     }
@@ -279,20 +284,74 @@ export function setupFusionHandlers(): void {
     if (c.transport !== 'stdio' && c.transport !== 'sse') {
       return errorResponse('transport must be "stdio" or "sse"');
     }
-    try {
-      const instance = await mcpClientsService.addClient({
-        name: c.name,
-        transport: c.transport,
-        command: typeof c.command === 'string' ? c.command : undefined,
-        args: Array.isArray(c.args)
-          ? c.args.filter((a): a is string => typeof a === 'string')
+
+    const normalized = {
+      name: c.name,
+      transport: c.transport,
+      command: typeof c.command === 'string' ? c.command : undefined,
+      args: Array.isArray(c.args)
+        ? c.args.filter((a): a is string => typeof a === 'string')
+        : undefined,
+      env:
+        c.env && typeof c.env === 'object'
+          ? (c.env as Record<string, string>)
           : undefined,
-        env:
-          c.env && typeof c.env === 'object'
-            ? (c.env as Record<string, string>)
-            : undefined,
-        url: typeof c.url === 'string' ? c.url : undefined,
-      });
+      url: typeof c.url === 'string' ? c.url : undefined,
+    } as const;
+
+    // Audit log location (may be unavailable if no project is open; in that
+    // case `addClient` will reject with "No project loaded" below anyway).
+    const root = projectManager.getCurrentProjectPath();
+    const auditPath = root ? v2Paths(root).mcpAccessLog : null;
+
+    // 1. Whitelist validation (command + env shape).
+    const check = validateMcpAddRequest(normalized);
+    if (!check.ok) {
+      if (auditPath) {
+        await appendMcpAudit(auditPath, {
+          ts: new Date().toISOString(),
+          kind: 'mcp_add',
+          decision: 'rejected',
+          name: normalized.name,
+          transport: normalized.transport,
+          command: normalized.command,
+          reason: check.reason,
+        });
+      }
+      return errorResponse(`mcp_add_rejected:${check.reason}`);
+    }
+
+    // 2. Native confirmation dialog (main-process owned; renderer cannot
+    //    bypass). SSE passes through without a dialog — no spawn happens.
+    const parent = BrowserWindow.fromWebContents(event.sender) ?? null;
+    const confirmed = await confirmMcpAdd(normalized, { dialog, parentWindow: parent });
+    if (!confirmed) {
+      if (auditPath) {
+        await appendMcpAudit(auditPath, {
+          ts: new Date().toISOString(),
+          kind: 'mcp_add',
+          decision: 'rejected',
+          name: normalized.name,
+          transport: normalized.transport,
+          command: normalized.command,
+          reason: 'user_cancelled',
+        });
+      }
+      return errorResponse('mcp_add_rejected:user_cancelled');
+    }
+
+    try {
+      const instance = await mcpClientsService.addClient(normalized);
+      if (auditPath) {
+        await appendMcpAudit(auditPath, {
+          ts: new Date().toISOString(),
+          kind: 'mcp_add',
+          decision: 'accepted',
+          name: normalized.name,
+          transport: normalized.transport,
+          command: normalized.command,
+        });
+      }
       return successResponse({ instance });
     } catch (e) {
       return errorResponse(e as Error);
