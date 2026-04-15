@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import hnswlib from 'hnswlib-node';
 import natural from 'natural';
 import type { PrimarySourceItem, PrimarySourcePhoto } from '../../integrations/tropy/TropyReader';
+import type { ArchivalMetadata } from '../../types/archival-metadata';
 import type {
   Entity,
   EntityType,
@@ -36,6 +37,8 @@ export interface PrimarySourceDocument {
   lastModified: string;
   indexedAt: string;
   metadata?: Record<string, string>;
+  /** Structured archival metadata — cote, fonds, repository, producer, … */
+  archival?: ArchivalMetadata;
 }
 
 export interface PrimarySourceChunk {
@@ -341,9 +344,25 @@ export class PrimarySourcesVectorStore {
         language TEXT,
         last_modified TEXT NOT NULL,
         indexed_at TEXT NOT NULL,
-        metadata TEXT
+        metadata TEXT,
+        archival_metadata TEXT
       );
     `);
+
+    // Soft migration: add archival_metadata column to pre-existing DBs
+    // (installed before the archival-metadata schema landed). SQLite has no
+    // IF NOT EXISTS for columns, so we guard with PRAGMA table_info.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('primary_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'archival_metadata')) {
+        this.db.exec('ALTER TABLE primary_sources ADD COLUMN archival_metadata TEXT');
+        console.log('🗄️ Migrated primary_sources: added archival_metadata column');
+      }
+    } catch (err) {
+      console.warn('⚠️ archival_metadata migration check failed:', err);
+    }
 
     // Table des photos associées aux sources
     this.db.exec(`
@@ -485,8 +504,8 @@ export class PrimarySourcesVectorStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO primary_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
-       transcription, transcription_source, language, last_modified, indexed_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -503,7 +522,8 @@ export class PrimarySourcesVectorStore {
       null, // language - à détecter plus tard
       source.lastModified.toISOString(),
       now,
-      source.metadata ? JSON.stringify(source.metadata) : null
+      source.metadata ? JSON.stringify(source.metadata) : null,
+      source.archival ? JSON.stringify(source.archival) : null
     );
 
     // Sauvegarder les photos
@@ -1685,6 +1705,7 @@ export class PrimarySourcesVectorStore {
       lastModified: row.last_modified,
       indexedAt: row.indexed_at,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      archival: row.archival_metadata ? JSON.parse(row.archival_metadata) : undefined,
     };
   }
 

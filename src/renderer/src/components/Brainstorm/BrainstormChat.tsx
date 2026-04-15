@@ -7,8 +7,9 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { ArrowRight, Check, Loader2, X } from 'lucide-react';
-import { useBrainstormChatStore, type BrainstormMessage } from '../../stores/brainstormChatStore';
+import { useBrainstormChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/brainstormChatStore';
 import { useBrainstormChat } from './useBrainstormChat';
+import { SourcePopover } from './SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { appendDraftToContent, messageToDraft } from './messageToDraft';
@@ -24,6 +25,7 @@ export const BrainstormChat: React.FC = () => {
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
+  const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
 
   const sendToWrite = useCallback(
     (m: BrainstormMessage): void => {
@@ -77,18 +79,50 @@ export const BrainstormChat: React.FC = () => {
               📚 Sources ({sources.length})
             </summary>
             <ul>
-              {sources.map((s, i) => (
-                <li key={i} className={`brainstorm-chat__source brainstorm-chat__source--${s.sourceType}`}>
-                  <div className="brainstorm-chat__source-head">
-                    <span className="brainstorm-chat__source-kind">{s.kind}</span>
-                    <strong>{s.title}</strong>
-                    <span className="brainstorm-chat__source-score">
-                      {(s.similarity * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <p className="brainstorm-chat__source-snippet">{s.snippet}</p>
-                </li>
-              ))}
+              {sources.map((s: BrainstormSource, i: number) => {
+                const isActive =
+                  activeSource?.msgId === orig.id && activeSource.index === i;
+                return (
+                  <li
+                    key={i}
+                    className={`brainstorm-chat__source brainstorm-chat__source--${s.sourceType}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveSource(
+                          isActive ? null : { msgId: orig.id, index: i }
+                        )
+                      }
+                      aria-expanded={isActive}
+                      data-testid={`source-badge-${i}`}
+                      style={{
+                        all: 'unset',
+                        cursor: 'pointer',
+                        display: 'block',
+                        width: '100%',
+                      }}
+                    >
+                      <div className="brainstorm-chat__source-head">
+                        <span className="brainstorm-chat__source-kind">{s.kind}</span>
+                        <strong>{s.title}</strong>
+                        <span className="brainstorm-chat__source-score">
+                          {(s.similarity * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <p className="brainstorm-chat__source-snippet">{s.snippet}</p>
+                    </button>
+                    {isActive && (
+                      <div style={{ marginTop: 6 }}>
+                        <SourcePopover
+                          source={s}
+                          onClose={() => setActiveSource(null)}
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </details>
         )}
@@ -139,7 +173,7 @@ export const BrainstormChat: React.FC = () => {
         )}
       </>
     );
-  }, [sendToWrite, sentToWriteId]);
+  }, [sendToWrite, sentToWriteId, activeSource]);
 
   return (
     <ChatSurface

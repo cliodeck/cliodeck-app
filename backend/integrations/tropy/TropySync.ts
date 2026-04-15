@@ -13,6 +13,7 @@ import {
 import { NERService } from '../../core/ner/NERService';
 import type { OllamaClient } from '../../core/llm/OllamaClient';
 import type { LLMProvider } from '../../core/llm/providers/base';
+import { archivalFromTropyMetadata } from '../../types/archival-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -331,6 +332,12 @@ export class TropySync {
       transcriptionSource,
       lastModified: this.reader.getLastModifiedTime(),
       metadata: this.extractMetadata(item),
+      archival: archivalFromTropyMetadata(this.extractMetadata(item), {
+        archive: item.archive,
+        collection: item.collection,
+        creator: item.creator,
+        date: item.date,
+      }),
     };
 
     // Sauvegarder

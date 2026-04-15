@@ -55,6 +55,7 @@
     "@types/dompurify": "^3.0.5",
     "better-sqlite3": "^11.0.0",
     "chokidar": "^3.6.0",
+    "citeproc": "^2.4.63",
     "docx": "^9.5.1",
     "docxtemplater": "^3.55.7",
     "dompurify": "^3.3.1",

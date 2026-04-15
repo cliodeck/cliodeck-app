@@ -522,6 +522,17 @@ const api = {
     openPath: (path: string) => ipcRenderer.invoke('shell:open-path', path),
   },
 
+  // Source traceability (Brainstorm citation click-through).
+  // See docs/source-traceability.md.
+  sources: {
+    openPdf: (documentId: string, pageNumber?: number) =>
+      ipcRenderer.invoke('sources:open-pdf', documentId, pageNumber),
+    revealTropy: (itemId: string) =>
+      ipcRenderer.invoke('sources:reveal-tropy', itemId),
+    openNote: (relativePath: string, lineNumber?: number) =>
+      ipcRenderer.invoke('sources:open-note', relativePath, lineNumber),
+  },
+
   // Tropy (Primary Sources)
   tropy: {
     // Project Management

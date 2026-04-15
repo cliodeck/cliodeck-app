@@ -20,7 +20,24 @@ export interface BrainstormSource {
   title: string;
   snippet: string;
   similarity: number;
+  /** Obsidian: vault-relative path of the note. */
   relativePath?: string;
+  // --- Traceability fields (populated best-effort by `hitsToSources`).
+  // Every field is optional so legacy envelopes keep round-tripping.
+  /** PDF document id (matches `pdfService.getDocument`). */
+  documentId?: string;
+  /** 1-based page number (PDFs only). */
+  pageNumber?: number;
+  /** Start character offset of the chunk within the page's text. */
+  chunkOffset?: number;
+  /** Tropy item id (primary sources only). */
+  itemId?: string;
+  /** First photo path associated with the Tropy item, if known. */
+  imagePath?: string;
+  /** Obsidian vault-relative note path (alias to `relativePath`). */
+  notePath?: string;
+  /** 1-based line anchor within the note, if computable. */
+  lineNumber?: number;
 }
 
 export interface BrainstormMessage {

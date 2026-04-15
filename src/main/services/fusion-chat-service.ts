@@ -32,8 +32,23 @@ export interface BrainstormSource {
   snippet: string;
   similarity: number;
   relativePath?: string;
+  // Traceability fields (see renderer store for field docs).
+  documentId?: string;
+  pageNumber?: number;
+  chunkOffset?: number;
+  itemId?: string;
+  imagePath?: string;
+  notePath?: string;
+  lineNumber?: number;
 }
 
+/**
+ * Lift RetrievalService hits into the wire-level `BrainstormSource` shape
+ * used by the Brainstorm UI. Every hit carries enough information to
+ * re-open its origin: the returned record is the single source of truth
+ * for the citation click-through flow (`sources:open-pdf`,
+ * `sources:reveal-tropy`, `sources:open-note`).
+ */
 export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
   return hits.map((h) => {
     const kind: BrainstormSource['kind'] =
@@ -47,7 +62,8 @@ export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource
         ? (h.source as { relativePath?: string } | undefined)
         : undefined;
     const title = h.document.title || vaultSrc?.relativePath || 'Sans titre';
-    return {
+
+    const base: BrainstormSource = {
       kind,
       sourceType: h.sourceType,
       title,
@@ -55,6 +71,24 @@ export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource
       similarity: h.similarity,
       relativePath: vaultSrc?.relativePath,
     };
+
+    if (h.sourceType === 'secondary') {
+      // SearchResult: chunk.documentId + chunk.pageNumber + chunk.startPosition.
+      const chunk = h.chunk as unknown as {
+        documentId?: string;
+        pageNumber?: number;
+        startPosition?: number;
+      };
+      base.documentId = chunk.documentId ?? h.document.id;
+      base.pageNumber = chunk.pageNumber;
+      base.chunkOffset = chunk.startPosition;
+    } else if (h.sourceType === 'primary') {
+      base.itemId = h.document.id ?? h.chunk.documentId;
+    } else if (h.sourceType === 'vault') {
+      base.notePath = vaultSrc?.relativePath;
+    }
+
+    return base;
   });
 }
 import {

@@ -53,6 +53,8 @@ export interface TropyProjectInfo {
 }
 
 // Types pour les sources primaires (utilisés par TropySync)
+import type { ArchivalMetadata } from '../../types/archival-metadata.js';
+
 export interface PrimarySourceItem {
   id: string;
   tropyId: number;
@@ -68,6 +70,8 @@ export interface PrimarySourceItem {
   transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
   lastModified: Date;
   metadata: Record<string, string>;
+  /** Structured archival metadata (cote, fonds, repository, producer, …). */
+  archival?: ArchivalMetadata;
 }
 
 export interface PrimarySourcePhoto {
