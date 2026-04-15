@@ -74,13 +74,38 @@ export interface BrainstormToolCall {
   errorMessage?: string;
 }
 
+/**
+ * Legacy-parity chat settings (step 3 of fusion). The UI does not yet
+ * expose these — persisting them in the store lets `useBrainstormChat`
+ * pass them along to `fusion.chat.start` so step 4 can wire controls
+ * without touching the IPC contract again. Optional fields mean an empty
+ * settings object behaves exactly like pre-fusion defaults.
+ */
+export interface BrainstormChatRetrievalSettings {
+  documentIds?: string[];
+  collectionKeys?: string[];
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  topK?: number;
+}
+
+export interface BrainstormChatSettings {
+  modeId?: string;
+  customSystemPrompt?: string;
+  retrieval?: BrainstormChatRetrievalSettings;
+}
+
 interface State {
   messages: BrainstormMessage[];
   /** Active server-side sessionId; null when idle. */
   sessionId: string | null;
   /** Per-session id of the assistant message currently being filled. */
   pendingAssistantId: string | null;
+  /** Persisted chat settings — passed to `fusion.chat.start` on every send. */
+  chatSettings: BrainstormChatSettings;
 
+  setChatSettings: (
+    patch: Partial<BrainstormChatSettings>
+  ) => void;
   appendUser: (content: string) => string;
   beginAssistant: (sessionId: string) => string;
   appendDelta: (assistantId: string, delta: string) => void;
@@ -111,6 +136,21 @@ export const useBrainstormChatStore = create<State>((set) => ({
   messages: [],
   sessionId: null,
   pendingAssistantId: null,
+  chatSettings: {},
+
+  setChatSettings: (patch) => {
+    set((s) => ({
+      chatSettings: {
+        ...s.chatSettings,
+        ...patch,
+        // Deep-merge the `retrieval` slice so partial updates don't wipe
+        // sibling filters.
+        retrieval: patch.retrieval
+          ? { ...s.chatSettings.retrieval, ...patch.retrieval }
+          : s.chatSettings.retrieval,
+      },
+    }));
+  },
 
   appendUser: (content) => {
     const id = nextId('u');
@@ -210,6 +250,13 @@ export const useBrainstormChatStore = create<State>((set) => ({
   },
 
   reset: () => {
-    set({ messages: [], sessionId: null, pendingAssistantId: null });
+    // Intentionally preserve `chatSettings` across a `reset()` — the user's
+    // selected mode / filters should survive a cleared conversation.
+    set((s) => ({
+      messages: [],
+      sessionId: null,
+      pendingAssistantId: null,
+      chatSettings: s.chatSettings,
+    }));
   },
 }));

@@ -27,8 +27,11 @@ import {
 import {
   runChatTurn,
   type ChatEngineRetriever,
+  type ChatEngineRetrievalOptions,
+  type ChatEngineSystemPromptConfig,
   type ChatEngineToolHandler,
 } from './chat-engine.js';
+import { modeService } from './mode-service.js';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -117,6 +120,27 @@ import type {
   ChatMessage,
 } from '../../../backend/core/llm/providers/base.js';
 
+/**
+ * RAG filter/tuning bag carried from the renderer into the retriever. Same
+ * fields as the legacy `EnrichedRAGOptions` but reduced to what actually
+ * matters cross-cutting: scoping and topK. Vault opt-in is implicit via
+ * `sourceType === 'vault'` (or caller keeps the Brainstorm default of
+ * primary+secondary+vault).
+ */
+export interface FusionChatRetrievalOptions {
+  documentIds?: string[];
+  collectionKeys?: string[];
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  topK?: number;
+}
+
+export interface FusionChatSystemPromptOptions {
+  /** Mode id — resolved to text via `modeService.getModeManager()`. */
+  modeId?: string;
+  /** Free-form override; takes precedence over the resolved mode text. */
+  customText?: string;
+}
+
 export interface ChatStartArgs {
   webContents: WebContents;
   messages: ChatMessage[];
@@ -127,6 +151,10 @@ export interface ChatStartArgs {
     temperature?: number;
     maxTokens?: number;
   };
+  /** Filters forwarded to `RetrievalService`. */
+  retrievalOptions?: FusionChatRetrievalOptions;
+  /** System-prompt override (mode / custom text). */
+  systemPrompt?: FusionChatSystemPromptOptions;
 }
 
 export interface ChatStreamEnvelope {
@@ -251,11 +279,30 @@ class FusionChatService {
     // --- Retrieval adapter -------------------------------------------------
     const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
       ? {
-          async search(lastUser) {
+          async search(lastUser, options?: ChatEngineRetrievalOptions) {
+            // Translate the engine-level sourceType (which allows 'vault')
+            // into RetrievalService's narrower primary|secondary|both plus
+            // an explicit `includeVault` flag. Brainstorm default keeps
+            // primary + secondary + vault (matches the prior behaviour).
+            const st = options?.sourceType;
+            let rsSourceType: 'primary' | 'secondary' | 'both' = 'both';
+            let includeVault = true;
+            if (st === 'vault') {
+              rsSourceType = 'both';
+              includeVault = true;
+            } else if (st === 'primary' || st === 'secondary' || st === 'both') {
+              rsSourceType = st;
+              // Preserve Brainstorm's vault-by-default behaviour unless the
+              // caller explicitly restricts to a single corpus.
+              includeVault = st === 'both';
+            }
             const { hits, stats } = await retrievalService.searchWithStats({
               query: lastUser,
-              sourceType: 'both',
-              includeVault: true,
+              sourceType: rsSourceType,
+              includeVault,
+              documentIds: options?.documentIds,
+              collectionKeys: options?.collectionKeys,
+              topK: options?.topK,
             });
             if (hits.length === 0) return null;
             return {
@@ -270,6 +317,34 @@ class FusionChatService {
         }
       : undefined;
 
+    // --- System-prompt composition ----------------------------------------
+    // Precedence (legacy parity):
+    //   1. explicit customText (UI `useCustomSystemPrompt` + `customSystemPrompt`)
+    //   2. resolved mode text (modeId → ResolvedMode.systemPrompt.fr by default)
+    //   3. nothing — fall back to whatever the provider / registry defaults do
+    // `.cliohints` were already prepended above and sit *below* the system
+    // override inside the message list.
+    let resolvedSystemText: string | undefined = args.systemPrompt?.customText;
+    if (!resolvedSystemText && args.systemPrompt?.modeId) {
+      try {
+        const mode = await modeService
+          .getModeManager()
+          .getMode(args.systemPrompt.modeId);
+        // Default to the FR prompt — matches the `chat-service` default.
+        // Renderer can pass `customText` if it wants a different locale.
+        resolvedSystemText = mode?.systemPrompt?.fr || mode?.systemPrompt?.en;
+      } catch (e) {
+        console.warn('[fusion-chat] mode resolution failed:', e);
+      }
+    }
+    const systemPromptConfig: ChatEngineSystemPromptConfig | undefined =
+      resolvedSystemText || args.systemPrompt?.modeId
+        ? {
+            customText: resolvedSystemText,
+            modeId: args.systemPrompt?.modeId,
+          }
+        : undefined;
+
     try {
       await runChatTurn<BrainstormSource>({
         provider: llm,
@@ -279,6 +354,8 @@ class FusionChatService {
         tools,
         toolHandler,
         retriever,
+        retrievalOptions: args.retrievalOptions,
+        systemPrompt: systemPromptConfig,
         hooks: {
           onChunk: (chunk) => sendChunk(chunk),
           onDone: (chunk) => sendChunk(chunk),

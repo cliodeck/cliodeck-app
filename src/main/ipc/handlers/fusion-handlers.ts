@@ -232,15 +232,29 @@ export function setupFusionHandlers(): void {
         return errorResponse('messages must be an array');
       }
       const messages = rawMessages as ChatMessage[];
-      const opts = (rawOpts ?? {}) as {
+      const rawOptsObj = (rawOpts ?? {}) as {
         model?: string;
         temperature?: number;
         maxTokens?: number;
+        retrievalOptions?: {
+          documentIds?: string[];
+          collectionKeys?: string[];
+          sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+          topK?: number;
+        };
+        systemPrompt?: { modeId?: string; customText?: string };
+      };
+      const opts = {
+        model: rawOptsObj.model,
+        temperature: rawOptsObj.temperature,
+        maxTokens: rawOptsObj.maxTokens,
       };
       const sessionId = fusionChatService.start({
         webContents: event.sender,
         messages,
         opts,
+        retrievalOptions: rawOptsObj.retrievalOptions,
+        systemPrompt: rawOptsObj.systemPrompt,
       });
       return successResponse({ sessionId });
     }

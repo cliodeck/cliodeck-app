@@ -734,7 +734,18 @@ const api = {
     chat: {
       start: (
         messages: unknown[],
-        opts?: { model?: string; temperature?: number; maxTokens?: number }
+        opts?: {
+          model?: string;
+          temperature?: number;
+          maxTokens?: number;
+          retrievalOptions?: {
+            documentIds?: string[];
+            collectionKeys?: string[];
+            sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+            topK?: number;
+          };
+          systemPrompt?: { modeId?: string; customText?: string };
+        }
       ) => ipcRenderer.invoke('fusion:chat:start', messages, opts ?? {}),
       cancel: (sessionId: string) =>
         ipcRenderer.invoke('fusion:chat:cancel', sessionId),

@@ -87,6 +87,87 @@ describe('chat-engine onExplanation', () => {
     expect(exp.timing.generationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('forwards retrievalOptions to the retriever verbatim', async () => {
+    const provider = makeFakeProvider([
+      { delta: '', done: true, finishReason: 'stop' },
+    ]);
+    let seen: unknown = null;
+    const retriever: ChatEngineRetriever<unknown> = {
+      async search(_last, options) {
+        seen = options;
+        return null;
+      },
+    };
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'q' }],
+      retriever,
+      retrievalOptions: {
+        documentIds: ['d1', 'd2'],
+        collectionKeys: ['col-A'],
+        sourceType: 'secondary',
+        topK: 7,
+      },
+    });
+    expect(seen).toEqual({
+      documentIds: ['d1', 'd2'],
+      collectionKeys: ['col-A'],
+      sourceType: 'secondary',
+      topK: 7,
+    });
+  });
+
+  it('prepends systemPrompt.customText as the first system message', async () => {
+    const captured: ChatMessage[][] = [];
+    const provider: LLMProvider = {
+      id: 'fake',
+      name: 'Fake',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'ready' }) as never,
+      healthCheck: async () => ({ state: 'ready' }) as never,
+      chat: async function* (msgs: ChatMessage[]) {
+        captured.push(msgs);
+        yield { delta: 'ok', done: false };
+        yield { delta: '', done: true, finishReason: 'stop' };
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'hello' }],
+      systemPrompt: { customText: 'CUSTOM PROMPT', modeId: 'explore' },
+    });
+    expect(captured[0][0]).toEqual({ role: 'system', content: 'CUSTOM PROMPT' });
+    expect(captured[0][1]).toEqual({ role: 'user', content: 'hello' });
+  });
+
+  it('ignores systemPrompt when customText is empty or whitespace', async () => {
+    const captured: ChatMessage[][] = [];
+    const provider: LLMProvider = {
+      id: 'fake',
+      name: 'Fake',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'ready' }) as never,
+      healthCheck: async () => ({ state: 'ready' }) as never,
+      chat: async function* (msgs: ChatMessage[]) {
+        captured.push(msgs);
+        yield { delta: '', done: true, finishReason: 'stop' };
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'x' }],
+      systemPrompt: { customText: '   ' },
+    });
+    expect(captured[0]).toHaveLength(1);
+    expect(captured[0][0].role).toBe('user');
+  });
+
   it('does not emit onExplanation when the retriever skips stats', async () => {
     const provider = makeFakeProvider([
       { delta: 'x', done: false },

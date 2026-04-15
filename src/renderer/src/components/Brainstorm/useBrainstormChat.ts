@@ -29,7 +29,18 @@ interface ToolCallEnv {
 interface FusionChatApi {
   start(
     messages: Array<{ role: string; content: string }>,
-    opts?: { model?: string; temperature?: number; maxTokens?: number }
+    opts?: {
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+      retrievalOptions?: {
+        documentIds?: string[];
+        collectionKeys?: string[];
+        sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+        topK?: number;
+      };
+      systemPrompt?: { modeId?: string; customText?: string };
+    }
   ): Promise<{ success: boolean; sessionId?: string; error?: string }>;
   cancel(sessionId: string): Promise<{ success: boolean; cancelled?: boolean }>;
   onChunk(
@@ -173,7 +184,19 @@ export function useBrainstormChat(): UseBrainstormChat {
         ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user' as const, content: trimmed },
       ];
-      const res = await chat.start(payload);
+      // Pull the persisted chat settings off the store and forward them
+      // every turn. Undefined fields are fine — the main-side handler
+      // treats the whole bag as optional.
+      const settings = useBrainstormChatStore.getState().chatSettings;
+      const startOpts: Parameters<typeof chat.start>[1] = {};
+      if (settings.retrieval) startOpts.retrievalOptions = settings.retrieval;
+      if (settings.modeId || settings.customSystemPrompt) {
+        startOpts.systemPrompt = {
+          modeId: settings.modeId,
+          customText: settings.customSystemPrompt,
+        };
+      }
+      const res = await chat.start(payload, startOpts);
       if (!res.success || !res.sessionId) {
         // eslint-disable-next-line no-console
         console.error('[brainstorm] start failed', res.error);

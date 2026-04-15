@@ -111,13 +111,43 @@ export interface ChatEngineRetrieverResult<TSource> {
   explanation?: PartialRAGExplanation;
 }
 
+/**
+ * Opaque retrieval-filter bag forwarded from caller to retriever. The
+ * engine never inspects these fields — it simply threads them through so
+ * legacy RAG filters (documentIds, collectionKeys, sourceType, topK) can
+ * reach `RetrievalService` without leaking that contract into the engine.
+ */
+export interface ChatEngineRetrievalOptions {
+  documentIds?: string[];
+  collectionKeys?: string[];
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  topK?: number;
+}
+
 export interface ChatEngineRetriever<TSource> {
   /**
    * Search the corpus for context chunks relevant to the last user turn.
    * Return both a formatted system-prompt string to prepend and the raw
    * source objects to surface to the UI. Throw (or return empty) to skip.
    */
-  search(lastUser: string): Promise<ChatEngineRetrieverResult<TSource> | null>;
+  search(
+    lastUser: string,
+    options?: ChatEngineRetrievalOptions
+  ): Promise<ChatEngineRetrieverResult<TSource> | null>;
+}
+
+/**
+ * System-prompt composition directives passed through `RunChatTurnArgs`.
+ * When `customText` is provided, the engine prepends it as a leading
+ * `system` message (before any retrieval-injected system block). `modeId`
+ * is advisory metadata — the engine itself does not resolve it; callers
+ * resolve mode → text in their own wiring layer and pass the resolved
+ * string via `customText`. Keeping the field here lets tests assert the
+ * wiring without coupling the engine to `modeService`.
+ */
+export interface ChatEngineSystemPromptConfig {
+  customText?: string;
+  modeId?: string;
 }
 
 export interface ChatEngineToolHandler {
@@ -137,6 +167,10 @@ export interface RunChatTurnArgs<TSource = unknown> {
   tools?: ToolDescriptor[];
   toolHandler?: ChatEngineToolHandler;
   retriever?: ChatEngineRetriever<TSource>;
+  /** Forwarded verbatim to the retriever (filters: documentIds, etc.). */
+  retrievalOptions?: ChatEngineRetrievalOptions;
+  /** Optional system-prompt override (mode text / custom prompt). */
+  systemPrompt?: ChatEngineSystemPromptConfig;
   hooks?: ChatEngineHooks;
   /** Max agent-loop iterations (default 6). */
   maxTurns?: number;
@@ -163,13 +197,25 @@ export async function runChatTurn<TSource = unknown>(
     hooks.onDone?.({ delta: '', done: true, finishReason: 'error' });
   };
 
-  // --- Retrieval injection -------------------------------------------------
+  // --- System-prompt override ---------------------------------------------
+  // When the caller provides a `customText`, inject it as the FIRST system
+  // message so it sits above any retrieval-injected system block and any
+  // `.cliohints` system message the service may have already prepended.
   let messages = args.messages;
+  const customText = args.systemPrompt?.customText;
+  if (customText && customText.trim().length > 0) {
+    messages = [{ role: 'system', content: customText }, ...messages];
+  }
+
+  // --- Retrieval injection -------------------------------------------------
   if (args.retriever) {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser?.content?.trim()) {
       try {
-        const result = await args.retriever.search(lastUser.content);
+        const result = await args.retriever.search(
+          lastUser.content,
+          args.retrievalOptions
+        );
         if (result && result.sources.length > 0) {
           messages = [
             { role: 'system', content: result.systemPrompt },
