@@ -13,8 +13,9 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, X } from 'lucide-react';
-import type { BrainstormSource } from '../../stores/brainstormChatStore';
+import type { BrainstormSource } from '../../stores/chatStore';
 
 interface Props {
   source: BrainstormSource;
@@ -53,13 +54,14 @@ export function positionLabel(s: BrainstormSource): string | null {
 }
 
 export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
+  const { t } = useTranslation('common');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const handleOpen = useCallback(async () => {
     const api = getSourcesApi();
     if (!api) {
-      setError('Ouverture de sources indisponible (preload manquant).');
+      setError(t('chat.sources.openUnavailable'));
       return;
     }
     setBusy(true);
@@ -68,14 +70,14 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
       let res: { success: boolean; error?: string };
       if (source.sourceType === 'secondary') {
         if (!source.documentId) {
-          setError('Document PDF non traçable (documentId manquant).');
+          setError(t('chat.sources.untrackablePdf'));
           setBusy(false);
           return;
         }
         res = await api.openPdf(source.documentId, source.pageNumber);
       } else if (source.sourceType === 'primary') {
         if (!source.itemId) {
-          setError('Source Tropy non traçable (itemId manquant).');
+          setError(t('chat.sources.untrackableTropy'));
           setBusy(false);
           return;
         }
@@ -83,19 +85,19 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
       } else {
         const rel = source.notePath ?? source.relativePath;
         if (!rel) {
-          setError('Note Obsidian non traçable (chemin manquant).');
+          setError(t('chat.sources.untrackableNote'));
           setBusy(false);
           return;
         }
         res = await api.openNote(rel, source.lineNumber);
       }
-      if (!res.success) setError(res.error ?? 'Échec de l’ouverture.');
+      if (!res.success) setError(res.error ?? t('chat.sources.openFailed'));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [source]);
+  }, [source, t]);
 
   const position = positionLabel(source);
   const canOpen =
@@ -131,7 +133,7 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
         <button
           type="button"
           onClick={onClose}
-          aria-label="Fermer"
+          aria-label={t('chat.sources.close')}
           style={{ background: 'transparent', border: 0, color: 'var(--text-secondary)', cursor: 'pointer' }}
         >
           <X size={14} />
@@ -177,7 +179,7 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
           disabled={!canOpen || busy}
           data-testid="source-popover-open"
         >
-          <ExternalLink size={12} /> {busy ? 'Ouverture…' : 'Ouvrir la source'}
+          <ExternalLink size={12} /> {busy ? t('chat.sources.opening') : t('chat.sources.open')}
         </button>
       </div>
     </div>

@@ -13,7 +13,7 @@
  * to extract.
  */
 
-import type { BrainstormMessage } from '../../stores/brainstormChatStore';
+import type { BrainstormMessage } from '../../stores/chatStore';
 
 export interface DraftCitation {
   /** Stable identifier (e.g., source.id from phase 0.4 union). */

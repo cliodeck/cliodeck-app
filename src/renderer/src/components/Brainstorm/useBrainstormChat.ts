@@ -9,10 +9,10 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import {
-  useBrainstormChatStore,
+  useChatStore as useBrainstormChatStore,
   type BrainstormSource,
   type BrainstormToolCall,
-} from '../../stores/brainstormChatStore';
+} from '../../stores/chatStore';
 import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {

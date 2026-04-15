@@ -6,8 +6,9 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Loader2, X } from 'lucide-react';
-import { useBrainstormChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/brainstormChatStore';
+import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
@@ -16,6 +17,7 @@ import { appendDraftToContent, messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
 import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
+// RAGExplanation type alias lives in chatStore.
 import type { RAGExplanation } from '../../stores/chatStore';
 
 interface BrainstormUnifiedMessage extends UnifiedMessage {
@@ -23,7 +25,8 @@ interface BrainstormUnifiedMessage extends UnifiedMessage {
 }
 
 export const BrainstormChat: React.FC = () => {
-  const messages = useBrainstormChatStore((s) => s.messages);
+  const { t } = useTranslation('common');
+  const messages = useChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export const BrainstormChat: React.FC = () => {
         content: m.content,
         pending: m.pending,
         isError: !!m.error,
-        badge: m.ragCitation ? 'citation' : undefined,
+        badge: m.ragCitation ? t('chat.brainstorm.citationBadge') : undefined,
         original: m,
       })),
     [messages]
@@ -62,10 +65,7 @@ export const BrainstormChat: React.FC = () => {
   );
 
   const emptyState = (
-    <p style={{ maxWidth: 420 }}>
-      Commencez une exploration libre. Les <code>.cliohints</code> et les sources indexées
-      seront injectés automatiquement.
-    </p>
+    <p style={{ maxWidth: 420 }}>{t('chat.brainstorm.emptyState')}</p>
   );
 
   const renderExtras = useCallback((m: BrainstormUnifiedMessage): React.ReactNode => {
@@ -78,7 +78,7 @@ export const BrainstormChat: React.FC = () => {
         {m.role === 'assistant' && sources.length > 0 && (
           <details className="brainstorm-chat__sources">
             <summary>
-              📚 Sources ({sources.length})
+              📚 {t('chat.brainstorm.sourcesLabel')} ({sources.length})
             </summary>
             <ul>
               {sources.map((s: BrainstormSource, i: number) => {
@@ -171,10 +171,12 @@ export const BrainstormChat: React.FC = () => {
               type="button"
               className="chat-surface__inline-btn"
               onClick={() => sendToWrite(orig)}
-              title="Insère ce tour comme brouillon dans Write"
+              title={t('chat.brainstorm.sendToWriteTitle')}
             >
               <ArrowRight size={12} />{' '}
-              {sentToWriteId === orig.id ? 'Envoyé' : 'Envoyer vers Write'}
+              {sentToWriteId === orig.id
+                ? t('chat.brainstorm.sentToWrite')
+                : t('chat.brainstorm.sendToWrite')}
             </button>
           </div>
         )}
@@ -191,7 +193,7 @@ export const BrainstormChat: React.FC = () => {
       onClear={messages.length > 0 ? reset : undefined}
       emptyState={emptyState}
       banner={error && !isStreaming ? error : undefined}
-      placeholder="Question, hypothèse, piste à explorer… (Cmd/Ctrl + Enter pour envoyer)"
+      placeholder={t('chat.brainstorm.placeholder')}
       renderMessageExtras={renderExtras}
     />
   );

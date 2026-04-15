@@ -12,6 +12,7 @@ import { logger } from '../../utils/logger.js';
 
 export function setupChatHandlers() {
   ipcMain.handle('chat:send', async (event, message: string, options?: any) => {
+    console.warn('[chat:send] deprecated — use fusion:chat:start (removed at fusion step 5)');
     logger.info('ipc', 'chat:send', { messageLength: message.length, hasOptions: !!options });
     try {
       // Validate input
@@ -100,6 +101,7 @@ export function setupChatHandlers() {
   });
 
   ipcMain.handle('chat:cancel', async () => {
+    console.warn('[chat:cancel] deprecated — use fusion:chat:cancel (removed at fusion step 5)');
     logger.info('ipc', 'chat:cancel');
     try {
       chatService.cancelCurrentStream();

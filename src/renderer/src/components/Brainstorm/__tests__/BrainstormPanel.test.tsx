@@ -60,7 +60,7 @@ describe('BrainstormPanel — project-aware loading', () => {
     render(<BrainstormPanel />);
 
     const notice = await screen.findByRole('status');
-    expect(notice.textContent).toMatch(/Open a project/i);
+    expect(notice.textContent).toMatch(/openProjectNotice|Open a project|Ouvrez un projet/i);
     // And crucially: no red error banner.
     expect(screen.queryByRole('alert')).toBeNull();
 

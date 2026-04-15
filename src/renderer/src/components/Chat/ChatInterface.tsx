@@ -1,9 +1,15 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChatMessage, useChatStore } from '../../stores/chatStore';
+import {
+  type ChatMessage,
+  useChatStore,
+  type BrainstormChatRetrievalSettings,
+} from '../../stores/chatStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
+import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
 import { ChatSurface } from './ChatSurface';
 import { RAGMessageExtras } from './RAGMessageExtras';
 import { ModeSelector } from './ModeSelector';
@@ -17,31 +23,93 @@ interface ChatUnifiedMessage extends UnifiedMessage {
   original: ChatMessage;
 }
 
+/**
+ * ChatInterface (Write mode).
+ *
+ * Post-fusion (step 4b): runs on the unified `fusion:chat:*` pipeline via
+ * `useBrainstormChat`. The legacy `chat:send` / `chat:onStream` handlers
+ * are left in place (deprecated) until step 5 of the fusion plan.
+ */
 export const ChatInterface: React.FC = () => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
-  const { messages, isProcessing, currentStreamingMessage, sendMessage, cancelGeneration, clearChat } =
-    useChatStore();
+  const messages = useChatStore((s) => s.messages);
+  const pendingAssistantId = useChatStore((s) => s.pendingAssistantId);
+  const resetChat = useChatStore((s) => s.reset);
+  const setChatSettings = useChatStore((s) => s.setChatSettings);
+  const { send, cancel } = useBrainstormChat();
   const { indexedFilePaths, refreshIndexedPDFs } = useBibliographyStore();
-  const { modes } = useModeStore();
-  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(null);
+  const { modes, activeMode, activeModeId } = useModeStore();
+  const ragParams = useRAGQueryStore((s) => s.params);
+  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(
+    null
+  );
 
   const indexedCount = indexedFilePaths.size;
+  const isProcessing = pendingAssistantId !== null;
 
   useEffect(() => {
     refreshIndexedPDFs();
   }, [refreshIndexedPDFs]);
 
+  // Project the RAG settings + active mode onto the store so every
+  // `send(...)` picks up the current filters / mode without per-call wiring.
   useEffect(() => {
-    const handleStatus = (_event: unknown, data: { stage: string; message: string }): void => {
-      setRagStatus({ message: data.message, isError: data.stage === 'error' });
+    const retrieval: BrainstormChatRetrievalSettings = {
+      topK: ragParams.topK,
+      documentIds:
+        ragParams.selectedDocumentIds && ragParams.selectedDocumentIds.length > 0
+          ? ragParams.selectedDocumentIds
+          : undefined,
+      collectionKeys:
+        ragParams.selectedCollectionKeys && ragParams.selectedCollectionKeys.length > 0
+          ? ragParams.selectedCollectionKeys
+          : undefined,
+      sourceType: ragParams.sourceType,
     };
-    // @ts-expect-error - electron IPC
-    window.electron?.ipcRenderer?.on('chat:status', handleStatus);
-    return () => {
-      // @ts-expect-error - electron IPC
-      window.electron?.ipcRenderer?.removeListener('chat:status', handleStatus);
+    let customSystemPrompt: string | undefined;
+    let modeIdForPrompt: string | undefined = activeModeId;
+    if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
+      if (activeModeId === 'free-mode') {
+        // Free mode: signal "no system prompt" by sending an empty string.
+        customSystemPrompt = '';
+      } else {
+        const promptLang =
+          (ragParams.systemPromptLanguage as 'fr' | 'en') || lang;
+        customSystemPrompt = activeMode.systemPrompt[promptLang];
+      }
+    }
+    setChatSettings({
+      modeId: modeIdForPrompt,
+      customSystemPrompt,
+      retrieval,
+    });
+  }, [ragParams, activeMode, activeModeId, lang, setChatSettings]);
+
+  // Status banner: subscribe to the fusion status stream.
+  useEffect(() => {
+    const w = window as unknown as {
+      electron?: {
+        fusion?: {
+          chat?: {
+            onStatus?: (
+              cb: (env: {
+                sessionId: string;
+                status: { phase: string; label?: string };
+              }) => void
+            ) => () => void;
+          };
+        };
+      };
     };
+    const onStatus = w.electron?.fusion?.chat?.onStatus;
+    if (!onStatus) return;
+    const unsub = onStatus((env) => {
+      const phase = env.status.phase;
+      const label = env.status.label ?? phase;
+      setRagStatus({ message: label, isError: phase === 'error' });
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -65,7 +133,8 @@ export const ChatInterface: React.FC = () => {
           role: m.role,
           content: m.content,
           timestamp: m.timestamp,
-          isError: m.isError,
+          pending: m.pending,
+          isError: !!m.error || !!m.isError,
           badge,
           original: m,
         };
@@ -77,22 +146,28 @@ export const ChatInterface: React.FC = () => {
     async (text: string) => {
       try {
         logger.component('ChatInterface', 'sendMessage', { query: text });
-        await sendMessage(text);
+        await send(text);
       } catch (error) {
         logger.error('ChatInterface', error);
       }
     },
-    [sendMessage]
+    [send]
   );
+
+  const handleCancel = useCallback(async () => {
+    await cancel();
+  }, [cancel]);
 
   const handleClear = useCallback(async () => {
     if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'))) {
-      clearChat();
+      resetChat();
     }
-  }, [clearChat, t]);
+  }, [resetChat, t]);
 
   const handleLearnMore = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } }));
+    window.dispatchEvent(
+      new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } })
+    );
   }, []);
 
   const emptyState = (
@@ -124,8 +199,12 @@ export const ChatInterface: React.FC = () => {
 
   const renderRAGExtras = useCallback(
     (m: ChatUnifiedMessage) => <RAGMessageExtras message={m.original} />,
-    [],
+    []
   );
+
+  // Streaming content: the pending assistant message already carries the
+  // running content; ChatSurface renders it in-place, so no separate
+  // streamingContent prop is needed now that messages carry `pending`.
 
   const headerExtras = (
     <>
@@ -141,10 +220,9 @@ export const ChatInterface: React.FC = () => {
         headerExtras={headerExtras}
         messages={unifiedMessages}
         isProcessing={isProcessing}
-        streamingContent={currentStreamingMessage || undefined}
         onSend={handleSend}
-        onCancel={cancelGeneration}
-        onClear={handleClear}
+        onCancel={handleCancel}
+        onClear={messages.length > 0 ? handleClear : undefined}
         emptyState={emptyState}
         banner={banner}
         renderMessageExtras={renderRAGExtras}

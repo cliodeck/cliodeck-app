@@ -531,6 +531,44 @@
     "readyState": {
       "title": "Prêt à vous aider",
       "message": "{{count}} document(s) indexé(s) disponible(s).\n\nPosez une question pour commencer."
+    },
+    "brainstorm": {
+      "emptyState": "Commencez une exploration libre. Les .cliohints et les sources indexées seront injectés automatiquement.",
+      "placeholder": "Question, hypothèse, piste à explorer… (Cmd/Ctrl + Enter pour envoyer)",
+      "citationBadge": "citation",
+      "sendToWrite": "Envoyer vers Write",
+      "sentToWrite": "Envoyé",
+      "sendToWriteTitle": "Insère ce tour comme brouillon dans Write",
+      "sourcesLabel": "Sources",
+      "openProjectNotice": "Ouvrez un projet pour commencer le brainstorming.",
+      "projectContext": "Contexte du projet",
+      "recipesCount": "{{count}} recettes",
+      "workspaceHints": "Workspace hints",
+      "noHints": "Aucun fichier .cliohints. Ajoutez-en un dans {{path}} pour injecter un contexte durable dans chaque prompt.",
+      "obsidianVault": "Vault Obsidian",
+      "vaultReady": "Index prêt à {{path}}",
+      "vaultNotIndexed": "Pas encore indexé — liez un vault depuis les Réglages.",
+      "vaultChecking": "vérification…",
+      "recipesHeading": "Recettes ({{count}})",
+      "noRecipes": "Aucune recette disponible.",
+      "fusionApiMissing": "API Fusion non exposée par le preload — reconstruisez le bundle preload.",
+      "stepsSuffix": "étapes"
+    },
+    "sources": {
+      "open": "Ouvrir la source",
+      "opening": "Ouverture…",
+      "close": "Fermer",
+      "openFailed": "Échec de l’ouverture.",
+      "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
+      "untrackablePdf": "Document PDF non traçable (documentId manquant).",
+      "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
+      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
     }
   },
   "corpus": {

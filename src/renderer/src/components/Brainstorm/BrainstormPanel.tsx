@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   FileText,
   Database,
@@ -66,6 +67,7 @@ declare global {
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
 export const BrainstormPanel: React.FC = () => {
+  const { t } = useTranslation('common');
   const [hints, setHints] = useState<HintsState | null>(null);
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
@@ -96,9 +98,7 @@ export const BrainstormPanel: React.FC = () => {
         const fusion = window.electron.fusion;
         if (!fusion) {
           if (!cancelled) {
-            setLoadError(
-              'Fusion API not exposed by preload — rebuild the preload bundle.'
-            );
+            setLoadError(t('chat.brainstorm.fusionApiMissing'));
             setStatus('idle');
           }
           return;
@@ -146,7 +146,7 @@ export const BrainstormPanel: React.FC = () => {
     <div className="brainstorm-panel">
       {status === 'no_project' && (
         <div className="brainstorm-panel__notice" role="status">
-          Open a project to start brainstorming.
+          {t('chat.brainstorm.openProjectNotice')}
         </div>
       )}
 
@@ -181,11 +181,11 @@ export const BrainstormPanel: React.FC = () => {
           )}
           <SettingsIcon size={14} />
           <span className="brainstorm-panel__drawer-title">
-            Contexte du projet
+            {t('chat.brainstorm.projectContext')}
           </span>
           {!contextOpen && recipeCount > 0 && (
             <span className="brainstorm-panel__drawer-count">
-              {recipeCount} recettes
+              {t('chat.brainstorm.recipesCount', { count: recipeCount })}
             </span>
           )}
         </button>
@@ -197,7 +197,7 @@ export const BrainstormPanel: React.FC = () => {
           >
             <div className="brainstorm-panel__section">
               <h3>
-                <FileText size={14} /> Workspace hints
+                <FileText size={14} /> {t('chat.brainstorm.workspaceHints')}
               </h3>
               {hints?.present ? (
                 <pre className="brainstorm-panel__hints">
@@ -205,32 +205,34 @@ export const BrainstormPanel: React.FC = () => {
                 </pre>
               ) : (
                 <p className="brainstorm-panel__muted">
-                  No <code>.cliohints</code> set. Add one at{' '}
-                  <code>
-                    {hints?.sourcePath ?? '.cliodeck/v2/hints.md'}
-                  </code>{' '}
-                  to inject durable context into every prompt.
+                  {t('chat.brainstorm.noHints', {
+                    path: hints?.sourcePath ?? '.cliodeck/v2/hints.md',
+                  })}
                 </p>
               )}
             </div>
 
             <div className="brainstorm-panel__section">
               <h3>
-                <Database size={14} /> Obsidian vault
+                <Database size={14} /> {t('chat.brainstorm.obsidianVault')}
               </h3>
               {vault ? (
                 <p className="brainstorm-panel__muted">
                   {vault.indexed
-                    ? `Index ready at ${vault.dbPath}`
-                    : 'Not indexed yet — link a vault from Settings.'}
+                    ? t('chat.brainstorm.vaultReady', { path: vault.dbPath })
+                    : t('chat.brainstorm.vaultNotIndexed')}
                 </p>
               ) : (
-                <p className="brainstorm-panel__muted">checking…</p>
+                <p className="brainstorm-panel__muted">
+                  {t('chat.brainstorm.vaultChecking')}
+                </p>
               )}
             </div>
 
             <div className="brainstorm-panel__section">
-              <h3>Recipes ({recipeCount})</h3>
+              <h3>
+                {t('chat.brainstorm.recipesHeading', { count: recipeCount })}
+              </h3>
               <ul className="brainstorm-panel__recipes">
                 {[...builtin, ...user].map((r) => (
                   <li key={r.fileName}>
@@ -239,13 +241,14 @@ export const BrainstormPanel: React.FC = () => {
                       v{r.version}
                     </span>
                     <p className="brainstorm-panel__muted">
-                      {r.description || '—'} · {r.steps} steps
+                      {r.description || '—'} · {r.steps}{' '}
+                      {t('chat.brainstorm.stepsSuffix')}
                     </p>
                   </li>
                 ))}
                 {recipeCount === 0 && (
                   <li className="brainstorm-panel__muted">
-                    No recipes available.
+                    {t('chat.brainstorm.noRecipes')}
                   </li>
                 )}
               </ul>

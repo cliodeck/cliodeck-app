@@ -3,8 +3,15 @@
 export { useProjectStore } from './projectStore';
 export type { Project, Chapter } from './projectStore';
 
-export { useChatStore } from './chatStore';
-export type { ChatMessage, ChatSource } from './chatStore';
+export { useChatStore, useBrainstormChatStore } from './chatStore';
+export type {
+  ChatMessage,
+  ChatSource,
+  BrainstormMessage,
+  BrainstormSource,
+  BrainstormChatSettings,
+  RAGExplanation,
+} from './chatStore';
 
 export { useBibliographyStore } from './bibliographyStore';
 export type { Citation } from './bibliographyStore';

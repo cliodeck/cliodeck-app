@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useBrainstormChatStore } from '../brainstormChatStore';
+import { useChatStore as useBrainstormChatStore } from '../chatStore';
 
 beforeEach(() => {
   useBrainstormChatStore.getState().reset();

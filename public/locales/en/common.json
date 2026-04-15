@@ -531,6 +531,44 @@
     "readyState": {
       "title": "Ready to assist",
       "message": "{{count}} indexed document(s) available.\n\nAsk a question to get started."
+    },
+    "brainstorm": {
+      "emptyState": "Start a free-form exploration. Your .cliohints and indexed sources are injected automatically.",
+      "placeholder": "Question, hypothesis, lead to explore… (Cmd/Ctrl + Enter to send)",
+      "citationBadge": "citation",
+      "sendToWrite": "Send to Write",
+      "sentToWrite": "Sent",
+      "sendToWriteTitle": "Insert this turn as a draft in Write",
+      "sourcesLabel": "Sources",
+      "openProjectNotice": "Open a project to start brainstorming.",
+      "projectContext": "Project context",
+      "recipesCount": "{{count}} recipes",
+      "workspaceHints": "Workspace hints",
+      "noHints": "No .cliohints set. Add one at {{path}} to inject durable context into every prompt.",
+      "obsidianVault": "Obsidian vault",
+      "vaultReady": "Index ready at {{path}}",
+      "vaultNotIndexed": "Not indexed yet — link a vault from Settings.",
+      "vaultChecking": "checking…",
+      "recipesHeading": "Recipes ({{count}})",
+      "noRecipes": "No recipes available.",
+      "fusionApiMissing": "Fusion API not exposed by preload — rebuild the preload bundle.",
+      "stepsSuffix": "steps"
+    },
+    "sources": {
+      "open": "Open source",
+      "opening": "Opening…",
+      "close": "Close",
+      "openFailed": "Failed to open.",
+      "openUnavailable": "Source opening unavailable (preload missing).",
+      "untrackablePdf": "PDF document not traceable (missing documentId).",
+      "untrackableTropy": "Tropy source not traceable (missing itemId).",
+      "untrackableNote": "Obsidian note not traceable (missing path).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
     }
   },
   "corpus": {

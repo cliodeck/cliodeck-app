@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChatSource } from '../../stores/chatStore';
+import type { ChatSource } from '../../stores/chatStore';
 import {
   type UnifiedSource,
   chatSourceToUnified,

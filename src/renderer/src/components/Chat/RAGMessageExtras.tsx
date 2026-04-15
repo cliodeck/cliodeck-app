@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChatMessage } from '../../stores/chatStore';
+import type { ChatMessage } from '../../stores/chatStore';
 import { SourceCard } from './SourceCard';
 import { ExplanationPanel } from './ExplanationPanel';
 
