@@ -533,6 +533,16 @@ const api = {
       ipcRenderer.invoke('sources:open-note', relativePath, lineNumber),
   },
 
+  // Citation (CSL / citeproc-js) — style picker + live preview in Settings.
+  citation: {
+    listStyles: () => ipcRenderer.invoke('citation:listStyles'),
+    listLocales: () => ipcRenderer.invoke('citation:listLocales'),
+    format: (items: unknown[], styleId: string, locale: string) =>
+      ipcRenderer.invoke('citation:format', items, styleId, locale),
+    preview: (bibKey: string, styleId: string, locale: string) =>
+      ipcRenderer.invoke('citation:preview', bibKey, styleId, locale),
+  },
+
   // Tropy (Primary Sources)
   tropy: {
     // Project Management

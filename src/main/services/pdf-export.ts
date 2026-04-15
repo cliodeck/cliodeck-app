@@ -3,6 +3,8 @@ import { writeFile, mkdir, readFile, rm } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
+import { processMarkdownCitations } from './citation-pipeline.js';
+import { bibliographyService } from './bibliography-service.js';
 
 // MARK: - Types
 
@@ -13,6 +15,16 @@ export interface ExportOptions {
   outputPath?: string;
   bibliographyPath?: string;
   cslPath?: string; // Path to CSL file for citation styling
+  /**
+   * Citation rendering options. When provided, the in-process
+   * CitationEngine pipeline pre-processes `[@key]` markers into Pandoc
+   * footnotes + appends a bibliography, bypassing pandoc's --citeproc.
+   */
+  citation?: {
+    useEngine?: boolean;
+    style?: string;
+    locale?: 'fr-FR' | 'en-US';
+  };
   metadata?: {
     title?: string;
     author?: string;
@@ -510,7 +522,48 @@ export class PDFExportService {
 
       // Write markdown content (unescape citations that were escaped by Milkdown)
       const mdPath = join(tempDir, 'input.md');
-      const cleanedContent = unescapeCitations(options.content);
+      let cleanedContent = unescapeCitations(options.content);
+
+      // In-process CitationEngine pipeline (opt-in). Runs BEFORE pandoc —
+      // resolves [@key] markers into Pandoc [^N] footnotes and appends a
+      // bibliography section, so pandoc treats them as plain footnotes and
+      // we don't need --citeproc / --bibliography.
+      let useEnginePipeline = false;
+      if (options.citation?.useEngine) {
+        try {
+          const style = options.citation.style ?? 'chicago-note-bibliography';
+          const locale = options.citation.locale ?? 'fr-FR';
+          const processed = await processMarkdownCitations(cleanedContent, {
+            style,
+            locale,
+            resolve: (key) => bibliographyService.getByCitationKey(key),
+          });
+          if (processed.missingKeys.length > 0) {
+            console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
+          }
+          cleanedContent = processed.md;
+          if (processed.footnotes.length > 0) {
+            const footnoteBlock = processed.footnotes
+              .map((fn) => `[^${fn.n}]: ${fn.text}`)
+              .join('\n\n');
+            cleanedContent += '\n\n' + footnoteBlock + '\n';
+          }
+          if (processed.bibliography.length > 0) {
+            const bibBlock =
+              '\n\n# Bibliographie\n\n' +
+              processed.bibliography.map((b) => `- ${b}`).join('\n') +
+              '\n';
+            cleanedContent += bibBlock;
+          }
+          useEnginePipeline = true;
+          console.log(
+            `📚 CitationEngine: ${processed.footnotes.length} footnote(s), ${processed.bibliography.length} bib entries`
+          );
+        } catch (err) {
+          console.warn('⚠️ CitationEngine pre-processing failed, falling back to pandoc:', err);
+        }
+      }
+
       await writeFile(mdPath, cleanedContent);
       console.log('📝 Markdown content written:', mdPath);
       console.log('📝 Content preview (first 500 chars):', cleanedContent.substring(0, 500));
@@ -706,8 +759,9 @@ export class PDFExportService {
         pandocArgs.push('-M', `abstract=${escapeLatex(abstract)}`);
       }
 
-      // Add bibliography if available
-      if (bibPath) {
+      // Add bibliography if available (skip when our engine already
+      // inlined footnotes + bibliography as plain markdown).
+      if (bibPath && !useEnginePipeline) {
         pandocArgs.push('--bibliography', bibPath);
         pandocArgs.push('--citeproc');
 

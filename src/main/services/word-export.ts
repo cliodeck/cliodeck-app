@@ -23,6 +23,11 @@ import {
   PageNumber,
 } from 'docx';
 import { marked } from 'marked';
+import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
+import { bibliographyService } from './bibliography-service.js';
+// FootnoteReferenceRun is the inline run; document footnotes are declared
+// via `Document.footnotes` keyed by id.
+import { FootnoteReferenceRun } from 'docx';
 // @ts-ignore - No type definitions available
 import Docxtemplater from 'docxtemplater';
 // @ts-ignore - No type definitions available
@@ -38,6 +43,15 @@ export interface WordExportOptions {
   bibliographyPath?: string;
   cslPath?: string; // Path to CSL file for citation styling
   templatePath?: string; // Path to .dotx template
+  /**
+   * Citation rendering options. When `useEngine` is true, `[@key]` markers
+   * are pre-processed into Word native footnotes + a bibliography section.
+   */
+  citation?: {
+    useEngine?: boolean;
+    style?: string;
+    locale?: 'fr-FR' | 'en-US';
+  };
   metadata?: {
     title?: string;
     author?: string;
@@ -278,15 +292,24 @@ class MarkdownToWordParser {
     );
   }
 
-  private parseInlineFormatting(text: string): TextRun[] {
-    const runs: TextRun[] = [];
+  private parseInlineFormatting(text: string): Array<TextRun | FootnoteReferenceRun> {
+    const runs: Array<TextRun | FootnoteReferenceRun> = [];
 
-    // Simple regex-based parsing for inline formatting
-    // This is a simplified version - you might want to use marked's inline lexer for more accuracy
-    const segments = text.split(/(\*\*.*?\*\*|__.*?__|_.*?_|\*.*?\*|`.*?`|\[.*?\]\(.*?\))/g);
+    // Footnote placeholder produced by CitationEngine pipeline:
+    //   {{FN:N}} -> FootnoteReferenceRun(N)
+    const segments = text.split(
+      /(\{\{FN:\d+\}\}|\*\*.*?\*\*|__.*?__|_.*?_|\*.*?\*|`.*?`|\[.*?\]\(.*?\))/g
+    );
 
     for (const segment of segments) {
       if (!segment) continue;
+
+      // Footnote reference placeholder
+      const fnMatch = segment.match(/^\{\{FN:(\d+)\}\}$/);
+      if (fnMatch) {
+        runs.push(new FootnoteReferenceRun(parseInt(fnMatch[1], 10)));
+        continue;
+      }
 
       // Bold: **text** or __text__
       if (/^\*\*(.*?)\*\*$/.test(segment) || /^__(.*?)__$/.test(segment)) {
@@ -347,6 +370,18 @@ class MarkdownToWordParser {
       .replace(/\[(.*?)\]\(.*?\)/g, '$1');
   }
 }
+
+/** Strip HTML tags / entities from citeproc output for plain-text Word runs. */
+const stripHtml = (s: string): string =>
+  s
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 
 /**
  * Unescape citation keys that were escaped by Milkdown editor
@@ -576,7 +611,13 @@ export class WordExportService {
       const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
       const hasPandoc = await this.checkPandoc();
 
-      if (hasBibliography && hasPandoc) {
+      // When the CitationEngine pipeline is requested we stay on the
+      // native docx path so we can emit proper Word footnotes via
+      // FootnoteReferenceRun — pandoc's citeproc would otherwise fight
+      // for the same markers.
+      const useEnginePipeline = !!options.citation?.useEngine;
+
+      if (hasBibliography && hasPandoc && !useEnginePipeline) {
         console.log('📚 Bibliography detected, using pandoc for export...');
         return await this.exportWithPandoc(options, outputPath, onProgress);
       }
@@ -592,8 +633,54 @@ export class WordExportService {
         progress: 30,
       });
 
+      // Run CitationEngine pipeline if requested, transforming [@key]
+      // clusters into {{FN:N}} placeholders that the inline parser turns
+      // into FootnoteReferenceRuns.
+      let sourceMarkdown = options.content;
+      let engineFootnotes: ProcessedFootnote[] = [];
+      let engineBibliography: string[] = [];
+      if (useEnginePipeline) {
+        try {
+          const style = options.citation?.style ?? 'chicago-note-bibliography';
+          const locale = options.citation?.locale ?? 'fr-FR';
+          const processed = await processMarkdownCitations(sourceMarkdown, {
+            style,
+            locale,
+            resolve: (key) => bibliographyService.getByCitationKey(key),
+          });
+          if (processed.missingKeys.length > 0) {
+            console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
+          }
+          // Swap Pandoc footnote markers for our docx placeholder.
+          sourceMarkdown = processed.md.replace(/\[\^(\d+)\]/g, '{{FN:$1}}');
+          engineFootnotes = processed.footnotes;
+          engineBibliography = processed.bibliography;
+        } catch (err) {
+          console.warn('⚠️ CitationEngine pre-processing failed:', err);
+        }
+      }
+
       // Parse markdown content
-      const contentParagraphs = await this.parser.parse(options.content);
+      const contentParagraphs = await this.parser.parse(sourceMarkdown);
+
+      // Append bibliography section if we have entries.
+      if (engineBibliography.length > 0) {
+        contentParagraphs.push(
+          new Paragraph({
+            text: 'Bibliographie',
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 400, after: 200 },
+          })
+        );
+        for (const entry of engineBibliography) {
+          contentParagraphs.push(
+            new Paragraph({
+              children: [new TextRun({ text: stripHtml(entry) })],
+              spacing: { after: 120 },
+            })
+          );
+        }
+      }
 
       onProgress?.({
         stage: 'generating',
@@ -726,12 +813,26 @@ export class WordExportService {
         });
       }
 
+      // Build the footnotes map expected by docx:
+      //   { [id]: { children: Paragraph[] } }
+      const docxFootnotes: Record<string, { children: Paragraph[] }> = {};
+      for (const fn of engineFootnotes) {
+        docxFootnotes[String(fn.n)] = {
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: stripHtml(fn.text) })],
+            }),
+          ],
+        };
+      }
+
       // Create document
       const doc = new Document({
         creator: options.metadata?.author || 'ClioDesk',
         title: options.metadata?.title || 'Document',
         description: abstract || '',
         sections,
+        ...(Object.keys(docxFootnotes).length > 0 ? { footnotes: docxFootnotes } : {}),
       });
 
       // Check if template is provided or exists

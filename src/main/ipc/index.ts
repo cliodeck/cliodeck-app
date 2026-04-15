@@ -24,6 +24,7 @@ import { setupTropyHandlers } from './handlers/tropy-handlers.js';
 import { setupSlidesHandlers } from './handlers/slides-handlers.js';
 import { setupFusionHandlers } from './handlers/fusion-handlers.js';
 import { setupSourcesHandlers } from './handlers/sources-handlers.js';
+import { setupCitationHandlers } from './handlers/citation-handlers.js';
 
 /**
  * Setup all IPC handlers
@@ -68,6 +69,7 @@ export function setupIPCHandlers() {
   setupSlidesHandlers();
   setupFusionHandlers();
   setupSourcesHandlers();
+  setupCitationHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
 }

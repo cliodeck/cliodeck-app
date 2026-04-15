@@ -7,84 +7,9 @@ import { replaceAll } from '@milkdown/utils';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
+import { CitationAutocomplete } from './CitationAutocomplete';
 import '@milkdown/crepe/theme/common/style.css';
 import './MilkdownEditor.css';
-
-// Citation autocomplete component
-const CitationAutocomplete: React.FC<{
-  query: string;
-  position: { top: number; left: number };
-  onSelect: (citationId: string) => void;
-  onClose: () => void;
-}> = ({ query, position, onSelect, onClose }) => {
-  const { t } = useTranslation('common');
-  const { citations } = useBibliographyStore();
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Filter citations based on query
-  const filteredCitations = citations.filter((citation) => {
-    const searchText = query.toLowerCase();
-    return (
-      citation.id.toLowerCase().includes(searchText) ||
-      citation.author.toLowerCase().includes(searchText) ||
-      citation.title.toLowerCase().includes(searchText) ||
-      citation.year.includes(searchText)
-    );
-  }).slice(0, 10);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [onClose]);
-
-  if (filteredCitations.length === 0) {
-    return (
-      <div
-        ref={menuRef}
-        className="citation-autocomplete-menu"
-        style={{ top: position.top, left: position.left }}
-      >
-        <div className="citation-autocomplete-empty">
-          {t('milkdownEditor.noCitationFound')}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={menuRef}
-      className="citation-autocomplete-menu"
-      style={{ top: position.top, left: position.left }}
-    >
-      {filteredCitations.map((citation) => (
-        <button
-          key={citation.id}
-          className="citation-autocomplete-item"
-          onClick={() => onSelect(citation.id)}
-        >
-          <span className="citation-key">@{citation.id}</span>
-          <span className="citation-info">
-            {citation.author} ({citation.year})
-          </span>
-          <span className="citation-title">{citation.title}</span>
-        </button>
-      ))}
-    </div>
-  );
-};
 
 export const MilkdownEditor: React.FC = () => {
   const { t } = useTranslation('common');
@@ -97,6 +22,13 @@ export const MilkdownEditor: React.FC = () => {
     clearPendingFootnoteScroll,
   } = useEditorStore();
   const { currentTheme } = useTheme();
+  const citations = useBibliographyStore((s) => s.citations);
+  const bibliographyCandidates = citations.map((c) => ({
+    id: c.id,
+    title: c.title,
+    author: c.author,
+    year: c.year,
+  }));
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
   const isInternalUpdate = useRef(false);
@@ -482,9 +414,11 @@ export const MilkdownEditor: React.FC = () => {
       {showCitationMenu && (
         <CitationAutocomplete
           query={citationQuery}
+          candidates={bibliographyCandidates}
           position={citationMenuPosition}
           onSelect={handleCitationSelect}
           onClose={() => setShowCitationMenu(false)}
+          emptyLabel={t('milkdownEditor.noCitationFound')}
         />
       )}
     </div>

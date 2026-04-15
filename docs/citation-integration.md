@@ -28,15 +28,23 @@
 
 ## What remains to wire
 
-1. **Markdown editor (`src/renderer/src/components/Editor/`)**
-   - Add an `@key` autocomplete popup in `MarkdownEditor.tsx` /
-     `MilkdownEditor.tsx` backed by the bibliography service
-     (`backend/core/bibliography-service.ts`). On selection, insert
-     a `[@bibKey]` marker at the caret. Same format Pandoc uses — good
-     for round-tripping.
+1. **Markdown editor (`src/renderer/src/components/Editor/`)** — *partially
+   landed.*
+   - Shared popup: `CitationAutocomplete.tsx` (generic; accepts
+     `candidates`, `query`, `position`, `onSelect`, `onClose`,
+     `maxResults` defaulting to 8; arrow/Enter/Esc/Tab keyboard
+     navigation; prefix-first filtering; theme tokens only).
+   - **MilkdownEditor**: already wired — the existing `[@` detection in
+     the ProseMirror `keyup` handler now renders the shared component
+     and inserts `[@key]` on selection.
+   - **MarkdownEditor (Monaco)**: uses Monaco's native
+     `registerCompletionItemProvider` triggered on `[@` — functionally
+     equivalent (filter, keyboard nav, insertion of `key]`) without a
+     bespoke overlay. Left as-is; swap to the shared popup only if we
+     need a richer UI than Monaco's suggestion widget allows.
    - Visual pill / hover-card showing the formatted footnote preview
      (call `CitationEngine.formatCitation` in the renderer via a new
-     IPC handler, e.g. `citation:preview`).
+     IPC handler, e.g. `citation:preview`) — still TODO.
 
 2. **IPC plumbing**
    - New handler file `src/main/ipc/handlers/citation-handlers.ts`

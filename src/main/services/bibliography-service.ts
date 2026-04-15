@@ -59,6 +59,15 @@ class BibliographyService {
   }
 
   /**
+   * Resolve a bibliographic key to a Citation.
+   * Matches both the BibTeX `id` (primary key as written `[@key]`) and the
+   * optional `key` alias field for legacy compatibility.
+   */
+  getByCitationKey(key: string): Citation | undefined {
+    return this.citations.find((c) => c.id === key || c.key === key);
+  }
+
+  /**
    * Generate statistics for the current bibliography
    */
   generateStatistics(citations?: Citation[]): BibliographyStatistics {
