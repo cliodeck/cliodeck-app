@@ -11,7 +11,7 @@
  * uncaught exception.
  */
 
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, app } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -67,12 +67,9 @@ async function readOrInitWorkspaceConfig(root: string): Promise<WorkspaceConfig>
   }
 }
 
-const BUILTIN_RECIPES_DIR = path.join(
-  process.cwd(),
-  'backend',
-  'recipes',
-  'builtin'
-);
+const BUILTIN_RECIPES_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'recipes-builtin')
+  : path.join(process.cwd(), 'backend', 'recipes', 'builtin');
 
 function noProject() {
   return { ...errorResponse('no_project'), error: 'no_project' as const };

@@ -146,6 +146,14 @@
           "!**/__pycache__",
           "!**/*.pyc"
         ]
+      },
+      {
+        "from": "backend/recipes/builtin",
+        "to": "recipes-builtin",
+        "filter": [
+          "*.yaml",
+          "*.yml"
+        ]
       }
     ],
     "linux": {
