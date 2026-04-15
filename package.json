@@ -65,7 +65,7 @@
     "hnswlib-node": "^3.0.0",
     "i18next": "^25.7.3",
     "js-yaml": "^4.1.1",
-    "lru-cache": "^11.2.4",
+    "lru-cache": "^10.4.3",
     "lucide-react": "^0.562.0",
     "marked": "^17.0.1",
     "natural": "^8.1.0",
