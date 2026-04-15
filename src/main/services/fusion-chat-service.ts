@@ -32,6 +32,7 @@ import {
   type ChatEngineToolHandler,
 } from './chat-engine.js';
 import { modeService } from './mode-service.js';
+import { historyService } from './history-service.js';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -239,6 +240,15 @@ class FusionChatService {
       safeSend('fusion:chat:chunk', envelope);
     };
 
+    // --- Research journal accumulation ---------------------------------
+    // Ported from legacy chat-service.logMessagesToHistory: record the
+    // user turn + the assistant turn + a rag_query AI-operation so the
+    // Journal panel keeps showing brainstorm/write exchanges after the
+    // unified-chat cutover.
+    const turnStartedAt = Date.now();
+    let assistantText = '';
+    let recordedSources: BrainstormSource[] = [];
+
     let registry;
     try {
       const cfg = configManager.getLLMConfig();
@@ -406,11 +416,18 @@ class FusionChatService {
           onStatus: (status) => {
             safeSend('fusion:chat:status', { sessionId, status });
           },
-          onChunk: (chunk) => sendChunk(chunk),
-          onDone: (chunk) => sendChunk(chunk),
+          onChunk: (chunk) => {
+            if (chunk.delta) assistantText += chunk.delta;
+            sendChunk(chunk);
+          },
+          onDone: (chunk) => {
+            if (chunk.delta) assistantText += chunk.delta;
+            sendChunk(chunk);
+          },
           onError: (err) =>
             sendChunk({ delta: '', done: true, finishReason: 'error' }, err),
           onSources: (sources) => {
+            recordedSources = sources as BrainstormSource[];
             safeSend('fusion:chat:context', { sessionId, sources });
           },
           onExplanation: (explanation: RAGExplanation) => {
@@ -446,6 +463,100 @@ class FusionChatService {
       });
     } finally {
       await registry.dispose().catch(() => undefined);
+      this.recordJournalEntry({
+        userMessage: args.messages[args.messages.length - 1],
+        assistantText,
+        sources: recordedSources,
+        durationMs: Date.now() - turnStartedAt,
+        modeId: args.systemPrompt?.modeId,
+        providerName: llm?.name ?? 'unknown',
+        retrievalOptions: args.retrievalOptions,
+      });
+    }
+  }
+
+  /**
+   * Ported from legacy chat-service.logMessagesToHistory (step 5 deletion).
+   * Fail-soft: the chat round-trip must not crash because the journal
+   * manager is unavailable or the project was closed mid-turn.
+   */
+  private recordJournalEntry(entry: {
+    userMessage: ChatMessage | undefined;
+    assistantText: string;
+    sources: BrainstormSource[];
+    durationMs: number;
+    modeId?: string;
+    providerName: string;
+    retrievalOptions?: ChatEngineRetrievalOptions;
+  }): void {
+    try {
+      const hm = historyService.getHistoryManager();
+      if (!hm) return;
+      const userText =
+        typeof entry.userMessage?.content === 'string'
+          ? entry.userMessage.content
+          : '';
+      if (!userText && !entry.assistantText) return;
+
+      const queryParams = {
+        model: entry.providerName,
+        topK: entry.retrievalOptions?.topK,
+        sourceType: entry.retrievalOptions?.sourceType,
+        includeVault: entry.retrievalOptions?.includeVault,
+        documentIds: entry.retrievalOptions?.documentIds,
+        collectionKeys: entry.retrievalOptions?.collectionKeys,
+        modeId: entry.modeId ?? 'default-assistant',
+      };
+
+      const serialisedSources =
+        entry.sources.length > 0
+          ? entry.sources.map((s) => ({
+              documentId: s.documentId ?? s.itemId ?? s.notePath ?? '',
+              documentTitle: s.title,
+              pageNumber: s.pageNumber,
+              similarity: s.similarity,
+              sourceType: s.sourceType,
+            }))
+          : undefined;
+
+      if (userText) {
+        hm.logChatMessage({
+          role: 'user',
+          content: userText,
+          queryParams,
+        });
+      }
+      if (entry.assistantText) {
+        hm.logChatMessage({
+          role: 'assistant',
+          content: entry.assistantText,
+          sources: serialisedSources,
+          queryParams,
+        });
+      }
+
+      if (entry.sources.length > 0 && entry.assistantText) {
+        hm.logAIOperation({
+          operationType: 'rag_query',
+          durationMs: entry.durationMs,
+          inputText: userText,
+          inputMetadata: {
+            topK: entry.retrievalOptions?.topK,
+            sourceType: entry.retrievalOptions?.sourceType,
+            sourcesFound: entry.sources.length,
+          },
+          modelName: entry.providerName,
+          modelParameters: { provider: entry.providerName },
+          outputText: entry.assistantText,
+          outputMetadata: {
+            sources: serialisedSources ?? [],
+            responseLength: entry.assistantText.length,
+          },
+          success: true,
+        });
+      }
+    } catch (e) {
+      console.warn('[fusion-chat] journal logging failed (non-fatal)', e);
     }
   }
 }
