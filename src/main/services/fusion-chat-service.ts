@@ -20,6 +20,10 @@ import { retrievalService, type MultiSourceSearchResult } from './retrieval-serv
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
 import {
+  brainstormSourceToUnified,
+  type UnifiedSource,
+} from '../../../backend/types/chat-source.js';
+import {
   runChatTurn,
   type ChatEngineRetriever,
   type ChatEngineToolHandler,
@@ -49,6 +53,17 @@ export interface BrainstormSource {
  * for the citation click-through flow (`sources:open-pdf`,
  * `sources:reveal-tropy`, `sources:open-note`).
  */
+/**
+ * Fusion step 1: unified-typed companion to `hitsToSources`. Returns the
+ * same hits in the shared `UnifiedSource` shape so downstream consumers
+ * (future merged chat renderer) can ignore the per-surface legacy type.
+ * Implemented in terms of `hitsToSources` + `brainstormSourceToUnified`
+ * to keep a single place defining the traceability-field mapping.
+ */
+export function hitsToUnifiedSources(hits: MultiSourceSearchResult[]): UnifiedSource[] {
+  return hitsToSources(hits).map(brainstormSourceToUnified);
+}
+
 export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
   return hits.map((h) => {
     const kind: BrainstormSource['kind'] =

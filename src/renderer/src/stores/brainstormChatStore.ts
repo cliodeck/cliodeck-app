@@ -13,6 +13,7 @@
  */
 
 import { create } from 'zustand';
+import type { RAGExplanation } from '../../../../backend/types/chat-source';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -53,6 +54,14 @@ export interface BrainstormMessage {
   sources?: BrainstormSource[];
   /** Tool calls performed during this assistant turn (in order). */
   toolCalls?: BrainstormToolCall[];
+  /**
+   * Fusion step 1: forward-compat fields mirrored from the legacy RAG
+   * chat. All optional — existing brainstorm envelopes never set them, so
+   * rendering paths stay untouched.
+   */
+  ragUsed?: boolean;
+  explanation?: RAGExplanation;
+  modeId?: string;
 }
 
 export interface BrainstormToolCall {
