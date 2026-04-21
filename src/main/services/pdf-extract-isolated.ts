@@ -1,8 +1,10 @@
 /**
- * Isolated PDF extraction via child_process.fork().
+ * Isolated PDF extraction via child_process.spawn() with SYSTEM Node.
  *
- * Wraps the heavy pdfjs-dist extraction in a separate Node process so that a
- * SIGSEGV inside pdfjs only kills the worker — not the Electron main process.
+ * Electron 28 ships Node 18.18 which causes pdfjs-dist to SIGSEGV on
+ * require(). The system Node (v20+) doesn't have this issue. We spawn
+ * the worker with the system `node` binary and communicate via
+ * stdin (JSON request) → stdout (JSON response).
  *
  * Features:
  *  - 120 s timeout (large PDFs can be slow)
@@ -10,7 +12,7 @@
  *  - Sequential queue (one extraction at a time to bound RAM)
  */
 
-import { fork, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 import { app } from 'electron';
 import type { DocumentPage, PDFMetadata } from '../../../backend/types/pdf-document.js';
@@ -35,128 +37,129 @@ export type IsolatedExtractionResult = IsolatedExtractionSuccess | IsolatedExtra
 // ── Worker path resolution ──────────────────────────────────────────────
 
 function resolveWorkerPath(): string {
-  // In packaged app: resources/app.asar/dist/...
-  // In dev: project root / dist/...
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
 
   if (app.isPackaged) {
-    // Inside asar: same relative structure
     return path.join(__dirname, '..', 'workers', 'pdf-extract-worker.js');
   }
-
-  // Dev mode: compiled output lives under dist/
-  // __dirname is dist/src/main/services/ → go up to dist/src/main/workers/
+  // Dev: dist/src/main/services/ → dist/src/main/workers/
   return path.join(__dirname, '..', 'workers', 'pdf-extract-worker.js');
+}
+
+/**
+ * Find the system Node binary. In dev, `node` from PATH is fine.
+ * In packaged mode, we look for common locations.
+ */
+function resolveNodeBinary(): string {
+  // Prefer the system node, not Electron's embedded one
+  if (process.platform === 'win32') return 'node.exe';
+  // On unix, /usr/bin/node or /usr/local/bin/node; let PATH resolve it
+  return 'node';
 }
 
 // ── Concurrency queue ───────────────────────────────────────────────────
 
-let pending: Promise<IsolatedExtractionResult> = Promise.resolve({ ok: true, pages: [], metadata: { keywords: [] }, title: '' });
+let pending: Promise<IsolatedExtractionResult> = Promise.resolve({
+  ok: true, pages: [], metadata: { keywords: [] }, title: '',
+});
 
 /**
- * Extract text from a PDF in an isolated child process.
- *
- * If the worker crashes (SIGSEGV, SIGABRT, non-zero exit), this returns a
- * failure result instead of throwing — callers can skip the file gracefully.
+ * Extract text from a PDF in an isolated child process using the system Node.
  */
 export function extractPdfIsolated(filePath: string): Promise<IsolatedExtractionResult> {
-  // Chain on the queue so only one extraction runs at a time
   const next = pending.then(
     () => doExtract(filePath),
-    () => doExtract(filePath) // also continue after a prior rejection
+    () => doExtract(filePath),
   );
   pending = next;
   return next;
 }
 
-// ── Core fork logic ─────────────────────────────────────────────────────
+// ── Core spawn logic ────────────────────────────────────────────────────
 
-const TIMEOUT_MS = 120_000; // 2 minutes
+const TIMEOUT_MS = 120_000;
 
 function doExtract(filePath: string): Promise<IsolatedExtractionResult> {
   return new Promise<IsolatedExtractionResult>((resolve) => {
     const workerPath = resolveWorkerPath();
-    let child: ChildProcess;
+    const nodeBin = resolveNodeBinary();
     let settled = false;
 
     const settle = (result: IsolatedExtractionResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      // Ensure the child is dead
-      try {
-        child?.kill();
-      } catch {
-        // already exited
-      }
+      try { child?.kill(); } catch { /* already exited */ }
       resolve(result);
     };
 
-    try {
-      child = fork(workerPath, [], {
-        // Pure Node — no Electron renderer deps
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      resolve({ ok: false, error: `Failed to spawn PDF worker: ${msg}` });
-      return;
-    }
+    // Spawn with system Node, passing the worker script.
+    // Remove ELECTRON_RUN_AS_NODE to use real system node, not Electron's.
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
 
-    // Forward worker stdout/stderr to main-process console for debugging
-    child.stdout?.on('data', (data: Buffer) => {
-      process.stdout.write(`[pdf-worker] ${data.toString()}`);
-    });
-    child.stderr?.on('data', (data: Buffer) => {
-      process.stderr.write(`[pdf-worker:err] ${data.toString()}`);
+    const child = spawn(nodeBin, [workerPath], {
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // Detach not needed — we want the child to die with us
     });
 
-    // Timeout
+    // Send the request as a JSON line on stdin, then close stdin
+    child.stdin.write(JSON.stringify({ filePath }) + '\n');
+    child.stdin.end();
+
+    // Accumulate stdout for the JSON response
+    let stdoutBuf = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBuf += chunk.toString('utf8');
+    });
+
+    // Forward stderr for debugging
+    child.stderr.on('data', (chunk: Buffer) => {
+      // Only log non-warning lines (pdfjs spams warnings about fonts)
+      const text = chunk.toString('utf8');
+      if (!text.startsWith('Warning:')) {
+        process.stderr.write(`[pdf-worker:err] ${text}`);
+      }
+    });
+
     const timer = setTimeout(() => {
       console.error(`[pdf-extract-isolated] Timeout after ${TIMEOUT_MS / 1000}s for ${filePath}`);
       settle({
         ok: false,
-        error: `PDF extraction timed out after ${TIMEOUT_MS / 1000}s — the file may be too large or corrupted`,
+        error: `PDF extraction timed out after ${TIMEOUT_MS / 1000}s`,
       });
     }, TIMEOUT_MS);
 
-    // IPC messages from worker
-    let readyReceived = false;
-    child.on('message', (msg: Record<string, unknown>) => {
-      if (!readyReceived && msg.ready) {
-        readyReceived = true;
-        // Worker is ready — send the extraction request
-        child.send({ filePath });
-        return;
-      }
-      // Extraction result
-      if (msg.ok === true && !msg.ready) {
-        settle(msg as unknown as IsolatedExtractionSuccess);
-      } else if (msg.ok === false) {
-        settle(msg as unknown as IsolatedExtractionFailure);
-      }
-    });
-
-    // Worker crash / exit
     child.on('error', (err: Error) => {
-      settle({ ok: false, error: `PDF worker error: ${err.message}` });
+      settle({ ok: false, error: `PDF worker spawn error: ${err.message}` });
     });
 
-    child.on('exit', (code: number | null, signal: string | null) => {
+    child.on('close', (code: number | null, signal: string | null) => {
       if (signal) {
         settle({
           ok: false,
           error: `PDF extraction crashed (${signal}) — this PDF may contain unsupported elements`,
         });
-      } else if (code !== null && code !== 0) {
-        settle({
-          ok: false,
-          error: `PDF extraction failed (exit code ${code})`,
-        });
+        return;
       }
-      // Normal exit (code 0) without a message means we already settled
+
+      // Try to parse the JSON from stdout
+      try {
+        const result = JSON.parse(stdoutBuf.trim());
+        if (result.ok === true) {
+          settle(result as IsolatedExtractionSuccess);
+        } else {
+          settle({ ok: false, error: result.error || 'Unknown worker error' });
+        }
+      } catch {
+        if (code !== 0) {
+          settle({ ok: false, error: `PDF extraction failed (exit code ${code})` });
+        } else {
+          settle({ ok: false, error: 'PDF worker returned unparseable output' });
+        }
+      }
     });
   });
 }

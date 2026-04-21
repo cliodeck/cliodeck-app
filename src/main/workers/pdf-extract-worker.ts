@@ -16,6 +16,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 
+// Redirect console.log/warn to stderr so stdout stays clean for our JSON.
+// pdfjs-dist emits "Warning: ..." via console.warn which would corrupt the
+// JSON response the parent reads from stdout.
+console.log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n');
+console.warn = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n');
+
 // ── Types (duplicated to avoid importing Electron-side modules) ─────────
 
 interface DocumentPage {
@@ -49,7 +55,6 @@ interface WorkerErrorResponse {
   error: string;
 }
 
-type WorkerResponse = WorkerSuccessResponse | WorkerErrorResponse;
 
 // ── pdfjs-dist bootstrap (same technique as PDFExtractor.ts) ────────────
 
@@ -258,9 +263,24 @@ async function extractDocument(
   return { pages, metadata, title };
 }
 
-// ── Message handler ─────────────────────────────────────────────────────
+// ── stdin/stdout protocol ───────────────────────────────────────────────
+// Parent sends a JSON line on stdin: { filePath: string }
+// Worker writes a JSON line on stdout: { ok, pages?, metadata?, title?, error? }
+// stderr is for debug/warnings only.
 
-process.on('message', async (msg: WorkerRequest) => {
+let inputBuf = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk: string) => { inputBuf += chunk; });
+process.stdin.on('end', async () => {
+  let msg: WorkerRequest;
+  try {
+    msg = JSON.parse(inputBuf.trim());
+  } catch {
+    const response: WorkerErrorResponse = { ok: false, error: 'Invalid JSON on stdin' };
+    process.stdout.write(JSON.stringify(response) + '\n');
+    process.exit(1);
+  }
+
   try {
     const result = await extractDocument(msg.filePath);
     const response: WorkerSuccessResponse = {
@@ -269,13 +289,12 @@ process.on('message', async (msg: WorkerRequest) => {
       metadata: result.metadata,
       title: result.title,
     };
-    process.send!(response);
+    process.stdout.write(JSON.stringify(response) + '\n');
+    process.exit(0);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const response: WorkerErrorResponse = { ok: false, error: errorMsg };
-    process.send!(response);
+    process.stdout.write(JSON.stringify(response) + '\n');
+    process.exit(1);
   }
 });
-
-// Signal readiness
-process.send!({ ok: true, ready: true });
