@@ -12,7 +12,7 @@ import { EnhancedVectorStore } from '../vector-store/EnhancedVectorStore.js';
 // OllamaClient import removed: PDFIndexer now accepts a generic embedding function
 import { CitationExtractor } from '../analysis/CitationExtractor.js';
 import { DocumentSummarizer, type SummarizerConfig } from '../analysis/DocumentSummarizer.js';
-import type { PDFDocument, DocumentChunk } from '../../types/pdf-document.js';
+import type { PDFDocument, DocumentChunk, DocumentPage, PDFMetadata } from '../../types/pdf-document.js';
 import type { RAGConfig } from '../../types/config.js';
 
 /**
@@ -70,8 +70,19 @@ export interface IndexingProgress {
   totalChunks?: number;
 }
 
+/**
+ * Signature for an extraction function that can replace the built-in
+ * PDFExtractor.extractDocument(). Used by the Electron-side wrapper to
+ * inject child_process-based isolation so a pdfjs SIGSEGV does not kill
+ * the main process.
+ */
+export type ExtractDocumentFn = (
+  filePath: string
+) => Promise<{ pages: DocumentPage[]; metadata: PDFMetadata; title: string }>;
+
 export class PDFIndexer {
   private pdfExtractor: PDFExtractor;
+  private extractDocumentFn: ExtractDocumentFn;
   private textPreprocessor: TextPreprocessor;
   private chunker: DocumentChunker | AdaptiveChunker;
   private semanticChunker: SemanticChunker | null = null;
@@ -91,9 +102,12 @@ export class PDFIndexer {
     chunkingConfig: 'cpuOptimized' | 'standard' | 'large' = 'cpuOptimized',
     summarizerConfig?: SummarizerConfig,
     useAdaptiveChunking: boolean = false,
-    ragConfig?: Partial<RAGConfig>
+    ragConfig?: Partial<RAGConfig>,
+    extractDocumentOverride?: ExtractDocumentFn
   ) {
     this.pdfExtractor = new PDFExtractor();
+    this.extractDocumentFn = extractDocumentOverride
+      ?? ((fp: string) => this.pdfExtractor.extractDocument(fp));
     this.textPreprocessor = new TextPreprocessor();
     this.qualityScorer = new ChunkQualityScorer();
     this.deduplicator = new ChunkDeduplicator();
@@ -207,7 +221,7 @@ export class PDFIndexer {
         message: 'Extraction du texte PDF...',
       });
 
-      const { pages, metadata, title: extractedTitle } = await this.pdfExtractor.extractDocument(filePath);
+      const { pages, metadata, title: extractedTitle } = await this.extractDocumentFn(filePath);
       console.log(`🔍 [INDEXER] Step 1 complete: ${pages.length} pages extracted`);
 
       // Use bibliography metadata if provided, otherwise fall back to PDF extraction

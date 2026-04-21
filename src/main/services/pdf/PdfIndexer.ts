@@ -6,13 +6,14 @@
  * `LLMProviderManager.generateEmbedding` path. Kept intentionally thin;
  * the PDF parsing / chunking itself still lives in the backend indexer.
  */
-import { PDFIndexer as BackendPDFIndexer, type IndexingProgress } from '../../../../backend/core/pdf/PDFIndexer.js';
+import { PDFIndexer as BackendPDFIndexer, type IndexingProgress, type ExtractDocumentFn } from '../../../../backend/core/pdf/PDFIndexer.js';
 import type { LLMProviderManager } from '../../../../backend/core/llm/LLMProviderManager.js';
 import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
 import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
 import type { RAGConfig } from '../../../../backend/types/config.js';
 import type { VectorStore } from '../../../../backend/core/vector-store/VectorStore.js';
 import type { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
+import { extractPdfIsolated } from '../pdf-extract-isolated.js';
 
 export type { IndexingProgress };
 
@@ -50,13 +51,24 @@ export class PdfIndexer {
         }
       : (text: string) => deps.llmProviderManager.generateEmbedding(text);
 
+    // Wrap extractPdfIsolated as an ExtractDocumentFn that throws on failure
+    // so BackendPDFIndexer's existing error handling catches it cleanly.
+    const isolatedExtract: ExtractDocumentFn = async (filePath: string) => {
+      const result = await extractPdfIsolated(filePath);
+      if (result.ok === false) {
+        throw new Error(result.error);
+      }
+      return { pages: result.pages, metadata: result.metadata, title: result.title };
+    };
+
     this.backend = new BackendPDFIndexer(
       deps.vectorStore,
       embeddingFn,
       deps.ragConfig.chunkingConfig,
       deps.summarizerConfig,
       deps.ragConfig.useAdaptiveChunking !== false,
-      deps.ragConfig
+      deps.ragConfig,
+      isolatedExtract
     );
   }
 

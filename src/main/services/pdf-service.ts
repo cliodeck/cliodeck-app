@@ -11,6 +11,7 @@ import { TextometricsService, type CorpusTextStatistics } from '../../../backend
 import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
 import { configManager } from './config-manager.js';
 import { retrievalService, type SourceType } from './retrieval-service.js';
+import { extractPdfIsolated } from './pdf-extract-isolated.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -220,25 +221,22 @@ class PDFService {
   }
 
   async extractPDFMetadata(filePath: string) {
-    // This doesn't require initialization since we're just extracting metadata
-    const PDFExtractor = (await import('../../../backend/core/pdf/PDFExtractor.js')).PDFExtractor;
-    const extractor = new PDFExtractor();
+    // Uses isolated worker so a pdfjs SIGSEGV does not crash the app
+    const result = await extractPdfIsolated(filePath);
 
-    try {
-      const extracted = await extractor.extractDocument(filePath);
-      return {
-        title: extracted.title || filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
-        author: extracted.metadata.creator,
-        pageCount: extracted.pages.length,
-      };
-    } catch (error: unknown) {
-      console.error('Failed to extract PDF metadata:', error);
-      // Fallback to filename
+    if (result.ok === false) {
+      console.error('Failed to extract PDF metadata (isolated):', result.error);
       return {
         title: filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
         pageCount: 0,
       };
     }
+
+    return {
+      title: result.title || filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
+      author: result.metadata.creator as string | undefined,
+      pageCount: result.pages.length,
+    };
   }
 
   async indexPDF(
