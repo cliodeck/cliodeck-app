@@ -2,13 +2,15 @@
 /**
  * ClioDeck MCP server stdio entrypoint (fusion step 2.5).
  *
- * Usage:
- *   cliodeck-mcp <workspace-root>
+ * Invoke via the `bin/cliodeck-mcp` wrapper, which runs this script under
+ * Electron's embedded Node so the better-sqlite3 binding ABI matches the
+ * one produced by `electron-builder install-app-deps`. Invoking directly
+ * with system Node will fail with NODE_MODULE_VERSION mismatch unless a
+ * second rebuild is kept in sync on every `npm install`.
  *
- * Spawned by an MCP client (Claude Desktop config, Cursor `mcp.json`, etc.)
- * with the workspace root as its single argument. Exits non-zero with a
- * clear stderr message when the workspace doesn't exist or the MCP server
- * is disabled in its config.
+ * Usage (MCP client config, e.g. Claude Desktop / Cursor `mcp.json`):
+ *   command: /absolute/path/to/cliodeck-app/bin/cliodeck-mcp
+ *   args:    ["/absolute/path/to/workspace"]
  *
  * Inactive by default: the gate lives in `loadMCPConfig`, not here. That
  * way running the binary by accident — say, a stale Claude Desktop config

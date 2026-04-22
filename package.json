@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Assistant d'écriture pour historiens avec RAG et intégration Zotero/Tropy",
   "main": "dist/src/main/index.js",
+  "bin": {
+    "cliodeck-mcp": "bin/cliodeck-mcp"
+  },
   "author": {
     "name": "Frédéric Clavert",
     "email": "frederic.clavert@uni.lu"
