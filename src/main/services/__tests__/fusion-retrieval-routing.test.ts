@@ -224,4 +224,35 @@ describe('RetrievalService.search — branch dispatch', () => {
     expect(tropySpy).toHaveBeenCalledTimes(1);
     expect(vaultSpy).toHaveBeenCalledTimes(1);
   });
+
+  // Regression: the previous implementation split topK across sources
+  // (0.6/0.4/0.4), which wasted budget on empty sources. A project with
+  // PDFs only would lose 40% of its slots to an unused Tropy branch.
+  // Each active source must now be queried for the full topK; the final
+  // `sort().slice(0, topK)` keeps the best chunks by similarity overall.
+  describe('topK budget (no fractional split across sources)', () => {
+    const topKOf = (spy: ReturnType<typeof vi.fn>): number => {
+      const call = spy.mock.calls[0];
+      const opts = call?.[1] as { topK?: number } | undefined;
+      return opts?.topK ?? -1;
+    };
+
+    it('both: PDF and Tropy each get full topK', async () => {
+      await run('both', false);
+      expect(topKOf(secondarySpy)).toBe(5);
+      expect(topKOf(tropySpy)).toBe(5);
+    });
+
+    it('both + includeVault: all three sources each get full topK', async () => {
+      await run('both', true);
+      expect(topKOf(secondarySpy)).toBe(5);
+      expect(topKOf(tropySpy)).toBe(5);
+      expect(topKOf(vaultSpy)).toBe(5);
+    });
+
+    it('secondary-only: PDF gets full topK (unchanged)', async () => {
+      await run('secondary', false);
+      expect(topKOf(secondarySpy)).toBe(5);
+    });
+  });
 });

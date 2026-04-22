@@ -382,7 +382,7 @@ class RetrievalService {
 
     if (sourceType === 'secondary' || sourceType === 'both') {
       const secondaryResults = await this.searchSecondary(q.query, {
-        topK: sourceType === 'both' ? Math.ceil(topK * 0.6) : topK,
+        topK,
         threshold,
         documentIds: q.documentIds,
         collectionKeys: q.collectionKeys,
@@ -405,7 +405,7 @@ class RetrievalService {
     if (sourceType === 'primary' || sourceType === 'both') {
       try {
         const primaryResults = await tropyService.search(q.query, {
-          topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
+          topK,
           threshold,
         });
         const mappedPrimaryResults: PrimaryMappedSearchResult[] = primaryResults.map(
@@ -447,7 +447,7 @@ class RetrievalService {
     if (q.includeVault || sourceType === 'vault') {
       try {
         const vaultResults = await this.searchVault(q.query, {
-          topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
+          topK,
         });
         allSourceResults.push(...vaultResults);
         if (DEBUG) {
