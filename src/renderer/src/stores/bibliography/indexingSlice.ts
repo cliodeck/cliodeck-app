@@ -150,13 +150,34 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     // Refresh indexed PDFs list first
     await get().refreshIndexedPDFs();
 
-    // Get citations with PDFs that are not yet indexed
-    const citationsWithPDFs = citations.filter(
-      (c) => c.file && !get().indexedFilePaths.has(c.file)
-    );
+    // Get citations with PDFs that are not yet indexed, deduplicated by
+    // filePath. A Zotero library can have many bibliography items pointing
+    // to the same PDF (e.g. per-day diary entries in one monthly scan);
+    // indexing each item separately re-extracts, re-embeds and re-stores
+    // the same PDF — O(items) instead of O(PDFs). Dedup at batch-entry
+    // because `indexedFilePaths` only updates after each IPC returns, so
+    // the pre-existing `.has()` check alone does not deduplicate within
+    // a single batch.
+    const alreadyIndexed = get().indexedFilePaths;
+    const seenInBatch = new Set<string>();
+    const citationsWithPDFs = citations.filter((c) => {
+      if (!c.file) return false;
+      if (alreadyIndexed.has(c.file)) return false;
+      if (seenInBatch.has(c.file)) return false;
+      seenInBatch.add(c.file);
+      return true;
+    });
 
     if (citationsWithPDFs.length === 0) {
       return { indexed: 0, skipped: 0, errors: [] };
+    }
+
+    const itemsWithFile = citations.filter((c) => c.file).length;
+    if (itemsWithFile > citationsWithPDFs.length) {
+      console.log(
+        `📚 [indexing] ${citationsWithPDFs.length} unique PDFs to index ` +
+          `(from ${itemsWithFile} bibliography items — ${itemsWithFile - citationsWithPDFs.length} share a PDF with another item)`
+      );
     }
 
     const errors: string[] = [];
