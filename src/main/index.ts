@@ -1,6 +1,29 @@
 // Console filter must be imported first to filter logs in production
 import '../shared/console-filter.js';
 
+// Capture otherwise-silent async errors. Electron exits without a trace
+// when a promise is rejected unhandled or an uncaught exception escapes
+// an event-loop callback — which is how indexing crashes have been
+// disappearing. We record to stderr AND append to ~/.cliodeck-crash.log
+// so the trace survives the terminal being closed.
+import { appendFileSync } from 'fs';
+import { homedir } from 'os';
+import { join as pathJoin } from 'path';
+
+const CRASH_LOG = pathJoin(homedir(), '.cliodeck-crash.log');
+
+function recordFatal(kind: 'uncaughtException' | 'unhandledRejection', err: unknown): void {
+  const stamp = new Date().toISOString();
+  const message =
+    err instanceof Error ? err.stack || err.message : typeof err === 'string' ? err : JSON.stringify(err);
+  const line = `\n=== ${stamp} ${kind} ===\n${message}\n`;
+  try { process.stderr.write(line); } catch { /* ignore */ }
+  try { appendFileSync(CRASH_LOG, line); } catch { /* ignore */ }
+}
+
+process.on('uncaughtException', (err) => recordFatal('uncaughtException', err));
+process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', reason));
+
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
