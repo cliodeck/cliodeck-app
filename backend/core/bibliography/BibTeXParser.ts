@@ -431,6 +431,12 @@ export class BibTeXParser {
       keywords: fields.keywords,
       notes: fields.note || fields.abstract,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      // Carry zoterokey through: ZoteroDiffEngine matches local↔remote
+      // citations by zoteroKey. Dropping it here made every remote item
+      // look new on the next sync (68 → 136 duplicate documents) and
+      // also prevented metadata from being re-merged after bibtex
+      // collisions on `id`.
+      zoteroKey: fields.zoterokey,
       dateAdded: fields.dateadded,
       dateModified: fields.datemodified,
     });

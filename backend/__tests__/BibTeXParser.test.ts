@@ -170,5 +170,35 @@ describe('BibTeXParser', () => {
 
       expect(citations[0].displayString).toBe('Anonymous Work');
     });
+
+    it('carries the zoterokey field into citation.zoteroKey', () => {
+      // Regression test: Zotero sync matches local↔remote citations by
+      // zoteroKey. If the parser drops it, every remote item looks new
+      // and the sync duplicates the whole corpus.
+      const bibtex = `
+@misc{Lester_1935,
+  author = {Lester, Sean},
+  title = {Diary - 13 November 1935},
+  year = {1935},
+  zoterokey = {45SMZJQK}
+}
+
+@misc{Lester_1935,
+  author = {Lester, Sean},
+  title = {Diary - 14 November 1935},
+  year = {1935},
+  zoterokey = {QRS88ABC}
+}
+      `;
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations).toHaveLength(2);
+      expect(citations[0].zoteroKey).toBe('45SMZJQK');
+      expect(citations[1].zoteroKey).toBe('QRS88ABC');
+      // The bibtexKey collides (both `Lester_1935`) — only zoteroKey
+      // tells them apart.
+      expect(citations[0].id).toBe(citations[1].id);
+    });
   });
 });
