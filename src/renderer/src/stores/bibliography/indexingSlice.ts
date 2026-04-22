@@ -174,9 +174,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
     const itemsWithFile = citations.filter((c) => c.file).length;
     if (itemsWithFile > citationsWithPDFs.length) {
+      const duplicates = itemsWithFile - citationsWithPDFs.length;
       console.log(
-        `📚 [indexing] ${citationsWithPDFs.length} unique PDFs to index ` +
-          `(from ${itemsWithFile} bibliography items — ${itemsWithFile - citationsWithPDFs.length} share a PDF with another item)`
+        `📚 [indexing] Deduped batch: ${duplicates} of ${itemsWithFile} items skipped — ` +
+          `their filePath is already queued by another item. ` +
+          `This usually means bibtexKey collision in the bibtex export or multiple Zotero items sharing a single attachment.`
       );
     }
 
