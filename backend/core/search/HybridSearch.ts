@@ -186,16 +186,31 @@ export class HybridSearch {
       console.log(`🎯 Hybrid search: Boosted ${boostedCount} chunks with exact keyword matches`);
     }
 
-    // Sort by RRF score and convert to SearchResult
+    // Sort by RRF score (drives ordering: the fusion's real contribution)
+    // and return `similarity` as the dense cosine score so downstream
+    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) still mean
+    // what they used to before the hybrid switch. Returning rrfScore here
+    // made everything look unrelated — a top-1 RRF score peaks near
+    // 1/(K+1) ≈ 0.016, well below any sensible cosine threshold, so every
+    // result got filtered out and the fallback kept the same top-3 for
+    // every query.
+    //
+    // Trade-off: chunks found only by BM25 (no dense hit in the top
+    // candidate pool) will have denseScore=0 and get filtered by the
+    // cosine threshold. That's usually right — if the dense index
+    // doesn't surface a chunk among 50+ candidates, it isn't a strong
+    // semantic match even if it has an exact keyword. sparseScore is
+    // still exposed for callers that want to see it.
     const fusedResults = Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
       .map((entry) => ({
         chunk: entry.chunk,
-        similarity: entry.rrfScore, // Use RRF score as similarity
+        similarity: entry.denseScore,
         document: null as any, // Will be populated later
         denseScore: entry.denseScore,
         sparseScore: entry.sparseScore,
+        rrfScore: entry.rrfScore,
         denseRank: entry.denseRank,
         sparseRank: entry.sparseRank,
       }));

@@ -1127,14 +1127,20 @@ export class PrimarySourcesVectorStore {
       console.log(`🎯 Primary sources: Boosted ${boostedCount} chunks with exact keyword matches`);
     }
 
-    // Sort by RRF score and convert to results
+    // Sort by RRF score (fusion's contribution to ordering) but expose
+    // the dense cosine as `similarity` so downstream threshold filtering
+    // (retrieval-service.ts, seuil ≈ 0.12) keeps its semantics. Returning
+    // rrfScore as similarity made every chunk look unrelated — top-1 RRF
+    // peaks near 1/(K+1) ≈ 0.016, far below any cosine threshold, so
+    // everything got filtered and the fallback served the same 3 results
+    // for every query. See HybridSearch.ts for the sibling fix.
     return Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
       .map(entry => ({
         chunk: entry.chunk,
         source: entry.source,
-        similarity: entry.rrfScore, // Use RRF score as similarity
+        similarity: entry.denseScore,
         sourceType: 'primary' as const,
       }));
   }
