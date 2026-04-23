@@ -19,6 +19,7 @@ import { MCPAccessLogger } from './logger.js';
 import type { MCPRuntimeConfig } from './config.js';
 import { registerSearchObsidian } from './tools/searchObsidian.js';
 import { registerSearchZotero } from './tools/searchZotero.js';
+import { registerSearchDocuments } from './tools/searchDocuments.js';
 import { registerSearchTropy } from './tools/searchTropy.js';
 import { registerGraphNeighbors } from './tools/graphNeighbors.js';
 import { registerEntityContext } from './tools/entityContext.js';
@@ -43,6 +44,7 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
 
   registerSearchObsidian(server, cfg, logger);
   registerSearchZotero(server, cfg, logger);
+  registerSearchDocuments(server, cfg, logger);
   registerSearchTropy(server, cfg, logger);
   registerGraphNeighbors(server, cfg, logger);
   registerEntityContext(server, cfg, logger);
@@ -52,7 +54,7 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
   console.error(`[ClioDeck MCP] Server created for workspace ${cfg.workspaceRoot}`);
   console.error(`[ClioDeck MCP] Audit log: ${cfg.paths.mcpAccessLog}`);
   console.error(
-    `[ClioDeck MCP] Tools: search_obsidian, search_zotero, search_tropy, graph_neighbors, entity_context, search_gallica`
+    `[ClioDeck MCP] Tools: search_obsidian, search_zotero, search_documents, search_tropy, graph_neighbors, entity_context, search_gallica`
   );
 
   return { server, logger };
