@@ -10,7 +10,6 @@ import {
   validate,
   StringPathSchema,
   StringContentSchema,
-  StringQuerySchema,
   BibliographyExportSchema,
   BibliographyExportStringSchema,
   BibliographyDetectOrphanPdfsSchema,
@@ -46,7 +45,10 @@ export function setupBibliographyHandlers() {
 
   ipcMain.handle('bibliography:search', async (_event, rawQuery: unknown) => {
     try {
-      const query = validate(StringQuerySchema, rawQuery);
+      // Accept an empty string: the renderer calls search('') as a
+      // "list all" shortcut (e.g. CitationStyleSection). The service
+      // itself handles the empty case by returning every citation.
+      const query = typeof rawQuery === 'string' ? rawQuery : '';
       const citations = bibliographyService.searchCitations(query);
       return successResponse({ citations });
     } catch (error: any) {
