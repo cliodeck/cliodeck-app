@@ -184,6 +184,20 @@ export class ObsidianVaultStore {
         `Embedding dimension mismatch: got ${embedding.length}, expected ${this.dimension}`
       );
     }
+    // Validate every float before writing — a NaN/Infinity slipping into
+    // the BLOB is harmless on insert but poisons any future cosine
+    // computation that reads it back, and in one observed case
+    // correlated with a SIGSEGV in the native binding on subsequent
+    // writes. Throwing here means the batch reports the chunk as
+    // failed instead of crashing the indexer for the whole vault.
+    for (let i = 0; i < embedding.length; i++) {
+      const v = embedding[i];
+      if (!Number.isFinite(v)) {
+        throw new Error(
+          `Embedding for chunk ${chunk.id} contains a non-finite value at index ${i} (${v}); refusing to persist.`
+        );
+      }
+    }
     this.db
       .prepare(
         `INSERT INTO chunks (id, note_id, chunk_index, content, section_title, start_position, end_position, embedding, dimension)

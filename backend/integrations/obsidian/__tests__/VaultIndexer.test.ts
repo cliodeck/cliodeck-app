@@ -170,4 +170,38 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
     const reason = report.skipped[0].reason;
     expect(reason.kind).toBe('oversized');
   });
+
+  it('rejects non-finite embeddings before writing to sqlite', async () => {
+    // Regression: a NaN or Infinity slipped through to the BLOB insert
+    // corrupted future reads and in one observed case preceded a
+    // SIGSEGV in the native binding. The store must refuse the write
+    // loud, not silently persist poison.
+    writeNote('A.md', '# A\nhello');
+
+    const reader = new ObsidianVaultReader(vault);
+    store = new ObsidianVaultStore({
+      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dimension: DIMENSION,
+    });
+
+    const nanEmbedder: EmbeddingProvider = {
+      ...fakeEmbedder(),
+      embed: async (texts) =>
+        texts.map(() => {
+          const v = new Array<number>(DIMENSION).fill(0.1);
+          v[3] = NaN;
+          return v;
+        }),
+    };
+    const indexer = new ObsidianVaultIndexer(reader, store, nanEmbedder);
+
+    const report = await indexer.indexAll();
+    expect(report.stats.failedCount).toBe(1);
+    expect(report.failed[0].reason.kind).toBe('io_error');
+    expect(
+      (report.failed[0].reason as { kind: 'io_error'; message: string }).message
+    ).toMatch(/non-finite/);
+    // Nothing from the poison batch should reach the table.
+    expect(store.stats().chunkCount).toBe(0);
+  });
 });
