@@ -1,7 +1,7 @@
 # Archive MCP connectors — design
 
-**Status**: Gallica shipped (end-to-end). Europeana scaffolded. Archives
-nationales + Transkribus at the design stage.
+**Status**: Gallica and HAL shipped (end-to-end). Europeana scaffolded.
+Archives nationales + Transkribus at the design stage.
 
 **Why**: a ClioDeck differentiator over "ChatGPT + Zotero" is built-in,
 authenticated access to the archives that historians actually use. These
@@ -26,7 +26,32 @@ shared audit log (`.cliodeck/v2/mcp-access.jsonl`).
   would be overkill for five Dublin Core fields.
 - Status: **built-in, enabled by default**.
 
-## 2. Europeana — scaffolded
+## 2. HAL (CNRS/CCSD) — shipped
+
+- Tool: `search_hal` in `backend/mcp-server/tools/searchHal.ts`
+- Endpoint: `https://api.archives-ouvertes.fr/search/`
+  (Solr over the HAL catalogue, JSON response, `wt=json`)
+- Auth: **none** (public)
+- Rate limit: not officially published; HAL tolerates interactive use.
+  Same rationale as Gallica — one model-driven call per turn, no
+  client-side throttle. Revisit if batch / recipe workflows appear.
+- Parser: native JSON, fixed field list via `fl=…`. A schema change
+  that drops a field fails closed (empty / null in the hit) rather
+  than crashing.
+- **Kind: secondary source.** Unlike Gallica (digitised primary
+  archives), HAL surfaces peer-reviewed scholarship *about* a topic:
+  articles, book chapters, theses, conference papers, reports. The
+  tool's MCP description labels this explicitly so the model picks
+  `search_gallica` for primary sources and `search_hal` for
+  literature review. The JSON payload returned to the model also
+  carries `"kind": "secondary"` for the same reason.
+- Filters: `dateFrom` / `dateTo` map to `producedDateY_i` (production
+  year, not submission year — the field a historian cares about);
+  `docType` maps to HAL's uppercase codes (`ART`, `COMM`, `THESE`,
+  `OUV`, `COUV`, `REPORT`…).
+- Status: **built-in, enabled by default**.
+
+## 3. Europeana — scaffolded
 
 - Tool: `search_europeana` in `backend/mcp-server/tools/searchEuropeana.ts`
   (not yet registered — waits on key-resolution plumbing)
@@ -40,7 +65,7 @@ shared audit log (`.cliodeck/v2/mcp-access.jsonl`).
   at registration time), surface a clear "missing key" error so the
   model can guide the user to Settings → Archives.
 
-## 3. Archives nationales (France) — research needed
+## 4. Archives nationales (France) — research needed
 
 The SIA (Système d'information archivistique) public search lives at
 <https://www.siv.archives-nationales.culture.gouv.fr>. As of 2026-04,
@@ -60,7 +85,7 @@ The SIA (Système d'information archivistique) public search lives at
 **Decision**: scaffold `search_francearchives` next (OpenSearch, no
 auth), and document SIA as a known gap rather than pretend we cover it.
 
-## 4. Transkribus — deferred
+## 5. Transkribus — deferred
 
 Transkribus is not a search API — it's an **HTR service**
 (handwritten-text recognition). The relevant flow is:
@@ -89,7 +114,7 @@ implementing.
 
 ---
 
-## 5. "Built-in connector" concept — pre-configuration
+## 6. "Built-in connector" concept — pre-configuration
 
 Current MCP client config (`WorkspaceConfig.mcpClients`) is
 user-authored: the historian writes command/url/env themselves. That
@@ -100,7 +125,7 @@ friction is wrong for the archives catalogue, which should feel curated.
 ```ts
 // backend/mcp-server/builtin-connectors.ts
 export interface BuiltinConnector {
-  id: 'gallica' | 'europeana' | 'francearchives' | 'transkribus';
+  id: 'gallica' | 'hal' | 'europeana' | 'francearchives' | 'transkribus';
   label: string;            // i18n key
   requiresApiKey: boolean;
   apiKeyStorageKey?: string; // for secureStorage
@@ -109,7 +134,7 @@ export interface BuiltinConnector {
 }
 ```
 
-- Gallica: `enabledByDefault: true`, `requiresApiKey: false`.
+- Gallica, HAL: `enabledByDefault: true`, `requiresApiKey: false`.
 - Europeana, Transkribus: `requiresApiKey: true`, off by default,
   enabled once the user saves a key in Settings → Archives.
 - FranceArchives: `enabledByDefault: true`, `requiresApiKey: false`.
@@ -140,7 +165,7 @@ New `ArchivesConfigSection.tsx` next to `LLMConfigSection.tsx`:
 
 ---
 
-## 6. Testing strategy
+## 7. Testing strategy
 
 - **Unit**: mock `fetch`, snapshot parsers on real (captured) API
   samples stored under `backend/mcp-server/__tests__/fixtures/`. Don't

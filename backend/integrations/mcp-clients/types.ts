@@ -2,7 +2,11 @@
  * MCP client types (fusion step 4.4 + 4.4.1bis).
  *
  * Typed state machine and event shapes for external MCP servers we
- * *consume* (Gallica, HAL, Isidore, Europeana, Transkribus, custom…).
+ * *consume* over stdio/SSE (third-party servers the historian installs
+ * and configures herself). Not to be confused with the built-in archive
+ * connectors (Gallica, HAL, Europeana, FranceArchives, Transkribus),
+ * which live inside *our own* MCP server as tools under
+ * `backend/mcp-server/tools/` — see `docs/archive-mcp-connectors.md`.
  * Mirrors the claw-code lesson 6.1: every long-lived component exposes
  * a typed state, never a boolean `connected`. Every transition is
  * emitted as a typed event, never scraped from logs (lesson 6.2).

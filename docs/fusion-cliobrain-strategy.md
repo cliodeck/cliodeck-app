@@ -67,7 +67,8 @@ ClioDeck reste le produit. On y absorbe ClioBrain comme **un mode de travail** (
 ### Phase 3 — MCP à double sens
 
 - **Serveur MCP** (héritage ClioBrain) : corpus local → Claude Desktop/Code.
-- **Client MCP** (leçon goose) : ClioDeck consomme serveurs MCP externes (Gallica, HAL, Isidore, Europeana, Transkribus). Pattern `extension_manager` goose.
+- **Client MCP** (leçon goose) : ClioDeck consomme des serveurs MCP tiers configurés par l'utilisateur (stdio/SSE). Pattern `extension_manager` goose.
+- **Connecteurs d'archives intégrés** : Gallica, Europeana, FranceArchives, Transkribus, HAL — exposés comme *outils* de notre propre serveur MCP (`backend/mcp-server/tools/`), pas comme serveurs MCP externes. Voir `docs/archive-mcp-connectors.md`.
 
 ## Architecture cible
 
