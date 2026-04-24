@@ -1,6 +1,13 @@
 import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import ForceGraph2D from 'react-force-graph-2d';
+// react-force-graph-2d's ForceGraphProps is generic and its d.ts resolves to
+// a shape we'd have to mirror exhaustively for every prop. Casting the
+// imported component to `any` here preserves call-site type-checking for
+// our own GraphNode/GraphEdge handlers (already annotated) without forcing
+// a structural match with the library's internal `LinkObject<…>` wrapper.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import ForceGraph2DImpl from 'react-force-graph-2d';
+const ForceGraph2D = ForceGraph2DImpl as unknown as React.FC<Record<string, unknown>>;
 import { CollapsibleSection } from '../common/CollapsibleSection';
 
 // Heavy, recharts-based sub-panels — defer until the user scrolls to them.

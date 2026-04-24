@@ -4,6 +4,7 @@ import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { replaceAll } from '@milkdown/utils';
+import { Selection } from 'prosemirror-state';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -158,7 +159,9 @@ export const MilkdownEditor: React.FC = () => {
     };
 
     const cleanup = window.electron.editor.onInsertText(handler);
-    return cleanup;
+    return () => {
+      cleanup();
+    };
   }, [safeEditorAction]);
 
   // Handle citation autocomplete detection (only citations, not footnotes)
@@ -282,7 +285,7 @@ export const MilkdownEditor: React.FC = () => {
           if (targetPos > 0) {
             // Position cursor at the end of the footnote definition
             const $pos = state.doc.resolve(targetPos);
-            const selection = state.selection.constructor.near($pos);
+            const selection = Selection.near($pos);
 
             const tr = state.tr.setSelection(selection);
             view.dispatch(tr);
@@ -346,11 +349,6 @@ export const MilkdownEditor: React.FC = () => {
         // Extract footnote number from the element text content
         const footnoteNum = footnoteRef.textContent?.trim();
         if (!footnoteNum) return;
-
-        // Find the corresponding footnote definition
-        const footnoteDefinition = container.querySelector(
-          `dl[data-type="footnote_definition"] dt`
-        );
 
         // Look through all footnote definitions to find the matching one
         const allDefinitions = container.querySelectorAll('dl[data-type="footnote_definition"]');

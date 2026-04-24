@@ -46,7 +46,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
   );
 
   const renderFeatureDetail = (featureKey: string) => {
-    const feature = features[featureKey];
+    const feature = features[featureKey as keyof typeof features];
     if (!feature) return null;
 
     return (

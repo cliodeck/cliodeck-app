@@ -12,7 +12,7 @@ export const logger = {
     console.log(`[${componentName}] ${action}`, ...args);
   },
 
-  error: (context: string, error: any) => {
-    console.error(`[ERROR:${context}]`, error);
+  error: (context: string, messageOrError: unknown, ...args: unknown[]) => {
+    console.error(`[ERROR:${context}]`, messageOrError, ...args);
   },
 };

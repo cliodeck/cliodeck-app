@@ -152,9 +152,11 @@ export const ConfigPanel: React.FC = () => {
   });
 
   const [zoteroConfig, setZoteroConfig] = useState<ZoteroConfig>({
+    mode: 'api',
     userId: '',
     apiKey: '',
     autoSync: false,
+    dataDirectory: '',
   });
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);

@@ -246,6 +246,13 @@ const api = {
       content: string;
       outputPath?: string;
       bibliographyPath?: string;
+      cslPath?: string;
+      beamerConfig?: unknown;
+      citation?: {
+        useEngine?: boolean;
+        style?: string;
+        locale?: string;
+      };
       metadata?: {
         title?: string;
         author?: string;
@@ -269,6 +276,11 @@ const api = {
       bibliographyPath?: string;
       cslPath?: string;
       templatePath?: string;
+      citation?: {
+        useEngine?: boolean;
+        style?: string;
+        locale?: string;
+      };
       metadata?: {
         title?: string;
         author?: string;

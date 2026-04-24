@@ -5,7 +5,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import React from 'react';
 
 // Mock heavy inner panels — we only care about mount + store projection.
 vi.mock('../../Chat/ModeSelector', () => ({

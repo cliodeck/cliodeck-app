@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
+import type { editor, Position } from 'monaco-editor';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -96,7 +96,7 @@ export const MarkdownEditor: React.FC = () => {
 
     // Add custom citation autocomplete
     monaco.languages.registerCompletionItemProvider('markdown', {
-      provideCompletionItems: (model, position) => {
+      provideCompletionItems: (model: editor.ITextModel, position: Position) => {
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,

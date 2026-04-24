@@ -11,6 +11,10 @@ export interface Project {
   lastOpenedAt: Date;
   defaultEditor?: 'wysiwyg' | 'source';
   cslPath?: string;
+  // Resolved absolute path to the bibliography file, derived from
+  // `bibliographySource` by `project-manager.ts` at load time. Optional
+  // because older / freshly-created projects may not have one yet.
+  bibliography?: string;
 }
 
 export interface Chapter {

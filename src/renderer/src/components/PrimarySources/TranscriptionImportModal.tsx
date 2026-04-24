@@ -74,7 +74,9 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
 
   const handleDirectoryImport = async () => {
     try {
-      const result = await window.electron.dialog.openDirectory();
+      const result = await window.electron.dialog.openFile({
+        properties: ['openDirectory'],
+      });
 
       if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
         setIsImporting(true);

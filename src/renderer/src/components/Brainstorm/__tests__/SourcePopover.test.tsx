@@ -4,23 +4,21 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { SourcePopover, positionLabel } from '../SourcePopover';
 import type { BrainstormSource } from '../../../stores/chatStore';
 
-interface ElectronWindow extends Window {
-  electron?: {
-    sources?: {
-      openPdf: ReturnType<typeof vi.fn>;
-      revealTropy: ReturnType<typeof vi.fn>;
-      openNote: ReturnType<typeof vi.fn>;
-    };
-  };
-}
+type MockSourcesApi = {
+  openPdf: ReturnType<typeof vi.fn>;
+  revealTropy: ReturnType<typeof vi.fn>;
+  openNote: ReturnType<typeof vi.fn>;
+};
 
-function installApi(): ElectronWindow['electron']['sources'] {
-  const api = {
+function installApi(): MockSourcesApi {
+  const api: MockSourcesApi = {
     openPdf: vi.fn().mockResolvedValue({ success: true }),
     revealTropy: vi.fn().mockResolvedValue({ success: true }),
     openNote: vi.fn().mockResolvedValue({ success: true }),
   };
-  (window as unknown as ElectronWindow).electron = { sources: api };
+  (window as unknown as { electron: { sources: MockSourcesApi } }).electron = {
+    sources: api,
+  };
   return api;
 }
 
@@ -32,7 +30,7 @@ const base: Omit<BrainstormSource, 'sourceType' | 'kind'> = {
 
 describe('SourcePopover', () => {
   beforeEach(() => {
-    (window as unknown as ElectronWindow).electron = undefined;
+    (window as unknown as { electron: unknown }).electron = undefined;
   });
   afterEach(() => cleanup());
 

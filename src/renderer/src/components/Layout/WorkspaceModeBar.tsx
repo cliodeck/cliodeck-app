@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Lightbulb, Pen, BarChart3, Share2 } from 'lucide-react';
+import { Lightbulb, Pen, BarChart3, Share2, type LucideIcon } from 'lucide-react';
 import {
   useWorkspaceModeStore,
   WORKSPACE_MODES,
@@ -20,7 +20,7 @@ import {
 } from '../../stores/workspaceModeStore';
 import './WorkspaceModeBar.css';
 
-const ICONS: Record<WorkspaceMode, React.ComponentType<{ size?: number }>> = {
+const ICONS: Record<WorkspaceMode, LucideIcon> = {
   brainstorm: Lightbulb,
   write: Pen,
   analyze: BarChart3,

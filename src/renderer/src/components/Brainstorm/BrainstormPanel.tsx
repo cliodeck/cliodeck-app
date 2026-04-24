@@ -41,29 +41,6 @@ interface VaultStatus {
   dbPath: string;
 }
 
-// Minimal typing of the new fusion API on window.electron — keeps the
-// scaffold self-contained until a global ambient declaration is added.
-type FusionApi = {
-  hints: { read(): Promise<{ success: boolean; hints?: HintsState; error?: string }> };
-  recipes: {
-    list(): Promise<{
-      success: boolean;
-      builtin?: RecipeSummary[];
-      user?: RecipeSummary[];
-      error?: string;
-    }>;
-  };
-  vault: {
-    status(): Promise<{ success: boolean; indexed?: boolean; dbPath?: string; error?: string }>;
-  };
-};
-
-declare global {
-  interface Window {
-    electron: { fusion?: FusionApi } & Window['electron'];
-  }
-}
-
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
 export const BrainstormPanel: React.FC = () => {

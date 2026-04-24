@@ -10,7 +10,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 
 // Heavy siblings — silence for the round-trip under test.
 vi.mock('../../Chat/RAGSettingsPanel', () => ({ RAGSettingsPanel: () => null }));

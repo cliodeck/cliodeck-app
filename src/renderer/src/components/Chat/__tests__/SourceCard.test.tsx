@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { SourceCard } from '../SourceCard';
 import type { ChatSource } from '../../../stores/chatStore';
 import type { UnifiedSource } from '../../../../../../backend/types/chat-source';

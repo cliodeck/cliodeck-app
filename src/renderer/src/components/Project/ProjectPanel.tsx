@@ -5,7 +5,6 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
-import { BeamerConfig } from './BeamerConfig';
 import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';

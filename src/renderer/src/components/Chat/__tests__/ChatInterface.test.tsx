@@ -8,7 +8,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 
 // Silence the RAGSettingsPanel — it pulls heavy stores we don't need here.
 vi.mock('../RAGSettingsPanel', () => ({

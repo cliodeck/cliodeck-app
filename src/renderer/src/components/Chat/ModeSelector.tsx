@@ -11,13 +11,14 @@ import {
   Compass,
   Lightbulb,
   Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
 import { useModeStore } from '../../stores/modeStore';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import type { ModeCategory } from '../../../../../backend/types/mode';
 import './ModeSelector.css';
 
-const ICON_MAP: Record<string, React.FC<{ size?: number }>> = {
+const ICON_MAP: Record<string, LucideIcon> = {
   MessageSquare,
   BookOpen,
   FileSearch,
@@ -39,7 +40,7 @@ const CATEGORIES: Array<ModeCategory | 'all'> = [
 ];
 
 export const ModeSelector: React.FC = () => {
-  const { t, i18n } = useTranslation('common');
+  const { i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
   const {
     modes,

@@ -6,6 +6,7 @@ import React from 'react';
 import { FallbackProps } from 'react-error-boundary';
 
 export const ErrorFallback: React.FC<FallbackProps> = ({ error, resetErrorBoundary }) => {
+  const err = error instanceof Error ? error : new Error(String(error));
   return (
     <div
       role="alert"
@@ -54,8 +55,8 @@ export const ErrorFallback: React.FC<FallbackProps> = ({ error, resetErrorBounda
               color: '#dc3545',
             }}
           >
-            {error.message}
-            {error.stack && '\n\n' + error.stack}
+            {err.message}
+            {err.stack && '\n\n' + err.stack}
           </pre>
         </details>
         <button

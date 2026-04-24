@@ -276,7 +276,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           console.log('📦 Ollama API response:', result);
 
           if (result.success && result.models) {
-            console.log(`📋 All models from Ollama (${result.models.length}):`, result.models.map(m => m.id));
+            console.log(`📋 All models from Ollama (${result.models.length}):`, result.models.map((m: AvailableModel) => m.id));
 
             // Filter only chat models (exclude embedding models)
             const chatModels = result.models.filter(
@@ -284,7 +284,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
                 !model.id.includes('embed') && !model.id.includes('embedding')
             );
 
-            console.log(`✅ Chat models after filtering (${chatModels.length}):`, chatModels.map(m => m.id));
+            console.log(`✅ Chat models after filtering (${chatModels.length}):`, chatModels.map((m: AvailableModel) => m.id));
 
             set({
               availableModels: chatModels,

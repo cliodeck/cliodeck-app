@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { ChatSurface } from '../ChatSurface';
 import type { UnifiedMessage } from '../types';
 

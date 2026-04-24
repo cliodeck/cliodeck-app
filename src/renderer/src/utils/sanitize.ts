@@ -1,4 +1,4 @@
-import DOMPurify from 'dompurify';
+import DOMPurify, { type Config } from 'dompurify';
 
 /**
  * Force `rel="noopener noreferrer"` on any <a target="_blank"> that survives
@@ -19,7 +19,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * DOMPurify configuration for chat messages (assistant responses).
  * Allows standard markdown-generated HTML tags but strips scripts and event handlers.
  */
-const CHAT_PURIFY_CONFIG: DOMPurify.Config = {
+const CHAT_PURIFY_CONFIG: Config = {
   ALLOWED_TAGS: [
     'p', 'br', 'strong', 'em', 'b', 'i', 'u',
     'ul', 'ol', 'li',
@@ -38,7 +38,7 @@ const CHAT_PURIFY_CONFIG: DOMPurify.Config = {
  * DOMPurify configuration for markdown preview (editor content).
  * Slightly more permissive to allow images in user content.
  */
-const PREVIEW_PURIFY_CONFIG: DOMPurify.Config = {
+const PREVIEW_PURIFY_CONFIG: Config = {
   ALLOWED_TAGS: [
     ...CHAT_PURIFY_CONFIG.ALLOWED_TAGS!,
     'img',

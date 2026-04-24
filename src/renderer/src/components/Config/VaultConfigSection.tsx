@@ -41,16 +41,17 @@ function vaultApi(): VaultApi | null {
   );
 }
 
-function dialogApi(): {
+type DialogApi = {
   openFile(opts: {
     properties?: string[];
     title?: string;
   }): Promise<{ canceled: boolean; filePaths?: string[] }>;
-} | null {
+};
+
+function dialogApi(): DialogApi | null {
   return (
-    (window as unknown as {
-      electron?: { dialog?: ReturnType<() => typeof dialogApi> extends infer T ? NonNullable<T> : never };
-    }).electron?.dialog ?? null
+    (window as unknown as { electron?: { dialog?: DialogApi } }).electron
+      ?.dialog ?? null
   );
 }
 
