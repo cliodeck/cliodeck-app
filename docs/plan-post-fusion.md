@@ -132,11 +132,11 @@ Les gaps du plan `fusion-cliobrain-implementation-plan.md` qui étaient marqués
 |---|---|---|---|---|
 | 1.1 | Sécurité | L | ✅ Upgrade Electron 28 → 40.9.2 (commits `e6ee7d7` + `414f188`) ; rebuilds natifs validés (better-sqlite3 12, hnswlib-node 3, canvas 3 via overrides) ; CVE HIGH+ Electron purgées | Fait |
 | 1.2 | Backend | M | ✅ Step 1.4 finalisé : `OllamaClient.ts` (1104 LOC) + `LLMProviderManager.ts` (532 LOC) + bridge.ts supprimés ; tous les consommateurs (similarity, slides, retrieval, tropy, NER, summarizer, pdf, config-handlers) sur `ProviderRegistry` typé. Polling redondant de `/api/tags` éliminé | Fait |
-| 1.3 | Backend | M | Câbler `ContextCompactor` dans `chat-engine.ts` (phase `compressing` déjà réservée) | Oui — décider contextes par modèle ([A6](actions-frederic.md#a6)) |
+| 1.3 | Backend | M | ✅ `ContextCompactor` câblé dans `chat-engine.ts` ; table `getContextWindow(model)` couvre Claude/GPT/Mistral/Gemini/Llama/Qwen/Gemma/Phi (commit `30a137c`) | Fait |
 | 1.4 | Frontend | M | i18n sur les 5 sections fusion (Vault / Hints / Recipes / MCP / RecipeRunModal) + audit parité sémantique `common.json` FR/EN | Oui — valider traductions EN ([A7](actions-frederic.md#a7)) |
 | 1.5 | Sécurité | M | Router `mcpClients[].env[*]` vers `secureStorage` — migrer workspaces existants | Oui — OK pour migration au prochain `loadProject` ([A8](actions-frederic.md#a8)) |
 | 1.6 | Sécurité | L | Remplacer puppeteer par `webContents.printToPDF` offscreen (supprime ~400 MB dep + 2ᵉ surface Chromium) | Non |
-| 1.7 | Backend | M | Retour typé `{ ok, skipped, failed }` pour `retrieval-service.search` — partial success first-class (principe 6.3) | Non |
+| 1.7 | Backend | M | ✅ Enveloppe typée `{ hits, outcomes }` pour `retrievalService.search` — partial-success first-class (principe 6.3) ; facade `pdf-service` préserve la forme aplatie pour l'IPC `pdf:search` (commit `31958a9`) | Fait |
 | 1.8 | Backend | M | Capability tool-use par modèle pour Ollama (whitelist `qwen2.5`, `llama3.1`, `mistral-nemo`, …) | Oui — tester quels modèles tiennent ([A9](actions-frederic.md#a9)) |
 | 1.9 | Backend | M | Tests pour `backend/mcp-server/tools/` (9 fichiers exposés, 0 test) | Non |
 
