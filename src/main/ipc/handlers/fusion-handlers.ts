@@ -23,6 +23,8 @@ import {
 import { projectManager } from '../../services/project-manager.js';
 import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
+import { retrievalService } from '../../services/retrieval-service.js';
+import { secureStorage } from '../../services/secure-storage.js';
 import {
   loadWorkspaceHints,
   writeWorkspaceHints,
@@ -548,6 +550,79 @@ export function setupFusionHandlers(): void {
         store.close();
         await registry.dispose().catch(() => undefined);
       }
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  // MARK: - security (SourceInspector mode)
+
+  ipcMain.handle('fusion:security:get-mode', async () => {
+    return successResponse({ mode: retrievalService.getInspectorMode() });
+  });
+
+  // MARK: - archives connectors (Europeana key)
+
+  ipcMain.handle('fusion:archives:get-status', async () => {
+    return successResponse({
+      connectors: {
+        europeana: {
+          configured: secureStorage.hasKey('mcp.europeana.apiKey'),
+        },
+      },
+    });
+  });
+
+  ipcMain.handle(
+    'fusion:archives:set-key',
+    async (_e, rawConnector: unknown, rawKey: unknown) => {
+      if (rawConnector !== 'europeana') {
+        return errorResponse(`unknown connector: ${String(rawConnector)}`);
+      }
+      if (typeof rawKey !== 'string' || !rawKey.trim()) {
+        return errorResponse('key must be a non-empty string');
+      }
+      try {
+        secureStorage.setKey('mcp.europeana.apiKey', rawKey.trim());
+        // Mirror to env so the in-process MCP server (when spawned by us)
+        // sees the key without a restart. Third-party MCP clients still
+        // need to set the env var in their own config.
+        process.env.EUROPEANA_API_KEY = rawKey.trim();
+        return successResponse({ connector: 'europeana' });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    'fusion:archives:delete-key',
+    async (_e, rawConnector: unknown) => {
+      if (rawConnector !== 'europeana') {
+        return errorResponse(`unknown connector: ${String(rawConnector)}`);
+      }
+      try {
+        secureStorage.deleteKey('mcp.europeana.apiKey');
+        delete process.env.EUROPEANA_API_KEY;
+        return successResponse({ connector: 'europeana' });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
+  ipcMain.handle('fusion:security:set-mode', async (_e, rawMode: unknown) => {
+    if (rawMode !== 'warn' && rawMode !== 'audit' && rawMode !== 'block') {
+      return errorResponse('mode must be "warn" | "audit" | "block"');
+    }
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      cfg.security = { ...(cfg.security ?? {}), sourceInspectorMode: rawMode };
+      await writeWorkspaceConfig(root, cfg);
+      retrievalService.setInspectorMode(rawMode);
+      return successResponse({ mode: rawMode });
     } catch (e) {
       return errorResponse(e as Error);
     }

@@ -43,8 +43,9 @@ export type SecurityEvent =
       kind: 'prompt_injection_blocked';
       source: SourceId;
       chunkId: string;
-      mode: 'warn' | 'block';
+      mode: 'warn' | 'audit' | 'block';
       pattern: string;
+      severity: SecuritySeverity;
       at: string;
     };
 

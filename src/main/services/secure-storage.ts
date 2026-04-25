@@ -15,7 +15,10 @@ import { safeStorage } from 'electron';
 export const SENSITIVE_KEYS = [
   'llm.claudeAPIKey',
   'llm.openaiAPIKey',
+  'llm.mistralAPIKey',
+  'llm.geminiAPIKey',
   'zotero.apiKey',
+  'mcp.europeana.apiKey',
 ] as const;
 
 export type SensitiveKeyName = (typeof SENSITIVE_KEYS)[number];

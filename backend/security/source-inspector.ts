@@ -2,11 +2,15 @@
  * SourceInspector (fusion step 4.5).
  *
  * Scans RAG chunks BEFORE they reach the prompt for adversarial patterns
- * (prompt injection attempts, suspicious URLs, unusual encodings). Two
- * action modes:
- *   - `warn`: emits a `SecurityEvent`; chunk passes through.
- *   - `block`: emits a `prompt_injection_blocked` event AND drops the
- *     chunk from the inspected batch.
+ * (prompt injection attempts, suspicious URLs, unusual encodings). Three
+ * action modes — picked deliberately to balance researcher autonomy
+ * against silent risk:
+ *   - `warn`: emits a `SecurityEvent`; never drops a chunk.
+ *   - `audit`: emits events; drops only chunks with a `high`-severity
+ *     suspicious instruction (the "blocking strict" historical default).
+ *   - `block`: emits events; drops chunks with a `high` *or* `medium`
+ *     severity suspicious instruction. Opt-in for advanced users who
+ *     prefer false-positive cost over false-negative cost.
  *
  * Pattern set is intentionally conservative — historical primary sources
  * legitimately contain imperative speech ("ignore everything you knew
@@ -23,7 +27,9 @@
 import type { SecurityEvent, SecuritySeverity } from './events.js';
 import type { SourceId } from '../types/source.js';
 
-export type InspectorMode = 'warn' | 'block';
+export type InspectorMode = 'warn' | 'audit' | 'block';
+
+export const DEFAULT_INSPECTOR_MODE: InspectorMode = 'warn';
 
 export interface InspectableChunk {
   id: string;
@@ -126,20 +132,16 @@ export class SourceInspector {
       result.events.push(...events);
       for (const e of events) this.emit(e);
 
-      const hasInjection = events.some(
-        (e) => e.kind === 'suspicious_instruction' && e.severity === 'high'
-      );
+      const triggering = this.findBlockingEvent(events);
 
-      if (hasInjection && this.mode === 'block') {
+      if (triggering) {
         const blockEvent: SecurityEvent = {
           kind: 'prompt_injection_blocked',
           source: chunk.source,
           chunkId: chunk.id,
-          mode: 'block',
-          pattern:
-            (events.find((e) => e.kind === 'suspicious_instruction') as
-              | Extract<SecurityEvent, { kind: 'suspicious_instruction' }>
-              | undefined)?.pattern ?? 'unknown',
+          mode: this.mode,
+          pattern: triggering.pattern,
+          severity: triggering.severity,
           at: now(),
         };
         result.events.push(blockEvent);
@@ -151,6 +153,32 @@ export class SourceInspector {
     }
 
     return result;
+  }
+
+  /**
+   * Decide whether to block this chunk. Returns the first
+   * suspicious_instruction event that crosses the threshold for the
+   * current mode, or `null` if the chunk should pass.
+   *
+   * - `warn`   never blocks (returns null).
+   * - `audit`  blocks on `high` only.
+   * - `block`  blocks on `high` *or* `medium`.
+   */
+  private findBlockingEvent(
+    events: SecurityEvent[]
+  ): Extract<SecurityEvent, { kind: 'suspicious_instruction' }> | null {
+    if (this.mode === 'warn') return null;
+    const allowedSeverities: SecuritySeverity[] =
+      this.mode === 'audit' ? ['high'] : ['high', 'medium'];
+    for (const e of events) {
+      if (
+        e.kind === 'suspicious_instruction' &&
+        allowedSeverities.includes(e.severity)
+      ) {
+        return e;
+      }
+    }
+    return null;
   }
 
   private scan(chunk: InspectableChunk): SecurityEvent[] {

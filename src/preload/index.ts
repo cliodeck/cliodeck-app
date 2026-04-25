@@ -731,6 +731,40 @@ const api = {
         return () => ipcRenderer.removeListener('fusion:vault:progress', listener);
       },
     },
+    security: {
+      getMode: () =>
+        ipcRenderer.invoke('fusion:security:get-mode') as Promise<{
+          success: boolean;
+          mode?: 'warn' | 'audit' | 'block';
+          error?: string;
+        }>,
+      setMode: (mode: 'warn' | 'audit' | 'block') =>
+        ipcRenderer.invoke('fusion:security:set-mode', mode) as Promise<{
+          success: boolean;
+          mode?: 'warn' | 'audit' | 'block';
+          error?: string;
+        }>,
+    },
+    archives: {
+      getStatus: () =>
+        ipcRenderer.invoke('fusion:archives:get-status') as Promise<{
+          success: boolean;
+          connectors?: { europeana: { configured: boolean } };
+          error?: string;
+        }>,
+      setKey: (connector: 'europeana', key: string) =>
+        ipcRenderer.invoke('fusion:archives:set-key', connector, key) as Promise<{
+          success: boolean;
+          connector?: string;
+          error?: string;
+        }>,
+      deleteKey: (connector: 'europeana') =>
+        ipcRenderer.invoke('fusion:archives:delete-key', connector) as Promise<{
+          success: boolean;
+          connector?: string;
+          error?: string;
+        }>,
+    },
     chat: {
       start: (
         messages: unknown[],

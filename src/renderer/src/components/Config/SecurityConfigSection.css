@@ -1,0 +1,65 @@
+.security-help-trigger {
+  margin-left: 0.4rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.security-help-trigger:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.security-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.security-mode-card {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 0.5rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--bg-panel);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.security-mode-card:hover {
+  border-color: var(--color-accent);
+}
+
+.security-mode-card.is-active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--bg-panel));
+}
+
+.security-mode-card input[type='radio'] {
+  margin: 0;
+}
+
+.security-mode-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.security-mode-blurb {
+  grid-column: 3;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}

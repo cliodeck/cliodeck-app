@@ -1,7 +1,7 @@
 # Archive MCP connectors — design
 
-**Status**: Gallica and HAL shipped (end-to-end). Europeana scaffolded.
-Archives nationales + Transkribus at the design stage.
+**Status**: Gallica, HAL, and Europeana shipped (end-to-end). Archives
+nationales + Transkribus at the design stage.
 
 **Why**: a ClioDeck differentiator over "ChatGPT + Zotero" is built-in,
 authenticated access to the archives that historians actually use. These
@@ -51,19 +51,39 @@ shared audit log (`.cliodeck/v2/mcp-access.jsonl`).
   `OUV`, `COUV`, `REPORT`…).
 - Status: **built-in, enabled by default**.
 
-## 3. Europeana — scaffolded
+## 3. Europeana — shipped
 
 - Tool: `search_europeana` in `backend/mcp-server/tools/searchEuropeana.ts`
-  (not yet registered — waits on key-resolution plumbing)
 - Endpoint: `https://api.europeana.eu/record/v2/search.json`
 - Auth: free API key (`wskey=…`), one per user, obtainable at
   <https://pro.europeana.eu/pages/get-api>
 - Rate limit: 10 req/s per key (unofficial; Europeana throttles but
-  rarely publishes limits)
-- Payload is already JSON — no XML parsing.
-- TODO: resolve API key from `secureStorage` at tool-call time (not
-  at registration time), surface a clear "missing key" error so the
-  model can guide the user to Settings → Archives.
+  rarely publishes limits).
+- Payload is JSON — no XML parsing.
+- **Key plumbing — two paths**:
+  1. **In-app spawned MCP server** (Brainstorm tool-use, future): the user
+     stores the key once in *Settings → Archives*, encrypted via Electron
+     `safeStorage` under the entry `mcp.europeana.apiKey`. At app startup,
+     the main process propagates it into `process.env.EUROPEANA_API_KEY`
+     so any MCP server child inherits it. The tool reads
+     `process.env.EUROPEANA_API_KEY` *at call time* — the user can rotate
+     or unset without restarting the server.
+  2. **Third-party MCP client** (Claude Desktop, Cursor): the client spawns
+     `bin/cliodeck-mcp` with its own env. The user must add
+     `EUROPEANA_API_KEY` to that client's MCP config. Example for Claude
+     Desktop:
+     ```json
+     {
+       "mcpServers": {
+         "cliodeck": {
+           "command": "/path/to/cliodeck/bin/cliodeck-mcp",
+           "env": { "EUROPEANA_API_KEY": "wskey-…" }
+         }
+       }
+     }
+     ```
+- Status: **built-in, opt-in via key entry**. The MCP description tells
+  the model to ask the user when the key is missing — no silent failure.
 
 ## 4. Archives nationales (France) — research needed
 

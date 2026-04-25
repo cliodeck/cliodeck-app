@@ -28,6 +28,15 @@ import { ObsidianVaultStore } from '../../../backend/integrations/obsidian/Obsid
 import { obsidianStorePath } from '../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
+import {
+  SourceInspector,
+  DEFAULT_INSPECTOR_MODE,
+  appendSecurityEvent,
+  type InspectableChunk,
+  type InspectorMode,
+} from '../../../backend/security/source-inspector.js';
+import { v2Paths } from '../../../backend/core/workspace/layout.js';
+import { readWorkspaceConfig } from '../../../backend/core/workspace/config.js';
 
 /**
  * Hot-path logging gate. The retrieval pipeline emits a high volume of
@@ -184,6 +193,28 @@ function expandQueryMultilingual(query: string): string[] {
   return queries;
 }
 
+/**
+ * Map a retrieved chunk onto the SourceInspector input shape. The
+ * `source` field is purely informational for the audit log — we encode
+ * the kind so post-hoc analysis can spot patterns ("most blocks are on
+ * vault notes" → vault is the noisy source).
+ */
+function toInspectable(r: MultiSourceSearchResult): InspectableChunk {
+  let source: string;
+  if (r.sourceType === 'primary') {
+    source = `tropy:${r.document.id ?? 'unknown'}`;
+  } else if (r.sourceType === 'vault') {
+    source = `obsidian:${r.source.noteId}`;
+  } else {
+    source = `pdf:${r.document.id ?? r.document.bibtexKey ?? 'unknown'}`;
+  }
+  return {
+    id: r.chunk.id,
+    source,
+    content: r.chunk.content,
+  };
+}
+
 /** Mean-pool a non-empty list of embeddings into a single vector. */
 function meanPoolEmbeddings(embeddings: Float32Array[]): Float32Array {
   const dim = embeddings[0].length;
@@ -202,6 +233,13 @@ class RetrievalService {
   private workspaceRoot: string | null = null;
   private vaultStore: ObsidianVaultStore | null = null;
   private warmupStarted = false;
+  /**
+   * Cached inspector mode for the current workspace. Refreshed on
+   * `configure()` and on explicit `setInspectorMode()` calls (the IPC
+   * handler for SecurityConfigSection writes through this method *and*
+   * to disk so both sides stay in sync without file I/O per query).
+   */
+  private inspectorMode: InspectorMode = DEFAULT_INSPECTOR_MODE;
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
@@ -230,6 +268,41 @@ class RetrievalService {
       this.warmupStarted = true;
       void this.warmupDictionaryEmbeddings();
     }
+
+    // Refresh the inspector mode for the new workspace. Best-effort —
+    // a missing or unreadable config falls back to `warn`.
+    void this.refreshInspectorMode();
+  }
+
+  private async refreshInspectorMode(): Promise<void> {
+    if (!this.workspaceRoot) {
+      this.inspectorMode = DEFAULT_INSPECTOR_MODE;
+      return;
+    }
+    try {
+      const cfg = await readWorkspaceConfig(this.workspaceRoot);
+      const m = cfg.security?.sourceInspectorMode;
+      this.inspectorMode = m ?? DEFAULT_INSPECTOR_MODE;
+    } catch {
+      this.inspectorMode = DEFAULT_INSPECTOR_MODE;
+    }
+  }
+
+  /**
+   * Public getter for the IPC handler `fusion:security:get-mode`.
+   */
+  getInspectorMode(): InspectorMode {
+    return this.inspectorMode;
+  }
+
+  /**
+   * Public setter — used by the IPC handler `fusion:security:set-mode`
+   * after the SecurityConfigSection radio changes. Caller is responsible
+   * for persisting to `workspace.config.json`; this method just updates
+   * the in-memory cache.
+   */
+  setInspectorMode(mode: InspectorMode): void {
+    this.inspectorMode = mode;
   }
 
   clear(): void {
@@ -467,16 +540,54 @@ class RetrievalService {
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
 
+    // Run the inspector before returning chunks to the caller. In `warn`
+    // mode this is a logging side-effect; in `audit`/`block` it filters
+    // chunks the inspector deems unsafe.
+    const inspectedResults = this.inspectAndFilter(sortedResults);
+
     if (DEBUG) {
       console.log(
-        `🔍 [PDF-SERVICE] Final combined results: ${sortedResults.length} (from ${allSourceResults.length} total)`
+        `🔍 [PDF-SERVICE] Final combined results: ${inspectedResults.length} (from ${allSourceResults.length} total, ${sortedResults.length - inspectedResults.length} blocked by inspector)`
       );
       console.log(
         `🔍 [PDF-SERVICE] Total search duration: ${Date.now() - searchStart}ms`
       );
     }
 
-    return sortedResults;
+    return inspectedResults;
+  }
+
+  /**
+   * Pass each retrieved chunk through the SourceInspector. Events are
+   * appended to `.cliodeck/v2/security-events.jsonl` (best-effort —
+   * persistence failures must not break retrieval). In `warn` mode the
+   * input list is returned unchanged; in `audit`/`block` mode chunks
+   * flagged as injection attempts are filtered out.
+   */
+  private inspectAndFilter(
+    results: MultiSourceSearchResult[]
+  ): MultiSourceSearchResult[] {
+    if (results.length === 0) return results;
+    const logPath = this.workspaceRoot
+      ? v2Paths(this.workspaceRoot).securityEventsLog
+      : null;
+    const inspector = new SourceInspector({
+      mode: this.inspectorMode,
+      onEvent: logPath
+        ? (e) => {
+            void appendSecurityEvent(logPath, e).catch((err) => {
+              console.warn('[retrieval] security event log failed:', err);
+            });
+          }
+        : undefined,
+    });
+    const inspectables: InspectableChunk[] = results.map((r) =>
+      toInspectable(r)
+    );
+    const outcome = inspector.inspect(inspectables);
+    if (outcome.blocked.length === 0) return results;
+    const blockedIds = new Set(outcome.blocked.map((c) => c.id));
+    return results.filter((r) => !blockedIds.has(r.chunk.id));
   }
 
   private async searchVault(

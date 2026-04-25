@@ -44,6 +44,14 @@ export interface WorkspaceConfig {
   };
   /** External MCP servers the workspace can consume (phase 4.4). */
   mcpClients?: MCPClientConfig[];
+  /** Source-inspector defence policy (phase 4.5). Optional — absent means
+   * default `warn`. Stored per-workspace so the choice survives across
+   * sessions and can vary by project (a corpus of public archives may
+   * accept stricter `block`; one full of historical primary sources with
+   * imperative speech may need `warn`). */
+  security?: {
+    sourceInspectorMode?: 'warn' | 'audit' | 'block';
+  };
   /** Catch-all for forward-compat: unknown keys are preserved. */
   [k: string]: unknown;
 }

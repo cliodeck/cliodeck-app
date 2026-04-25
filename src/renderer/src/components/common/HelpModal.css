@@ -1,0 +1,116 @@
+.help-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.help-modal {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 720px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px color-mix(in srgb, #000 50%, transparent);
+}
+
+.help-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 8px 8px 0 0;
+}
+
+.help-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.help-modal-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.help-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.help-modal-close:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+.help-modal-content {
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+.help-modal-content h3 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.help-modal-content h3:first-child {
+  margin-top: 0;
+}
+
+.help-modal-content p {
+  margin: 0 0 0.75rem;
+}
+
+.help-modal-content ul {
+  margin: 0.25rem 0 0.75rem;
+  padding-left: 1.25rem;
+}
+
+.help-modal-content li {
+  margin-bottom: 0.35rem;
+}
+
+.help-modal-content code {
+  background: var(--bg-panel);
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+  border: 1px solid var(--border-color);
+}
+
+.help-modal-content .help-mode-card {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.6rem;
+  background: var(--bg-panel);
+}
+
+.help-modal-content .help-mode-card strong {
+  color: var(--color-accent);
+}
+
+.help-modal-content .help-callout {
+  border-left: 3px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 0.6rem 0.75rem;
+  border-radius: 0 4px 4px 0;
+  margin: 0.75rem 0;
+}

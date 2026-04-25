@@ -25,6 +25,7 @@ import { registerGraphNeighbors } from './tools/graphNeighbors.js';
 import { registerEntityContext } from './tools/entityContext.js';
 import { registerSearchGallica } from './tools/searchGallica.js';
 import { registerSearchHal } from './tools/searchHal.js';
+import { registerSearchEuropeana } from './tools/searchEuropeana.js';
 
 const SERVER_NAME = 'cliodeck';
 const SERVER_VERSION = '0.1.0';
@@ -53,11 +54,20 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
   registerSearchGallica(server, cfg, logger);
   // HAL (CNRS/CCSD) — public Solr endpoint, no key, secondary literature.
   registerSearchHal(server, cfg, logger);
+  // Europeana — requires a free API key. Read at *call* time from
+  // EUROPEANA_API_KEY env var so the user can configure / rotate / unset
+  // without restarting the server. The Electron app (when it spawns this
+  // server itself) propagates the key from secureStorage via env. When
+  // a third-party MCP client (Claude Desktop) spawns the server, the user
+  // sets the env var in their client config — see docs/archive-mcp-connectors.md.
+  registerSearchEuropeana(server, cfg, logger, {
+    getApiKey: () => process.env.EUROPEANA_API_KEY ?? null,
+  });
 
   console.error(`[ClioDeck MCP] Server created for workspace ${cfg.workspaceRoot}`);
   console.error(`[ClioDeck MCP] Audit log: ${cfg.paths.mcpAccessLog}`);
   console.error(
-    `[ClioDeck MCP] Tools: search_obsidian, search_zotero, search_documents, search_tropy, graph_neighbors, entity_context, search_gallica, search_hal`
+    `[ClioDeck MCP] Tools: search_obsidian, search_zotero, search_documents, search_tropy, graph_neighbors, entity_context, search_gallica, search_hal, search_europeana`
   );
 
   return { server, logger };

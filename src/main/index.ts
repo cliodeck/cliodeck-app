@@ -95,6 +95,21 @@ app.whenReady().then(async () => {
   await configManager.init();
   console.log('✅ configManager initialized');
 
+  // Propagate connector secrets from secureStorage into process.env so
+  // any MCP-server-as-tools subprocess we spawn inherits them. Third-party
+  // MCP clients (Claude Desktop) don't share our env, so they still need
+  // EUROPEANA_API_KEY explicitly in their own config — see archive-mcp-connectors.md.
+  try {
+    const { secureStorage } = await import('./services/secure-storage.js');
+    const europeanaKey = secureStorage.getKey('mcp.europeana.apiKey');
+    if (europeanaKey) {
+      process.env.EUROPEANA_API_KEY = europeanaKey;
+      console.log('🔑 [Secrets] EUROPEANA_API_KEY propagated to process.env');
+    }
+  } catch (e) {
+    console.warn('[Secrets] Failed to propagate connector keys:', e);
+  }
+
   // Charger les traductions des menus
   loadMenuTranslations();
 
