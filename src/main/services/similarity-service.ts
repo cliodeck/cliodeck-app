@@ -102,10 +102,11 @@ const DEFAULT_OPTIONS: SimilarityOptions = {
 class SimilarityService {
   private abortController: AbortController | null = null;
   /**
-   * Optional typed LLM provider (fusion 1.4e). When set, `rerankWithLLM`
-   * routes through it instead of `pdfService.getOllamaClient()`. Callers
-   * (IPC handlers wiring the workspace registry, tests) set this before
-   * invoking analysis; falls back to legacy Ollama otherwise.
+   * Typed LLM provider (fusion 1.2a). Callers (similarity-handlers IPC,
+   * tests) wire this from a `ProviderRegistry` built off the active
+   * workspace config before invoking `analyzeDocument`. `rerankWithLLM`
+   * fails loud if it isn't set — the previous legacy `OllamaClient`
+   * fallback is gone.
    */
   private llm: import('../../../backend/core/llm/providers/base').LLMProvider | null = null;
 
@@ -686,11 +687,10 @@ class SimilarityService {
     query: string,
     candidates: PDFRecommendation[]
   ): Promise<PDFRecommendation[]> {
-    // Fusion 1.4e: prefer the typed provider when wired; fall back to
-    // the legacy OllamaClient path so existing call sites are unchanged.
-    const ollamaClient = this.llm ? null : pdfService.getOllamaClient();
-    if (!this.llm && !ollamaClient) {
-      throw new Error('No LLM path available (neither provider nor OllamaClient)');
+    if (!this.llm) {
+      throw new Error(
+        'similarity-service: LLM provider not wired (call setLLMProvider before analyzeDocument)'
+      );
     }
 
     // Limit candidates to avoid context length issues
@@ -726,10 +726,8 @@ Your ranking:`;
     console.log('🔄 [SIMILARITY] Sending reranking request to LLM...');
     const startTime = Date.now();
 
-    // Use generateResponse (non-streaming) for efficiency
-    const response = this.llm
-      ? await this.llm.complete(prompt)
-      : await ollamaClient!.generateResponse(prompt, []);
+    // Use complete() (non-streaming) for efficiency.
+    const response = await this.llm.complete(prompt);
     const duration = Date.now() - startTime;
 
     console.log('🔄 [SIMILARITY] LLM reranking response:', {
