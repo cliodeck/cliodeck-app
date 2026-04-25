@@ -1,13 +1,13 @@
 /**
- * Fusion 1.4d: TropySync can be wired to the typed provider registry for
- * NER without going through OllamaClient. The full `sync()` flow touches
- * Tropy + OCR + vector store and isn't reasonable to mock out here; we
- * cover the migration-relevant seam (NER init path selection) directly.
+ * Fusion 1.2c: TropySync's only NER init path is the typed-provider one
+ * (`initNERServiceWithProvider`). The legacy `initNERService(ollamaClient)`
+ * was retired with the rest of the OllamaClient consumers in the service
+ * layer — this test stays scoped to the migration-relevant seam, since the
+ * full `sync()` flow touches Tropy + OCR + vector store.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { TropySync } from '../TropySync';
 import type { LLMProvider } from '../../../core/llm/providers/base';
-import type { OllamaClient } from '../../../core/llm/OllamaClient';
 
 function fakeLLM(): LLMProvider {
   return {
@@ -24,16 +24,7 @@ function fakeLLM(): LLMProvider {
   };
 }
 
-function fakeOllama(): OllamaClient {
-  return {
-    chatModel: 'llama',
-    generateResponseStream: async function* () {
-      yield '[]';
-    },
-  } as unknown as OllamaClient;
-}
-
-describe('TropySync NER init (1.4d)', () => {
+describe('TropySync NER init (1.2c)', () => {
   it('initNERServiceWithProvider builds a provider-backed NER', () => {
     const sync = new TropySync();
     sync.initNERServiceWithProvider(fakeLLM());
@@ -41,13 +32,6 @@ describe('TropySync NER init (1.4d)', () => {
     // should run through the provider without touching the stubbed ollama.
     const ner = (sync as unknown as { nerService: { extractQueryEntities: (q: string) => Promise<unknown[]> } })
       .nerService;
-    expect(ner).toBeTruthy();
-  });
-
-  it('initNERService (legacy) still wires through OllamaClient', () => {
-    const sync = new TropySync();
-    sync.initNERService(fakeOllama());
-    const ner = (sync as unknown as { nerService: unknown }).nerService;
     expect(ner).toBeTruthy();
   });
 

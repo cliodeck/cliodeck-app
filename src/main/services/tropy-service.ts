@@ -6,13 +6,23 @@ import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress } from 
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
 import { PrimarySourcesVectorStore, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
-import { NERService, createNERService } from '../../../backend/core/ner/NERService.js';
+import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
 
 // Chunking optimization modules
 import { DocumentChunker, CHUNKING_CONFIGS } from '../../../backend/core/chunking/DocumentChunker.js';
 import { ChunkQualityScorer } from '../../../backend/core/chunking/ChunkQualityScorer.js';
 import { ChunkDeduplicator } from '../../../backend/core/chunking/ChunkDeduplicator.js';
+
+// Typed provider registry (fusion 1.2c) — replaces the dual
+// `pdfService.getOllamaClient() / getLLMProviderManager()` pattern.
+import { configManager } from './config-manager.js';
+import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import type {
+  EmbeddingProvider,
+  LLMProvider,
+} from '../../../backend/core/llm/providers/base.js';
+import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 
 // MARK: - Types
 
@@ -55,6 +65,16 @@ class TropyService {
   private deduplicator: ChunkDeduplicator | null = null;
 
   /**
+   * Typed provider registry (fusion 1.2c). Built from the active workspace
+   * config in `init()`, used for both NER (`registry.getLLM()`) and
+   * chunk/query embeddings (`registry.getEmbedding()`). Disposed in
+   * `close()` to release HTTP agents / native handles.
+   */
+  private registry: ProviderRegistry | null = null;
+  private llm: LLMProvider | null = null;
+  private embedding: EmbeddingProvider | null = null;
+
+  /**
    * Initialise le service Tropy pour un projet
    */
   async init(projectPath: string): Promise<void> {
@@ -63,6 +83,23 @@ class TropyService {
     this.tropySync = new TropySync();
     this.watcher = new TropyWatcher();
     this.ocrPipeline = new TropyOCRPipeline();
+
+    // Build the typed provider registry from the active config. Same
+    // self-contained lifecycle as retrieval-service: dispose any previous
+    // registry before re-init.
+    await this.disposePreviousRegistry();
+    try {
+      this.registry = createRegistryFromClioDeckConfig(
+        configManager.getLLMConfig()
+      );
+      this.llm = this.registry.getLLM();
+      this.embedding = this.registry.getEmbedding();
+    } catch (e) {
+      console.warn('[tropy-service] failed to build provider registry:', e);
+      this.registry = null;
+      this.llm = null;
+      this.embedding = null;
+    }
 
     // Initialize chunking optimization modules
     this.chunker = new DocumentChunker(CHUNKING_CONFIGS.cpuOptimized);
@@ -90,6 +127,7 @@ class TropyService {
     this.stopWatching();
     await this.ocrPipeline?.dispose();
     this.vectorStore?.close();
+    await this.disposePreviousRegistry();
 
     this.vectorStore = null;
     this.tropySync = null;
@@ -102,6 +140,30 @@ class TropyService {
     this.chunker = null;
     this.qualityScorer = null;
     this.deduplicator = null;
+  }
+
+  private async disposePreviousRegistry(): Promise<void> {
+    const prev = this.registry;
+    this.registry = null;
+    this.llm = null;
+    this.embedding = null;
+    if (prev) {
+      await prev.dispose().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Embed a single text via the typed provider; returns the Float32Array
+   * shape PrimarySourcesVectorStore expects.
+   */
+  private async embedOne(text: string): Promise<Float32Array> {
+    if (!this.embedding) {
+      throw new Error(
+        'tropy-service: embedding provider not configured (call init() first)'
+      );
+    }
+    const [vec] = await this.embedding.embed([text]);
+    return Float32Array.from(vec);
   }
 
   /**
@@ -190,20 +252,13 @@ class TropyService {
       });
     };
 
-    // Get OllamaClient for NER extraction
-    let ollamaClient = null;
-    try {
-      const { pdfService } = await import('./pdf-service.js');
-      ollamaClient = pdfService.getOllamaClient();
-    } catch (error) {
-      console.warn('⚠️ [TROPY-SERVICE] Could not get OllamaClient for NER:', error);
-    }
-
-    // Phase 1: Synchroniser les métadonnées (includes NER if ollamaClient is available)
+    // Phase 1: Synchroniser les métadonnées (NER runs only when
+    // `extractEntities` is true *and* the typed registry built in `init()`
+    // exposes a usable LLM provider).
     const syncOptions = {
       ...options,
-      ollamaClient,  // Pass to TropySync for NER extraction
-      extractEntities: options.extractEntities === true,  // Disabled by default (opt-in due to slow performance)
+      llm: this.llm ?? undefined,
+      extractEntities: options.extractEntities === true,
     };
 
     const result = await this.tropySync.sync(
@@ -246,13 +301,8 @@ class TropyService {
     if (!this.vectorStore) {
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
-
-    // Import LLMProviderManager dynamically to avoid circular dependencies
-    const { pdfService } = await import('./pdf-service.js');
-    const llmProvider = pdfService.getLLMProviderManager();
-
-    if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
-      console.warn('⚠️ [TROPY-SERVICE] No embedding provider available, skipping embedding generation');
+    if (!this.embedding) {
+      console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, skipping embedding generation');
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
@@ -358,7 +408,7 @@ class TropyService {
               startPosition: rawChunk.startPosition,
               endPosition: rawChunk.endPosition,
             };
-            const embedding = await llmProvider.generateEmbedding(sourceChunk.content);
+            const embedding = await this.embedOne(sourceChunk.content);
             this.vectorStore!.saveChunk(sourceChunk, embedding);
             chunksCreated++;
           } catch (error) {
@@ -644,21 +694,17 @@ class TropyService {
     const threshold = passedThreshold > 0.05 ? 0.005 : passedThreshold;
 
     try {
-      // Import LLMProviderManager dynamically to avoid circular dependencies
-      const { pdfService } = await import('./pdf-service.js');
-      const llmProvider = pdfService.getLLMProviderManager();
-
-      if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
-        console.warn('⚠️ [TROPY-SERVICE] No embedding provider available, cannot generate embedding');
+      if (!this.embedding) {
+        console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, cannot generate embedding');
         return [];
       }
 
       // Expand query for multilingual search (FR + EN)
-      const expandedQuery = await this.expandQueryMultilingual(query, llmProvider);
+      const expandedQuery = await this.expandQueryMultilingual(query);
       console.log(`📜 [TROPY-SERVICE] Expanded query: "${expandedQuery}"`);
 
-      // Generate embedding for the expanded query (with query prefix for embedded models)
-      const queryEmbedding = await llmProvider.generateQueryEmbedding(expandedQuery);
+      // Generate embedding for the expanded query.
+      const queryEmbedding = await this.embedOne(expandedQuery);
       console.log(`📜 [TROPY-SERVICE] Query embedding generated, dimension: ${queryEmbedding.length}`);
 
       // Search using hybrid search (HNSW + BM25) - pass both embedding and text
@@ -696,7 +742,7 @@ class TropyService {
    * Expand query with multilingual terms (FR/EN)
    * This helps find relevant results across languages
    */
-  private async expandQueryMultilingual(query: string, ollamaClient: any): Promise<string> {
+  private async expandQueryMultilingual(query: string): Promise<string> {
     // Simple heuristic: if query is short, keep it as is
     if (query.length < 20) {
       return query;
@@ -728,25 +774,23 @@ class TropyService {
     const useEntities = options?.useEntities ?? true;
 
     try {
-      // Import LLMProviderManager dynamically
-      const { pdfService } = await import('./pdf-service.js');
-      const llmProvider = pdfService.getLLMProviderManager();
-      const ollamaClient = pdfService.getOllamaClient(); // Still needed for NER
-
-      if (!llmProvider || !await llmProvider.isEmbeddingAvailable()) {
-        console.warn('⚠️ [TROPY-SERVICE] No embedding provider available');
+      if (!this.embedding) {
+        console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured');
         return [];
       }
 
-      // Initialize NER service if needed (requires OllamaClient for text generation)
-      if (!this.nerService && useEntities && ollamaClient) {
-        this.nerService = createNERService(ollamaClient);
-        console.log('🏷️ [TROPY-SERVICE] NER service initialized');
+      // NER initialisation is done via TropySync.initNERServiceWithProvider
+      // during sync(); here, if NER is requested but no service is yet
+      // initialised (e.g. search before any sync), we degrade to plain
+      // hybrid search rather than spinning up NER ad-hoc with the legacy
+      // OllamaClient — that path was retired in fusion 1.2c.
+      if (useEntities && !this.nerService) {
+        console.log('🏷️ [TROPY-SERVICE] No NER service yet — falling back to hybrid search');
       }
 
       // Generate query embedding (with query prefix for embedded models)
-      const expandedQuery = await this.expandQueryMultilingual(query, llmProvider);
-      const queryEmbedding = await llmProvider.generateQueryEmbedding(expandedQuery);
+      const expandedQuery = await this.expandQueryMultilingual(query);
+      const queryEmbedding = await this.embedOne(expandedQuery);
 
       // If not using entities, fallback to hybrid search
       if (!useEntities || !this.nerService) {

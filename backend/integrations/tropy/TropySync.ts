@@ -11,6 +11,10 @@ import {
   PrimarySourceDocument,
 } from '../../core/vector-store/PrimarySourcesVectorStore';
 import { NERService } from '../../core/ner/NERService';
+// Legacy OllamaClient type is still imported as a *type-only* casting
+// target for the NERService constructor (NERService still wants the slot
+// positionally; the stub feeds a no-op there until step 1.2d cleans
+// up NERService itself).
 import type { OllamaClient } from '../../core/llm/OllamaClient';
 import type { LLMProvider } from '../../core/llm/providers/base';
 import { archivalFromTropyMetadata } from '../../types/archival-metadata';
@@ -26,15 +30,8 @@ export interface TropySyncOptions {
   forceReindex?: boolean;
   extractEntities?: boolean;  // Enable NER extraction (default: false - opt-in due to slow performance)
   /**
-   * Legacy NER driver. Preserved for existing call sites; new callers
-   * should prefer `llm` below, which routes through the typed provider
-   * registry (fusion 1.4d).
-   */
-  ollamaClient?: OllamaClient;
-  /**
-   * Typed provider for NER. When present, supersedes `ollamaClient` —
-   * enables using any backend (Anthropic, Mistral, local Ollama) without
-   * touching TropySync itself.
+   * Typed provider for NER. Required when `extractEntities === true` —
+   * the legacy `ollamaClient` slot was removed in fusion step 1.2c.
    */
   llm?: LLMProvider;
 }
@@ -77,25 +74,13 @@ export class TropySync {
   }
 
   /**
-   * Initializes the NER service with an Ollama client (legacy path).
+   * Initialises the NER service with a typed LLMProvider.
    *
-   * New callers should use `initNERServiceWithProvider(llm)` so NER runs
-   * under whichever backend the workspace has configured.
-   */
-  initNERService(ollamaClient: OllamaClient): void {
-    this.nerService = new NERService(ollamaClient);
-    console.log('🏷️ [TROPY-SYNC] NER service initialized (ollamaClient)');
-  }
-
-  /**
-   * Initializes the NER service with a typed LLMProvider (fusion 1.4d).
-   * The OllamaClient slot is still required by NERService's constructor,
-   * but when `providers.llm` is set it wins over the ollama path —
-   * we pass a no-op stub to keep the class contract stable.
+   * NERService's constructor still requires an OllamaClient positional
+   * slot (cleaned up in fusion step 1.2d); we pass a no-op stub so the
+   * `runPrompt()` helper's `llm` branch is what actually runs.
    */
   initNERServiceWithProvider(llm: LLMProvider): void {
-    // NERService signature takes OllamaClient positionally; feed a stub
-    // so the runPrompt() helper's llm branch is what actually runs.
     const stub = {
       chatModel: 'provider-driven',
       generateResponseStream: async function* () {
@@ -216,19 +201,10 @@ export class TropySync {
       }
 
       // Phase 2.5: Extract named entities (if enabled)
-      const shouldExtractEntities = options.extractEntities === true;
-      const hasLLMPath = Boolean(options.llm || options.ollamaClient);
-      if (shouldExtractEntities && hasLLMPath) {
-        // Initialize NER service if not already done.
-        // Prefer the typed provider path (fusion 1.4d) when available.
+      if (options.extractEntities === true && options.llm) {
         if (!this.nerService) {
-          if (options.llm) {
-            this.initNERServiceWithProvider(options.llm);
-          } else if (options.ollamaClient) {
-            this.initNERService(options.ollamaClient);
-          }
+          this.initNERServiceWithProvider(options.llm);
         }
-
         if (this.nerService) {
           await this.extractEntitiesForSources(vectorStore, onProgress);
         }
