@@ -37,6 +37,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
+    "test:integration": "npm rebuild better-sqlite3 && vitest run; npm run rebuild:native",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:provider-parity": "vitest run backend/core/llm/providers/__tests__/parity.test.ts",

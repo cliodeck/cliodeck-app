@@ -138,7 +138,7 @@ Les gaps du plan `fusion-cliobrain-implementation-plan.md` qui étaient marqués
 | 1.6 | Sécurité | L | ✅ Suppression de `backend/export/PDFExporter.ts` (dead code) + désinstallation `puppeteer` (53 paquets transitifs supprimés, ~400 MB) ; le seul vrai consommateur Chromium-PDF (revealjs-export) utilisait déjà `webContents.printToPDF` | Fait |
 | 1.7 | Backend | M | ✅ Enveloppe typée `{ hits, outcomes }` pour `retrievalService.search` — partial-success first-class (principe 6.3) ; facade `pdf-service` préserve la forme aplatie pour l'IPC `pdf:search` (commit `31958a9`) | Fait |
 | 1.8 | Backend | M | Capability tool-use par modèle pour Ollama (whitelist `qwen2.5`, `llama3.1`, `mistral-nemo`, …) | Oui — tester quels modèles tiennent ([A9](actions-frederic.md#a9)) |
-| 1.9 | Backend | M | Tests pour `backend/mcp-server/tools/` (9 fichiers exposés, 0 test) | Non |
+| 1.9 | Backend | M | ✅ Tests pour les 7 outils MCP non couverts (`searchEuropeana`, `searchObsidian`, `searchTropy`, `searchZotero`, `searchDocuments`, `entityContext`, `graphNeighbors`) — 54 nouveaux cas, 100% des outils exposés ont désormais une suite. Helper `_helpers.ts` mutualise capture du `McpServer.tool()` + fixtures sqlite éphémères. Script `npm run test:integration` rebuild better-sqlite3 pour Node ABI puis le restore | Fait |
 
 **Gate Phase 1** : la promesse goose #1 (« ajouter un provider = un fichier ») est vraie sans concession ; aucun `OllamaClient` hors backup de git history ; Electron ≥ 34 ; tous les secrets sensibles passent par `secureStorage`.
 
