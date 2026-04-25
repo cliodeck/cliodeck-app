@@ -258,7 +258,10 @@ export const PDFIndexPanel: React.FC = () => {
     );
 
     for (const file of files) {
-      await indexPDF(file.path);
+      // Electron 32+ removed the non-standard `File.path`; resolve via the
+      // preload-exposed `webUtils.getPathForFile` instead.
+      const absolutePath = window.electron.webUtils.getPathForFile(file);
+      await indexPDF(absolutePath);
     }
   };
 

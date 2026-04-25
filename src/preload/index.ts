@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 // Security: Whitelist of IPC channels allowed through the generic ipcRenderer bridge.
 // All other channels are blocked to prevent unauthorized IPC communication.
@@ -149,6 +149,14 @@ const api = {
   dialog: {
     openFile: (options: any) => ipcRenderer.invoke('dialog:open-file', options),
     saveFile: (options: any) => ipcRenderer.invoke('dialog:save-file', options),
+  },
+
+  // Renderer-side helpers from Electron's web-utils. Replaces the
+  // pre-Electron-32 `File.path` non-standard property — that field was
+  // removed for web-platform compliance, and `webUtils.getPathForFile`
+  // is the supported replacement (sync, no IPC round-trip).
+  webUtils: {
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
   },
 
   // File system
