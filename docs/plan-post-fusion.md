@@ -134,8 +134,8 @@ Les gaps du plan `fusion-cliobrain-implementation-plan.md` qui étaient marqués
 | 1.2 | Backend | M | ✅ Step 1.4 finalisé : `OllamaClient.ts` (1104 LOC) + `LLMProviderManager.ts` (532 LOC) + bridge.ts supprimés ; tous les consommateurs (similarity, slides, retrieval, tropy, NER, summarizer, pdf, config-handlers) sur `ProviderRegistry` typé. Polling redondant de `/api/tags` éliminé | Fait |
 | 1.3 | Backend | M | ✅ `ContextCompactor` câblé dans `chat-engine.ts` ; table `getContextWindow(model)` couvre Claude/GPT/Mistral/Gemini/Llama/Qwen/Gemma/Phi (commit `30a137c`) | Fait |
 | 1.4 | Frontend | M | i18n sur les 5 sections fusion (Vault / Hints / Recipes / MCP / RecipeRunModal) + audit parité sémantique `common.json` FR/EN | Oui — valider traductions EN ([A7](actions-frederic.md#a7)) |
-| 1.5 | Sécurité | M | Router `mcpClients[].env[*]` vers `secureStorage` — migrer workspaces existants | Oui — OK pour migration au prochain `loadProject` ([A8](actions-frederic.md#a8)) |
-| 1.6 | Sécurité | L | Remplacer puppeteer par `webContents.printToPDF` offscreen (supprime ~400 MB dep + 2ᵉ surface Chromium) | Non |
+| 1.5 | Sécurité | M | ✅ Routage `mcpClients[].env[*]` → `secureStorage` (sentinel `__cliodeck_secret__` + heuristique `KEY/TOKEN/SECRET/PASSWORD/PASS/CREDENTIAL`) ; migration idempotente au `loadProject` (commit `1f9817f`) | Fait |
+| 1.6 | Sécurité | L | ✅ Suppression de `backend/export/PDFExporter.ts` (dead code) + désinstallation `puppeteer` (53 paquets transitifs supprimés, ~400 MB) ; le seul vrai consommateur Chromium-PDF (revealjs-export) utilisait déjà `webContents.printToPDF` | Fait |
 | 1.7 | Backend | M | ✅ Enveloppe typée `{ hits, outcomes }` pour `retrievalService.search` — partial-success first-class (principe 6.3) ; facade `pdf-service` préserve la forme aplatie pour l'IPC `pdf:search` (commit `31958a9`) | Fait |
 | 1.8 | Backend | M | Capability tool-use par modèle pour Ollama (whitelist `qwen2.5`, `llama3.1`, `mistral-nemo`, …) | Oui — tester quels modèles tiennent ([A9](actions-frederic.md#a9)) |
 | 1.9 | Backend | M | Tests pour `backend/mcp-server/tools/` (9 fichiers exposés, 0 test) | Non |

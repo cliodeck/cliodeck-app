@@ -36,7 +36,6 @@ const dependencies: Dependency[] = [
   { name: 'pdf-poppler', license: 'ISC', url: 'https://github.com/kb47/pdf-poppler' },
   { name: 'pdfjs-dist', license: 'Apache-2.0', url: 'https://github.com/mozilla/pdfjs-dist' },
   { name: 'PizZip', license: 'MIT / GPL-3.0', url: 'https://github.com/open-xml-templating/pizzip' },
-  { name: 'Puppeteer', license: 'Apache-2.0', url: 'https://github.com/puppeteer/puppeteer' },
   { name: 'React', license: 'MIT', url: 'https://reactjs.org' },
   { name: 'react-error-boundary', license: 'MIT', url: 'https://github.com/bvaughn/react-error-boundary' },
   { name: 'react-force-graph', license: 'MIT', url: 'https://github.com/vasturiano/react-force-graph' },
