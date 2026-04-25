@@ -130,8 +130,8 @@ Les gaps du plan `fusion-cliobrain-implementation-plan.md` qui étaient marqués
 
 | # | Type | Effort | Description | [USER] |
 |---|---|---|---|---|
-| 1.1 | Sécurité | L | Upgrade Electron 28 → 34+ ; valider rebuilds natifs (better-sqlite3, hnswlib-node, node-llama-cpp) | Oui — budget temps test UX post-upgrade ([A4](actions-frederic.md#a4)) |
-| 1.2 | Backend | M | Finir step 1.4 : supprimer `OllamaClient.ts` + `LLMProviderManager.ts`, router tous les consommateurs via `ProviderRegistry` | Oui — validation impact services affectés ([A5](actions-frederic.md#a5)) |
+| 1.1 | Sécurité | L | ✅ Upgrade Electron 28 → 40.9.2 (commits `e6ee7d7` + `414f188`) ; rebuilds natifs validés (better-sqlite3 12, hnswlib-node 3, canvas 3 via overrides) ; CVE HIGH+ Electron purgées | Fait |
+| 1.2 | Backend | M | ✅ Step 1.4 finalisé : `OllamaClient.ts` (1104 LOC) + `LLMProviderManager.ts` (532 LOC) + bridge.ts supprimés ; tous les consommateurs (similarity, slides, retrieval, tropy, NER, summarizer, pdf, config-handlers) sur `ProviderRegistry` typé. Polling redondant de `/api/tags` éliminé | Fait |
 | 1.3 | Backend | M | Câbler `ContextCompactor` dans `chat-engine.ts` (phase `compressing` déjà réservée) | Oui — décider contextes par modèle ([A6](actions-frederic.md#a6)) |
 | 1.4 | Frontend | M | i18n sur les 5 sections fusion (Vault / Hints / Recipes / MCP / RecipeRunModal) + audit parité sémantique `common.json` FR/EN | Oui — valider traductions EN ([A7](actions-frederic.md#a7)) |
 | 1.5 | Sécurité | M | Router `mcpClients[].env[*]` vers `secureStorage` — migrer workspaces existants | Oui — OK pour migration au prochain `loadProject` ([A8](actions-frederic.md#a8)) |
