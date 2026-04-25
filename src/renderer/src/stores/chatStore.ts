@@ -18,6 +18,7 @@
 
 import { create } from 'zustand';
 import type { RAGExplanation as RAGExplanationBackend } from '../../../../backend/types/chat-source';
+import { useModeStore } from './modeStore';
 
 // MARK: - Types (brainstorm, canonical)
 
@@ -229,14 +230,7 @@ export const useChatStore = create<State>((set) => ({
   appendUser: (content) => {
     const id = nextId('u');
     // Capture active mode for display/history, mirroring legacy behaviour.
-    let modeId: string | undefined;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { useModeStore } = require('./modeStore');
-      modeId = useModeStore.getState().activeModeId;
-    } catch {
-      /* modeStore not available (tests) */
-    }
+    const modeId = useModeStore.getState().activeModeId;
     set((s) => ({
       messages: [
         ...s.messages,
@@ -248,14 +242,7 @@ export const useChatStore = create<State>((set) => ({
 
   beginAssistant: (sessionId) => {
     const id = nextId('a');
-    let modeId: string | undefined;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { useModeStore } = require('./modeStore');
-      modeId = useModeStore.getState().activeModeId;
-    } catch {
-      /* modeStore not available */
-    }
+    const modeId = useModeStore.getState().activeModeId;
     set((s) => ({
       sessionId,
       pendingAssistantId: id,
