@@ -88,7 +88,6 @@ The importer copies `brain.db`, `hnsw.index`, `hints.md`, and the MCP access log
 git clone https://github.com/inactinique/cliodeck.git
 cd cliodeck
 npm install
-npx electron-rebuild -f
 npm run build
 npm start
 ```

@@ -18,7 +18,7 @@ Current painful path (README §Quick start):
 1. Install Homebrew (macOS) or run `curl | sh` (Linux) to get Ollama.
 2. `ollama pull nomic-embed-text` + a chat model (~2-5 GB). No progress UI in ClioDeck.
 3. Download ClioDeck DMG/AppImage.
-4. If building from source: `npx electron-rebuild -f` (native bindings for `better-sqlite3`, `hnswlib-node`, `node-llama-cpp`).
+4. If building from source: native bindings for `better-sqlite3`, `hnswlib-node`, `node-llama-cpp` are rebuilt automatically via the `postinstall` hook.
 5. For export to PDF: install Pandoc + a LaTeX distribution (MacTeX/TeX Live ~4 GB).
 
 **Dropout happens at step 1 or 2.** We lose every non-dev user before they see the app.
@@ -202,7 +202,7 @@ Non-exhaustive task list. Each bullet is a discrete PR.
 - `package.json` → `build.extraResources`: add entries for `resources/bin/ollama/${os}` and `resources/bin/pandoc/${os}` plus `resources/bin/tectonic/${os}`.
 - `package.json` → `build.asarUnpack`: add the new `resources/bin/**` so spawning works from a packaged app.
 - `scripts/prepare-binaries.mjs` (new): CI prebuild that downloads + verifies SHA256 of Ollama / Pandoc / tectonic per target.
-- `scripts/after-pack.cjs`: `chmod +x` the three binaries on mac/linux post-pack.
+- `scripts/after-pack.cjs` (new): `chmod +x` the three binaries on mac/linux post-pack. Remember to wire it up via `build.afterPack` in `package.json`.
 - GitHub Actions workflow: matrix build for mac-universal, win-x64, linux-x64, linux-arm64. Secrets for Apple notarisation + Windows signing. Publish `-offline` variant with `BUNDLE_MODELS=1`.
 
 **Main process**

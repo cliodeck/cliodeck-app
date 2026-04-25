@@ -23,16 +23,16 @@
     "build:main": "tsc -p tsconfig.node.json --noEmitOnError false && node scripts/fix-imports.mjs && node scripts/fix-backend.mjs",
     "build:preload": "tsc -p tsconfig.preload.json --noEmitOnError false",
     "build:renderer": "vite build",
-    "build:all": "npm run build && electron-builder",
+    "build:all": "npm run typecheck && npm run build && npm run rebuild:native && electron-builder",
     "build:linux": "npm run build && npm run rebuild:native && electron-builder --linux",
     "build:mac": "npm run build && npm run rebuild:native && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
     "build:dir": "npm run build && electron-builder --dir",
-    "rebuild:native": "npm run rebuild:x64",
-    "rebuild:x64": "electron-rebuild -f -a x64",
-    "rebuild:arm64": "electron-rebuild -f -a arm64",
+    "rebuild:native": "electron-builder install-app-deps",
+    "rebuild:x64": "electron-builder install-app-deps --arch=x64",
+    "rebuild:arm64": "electron-builder install-app-deps --arch=arm64",
     "preview": "vite preview",
-    "start": "env -u ELECTRON_RUN_AS_NODE npx electron . --no-sandbox",
+    "start": "env -u ELECTRON_RUN_AS_NODE npx electron .",
     "start:prod": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
@@ -108,7 +108,6 @@
     "concurrently": "^9.2.1",
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^8.56.0",
     "jsdom": "^29.0.2",
     "node-gyp": "^12.1.0",
@@ -158,6 +157,13 @@
           "*.yaml",
           "*.yml"
         ]
+      },
+      {
+        "from": "public/locales",
+        "to": "public/locales",
+        "filter": [
+          "**/*.json"
+        ]
       }
     ],
     "linux": {
@@ -198,7 +204,6 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
-    "afterPack": "./scripts/after-pack.cjs",
     "win": {
       "target": [
         "nsis"
