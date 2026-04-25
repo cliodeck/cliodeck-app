@@ -35,10 +35,7 @@ interface VaultApi {
 }
 
 function vaultApi(): VaultApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { vault?: VaultApi } } })
-      .electron?.fusion?.vault ?? null
-  );
+  return (window.electron?.fusion?.vault as VaultApi | undefined) ?? null;
 }
 
 type DialogApi = {
@@ -49,10 +46,7 @@ type DialogApi = {
 };
 
 function dialogApi(): DialogApi | null {
-  return (
-    (window as unknown as { electron?: { dialog?: DialogApi } }).electron
-      ?.dialog ?? null
-  );
+  return (window.electron?.dialog as DialogApi | undefined) ?? null;
 }
 
 export const VaultConfigSection: React.FC = () => {

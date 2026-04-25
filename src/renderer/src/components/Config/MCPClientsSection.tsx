@@ -39,10 +39,7 @@ interface MCPApi {
 }
 
 function api(): MCPApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { mcp?: MCPApi } } })
-      .electron?.fusion?.mcp ?? null
-  );
+  return (window.electron?.fusion?.mcp as MCPApi | undefined) ?? null;
 }
 
 type FormState = {

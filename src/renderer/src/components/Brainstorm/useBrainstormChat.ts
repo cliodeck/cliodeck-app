@@ -65,9 +65,7 @@ interface FusionChatApi {
 }
 
 function api(): FusionChatApi | null {
-  const f = (window as unknown as { electron?: { fusion?: { chat?: FusionChatApi } } })
-    .electron?.fusion?.chat;
-  return f ?? null;
+  return (window.electron?.fusion?.chat as FusionChatApi | undefined) ?? null;
 }
 
 export interface UseBrainstormChat {

@@ -15,10 +15,7 @@ interface HintsApi {
 }
 
 function api(): HintsApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { hints?: HintsApi } } })
-      .electron?.fusion?.hints ?? null
-  );
+  return (window.electron?.fusion?.hints as HintsApi | undefined) ?? null;
 }
 
 export const WorkspaceHintsSection: React.FC = () => {

@@ -29,8 +29,7 @@ interface SourcesApi {
 }
 
 function getSourcesApi(): SourcesApi | null {
-  const w = window as unknown as { electron?: { sources?: SourcesApi } };
-  return w.electron?.sources ?? null;
+  return (window.electron?.sources as SourcesApi | undefined) ?? null;
 }
 
 export function positionLabel(s: BrainstormSource): string | null {

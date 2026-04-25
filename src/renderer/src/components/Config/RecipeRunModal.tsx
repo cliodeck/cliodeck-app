@@ -59,10 +59,7 @@ interface RecipesApi {
 }
 
 function api(): RecipesApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { recipes?: RecipesApi } } })
-      .electron?.fusion?.recipes ?? null
-  );
+  return (window.electron?.fusion?.recipes as RecipesApi | undefined) ?? null;
 }
 
 interface Props {

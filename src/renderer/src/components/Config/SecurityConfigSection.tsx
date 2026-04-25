@@ -15,10 +15,7 @@ interface SecurityApi {
 }
 
 function api(): SecurityApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { security?: SecurityApi } } })
-      .electron?.fusion?.security ?? null
-  );
+  return (window.electron?.fusion?.security as SecurityApi | undefined) ?? null;
 }
 
 const MODE_OPTIONS: Array<{

@@ -22,10 +22,7 @@ interface ArchivesApi {
 }
 
 function api(): ArchivesApi | null {
-  return (
-    (window as unknown as { electron?: { fusion?: { archives?: ArchivesApi } } })
-      .electron?.fusion?.archives ?? null
-  );
+  return (window.electron?.fusion?.archives as ArchivesApi | undefined) ?? null;
 }
 
 export const ArchivesConfigSection: React.FC = () => {
