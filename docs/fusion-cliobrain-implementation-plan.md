@@ -1,6 +1,8 @@
 # Plan d'implémentation — Fusion ClioBrain dans ClioDeck + leçons goose
 
 > Plan opérationnel. Pour le contexte stratégique voir `fusion-cliobrain-strategy.md`.
+>
+> **Statut (2026-04-25)** : la majorité des étapes des Phases 0–4 ont été livrées (références dans les commits via la numérotation ci-dessous). Le travail restant et les nouvelles priorités ne suivent plus ce plan — voir [`plan-post-fusion.md`](plan-post-fusion.md) pour l'audit synthétique des quatre spécialistes et la roadmap actuelle (Phases 0–4 post-fusion). Ce document reste la référence canonique pour les **numéros de step** cités dans `git log`.
 
 Ce plan est séquentiel sauf mention contraire. Chaque étape a un **critère de complétion** vérifiable. La numérotation des étapes est stable pour référencement dans les commits (`feat(fusion): step 3.2 — Obsidian VaultReader`).
 
