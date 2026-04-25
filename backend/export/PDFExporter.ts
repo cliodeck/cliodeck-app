@@ -13,6 +13,41 @@ async function getPuppeteer() {
   return puppeteerInstance;
 }
 
+/**
+ * Defence-in-depth sanitizer for the marked → Puppeteer pipeline.
+ *
+ * Why a hand-rolled stripper instead of DOMPurify+jsdom: jsdom isn't a
+ * runtime dependency yet (it's in devDeps for tests), and the alternative
+ * parse5-based sanitizers are heavy. The export path is constrained:
+ *   1. Source = marked-rendered HTML from a trusted user document.
+ *   2. Target = Puppeteer rendering for a static PDF — no scripts ever
+ *      need to run for the output to be correct.
+ * So we drop *every* tag that can execute code (script/iframe/object/…)
+ * plus event-handler attributes and `javascript:` URLs. Combined with a
+ * strict CSP meta tag in the export template, this neutralises the two
+ * paths an injected `<script>` in markdown could take.
+ *
+ * Roadmap: once jsdom (or a lighter window provider) lands as a runtime
+ * dep — bundled or local-installed — swap this for `DOMPurify(window)`
+ * with the same allowlist. The signature is intentionally compatible.
+ */
+const STRIP_DANGEROUS_TAGS =
+  /<\/?(?:script|iframe|object|embed|form|link|meta|base|svg|foreignobject|input|textarea|select|button|style|template|frame|frameset|noscript|noframes)\b[^>]*>/gi;
+const STRIP_EVENT_HANDLERS =
+  /\s(?:on[a-z]+|formaction|srcdoc|background|dynsrc|lowsrc)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+const NEUTRALISE_JS_URLS =
+  /(\b(?:href|src|xlink:href|action)\s*=\s*)(?:"javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi;
+const NEUTRALISE_TEXT_DATA_URLS =
+  /(\b(?:href|src)\s*=\s*)(?:"data:text\/[^"]*"|'data:text\/[^']*')/gi;
+
+function sanitizeMarkedHtml(html: string): string {
+  return html
+    .replace(STRIP_DANGEROUS_TAGS, '')
+    .replace(STRIP_EVENT_HANDLERS, '')
+    .replace(NEUTRALISE_JS_URLS, '$1""')
+    .replace(NEUTRALISE_TEXT_DATA_URLS, '$1""');
+}
+
 export interface PDFExportOptions {
   format?: 'A4' | 'Letter';
   margin?: {
@@ -88,8 +123,25 @@ export class PDFExporter {
       gfm: true,
     });
 
-    // Parser le markdown
-    const content = marked.parse(markdown);
+    // Parser le markdown — `marked.parse` may return Promise<string> in
+    // async mode but we configured `breaks/gfm` (sync) so the cast is safe.
+    const rawHtml = marked.parse(markdown) as string;
+    // Defence-in-depth: strip script/iframe/event-handlers/javascript:
+    // URLs from the HTML before injecting it into the Puppeteer page.
+    const content = sanitizeMarkedHtml(rawHtml);
+
+    // CSP: refuse everything except inline styles (we ship one <style>
+    // block in head) and self-loaded images. No scripts, no remote
+    // resources, no plugins. Combined with the sanitizer above this
+    // closes both paths — injected `<script>` is stripped, and any that
+    // slips through is blocked at parse time by Chromium.
+    const csp =
+      "default-src 'none'; " +
+      "style-src 'unsafe-inline'; " +
+      "img-src 'self' data: file: https:; " +
+      "font-src 'self' data:; " +
+      "base-uri 'none'; " +
+      "form-action 'none';";
 
     // Construire le HTML complet avec styles
     return `
@@ -97,6 +149,7 @@ export class PDFExporter {
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Document</title>
   <style>
