@@ -33,6 +33,11 @@ import { ensureV2Directories, v2Paths } from '../../../backend/core/workspace/la
 import path from 'path';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
+import {
+  deleteClientEnvSecrets,
+  migrateClientEnvSecrets,
+  resolveClientEnvSecrets,
+} from './mcp-env-secrets.js';
 
 export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
   if (w.transport === 'stdio') {
@@ -45,7 +50,10 @@ export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
         transport: 'stdio',
         command: w.command,
         args: w.args,
-        env: w.env,
+        // Resolve sentinels against `secureStorage` here — the spawned
+        // MCP server expects the actual API key, not the placeholder
+        // that lives in `config.json`. (fusion 1.5)
+        env: resolveClientEnvSecrets(w.name, w.env),
       },
     };
   }
@@ -122,6 +130,24 @@ class MCPClientsService {
 
     const cfg = await this.readOrInitConfig(root);
     const clients = cfg.mcpClients ?? [];
+
+    // Fusion 1.5: any sensitive env value still in plain text inside
+    // `config.json` is migrated to `secureStorage` on first load. The
+    // config is only rewritten when at least one secret was actually
+    // moved, so opening a workspace with no secrets is a no-op.
+    let migrated = false;
+    for (const w of clients) {
+      if (migrateClientEnvSecrets(w)) migrated = true;
+    }
+    if (migrated) {
+      cfg.mcpClients = clients;
+      try {
+        await writeWorkspaceConfig(root, cfg);
+      } catch (e) {
+        console.warn('[mcp-clients] failed to persist secret migration:', e);
+      }
+    }
+
     for (const w of clients) {
       try {
         this.manager.register(toManagerConfig(w));
@@ -166,6 +192,10 @@ class MCPClientsService {
     if (existing.some((c) => c.name === client.name)) {
       throw new Error(`MCP client "${client.name}" already exists`);
     }
+    // Route fresh secrets straight to `secureStorage` so they never
+    // touch `config.json`. The migration step above handles previously
+    // persisted plain values; this catches new ones at the door.
+    migrateClientEnvSecrets(client);
     cfg.mcpClients = [...existing, client];
     await writeWorkspaceConfig(this.workspaceRoot, cfg);
     this.manager.register(toManagerConfig(client));
@@ -177,8 +207,10 @@ class MCPClientsService {
       throw new Error('No project loaded');
     }
     const cfg = await this.readOrInitConfig(this.workspaceRoot);
+    const removed = (cfg.mcpClients ?? []).find((c) => c.name === name);
     cfg.mcpClients = (cfg.mcpClients ?? []).filter((c) => c.name !== name);
     await writeWorkspaceConfig(this.workspaceRoot, cfg);
+    if (removed) deleteClientEnvSecrets(removed);
     await this.manager.stop(name);
   }
 
