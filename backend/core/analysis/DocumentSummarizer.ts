@@ -1,4 +1,3 @@
-import type { OllamaClient } from '../llm/OllamaClient';
 import type { PDFMetadata } from '../../types/pdf-document';
 import type {
   EmbeddingProvider,
@@ -21,19 +20,15 @@ interface Sentence {
 /**
  * DocumentSummarizer génère des résumés de documents PDF
  * - Extractif : sélection de phrases importantes (sans dépendance externe)
- * - Abstractif : génération via LLM (Ollama)
- */
-/**
- * Optional registry-driven providers (fusion step 1.4b).
+ * - Abstractif : génération via le typed `LLMProvider` (1.2d)
  *
- * DocumentSummarizer historically took an `OllamaClient` (RAG-coupled
- * with timeouts, error classification, chunk averaging). The fusion
- * plan calls for routing through the typed `LLMProvider` /
- * `EmbeddingProvider` instead. This overload keeps the legacy path
- * working (existing call sites unchanged) while new callers — tests,
- * CLI, recipe runners — can pass providers directly. When present,
- * providers win over `ollamaClient`; no call site has to migrate in a
- * single step.
+ * Embeddings are produced through one of:
+ *   - an `embeddingFunction(text) -> Float32Array` callback (the path
+ *     used by `PDFIndexer` so it can share its own embed wiring), or
+ *   - a typed `EmbeddingProvider` set via `setEmbeddingProvider()`
+ *     (used by tests / CLI).
+ *
+ * The legacy `OllamaClient` slot was removed in fusion step 1.2d.
  */
 export interface SummarizerProviders {
   llm?: LLMProvider;
@@ -42,7 +37,6 @@ export interface SummarizerProviders {
 
 export class DocumentSummarizer {
   private config: SummarizerConfig;
-  private ollamaClient?: OllamaClient;
   private llm?: LLMProvider;
   private embeddingProvider?: EmbeddingProvider;
 
@@ -165,26 +159,24 @@ export class DocumentSummarizer {
 
   constructor(
     config: SummarizerConfig,
-    ollamaClient?: OllamaClient,
     embeddingFunction?: (text: string) => Promise<Float32Array>,
     providers?: SummarizerProviders
   ) {
     this.config = config;
-    this.ollamaClient = ollamaClient;
     this.embeddingFunction = embeddingFunction;
     this.llm = providers?.llm;
     this.embeddingProvider = providers?.embedding;
   }
 
-  /** Test/CLI hook — swap in typed providers after construction. */
+  /** Test / CLI hook — swap in typed providers after construction. */
   setProviders(providers: SummarizerProviders): void {
     if (providers.llm) this.llm = providers.llm;
     if (providers.embedding) this.embeddingProvider = providers.embedding;
   }
 
-  /** Returns true when at least one LLM path is reachable. */
+  /** Returns true when an LLM path is reachable. */
   hasLLM(): boolean {
-    return Boolean(this.llm || this.ollamaClient);
+    return Boolean(this.llm);
   }
 
   /**
@@ -223,11 +215,8 @@ export class DocumentSummarizer {
       const [vec] = await this.embeddingProvider.embed([summary]);
       return Float32Array.from(vec);
     }
-    if (this.ollamaClient) {
-      return this.ollamaClient.generateEmbedding(summary);
-    }
     throw new Error(
-      'No embedding path configured: set embeddingFunction, embeddingProvider, or ollamaClient'
+      'DocumentSummarizer: no embedding path configured (set embeddingFunction or embeddingProvider)'
     );
   }
 
@@ -408,13 +397,12 @@ export class DocumentSummarizer {
     const prompt = this.buildAbstractiveSummaryPrompt(truncatedText, metadata);
 
     try {
-      // Prefer the typed LLMProvider when available (fusion 1.4b migration).
-      // Fall back to the legacy OllamaClient path so existing call sites
-      // keep their RAG-specific error classification / timeouts.
-      const summary = this.llm
-        ? await this.llm.complete(prompt)
-        : await this.ollamaClient!.generateResponse(prompt, []);
-
+      if (!this.llm) {
+        throw new Error(
+          'DocumentSummarizer: abstractive summarization requires an LLM provider (call setProviders or pass via constructor)'
+        );
+      }
+      const summary = await this.llm.complete(prompt);
       return summary.trim();
     } catch (error) {
       console.error('❌ Abstractive summarization failed:', error);

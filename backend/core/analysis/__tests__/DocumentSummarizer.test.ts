@@ -1,7 +1,7 @@
 /**
- * Fusion step 1.4b tests: DocumentSummarizer can drive abstractive summaries
- * and summary embeddings through the typed provider registry, and falls back
- * cleanly when neither path is configured.
+ * Fusion step 1.2d tests: DocumentSummarizer drives abstractive summaries
+ * and summary embeddings through the typed provider registry only.
+ * The legacy `OllamaClient` slot was retired; tests assert that.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { DocumentSummarizer } from '../DocumentSummarizer';
@@ -38,8 +38,8 @@ function fakeEmbedding(vec: number[]): EmbeddingProvider {
   };
 }
 
-describe('DocumentSummarizer — registry path (1.4b)', () => {
-  it('hasLLM is false with no providers and no ollamaClient', () => {
+describe('DocumentSummarizer — registry path (1.2d)', () => {
+  it('hasLLM is false when no provider is wired', () => {
     const s = new DocumentSummarizer({
       enabled: true,
       method: 'abstractive',
@@ -48,10 +48,9 @@ describe('DocumentSummarizer — registry path (1.4b)', () => {
     expect(s.hasLLM()).toBe(false);
   });
 
-  it('abstractive path prefers providers.llm over ollamaClient', async () => {
+  it('abstractive path runs through providers.llm', async () => {
     const s = new DocumentSummarizer(
       { enabled: true, method: 'abstractive', maxLength: 200 },
-      undefined,
       undefined,
       { llm: fakeLLM('VIA PROVIDER') }
     );
@@ -59,14 +58,14 @@ describe('DocumentSummarizer — registry path (1.4b)', () => {
     expect(out).toBe('VIA PROVIDER');
   });
 
-  it('falls back to extractive when neither path is configured', async () => {
+  it('falls back to extractive when no LLM is configured', async () => {
     const s = new DocumentSummarizer({
       enabled: true,
       method: 'abstractive',
       maxLength: 100,
     });
-    // With no LLM, should warn and use extractive — output is non-empty
-    // (extractive picks sentences) rather than throwing.
+    // Without a typed LLM, `generateSummary` should warn and use extractive
+    // — output is non-empty rather than throwing.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const out = await s.generateSummary(
       'Recherche méthodologique. Les résultats montrent que. Une conclusion importante.'
@@ -76,16 +75,14 @@ describe('DocumentSummarizer — registry path (1.4b)', () => {
     warn.mockRestore();
   });
 
-  it('embedding path prefers embeddingFunction, then embeddingProvider, then ollamaClient', async () => {
+  it('embedding path prefers embeddingFunction over embeddingProvider', async () => {
     const custom = vi.fn(async () => new Float32Array([1, 2]));
     const s = new DocumentSummarizer(
       { enabled: true, method: 'extractive', maxLength: 100 },
-      undefined,
       custom,
       { embedding: fakeEmbedding([9, 9, 9]) }
     );
     const out = await s.generateSummaryEmbedding('summary');
-    // custom function wins
     expect(Array.from(out)).toEqual([1, 2]);
     expect(custom).toHaveBeenCalled();
   });
@@ -93,7 +90,6 @@ describe('DocumentSummarizer — registry path (1.4b)', () => {
   it('embeddingProvider is used when no custom function is set', async () => {
     const s = new DocumentSummarizer(
       { enabled: true, method: 'extractive', maxLength: 100 },
-      undefined,
       undefined,
       { embedding: fakeEmbedding([7, 8, 9]) }
     );
@@ -108,7 +104,7 @@ describe('DocumentSummarizer — registry path (1.4b)', () => {
       maxLength: 100,
     });
     await expect(s.generateSummaryEmbedding('x')).rejects.toThrow(
-      /No embedding path configured/
+      /no embedding path configured/i
     );
   });
 

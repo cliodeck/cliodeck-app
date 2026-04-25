@@ -11,7 +11,6 @@
  * instance; default 'fr' preserves the existing call-site behavior.
  */
 
-import { OllamaClient, GENERATION_PRESETS } from '../llm/OllamaClient';
 import { EntityNormalizer, entityNormalizer } from './EntityNormalizer';
 import type {
   EntityType,
@@ -140,36 +139,23 @@ const MAX_TEXT_LENGTH = 3000;
 
 // MARK: - NERService
 
-/**
- * Optional registry-driven provider (fusion step 1.4c).
- *
- * NERService historically took an `OllamaClient` and streamed via
- * `generateResponseStream`. The new optional `providers.llm` uses
- * `LLMProvider.complete()` (under the hood it accumulates the stream),
- * so new call sites — recipes, CLI, MCP tools — can pass a provider
- * selected at the workspace level instead of binding to Ollama
- * directly. Legacy OllamaClient callers keep their RAG-specific
- * timeout / error classification.
- */
-export interface NERProviders {
-  llm?: LLMProvider;
-}
-
 export class NERService {
-  private ollamaClient: OllamaClient;
-  private llm?: LLMProvider;
+  private llm: LLMProvider;
   private normalizer: EntityNormalizer;
   private modelOverride?: string;
   private language: NERLanguage;
 
+  /**
+   * Construct an NER service bound to a typed `LLMProvider`. Fusion step
+   * 1.2d removed the legacy `OllamaClient` slot; callers pass a provider
+   * built off `ProviderRegistry.getLLM()` (or a stub in tests).
+   */
   constructor(
-    ollamaClient: OllamaClient,
+    llm: LLMProvider,
     modelOverride?: string,
-    language: NERLanguage = 'fr',
-    providers?: NERProviders
+    language: NERLanguage = 'fr'
   ) {
-    this.ollamaClient = ollamaClient;
-    this.llm = providers?.llm;
+    this.llm = llm;
     this.normalizer = entityNormalizer;
     this.modelOverride = modelOverride;
     this.language = language;
@@ -179,8 +165,8 @@ export class NERService {
     this.language = language;
   }
 
-  setProviders(providers: NERProviders): void {
-    if (providers.llm) this.llm = providers.llm;
+  setLLMProvider(llm: LLMProvider): void {
+    this.llm = llm;
   }
 
   /**
@@ -188,7 +174,7 @@ export class NERService {
    */
   async extractEntities(text: string): Promise<NERExtractionResult> {
     const startTime = Date.now();
-    const modelUsed = this.modelOverride || this.ollamaClient.chatModel;
+    const modelUsed = this.modelOverride || this.llm.id;
 
     if (!text || text.trim().length < 10) {
       return {
@@ -241,11 +227,8 @@ export class NERService {
 
       // Use lower temperature for consistency
       const response = await this.runPrompt(prompt, {
-        ollama: {
-          timeoutMs: 30000,
-          options: { ...GENERATION_PRESETS.deterministic },
-        },
-        provider: { temperature: 0 },
+        timeoutMs: 30000,
+        temperature: 0,
       });
 
       const entities = this.parseEntitiesFromResponse(response);
@@ -265,59 +248,33 @@ export class NERService {
   private async extractFromChunk(text: string): Promise<ExtractedEntity[]> {
     const prompt = NER_PROMPTS[this.language].replace('{TEXT}', text);
     const response = await this.runPrompt(prompt, {
-      ollama: {
-        timeoutMs: 120000, // 2 min for long texts
-        options: { ...GENERATION_PRESETS.academic, temperature: 0.1 },
-      },
-      provider: { temperature: 0.1 },
+      timeoutMs: 120000, // 2 min for long texts
+      temperature: 0.1,
     });
     return this.parseEntitiesFromResponse(response);
   }
 
   /**
-   * Unified LLM invocation. Prefers the typed provider when set (fusion
-   * 1.4c); falls back to OllamaClient.generateResponseStream so existing
-   * timeout + error classification behaviour is preserved for callers
-   * that haven't migrated.
+   * Run a prompt through the typed `LLMProvider`, accumulating the stream
+   * via `complete()`. The legacy `OllamaClient.generateResponseStream`
+   * fallback was retired in fusion step 1.2d.
    */
   private async runPrompt(
     prompt: string,
-    opts: {
-      ollama: {
-        timeoutMs: number;
-        options: Partial<typeof GENERATION_PRESETS.academic> & { num_ctx?: number };
-      };
-      provider: { temperature?: number; maxTokens?: number };
-    }
+    opts: { timeoutMs: number; temperature?: number; maxTokens?: number }
   ): Promise<string> {
-    if (this.llm) {
-      const ctrl = new AbortController();
-      const timer = setTimeout(
-        () => ctrl.abort(),
-        opts.ollama.timeoutMs
-      );
-      try {
-        return await this.llm.complete(prompt, {
-          model: this.modelOverride,
-          temperature: opts.provider.temperature,
-          maxTokens: opts.provider.maxTokens,
-          signal: ctrl.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+    try {
+      return await this.llm.complete(prompt, {
+        model: this.modelOverride,
+        temperature: opts.temperature,
+        maxTokens: opts.maxTokens,
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
     }
-    let response = '';
-    for await (const chunk of this.ollamaClient.generateResponseStream(
-      prompt,
-      [],
-      this.modelOverride,
-      opts.ollama.timeoutMs,
-      opts.ollama.options
-    )) {
-      response += chunk;
-    }
-    return response;
   }
 
   /**
@@ -514,6 +471,6 @@ export class NERService {
 
 // MARK: - Factory
 
-export function createNERService(ollamaClient: OllamaClient, modelOverride?: string): NERService {
-  return new NERService(ollamaClient, modelOverride);
+export function createNERService(llm: LLMProvider, modelOverride?: string): NERService {
+  return new NERService(llm, modelOverride);
 }

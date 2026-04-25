@@ -11,11 +11,6 @@ import {
   PrimarySourceDocument,
 } from '../../core/vector-store/PrimarySourcesVectorStore';
 import { NERService } from '../../core/ner/NERService';
-// Legacy OllamaClient type is still imported as a *type-only* casting
-// target for the NERService constructor (NERService still wants the slot
-// positionally; the stub feeds a no-op there until step 1.2d cleans
-// up NERService itself).
-import type { OllamaClient } from '../../core/llm/OllamaClient';
 import type { LLMProvider } from '../../core/llm/providers/base';
 import { archivalFromTropyMetadata } from '../../types/archival-metadata';
 import * as fs from 'fs';
@@ -74,22 +69,11 @@ export class TropySync {
   }
 
   /**
-   * Initialises the NER service with a typed LLMProvider.
-   *
-   * NERService's constructor still requires an OllamaClient positional
-   * slot (cleaned up in fusion step 1.2d); we pass a no-op stub so the
-   * `runPrompt()` helper's `llm` branch is what actually runs.
+   * Initialises the NER service with a typed LLMProvider. As of fusion
+   * step 1.2d, NERService takes the provider directly — no stub needed.
    */
   initNERServiceWithProvider(llm: LLMProvider): void {
-    const stub = {
-      chatModel: 'provider-driven',
-      generateResponseStream: async function* () {
-        throw new Error(
-          'NERService legacy path called despite providers.llm being set'
-        );
-      },
-    } as unknown as OllamaClient;
-    this.nerService = new NERService(stub, undefined, 'fr', { llm });
+    this.nerService = new NERService(llm, undefined, 'fr');
     console.log('🏷️ [TROPY-SYNC] NER service initialized (LLMProvider)');
   }
 

@@ -191,7 +191,7 @@ export class PDFIndexer {
     };
 
     if (this.summarizerConfig.enabled) {
-      this.documentSummarizer = new DocumentSummarizer(this.summarizerConfig, undefined, generateEmbedding);
+      this.documentSummarizer = new DocumentSummarizer(this.summarizerConfig, generateEmbedding);
     }
   }
 
