@@ -15,7 +15,6 @@
 import fs from 'fs';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
-import { LLMProviderManager } from '../../../backend/core/llm/LLMProviderManager.js';
 import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
 import type {
   SearchResult,
@@ -37,6 +36,9 @@ import {
 } from '../../../backend/security/source-inspector.js';
 import { v2Paths } from '../../../backend/core/workspace/layout.js';
 import { readWorkspaceConfig } from '../../../backend/core/workspace/config.js';
+import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
+import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 
 /**
  * Hot-path logging gate. The retrieval pipeline emits a high volume of
@@ -229,7 +231,14 @@ function meanPoolEmbeddings(embeddings: Float32Array[]): Float32Array {
 
 class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
-  private llmProviderManager: LLMProviderManager | null = null;
+  /**
+   * Typed embedding provider (fusion 1.2b). Owned by this service: the
+   * registry built in `configure()` is disposed in `clear()`. We keep the
+   * registry handle so `dispose()` cascades to the underlying provider's
+   * resources (HTTP agents, native handles).
+   */
+  private embedding: EmbeddingProvider | null = null;
+  private registry: ProviderRegistry | null = null;
   private workspaceRoot: string | null = null;
   private vaultStore: ObsidianVaultStore | null = null;
   private warmupStarted = false;
@@ -243,20 +252,34 @@ class RetrievalService {
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
-   * pdf-service.init() so the two services share the same vector store
-   * and provider manager instances.
+   * pdf-service.init() so both services share the same vector store.
+   *
+   * The embedding provider is built locally from the active workspace
+   * config — retrieval-service owns its own ProviderRegistry lifecycle.
+   * Calling `configure()` again or `clear()` disposes the previous one.
    *
    * Note: the embedding cache is module-scoped and is intentionally NOT
    * reset here — query embeddings don't depend on which project is open.
    */
   configure(deps: {
     vectorStore: VectorStore | EnhancedVectorStore;
-    llmProviderManager: LLMProviderManager;
     workspaceRoot?: string;
   }): void {
     this.vectorStore = deps.vectorStore;
-    this.llmProviderManager = deps.llmProviderManager;
     this.workspaceRoot = deps.workspaceRoot ?? null;
+
+    // Build the typed embedding provider from the active config. Dispose
+    // any previous registry to release HTTP agents / native handles.
+    void this.disposePreviousRegistry();
+    try {
+      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      this.embedding = this.registry.getEmbedding();
+    } catch (e) {
+      console.warn('[retrieval] failed to build embedding provider:', e);
+      this.registry = null;
+      this.embedding = null;
+    }
+
     // Invalidate any previously opened vault store — the project may have
     // changed underneath us.
     this.vaultStore?.close();
@@ -272,6 +295,15 @@ class RetrievalService {
     // Refresh the inspector mode for the new workspace. Best-effort —
     // a missing or unreadable config falls back to `warn`.
     void this.refreshInspectorMode();
+  }
+
+  private async disposePreviousRegistry(): Promise<void> {
+    const prev = this.registry;
+    this.registry = null;
+    this.embedding = null;
+    if (prev) {
+      await prev.dispose().catch(() => undefined);
+    }
   }
 
   private async refreshInspectorMode(): Promise<void> {
@@ -307,7 +339,7 @@ class RetrievalService {
 
   clear(): void {
     this.vectorStore = null;
-    this.llmProviderManager = null;
+    void this.disposePreviousRegistry();
     // Embedding cache persists across clear() — see constructor comment.
     this.workspaceRoot = null;
     this.vaultStore?.close();
@@ -315,12 +347,22 @@ class RetrievalService {
   }
 
   private getProviderId(): string | undefined {
-    // Best-effort: embeddingProvider > provider. Typed loosely because
-    // the concrete shape lives in LLMProviderManager internals.
-    const mgr = this.llmProviderManager as unknown as {
-      config?: { embeddingProvider?: string; provider?: string };
-    } | null;
-    return mgr?.config?.embeddingProvider || mgr?.config?.provider;
+    // Stable provider id from the typed embedding (e.g. `ollama-embed:nomic-embed-text`).
+    return this.embedding?.id;
+  }
+
+  /**
+   * Embed a single query through the typed provider. Returns a Float32Array
+   * (the rest of the pipeline — HNSW, BM25 — expects this shape).
+   */
+  private async embedQuery(text: string): Promise<Float32Array> {
+    if (!this.embedding) {
+      throw new Error(
+        'retrieval-service: embedding provider not configured (call configure() first)'
+      );
+    }
+    const [vec] = await this.embedding.embed([text]);
+    return Float32Array.from(vec);
   }
 
   private async warmupDictionaryEmbeddings(): Promise<void> {
@@ -333,7 +375,7 @@ class RetrievalService {
       for (const term of terms) {
         if (queryEmbeddingCache.has(term, providerId)) continue;
         try {
-          const emb = await this.llmProviderManager!.generateQueryEmbedding(term);
+          const emb = await this.embedQuery(term);
           queryEmbeddingCache.set(term, emb, providerId);
         } catch {
           // Warmup is best-effort: a provider may be unavailable at boot.
@@ -367,7 +409,7 @@ class RetrievalService {
   }
 
   private ensureReady(): void {
-    if (!this.vectorStore || !this.llmProviderManager) {
+    if (!this.vectorStore || !this.embedding) {
       throw new Error(
         'RetrievalService not configured. Call configure() after initializing pdf-service.'
       );
@@ -378,7 +420,7 @@ class RetrievalService {
     const providerId = this.getProviderId();
     const cached = queryEmbeddingCache.get(query, providerId);
     if (cached) return cached;
-    const embedding = await this.llmProviderManager!.generateQueryEmbedding(query);
+    const embedding = await this.embedQuery(query);
     queryEmbeddingCache.set(query, embedding, providerId);
     return embedding;
   }

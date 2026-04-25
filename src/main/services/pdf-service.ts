@@ -166,10 +166,11 @@ class PDFService {
 
       this.currentProjectPath = projectPath;
 
-      // Wire the shared RetrievalService to this project's store/providers.
+      // Wire the shared RetrievalService to this project's vector store.
+      // (As of 1.2b, RetrievalService owns its own typed embedding
+      // provider, built from the workspace config — no manager handoff.)
       retrievalService.configure({
         vectorStore: this.vectorStore,
-        llmProviderManager: this.llmProviderManager,
         workspaceRoot: projectPath,
       });
 
