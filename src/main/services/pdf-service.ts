@@ -3,8 +3,14 @@ import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
 import { PdfVectorStore } from './pdf/PdfVectorStore.js';
 import { PdfIndexer } from './pdf/PdfIndexer.js';
-import { OllamaClient } from '../../../backend/core/llm/OllamaClient.js';
-import { LLMProviderManager, type LLMProvider } from '../../../backend/core/llm/LLMProviderManager.js';
+import {
+  createRegistryFromClioDeckConfig,
+} from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import type {
+  EmbeddingProvider,
+  LLMProvider,
+} from '../../../backend/core/llm/providers/base.js';
+import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 import { KnowledgeGraphBuilder, type GraphNode, type GraphEdge } from '../../../backend/core/analysis/KnowledgeGraphBuilder.js';
 import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../backend/core/analysis/TopicModelingService.js';
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
@@ -37,28 +43,20 @@ interface AnalyzeTopicsOptions {
 class PDFService {
   private pdfIndexer: PdfIndexer | null = null;
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
-  private ollamaClient: OllamaClient | null = null;
-  private llmProviderManager: LLMProviderManager | null = null;
   private currentProjectPath: string | null = null;
-  /**
-   * Optional typed embedding provider (fusion 1.4i). When set, the
-   * embedding function passed to PDFIndexer routes through it instead of
-   * `llmProviderManager.generateEmbedding`. Callers wire this to the
-   * workspace's `EmbeddingProvider` from the phase 1.3 registry so
-   * indexing uses the configured backend uniformly with the rest of the
-   * app. Legacy path preserved for existing init flows.
-   */
-  private embeddingProvider:
-    | import('../../../backend/core/llm/providers/base').EmbeddingProvider
-    | null = null;
 
-  setEmbeddingProvider(
-    p:
-      | import('../../../backend/core/llm/providers/base').EmbeddingProvider
-      | null
-  ): void {
-    this.embeddingProvider = p;
-  }
+  /**
+   * Typed provider registry (fusion 1.2e). pdf-service owns the
+   * `ProviderRegistry` lifecycle for the active project: built from
+   * the workspace LLM config in `init()`, rebuilt by
+   * `updateEmbeddedModel()` / `disableEmbeddedModel()` / etc., disposed
+   * at `init()` re-entry. Replaces the legacy `OllamaClient` +
+   * `LLMProviderManager` pair that this service used to instantiate
+   * twice per project.
+   */
+  private registry: ProviderRegistry | null = null;
+  private llm: LLMProvider | null = null;
+  private embedding: EmbeddingProvider | null = null;
 
   /**
    * Initialise le PDF Service pour un projet spécifique
@@ -88,30 +86,11 @@ class PDFService {
       const config = configManager.getLLMConfig();
       const ragConfig = configManager.getRAGConfig();
 
-      // Initialiser Ollama client avec la config actuelle
-      this.ollamaClient = new OllamaClient(
-        config.ollamaURL,
-        config.ollamaChatModel,
-        config.ollamaEmbeddingModel,
-        config.embeddingStrategy || 'nomic-fallback'
-      );
-
-      // Initialiser le LLM Provider Manager (gère Ollama + modèle embarqué pour génération ET embeddings)
-      this.llmProviderManager = new LLMProviderManager({
-        provider: (config.generationProvider as LLMProvider) || 'auto',
-        embeddedModelPath: config.embeddedModelPath,
-        embeddedModelId: config.embeddedModelId,
-        ollamaURL: config.ollamaURL,
-        ollamaChatModel: config.ollamaChatModel,
-        ollamaEmbeddingModel: config.ollamaEmbeddingModel,
-        // Embedded embedding model support
-        embeddedEmbeddingModelPath: config.embeddedEmbeddingModelPath,
-        embeddedEmbeddingModelId: config.embeddedEmbeddingModelId,
-        embeddingProvider: config.embeddingProvider,
-      });
-
-      // Start LLM initialization (runs in parallel with VectorStore)
-      const llmInitPromise = this.llmProviderManager.initialize();
+      // Build the typed provider registry from the active config.
+      // Replaces the previous `new OllamaClient(...)` + `new LLMProviderManager(...)`
+      // pair (the latter held a *third* OllamaClient internally — that's
+      // gone now too).
+      await this.rebuildLLMRegistry();
 
       // Initialiser VectorStore (Enhanced ou Standard selon config)
       const { store, initPromise: vsInitPromise } = PdfVectorStore.create(
@@ -121,8 +100,9 @@ class PDFService {
       );
       this.vectorStore = store;
 
-      // Wait for both LLM and VectorStore to finish initializing in parallel
-      await Promise.all([llmInitPromise, vsInitPromise].filter(Boolean));
+      if (vsInitPromise) {
+        await vsInitPromise;
+      }
 
       // Post-init: configure search modes on the enhanced store. Any
       // rebuild is deferred until after warmup (see below) so we don't
@@ -156,10 +136,12 @@ class PDFService {
       // Initialiser l'indexeur (façade — la fonction d'embedding et la
       // construction du backend PDFIndexer vivent maintenant dans
       // ./pdf/PdfIndexer.ts).
+      if (!this.embedding) {
+        throw new Error('PDF Service: embedding provider not configured');
+      }
       this.pdfIndexer = new PdfIndexer({
         vectorStore: this.vectorStore,
-        llmProviderManager: this.llmProviderManager,
-        embeddingProvider: this.embeddingProvider,
+        embeddingProvider: this.embedding,
         ragConfig,
         summarizerConfig,
       });
@@ -201,11 +183,11 @@ class PDFService {
    * Warmup embedding model to reduce first-query latency
    */
   private async warmupEmbeddingModel(): Promise<void> {
-    if (!this.llmProviderManager) return;
+    if (!this.embedding) return;
 
     console.log('🔥 [WARMUP] Pre-loading embedding model...');
     try {
-      await this.llmProviderManager.generateEmbedding('warmup query');
+      await this.embedding.embed(['warmup query']);
       console.log('✅ [WARMUP] Embedding model ready');
     } catch (_e: unknown) {
       console.warn('⚠️  [WARMUP] Failed - first query may be slower');
@@ -213,10 +195,39 @@ class PDFService {
   }
 
   /**
+   * Build (or rebuild) the typed provider registry from the active
+   * workspace LLM config. Disposes the previous registry first so the
+   * native handles / HTTP agents it owns are released cleanly. Used by
+   * `init()` and by the embedded-model setters below — the latter are
+   * called after `embedded-llm-handlers` updates `configManager`.
+   */
+  private async rebuildLLMRegistry(): Promise<void> {
+    const prev = this.registry;
+    this.registry = null;
+    this.llm = null;
+    this.embedding = null;
+    if (prev) {
+      await prev.dispose().catch(() => undefined);
+    }
+
+    try {
+      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      this.llm = this.registry.getLLM();
+      this.embedding = this.registry.getEmbedding();
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to build provider registry:', e);
+      this.registry = null;
+      this.llm = null;
+      this.embedding = null;
+      throw e;
+    }
+  }
+
+  /**
    * Vérifie si le service est initialisé
    */
   private ensureInitialized() {
-    if (!this.vectorStore || !this.pdfIndexer || !this.llmProviderManager) {
+    if (!this.vectorStore || !this.pdfIndexer || !this.llm || !this.embedding) {
       throw new Error('PDF Service not initialized. Call init(projectPath) first.');
     }
   }
@@ -316,90 +327,68 @@ class PDFService {
     return this.currentProjectPath;
   }
 
-  getOllamaClient() {
-    return this.ollamaClient;
+  /**
+   * Public typed-provider accessors (fusion 1.2e). Replace the legacy
+   * `getOllamaClient()` / `getLLMProviderManager()` getters that were
+   * the last entry points into the OllamaClient + LLMProviderManager
+   * pair. Callers use these to drive chat / embedding work without
+   * caring about backend choice.
+   */
+  getLLMProvider(): LLMProvider | null {
+    return this.llm;
+  }
+  getEmbeddingProvider(): EmbeddingProvider | null {
+    return this.embedding;
   }
 
   /**
-   * Retourne le LLM Provider Manager pour la génération de texte
-   * Gère automatiquement le fallback entre Ollama et le modèle embarqué
+   * Embedded-model lifecycle. Each call assumes `embedded-llm-handlers`
+   * has already updated `configManager` with the new (or cleared)
+   * embedded model paths; we just rebuild the registry so the next
+   * chat / embedding call picks up the change.
    */
-  getLLMProviderManager() {
-    return this.llmProviderManager;
-  }
-
-  /**
-   * Met à jour le modèle embarqué dans le LLMProviderManager
-   * Appelé après le téléchargement d'un nouveau modèle
-   */
-  async updateEmbeddedModel(modelPath: string, modelId?: string): Promise<boolean> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized, cannot update embedded model');
-      return false;
-    }
-
+  async updateEmbeddedModel(modelPath: string, _modelId?: string): Promise<boolean> {
     console.log(`🔄 [PDF-SERVICE] Updating embedded model: ${modelPath}`);
-    const success = await this.llmProviderManager.setEmbeddedModelPath(modelPath, modelId);
-
-    if (success) {
+    try {
+      await this.rebuildLLMRegistry();
       console.log('✅ [PDF-SERVICE] Embedded model updated successfully');
-    } else {
-      console.error('❌ [PDF-SERVICE] Failed to update embedded model');
-    }
-
-    return success;
-  }
-
-  /**
-   * Désactive le modèle embarqué dans le LLMProviderManager
-   * Appelé après la suppression d'un modèle
-   */
-  async disableEmbeddedModel(): Promise<void> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized');
-      return;
-    }
-
-    console.log('🔄 [PDF-SERVICE] Disabling embedded model');
-    await this.llmProviderManager.disableEmbedded();
-    console.log('✅ [PDF-SERVICE] Embedded model disabled');
-  }
-
-  /**
-   * Met à jour le modèle d'embedding embarqué dans le LLMProviderManager
-   * Appelé après le téléchargement d'un nouveau modèle d'embedding
-   */
-  async updateEmbeddedEmbeddingModel(modelPath: string, modelId?: string): Promise<boolean> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized, cannot update embedded embedding model');
+      return true;
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-model change:', e);
       return false;
     }
-
-    console.log(`🔄 [PDF-SERVICE] Updating embedded embedding model: ${modelPath}`);
-    const success = await this.llmProviderManager.setEmbeddedEmbeddingModelPath(modelPath, modelId);
-
-    if (success) {
-      console.log('✅ [PDF-SERVICE] Embedded embedding model updated successfully');
-    } else {
-      console.error('❌ [PDF-SERVICE] Failed to update embedded embedding model');
-    }
-
-    return success;
   }
 
-  /**
-   * Désactive le modèle d'embedding embarqué dans le LLMProviderManager
-   * Appelé après la suppression d'un modèle d'embedding
-   */
-  async disableEmbeddedEmbeddingModel(): Promise<void> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized');
-      return;
+  async disableEmbeddedModel(): Promise<void> {
+    console.log('🔄 [PDF-SERVICE] Disabling embedded model');
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded model disabled');
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded model:', e);
     }
+  }
 
+  async updateEmbeddedEmbeddingModel(modelPath: string, _modelId?: string): Promise<boolean> {
+    console.log(`🔄 [PDF-SERVICE] Updating embedded embedding model: ${modelPath}`);
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded embedding model updated successfully');
+      return true;
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-embedding change:', e);
+      return false;
+    }
+  }
+
+  async disableEmbeddedEmbeddingModel(): Promise<void> {
     console.log('🔄 [PDF-SERVICE] Disabling embedded embedding model');
-    await this.llmProviderManager.disableEmbeddedEmbedding();
-    console.log('✅ [PDF-SERVICE] Embedded embedding model disabled');
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded embedding model disabled');
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded embedding:', e);
+    }
   }
 
   getVectorStore() {
@@ -773,15 +762,16 @@ class PDFService {
       this.vectorStore = null;
     }
 
-    // Libérer les ressources du LLM Provider Manager
-    if (this.llmProviderManager) {
-      console.log('🔒 Disposing LLM Provider Manager...');
-      await this.llmProviderManager.dispose();
-      this.llmProviderManager = null;
+    // Libérer les ressources du registry typé (HTTP agents, native handles).
+    if (this.registry) {
+      console.log('🔒 Disposing LLM provider registry...');
+      await this.registry.dispose().catch(() => undefined);
+      this.registry = null;
+      this.llm = null;
+      this.embedding = null;
     }
 
     this.pdfIndexer = null;
-    this.ollamaClient = null;
     this.currentProjectPath = null;
 
     console.log('✅ PDF Service closed');

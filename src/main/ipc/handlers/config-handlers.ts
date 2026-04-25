@@ -127,17 +127,35 @@ export function setupConfigHandlers() {
     return result;
   });
 
-  // Ollama handlers
+  // Ollama handlers — independent of pdf-service / project lifecycle.
+  // The list-models / availability probes are pure metadata about a
+  // local Ollama daemon (no model loading, no embedding work), so
+  // they hit `/api/tags` directly via fetch instead of going through
+  // a typed provider. This decouples the LLM-config UI from the
+  // workspace registry's lifecycle (it can poll Ollama before any
+  // project is open).
   ipcMain.handle('ollama:list-models', async () => {
     console.log('IPC Call: ollama:list-models');
     try {
-      const ollamaClient = pdfService.getOllamaClient();
-      if (!ollamaClient) {
-        console.log('Ollama client not initialized yet (no project loaded)');
-        return successResponse({ models: [] });
+      const baseUrl = configManager.getLLMConfig().ollamaURL || 'http://127.0.0.1:11434';
+      const url = `${baseUrl.replace(/\/$/, '')}/api/tags`;
+      console.log('🔍 Fetching Ollama models from:', url);
+      console.log('   Using Node.js http module (more reliable in Electron)');
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Ollama returned HTTP ${res.status}`);
       }
-
-      const models = await ollamaClient.listAvailableModels();
+      const data = (await res.json()) as {
+        models?: Array<{ name: string; size?: number }>;
+      };
+      const models = (data.models ?? []).map((m) => ({
+        id: m.name,
+        name: m.name,
+        size: typeof m.size === 'number' ? formatOllamaSize(m.size) : undefined,
+        description: 'Modèle Ollama',
+        recommendedFor: [] as string[],
+      }));
+      console.log('✅ Successfully fetched', models.length, 'models');
       console.log('IPC Response: ollama:list-models', { count: models.length });
       return successResponse({ models });
     } catch (error: any) {
@@ -149,12 +167,10 @@ export function setupConfigHandlers() {
   ipcMain.handle('ollama:check-availability', async () => {
     console.log('IPC Call: ollama:check-availability');
     try {
-      const ollamaClient = pdfService.getOllamaClient();
-      if (!ollamaClient) {
-        return successResponse({ available: false });
-      }
-
-      const available = await ollamaClient.isAvailable();
+      const baseUrl = configManager.getLLMConfig().ollamaURL || 'http://127.0.0.1:11434';
+      const url = `${baseUrl.replace(/\/$/, '')}/api/tags`;
+      const res = await fetch(url);
+      const available = res.ok;
       console.log('IPC Response: ollama:check-availability', { available });
       return successResponse({ available });
     } catch (error: any) {
@@ -164,4 +180,17 @@ export function setupConfigHandlers() {
   });
 
   console.log('Config handlers registered');
+}
+
+/** Human-readable size used by the Ollama list-models response. */
+function formatOllamaSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
 }

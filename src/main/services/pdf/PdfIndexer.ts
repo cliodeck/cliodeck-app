@@ -1,13 +1,13 @@
 /**
  * PdfIndexer — extracted from pdf-service.ts as part of the fusion
  * split (see CLAUDE.md §2). Builds and owns the lower-level
- * `backend/core/pdf/PDFIndexer`, wiring the embedding function to
- * either a fusion 1.4i `EmbeddingProvider` or the legacy
- * `LLMProviderManager.generateEmbedding` path. Kept intentionally thin;
- * the PDF parsing / chunking itself still lives in the backend indexer.
+ * `backend/core/pdf/PDFIndexer`, wiring the embedding function to a
+ * typed `EmbeddingProvider` (fusion 1.2e: the legacy
+ * `LLMProviderManager.generateEmbedding` fallback was retired).
+ * Kept intentionally thin; the PDF parsing / chunking itself still
+ * lives in the backend indexer.
  */
 import { PDFIndexer as BackendPDFIndexer, type IndexingProgress, type ExtractDocumentFn } from '../../../../backend/core/pdf/PDFIndexer.js';
-import type { LLMProviderManager } from '../../../../backend/core/llm/LLMProviderManager.js';
 import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
 import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
 import type { RAGConfig } from '../../../../backend/types/config.js';
@@ -31,8 +31,7 @@ interface SummarizerConfigLike {
 
 export interface PdfIndexerDeps {
   vectorStore: AnyVectorStore;
-  llmProviderManager: LLMProviderManager;
-  embeddingProvider: EmbeddingProvider | null;
+  embeddingProvider: EmbeddingProvider;
   ragConfig: RAGConfig;
   summarizerConfig: SummarizerConfigLike;
 }
@@ -44,12 +43,10 @@ export class PdfIndexer {
   constructor(deps: PdfIndexerDeps) {
     this.vectorStore = deps.vectorStore;
 
-    const embeddingFn = deps.embeddingProvider
-      ? async (text: string): Promise<Float32Array> => {
-          const [vec] = await deps.embeddingProvider!.embed([text]);
-          return Float32Array.from(vec);
-        }
-      : (text: string) => deps.llmProviderManager.generateEmbedding(text);
+    const embeddingFn = async (text: string): Promise<Float32Array> => {
+      const [vec] = await deps.embeddingProvider.embed([text]);
+      return Float32Array.from(vec);
+    };
 
     // Wrap extractPdfIsolated as an ExtractDocumentFn that throws on failure
     // so BackendPDFIndexer's existing error handling catches it cleanly.
