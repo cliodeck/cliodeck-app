@@ -2,9 +2,10 @@
  * Ollama provider (fusion step 1.2).
  *
  * Thin LLMProvider/EmbeddingProvider implementation over the Ollama HTTP API.
- * Intentionally decoupled from the legacy OllamaClient (which is tangled with
- * RAG-specific SearchResult types); the migration (step 1.4) will route
- * existing callers through the registry.
+ * As of fusion step 1.2g this is the only Ollama integration in the
+ * codebase — the legacy `OllamaClient` (RAG-coupled, tangled with
+ * `SearchResult` types) was removed once all consumers had been
+ * migrated to the typed registry.
  */
 
 import type {
