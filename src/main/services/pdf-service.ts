@@ -270,7 +270,11 @@ class PDFService {
 
   /**
    * Thin facade: delegates to RetrievalService (fusion B1). Legacy callers
-   * keep the same signature and result shape.
+   * (incl. the `pdf:search` IPC handler consumed by the renderer) keep
+   * the flat-array return shape they expect; the typed
+   * `RetrievalSearchResult` envelope (fusion 1.7) is unwrapped here.
+   * Per-corpus outcomes are still available to internal callers via
+   * `retrievalService.search(...)` directly.
    */
   async search(
     query: string,
@@ -284,7 +288,7 @@ class PDFService {
     }
   ) {
     this.ensureInitialized();
-    return retrievalService.search({
+    const { hits } = await retrievalService.search({
       query,
       topK: options?.topK,
       threshold: options?.threshold,
@@ -293,6 +297,7 @@ class PDFService {
       sourceType: options?.sourceType,
       includeVault: options?.includeVault,
     });
+    return hits;
   }
 
   async getAllDocuments() {

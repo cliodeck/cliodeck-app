@@ -67,7 +67,7 @@ const searchHandler: StepHandler = async (step, _ctx): Promise<StepResult> => {
     };
   }
 
-  const hits = await retrievalService.search({
+  const { hits } = await retrievalService.search({
     query: query || (collectionKeys?.[0] ?? ''),
     topK: limit,
     sourceType,

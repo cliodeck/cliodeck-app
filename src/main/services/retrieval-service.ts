@@ -116,6 +116,38 @@ export type MultiSourceSearchResult =
   | VaultMappedSearchResult;
 
 /**
+ * Per-corpus outcome (fusion 1.7 — partial-success first-class).
+ *
+ * Each retrieval call fans out to up to three corpora (secondary PDFs,
+ * primary Tropy, Obsidian vault). Any individual corpus may be skipped
+ * (not in scope), succeed with N hits, succeed with 0 hits, or throw.
+ * The previous shape collapsed all three into a flat list and logged
+ * failures via `console.warn` — callers had no way to tell the
+ * difference between "Tropy was empty" and "Tropy crashed". This
+ * envelope makes the distinction first-class.
+ */
+export interface RetrievalSourceOutcome {
+  source: 'secondary' | 'primary' | 'vault';
+  /** True iff the corpus was in the requested `sourceType` scope. */
+  attempted: boolean;
+  /** True iff the corpus's search ran without throwing. */
+  ok: boolean;
+  /** Hits this corpus contributed *before* sort+slice across the union. */
+  hitCount: number;
+  /** Search duration for this corpus in ms (only when `attempted`). */
+  durationMs?: number;
+  /** Error message when `ok === false`; undefined otherwise. */
+  error?: string;
+}
+
+export interface RetrievalSearchResult {
+  /** Combined, sort-and-slice'd hit list (the legacy return value). */
+  hits: MultiSourceSearchResult[];
+  /** Per-corpus outcomes (always 3 entries: secondary, primary, vault). */
+  outcomes: RetrievalSourceOutcome[];
+}
+
+/**
  * Partial RAG-explanation payload produced alongside retrieval hits. Only
  * the `search` slice is populated here (plus a `timing.searchMs`); the
  * compression/graph/llm slices are filled by downstream stages. Mirrors
@@ -143,6 +175,10 @@ export interface RetrievalSearchStats {
 export interface RetrievalSearchWithStatsResult {
   hits: MultiSourceSearchResult[];
   stats: RetrievalSearchStats;
+  /** Per-corpus outcomes (fusion 1.7) — surfaced here so callers that
+   *  use `searchWithStats` can render error banners alongside
+   *  explainable-AI stats without a separate retrieval call. */
+  outcomes: RetrievalSourceOutcome[];
 }
 
 export interface RetrievalQuery {
@@ -433,7 +469,7 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const hits = await this.search(q);
+    const { hits, outcomes } = await this.search(q);
     const searchMs = Date.now() - t0;
 
     const documentMap = new Map<
@@ -464,6 +500,7 @@ class RetrievalService {
 
     return {
       hits,
+      outcomes,
       stats: {
         search: {
           query: q.query,
@@ -478,7 +515,7 @@ class RetrievalService {
     };
   }
 
-  async search(q: RetrievalQuery): Promise<MultiSourceSearchResult[]> {
+  async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
     this.ensureReady();
 
     const sourceType = q.sourceType || 'both';
@@ -495,29 +532,68 @@ class RetrievalService {
 
     const allSourceResults: MultiSourceSearchResult[] = [];
 
+    // Each corpus is wrapped to produce a typed outcome the union return
+    // can carry. Partial-success first-class (claw-code lesson 6.3): an
+    // error in one corpus must not silently lose the others.
+    const outcomeSecondary: RetrievalSourceOutcome = {
+      source: 'secondary',
+      attempted: false,
+      ok: false,
+      hitCount: 0,
+    };
+    const outcomePrimary: RetrievalSourceOutcome = {
+      source: 'primary',
+      attempted: false,
+      ok: false,
+      hitCount: 0,
+    };
+    const outcomeVault: RetrievalSourceOutcome = {
+      source: 'vault',
+      attempted: false,
+      ok: false,
+      hitCount: 0,
+    };
+
     if (sourceType === 'secondary' || sourceType === 'both') {
-      const secondaryResults = await this.searchSecondary(q.query, {
-        topK,
-        threshold,
-        documentIds: q.documentIds,
-        collectionKeys: q.collectionKeys,
-      });
-      allSourceResults.push(
-        ...secondaryResults.map(
+      outcomeSecondary.attempted = true;
+      const t0 = Date.now();
+      try {
+        const secondaryResults = await this.searchSecondary(q.query, {
+          topK,
+          threshold,
+          documentIds: q.documentIds,
+          collectionKeys: q.collectionKeys,
+        });
+        const mapped = secondaryResults.map(
           (r: SearchResult): SecondarySearchResult => ({
             ...r,
             sourceType: 'secondary' as const,
           })
-        )
-      );
-      if (DEBUG) {
-        console.log(
-          `📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`
         );
+        allSourceResults.push(...mapped);
+        outcomeSecondary.ok = true;
+        outcomeSecondary.hitCount = mapped.length;
+        if (DEBUG) {
+          console.log(
+            `📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`
+          );
+        }
+      } catch (error: unknown) {
+        outcomeSecondary.ok = false;
+        outcomeSecondary.error =
+          error instanceof Error ? error.message : String(error);
+        console.warn(
+          '⚠️ [PDF-SERVICE] Secondary source search failed:',
+          error
+        );
+      } finally {
+        outcomeSecondary.durationMs = Date.now() - t0;
       }
     }
 
     if (sourceType === 'primary' || sourceType === 'both') {
+      outcomePrimary.attempted = true;
+      const t0 = Date.now();
       try {
         const primaryResults = await tropyService.search(q.query, {
           topK,
@@ -545,36 +621,52 @@ class RetrievalService {
           })
         );
         allSourceResults.push(...mappedPrimaryResults);
+        outcomePrimary.ok = true;
+        outcomePrimary.hitCount = mappedPrimaryResults.length;
         if (DEBUG) {
           console.log(
             `📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`
           );
         }
       } catch (error: unknown) {
+        outcomePrimary.ok = false;
+        outcomePrimary.error =
+          error instanceof Error ? error.message : String(error);
         console.warn(
           '⚠️ [PDF-SERVICE] Primary source search failed (Tropy not initialized?):',
           error
         );
+      } finally {
+        outcomePrimary.durationMs = Date.now() - t0;
       }
     }
 
     // Vault-only mode implies vault inclusion regardless of the flag.
     if (q.includeVault || sourceType === 'vault') {
+      outcomeVault.attempted = true;
+      const t0 = Date.now();
       try {
         const vaultResults = await this.searchVault(q.query, {
           topK,
         });
         allSourceResults.push(...vaultResults);
+        outcomeVault.ok = true;
+        outcomeVault.hitCount = vaultResults.length;
         if (DEBUG) {
           console.log(
             `📓 [PDF-SERVICE] Vault (Obsidian): ${vaultResults.length} results`
           );
         }
       } catch (error: unknown) {
+        outcomeVault.ok = false;
+        outcomeVault.error =
+          error instanceof Error ? error.message : String(error);
         console.warn(
           '⚠️ [PDF-SERVICE] Vault search failed (not indexed?):',
           error
         );
+      } finally {
+        outcomeVault.durationMs = Date.now() - t0;
       }
     }
 
@@ -596,7 +688,10 @@ class RetrievalService {
       );
     }
 
-    return inspectedResults;
+    return {
+      hits: inspectedResults,
+      outcomes: [outcomeSecondary, outcomePrimary, outcomeVault],
+    };
   }
 
   /**
