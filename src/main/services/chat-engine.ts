@@ -26,6 +26,7 @@ import type {
   LLMProvider,
   ToolDescriptor,
 } from '../../../backend/core/llm/providers/base.js';
+import type { ContextCompactor } from '../../../backend/core/context-mgmt/compactor.js';
 import type { RAGExplanation } from '../../../backend/types/chat-source.js';
 
 /**
@@ -194,6 +195,14 @@ export interface RunChatTurnArgs<TSource = unknown> {
   hooks?: ChatEngineHooks;
   /** Max agent-loop iterations (default 6). */
   maxTurns?: number;
+  /**
+   * Optional context compactor (fusion 1.3). When present, the engine
+   * runs `compactor.compact(messages)` at the start of each agent-loop
+   * iteration so long sessions don't saturate the provider's window.
+   * Compaction failures are swallowed (logged + skipped) so a faulty
+   * summarisation never aborts the user's chat turn.
+   */
+  compactor?: ContextCompactor;
 }
 
 /**
@@ -291,7 +300,9 @@ export async function runChatTurn<TSource = unknown>(
     const llmStats: ChatEngineLLMStats = {
       provider: args.provider.id,
       model: args.opts?.model ?? args.provider.name,
-      contextWindow: 0,
+      // Surface the compactor's window when wired so the renderer can
+      // display "context: 200 000" alongside the response. 0 = unknown.
+      contextWindow: args.compactor?.contextWindow ?? 0,
       temperature: args.opts?.temperature ?? 0,
       promptSize,
       tokensIn: lastUsage?.promptTokens,
@@ -354,6 +365,29 @@ export async function runChatTurn<TSource = unknown>(
       let sawToolCall = false;
       let terminalDone = false;
       let lastDoneChunk: ChatChunk | null = null;
+
+      // Compaction: only when a compactor is wired AND the conversation
+      // already crossed its trigger threshold. The compactor itself
+      // returns the same array reference when it decides nothing needs
+      // changing, so we can detect that without computing tokens twice.
+      if (args.compactor) {
+        try {
+          const compacted = await args.compactor.compact(messages);
+          if (compacted !== messages) {
+            safeStatus({ phase: 'compressing' });
+            console.log('[chat-engine] context compacted', {
+              before: messages.length,
+              after: compacted.length,
+            });
+            messages = compacted;
+          }
+        } catch (e) {
+          console.warn(
+            '[chat-engine] compaction skipped:',
+            e instanceof Error ? e.message : e
+          );
+        }
+      }
 
       for await (const chunk of args.provider.chat(messages, {
         model: args.opts?.model,

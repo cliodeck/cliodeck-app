@@ -115,7 +115,12 @@ import {
   loadWorkspaceHints,
   prependAsSystemMessage,
 } from '../../../backend/core/hints/loader.js';
-import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import {
+  createRegistryFromClioDeckConfig,
+  resolveActiveChatModel,
+} from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { ContextCompactor } from '../../../backend/core/context-mgmt/compactor.js';
+import { getContextWindow } from '../../../backend/core/llm/context-windows.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -287,9 +292,11 @@ class FusionChatService {
     let recordedSources: BrainstormSource[] = [];
 
     let registry;
+    let activeModel: string;
     try {
       const cfg = configManager.getLLMConfig();
       registry = createRegistryFromClioDeckConfig(cfg);
+      activeModel = args.opts?.model ?? resolveActiveChatModel(cfg);
     } catch (e) {
       sendChunk(
         { delta: '', done: true, finishReason: 'error' },
@@ -320,6 +327,23 @@ class FusionChatService {
     }
 
     const llm = registry.getLLM();
+
+    // Build a context compactor (fusion 1.3) sized to the active chat
+    // model. Engine runs `compactor.compact(messages)` at the start of
+    // each agent-loop iteration; long brainstorm sessions stop
+    // saturating the provider's window without the renderer or the
+    // user touching anything. `keepRecentTurns` left at the default
+    // (4) — historians referencing earlier exchanges expect the last
+    // few questions to stay verbatim, the older middle gets a faithful
+    // third-person summary.
+    const compactor = new ContextCompactor({
+      llm,
+      contextWindow: getContextWindow(activeModel),
+      summarizeOptions: {
+        // Lower temperature for the summary call to stay faithful.
+        temperature: 0,
+      },
+    });
 
     // --- Assemble MCP tool catalog + dispatcher ---------------------------
     const toolScope = new Map<string, string>(); // namespaced tool name → client name
@@ -433,6 +457,7 @@ class FusionChatService {
         retriever,
         retrievalOptions: args.retrievalOptions,
         systemPrompt: systemPromptConfig,
+        compactor,
         hooks: {
           onStatus: (status) => {
             safeSend('fusion:chat:status', { sessionId, status });

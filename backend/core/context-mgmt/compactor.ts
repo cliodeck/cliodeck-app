@@ -60,7 +60,9 @@ export function isCompactedSummary(m: ChatMessage): boolean {
 
 export class ContextCompactor {
   private readonly llm: LLMProvider;
-  private readonly contextWindow: number;
+  /** Context window in tokens — exposed so callers can populate
+   *  telemetry / explanation payloads with the active value. */
+  readonly contextWindow: number;
   private readonly threshold: number;
   private readonly keepRecentTurns: number;
   private readonly tokenEstimator: TokenEstimator;

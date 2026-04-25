@@ -148,6 +148,29 @@ export function clioDeckConfigToRegistryConfig(
   }
 }
 
+/**
+ * Resolve the *active chat model name* for a given LLMConfig — the value
+ * that ends up in `RegistryConfig.llm.model`. Used by `ContextCompactor`
+ * wiring (fusion 1.3) to look up the model's window without rebuilding
+ * the registry just to read one string. Defaults mirror those in
+ * `clioDeckConfigToRegistryConfig`.
+ */
+export function resolveActiveChatModel(cfg: ClioDeckLLMConfig): string {
+  switch (cfg.backend) {
+    case 'claude':
+      return cfg.claudeModel || 'claude-sonnet-4-6';
+    case 'openai':
+      return cfg.openaiModel || 'gpt-4o-mini';
+    case 'mistral':
+      return cfg.mistralModel || 'mistral-large-latest';
+    case 'gemini':
+      return cfg.geminiModel || 'gemini-2.0-flash';
+    case 'ollama':
+    default:
+      return cfg.ollamaChatModel || 'llama3.2';
+  }
+}
+
 export function createRegistryFromClioDeckConfig(
   cfg: ClioDeckLLMConfig,
   opts: AdapterOptions = {}
