@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Network, Plus, RefreshCw, Trash2, Play } from 'lucide-react';
 
 interface ClientInstance {
@@ -74,6 +75,7 @@ function stateColor(state: ClientInstance['state']): string {
 }
 
 export const MCPClientsSection: React.FC = () => {
+  const { t } = useTranslation();
   const [clients, setClients] = useState<ClientInstance[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -83,7 +85,7 @@ export const MCPClientsSection: React.FC = () => {
   const refresh = useCallback(async () => {
     const a = api();
     if (!a) {
-      setError('Fusion API non exposée.');
+      setError(t('mcp.errors.noFusionApi'));
       return;
     }
     const res = await a.list();
@@ -91,9 +93,9 @@ export const MCPClientsSection: React.FC = () => {
       setClients(res.clients ?? []);
       setError(null);
     } else {
-      setError(res.error ?? 'Liste indisponible.');
+      setError(res.error ?? t('mcp.errors.listFailed'));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -131,12 +133,12 @@ export const MCPClientsSection: React.FC = () => {
         setShowForm(false);
         await refresh();
       } else {
-        setError(res.error ?? 'Ajout refusé.');
+        setError(res.error ?? t('mcp.errors.addFailed'));
       }
     } finally {
       setBusy(false);
     }
-  }, [form, refresh]);
+  }, [form, refresh, t]);
 
   const remove = useCallback(
     async (name: string) => {
@@ -171,16 +173,9 @@ export const MCPClientsSection: React.FC = () => {
   return (
     <section className="config-section">
       <h3 className="config-section-title">
-        <Network size={16} /> Clients MCP
+        <Network size={16} /> {t('mcp.title')}
       </h3>
-      <p className="config-hint">
-        Serveurs MCP (Model Context Protocol) externes consommés par
-        ClioDeck. Transport <code>stdio</code> (processus local) ou{' '}
-        <code>sse</code> (HTTP SSE distant). L'utilisation des outils MCP
-        depuis le chat Brainstorm (tool-use) arrive dans une vague suivante —
-        pour l'instant cette section sert à configurer les clients et
-        vérifier que leurs outils s'exposent correctement.
-      </p>
+      <p className="config-hint">{t('mcp.hint')}</p>
 
       {error && (
         <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
@@ -193,7 +188,7 @@ export const MCPClientsSection: React.FC = () => {
           onClick={() => void refresh()}
           disabled={busy}
         >
-          <RefreshCw size={14} strokeWidth={1} /> Actualiser
+          <RefreshCw size={14} strokeWidth={1} /> {t('mcp.buttons.refresh')}
         </button>
         <button
           type="button"
@@ -202,7 +197,7 @@ export const MCPClientsSection: React.FC = () => {
           disabled={busy}
         >
           <Plus size={14} strokeWidth={1} />{' '}
-          {showForm ? 'Annuler' : 'Ajouter un client'}
+          {showForm ? t('mcp.buttons.cancel') : t('mcp.buttons.addClient')}
         </button>
       </div>
 
@@ -217,17 +212,17 @@ export const MCPClientsSection: React.FC = () => {
           }}
         >
           <div className="config-field">
-            <label className="config-label">Nom</label>
+            <label className="config-label">{t('mcp.form.name')}</label>
             <input
               type="text"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="config-input"
-              placeholder="mon-serveur"
+              placeholder={t('mcp.form.namePlaceholder')}
             />
           </div>
           <div className="config-field">
-            <label className="config-label">Transport</label>
+            <label className="config-label">{t('mcp.form.transport')}</label>
             <select
               value={form.transport}
               onChange={(e) =>
@@ -235,44 +230,42 @@ export const MCPClientsSection: React.FC = () => {
               }
               className="config-input"
             >
-              <option value="stdio">stdio (processus local)</option>
-              <option value="sse">sse (HTTP SSE distant)</option>
+              <option value="stdio">{t('mcp.form.transportStdio')}</option>
+              <option value="sse">{t('mcp.form.transportSse')}</option>
             </select>
           </div>
           {form.transport === 'stdio' ? (
             <>
               <div className="config-field">
-                <label className="config-label">Commande</label>
+                <label className="config-label">{t('mcp.form.command')}</label>
                 <input
                   type="text"
                   value={form.command}
                   onChange={(e) => setForm({ ...form, command: e.target.value })}
                   className="config-input"
-                  placeholder="/usr/bin/python, npx, cliodeck-mcp-server…"
+                  placeholder={t('mcp.form.commandPlaceholder')}
                 />
               </div>
               <div className="config-field">
-                <label className="config-label">
-                  Arguments (séparés par espaces)
-                </label>
+                <label className="config-label">{t('mcp.form.args')}</label>
                 <input
                   type="text"
                   value={form.args}
                   onChange={(e) => setForm({ ...form, args: e.target.value })}
                   className="config-input"
-                  placeholder="--stdio --workspace /path/to/ws"
+                  placeholder={t('mcp.form.argsPlaceholder')}
                 />
               </div>
             </>
           ) : (
             <div className="config-field">
-              <label className="config-label">URL</label>
+              <label className="config-label">{t('mcp.form.url')}</label>
               <input
                 type="text"
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 className="config-input"
-                placeholder="https://example.com/mcp/sse"
+                placeholder={t('mcp.form.urlPlaceholder')}
               />
             </div>
           )}
@@ -287,14 +280,14 @@ export const MCPClientsSection: React.FC = () => {
               (form.transport === 'sse' && !form.url.trim())
             }
           >
-            <Play size={14} strokeWidth={1} /> Enregistrer &amp; démarrer
+            <Play size={14} strokeWidth={1} /> {t('mcp.buttons.save')}
           </button>
         </div>
       )}
 
       {clients.length === 0 ? (
         <p className="config-hint" style={{ margin: 0 }}>
-          Aucun client MCP configuré pour ce projet.
+          {t('mcp.empty')}
         </p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -328,7 +321,7 @@ export const MCPClientsSection: React.FC = () => {
                     className="toolbar-btn"
                     onClick={() => void restart(c.name)}
                     disabled={busy}
-                    title="Redémarrer"
+                    title={t('mcp.buttons.restart')}
                     style={{ padding: '2px 6px' }}
                   >
                     <RefreshCw size={12} strokeWidth={1} />
@@ -338,7 +331,7 @@ export const MCPClientsSection: React.FC = () => {
                     className="toolbar-btn"
                     onClick={() => void remove(c.name)}
                     disabled={busy}
-                    title="Supprimer"
+                    title={t('mcp.buttons.remove')}
                     style={{ padding: '2px 6px' }}
                   >
                     <Trash2 size={12} strokeWidth={1} />
@@ -359,7 +352,7 @@ export const MCPClientsSection: React.FC = () => {
               {c.tools.length > 0 && (
                 <details style={{ marginTop: 6, fontSize: 12 }}>
                   <summary style={{ cursor: 'pointer', opacity: 0.8 }}>
-                    Outils exposés ({c.tools.length})
+                    {t('mcp.tools.summary', { count: c.tools.length })}
                   </summary>
                   <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
                     {c.tools.map((t) => (

@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { X, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 interface RecipeInputDef {
@@ -69,6 +71,7 @@ interface Props {
 }
 
 export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) => {
+  const { t } = useTranslation();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
@@ -86,7 +89,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   useEffect(() => {
     const r = api();
     if (!r) {
-      setLoadError('Fusion API non exposée.');
+      setLoadError(t('recipeRun.errors.noFusionApi'));
       return;
     }
     void r.read(scope, fileName).then((res) => {
@@ -100,10 +103,10 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
         }
         setInputs(initial);
       } else {
-        setLoadError(res.error ?? 'Chargement impossible.');
+        setLoadError(res.error ?? t('recipeRun.errors.loadFailed'));
       }
     });
-  }, [scope, fileName]);
+  }, [scope, fileName, t]);
 
   useEffect(() => {
     const r = api();
@@ -157,12 +160,12 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           failedStep: res.failedStep,
         });
       } else {
-        setResult({ ok: false, error: res.error ?? 'Échec inconnu.' });
+        setResult({ ok: false, error: res.error ?? t('recipeRun.errors.unknownFailure') });
       }
     } finally {
       setRunning(false);
     }
-  }, [recipe, inputs, scope, fileName]);
+  }, [recipe, inputs, scope, fileName, t]);
 
   const renderField = (key: string, def: RecipeInputDef): React.ReactNode => {
     const value = inputs[key];
@@ -216,7 +219,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
         onChange={(e) => setInputs({ ...inputs, [key]: e.target.value })}
         className="config-input"
         disabled={running}
-        placeholder={def.type === 'path' ? '/absolute/path/…' : ''}
+        placeholder={def.type === 'path' ? t('recipeRun.placeholder.path') : ''}
       />
     );
   };
@@ -260,7 +263,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
 
               {Object.entries(recipe.inputs).length > 0 && (
                 <section className="config-section" style={{ marginBottom: 12 }}>
-                  <h3 className="config-section-title">Paramètres</h3>
+                  <h3 className="config-section-title">{t('recipeRun.sections.params')}</h3>
                   {Object.entries(recipe.inputs).map(([key, def]) => (
                     <div key={key} className="config-field">
                       <label className="config-label">
@@ -283,16 +286,16 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
                   disabled={!canRun}
                 >
                   {running ? <Loader2 size={14} /> : <Play size={14} strokeWidth={1} />}{' '}
-                  {running ? 'En cours…' : 'Lancer'}
+                  {running ? t('recipeRun.buttons.running') : t('recipeRun.buttons.run')}
                 </button>
                 <span style={{ opacity: 0.7, fontSize: 12 }}>
-                  {recipe.steps.length} étapes
+                  {t('recipeRun.stepsCount', { count: recipe.steps.length })}
                 </span>
               </div>
 
               {(events.length > 0 || result) && (
                 <section className="config-section">
-                  <h3 className="config-section-title">Journal</h3>
+                  <h3 className="config-section-title">{t('recipeRun.sections.log')}</h3>
                   <div
                     style={{
                       padding: 8,
@@ -307,7 +310,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
                   >
                     {events.map((e, i) => (
                       <div key={i} style={{ padding: '2px 0' }}>
-                        {renderEvent(e)}
+                        {renderEvent(e, t)}
                       </div>
                     ))}
                     <div ref={logEndRef} />
@@ -318,12 +321,13 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
                       {result.ok ? (
                         <span style={{ color: 'var(--color-accent)' }}>
                           <CheckCircle2 size={14} style={{ verticalAlign: 'middle' }} />{' '}
-                          Terminé. Journal : <code>{result.logPath}</code>
+                          {t('recipeRun.result.ok')} <code>{result.logPath}</code>
                         </span>
                       ) : (
                         <span style={{ color: 'var(--color-danger)' }}>
                           <XCircle size={14} style={{ verticalAlign: 'middle' }} />{' '}
-                          Échec : {result.failedStep
+                          {t('recipeRun.result.failed')}{' '}
+                          {result.failedStep
                             ? `${result.failedStep.stepId} — ${result.failedStep.message}`
                             : result.error}
                         </span>
@@ -334,7 +338,9 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
                   {result?.ok && result.outputs && (
                     <details style={{ marginTop: 8 }}>
                       <summary style={{ cursor: 'pointer', fontSize: 12 }}>
-                        Sorties ({Object.keys(result.outputs).length})
+                        {t('recipeRun.sections.outputs', {
+                          count: Object.keys(result.outputs).length,
+                        })}
                       </summary>
                       <pre
                         style={{
@@ -363,35 +369,46 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   );
 };
 
-function renderEvent(e: RunEvent): React.ReactNode {
+function renderEvent(e: RunEvent, t: TFunction): React.ReactNode {
   switch (e.kind) {
     case 'run_started':
-      return <span>▶ Run started — {e.recipe}</span>;
+      return <span>{t('recipeRun.log.runStarted', { recipe: e.recipe })}</span>;
     case 'step_start':
       return (
         <span style={{ opacity: 0.8 }}>
-          … step <strong>{e.stepId}</strong> ({e.stepKind})
+          {t('recipeRun.log.stepInProgress', {
+            stepId: e.stepId,
+            kind: e.stepKind,
+          })}
         </span>
       );
     case 'step_ok':
       return (
         <span style={{ color: 'var(--color-accent)' }}>
-          ✓ step <strong>{e.stepId}</strong>
-          {e.stub ? ' (stub)' : ''}
+          {t(e.stub ? 'recipeRun.log.stepOkStub' : 'recipeRun.log.stepOk', {
+            stepId: e.stepId,
+          })}
         </span>
       );
     case 'step_failed':
       return (
         <span style={{ color: 'var(--color-danger)' }}>
-          ✗ step <strong>{e.stepId}</strong> — {e.error.message}
+          {t('recipeRun.log.stepFailed', {
+            stepId: e.stepId,
+            message: e.error.message,
+          })}
         </span>
       );
     case 'run_completed':
-      return <span style={{ color: 'var(--color-accent)' }}>✓ Run completed</span>;
+      return (
+        <span style={{ color: 'var(--color-accent)' }}>
+          {t('recipeRun.log.runCompleted')}
+        </span>
+      );
     case 'run_failed':
       return (
         <span style={{ color: 'var(--color-danger)' }}>
-          ✗ Run failed — {e.error.message}
+          {t('recipeRun.log.runFailed', { message: e.error.message })}
         </span>
       );
   }

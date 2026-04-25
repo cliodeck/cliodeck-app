@@ -950,5 +950,156 @@
     "submit": "Auf GitHub öffnen",
     "submitted": "Das Formular wurde in Ihrem Browser geöffnet. Klicken Sie auf 'Submit new issue' auf GitHub, um zu bestätigen.",
     "systemInfo": "Systeminformationen"
+  },
+  "vault": {
+    "title": "Obsidian-Vault",
+    "hint": "Verknüpfen Sie einen Obsidian-Vault (Ordner mit Markdown-Notizen), damit der Brainstorm-Chat Ihre Notizen zusätzlich zur Bibliografie zitieren kann. Notizen werden lokal in .cliodeck/v2/obsidian-vectors.db indiziert.",
+    "errors": {
+      "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
+      "noProject": "Öffnen Sie ein Projekt, um den Vault zu konfigurieren.",
+      "statusFailed": "Vault-Status konnte nicht gelesen werden.",
+      "configRefused": "Konfiguration abgelehnt.",
+      "indexFailed": "Indizierung fehlgeschlagen."
+    },
+    "dialog": {
+      "pickTitle": "Obsidian-Vault-Ordner auswählen"
+    },
+    "labels": {
+      "path": "Pfad:",
+      "noVaultLinked": "kein Vault verknüpft",
+      "index": "Index:",
+      "ready": "bereit",
+      "notIndexed": "nicht indiziert"
+    },
+    "buttons": {
+      "linkVault": "Vault verknüpfen…",
+      "changeVault": "Vault wechseln…",
+      "index": "Indizieren",
+      "indexTitle": "Neue oder geänderte Notizen indizieren",
+      "reindex": "Neu indizieren (erzwingen)",
+      "reindexTitle": "Vollständige Neuindizierung erzwingen",
+      "unlink": "Trennen",
+      "unlinkTitle": "Vault trennen und lokalen Index löschen"
+    },
+    "report": {
+      "indexed": "Indiziert",
+      "skipped": "übersprungen",
+      "failed": "Fehler"
+    }
+  },
+  "hints": {
+    "title": "Dauerhafter Kontext",
+    "hint": "Diese Notizen werden als Systemnachricht in jede Brainstorm-Konversation (und die Rezepte, die sie verwenden) eingefügt. Ideal, um das Modell an Projektkonventionen, kanonische Quellen und Ausschlüsse zu erinnern.",
+    "filePath": "Datei:",
+    "errors": {
+      "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
+      "noProject": "Öffnen Sie ein Projekt, um Hints zu bearbeiten.",
+      "saveFailed": "Speichern fehlgeschlagen."
+    },
+    "buttons": {
+      "save": "Speichern",
+      "saveTitle": "Hints speichern"
+    },
+    "status": {
+      "saved": "✓ gespeichert"
+    },
+    "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n"
+  },
+  "recipes": {
+    "title": "Rezepte (schreibgeschützt)",
+    "hintIntro": "Verfügbare YAML-Rezepte —",
+    "hintBuiltinLabel": "builtin",
+    "hintBuiltinSuffix": "mit der App geliefert,",
+    "hintUserLabel": "user",
+    "hintUserSuffix": "im Projekt unter .cliodeck/v2/recipes/ abgelegt. Klicken Sie auf „Ausführen“, um ein Rezept mit interaktiver Parametereingabe auszuführen.",
+    "errors": {
+      "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
+      "loadFailed": "Laden nicht möglich."
+    },
+    "groups": {
+      "builtin": "Builtin",
+      "user": "User",
+      "empty": "Keine Rezepte."
+    },
+    "buttons": {
+      "run": "Ausführen",
+      "runTitle": "Dieses Rezept ausführen",
+      "refresh": "Aktualisieren",
+      "refreshTitle": "Liste neu laden"
+    },
+    "card": {
+      "stepsCount_one": "{{count}} Schritt",
+      "stepsCount_other": "{{count}} Schritte"
+    }
+  },
+  "mcp": {
+    "title": "MCP-Clients",
+    "hint": "Externe MCP-Server (Model Context Protocol), die ClioDeck konsumiert. Transport stdio (lokaler Prozess) oder sse (entfernter HTTP-SSE). Die Verwendung von MCP-Tools aus dem Brainstorm-Chat (Tool-Use) folgt in einer späteren Welle — derzeit dient dieser Bereich der Konfiguration der Clients und der Überprüfung, dass deren Tools korrekt exponiert werden.",
+    "errors": {
+      "noFusionApi": "Fusion-API nicht exponiert.",
+      "listFailed": "Liste nicht verfügbar.",
+      "addFailed": "Hinzufügen abgelehnt."
+    },
+    "buttons": {
+      "refresh": "Aktualisieren",
+      "addClient": "Client hinzufügen",
+      "cancel": "Abbrechen",
+      "save": "Speichern & starten",
+      "restart": "Neu starten",
+      "remove": "Entfernen"
+    },
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "mein-server",
+      "transport": "Transport",
+      "transportStdio": "stdio (lokaler Prozess)",
+      "transportSse": "sse (entfernter HTTP-SSE)",
+      "command": "Befehl",
+      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "args": "Argumente (durch Leerzeichen getrennt)",
+      "argsPlaceholder": "--stdio --workspace /path/to/ws",
+      "url": "URL",
+      "urlPlaceholder": "https://example.com/mcp/sse"
+    },
+    "empty": "Kein MCP-Client für dieses Projekt konfiguriert.",
+    "tools": {
+      "summary_one": "Verfügbares Tool ({{count}})",
+      "summary_other": "Verfügbare Tools ({{count}})"
+    }
+  },
+  "recipeRun": {
+    "errors": {
+      "noFusionApi": "Fusion-API nicht exponiert.",
+      "loadFailed": "Laden nicht möglich.",
+      "unknownFailure": "Unbekannter Fehler."
+    },
+    "sections": {
+      "params": "Parameter",
+      "log": "Protokoll",
+      "outputs_one": "Ausgabe ({{count}})",
+      "outputs_other": "Ausgaben ({{count}})"
+    },
+    "buttons": {
+      "run": "Ausführen",
+      "running": "Läuft…"
+    },
+    "stepsCount_one": "{{count}} Schritt",
+    "stepsCount_other": "{{count}} Schritte",
+    "result": {
+      "ok": "Fertig. Protokoll:",
+      "failed": "Fehlgeschlagen:"
+    },
+    "log": {
+      "runStarted": "▶ Run started — {{recipe}}",
+      "stepInProgress": "… step {{stepId}} ({{kind}})",
+      "stepOk": "✓ step {{stepId}}",
+      "stepOkStub": "✓ step {{stepId}} (stub)",
+      "stepFailed": "✗ step {{stepId}} — {{message}}",
+      "runCompleted": "✓ Run completed",
+      "runFailed": "✗ Run failed — {{message}}"
+    },
+    "placeholder": {
+      "path": "/absolute/path/…"
+    }
   }
 }

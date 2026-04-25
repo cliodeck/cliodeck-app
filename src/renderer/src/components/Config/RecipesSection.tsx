@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BookOpen, Play, RefreshCw } from 'lucide-react';
 import { RecipeRunModal } from './RecipeRunModal';
 
@@ -24,6 +25,7 @@ function api(): RecipesApi | null {
 }
 
 export const RecipesSection: React.FC = () => {
+  const { t } = useTranslation();
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export const RecipesSection: React.FC = () => {
   const refresh = async (): Promise<void> => {
     const r = api();
     if (!r) {
-      setError('Fusion API non exposée par le preload.');
+      setError(t('recipes.errors.noFusionApi'));
       return;
     }
     setLoading(true);
@@ -47,7 +49,7 @@ export const RecipesSection: React.FC = () => {
         setUser(res.user ?? []);
         setError(null);
       } else {
-        setError(res.error ?? 'Chargement impossible.');
+        setError(res.error ?? t('recipes.errors.loadFailed'));
       }
     } finally {
       setLoading(false);
@@ -76,7 +78,7 @@ export const RecipesSection: React.FC = () => {
       </h4>
       {items.length === 0 ? (
         <p className="config-hint" style={{ margin: 0 }}>
-          Aucune recette.
+          {t('recipes.groups.empty')}
         </p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -100,16 +102,17 @@ export const RecipesSection: React.FC = () => {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                 <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>
-                  <code>{r.fileName}</code> · {r.steps} étapes
+                  <code>{r.fileName}</code> ·{' '}
+                  {t('recipes.card.stepsCount', { count: r.steps })}
                 </p>
                 <button
                   type="button"
                   className="toolbar-btn"
                   onClick={() => setRunTarget({ scope: scopeOf(items), fileName: r.fileName })}
-                  title="Lancer cette recette"
+                  title={t('recipes.buttons.runTitle')}
                   style={{ padding: '2px 8px', fontSize: 12 }}
                 >
-                  <Play size={12} strokeWidth={1} /> Lancer
+                  <Play size={12} strokeWidth={1} /> {t('recipes.buttons.run')}
                 </button>
               </div>
             </li>
@@ -122,12 +125,12 @@ export const RecipesSection: React.FC = () => {
   return (
     <section className="config-section">
       <h3 className="config-section-title">
-        <BookOpen size={16} /> Recettes (lecture seule)
+        <BookOpen size={16} /> {t('recipes.title')}
       </h3>
       <p className="config-hint">
-        Recettes YAML disponibles — <em>builtin</em> livrées avec l'app,{' '}
-        <em>user</em> placées dans <code>.cliodeck/v2/recipes/</code> du projet.
-        Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.
+        {t('recipes.hintIntro')} <em>{t('recipes.hintBuiltinLabel')}</em>{' '}
+        {t('recipes.hintBuiltinSuffix')} <em>{t('recipes.hintUserLabel')}</em>{' '}
+        {t('recipes.hintUserSuffix')}
       </p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button
@@ -135,16 +138,16 @@ export const RecipesSection: React.FC = () => {
           className="toolbar-btn"
           onClick={() => void refresh()}
           disabled={loading}
-          title="Recharger la liste"
+          title={t('recipes.buttons.refreshTitle')}
         >
-          <RefreshCw size={14} strokeWidth={1} /> Actualiser
+          <RefreshCw size={14} strokeWidth={1} /> {t('recipes.buttons.refresh')}
         </button>
       </div>
       {error && (
         <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
       )}
-      {renderGroup('Builtin', builtin)}
-      {renderGroup('User', user)}
+      {renderGroup(t('recipes.groups.builtin'), builtin)}
+      {renderGroup(t('recipes.groups.user'), user)}
       {runTarget && (
         <RecipeRunModal
           scope={runTarget.scope}

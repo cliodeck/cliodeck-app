@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Database, FolderOpen, Link2Off, Play } from 'lucide-react';
 
 interface VaultStatus {
@@ -50,6 +51,7 @@ function dialogApi(): DialogApi | null {
 }
 
 export const VaultConfigSection: React.FC = () => {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,7 +65,7 @@ export const VaultConfigSection: React.FC = () => {
   const refresh = useCallback(async () => {
     const api = vaultApi();
     if (!api) {
-      setError('Fusion API non exposée par le preload.');
+      setError(t('vault.errors.noFusionApi'));
       return;
     }
     const res = await api.status();
@@ -75,11 +77,11 @@ export const VaultConfigSection: React.FC = () => {
       });
       setError(null);
     } else if (res.error === 'no_project') {
-      setError('Ouvrez un projet pour configurer le vault.');
+      setError(t('vault.errors.noProject'));
     } else {
-      setError(res.error ?? 'Impossible de lire le statut du vault.');
+      setError(res.error ?? t('vault.errors.statusFailed'));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -95,7 +97,7 @@ export const VaultConfigSection: React.FC = () => {
     if (!dlg) return;
     const res = await dlg.openFile({
       properties: ['openDirectory'],
-      title: 'Sélectionner le dossier du vault Obsidian',
+      title: t('vault.dialog.pickTitle'),
     });
     if (res.canceled || !res.filePaths?.length) return;
     const api = vaultApi();
@@ -104,14 +106,14 @@ export const VaultConfigSection: React.FC = () => {
     try {
       const setRes = await api.setPath(res.filePaths[0]);
       if (!setRes.success) {
-        setError(setRes.error ?? 'Configuration refusée.');
+        setError(setRes.error ?? t('vault.errors.configRefused'));
       } else {
         await refresh();
       }
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [refresh, t]);
 
   const runIndex = useCallback(
     async (force: boolean) => {
@@ -131,14 +133,14 @@ export const VaultConfigSection: React.FC = () => {
           });
           await refresh();
         } else {
-          setError(res.error ?? 'Indexation échouée.');
+          setError(res.error ?? t('vault.errors.indexFailed'));
         }
       } finally {
         setBusy(false);
         setProgress(null);
       }
     },
-    [refresh]
+    [refresh, t]
   );
 
   const unlink = useCallback(async () => {
@@ -157,13 +159,9 @@ export const VaultConfigSection: React.FC = () => {
   return (
     <section className="config-section">
       <h3 className="config-section-title">
-        <Database size={16} /> Vault Obsidian
+        <Database size={16} /> {t('vault.title')}
       </h3>
-      <p className="config-hint">
-        Lie un vault Obsidian (dossier de notes Markdown) pour que le chat
-        Brainstorm puisse citer tes notes en plus de ta bibliographie. Les
-        notes sont indexées localement dans <code>.cliodeck/v2/obsidian-vectors.db</code>.
-      </p>
+      <p className="config-hint">{t('vault.hint')}</p>
 
       {error && (
         <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
@@ -179,19 +177,21 @@ export const VaultConfigSection: React.FC = () => {
         }}
       >
         <div style={{ fontSize: 12 }}>
-          <strong>Chemin :</strong>{' '}
+          <strong>{t('vault.labels.path')}</strong>{' '}
           {status?.vaultPath ? (
             <code>{status.vaultPath}</code>
           ) : (
-            <em style={{ opacity: 0.7 }}>aucun vault lié</em>
+            <em style={{ opacity: 0.7 }}>{t('vault.labels.noVaultLinked')}</em>
           )}
         </div>
         <div style={{ fontSize: 12, marginTop: 4 }}>
-          <strong>Index :</strong>{' '}
+          <strong>{t('vault.labels.index')}</strong>{' '}
           {status?.indexed ? (
-            <span>prêt · <code>{status.dbPath}</code></span>
+            <span>
+              {t('vault.labels.ready')} · <code>{status.dbPath}</code>
+            </span>
           ) : (
-            <em style={{ opacity: 0.7 }}>non indexé</em>
+            <em style={{ opacity: 0.7 }}>{t('vault.labels.notIndexed')}</em>
           )}
         </div>
       </div>
@@ -204,34 +204,36 @@ export const VaultConfigSection: React.FC = () => {
           disabled={busy}
         >
           <FolderOpen size={14} strokeWidth={1} />{' '}
-          {status?.vaultPath ? 'Changer de vault…' : 'Lier un vault…'}
+          {status?.vaultPath
+            ? t('vault.buttons.changeVault')
+            : t('vault.buttons.linkVault')}
         </button>
         <button
           type="button"
           className="toolbar-btn"
           onClick={() => void runIndex(false)}
           disabled={busy || !status?.vaultPath}
-          title="Indexe les notes nouvelles ou modifiées"
+          title={t('vault.buttons.indexTitle')}
         >
-          <Play size={14} strokeWidth={1} /> Indexer
+          <Play size={14} strokeWidth={1} /> {t('vault.buttons.index')}
         </button>
         <button
           type="button"
           className="toolbar-btn"
           onClick={() => void runIndex(true)}
           disabled={busy || !status?.vaultPath}
-          title="Force le réindexation complète"
+          title={t('vault.buttons.reindexTitle')}
         >
-          <Play size={14} strokeWidth={1} /> Réindexer (force)
+          <Play size={14} strokeWidth={1} /> {t('vault.buttons.reindex')}
         </button>
         <button
           type="button"
           className="toolbar-btn"
           onClick={() => void unlink()}
           disabled={busy || !status?.vaultPath}
-          title="Détache le vault et supprime l'index local"
+          title={t('vault.buttons.unlinkTitle')}
         >
-          <Link2Off size={14} strokeWidth={1} /> Détacher
+          <Link2Off size={14} strokeWidth={1} /> {t('vault.buttons.unlink')}
         </button>
       </div>
 
@@ -243,8 +245,9 @@ export const VaultConfigSection: React.FC = () => {
 
       {lastReport && (
         <p style={{ marginTop: 8, fontSize: 12 }}>
-          ✓ Indexé : <strong>{lastReport.indexed}</strong> · ignoré :{' '}
-          {lastReport.skipped} · échecs : {lastReport.failed}
+          ✓ {t('vault.report.indexed')} : <strong>{lastReport.indexed}</strong> ·{' '}
+          {t('vault.report.skipped')} : {lastReport.skipped} ·{' '}
+          {t('vault.report.failed')} : {lastReport.failed}
           {lastReport.vaultName ? ` · ${lastReport.vaultName}` : ''}
         </p>
       )}

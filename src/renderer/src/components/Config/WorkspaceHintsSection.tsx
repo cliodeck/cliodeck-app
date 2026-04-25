@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileText, Save } from 'lucide-react';
 
 interface HintsApi {
@@ -19,6 +20,7 @@ function api(): HintsApi | null {
 }
 
 export const WorkspaceHintsSection: React.FC = () => {
+  const { t } = useTranslation();
   const [value, setValue] = useState('');
   const [sourcePath, setSourcePath] = useState<string>('.cliodeck/v2/hints.md');
   const [status, setStatus] = useState<
@@ -29,7 +31,7 @@ export const WorkspaceHintsSection: React.FC = () => {
   useEffect(() => {
     const h = api();
     if (!h) {
-      setStatus({ kind: 'error', message: 'Fusion API non exposée par le preload.' });
+      setStatus({ kind: 'error', message: t('hints.errors.noFusionApi') });
       return;
     }
     void h.read().then((res) => {
@@ -37,13 +39,13 @@ export const WorkspaceHintsSection: React.FC = () => {
         setValue(res.hints.raw);
         setSourcePath(res.hints.sourcePath);
       } else if (res.error === 'no_project') {
-        setStatus({ kind: 'error', message: 'Ouvrez un projet pour éditer les hints.' });
+        setStatus({ kind: 'error', message: t('hints.errors.noProject') });
       } else if (res.error) {
         setStatus({ kind: 'error', message: res.error });
       }
       setLoaded(true);
     });
-  }, []);
+  }, [t]);
 
   const save = useCallback(async () => {
     const h = api();
@@ -54,22 +56,18 @@ export const WorkspaceHintsSection: React.FC = () => {
       setStatus({ kind: 'ok' });
       setTimeout(() => setStatus({ kind: 'idle' }), 1500);
     } else {
-      setStatus({ kind: 'error', message: res.error ?? 'Échec de la sauvegarde.' });
+      setStatus({ kind: 'error', message: res.error ?? t('hints.errors.saveFailed') });
     }
-  }, [value]);
+  }, [value, t]);
 
   return (
     <section className="config-section">
       <h3 className="config-section-title">
-        <FileText size={16} /> Contexte durable (<code>.cliohints</code>)
+        <FileText size={16} /> {t('hints.title')} (<code>.cliohints</code>)
       </h3>
-      <p className="config-hint">
-        Ces notes sont injectées comme message système dans chaque conversation
-        Brainstorm (et les recettes qui l'utilisent). Idéal pour rappeler au
-        modèle les conventions du projet, les sources canoniques, les exclusions.
-      </p>
+      <p className="config-hint">{t('hints.hint')}</p>
       <p className="config-hint" style={{ fontSize: 11, opacity: 0.7 }}>
-        Fichier : <code>{sourcePath}</code>
+        {t('hints.filePath')} <code>{sourcePath}</code>
       </p>
       <textarea
         className="config-textarea"
@@ -77,7 +75,7 @@ export const WorkspaceHintsSection: React.FC = () => {
         onChange={(e) => setValue(e.target.value)}
         disabled={!loaded || status.kind === 'saving'}
         rows={10}
-        placeholder="# Contexte&#10;&#10;- Corpus : articles en FR sur …&#10;- Évite de citer Wikipedia&#10;- Utilise la chronologie stricte&#10;"
+        placeholder={t('hints.placeholder')}
         style={{
           width: '100%',
           fontFamily: 'var(--mono-font, ui-monospace, monospace)',
@@ -96,11 +94,13 @@ export const WorkspaceHintsSection: React.FC = () => {
           className="toolbar-btn"
           onClick={save}
           disabled={!loaded || status.kind === 'saving'}
-          title="Enregistrer les hints"
+          title={t('hints.buttons.saveTitle')}
         >
-          <Save size={16} strokeWidth={1} /> Enregistrer
+          <Save size={16} strokeWidth={1} /> {t('hints.buttons.save')}
         </button>
-        {status.kind === 'ok' && <span style={{ color: 'var(--color-accent)' }}>✓ enregistré</span>}
+        {status.kind === 'ok' && (
+          <span style={{ color: 'var(--color-accent)' }}>{t('hints.status.saved')}</span>
+        )}
         {status.kind === 'saving' && <span>…</span>}
         {status.kind === 'error' && (
           <span style={{ color: 'var(--color-danger)' }}>{status.message}</span>

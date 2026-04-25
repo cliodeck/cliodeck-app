@@ -1123,6 +1123,157 @@
     "analyze": "Analyser",
     "export": "Exporter"
   },
+  "vault": {
+    "title": "Vault Obsidian",
+    "hint": "Lie un vault Obsidian (dossier de notes Markdown) pour que le chat Brainstorm puisse citer tes notes en plus de ta bibliographie. Les notes sont indexées localement dans .cliodeck/v2/obsidian-vectors.db.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "noProject": "Ouvrez un projet pour configurer le vault.",
+      "statusFailed": "Impossible de lire le statut du vault.",
+      "configRefused": "Configuration refusée.",
+      "indexFailed": "Indexation échouée."
+    },
+    "dialog": {
+      "pickTitle": "Sélectionner le dossier du vault Obsidian"
+    },
+    "labels": {
+      "path": "Chemin :",
+      "noVaultLinked": "aucun vault lié",
+      "index": "Index :",
+      "ready": "prêt",
+      "notIndexed": "non indexé"
+    },
+    "buttons": {
+      "linkVault": "Lier un vault…",
+      "changeVault": "Changer de vault…",
+      "index": "Indexer",
+      "indexTitle": "Indexe les notes nouvelles ou modifiées",
+      "reindex": "Réindexer (force)",
+      "reindexTitle": "Force la réindexation complète",
+      "unlink": "Détacher",
+      "unlinkTitle": "Détache le vault et supprime l'index local"
+    },
+    "report": {
+      "indexed": "Indexé",
+      "skipped": "ignoré",
+      "failed": "échecs"
+    }
+  },
+  "hints": {
+    "title": "Contexte durable",
+    "hint": "Ces notes sont injectées comme message système dans chaque conversation Brainstorm (et les recettes qui l'utilisent). Idéal pour rappeler au modèle les conventions du projet, les sources canoniques, les exclusions.",
+    "filePath": "Fichier :",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "noProject": "Ouvrez un projet pour éditer les hints.",
+      "saveFailed": "Échec de la sauvegarde."
+    },
+    "buttons": {
+      "save": "Enregistrer",
+      "saveTitle": "Enregistrer les hints"
+    },
+    "status": {
+      "saved": "✓ enregistré"
+    },
+    "placeholder": "# Contexte\n\n- Corpus : articles en FR sur …\n- Évite de citer Wikipedia\n- Utilise la chronologie stricte\n"
+  },
+  "recipes": {
+    "title": "Recettes (lecture seule)",
+    "hintIntro": "Recettes YAML disponibles —",
+    "hintBuiltinLabel": "builtin",
+    "hintBuiltinSuffix": "livrées avec l'app,",
+    "hintUserLabel": "user",
+    "hintUserSuffix": "placées dans .cliodeck/v2/recipes/ du projet. Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "loadFailed": "Chargement impossible."
+    },
+    "groups": {
+      "builtin": "Builtin",
+      "user": "User",
+      "empty": "Aucune recette."
+    },
+    "buttons": {
+      "run": "Lancer",
+      "runTitle": "Lancer cette recette",
+      "refresh": "Actualiser",
+      "refreshTitle": "Recharger la liste"
+    },
+    "card": {
+      "stepsCount_one": "{{count}} étape",
+      "stepsCount_other": "{{count}} étapes"
+    }
+  },
+  "mcp": {
+    "title": "Clients MCP",
+    "hint": "Serveurs MCP (Model Context Protocol) externes consommés par ClioDeck. Transport stdio (processus local) ou sse (HTTP SSE distant). L'utilisation des outils MCP depuis le chat Brainstorm (tool-use) arrive dans une vague suivante — pour l'instant cette section sert à configurer les clients et vérifier que leurs outils s'exposent correctement.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée.",
+      "listFailed": "Liste indisponible.",
+      "addFailed": "Ajout refusé."
+    },
+    "buttons": {
+      "refresh": "Actualiser",
+      "addClient": "Ajouter un client",
+      "cancel": "Annuler",
+      "save": "Enregistrer & démarrer",
+      "restart": "Redémarrer",
+      "remove": "Supprimer"
+    },
+    "form": {
+      "name": "Nom",
+      "namePlaceholder": "mon-serveur",
+      "transport": "Transport",
+      "transportStdio": "stdio (processus local)",
+      "transportSse": "sse (HTTP SSE distant)",
+      "command": "Commande",
+      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "args": "Arguments (séparés par espaces)",
+      "argsPlaceholder": "--stdio --workspace /path/to/ws",
+      "url": "URL",
+      "urlPlaceholder": "https://example.com/mcp/sse"
+    },
+    "empty": "Aucun client MCP configuré pour ce projet.",
+    "tools": {
+      "summary_one": "Outil exposé ({{count}})",
+      "summary_other": "Outils exposés ({{count}})"
+    }
+  },
+  "recipeRun": {
+    "errors": {
+      "noFusionApi": "Fusion API non exposée.",
+      "loadFailed": "Chargement impossible.",
+      "unknownFailure": "Échec inconnu."
+    },
+    "sections": {
+      "params": "Paramètres",
+      "log": "Journal",
+      "outputs_one": "Sortie ({{count}})",
+      "outputs_other": "Sorties ({{count}})"
+    },
+    "buttons": {
+      "run": "Lancer",
+      "running": "En cours…"
+    },
+    "stepsCount_one": "{{count}} étape",
+    "stepsCount_other": "{{count}} étapes",
+    "result": {
+      "ok": "Terminé. Journal :",
+      "failed": "Échec :"
+    },
+    "log": {
+      "runStarted": "▶ Run started — {{recipe}}",
+      "stepInProgress": "… step {{stepId}} ({{kind}})",
+      "stepOk": "✓ step {{stepId}}",
+      "stepOkStub": "✓ step {{stepId}} (stub)",
+      "stepFailed": "✗ step {{stepId}} — {{message}}",
+      "runCompleted": "✓ Run completed",
+      "runFailed": "✗ Run failed — {{message}}"
+    },
+    "placeholder": {
+      "path": "/absolute/path/…"
+    }
+  },
   "analyze": {
     "title": "Analyser",
     "subtitle": "Explorez votre corpus, mesurez la similarité et faites émerger les thèmes.",

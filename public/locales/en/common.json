@@ -1123,6 +1123,157 @@
     "analyze": "Analyze",
     "export": "Export"
   },
+  "vault": {
+    "title": "Obsidian Vault",
+    "hint": "Link an Obsidian vault (folder of Markdown notes) so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally in .cliodeck/v2/obsidian-vectors.db.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "noProject": "Open a project to configure the vault.",
+      "statusFailed": "Could not read the vault status.",
+      "configRefused": "Configuration refused.",
+      "indexFailed": "Indexing failed."
+    },
+    "dialog": {
+      "pickTitle": "Select the Obsidian vault folder"
+    },
+    "labels": {
+      "path": "Path:",
+      "noVaultLinked": "no vault linked",
+      "index": "Index:",
+      "ready": "ready",
+      "notIndexed": "not indexed"
+    },
+    "buttons": {
+      "linkVault": "Link a vault…",
+      "changeVault": "Change vault…",
+      "index": "Index",
+      "indexTitle": "Index new or modified notes",
+      "reindex": "Reindex (force)",
+      "reindexTitle": "Force a full reindex",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink the vault and remove the local index"
+    },
+    "report": {
+      "indexed": "Indexed",
+      "skipped": "skipped",
+      "failed": "failed"
+    }
+  },
+  "hints": {
+    "title": "Persistent context",
+    "hint": "These notes are injected as a system message into every Brainstorm conversation (and the recipes that use it). Useful for reminding the model of project conventions, canonical sources, and exclusions.",
+    "filePath": "File:",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "noProject": "Open a project to edit hints.",
+      "saveFailed": "Save failed."
+    },
+    "buttons": {
+      "save": "Save",
+      "saveTitle": "Save hints"
+    },
+    "status": {
+      "saved": "✓ saved"
+    },
+    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n"
+  },
+  "recipes": {
+    "title": "Recipes (read-only)",
+    "hintIntro": "Available YAML recipes —",
+    "hintBuiltinLabel": "builtin",
+    "hintBuiltinSuffix": "shipped with the app,",
+    "hintUserLabel": "user",
+    "hintUserSuffix": "placed in .cliodeck/v2/recipes/ in the project. Click \"Run\" to execute a recipe with interactive parameter input.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "loadFailed": "Could not load."
+    },
+    "groups": {
+      "builtin": "Builtin",
+      "user": "User",
+      "empty": "No recipes."
+    },
+    "buttons": {
+      "run": "Run",
+      "runTitle": "Run this recipe",
+      "refresh": "Refresh",
+      "refreshTitle": "Reload the list"
+    },
+    "card": {
+      "stepsCount_one": "{{count}} step",
+      "stepsCount_other": "{{count}} steps"
+    }
+  },
+  "mcp": {
+    "title": "MCP Clients",
+    "hint": "External MCP (Model Context Protocol) servers consumed by ClioDeck. Transport stdio (local process) or sse (remote HTTP SSE). Using MCP tools from the Brainstorm chat (tool-use) is coming in a later wave — for now this section is for configuring clients and verifying that their tools expose correctly.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed.",
+      "listFailed": "List unavailable.",
+      "addFailed": "Add refused."
+    },
+    "buttons": {
+      "refresh": "Refresh",
+      "addClient": "Add a client",
+      "cancel": "Cancel",
+      "save": "Save & start",
+      "restart": "Restart",
+      "remove": "Remove"
+    },
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "my-server",
+      "transport": "Transport",
+      "transportStdio": "stdio (local process)",
+      "transportSse": "sse (remote HTTP SSE)",
+      "command": "Command",
+      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "args": "Arguments (space-separated)",
+      "argsPlaceholder": "--stdio --workspace /path/to/ws",
+      "url": "URL",
+      "urlPlaceholder": "https://example.com/mcp/sse"
+    },
+    "empty": "No MCP client configured for this project.",
+    "tools": {
+      "summary_one": "Tool exposed ({{count}})",
+      "summary_other": "Tools exposed ({{count}})"
+    }
+  },
+  "recipeRun": {
+    "errors": {
+      "noFusionApi": "Fusion API not exposed.",
+      "loadFailed": "Could not load.",
+      "unknownFailure": "Unknown failure."
+    },
+    "sections": {
+      "params": "Parameters",
+      "log": "Log",
+      "outputs_one": "Output ({{count}})",
+      "outputs_other": "Outputs ({{count}})"
+    },
+    "buttons": {
+      "run": "Run",
+      "running": "Running…"
+    },
+    "stepsCount_one": "{{count}} step",
+    "stepsCount_other": "{{count}} steps",
+    "result": {
+      "ok": "Done. Log:",
+      "failed": "Failed:"
+    },
+    "log": {
+      "runStarted": "▶ Run started — {{recipe}}",
+      "stepInProgress": "… step {{stepId}} ({{kind}})",
+      "stepOk": "✓ step {{stepId}}",
+      "stepOkStub": "✓ step {{stepId}} (stub)",
+      "stepFailed": "✗ step {{stepId}} — {{message}}",
+      "runCompleted": "✓ Run completed",
+      "runFailed": "✗ Run failed — {{message}}"
+    },
+    "placeholder": {
+      "path": "/absolute/path/…"
+    }
+  },
   "analyze": {
     "title": "Analyze",
     "subtitle": "Explore your corpus, measure similarity, and surface themes.",
