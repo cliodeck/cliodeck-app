@@ -169,8 +169,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       {/* Workspace mode bar (fusion phase 3.1a) */}
       <WorkspaceModeBar />
 
-      {/* Main 3-panel layout */}
-      <div className="main-content">
+      {/* Main 3-panel layout. `id` + `tabIndex` are the skip-link
+          target (fusion 3.3) — keyboard users hit Enter on the
+          skip-link to land focus here. */}
+      <div className="main-content" id="main-content" tabIndex={-1}>
         <PanelGroup direction="horizontal">
           {/* Left Panel - Projects / Bibliography */}
           <Panel defaultSize={20} minSize={15} maxSize={35}>

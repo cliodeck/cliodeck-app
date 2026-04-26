@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MainLayout } from './components/Layout/MainLayout';
 import { EditorPanel } from './components/Editor/EditorPanel';
@@ -21,6 +22,8 @@ import { useEditorStore } from './stores/editorStore';
 import { useTheme } from './hooks/useTheme';
 
 function App() {
+  const { t } = useTranslation('common');
+
   // Setup menu shortcuts listeners
   useMenuShortcuts();
 
@@ -92,6 +95,12 @@ function App() {
         // TODO: Send to error tracking service (Sentry, etc.)
       }}
     >
+      {/* Skip-to-content link (fusion 3.3) — first focusable element,
+          hidden until keyboard-focused. Lets Tab users jump past the
+          workspace mode bar / left tabs straight into the editor. */}
+      <a className="skip-link" href="#main-content">
+        {t('a11y.skipToMain', 'Skip to main content')}
+      </a>
       <MainLayout
         centerPanel={
           currentProjectType === 'presentation' ? (

@@ -4,6 +4,42 @@
   box-sizing: border-box;
 }
 
+/* === A11y — fusion 3.3 === */
+
+/* Global keyboard-focus ring. `:focus-visible` only triggers for
+   keyboard navigation (Tab) and programmatic focus, not mouse clicks,
+   so the visual outline doesn't fire on every button press while still
+   guaranteeing every focusable surface has a high-contrast ring for
+   screen-reader / keyboard users. The 2px outline + 2px offset makes
+   the ring legible against panels, cards, and the editor area. */
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Skip-to-content link — first focusable element in the document, hidden
+   visually until focused. Keyboard users hit Tab once and can jump past
+   the workspace-mode bar / left tabs into the editor. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -100px;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: var(--color-accent);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-size: var(--font-size-sm);
+  transition: top var(--transition-fast);
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 0.5rem;
+}
+
 /* CSS Variables for Design System */
 :root {
   /* === COLOR PALETTE === */

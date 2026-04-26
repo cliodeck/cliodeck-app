@@ -1067,6 +1067,9 @@
       "summary_other": "Verfügbare Tools ({{count}})"
     }
   },
+  "a11y": {
+    "skipToMain": "Zum Hauptinhalt springen"
+  },
   "mcpTools": {
     "summary": "{{enabled}} / {{total}} MCP-Tools aktiv",
     "groups": {

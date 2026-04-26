@@ -1239,6 +1239,9 @@
       "summary_other": "Tools exposed ({{count}})"
     }
   },
+  "a11y": {
+    "skipToMain": "Skip to main content"
+  },
   "mcpTools": {
     "summary": "{{enabled}} / {{total}} MCP tools active",
     "groups": {
