@@ -230,8 +230,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#fff3cd',
-                border: '1px solid #ffc107',
+                backgroundColor: 'var(--color-warning-bg)',
+                border: '1px solid var(--color-warning)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
@@ -513,8 +513,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
           </div>
 
           {/* === CHUNK QUALITY OPTIMIZATION === */}
-          <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid #ddd', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 16px 0', color: '#666' }}>🎯 Optimisation qualité des chunks</h4>
+          <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)' }}>🎯 Optimisation qualité des chunks</h4>
           </div>
 
           {/* Custom Chunking */}
@@ -814,8 +814,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#e3f2fd',
-                border: '1px solid #2196f3',
+                backgroundColor: 'var(--color-accent-bg)',
+                border: '1px solid var(--color-accent)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
@@ -894,8 +894,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#fff3e0',
-                border: '1px solid #ff9800',
+                backgroundColor: 'var(--color-warning-bg)',
+                border: '1px solid var(--color-warning)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>

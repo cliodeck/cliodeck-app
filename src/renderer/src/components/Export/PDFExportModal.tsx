@@ -267,15 +267,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
-            <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: '#4ec9b0' }}>abstract.md</code> de votre projet
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: 'var(--color-success)' }}>abstract.md</code> de votre projet
             </div>
           )}
 
           {/* Info about presentations */}
           {currentProject?.type === 'presentation' && (
-            <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-              🎬 Présentation Beamer : Le contenu sera lu depuis <code style={{ color: '#4ec9b0' }}>slides.md</code>
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+              🎬 Présentation Beamer : Le contenu sera lu depuis <code style={{ color: 'var(--color-success)' }}>slides.md</code>
               <br /><br />
               <strong>Syntaxe :</strong>
               <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>

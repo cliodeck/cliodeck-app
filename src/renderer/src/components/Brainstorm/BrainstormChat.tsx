@@ -22,6 +22,7 @@ import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
 import { McpToolsBanner } from './McpToolsBanner';
 import { useMcpToolsList } from './useMcpToolsList';
+import './BrainstormChat.css';
 // RAGExplanation type alias lives in chatStore.
 import type { RAGExplanation } from '../../stores/chatStore';
 
@@ -202,18 +203,8 @@ export const BrainstormChat: React.FC = () => {
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 
   return (
-    <div className="brainstorm-chat__root" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div
-        className="brainstorm-chat__settings-bar"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '4px 8px',
-          borderBottom: '1px solid var(--border-color)',
-          background: 'var(--bg-panel)',
-        }}
-      >
+    <div className="brainstorm-chat__root">
+      <div className="brainstorm-chat__settings-bar">
         <button
           type="button"
           onClick={() => setIsSettingsOpen((v) => !v)}
@@ -221,18 +212,7 @@ export const BrainstormChat: React.FC = () => {
           aria-label={settingsLabel}
           title={settingsLabel}
           data-testid="brainstorm-settings-toggle"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 8px',
-            fontSize: 12,
-            background: 'transparent',
-            border: '1px solid var(--border-color)',
-            borderRadius: 4,
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-          }}
+          className="brainstorm-chat__settings-toggle"
         >
           <SlidersHorizontal size={13} />
           <span>{settingsLabel}</span>
@@ -243,19 +223,12 @@ export const BrainstormChat: React.FC = () => {
         <div
           className="brainstorm-chat__settings-panel"
           data-testid="brainstorm-settings-panel"
-          style={{
-            padding: 8,
-            borderBottom: '1px solid var(--border-color)',
-            background: 'var(--bg-app)',
-            maxHeight: '40%',
-            overflowY: 'auto',
-          }}
         >
           <RAGSettingsPanel />
         </div>
       )}
       <McpToolsBanner tools={mcpTools} />
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="brainstorm-chat__surface-wrap">
         <ChatSurface
           messages={unifiedMessages}
           isProcessing={isStreaming}

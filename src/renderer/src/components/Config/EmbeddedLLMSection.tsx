@@ -155,8 +155,8 @@ export const EmbeddedLLMSection: React.FC = () => {
           {error && (
             <div className="config-error" style={{
               padding: '12px',
-              backgroundColor: 'var(--error-bg, #fee2e2)',
-              color: 'var(--error-text, #dc2626)',
+              backgroundColor: 'var(--color-danger-bg)',
+              color: 'var(--color-danger)',
               borderRadius: '4px',
               marginBottom: '16px',
               display: 'flex',
@@ -190,18 +190,18 @@ export const EmbeddedLLMSection: React.FC = () => {
                   key={model.id}
                   style={{
                     padding: '12px',
-                    border: '1px solid var(--border-color, #333)',
+                    border: '1px solid var(--border-color)',
                     borderRadius: '6px',
-                    backgroundColor: 'var(--bg-secondary, #1e1e1e)',
+                    backgroundColor: 'var(--bg-app)',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <div>
                       <div style={{ fontWeight: 500, marginBottom: '4px' }}>{model.name}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary, #888)' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                         {model.description}
                       </div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-tertiary, #666)', marginTop: '4px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                         {model.sizeMB} MB
                       </div>
                     </div>
@@ -213,7 +213,7 @@ export const EmbeddedLLMSection: React.FC = () => {
                             display: 'flex',
                             alignItems: 'center',
                             gap: '4px',
-                            color: 'var(--success-color, #22c55e)',
+                            color: 'var(--color-success)',
                             fontSize: '13px'
                           }}>
                             <Check size={16} />
@@ -224,7 +224,7 @@ export const EmbeddedLLMSection: React.FC = () => {
                             className="config-btn-small"
                             title={t('embeddedLLM.delete')}
                             style={{
-                              color: 'var(--error-text, #dc2626)',
+                              color: 'var(--color-danger)',
                               padding: '6px',
                               display: 'flex',
                               alignItems: 'center'
@@ -280,7 +280,7 @@ export const EmbeddedLLMSection: React.FC = () => {
                     <div style={{ marginTop: '12px' }}>
                       <div style={{
                         height: '6px',
-                        backgroundColor: 'var(--bg-tertiary, #333)',
+                        backgroundColor: 'var(--bg-card)',
                         borderRadius: '3px',
                         overflow: 'hidden'
                       }}>
@@ -288,7 +288,7 @@ export const EmbeddedLLMSection: React.FC = () => {
                           style={{
                             width: `${downloadProgress.percent}%`,
                             height: '100%',
-                            backgroundColor: 'var(--primary-color, #3b82f6)',
+                            backgroundColor: 'var(--color-accent)',
                             transition: 'width 0.3s ease'
                           }}
                         />
@@ -298,7 +298,7 @@ export const EmbeddedLLMSection: React.FC = () => {
                         justifyContent: 'space-between',
                         marginTop: '6px',
                         fontSize: '12px',
-                        color: 'var(--text-secondary, #888)'
+                        color: 'var(--text-tertiary)'
                       }}>
                         <span>{downloadProgress.message}</span>
                         <span>

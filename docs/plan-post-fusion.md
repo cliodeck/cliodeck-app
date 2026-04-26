@@ -168,8 +168,8 @@ Dette accumulée. Peut tourner en parallèle de Phase 2 si bandwidth le permet.
 
 | # | Type | Effort | Description | [USER] |
 |---|---|---|---|---|
-| 3.1 | Frontend | M | Extraire inline-styles fusion vers `.css` dédiés (notamment `BrainstormChat.css`) | Non |
-| 3.2 | Frontend + Design | S | Purge couleurs hardcodées dans `.tsx` (92 occurrences) — introduire tokens `--color-success-bg`, `--color-warning-bg` | Non |
+| 3.1 | Frontend | M | ✅ `BrainstormChat.tsx` migré vers `BrainstormChat.css` (4 blocs `style={{...}}` lourds → classes BEM-ish) ; `ErrorFallback.tsx` extrait vers `ErrorFallback.css` (10 inline-styles bootstrap → tokens). | Fait |
+| 3.2 | Frontend + Design | S | ✅ Tokens sémantiques `--color-{success,warning,danger,accent}-bg` introduits via `color-mix()` (héritent du thème actif). Purge sur 9 fichiers : `ErrorFallback`, `BeamerConfig`, `EmbeddedLLMSection`, `RAGConfigSection`, `ActionsSection`, `RevealJsConfig`, `PDFIndexPanel`, 3 export modals, `MarkdownPreview`, `ZoteroConfigSection`, `LLMConfigSection`. 106 → 30 sites (-76). Reste `TopicTimeline` (chart palette dédiée) + `CorpusExplorerPanel` (couplé 3.16). | Fait (vague 1) |
 | 3.3 | Design | S | `:focus-visible` global + skip-link + audit contraste icônes | Non |
 | 3.4 | Design | S | Refonte Settings : sidebar catégorisée + recherche au lieu de 15 sections empilées | Oui — arbitrage persona target ([A17](actions-frederic.md#a17)) |
 | 3.5 | Frontend | M | `notificationStore` + composant `<StatusToast>` — unifier retours (vault, recipe, MCP, RAG) | Oui — comportement bloquant vs non ([A18](actions-frederic.md#a18)) |

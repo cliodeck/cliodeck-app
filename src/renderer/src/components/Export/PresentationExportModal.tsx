@@ -163,15 +163,15 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
 
         <div className="presentation-export-body">
           {/* Info about reveal.js */}
-          <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
+          <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
             💡 {t('presentation.info')}
             <br /><br />
             <strong>{t('presentation.controls')}</strong>
             <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
               <li>{t('presentation.controlArrows')}</li>
-              <li><code style={{ color: '#4ec9b0' }}>S</code> : {t('presentation.controlS').replace('S key: ', '')}</li>
-              <li><code style={{ color: '#4ec9b0' }}>F</code> : {t('presentation.controlF').replace('F key: ', '')}</li>
-              <li><code style={{ color: '#4ec9b0' }}>ESC</code> : {t('presentation.controlESC').replace('ESC key: ', '')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>S</code> : {t('presentation.controlS').replace('S key: ', '')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>F</code> : {t('presentation.controlF').replace('F key: ', '')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>ESC</code> : {t('presentation.controlESC').replace('ESC key: ', '')}</li>
             </ul>
           </div>
 
@@ -194,9 +194,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
                   style={{
                     padding: '6px 12px',
                     borderRadius: '6px',
-                    border: `1px solid ${exportMode === mode ? 'var(--color-accent, #7c6af4)' : 'var(--border-color, #444)'}`,
-                    background: exportMode === mode ? 'var(--color-accent, #7c6af4)' : 'transparent',
-                    color: exportMode === mode ? '#fff' : 'var(--text-primary)',
+                    border: `1px solid ${exportMode === mode ? 'var(--color-accent)' : 'var(--border-color)'}`,
+                    background: exportMode === mode ? 'var(--color-accent)' : 'transparent',
+                    color: exportMode === mode ? 'var(--text-primary)' : 'var(--text-primary)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     display: 'flex',
@@ -210,7 +210,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
                 </button>
               ))}
             </div>
-            <small style={{ color: '#888', fontSize: '11px', marginTop: '4px' }}>
+            <small style={{ color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
               {t(`presentation.modeDesc.${exportMode}`)}
             </small>
           </div>

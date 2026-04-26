@@ -321,8 +321,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#fff3cd',
-                border: '1px solid #ffc107',
+                backgroundColor: 'var(--color-warning-bg)',
+                border: '1px solid var(--color-warning)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>

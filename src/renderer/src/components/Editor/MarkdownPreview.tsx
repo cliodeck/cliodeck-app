@@ -17,7 +17,7 @@ export const MarkdownPreview: React.FC = () => {
 
   useEffect(() => {
     if (!content || content.trim().length === 0) {
-      setHtmlContent('<p style="color: #888; font-style: italic;">Commencez à écrire pour voir la prévisualisation...</p>');
+      setHtmlContent('<p style="color: var(--text-tertiary); font-style: italic;">Commencez à écrire pour voir la prévisualisation...</p>');
       return;
     }
 
@@ -28,7 +28,7 @@ export const MarkdownPreview: React.FC = () => {
       setHtmlContent(sanitizePreview(parsed));
     } catch (error) {
       console.error('Markdown parsing error:', error);
-      setHtmlContent('<p style="color: #f48771;">Erreur de parsing markdown</p>');
+      setHtmlContent('<p style="color: var(--color-warning);">Erreur de parsing markdown</p>');
     }
   }, [content]);
 

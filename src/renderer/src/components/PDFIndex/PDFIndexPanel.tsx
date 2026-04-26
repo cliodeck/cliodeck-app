@@ -325,16 +325,16 @@ export const PDFIndexPanel: React.FC = () => {
             <span className="stat-label">{t('pdfIndex.chunks')}</span>
           </div>
         </div>
-        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #444' }}>
+        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
           <button
             className="config-btn-small"
             onClick={handleCleanOrphanedChunks}
             disabled={isCleaning}
             style={{
               width: '100%',
-              background: '#3c3c3c',
-              color: '#ffffff',
-              border: '1px solid #555',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color-hover)',
               padding: '8px 12px',
               borderRadius: '4px',
               cursor: isCleaning ? 'not-allowed' : 'pointer',

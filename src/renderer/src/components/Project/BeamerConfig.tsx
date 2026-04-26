@@ -206,7 +206,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Theme Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.appearance')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.appearance')}</h5>
 
         <div className="config-section">
           <label>{t('beamer.mainTheme')}</label>
@@ -267,7 +267,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Title Page Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.titlePage')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.titlePage')}</h5>
 
         <div className="config-section">
           <label>{t('beamer.institution')}</label>
@@ -281,9 +281,9 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
             style={{
               width: '100%',
               padding: '0.5rem 0.75rem',
-              backgroundColor: '#1e1e1e',
-              color: '#ccc',
-              border: '1px solid #3e3e42',
+              backgroundColor: 'var(--bg-app)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-color)',
               borderRadius: '4px',
               fontSize: 'var(--font-size-sm)'
             }}
@@ -302,9 +302,9 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
             style={{
               width: '100%',
               padding: '0.5rem 0.75rem',
-              backgroundColor: '#1e1e1e',
-              color: '#ccc',
-              border: '1px solid #3e3e42',
+              backgroundColor: 'var(--bg-app)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-color)',
               borderRadius: '4px',
               fontSize: 'var(--font-size-sm)'
             }}
@@ -314,7 +314,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Table of Contents Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.toc')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.toc')}</h5>
 
         <div className="config-section">
           <label className="checkbox-label">
@@ -355,7 +355,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Numbering Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.numbering')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.numbering')}</h5>
 
         <div className="config-section">
           <label className="checkbox-label">
@@ -397,7 +397,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Footer Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.footer')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.footer')}</h5>
 
         <div className="config-section">
           <label className="checkbox-label">
@@ -438,7 +438,7 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
 
       {/* Advanced Section */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h5 style={{ margin: '0 0 0.75rem 0', color: '#ccc', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.advanced')}</h5>
+        <h5 style={{ margin: '0 0 0.75rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('beamer.advanced')}</h5>
 
         <div className="config-section">
           <label className="checkbox-label">

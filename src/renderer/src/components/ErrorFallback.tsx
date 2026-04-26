@@ -1,77 +1,40 @@
 /**
  * Error Fallback Component
- * Displayed when a React component crashes
+ * Displayed when a React component crashes.
+ *
+ * Fusion 3.1 + 3.2 — moved from inline-style + bootstrap colour
+ * parachute to theme tokens via `ErrorFallback.css`. The fallback
+ * now respects the active theme (dark/light) instead of forcing a
+ * white card on a grey backdrop.
  */
 import React from 'react';
 import { FallbackProps } from 'react-error-boundary';
+import './ErrorFallback.css';
 
-export const ErrorFallback: React.FC<FallbackProps> = ({ error, resetErrorBoundary }) => {
+export const ErrorFallback: React.FC<FallbackProps> = ({
+  error,
+  resetErrorBoundary,
+}) => {
   const err = error instanceof Error ? error : new Error(String(error));
   return (
-    <div
-      role="alert"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        padding: '2rem',
-        backgroundColor: '#f8f9fa',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '600px',
-          padding: '2rem',
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-        }}
-      >
-        <h1 style={{ color: '#dc3545', marginBottom: '1rem' }}>
-          Oops! Something went wrong
-        </h1>
-        <p style={{ marginBottom: '1rem', color: '#6c757d' }}>
-          The application encountered an unexpected error. Please try reloading or contact support if the problem persists.
+    <div role="alert" className="error-fallback">
+      <div className="error-fallback__card">
+        <h1 className="error-fallback__title">Oops! Something went wrong</h1>
+        <p className="error-fallback__lede">
+          The application encountered an unexpected error. Please try reloading
+          or contact support if the problem persists.
         </p>
-        <details style={{ marginBottom: '1.5rem' }}>
-          <summary
-            style={{
-              cursor: 'pointer',
-              color: '#007bff',
-              marginBottom: '0.5rem',
-            }}
-          >
-            Error details
-          </summary>
-          <pre
-            style={{
-              padding: '1rem',
-              backgroundColor: '#f8f9fa',
-              borderRadius: '4px',
-              overflow: 'auto',
-              fontSize: '0.875rem',
-              color: '#dc3545',
-            }}
-          >
+        <details className="error-fallback__details">
+          <summary>Error details</summary>
+          <pre className="error-fallback__stack">
             {err.message}
             {err.stack && '\n\n' + err.stack}
           </pre>
         </details>
         <button
+          type="button"
           onClick={resetErrorBoundary}
-          style={{
-            padding: '0.5rem 1.5rem',
-            backgroundColor: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '1rem',
-          }}
-          onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#0056b3')}
-          onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#007bff')}
+          className="error-fallback__retry"
         >
           Try again
         </button>

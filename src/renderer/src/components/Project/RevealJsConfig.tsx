@@ -79,13 +79,15 @@ export const RevealJsConfig: React.FC<Props> = ({ projectPath }) => {
 
   const row = (label: string, children: React.ReactNode) => (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
-      <label style={{ fontSize: '0.82rem', color: '#ccc' }}>{label}</label>
+      <label style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{label}</label>
       {children}
     </div>
   );
 
   const selectStyle: React.CSSProperties = {
-    background: '#1e1e1e', color: '#ccc', border: '1px solid #3e3e42',
+    background: 'var(--bg-app)',
+    color: 'var(--text-secondary)',
+    border: '1px solid var(--border-color)',
     borderRadius: '4px', padding: '3px 6px', fontSize: '0.82rem', minWidth: '130px',
   };
 
@@ -116,13 +118,13 @@ export const RevealJsConfig: React.FC<Props> = ({ projectPath }) => {
             checked={config[key as keyof RevealConfig] as boolean}
             onChange={e => set(key as keyof RevealConfig, e.target.checked)}
           />
-          <label htmlFor={`rcfg-${key}`} style={{ fontSize: '0.82rem', color: '#ccc', cursor: 'pointer' }}>
+          <label htmlFor={`rcfg-${key}`} style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
             {label}
           </label>
         </div>
       ))}
 
-      <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.75rem' }}>
+      <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.75rem' }}>
         {t('revealjs.configHint')}
       </p>
     </div>

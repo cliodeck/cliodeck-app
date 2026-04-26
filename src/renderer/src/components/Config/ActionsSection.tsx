@@ -192,7 +192,7 @@ export const ActionsSection: React.FC = () => {
 
           {/* Danger Zone */}
           <div className="config-field" style={{ marginTop: '24px' }}>
-            <label className="config-label" style={{ color: '#f48771' }}>
+            <label className="config-label" style={{ color: 'var(--color-warning)' }}>
               {t('actions.dangerZone')}
             </label>
 
@@ -212,8 +212,8 @@ export const ActionsSection: React.FC = () => {
               disabled={isPurging || stats.totalDocuments === 0}
               style={{
                 marginTop: '8px',
-                background: '#c72e0f',
-                color: '#ffffff',
+                background: 'var(--color-danger)',
+                color: 'var(--text-primary)',
                 border: 'none',
               }}
             >
@@ -236,8 +236,8 @@ export const ActionsSection: React.FC = () => {
               disabled={isPurgingPrimary || primaryStats.sourceCount === 0}
               style={{
                 marginTop: '8px',
-                background: '#c72e0f',
-                color: '#ffffff',
+                background: 'var(--color-danger)',
+                color: 'var(--text-primary)',
                 border: 'none',
               }}
             >

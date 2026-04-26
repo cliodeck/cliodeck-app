@@ -18,6 +18,14 @@
   --color-success: #4ec9b0;
   --color-warning: #f48771;
 
+  /* Semantic backgrounds — fusion 3.2. Tinted bands derived from the
+     foreground tokens via color-mix so light/dark themes inherit
+     automatically. Use for status banners, callouts, severity dots. */
+  --color-danger-bg: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  --color-warning-bg: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  --color-success-bg: color-mix(in srgb, var(--color-success) 14%, transparent);
+  --color-accent-bg: color-mix(in srgb, var(--color-accent) 12%, transparent);
+
   /* Backgrounds */
   --bg-app: #1e1e1e;
   --bg-panel: #252526;
