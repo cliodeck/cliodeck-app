@@ -33,6 +33,38 @@ export interface OllamaEmbeddingProviderConfig {
 
 const DEFAULT_BASE = 'http://127.0.0.1:11434';
 
+/**
+ * Models known to emit valid `tool_calls` JSON consistently when served by
+ * Ollama. Conservative by design — see `docs/research-ollama-tools-1.8.md`
+ * for the source-cited rationale per family. The Llama 3.x and 4.x families
+ * are intentionally absent: both generations exhibit the failure mode the
+ * original `capabilities.tools = false` comment described (looping malformed
+ * `tool_calls`, raw JSON in the `content` field instead of structured calls).
+ *
+ * Each entry is anchored with `^` so a substring like `qwen` doesn't match
+ * `qwen2.5:0.5b`, and uses `\b` to allow further suffixes such as
+ * quantization variants (`qwen3:8b-q4_K_M`) without permitting a different
+ * size to slip through (`qwen3:80b` doesn't match `qwen3:8b\b`).
+ */
+const OLLAMA_TOOL_CAPABLE_PATTERNS: readonly RegExp[] = [
+  /^ministral-3:8b\b/,
+  /^ministral-3:14b\b/,
+  /^qwen3:8b\b/,
+  /^qwen3:14b\b/,
+  /^qwen3:32b\b/,
+  /^mistral-nemo(:|$)/,
+];
+
+/**
+ * True iff `modelName` matches the tool-use whitelist. Exported so the
+ * registry, the renderer's model-picker, and tests can all reason about
+ * the same source of truth.
+ */
+export function isOllamaToolCapableModel(modelName: string | undefined): boolean {
+  if (!modelName) return false;
+  return OLLAMA_TOOL_CAPABLE_PATTERNS.some((p) => p.test(modelName));
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -57,16 +89,20 @@ async function fetchJson<T>(
 export class OllamaProvider implements LLMProvider {
   readonly id = 'ollama';
   readonly name = 'Ollama';
-  // tools: most Ollama-served models (llama3.2, mistral-small, etc.) handle
-  // function-calling poorly — they either loop on malformed tool_calls or
-  // return an empty stream, producing 0-token assistant messages. Flipped
-  // off until per-model opt-in is added (see CLAUDE.md §6).
-  readonly capabilities: ProviderCapabilities = {
-    chat: true,
-    streaming: true,
-    tools: false,
-    embeddings: false,
-  };
+  // `tools` is per-model: most Ollama-served Llama variants either loop on
+  // malformed `tool_calls` or return an empty stream. Only models in
+  // `OLLAMA_TOOL_CAPABLE_PATTERNS` (qwen3, ministral-3, mistral-nemo) emit
+  // valid `tool_calls` JSON consistently. The getter reads `this.model` so
+  // a Provider configured with `qwen3:8b` advertises `tools: true` while the
+  // same class instantiated with `llama3.2` advertises `tools: false`.
+  get capabilities(): ProviderCapabilities {
+    return {
+      chat: true,
+      streaming: true,
+      tools: isOllamaToolCapableModel(this.model),
+      embeddings: false,
+    };
+  }
 
   private status: ProviderStatus = { state: 'unconfigured' };
   private readonly baseUrl: string;
