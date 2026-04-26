@@ -1,9 +1,31 @@
-import React, { useEffect, useState } from 'react';
-import { Shield, HelpCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Shield, HelpCircle, RefreshCw } from 'lucide-react';
 import { HelpModal } from '../common/HelpModal';
 import './SecurityConfigSection.css';
 
 type InspectorMode = 'warn' | 'audit' | 'block';
+type Severity = 'low' | 'medium' | 'high';
+
+interface SecurityEventRecord {
+  kind: string;
+  chunkId: string;
+  at: string;
+  severity?: Severity;
+  pattern?: string;
+  url?: string;
+  detail?: string;
+  mode?: InspectorMode;
+  source?: { kind?: string; documentId?: string; chunkId?: string };
+}
+
+interface SecurityEventStatsRecord {
+  total: number;
+  byKind: Record<string, number>;
+  bySeverity: Record<Severity, number>;
+  firstAt?: string;
+  lastAt?: string;
+  recent: SecurityEventRecord[];
+}
 
 interface SecurityApi {
   getMode(): Promise<{ success: boolean; mode?: InspectorMode; error?: string }>;
@@ -12,10 +34,36 @@ interface SecurityApi {
     mode?: InspectorMode;
     error?: string;
   }>;
+  getEvents?(opts?: { recentLimit?: number }): Promise<{
+    success: boolean;
+    stats?: SecurityEventStatsRecord;
+    error?: string;
+  }>;
 }
 
 function api(): SecurityApi | null {
   return (window.electron?.fusion?.security as SecurityApi | undefined) ?? null;
+}
+
+const KIND_LABELS: Record<string, string> = {
+  suspicious_instruction: 'Instruction suspecte',
+  external_url: 'URL externe',
+  unusual_encoding: 'Encodage inhabituel',
+  prompt_injection_blocked: 'Injection bloquée',
+};
+
+function formatRelative(isoAt: string): string {
+  const t = Date.parse(isoAt);
+  if (!Number.isFinite(t)) return isoAt;
+  const diffMs = Date.now() - t;
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return 'à l’instant';
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `il y a ${days} j`;
+  return new Date(t).toLocaleDateString('fr-FR');
 }
 
 const MODE_OPTIONS: Array<{
@@ -46,6 +94,29 @@ export const SecurityConfigSection: React.FC = () => {
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [stats, setStats] = useState<SecurityEventStatsRecord | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const refreshStats = useCallback(async (): Promise<void> => {
+    const s = api();
+    if (!s?.getEvents) {
+      setStatsError('API getEvents non disponible.');
+      return;
+    }
+    setStatsLoading(true);
+    try {
+      const res = await s.getEvents({ recentLimit: 20 });
+      if (res.success && res.stats) {
+        setStats(res.stats);
+        setStatsError(null);
+      } else {
+        setStatsError(res.error ?? 'Lecture des événements impossible.');
+      }
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const s = api();
@@ -59,7 +130,8 @@ export const SecurityConfigSection: React.FC = () => {
       else if (res.error) setError(res.error);
       setLoaded(true);
     });
-  }, []);
+    void refreshStats();
+  }, [refreshStats]);
 
   const handleChange = async (next: InspectorMode): Promise<void> => {
     const s = api();
@@ -143,6 +215,124 @@ export const SecurityConfigSection: React.FC = () => {
           {savedNotice}
         </p>
       )}
+
+      <div className="security-events-panel" data-testid="security-events-panel">
+        <div className="security-events-header">
+          <h4>Événements détectés</h4>
+          <button
+            type="button"
+            className="security-events-refresh"
+            onClick={() => void refreshStats()}
+            disabled={statsLoading}
+            aria-label="Recharger les événements"
+            title="Recharger les événements"
+          >
+            <RefreshCw size={13} />
+          </button>
+        </div>
+
+        {statsError && (
+          <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>
+            {statsError}
+          </p>
+        )}
+
+        {!stats && !statsError && (
+          <p className="config-hint" style={{ margin: 0 }}>
+            Chargement des événements…
+          </p>
+        )}
+
+        {stats && stats.total === 0 && (
+          <p className="config-hint" style={{ margin: 0 }}>
+            Aucun événement consigné pour ce projet.
+          </p>
+        )}
+
+        {stats && stats.total > 0 && (
+          <>
+            <div className="security-events-summary">
+              <div>
+                <span className="security-events-stat-num">{stats.total}</span>
+                <span className="security-events-stat-label">total</span>
+              </div>
+              {stats.firstAt && stats.lastAt && (
+                <div className="security-events-range">
+                  du <code>{stats.firstAt.slice(0, 10)}</code> au{' '}
+                  <code>{stats.lastAt.slice(0, 10)}</code>
+                </div>
+              )}
+            </div>
+
+            <div className="security-events-grid">
+              <div className="security-events-card">
+                <h5>Par type</h5>
+                <ul>
+                  {(
+                    Object.keys(stats.byKind) as Array<keyof typeof stats.byKind>
+                  ).map((k) => (
+                    <li key={k}>
+                      <span>{KIND_LABELS[k] ?? k}</span>
+                      <strong>{stats.byKind[k]}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="security-events-card">
+                <h5>Par sévérité</h5>
+                <ul>
+                  <li>
+                    <span className="severity-dot severity-high" /> Haute
+                    <strong>{stats.bySeverity.high}</strong>
+                  </li>
+                  <li>
+                    <span className="severity-dot severity-medium" /> Moyenne
+                    <strong>{stats.bySeverity.medium}</strong>
+                  </li>
+                  <li>
+                    <span className="severity-dot severity-low" /> Basse
+                    <strong>{stats.bySeverity.low}</strong>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <details className="security-events-recent">
+              <summary>Derniers événements ({stats.recent.length})</summary>
+              <ul>
+                {stats.recent.map((ev, idx) => (
+                  <li
+                    key={`${ev.at}-${ev.chunkId}-${idx}`}
+                    className={`security-events-recent-item severity-${ev.severity ?? 'na'}`}
+                  >
+                    <span className="security-events-recent-when">
+                      {formatRelative(ev.at)}
+                    </span>
+                    <span className="security-events-recent-kind">
+                      {KIND_LABELS[ev.kind] ?? ev.kind}
+                    </span>
+                    {ev.pattern && (
+                      <code className="security-events-recent-detail">
+                        {ev.pattern}
+                      </code>
+                    )}
+                    {ev.url && (
+                      <code className="security-events-recent-detail">
+                        {ev.url}
+                      </code>
+                    )}
+                    {ev.detail && (
+                      <code className="security-events-recent-detail">
+                        {ev.detail}
+                      </code>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </>
+        )}
+      </div>
 
       <HelpModal
         isOpen={helpOpen}
@@ -233,10 +423,11 @@ export const SecurityConfigSection: React.FC = () => {
 
         <h3>Où voir les événements ?</h3>
         <p>
-          Tous les patterns détectés sont écrits ligne par ligne dans{' '}
-          <code>.cliodeck/v2/security-events.jsonl</code> à la racine de ton
-          projet. Une vue d’ensemble UI (graphique par jour, filtres par
-          sévérité) arrivera dans une mise à jour ultérieure.
+          Le panneau <strong>Événements détectés</strong> juste sous les
+          modes affiche le total, la répartition par type / sévérité, et
+          les derniers événements consignés. La source brute reste{' '}
+          <code>.cliodeck/v2/security-events.jsonl</code> à la racine de
+          ton projet — utile si tu veux scripter une analyse plus poussée.
         </p>
       </HelpModal>
     </section>

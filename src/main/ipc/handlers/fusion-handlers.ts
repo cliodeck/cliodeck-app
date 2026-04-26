@@ -631,6 +631,32 @@ export function setupFusionHandlers(): void {
       return errorResponse(e as Error);
     }
   });
+
+  // Stats over `.cliodeck/v2/security-events.jsonl` (fusion 2.8).
+  // Read + aggregate is fast (typical workspaces have hundreds of
+  // events at most), so we hand the renderer a fully shaped payload
+  // each call rather than streaming. Rotation lands later in 3.14.
+  ipcMain.handle('fusion:security:get-events', async (_e, rawOpts: unknown) => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    const opts = (rawOpts ?? {}) as { recentLimit?: unknown };
+    const recentLimit =
+      typeof opts.recentLimit === 'number' && opts.recentLimit >= 0
+        ? Math.floor(opts.recentLimit)
+        : undefined;
+    try {
+      const { readSecurityEventsLog, aggregateSecurityEvents } = await import(
+        '../../../../backend/security/events-reader.js'
+      );
+      const events = await readSecurityEventsLog(
+        v2Paths(root).securityEventsLog
+      );
+      const stats = aggregateSecurityEvents(events, { recentLimit });
+      return successResponse({ stats });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
 }
 
 interface RecipeSummary {

@@ -752,6 +752,37 @@ const api = {
           mode?: 'warn' | 'audit' | 'block';
           error?: string;
         }>,
+      /**
+       * Fusion 2.8 — aggregated stats over the workspace
+       * `security-events.jsonl`. Optional `recentLimit` caps the
+       * `recent` slice the renderer wants to render (default 50).
+       */
+      getEvents: (opts?: { recentLimit?: number }) =>
+        ipcRenderer.invoke(
+          'fusion:security:get-events',
+          opts ?? {}
+        ) as Promise<{
+          success: boolean;
+          stats?: {
+            total: number;
+            byKind: Record<string, number>;
+            bySeverity: Record<'low' | 'medium' | 'high', number>;
+            firstAt?: string;
+            lastAt?: string;
+            recent: Array<{
+              kind: string;
+              chunkId: string;
+              at: string;
+              severity?: 'low' | 'medium' | 'high';
+              pattern?: string;
+              url?: string;
+              detail?: string;
+              mode?: 'warn' | 'audit' | 'block';
+              source?: { kind?: string; documentId?: string; chunkId?: string };
+            }>;
+          };
+          error?: string;
+        }>,
     },
     archives: {
       getStatus: () =>
