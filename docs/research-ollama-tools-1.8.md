@@ -76,3 +76,75 @@ Ordered by recommendation strength for a francophone digital-humanities user bas
 **Quantization note.** Across all five whitelist entries, q4_K_M is the floor for reliable JSON emission in community reports; q3 and below produce noticeably more malformed `tool_calls`. q8 is preferable on the 32 GB desktop for `mistral-small3.2` and `qwen3:14b` if RAM allows. I could not find a primary-source benchmark for q4-vs-q8 tool-call validity rate (couldn't confirm a specific number) — the recommendation is conservative practice rather than a measured threshold.
 
 **What I could not confirm.** Per-quantization tool-call validity rates from a primary source; the exact Ollama version that shipped the new (Aho-Corasick-style) parser from PR #10415 referenced in issue #7014; whether `devstral` carries the `tools` badge today (the page content I retrieved did not show one). All three are worth a 30-minute confirmation pass before flipping the whitelist live.
+
+---
+
+## 6. Update (April 2026) — ministral-3 and Llama 4
+
+The first pass of this report missed two families the user surfaced in review: Mistral's `ministral-3` and Meta's `llama4`. Investigated directly.
+
+### Ministral-3 — *replaces both mistral-nemo and mistral-small3.2 in the whitelist*
+
+Mistral published the `Ministral 3` collection on Hugging Face in **December 2025** (the `2512` suffix in the model names is YYMM). It is positioned as the edge-deployment successor to mistral-nemo, with three dense sizes — 3B, 8B, 14B — plus reasoning and base variants. Apache 2.0 licence. ([HF collection](https://huggingface.co/collections/mistralai/ministral-3))
+
+Key facts from the [model card](https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512):
+
+- **Native function calling is first-class.** Mistral's own deployment doc tells vLLM users to pass `--enable-auto-tool-choice --tool-call-parser mistral`. The card calls out "best-in-class agentic capabilities with native function calling and JSON outputting".
+- **256k context window** (vs 128k for both mistral-nemo and mistral-small3.2).
+- **Multilingual including French** — same Mistral house language quality as Nemo, on a fresher base.
+- **Vision in the box.**
+
+On Ollama, the family is shipped as `ministral-3` ([library page](https://ollama.com/library/ministral-3)) with `tools` and `vision` badges across the 3b, 8b, and 14b sizes:
+
+| Tag | Size at q4_K_M | Tools | Vision | Context |
+|---|---|---|---|---|
+| `ministral-3:3b` | ~2.2 GB | ✓ | ✓ | 256k |
+| `ministral-3:8b` | **6.0 GB** | ✓ | ✓ | 256k |
+| `ministral-3:14b` | **9.1 GB** | ✓ | ✓ | 256k |
+
+Sources: [`ministral-3:8b`](https://ollama.com/library/ministral-3:8b), [`ministral-3:14b`](https://ollama.com/library/ministral-3:14b).
+
+**Caveat that turned out stale.** The Ollama model page still says "requires Ollama 0.13.1, which is currently in pre-release". As of today, the Ollama latest stable is **v0.21.2 (released Apr 23, 2026)** — six minor versions past 0.13. The pre-release warning is from the launch four months ago and no longer applies. ([Ollama releases](https://github.com/ollama/ollama/releases))
+
+**Empirical confirmation.** Composio published an MCP tool-calling guide that uses `ministral-3:3b` via Ollama end-to-end; on the 3B size they note "decent for the size but not very reliable" — implying the 8B and 14B are the realistic targets. ([Composio guide](https://composio.dev/content/tool-calling-with-ministral-3b)) That matches the Mistral pattern: their tool-call template is robust by design, and reliability scales with parameter count.
+
+**Verdict.** `ministral-3:8b` and `ministral-3:14b` materially outclass `mistral-nemo` and `mistral-small3.2` for the ClioDeck use case:
+  - 4 months old vs 9–21 months old.
+  - 256k context vs 128k.
+  - Smaller footprint at the same quality tier (the 14B at 9.1 GB vs Small 3.2 at 15 GB).
+  - Same Apache 2.0 / French house language / first-class function calling, on a fresher base.
+
+The earlier Mistral picks should be **demoted to fallback** (for users on Ollama < 0.13 — increasingly rare), not kept as defaults.
+
+### Llama 4 — *not whitelistable in the ≤ 32B band*
+
+The [Llama 4 collection](https://huggingface.co/collections/meta-llama/llama-4) ships two MoE models on Ollama:
+
+| Tag | Active / Total params | Size at q4 | Tools | Notes |
+|---|---|---|---|---|
+| `llama4:scout` | 17B / **109B** | **67 GB** | ✓ | 128k context. Page warns the model has been deprecated; users redirected to Maverick. ([page](https://ollama.com/library/llama4:scout)) |
+| `llama4:maverick` | 17B / **402B** | ~200 GB+ | ✓ | Cloud-tier only. |
+
+The "17B active" framing is misleading for local use. Ollama loads the full MoE in RAM; only the routing dispatches per token to a subset. So Scout needs **67 GB of RAM** at q4 — five times the upper-end ClioDeck target (16 GB MacBook / 32 GB desktop) — and Maverick is in a different building entirely.
+
+**Tool-calling reliability is also documented as flaky.** The Llama-4 family inherits the Llama-3 family's tool-call format problems:
+  - The MLX engine emits tool calls as raw JSON text in the assistant message content field instead of structured `tool_calls` — clients that follow the OpenAI protocol then loop infinitely. ([LM Studio bug #1794](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1794))
+  - vLLM requires a specific `llama4_pythonic` parser plus a custom `tool_chat_template_llama4_pythonic.jinja` chat template to parse tool calls correctly — i.e. the format is non-standard. ([vLLM tool-calling docs](https://docs.vllm.ai/en/latest/features/tool_calling/))
+  - HF discussion threads contain user-contributed `fix_tool_call` patches against the Scout-Instruct card. ([HF discussion #78](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct/discussions/78))
+
+This is exactly the failure mode the maintainer's note flagged for Llama 3.x. The Llama family stays out of the whitelist.
+
+### Revised final whitelist (supersedes §5)
+
+Ordered by recommendation strength for the francophone digital-humanities user base on 16 GB / 32 GB machines:
+
+1. **`ollama pull ministral-3:8b`** — 6.0 GB, 256k context, native function calling, vision. *New default for the 16 GB MacBook target.*
+2. **`ollama pull qwen3:8b`** — 5.5 GB, canonical Ollama tool-call example. *Alternative when French is not the priority.*
+3. **`ollama pull ministral-3:14b`** — 9.1 GB, 256k context. *New default for the 32 GB desktop, replacing `mistral-small3.2`.*
+4. **`ollama pull qwen3:14b`** — 9 GB, avoids the qwen3:30b-a3b `thinking`+tools regression.
+5. **`ollama pull mistral-nemo`** — 7.5 GB. **Demoted to fallback** for users on Ollama < 0.13 where ministral-3 doesn't load.
+6. **`ollama pull qwen3:32b`** — 20 GB, high-end desktop only.
+
+**Removed from the previous list:** `mistral-small3.2` (superseded by `ministral-3:14b` at half the RAM with twice the context), `qwen2.5:14b` (Ollama < 0.13 is now rare enough that `mistral-nemo` is the only fallback worth shipping).
+
+**Llama family verdict — confirmed across 3.x and 4.x:** do not whitelist. Both generations exhibit the same tool-call format problems, and the 4.x sizes don't fit the laptop targets anyway.
