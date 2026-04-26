@@ -11,7 +11,7 @@ export interface Session {
   endedAt?: Date;
   totalDurationMs?: number;
   eventCount: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface HistoryEvent {
@@ -19,7 +19,7 @@ export interface HistoryEvent {
   sessionId: string;
   eventType: string;
   timestamp: Date;
-  eventData?: Record<string, any>;
+  eventData?: Record<string, unknown>;
 }
 
 export interface AIOperation {
@@ -29,11 +29,11 @@ export interface AIOperation {
   timestamp: Date;
   durationMs?: number;
   inputText?: string;
-  inputMetadata?: Record<string, any>;
+  inputMetadata?: Record<string, unknown>;
   modelName?: string;
-  modelParameters?: Record<string, any>;
+  modelParameters?: Record<string, unknown>;
   outputText?: string;
-  outputMetadata?: Record<string, any>;
+  outputMetadata?: Record<string, unknown>;
   success: boolean;
   errorMessage?: string;
 }
@@ -43,8 +43,36 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
-  sources?: any[];
+  sources?: unknown[];
   timestamp: Date;
+}
+
+// ============================================================================
+// Raw IPC shapes — mirror the in-store types but with dates as strings.
+// The preload's history.* methods return `Promise<unknown>` (no schema
+// passthrough yet), so we narrow at the mapper level. Keeping these as
+// dedicated types instead of `any` makes a future schema-bump grep-able.
+// ============================================================================
+
+type RawSession = Omit<Session, 'startedAt' | 'endedAt'> & {
+  startedAt: string;
+  endedAt?: string;
+};
+
+type RawHistoryEvent = Omit<HistoryEvent, 'timestamp'> & {
+  timestamp: string;
+};
+
+type RawAIOperation = Omit<AIOperation, 'timestamp'> & {
+  timestamp: string;
+};
+
+type RawChatMessage = Omit<ChatMessage, 'timestamp'> & {
+  timestamp: string;
+};
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export interface HistoryStatistics {
@@ -131,7 +159,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       const result = await window.electron.history.getSessions();
       if (result.success) {
         // Parse dates
-        const sessions = result.sessions.map((s: any) => ({
+        const sessions = result.sessions.map((s: RawSession): Session => ({
           ...s,
           startedAt: new Date(s.startedAt),
           endedAt: s.endedAt ? new Date(s.endedAt) : undefined,
@@ -140,8 +168,8 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       } else {
         set({ error: result.error, loading: false });
       }
-    } catch (error: any) {
-      set({ error: error.message, loading: false });
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
     }
   },
 
@@ -167,16 +195,18 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       const result = await window.electron.history.getEvents(sessionId);
       if (result.success) {
         // Parse dates
-        const events = result.events.map((e: any) => ({
-          ...e,
-          timestamp: new Date(e.timestamp),
-        }));
+        const events = result.events.map(
+          (e: RawHistoryEvent): HistoryEvent => ({
+            ...e,
+            timestamp: new Date(e.timestamp),
+          })
+        );
         set({ events, loading: false });
       } else {
         set({ error: result.error, loading: false });
       }
-    } catch (error: any) {
-      set({ error: error.message, loading: false });
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
     }
   },
 
@@ -186,13 +216,15 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       const result = await window.electron.history.getAIOperations(sessionId);
       if (result.success) {
         // Parse dates
-        const operations = result.operations.map((op: any) => ({
-          ...op,
-          timestamp: new Date(op.timestamp),
-        }));
+        const operations = result.operations.map(
+          (op: RawAIOperation): AIOperation => ({
+            ...op,
+            timestamp: new Date(op.timestamp),
+          })
+        );
         set({ aiOperations: operations });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to load AI operations:', error);
     }
   },
@@ -203,13 +235,15 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       const result = await window.electron.history.getChatHistory(sessionId);
       if (result.success) {
         // Parse dates
-        const messages = result.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        }));
+        const messages = result.messages.map(
+          (msg: RawChatMessage): ChatMessage => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp),
+          })
+        );
         set({ chatMessages: messages });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to load chat history:', error);
     }
   },
@@ -221,7 +255,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       if (result.success) {
         set({ statistics: result.statistics });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to load statistics:', error);
     }
   },
@@ -249,8 +283,8 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       } else {
         set({ error: result.error, loading: false });
       }
-    } catch (error: any) {
-      set({ error: error.message, loading: false });
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
     }
   },
 
@@ -266,16 +300,18 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       const result = await window.electron.history.searchEvents(get().filters);
       if (result.success) {
         // Parse dates
-        const events = result.events.map((e: any) => ({
-          ...e,
-          timestamp: new Date(e.timestamp),
-        }));
+        const events = result.events.map(
+          (e: RawHistoryEvent): HistoryEvent => ({
+            ...e,
+            timestamp: new Date(e.timestamp),
+          })
+        );
         set({ events, loading: false });
       } else {
         set({ error: result.error, loading: false });
       }
-    } catch (error: any) {
-      set({ error: error.message, loading: false });
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
     }
   },
 
@@ -307,22 +343,22 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         window.electron.history.getAllChatMessages(),
       ]);
 
-      const allEvents = eventsResult.success
-        ? eventsResult.events.map((e: any) => ({
+      const allEvents: HistoryEvent[] = eventsResult.success
+        ? eventsResult.events.map((e: RawHistoryEvent) => ({
             ...e,
             timestamp: new Date(e.timestamp),
           }))
         : [];
 
-      const allAIOperations = aiOpsResult.success
-        ? aiOpsResult.operations.map((op: any) => ({
+      const allAIOperations: AIOperation[] = aiOpsResult.success
+        ? aiOpsResult.operations.map((op: RawAIOperation) => ({
             ...op,
             timestamp: new Date(op.timestamp),
           }))
         : [];
 
-      const allChatMessages = chatResult.success
-        ? chatResult.messages.map((msg: any) => ({
+      const allChatMessages: ChatMessage[] = chatResult.success
+        ? chatResult.messages.map((msg: RawChatMessage) => ({
             ...msg,
             timestamp: new Date(msg.timestamp),
           }))
@@ -334,8 +370,8 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         allChatMessages,
         loading: false,
       });
-    } catch (error: any) {
-      set({ error: error.message, loading: false });
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
     }
   },
 }));

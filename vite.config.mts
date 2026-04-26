@@ -16,7 +16,7 @@ export default defineConfig({
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,
-    // Electron 28 ships Chromium 120, so we can safely target modern ES.
+    // Electron 40 ships Chromium 131+, so we can safely target modern ES.
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
@@ -67,6 +67,16 @@ export default defineConfig({
         },
       },
     },
+  },
+  // Fusion 3.9 — mark `console.log` / `info` / `debug` as side-effect-free
+  // so esbuild's DCE eliminates them from the production bundle. The
+  // renderer had ~270 console sites at the start of Phase 3; the audit's
+  // concern was prod console pollution. Strip them surgically and keep
+  // `console.warn` + `console.error` as diagnostic surface for support
+  // triage. In `vite serve` (dev), `pure` is still applied but unminified
+  // output keeps the calls visible — exactly what we want during dev.
+  esbuild: {
+    pure: ['console.log', 'console.info', 'console.debug'],
   },
   server: {
     port: 5173,

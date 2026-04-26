@@ -49,7 +49,7 @@ export const useProjectIPC = () => {
         TIMEOUTS.MEDIUM
       ),
 
-    createProject: (data: any) =>
+    createProject: (data: Parameters<typeof window.electron.project.create>[0]) =>
       callWithTimeout(
         () => window.electron.project.create(data),
         'project:create',
@@ -76,7 +76,10 @@ export const usePDFIPC = () => {
         TIMEOUTS.VERY_SLOW // PDF indexing can be slow
       ),
 
-    searchPDF: (query: string, options?: any) =>
+    searchPDF: (
+      query: string,
+      options?: Parameters<typeof window.electron.pdf.search>[1]
+    ) =>
       callWithTimeout(
         () => window.electron.pdf.search(query, options),
         'pdf:search',
@@ -96,14 +99,18 @@ export const useCorpusIPC = () => {
   const { callWithTimeout } = useIPCWithTimeout();
 
   return {
-    getGraph: (options?: any) =>
+    getGraph: (
+      options?: Parameters<typeof window.electron.corpus.getGraph>[0]
+    ) =>
       callWithTimeout(
         () => window.electron.corpus.getGraph(options),
         'corpus:get-graph',
         TIMEOUTS.SLOW
       ),
 
-    analyzeTopics: (options?: any) =>
+    analyzeTopics: (
+      options?: Parameters<typeof window.electron.corpus.analyzeTopics>[0]
+    ) =>
       callWithTimeout(
         () => window.electron.corpus.analyzeTopics(options),
         'corpus:analyze-topics',

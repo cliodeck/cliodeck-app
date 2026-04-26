@@ -184,11 +184,12 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
       } else {
         throw new Error(result.error || 'Unknown error during analysis');
       }
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Similarity', error);
       set({
         isAnalyzing: false,
-        error: error.message || 'Erreur lors de l\'analyse',
+        error:
+          error instanceof Error ? error.message : 'Erreur lors de l\'analyse',
         progress: DEFAULT_PROGRESS,
       });
     }
@@ -202,7 +203,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
         isAnalyzing: false,
         progress: DEFAULT_PROGRESS,
       });
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Similarity', 'Cancel failed', error);
     }
   },
@@ -217,7 +218,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
         progress: DEFAULT_PROGRESS,
         error: null,
       });
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Similarity', 'Clear cache failed', error);
     }
   },
@@ -265,7 +266,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
         set({ results: resultsMap });
         logger.store('Similarity', 'Cached results loaded', { segments: resultsMap.size });
       }
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Similarity', 'Failed to load cached results', error);
     }
   },

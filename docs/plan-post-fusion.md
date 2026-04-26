@@ -175,8 +175,8 @@ Dette accumulée. Peut tourner en parallèle de Phase 2 si bandwidth le permet.
 | 3.5 | Frontend | M | `notificationStore` + composant `<StatusToast>` — unifier retours (vault, recipe, MCP, RAG) | Oui — comportement bloquant vs non ([A18](actions-frederic.md#a18)) |
 | 3.6 | Design | S | Déduplication `CorpusExplorer` — panneau droit OU mode Analyze, pas les deux | Oui — choix architecture ([A19](actions-frederic.md#a19)) |
 | 3.7 | Design | M | Status bar persistante (bas de fenêtre) : état MCP / vault / indexation | Non |
-| 3.8 | Frontend | S | Éradiquer les 107 `any` (hooks/useIPCWithTimeout, similarityStore, modeStore) | Non |
-| 3.9 | Frontend | S | Remplacer 276 `console.*` par `utils/logger.ts` | Non |
+| 3.8 | Frontend | S | ✅ Premier sweep `any` — 28 sites éliminés (les 3 fichiers explicitement audit-flaggés `useIPCWithTimeout`, `similarityStore`, `modeStore` + le concentré `journalStore` à 17 sites). Reste ~79 dispersés dans `CorpusExplorerPanel` (couplé à 3.16), `ProjectPanel`, `primarySourcesStore`, `ZoteroImport`, etc. — tracés dans l'issue #6. | Fait (vague 1) |
+| 3.9 | Frontend | S | ✅ `vite.config.mts` marque `console.log/info/debug` comme `pure` → esbuild's DCE supprime les ~270 sites du bundle prod. `logger` upgradé avec `log/info/debug` no-op-en-prod (gate `import.meta.env.PROD`) pour les imports explicites. `console.warn` + `console.error` préservés (surface diagnostique pour le triage). Bundle prod : 108 → ~2 sites résiduels (third-party). | Fait |
 | 3.10 | Frontend | S | ✅ `ProjectLoadState` discriminé (idle / loading / ready / failed) — chaque variant porte ce qu'il y a à porter (`path` pour loading, `error` + `at` pour failed). `closeProject` revient à idle même quand l'IPC échoue. 9 tests couvrent les transitions. | Fait |
 | 3.11 | Backend | L | Décomposer `retrieval-service.ts:515-707 (searchSecondary)` en `SecondaryRetriever` testé | Non |
 | 3.12 | Backend | S | Sortir `ACADEMIC_TERMS_FR_TO_EN` de `retrieval-service.ts:153` vers config workspace | Oui — public cible ([A20](actions-frederic.md#a20)) |
