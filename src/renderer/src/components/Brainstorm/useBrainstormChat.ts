@@ -13,6 +13,11 @@ import {
   type BrainstormSource,
   type BrainstormToolCall,
 } from '../../stores/chatStore';
+import {
+  useMcpToolsStore,
+  selectEnabledToolNames,
+} from '../../stores/mcpToolsStore';
+import { useMcpToolsList } from './useMcpToolsList';
 import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {
@@ -41,6 +46,7 @@ interface FusionChatApi {
         topK?: number;
       };
       systemPrompt?: { modeId?: string; customText?: string };
+      enabledTools?: string[];
     }
   ): Promise<{ success: boolean; sessionId?: string; error?: string }>;
   cancel(sessionId: string): Promise<{ success: boolean; cancelled?: boolean }>;
@@ -78,6 +84,13 @@ export interface UseBrainstormChat {
 
 export function useBrainstormChat(): UseBrainstormChat {
   const store = useChatStore();
+  // Track the current MCP tools list in a ref so the `send` callback
+  // doesn't get recreated every time the catalogue changes (fusion 2.5).
+  const mcpTools = useMcpToolsList();
+  const mcpToolsRef = useRef(mcpTools);
+  useEffect(() => {
+    mcpToolsRef.current = mcpTools;
+  }, [mcpTools]);
   // Remember the current assistant id per active session so we don't mix
   // them up when the user sends fast follow-ups.
   const assistantIdBySession = useRef<Map<string, string>>(new Map());
@@ -194,6 +207,18 @@ export function useBrainstormChat(): UseBrainstormChat {
           modeId: settings.modeId,
           customText: settings.customSystemPrompt,
         };
+      }
+      // Fusion 2.5 — pass the user-validated MCP tool subset. When no
+      // MCP server is registered the list is empty and we send no
+      // `enabledTools` field at all (the backend then falls back to
+      // legacy "every ready tool" behaviour, which is itself a no-op
+      // when capabilities.tools=false).
+      const tools = mcpToolsRef.current;
+      if (tools.length > 0) {
+        startOpts.enabledTools = selectEnabledToolNames(
+          tools,
+          useMcpToolsStore.getState().overrides
+        );
       }
       const res = await chat.start(payload, startOpts);
       if (!res.success || !res.sessionId) {

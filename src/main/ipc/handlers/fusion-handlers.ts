@@ -246,6 +246,7 @@ export function setupFusionHandlers(): void {
           topK?: number;
         };
         systemPrompt?: { modeId?: string; customText?: string };
+        enabledTools?: string[];
       };
       const opts = {
         model: rawOptsObj.model,
@@ -258,6 +259,9 @@ export function setupFusionHandlers(): void {
         opts,
         retrievalOptions: rawOptsObj.retrievalOptions,
         systemPrompt: rawOptsObj.systemPrompt,
+        enabledTools: Array.isArray(rawOptsObj.enabledTools)
+          ? rawOptsObj.enabledTools.filter((s): s is string => typeof s === 'string')
+          : undefined,
       });
       return successResponse({ sessionId });
     }

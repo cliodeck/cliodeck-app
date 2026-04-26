@@ -1239,6 +1239,13 @@
       "summary_other": "Outils exposés ({{count}})"
     }
   },
+  "mcpTools": {
+    "summary": "{{enabled}} / {{total}} outils MCP actifs",
+    "groups": {
+      "read": "Lecture seule · activés par défaut",
+      "write": "Écriture / réseau · sur consentement"
+    }
+  },
   "recipeRun": {
     "errors": {
       "noFusionApi": "Fusion API non exposée.",

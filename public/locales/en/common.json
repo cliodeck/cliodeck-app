@@ -1239,6 +1239,13 @@
       "summary_other": "Tools exposed ({{count}})"
     }
   },
+  "mcpTools": {
+    "summary": "{{enabled}} / {{total}} MCP tools active",
+    "groups": {
+      "read": "Read-only · auto-enabled",
+      "write": "Write / network · opt-in"
+    }
+  },
   "recipeRun": {
     "errors": {
       "noFusionApi": "Fusion API not exposed.",

@@ -20,6 +20,8 @@ import { RAGSettingsPanel } from '../Chat/RAGSettingsPanel';
 import { useChatSettingsProjection } from '../Chat/useChatSettingsProjection';
 import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
+import { McpToolsBanner } from './McpToolsBanner';
+import { useMcpToolsList } from './useMcpToolsList';
 // RAGExplanation type alias lives in chatStore.
 import type { RAGExplanation } from '../../stores/chatStore';
 
@@ -35,6 +37,7 @@ export const BrainstormChat: React.FC = () => {
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const mcpTools = useMcpToolsList();
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
   // `fusion.chat.start` from Brainstorm picks up current filters.
@@ -247,6 +250,7 @@ export const BrainstormChat: React.FC = () => {
           <RAGSettingsPanel />
         </div>
       )}
+      <McpToolsBanner tools={mcpTools} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ChatSurface
           messages={unifiedMessages}

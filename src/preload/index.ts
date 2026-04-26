@@ -788,6 +788,12 @@ const api = {
             topK?: number;
           };
           systemPrompt?: { modeId?: string; customText?: string };
+          /**
+           * Namespaced MCP tool names (`clientName__bareName`) the
+           * renderer wants exposed to the model on this turn (fusion
+           * 2.5). Omit to fall back to the legacy "every ready tool".
+           */
+          enabledTools?: string[];
         }
       ) => ipcRenderer.invoke('fusion:chat:start', messages, opts ?? {}),
       cancel: (sessionId: string) =>

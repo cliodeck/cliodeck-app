@@ -1067,6 +1067,13 @@
       "summary_other": "Verfügbare Tools ({{count}})"
     }
   },
+  "mcpTools": {
+    "summary": "{{enabled}} / {{total}} MCP-Tools aktiv",
+    "groups": {
+      "read": "Schreibgeschützt · standardmäßig aktiviert",
+      "write": "Schreibend / Netzwerk · nach Zustimmung"
+    }
+  },
   "recipeRun": {
     "errors": {
       "noFusionApi": "Fusion-API nicht exponiert.",

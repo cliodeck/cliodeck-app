@@ -220,6 +220,15 @@ export interface ChatStartArgs {
   retrievalOptions?: FusionChatRetrievalOptions;
   /** System-prompt override (mode / custom text). */
   systemPrompt?: FusionChatSystemPromptOptions;
+  /**
+   * Opt-in/opt-out filter on the MCP tool catalog (fusion 2.5). Tool
+   * names are namespaced — `${clientName}__${bareToolName}` — exactly as
+   * they appear in the wire format the model sees. When the array is
+   * provided, only tools whose namespaced name appears in it are sent
+   * to the model. When `undefined`, every `ready` tool is sent
+   * (legacy behaviour, preserved for callers that haven't been updated).
+   */
+  enabledTools?: string[];
 }
 
 export interface ChatStreamEnvelope {
@@ -348,11 +357,18 @@ class FusionChatService {
     // --- Assemble MCP tool catalog + dispatcher ---------------------------
     const toolScope = new Map<string, string>(); // namespaced tool name → client name
     const tools: ToolDescriptor[] = [];
+    // Optional opt-in/opt-out filter from the renderer (fusion 2.5).
+    // `undefined` keeps legacy behaviour (every `ready` tool is sent);
+    // an explicit set narrows to user-enabled tools.
+    const enabledToolFilter = args.enabledTools
+      ? new Set(args.enabledTools)
+      : null;
     if (llm.capabilities.tools) {
       for (const client of mcpClientsService.list()) {
         if (client.state !== 'ready') continue;
         for (const t of client.tools) {
           const namespaced = `${client.name}__${t.name}`;
+          if (enabledToolFilter && !enabledToolFilter.has(namespaced)) continue;
           toolScope.set(namespaced, client.name);
           tools.push({
             name: namespaced,
