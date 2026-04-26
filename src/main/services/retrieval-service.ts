@@ -15,6 +15,10 @@
 import fs from 'fs';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
+import {
+  SecondaryRetriever,
+  ACADEMIC_TERMS_FR_TO_EN,
+} from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
 import type {
   SearchResult,
@@ -197,39 +201,10 @@ export interface RetrievalQuery {
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
-const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {
-  'taxonomie de bloom': ["bloom's taxonomy", 'bloom taxonomy', 'blooms taxonomy'],
-  'zone proximale développement': ['zone of proximal development', 'zpd', 'vygotsky'],
-  'apprentissage significatif': ['meaningful learning', 'significant learning'],
-  constructivisme: ['constructivism', 'constructivist'],
-  socioconstructivisme: ['social constructivism', 'socioconstructivism'],
-  métacognition: ['metacognition', 'metacognitive'],
-  'pédagogie active': ['active learning', 'active pedagogy'],
-};
-
-function expandQueryMultilingual(query: string): string[] {
-  const queries = [query];
-  const lowerQuery = query.toLowerCase();
-
-  for (const [frTerm, enTranslations] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
-    if (lowerQuery.includes(frTerm)) {
-      enTranslations.forEach((enTerm) => {
-        const translatedQuery = query.replace(new RegExp(frTerm, 'gi'), enTerm);
-        queries.push(translatedQuery);
-      });
-    }
-  }
-
-  if (DEBUG) {
-    console.log('🌐 [MULTILINGUAL] Query expansion:', {
-      original: query,
-      expanded: queries,
-      count: queries.length,
-    });
-  }
-
-  return queries;
-}
+// Query expansion + embedding pooling moved to
+// `backend/core/rag/retrievers/secondary-retriever.ts` (fusion 3.11).
+// `ACADEMIC_TERMS_FR_TO_EN` is re-exported from there and consumed
+// below by `warmupDictionaryEmbeddings`.
 
 /**
  * Map a retrieved chunk onto the SourceInspector input shape. The
@@ -251,18 +226,6 @@ function toInspectable(r: MultiSourceSearchResult): InspectableChunk {
     source,
     content: r.chunk.content,
   };
-}
-
-/** Mean-pool a non-empty list of embeddings into a single vector. */
-function meanPoolEmbeddings(embeddings: Float32Array[]): Float32Array {
-  const dim = embeddings[0].length;
-  const pooled = new Float32Array(dim);
-  for (const emb of embeddings) {
-    for (let i = 0; i < dim; i++) pooled[i] += emb[i];
-  }
-  const n = embeddings.length;
-  for (let i = 0; i < dim; i++) pooled[i] /= n;
-  return pooled;
 }
 
 class RetrievalService {
@@ -760,6 +723,15 @@ class RetrievalService {
     );
   }
 
+  /**
+   * Thin delegate over `SecondaryRetriever` (fusion 3.11). The retrieval
+   * pipeline for the secondary corpus — query expansion, embedding
+   * fan-out, hybrid HNSW+BM25 search, threshold + cross-language
+   * fallback — was extracted into `backend/core/rag/retrievers/
+   * secondary-retriever.ts` to make each step testable in isolation.
+   * This method now resolves the RAG config, builds the retriever, and
+   * forwards.
+   */
   private async searchSecondary(
     query: string,
     options?: {
@@ -769,189 +741,20 @@ class RetrievalService {
       collectionKeys?: string[];
     }
   ): Promise<SearchResult[]> {
-    const searchStart = Date.now();
     const ragConfig = configManager.getRAGConfig();
     const topK = options?.topK || ragConfig.topK;
     const threshold = options?.threshold || ragConfig.similarityThreshold;
 
-    let documentIdsFilter = options?.documentIds;
-
-    if (options?.collectionKeys && options.collectionKeys.length > 0) {
-      const docsInCollections = this.vectorStore!.getDocumentIdsInCollections(
-        options.collectionKeys,
-        true
-      );
-
-      if (DEBUG) {
-        console.log(
-          `🔍 [PDF-SERVICE] Collection filter: ${options.collectionKeys.length} collection(s) -> ${docsInCollections.length} document(s)`
-        );
-      }
-
-      if (documentIdsFilter && documentIdsFilter.length > 0) {
-        documentIdsFilter = documentIdsFilter.filter((id) =>
-          docsInCollections.includes(id)
-        );
-        if (DEBUG) {
-          console.log(
-            `🔍 [PDF-SERVICE] After intersection with documentIds: ${documentIdsFilter.length} document(s)`
-          );
-        }
-      } else {
-        documentIdsFilter = docsInCollections;
-      }
-
-      if (documentIdsFilter.length === 0) {
-        if (DEBUG) {
-          console.log(
-            '🔍 [PDF-SERVICE] No documents match the collection filter, returning empty results'
-          );
-        }
-        return [];
-      }
-    }
-
-    const expandedQueries = expandQueryMultilingual(query);
-    const allResults = new Map<string, SearchResult>();
-
-    const embeddingStart = Date.now();
-    if (DEBUG) {
-      console.log(
-        `🔍 [PDF-SERVICE] Generating ${expandedQueries.length} embeddings in parallel...`
-      );
-    }
-
-    const embeddings = await Promise.all(
-      expandedQueries.map((q) => this.getQueryEmbedding(q))
-    );
-
-    if (DEBUG) {
-      console.log(
-        `✅ [PDF-SERVICE] All embeddings generated in ${Date.now() - embeddingStart}ms`
-      );
-    }
-
-    const cacheStats = queryEmbeddingCache.getStats();
-    if (DEBUG && (cacheStats.hits + cacheStats.misses) % 10 === 0) {
-      console.log(
-        `💾 [EMB CACHE] Stats: ${cacheStats.hits} hits, ${cacheStats.misses} misses (${cacheStats.hitRate})`
-      );
-    }
-
-    const searchStart2 = Date.now();
-
-    // Strategy:
-    //   - 1 variant: run a single HNSW+BM25 search (no pooling overhead).
-    //   - N variants: run ONE HNSW search on the mean-pooled embedding
-    //     (semantic center of the variants), and — for EnhancedVectorStore
-    //     — fire a cheap BM25-driven search per variant to preserve lexical
-    //     recall of translated terms. Dedup keeps the best similarity.
-    if (expandedQueries.length === 1) {
-      const queryEmbedding = embeddings[0];
-      const results =
-        this.vectorStore instanceof EnhancedVectorStore
-          ? await this.vectorStore.search(
-              expandedQueries[0],
-              queryEmbedding,
-              topK,
-              documentIdsFilter
-            )
-          : this.vectorStore!.search(queryEmbedding, topK, documentIdsFilter);
-      for (const result of results) {
-        allResults.set(result.chunk.id, result);
-      }
-    } else {
-      const pooledEmbedding = meanPoolEmbeddings(embeddings);
-
-      if (this.vectorStore instanceof EnhancedVectorStore) {
-        // Pooled HNSW (semantic) + per-variant BM25-capable search (lexical).
-        // The hybrid store internally blends HNSW+BM25; passing the variant
-        // text preserves BM25 recall for translated terms without N HNSW hits.
-        const store = this.vectorStore;
-        const pooledPromise = store.search(
-          expandedQueries[0],
-          pooledEmbedding,
-          topK,
-          documentIdsFilter
-        );
-        const variantPromises = expandedQueries.map((eq) =>
-          store.search(eq, pooledEmbedding, topK, documentIdsFilter)
-        );
-        const [pooledResults, ...variantResults] = await Promise.all([
-          pooledPromise,
-          ...variantPromises,
-        ]);
-        const buckets = [pooledResults, ...variantResults];
-        for (const results of buckets) {
-          for (const result of results) {
-            const existing = allResults.get(result.chunk.id);
-            if (!existing || result.similarity > existing.similarity) {
-              allResults.set(result.chunk.id, result);
-            }
-          }
-        }
-      } else {
-        // Plain VectorStore is HNSW-only: a single pooled search is strictly
-        // cheaper than N, and the variants add no lexical signal here.
-        const results = this.vectorStore!.search(
-          pooledEmbedding,
-          topK,
-          documentIdsFilter
-        );
-        for (const result of results) {
-          allResults.set(result.chunk.id, result);
-        }
-      }
-    }
-
-    if (DEBUG) {
-      console.log(
-        `✅ [PDF-SERVICE] All searches completed in ${Date.now() - searchStart2}ms`
-      );
-      console.log(
-        `🔍 [PDF-SERVICE] Merged ${allResults.size} unique chunks from ${expandedQueries.length} query variants`
-      );
-    }
-
-    const mergedResults = Array.from(allResults.values())
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
-
-    let filteredResults = mergedResults.filter((r) => r.similarity >= threshold);
-
-    if (filteredResults.length === 0 && mergedResults.length > 0) {
-      const minFallbackResults = Math.min(3, mergedResults.length);
-      console.warn('⚠️  [PDF-SERVICE DEBUG] All results filtered out by threshold!');
-      console.warn(
-        '⚠️  [PDF-SERVICE DEBUG] Applying fallback: keeping top',
-        minFallbackResults,
-        'results'
-      );
-      console.warn(
-        '⚠️  [PDF-SERVICE DEBUG] Best similarity:',
-        mergedResults[0]?.similarity.toFixed(4)
-      );
-      console.warn(
-        '⚠️  [PDF-SERVICE DEBUG] This may indicate cross-language search (e.g., FR query → EN docs)'
-      );
-
-      filteredResults = mergedResults.slice(0, minFallbackResults);
-    }
-
-    if (DEBUG) {
-      console.log('🔍 [PDF-SERVICE DEBUG] Secondary search results:', {
-        totalUniqueChunks: mergedResults.length,
-        filteredResults: filteredResults.length,
-        threshold: threshold,
-        fallbackApplied:
-          filteredResults.length > 0 &&
-          filteredResults.length <
-            mergedResults.filter((r) => r.similarity >= threshold).length,
-        totalDuration: `${Date.now() - searchStart}ms`,
-      });
-    }
-
-    return filteredResults;
+    const retriever = new SecondaryRetriever({
+      vectorStore: this.vectorStore!,
+      getQueryEmbedding: (q) => this.getQueryEmbedding(q),
+    });
+    return retriever.search(query, {
+      topK,
+      threshold,
+      documentIds: options?.documentIds,
+      collectionKeys: options?.collectionKeys,
+    });
   }
 }
 
