@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { sanitizeChat } from '../../utils/sanitize';
 
 /**
  * Citation style selector (CSL / citeproc-js).
@@ -172,14 +173,24 @@ export const CitationStyleSection: React.FC = () => {
                 </div>
               ) : (
                 <div className="config-description">
+                  {/* Fusion 3.13 — citeproc renders inline HTML
+                      (italics, smallcaps, hanging indents). The output
+                      is trusted in practice (CSL files come from a
+                      curated repo) but we sanitize anyway: a malformed
+                      style or a malicious bib entry must not be able
+                      to inject script/iframe into the renderer. */}
                   <div
                     data-testid="citation-preview-footnote"
-                    dangerouslySetInnerHTML={{ __html: previewFootnote }}
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeChat(previewFootnote),
+                    }}
                   />
                   <div
                     data-testid="citation-preview-bibliography"
                     style={{ marginTop: 8 }}
-                    dangerouslySetInnerHTML={{ __html: previewBibliography }}
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeChat(previewBibliography),
+                    }}
                   />
                 </div>
               )}

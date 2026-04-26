@@ -27,12 +27,13 @@ export const ProjectPanel: React.FC = () => {
   const {
     currentProject,
     recentProjects,
-    isLoading,
+    loadState,
     loadProject,
     createProject,
     closeProject,
     loadRecentProjects,
   } = useProjectStore();
+  const isLoading = loadState.kind === 'loading';
 
   const { loadFile } = useEditorStore();
 

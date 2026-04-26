@@ -177,10 +177,10 @@ Dette accumulée. Peut tourner en parallèle de Phase 2 si bandwidth le permet.
 | 3.7 | Design | M | Status bar persistante (bas de fenêtre) : état MCP / vault / indexation | Non |
 | 3.8 | Frontend | S | Éradiquer les 107 `any` (hooks/useIPCWithTimeout, similarityStore, modeStore) | Non |
 | 3.9 | Frontend | S | Remplacer 276 `console.*` par `utils/logger.ts` | Non |
-| 3.10 | Frontend | S | State machine typée pour `projectStore.loadProject` (idle / loading / ready / failed) | Non |
+| 3.10 | Frontend | S | ✅ `ProjectLoadState` discriminé (idle / loading / ready / failed) — chaque variant porte ce qu'il y a à porter (`path` pour loading, `error` + `at` pour failed). `closeProject` revient à idle même quand l'IPC échoue. 9 tests couvrent les transitions. | Fait |
 | 3.11 | Backend | L | Décomposer `retrieval-service.ts:515-707 (searchSecondary)` en `SecondaryRetriever` testé | Non |
 | 3.12 | Backend | S | Sortir `ACADEMIC_TERMS_FR_TO_EN` de `retrieval-service.ts:153` vers config workspace | Oui — public cible ([A20](actions-frederic.md#a20)) |
-| 3.13 | Sécurité | S | DOMPurify sur previews citeproc | Non |
+| 3.13 | Sécurité | S | ✅ `sanitizeChat` appliqué aux deux previews citeproc (`previewFootnote`, `previewBibliography`) dans `CitationStyleSection`. La même config DOMPurify que le chat — strict allowlist, `rel="noopener noreferrer"` forcé sur les `target="_blank"`. | Fait |
 | 3.14 | Sécurité | S | Rotation mensuelle + gzip `mcp-access.jsonl` et `security-events.jsonl` | Oui — TTL par défaut ([A21](actions-frederic.md#a21)) |
 | 3.15 | Design | S | Traduire « Workspace hints » en FR (« Consignes de projet » ou « Mémento ») | Oui — terme à valider ([A22](actions-frederic.md#a22)) |
 | 3.16 | Frontend | L | Découper `CorpusExplorerPanel.tsx` (1072 lignes) en 3-4 sous-composants | Non |

@@ -24,14 +24,30 @@ export interface Chapter {
   order: number;
 }
 
+/**
+ * Typed load state machine (fusion 3.10, claw-code lesson 6.1).
+ *
+ * Replaces the legacy `isLoading: boolean`. Components that just want
+ * a spinner can read `loadState.kind === 'loading'`; components that
+ * need the failure reason (toast, retry button) get it without a side
+ * channel. `ready` does NOT carry the project itself — `currentProject`
+ * remains the single source of truth for "what is loaded right now"
+ * so existing selectors keep working unchanged.
+ */
+export type ProjectLoadState =
+  | { kind: 'idle' }
+  | { kind: 'loading'; path: string }
+  | { kind: 'ready'; loadedAt: string; path: string }
+  | { kind: 'failed'; path: string; error: string; at: string };
+
 interface ProjectState {
   // Current project
   currentProject: Project | null;
   chapters: Chapter[];
   currentChapterId: string | null;
 
-  // Loading state
-  isLoading: boolean;
+  // Typed load state — see ProjectLoadState above.
+  loadState: ProjectLoadState;
 
   // Recent projects
   recentProjects: Project[];
@@ -55,11 +71,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProject: null,
   chapters: [],
   currentChapterId: null,
-  isLoading: false,
+  loadState: { kind: 'idle' },
   recentProjects: [],
 
   loadProject: async (projectPath: string) => {
-    set({ isLoading: true });
+    set({ loadState: { kind: 'loading', path: projectPath } });
     try {
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
@@ -174,15 +190,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       // Update recent projects
       await get().loadRecentProjects();
+
+      set({
+        loadState: {
+          kind: 'ready',
+          loadedAt: new Date().toISOString(),
+          path: projectPath,
+        },
+      });
     } catch (error) {
       console.error('Failed to load project:', error);
+      set({
+        loadState: {
+          kind: 'failed',
+          path: projectPath,
+          error: error instanceof Error ? error.message : String(error),
+          at: new Date().toISOString(),
+        },
+      });
       throw error;
-    } finally {
-      set({ isLoading: false });
     }
   },
 
   createProject: async (name: string, type: Project['type'], path: string) => {
+    set({ loadState: { kind: 'loading', path } });
     try {
       const result = await window.electron.project.create({ name, type, path });
 
@@ -200,11 +231,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         },
         chapters: [],
         currentChapterId: null,
+        loadState: {
+          kind: 'ready',
+          loadedAt: new Date().toISOString(),
+          path,
+        },
       });
 
       await get().loadRecentProjects();
     } catch (error) {
       console.error('Failed to create project:', error);
+      set({
+        loadState: {
+          kind: 'failed',
+          path,
+          error: error instanceof Error ? error.message : String(error),
+          at: new Date().toISOString(),
+        },
+      });
       throw error;
     }
   },
@@ -223,6 +267,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       currentProject: null,
       chapters: [],
       currentChapterId: null,
+      loadState: { kind: 'idle' },
     });
   },
 
