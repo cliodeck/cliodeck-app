@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { appendDraftToContent, messageToDraft } from '../messageToDraft';
+import {
+  appendDraftToContent,
+  insertDraftAtOffset,
+  messageToDraft,
+} from '../messageToDraft';
 
 describe('messageToDraft (3.3)', () => {
   it('formats an assistant turn with markers', () => {
@@ -48,5 +52,33 @@ describe('messageToDraft (3.3)', () => {
     expect(appendDraftToContent('A\n', 'B')).toBe('A\n\nB\n');
     // already has a blank line: no extra padding needed
     expect(appendDraftToContent('A\n\n', 'B')).toBe('A\n\nB\n');
+  });
+});
+
+describe('insertDraftAtOffset (2.6)', () => {
+  it('falls back to draft alone when content is empty', () => {
+    expect(insertDraftAtOffset('', 0, 'X')).toBe('X');
+  });
+
+  it('inserts at offset 0 with a trailing blank line', () => {
+    expect(insertDraftAtOffset('A', 0, 'X')).toBe('X\n\nA');
+  });
+
+  it('inserts at offset === content.length with leading blank line', () => {
+    expect(insertDraftAtOffset('A', 1, 'X')).toBe('A\n\nX');
+  });
+
+  it('pads both sides to land the draft on a clean block boundary', () => {
+    // Cursor mid-paragraph — both sides need padding.
+    expect(insertDraftAtOffset('A\nB', 1, 'X')).toBe('A\n\nX\n\nB');
+  });
+
+  it('does not double-pad when content already ends with a blank line', () => {
+    expect(insertDraftAtOffset('A\n\n', 3, 'X')).toBe('A\n\nX');
+  });
+
+  it('clamps an out-of-range offset to the document length', () => {
+    expect(insertDraftAtOffset('A', 999, 'X')).toBe('A\n\nX');
+    expect(insertDraftAtOffset('A', -5, 'X')).toBe('X\n\nA');
   });
 });

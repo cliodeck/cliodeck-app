@@ -89,3 +89,37 @@ export function appendDraftToContent(
       : '\n\n';
   return `${existing}${sep}${draft}\n`;
 }
+
+/**
+ * Splice a draft block into existing content at `offset`, padding both
+ * sides so the inserted markdown sits on a clean block boundary
+ * (avoids the case where the draft is concatenated mid-paragraph and
+ * the parser fails to recognise the marker line).
+ *
+ * Used by the cursor-insertion path of `editorStore.insertDraftAtCursor`
+ * (fusion 2.6, A13 option a). The "append" path keeps using
+ * `appendDraftToContent` above.
+ */
+export function insertDraftAtOffset(
+  existing: string,
+  offset: number,
+  draft: string
+): string {
+  if (!existing) return draft;
+  const safeOffset = Math.max(0, Math.min(offset, existing.length));
+  const before = existing.slice(0, safeOffset);
+  const after = existing.slice(safeOffset);
+  const padBefore =
+    before === '' || before.endsWith('\n\n')
+      ? ''
+      : before.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+  const padAfter =
+    after === '' || after.startsWith('\n\n')
+      ? ''
+      : after.startsWith('\n')
+        ? '\n'
+        : '\n\n';
+  return before + padBefore + draft + padAfter + after;
+}

@@ -13,7 +13,7 @@ import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
-import { appendDraftToContent, messageToDraft } from './messageToDraft';
+import { messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
 import { ModeSelector } from '../Chat/ModeSelector';
 import { RAGSettingsPanel } from '../Chat/RAGSettingsPanel';
@@ -47,7 +47,11 @@ export const BrainstormChat: React.FC = () => {
     (m: BrainstormMessage): void => {
       const editor = useEditorStore.getState();
       const block = messageToDraft(m);
-      editor.setContent(appendDraftToContent(editor.content, block));
+      // Insert at the user's current cursor when an editor is mounted;
+      // fall back to append when neither editor exists yet (fusion 2.6,
+      // A13 option a). The undo path is the editor's own native history
+      // — a single Cmd/Ctrl-Z reverts the splice.
+      editor.insertDraftAtCursor(block);
       setSentToWriteId(m.id);
       setWorkspaceMode('write');
     },
