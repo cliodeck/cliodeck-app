@@ -39,12 +39,17 @@ export type IsolatedExtractionResult = IsolatedExtractionSuccess | IsolatedExtra
 function resolveWorkerPath(): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
+  const workerPath = path.join(__dirname, '..', 'workers', 'pdf-extract-worker.js');
 
   if (app.isPackaged) {
-    return path.join(__dirname, '..', 'workers', 'pdf-extract-worker.js');
+    // System node can't read app.asar (Electron-only virtual FS). The worker
+    // and pdfjs-dist must be in `asarUnpack` so they live on the real disk.
+    return workerPath.replace(
+      `${path.sep}app.asar${path.sep}`,
+      `${path.sep}app.asar.unpacked${path.sep}`,
+    );
   }
-  // Dev: dist/src/main/services/ → dist/src/main/workers/
-  return path.join(__dirname, '..', 'workers', 'pdf-extract-worker.js');
+  return workerPath;
 }
 
 /**

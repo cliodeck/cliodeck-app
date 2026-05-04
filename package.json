@@ -135,7 +135,9 @@
     "asarUnpack": [
       "node_modules/node-llama-cpp/**/*",
       "node_modules/better-sqlite3/**/*",
-      "node_modules/hnswlib-node/**/*"
+      "node_modules/hnswlib-node/**/*",
+      "node_modules/pdfjs-dist/**/*",
+      "dist/src/main/workers/**/*"
     ],
     "extraResources": [
       {
