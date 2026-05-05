@@ -1111,5 +1111,9 @@
     "placeholder": {
       "path": "/absolute/path/…"
     }
+  },
+  "statusBar": {
+    "mcpTooltip": "MCP: {{ready}}/{{total}} bereit",
+    "vaultTooltip": "Vault: {{count}} Notizen"
   }
 }

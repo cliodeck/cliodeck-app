@@ -73,7 +73,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       const result = await window.electron.pdf.getAll();
       if (result.success && Array.isArray(result.documents)) {
         // Find document with matching bibtexKey
-        const doc = result.documents.find((d: any) => d.bibtexKey === citationId);
+        const doc = result.documents.find((d: { bibtexKey?: string; id?: string }) => d.bibtexKey === citationId);
         return doc?.id || null;
       }
       return null;
@@ -290,7 +290,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           console.log('📄 Sample document structure:', JSON.stringify(result.documents[0], null, 2));
         }
 
-        result.documents.forEach((doc: any) => {
+        result.documents.forEach((doc: { fileURL?: string; bibtexKey?: string }) => {
           // Document stores file path as fileURL (from backend)
           if (doc.fileURL) {
             indexedPaths.add(doc.fileURL);

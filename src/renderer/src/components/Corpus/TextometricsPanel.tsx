@@ -53,9 +53,9 @@ export const TextometricsPanel: React.FC = () => {
       } else {
         setError(result.error || 'Failed to load text statistics');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('❌ Error loading text statistics:', err);
-      setError(err.message || 'An error occurred while loading text statistics');
+      setError(err instanceof Error ? err.message : String(err) || 'An error occurred while loading text statistics');
     } finally {
       setLoading(false);
     }

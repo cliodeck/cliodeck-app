@@ -182,12 +182,12 @@ export const BeamerConfig: React.FC<BeamerConfigProps> = ({
     }
   };
 
-  const handleChange = (key: keyof BeamerConfigOptions, value: any) => {
+  const handleChange = (key: keyof BeamerConfigOptions, value: BeamerConfigOptions[keyof BeamerConfigOptions]) => {
     const newConfig = { ...config, [key]: value };
     saveConfig(newConfig);
   };
 
-  const handleTextChange = (key: keyof BeamerConfigOptions, value: any) => {
+  const handleTextChange = (key: keyof BeamerConfigOptions, value: BeamerConfigOptions[keyof BeamerConfigOptions]) => {
     // For text inputs, only update local state without saving
     setConfig({ ...config, [key]: value });
   };

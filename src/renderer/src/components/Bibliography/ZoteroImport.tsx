@@ -50,6 +50,7 @@ export const ZoteroImport: React.FC = () => {
     : !!dataDirectory;
 
   // Build common options for IPC calls
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic options bag passed to typed IPC
   const buildOptions = (extra: Record<string, any> = {}): any => {
     const base = zoteroMode === 'api'
       ? { mode: 'api', userId, apiKey, groupId: groupId || undefined }
@@ -199,7 +200,7 @@ export const ZoteroImport: React.FC = () => {
 
           // Count how many have PDF attachments available
           const withPDFs = enrichResult.citations.filter(
-            (c: any) => c.zoteroAttachments && c.zoteroAttachments.length > 0
+            (c: { zoteroAttachments?: unknown[] }) => c.zoteroAttachments && c.zoteroAttachments.length > 0
           ).length;
           console.log(`${withPDFs} citations have PDF attachments available in Zotero`);
 
@@ -283,6 +284,7 @@ export const ZoteroImport: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- resolution shape varies by strategy
   const handleApplySync = async (strategy: 'local' | 'remote' | 'manual', resolution?: any) => {
     if (!syncDiff) return;
 

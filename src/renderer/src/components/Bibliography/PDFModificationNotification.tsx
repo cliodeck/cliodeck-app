@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, RefreshCw, X } from 'lucide-react';
+import type { Citation } from '../../stores/bibliography/types';
 import './PDFModificationNotification.css';
 
 interface ModifiedPDF {
@@ -98,7 +99,7 @@ export const PDFModificationNotification: React.FC<PDFModificationNotificationPr
  * Hook to detect modified PDFs and show notification
  */
 export const usePDFModificationDetection = (
-  citations: any[],
+  citations: Citation[],
   projectPath: string | undefined
 ): {
   modifiedPDFs: ModifiedPDF[];

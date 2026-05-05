@@ -519,7 +519,22 @@
     "you": "You",
     "assistant": "Assistant",
     "noContextWarning": "This response is not based on your documents. No relevant passages were found in your corpus.",
-    "sources": "Sources",
+    "sources": {
+      "open": "Open source",
+      "opening": "Opening…",
+      "close": "Close",
+      "openFailed": "Failed to open.",
+      "openUnavailable": "Source opening unavailable (preload missing).",
+      "untrackablePdf": "PDF document not traceable (missing documentId).",
+      "untrackableTropy": "Tropy source not traceable (missing itemId).",
+      "untrackableNote": "Obsidian note not traceable (missing path).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
+    },
     "source": "Source",
     "excerpt": "Excerpt:",
     "page": "Page",
@@ -592,22 +607,6 @@
       "noRecipes": "No recipes available.",
       "fusionApiMissing": "Fusion API not exposed by preload — rebuild the preload bundle.",
       "stepsSuffix": "steps"
-    },
-    "sources": {
-      "open": "Open source",
-      "opening": "Opening…",
-      "close": "Close",
-      "openFailed": "Failed to open.",
-      "openUnavailable": "Source opening unavailable (preload missing).",
-      "untrackablePdf": "PDF document not traceable (missing documentId).",
-      "untrackableTropy": "Tropy source not traceable (missing itemId).",
-      "untrackableNote": "Obsidian note not traceable (missing path).",
-      "position": {
-        "pageWithOffset": "page {{page}} · offset {{offset}}",
-        "page": "page {{page}}",
-        "noteWithLine": "{{path}} · L{{line}}",
-        "item": "item #{{id}}"
-      }
     }
   },
   "corpus": {
@@ -1313,5 +1312,9 @@
       "description": "Slides (online, offline, or PDF)."
     },
     "action": "Open exporter"
+  },
+  "statusBar": {
+    "mcpTooltip": "MCP: {{ready}}/{{total}} ready",
+    "vaultTooltip": "Vault: {{count}} notes"
   }
 }

@@ -62,9 +62,10 @@ export const EditorPanel: React.FC = () => {
     try {
       await saveFile();
       logger.component('EditorPanel', 'File saved successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If no file path, show save dialog
-      if (error.message.includes('No file path')) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.includes('No file path')) {
         logger.component('EditorPanel', 'No file path, showing save dialog');
         const result = await window.electron.dialog.saveFile({
           filters: [

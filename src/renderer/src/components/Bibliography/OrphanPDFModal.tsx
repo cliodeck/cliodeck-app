@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Archive, FolderOpen, AlertTriangle, X, RefreshCw } from 'lucide-react';
 import { useDialogStore } from '../../stores/dialogStore';
+import type { Citation } from '../../stores/bibliography/types';
 import './OrphanPDFModal.css';
 
 interface OrphanPDFInfo {
@@ -23,7 +24,7 @@ interface OrphanPDFModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectPath: string;
-  citations: any[];
+  citations: Citation[];
 }
 
 export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({

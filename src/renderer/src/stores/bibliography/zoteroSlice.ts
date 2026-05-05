@@ -35,6 +35,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }
 
       // Build download options based on mode
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic options bag passed to IPC
       let downloadOptions: any;
       if (mode === 'api') {
         if (!zoteroConfig.userId || !zoteroConfig.apiKey) {
@@ -222,6 +223,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           console.log(`Downloading PDF for: ${citation.title}`);
 
           // Build download options based on mode
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic options bag passed to IPC
           const downloadOptions: any = mode === 'api'
             ? {
                 mode: 'api',

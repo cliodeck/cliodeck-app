@@ -519,7 +519,22 @@
     "you": "Vous",
     "assistant": "Assistant",
     "noContextWarning": "Cette réponse n'est pas basée sur vos documents. Aucun passage pertinent n'a été trouvé dans votre corpus.",
-    "sources": "Sources",
+    "sources": {
+      "open": "Ouvrir la source",
+      "opening": "Ouverture…",
+      "close": "Fermer",
+      "openFailed": "Échec de l’ouverture.",
+      "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
+      "untrackablePdf": "Document PDF non traçable (documentId manquant).",
+      "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
+      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
+    },
     "source": "Source",
     "excerpt": "Extrait:",
     "page": "Page",
@@ -592,22 +607,6 @@
       "noRecipes": "Aucune recette disponible.",
       "fusionApiMissing": "API Fusion non exposée par le preload — reconstruisez le bundle preload.",
       "stepsSuffix": "étapes"
-    },
-    "sources": {
-      "open": "Ouvrir la source",
-      "opening": "Ouverture…",
-      "close": "Fermer",
-      "openFailed": "Échec de l’ouverture.",
-      "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
-      "untrackablePdf": "Document PDF non traçable (documentId manquant).",
-      "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
-      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
-      "position": {
-        "pageWithOffset": "page {{page}} · offset {{offset}}",
-        "page": "page {{page}}",
-        "noteWithLine": "{{path}} · L{{line}}",
-        "item": "item #{{id}}"
-      }
     }
   },
   "corpus": {
@@ -1313,5 +1312,9 @@
       "description": "Diapositives (en ligne, hors-ligne ou PDF)."
     },
     "action": "Ouvrir l'exportateur"
+  },
+  "statusBar": {
+    "mcpTooltip": "MCP : {{ready}}/{{total}} prêts",
+    "vaultTooltip": "Vault : {{count}} notes"
   }
 }

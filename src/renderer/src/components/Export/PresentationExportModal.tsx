@@ -61,7 +61,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
       if (!result.canceled && result.filePath) {
         setOutputPath(result.filePath);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to select output path:', err);
     }
   };
@@ -133,8 +133,8 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         setError(result.error || t('presentation.unknownError'));
         setIsExporting(false);
       }
-    } catch (err: any) {
-      setError(t('presentation.exportError') + ': ' + err.message);
+    } catch (err: unknown) {
+      setError(t('presentation.exportError') + ': ' + (err instanceof Error ? err.message : String(err)));
       setIsExporting(false);
     }
   };

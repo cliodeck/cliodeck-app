@@ -86,8 +86,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           `Dépendances manquantes:\n${!result.pandoc ? '- Pandoc (installez avec: brew install pandoc)\n' : ''}${!result.xelatex ? '- XeLaTeX (installez avec: brew install --cask mactex)' : ''}`
         );
       }
-    } catch (err: any) {
-      setError('Erreur lors de la vérification des dépendances: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de la vérification des dépendances: ' + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -104,7 +104,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       if (!result.canceled && result.filePath) {
         setOutputPath(result.filePath);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to select output path:', err);
     }
   };
@@ -193,8 +193,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         setError(result.error || 'Erreur inconnue lors de l\'export');
         setIsExporting(false);
       }
-    } catch (err: any) {
-      setError('Erreur lors de l\'export: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
       setIsExporting(false);
     }
   };

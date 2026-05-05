@@ -65,7 +65,8 @@ export const TopicTimeline: React.FC<TopicTimelineProps> = ({ timelineData, topi
   }, {} as Record<string, string>);
 
   // Custom tooltip pour afficher les informations détaillées
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  interface TooltipEntry { dataKey: string; value: number; color: string }
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: TooltipEntry[]; label?: string }) => {
     if (active && payload && payload.length) {
       return (
         <div
@@ -79,8 +80,8 @@ export const TopicTimeline: React.FC<TopicTimelineProps> = ({ timelineData, topi
         >
           <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>Année: {label}</p>
           {payload
-            .sort((a: any, b: any) => b.value - a.value)
-            .map((entry: any, index: number) => (
+            .sort((a, b) => b.value - a.value)
+            .map((entry, index) => (
               <p key={index} style={{ color: entry.color, margin: '2px 0' }}>
                 {topicLabels[entry.dataKey]}: {entry.value} doc(s)
               </p>

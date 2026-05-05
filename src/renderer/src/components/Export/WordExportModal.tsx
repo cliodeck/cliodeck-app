@@ -101,7 +101,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       if (!result.canceled && result.filePath) {
         setOutputPath(result.filePath);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to select output path:', err);
     }
   };
@@ -169,8 +169,8 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         setError(result.error || 'Erreur inconnue lors de l\'export');
         setIsExporting(false);
       }
-    } catch (err: any) {
-      setError('Erreur lors de l\'export: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
       setIsExporting(false);
     }
   };

@@ -354,7 +354,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
 
           if (result.success && result.documents) {
             // Map to AvailableDocument format
-            const documents: AvailableDocument[] = result.documents.map((doc: any) => ({
+            const documents: AvailableDocument[] = result.documents.map((doc: { id: string; title?: string; author?: string; year?: string }) => ({
               id: doc.id,
               title: doc.title || 'Untitled',
               author: doc.author,

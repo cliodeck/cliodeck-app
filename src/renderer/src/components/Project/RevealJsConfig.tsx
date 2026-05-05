@@ -74,7 +74,7 @@ export const RevealJsConfig: React.FC<Props> = ({ projectPath }) => {
     }
   };
 
-  const set = (key: keyof RevealConfig, value: any) =>
+  const set = (key: keyof RevealConfig, value: RevealConfig[keyof RevealConfig]) =>
     save({ ...config, [key]: value });
 
   const row = (label: string, children: React.ReactNode) => (
