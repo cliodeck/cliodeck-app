@@ -9,6 +9,7 @@ import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { WorkspaceModeBar } from './WorkspaceModeBar';
 import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { StatusBar } from './StatusBar';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
 
@@ -357,6 +358,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           <AboutModal isOpen={showAboutModal} onClose={() => setShowAboutModal(false)} />
         </Suspense>
       )}
+
+      {/* Status Bar — persistent bottom bar (fusion 3.7) */}
+      <StatusBar />
     </div>
   );
 };

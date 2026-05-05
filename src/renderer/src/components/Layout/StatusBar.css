@@ -1,0 +1,49 @@
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.status-bar__section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-bar__section--right {
+  gap: 16px;
+}
+
+.status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.status-bar__item--warning {
+  color: var(--color-warning, #e6a817);
+}
+
+.status-bar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 2px;
+}
+
+.status-bar__dot--danger {
+  background: var(--color-danger, #e53e3e);
+}
