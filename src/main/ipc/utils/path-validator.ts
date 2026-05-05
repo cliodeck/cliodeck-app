@@ -61,7 +61,15 @@ async function projectRoots(): Promise<string[]> {
   const pm = await getProjectManager();
   const projectPath = pm.getCurrentProjectPath();
   if (!projectPath) return [];
-  return [path.resolve(projectPath)];
+  const resolved = path.resolve(projectPath);
+  // Also resolve through realpath so that macOS /var → /private/var
+  // symlinks don't cause false rejections.
+  try {
+    const real = await realpath(resolved);
+    return real === resolved ? [resolved] : [resolved, real];
+  } catch {
+    return [resolved];
+  }
 }
 
 /**
