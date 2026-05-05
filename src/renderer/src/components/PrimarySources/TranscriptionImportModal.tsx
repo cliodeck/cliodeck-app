@@ -63,10 +63,10 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
         }
         setIsImporting(false);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setImportResult({
         success: false,
-        message: error.message || t('primarySources.importFailed', 'Import failed'),
+        message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
     }
@@ -106,10 +106,10 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
         }
         setIsImporting(false);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setImportResult({
         success: false,
-        message: error.message || t('primarySources.importFailed', 'Import failed'),
+        message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
     }

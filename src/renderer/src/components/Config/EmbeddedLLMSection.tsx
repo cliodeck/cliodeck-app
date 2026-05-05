@@ -106,9 +106,9 @@ export const EmbeddedLLMSection: React.FC = () => {
       });
 
       await window.electron.embeddedLLM.download(modelId);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Download failed:', err);
-      setError(err.message || t('embeddedLLM.downloadError'));
+      setError(err instanceof Error ? err.message : String(err) || t('embeddedLLM.downloadError'));
       setDownloadingModelId(null);
     }
   };

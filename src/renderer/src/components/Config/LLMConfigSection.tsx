@@ -18,7 +18,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
 }) => {
   const { t } = useTranslation('common');
 
-  const handleFieldChange = (field: keyof LLMConfig, value: any) => {
+  const handleFieldChange = (field: keyof LLMConfig, value: LLMConfig[keyof LLMConfig]) => {
     onChange({ ...config, [field]: value });
   };
 

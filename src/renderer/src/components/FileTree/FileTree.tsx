@@ -111,8 +111,8 @@ export const FileTree: React.FC<FileTreeProps> = ({ rootPath, onFileSelect }) =>
         } else {
           setError(result.error || 'Failed to load directory');
         }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load directory');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err) || 'Failed to load directory');
         console.error('Failed to load root directory:', err);
       } finally {
         setIsLoading(false);

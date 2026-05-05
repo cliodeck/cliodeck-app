@@ -31,7 +31,7 @@ export const SlideEditorPanel: React.FC = () => {
   const handleSave = async () => {
     try {
       await saveFile();
-    } catch (error: any) {
+    } catch (error: unknown) {
       await useDialogStore.getState().showAlert(t('toolbar.saveError'));
     }
   };

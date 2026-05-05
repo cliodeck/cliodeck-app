@@ -177,7 +177,7 @@ export const ConfigPanel: React.FC = () => {
     try {
       const response = await window.electron.ollama.listModels();
       if (response.success && response.models) {
-        setAvailableModels(response.models.map((m: any) => m.name || m.id));
+        setAvailableModels(response.models.map((m: { name?: string; id?: string }) => m.name || m.id || ''));
       }
     } catch (error) {
       console.error('Failed to refresh Ollama models:', error);

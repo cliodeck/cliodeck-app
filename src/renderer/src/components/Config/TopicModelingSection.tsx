@@ -41,9 +41,9 @@ export const TopicModelingSection: React.FC = () => {
       } else {
         setStatus({ installed: false, error: result.error });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to check topic modeling status:', error);
-      setStatus({ installed: false, error: error.message || t('topicModeling.installError') });
+      setStatus({ installed: false, error: error instanceof Error ? error.message : t('topicModeling.installError') });
     } finally {
       setLoading(false);
     }
@@ -72,9 +72,9 @@ export const TopicModelingSection: React.FC = () => {
           `❌ ${t('topicModeling.installError')}: ${result.error || 'Unknown error'}`,
         ]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to setup environment:', error);
-      setInstallProgress((prev) => [...prev, `❌ ${t('topicModeling.installError')}: ${error.message}`]);
+      setInstallProgress((prev) => [...prev, `❌ ${t('topicModeling.installError')}: ${error instanceof Error ? error.message : String(error)}`]);
     } finally {
       setInstalling(false);
       removeListener();
