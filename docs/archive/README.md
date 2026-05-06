@@ -5,15 +5,22 @@ historical context (the data flow, the migration approach, the
 rationale of trade-offs) but not the place to look for what's left to
 do or what's currently true.
 
-For the current architecture, see the top-level `docs/` folder; for the
-forward-looking roadmap, see [`../plan-post-fusion.md`](../plan-post-fusion.md).
+For the current architecture, see the top-level `docs/` folder.
 
 ## What's here
 
-| File | Captures | Caveats |
-|---|---|---|
-| `archival-metadata.md` | The **archival metadata** layer for primary sources (`repository`, `fonds`, `callNumber`, `producer`…) — what landed, schema migration approach, integration points. | The "what's still to do" list is *not* tracked in `plan-post-fusion.md`. Treat it as a domain-specific TODO that ships a follow-up PR; check the actual code (`backend/types/archival-metadata.ts`, `backend/integrations/tropy/TropySync.ts`) for ground truth. |
-| `citation-integration.md` | The **CSL citation engine** scaffold — `citeproc-js` wiring, BibTeX→CSL adapter, the `CitationEngine.ts` API surface. | **Partially out of date.** Several "what remains to wire" items have shipped since (notably `CitationStyleSection.tsx` is in `ConfigPanel.tsx`, MilkdownEditor's autocomplete is wired). Check the actual files before assuming a TODO is open. |
+| File | Captures |
+|---|---|
+| `fusion-cliobrain-implementation-plan.md` | The original step-by-step fusion plan (phases 0-4). All phases 0-3 completed. |
+| `fusion-cliobrain-strategy.md` | Strategic rationale for absorbing ClioBrain into ClioDeck. |
+| `plan-post-fusion.md` | Post-fusion audit and roadmap (phases 0-3 of the post-audit). All completed. |
+| `actions-frederic.md` | Step-by-step list of human decisions needed during phases 0-3. All resolved. |
+| `i18n-fusion-1.4b-review.md` | i18n review checklist for the 5 fusion sections. Accepted as-is. |
+| `research-ollama-tools-1.8.md` | Research on Ollama tool-use model compatibility (step 1.8). |
+| `research-historians-desktop.md` | Research note on Greenstreet's "Historian's Desktop" — inspired onboarding (2.9/2.10). |
+| `archive-mcp-connectors.md` | Design doc for MCP archive connectors (Gallica, HAL, Europeana, etc.). |
+| `archival-metadata.md` | The archival metadata layer for primary sources. |
+| `citation-integration.md` | The CSL citation engine scaffold. |
 
 ## When to consult these vs. the live docs
 
