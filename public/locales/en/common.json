@@ -94,6 +94,8 @@
   },
   "settings": {
     "title": "Settings",
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
     "save": "Save",
     "saved": "Configuration saved",
     "saveError": "Error saving configuration",

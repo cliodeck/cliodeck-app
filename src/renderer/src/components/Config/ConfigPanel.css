@@ -18,6 +18,37 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+.config-mode-toggle {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.config-mode-btn {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.config-mode-btn:not(:last-child) {
+  border-right: 1px solid var(--border-color);
+}
+
+.config-mode-btn.is-active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.config-mode-btn:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
 .config-header h2 {
   margin: 0;
   font-size: var(--font-size-lg);

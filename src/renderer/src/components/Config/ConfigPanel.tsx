@@ -96,9 +96,14 @@ export interface LLMConfig {
   useCloudEmbeddings?: boolean;
 }
 
+type SettingsMode = 'simple' | 'expert';
+
 export const ConfigPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const { settings: editorSettings, updateSettings } = useEditorStore();
+  const [settingsMode, setSettingsMode] = useState<SettingsMode>(() => {
+    return (localStorage.getItem('cliodeck-settings-mode') as SettingsMode) || 'simple';
+  });
 
   const [ragConfig, setRagConfig] = useState<RAGConfig>({
     topK: 10,
@@ -307,9 +312,30 @@ export const ConfigPanel: React.FC = () => {
     }
   };
 
+  const handleModeChange = (mode: SettingsMode) => {
+    setSettingsMode(mode);
+    localStorage.setItem('cliodeck-settings-mode', mode);
+  };
+
   return (
     <div className="config-panel">
       <div className="config-header">
+        <div className="config-mode-toggle">
+          <button
+            type="button"
+            className={`config-mode-btn ${settingsMode === 'simple' ? 'is-active' : ''}`}
+            onClick={() => handleModeChange('simple')}
+          >
+            {t('settings.modeSimple')}
+          </button>
+          <button
+            type="button"
+            className={`config-mode-btn ${settingsMode === 'expert' ? 'is-active' : ''}`}
+            onClick={() => handleModeChange('expert')}
+          >
+            {t('settings.modeExpert')}
+          </button>
+        </div>
         <div className="config-actions">
           {saveMessage && (
             <span className={`save-message ${saveMessageType}`}>{saveMessage}</span>
@@ -333,14 +359,8 @@ export const ConfigPanel: React.FC = () => {
       </div>
 
       <div className="config-content">
-        <UIConfigSection />
-
+        {/* Simple mode: essentials only */}
         <LanguageConfigSection />
-
-        <RAGConfigSection
-          config={ragConfig}
-          onChange={setRagConfig}
-        />
 
         <LLMConfigSection
           config={llmConfig}
@@ -348,10 +368,6 @@ export const ConfigPanel: React.FC = () => {
           availableModels={availableModels}
           onRefreshModels={handleRefreshModels}
         />
-
-        <EmbeddedLLMSection />
-
-        <ModeManagerSection />
 
         <EditorConfigSection
           config={editorConfig}
@@ -363,21 +379,37 @@ export const ConfigPanel: React.FC = () => {
           onChange={setZoteroConfig}
         />
 
-        <TopicModelingSection />
-
         <VaultConfigSection />
 
-        <WorkspaceHintsSection />
+        {/* Expert mode: everything else */}
+        {settingsMode === 'expert' && (
+          <>
+            <UIConfigSection />
 
-        <RecipesSection />
+            <RAGConfigSection
+              config={ragConfig}
+              onChange={setRagConfig}
+            />
 
-        <MCPClientsSection />
+            <EmbeddedLLMSection />
 
-        <ArchivesConfigSection />
+            <ModeManagerSection />
 
-        <SecurityConfigSection />
+            <TopicModelingSection />
 
-        <CitationStyleSection />
+            <WorkspaceHintsSection />
+
+            <RecipesSection />
+
+            <MCPClientsSection />
+
+            <ArchivesConfigSection />
+
+            <SecurityConfigSection />
+
+            <CitationStyleSection />
+          </>
+        )}
       </div>
     </div>
   );

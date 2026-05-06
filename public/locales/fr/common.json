@@ -94,6 +94,8 @@
   },
   "settings": {
     "title": "Paramètres",
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
     "save": "Enregistrer",
     "saved": "Configuration sauvegardée",
     "saveError": "Erreur lors de la sauvegarde",
