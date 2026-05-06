@@ -641,7 +641,9 @@ export const fusionChatService = new FusionChatService();
 function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
   const lines: string[] = [
     'Contexte extrait du corpus indexé (sources citées ci-dessous).',
-    "Utilise prioritairement ces extraits pour répondre ; indique clairement si l'information n'y figure pas.",
+    "RÈGLE ABSOLUE : réponds UNIQUEMENT à partir de ces extraits. Ne complète JAMAIS avec tes connaissances générales.",
+    "Si l'information demandée n'apparaît pas dans les extraits ci-dessous, dis-le explicitement : « Cette information n'apparaît pas dans les sources consultées. »",
+    "Cite le numéro de la source [N] pour chaque affirmation.",
     '',
   ];
   hits.forEach((h, i) => {
