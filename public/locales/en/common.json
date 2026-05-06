@@ -1299,7 +1299,9 @@
   "ideas": {
     "tabChat": "Chat",
     "tabIdeas": "Ideas",
+    "tabCanvas": "Board",
     "tabGraph": "Graph",
+    "canvasEmpty": "Empty board. Click + to add an idea.",
     "newIdeaTitle": "New idea",
     "searchPlaceholder": "Search…",
     "create": "New idea",

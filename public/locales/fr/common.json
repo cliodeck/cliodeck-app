@@ -1299,7 +1299,9 @@
   "ideas": {
     "tabChat": "Chat",
     "tabIdeas": "Idées",
+    "tabCanvas": "Tableau",
     "tabGraph": "Graphe",
+    "canvasEmpty": "Tableau vide. Cliquez + pour ajouter une idée.",
     "newIdeaTitle": "Nouvelle idée",
     "searchPlaceholder": "Rechercher…",
     "create": "Nouvelle idée",

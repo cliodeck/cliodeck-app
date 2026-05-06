@@ -1,0 +1,151 @@
+.ideas-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+  cursor: grab;
+  user-select: none;
+}
+
+.ideas-canvas:active {
+  cursor: grabbing;
+}
+
+.ideas-canvas__toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.ideas-canvas__toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ideas-canvas__toolbar button:hover {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--text-primary);
+}
+
+.ideas-canvas__zoom-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  min-width: 36px;
+  text-align: center;
+}
+
+.ideas-canvas__surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ideas-canvas__links {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.ideas-canvas__link-line {
+  stroke: var(--text-tertiary);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.5;
+}
+
+.ideas-canvas__card {
+  position: absolute;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 6px;
+  cursor: grab;
+  transition: box-shadow 0.12s, border-color 0.12s;
+  overflow: hidden;
+}
+
+.ideas-canvas__card:active {
+  cursor: grabbing;
+}
+
+.ideas-canvas__card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+.ideas-canvas__card.is-selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.ideas-canvas__card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.ideas-canvas__card-content {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-height: 52px;
+  overflow: hidden;
+}
+
+.ideas-canvas__card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.ideas-canvas__card-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--text-secondary);
+}
+
+.ideas-canvas__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.ideas-canvas__empty p {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}

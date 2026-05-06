@@ -19,10 +19,12 @@ import {
   MessageCircle,
   Lightbulb,
   Network,
+  LayoutGrid,
 } from 'lucide-react';
 import { BrainstormChat } from './BrainstormChat';
 import { IdeasPanel } from './IdeasPanel';
 import { IdeasGraph } from './IdeasGraph';
+import { IdeasCanvas } from './IdeasCanvas';
 import { useProjectStore } from '../../stores/projectStore';
 import { useIdeaStore } from '../../stores/ideaStore';
 import './BrainstormPanel.css';
@@ -49,7 +51,7 @@ interface VaultStatus {
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
-type BrainstormTab = 'chat' | 'ideas' | 'graph';
+type BrainstormTab = 'chat' | 'ideas' | 'canvas' | 'graph';
 
 export const BrainstormPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -169,6 +171,15 @@ export const BrainstormPanel: React.FC = () => {
         </button>
         <button
           role="tab"
+          aria-selected={activeTab === 'canvas'}
+          className={`brainstorm-panel__tab ${activeTab === 'canvas' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('canvas')}
+        >
+          <LayoutGrid size={14} />
+          <span>{t('ideas.tabCanvas')}</span>
+        </button>
+        <button
+          role="tab"
           aria-selected={activeTab === 'graph'}
           className={`brainstorm-panel__tab ${activeTab === 'graph' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('graph')}
@@ -187,6 +198,11 @@ export const BrainstormPanel: React.FC = () => {
       {activeTab === 'ideas' && (
         <section className="brainstorm-panel__chat">
           <IdeasPanel />
+        </section>
+      )}
+      {activeTab === 'canvas' && (
+        <section className="brainstorm-panel__chat">
+          <IdeasCanvas />
         </section>
       )}
       {activeTab === 'graph' && (
