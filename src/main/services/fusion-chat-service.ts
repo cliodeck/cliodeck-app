@@ -396,6 +396,9 @@ class FusionChatService {
     };
 
     // --- Retrieval adapter -------------------------------------------------
+    // Note: SourceInspector runs inside retrieval-service.search() — chunks
+    // are already filtered by the configured mode (warn/audit/block) before
+    // hits reach this adapter.
     const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
       ? {
           async search(lastUser, options?: ChatEngineRetrievalOptions) {
