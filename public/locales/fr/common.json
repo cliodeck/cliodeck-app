@@ -1196,6 +1196,8 @@
     "buttons": {
       "run": "Lancer",
       "runTitle": "Lancer cette recette",
+      "edit": "Éditer",
+      "editTitle": "Modifier cette recette",
       "refresh": "Actualiser",
       "refreshTitle": "Recharger la liste"
     },
@@ -1203,6 +1205,27 @@
       "stepsCount_one": "{{count}} étape",
       "stepsCount_other": "{{count}} étapes"
     }
+  },
+  "recipeEditor": {
+    "readOnly": "lecture seule",
+    "unsaved": "non enregistré",
+    "modeForm": "Formulaire",
+    "modeYaml": "YAML",
+    "save": "Enregistrer",
+    "sections": {
+      "metadata": "Métadonnées",
+      "inputs": "Paramètres",
+      "steps": "Étapes"
+    },
+    "fields": {
+      "name": "Nom",
+      "version": "Version",
+      "description": "Description"
+    },
+    "addInput": "Ajouter",
+    "addStep": "Ajouter",
+    "noInputs": "Aucun paramètre défini.",
+    "noSteps": "Aucune étape."
   },
   "mcp": {
     "title": "Clients MCP",

@@ -684,6 +684,10 @@ const api = {
       list: () => ipcRenderer.invoke('fusion:recipes:list'),
       read: (scope: 'builtin' | 'user', fileName: string) =>
         ipcRenderer.invoke('fusion:recipes:read', scope, fileName),
+      readYaml: (scope: 'builtin' | 'user', fileName: string) =>
+        ipcRenderer.invoke('fusion:recipes:read-yaml', scope, fileName),
+      save: (fileName: string, yaml: string) =>
+        ipcRenderer.invoke('fusion:recipes:save', fileName, yaml),
       run: (
         scope: 'builtin' | 'user',
         fileName: string,

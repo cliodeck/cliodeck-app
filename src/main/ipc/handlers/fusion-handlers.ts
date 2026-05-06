@@ -158,6 +158,62 @@ export function setupFusionHandlers(): void {
     }
   );
 
+  // Read raw YAML for the recipe editor (A14)
+  ipcMain.handle(
+    'fusion:recipes:read-yaml',
+    async (_e, rawScope: unknown, rawFileName: unknown) => {
+      if (rawScope !== 'builtin' && rawScope !== 'user') {
+        return errorResponse('scope must be "builtin" or "user"');
+      }
+      if (typeof rawFileName !== 'string' || !/^[\w.-]+\.ya?ml$/i.test(rawFileName)) {
+        return errorResponse('invalid recipe fileName');
+      }
+      const baseDir =
+        rawScope === 'builtin'
+          ? BUILTIN_RECIPES_DIR
+          : (() => {
+              const root = projectManager.getCurrentProjectPath();
+              return root ? v2Paths(root).recipesDir : null;
+            })();
+      if (!baseDir) return noProject();
+      try {
+        const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
+        return successResponse({ yaml: raw });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
+  // Save recipe YAML to disk (A14 — user recipes only)
+  ipcMain.handle(
+    'fusion:recipes:save',
+    async (_e, rawFileName: unknown, rawYaml: unknown) => {
+      const root = projectManager.getCurrentProjectPath();
+      if (!root) return noProject();
+      if (typeof rawFileName !== 'string' || !/^[\w.-]+\.ya?ml$/i.test(rawFileName)) {
+        return errorResponse('invalid recipe fileName');
+      }
+      if (typeof rawYaml !== 'string') {
+        return errorResponse('yaml must be a string');
+      }
+      // Validate before saving
+      try {
+        parseRecipe(rawYaml);
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+      const userDir = v2Paths(root).recipesDir;
+      try {
+        await fs.mkdir(userDir, { recursive: true });
+        await fs.writeFile(path.join(userDir, rawFileName), rawYaml, 'utf8');
+        return successResponse({});
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
   ipcMain.handle(
     'fusion:recipes:run',
     async (

@@ -1196,6 +1196,8 @@
     "buttons": {
       "run": "Run",
       "runTitle": "Run this recipe",
+      "edit": "Edit",
+      "editTitle": "Edit this recipe",
       "refresh": "Refresh",
       "refreshTitle": "Reload the list"
     },
@@ -1203,6 +1205,27 @@
       "stepsCount_one": "{{count}} step",
       "stepsCount_other": "{{count}} steps"
     }
+  },
+  "recipeEditor": {
+    "readOnly": "read-only",
+    "unsaved": "unsaved",
+    "modeForm": "Form",
+    "modeYaml": "YAML",
+    "save": "Save",
+    "sections": {
+      "metadata": "Metadata",
+      "inputs": "Parameters",
+      "steps": "Steps"
+    },
+    "fields": {
+      "name": "Name",
+      "version": "Version",
+      "description": "Description"
+    },
+    "addInput": "Add",
+    "addStep": "Add",
+    "noInputs": "No parameters defined.",
+    "noSteps": "No steps."
   },
   "mcp": {
     "title": "MCP Clients",

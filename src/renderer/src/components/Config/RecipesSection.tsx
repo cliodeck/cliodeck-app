@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpen, Play, RefreshCw } from 'lucide-react';
+import { BookOpen, Pencil, Play, RefreshCw } from 'lucide-react';
 import { RecipeRunModal } from './RecipeRunModal';
+import { RecipeEditor } from './RecipeEditor';
 
 interface RecipeSummary {
   fileName: string;
@@ -31,6 +32,10 @@ export const RecipesSection: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [runTarget, setRunTarget] = useState<{
+    scope: 'builtin' | 'user';
+    fileName: string;
+  } | null>(null);
+  const [editTarget, setEditTarget] = useState<{
     scope: 'builtin' | 'user';
     fileName: string;
   } | null>(null);
@@ -105,15 +110,26 @@ export const RecipesSection: React.FC = () => {
                   <code>{r.fileName}</code> ·{' '}
                   {t('recipes.card.stepsCount', { count: r.steps })}
                 </p>
-                <button
-                  type="button"
-                  className="toolbar-btn"
-                  onClick={() => setRunTarget({ scope: scopeOf(items), fileName: r.fileName })}
-                  title={t('recipes.buttons.runTitle')}
-                  style={{ padding: '2px 8px', fontSize: 12 }}
-                >
-                  <Play size={12} strokeWidth={1} /> {t('recipes.buttons.run')}
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => setEditTarget({ scope: scopeOf(items), fileName: r.fileName })}
+                    title={t('recipes.buttons.editTitle')}
+                    style={{ padding: '2px 8px', fontSize: 12 }}
+                  >
+                    <Pencil size={12} strokeWidth={1} /> {t('recipes.buttons.edit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => setRunTarget({ scope: scopeOf(items), fileName: r.fileName })}
+                    title={t('recipes.buttons.runTitle')}
+                    style={{ padding: '2px 8px', fontSize: 12 }}
+                  >
+                    <Play size={12} strokeWidth={1} /> {t('recipes.buttons.run')}
+                  </button>
+                </div>
               </div>
             </li>
           ))}
@@ -153,6 +169,14 @@ export const RecipesSection: React.FC = () => {
           scope={runTarget.scope}
           fileName={runTarget.fileName}
           onClose={() => setRunTarget(null)}
+        />
+      )}
+      {editTarget && (
+        <RecipeEditor
+          scope={editTarget.scope}
+          fileName={editTarget.fileName}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => void refresh()}
         />
       )}
     </section>
