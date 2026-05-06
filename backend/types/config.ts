@@ -118,6 +118,10 @@ export interface RAGConfig {
   // === Obsidian vault as RAG source ===
   /** Include the workspace Obsidian vault (if indexed) in the retrieval pipeline. */
   includeObsidianVault?: boolean;
+
+  // === Query expansion (A20) ===
+  /** User-defined FR→EN term dictionary merged on top of built-in defaults. */
+  queryExpansionDictionary?: Record<string, string[]>;
 }
 
 export interface ZoteroConfig {

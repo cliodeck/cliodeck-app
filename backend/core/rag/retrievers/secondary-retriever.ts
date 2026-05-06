@@ -55,10 +55,9 @@ export type EmbedQuery = (query: string) => Promise<Float32Array>;
 export type ExpandQuery = (query: string) => string[];
 
 /**
- * Curated FR↔EN academic-term map. The source-of-truth for both the
- * `expandQueryFrEn` expander below and the embedding-cache warmup in
- * `retrieval-service.ts`. A20 (deferred) will move this to the
- * workspace config so historians can extend it without recompiling.
+ * Default FR↔EN academic-term map. Minimal bootstrap — the real dictionary
+ * is loaded from `.cliodeck/v2/config.json` → `rag.queryExpansionDictionary`
+ * at runtime and merged on top of these defaults (A20).
  */
 export const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {
   'taxonomie de bloom': ["bloom's taxonomy", 'bloom taxonomy', 'blooms taxonomy'],
@@ -71,14 +70,19 @@ export const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {
 };
 
 /**
- * Default multilingual expander — maps the curated FR academic terms
- * to their EN counterparts and yields one variant per translation.
- * Always includes the original query as variant 0.
+ * Create a query expander with a custom dictionary (merged on top of defaults).
  */
-export function expandQueryFrEn(query: string): string[] {
+export function createExpandQueryFrEn(
+  userDictionary?: Record<string, string[]>
+): ExpandQuery {
+  const merged = { ...ACADEMIC_TERMS_FR_TO_EN, ...userDictionary };
+  return (query: string) => expandQueryWithDict(query, merged);
+}
+
+function expandQueryWithDict(query: string, dict: Record<string, string[]>): string[] {
   const queries = [query];
   const lower = query.toLowerCase();
-  for (const [frTerm, enTranslations] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
+  for (const [frTerm, enTranslations] of Object.entries(dict)) {
     if (lower.includes(frTerm)) {
       for (const enTerm of enTranslations) {
         queries.push(query.replace(new RegExp(frTerm, 'gi'), enTerm));
@@ -86,6 +90,17 @@ export function expandQueryFrEn(query: string): string[] {
     }
   }
   return queries;
+}
+
+/**
+ * Default multilingual expander — maps the curated FR academic terms
+ * to their EN counterparts and yields one variant per translation.
+ * Always includes the original query as variant 0.
+ * Uses the built-in dictionary only. For custom dictionaries, use
+ * `createExpandQueryFrEn(userDict)`.
+ */
+export function expandQueryFrEn(query: string): string[] {
+  return expandQueryWithDict(query, ACADEMIC_TERMS_FR_TO_EN);
 }
 
 /** Mean-pool a non-empty list of equal-dimension embeddings. */

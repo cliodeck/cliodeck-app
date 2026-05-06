@@ -18,6 +18,7 @@ import { EnhancedVectorStore } from '../../../backend/core/vector-store/Enhanced
 import {
   SecondaryRetriever,
   ACADEMIC_TERMS_FR_TO_EN,
+  createExpandQueryFrEn,
 } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
 import type {
@@ -745,9 +746,16 @@ class RetrievalService {
     const topK = options?.topK || ragConfig.topK;
     const threshold = options?.threshold || ragConfig.similarityThreshold;
 
+    // A20: inject user dictionary for query expansion if configured
+    const userDict = ragConfig.queryExpansionDictionary;
+    const expandQuery = userDict
+      ? createExpandQueryFrEn(userDict)
+      : undefined; // uses default expandQueryFrEn
+
     const retriever = new SecondaryRetriever({
       vectorStore: this.vectorStore!,
       getQueryEmbedding: (q) => this.getQueryEmbedding(q),
+      expandQuery,
     });
     return retriever.search(query, {
       topK,
