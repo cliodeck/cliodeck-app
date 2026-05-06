@@ -301,3 +301,31 @@
   font-size: 11px;
   color: var(--text-tertiary);
 }
+
+/* NER entity highlights (A11.5) */
+.ner {
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: inherit;
+  cursor: default;
+}
+
+.ner--date {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+  color: #f59e0b;
+}
+
+.ner--person {
+  background: color-mix(in srgb, #8b5cf6 20%, transparent);
+  color: #a78bfa;
+}
+
+.ner--place {
+  background: color-mix(in srgb, #10b981 20%, transparent);
+  color: #34d399;
+}
+
+.ner--org {
+  background: color-mix(in srgb, #3b82f6 20%, transparent);
+  color: #60a5fa;
+}

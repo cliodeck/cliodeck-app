@@ -10,6 +10,8 @@ interface MessageListProps<M extends UnifiedMessage> {
   /** True when a generation is running and no partial content has arrived yet. */
   showTypingIndicator?: boolean;
   renderExtras?: (message: M) => React.ReactNode;
+  /** Enable NER entity highlighting in assistant messages. */
+  enableNER?: boolean;
 }
 
 function MessageListInner<M extends UnifiedMessage>({
@@ -17,6 +19,7 @@ function MessageListInner<M extends UnifiedMessage>({
   streamingContent,
   showTypingIndicator,
   renderExtras,
+  enableNER,
 }: MessageListProps<M>): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -31,6 +34,7 @@ function MessageListInner<M extends UnifiedMessage>({
           key={message.id}
           message={message}
           extras={renderExtras ? renderExtras(message) : undefined}
+          enableNER={enableNER}
         />
       ))}
 

@@ -7,7 +7,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Loader2, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, Check, Highlighter, Loader2, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
@@ -38,6 +38,7 @@ export const BrainstormChat: React.FC = () => {
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [nerEnabled, setNerEnabled] = useState(false);
   const mcpTools = useMcpToolsList();
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
@@ -217,6 +218,16 @@ export const BrainstormChat: React.FC = () => {
           <SlidersHorizontal size={13} />
           <span>{settingsLabel}</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setNerEnabled((v) => !v)}
+          aria-pressed={nerEnabled}
+          title={t('chat.brainstorm.nerToggle')}
+          className={`brainstorm-chat__settings-toggle ${nerEnabled ? 'is-active' : ''}`}
+        >
+          <Highlighter size={13} />
+          <span>{t('chat.brainstorm.nerToggle')}</span>
+        </button>
         {isSettingsOpen && <ModeSelector />}
       </div>
       {isSettingsOpen && (
@@ -239,6 +250,7 @@ export const BrainstormChat: React.FC = () => {
           banner={error && !isStreaming ? error : undefined}
           placeholder={t('chat.brainstorm.placeholder')}
           renderMessageExtras={renderExtras}
+          enableNER={nerEnabled}
         />
       </div>
     </div>

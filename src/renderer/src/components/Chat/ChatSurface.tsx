@@ -20,6 +20,8 @@ interface ChatSurfaceProps<M extends UnifiedMessage> {
   placeholder?: string;
   renderMessageExtras?: (message: M) => React.ReactNode;
   footer?: React.ReactNode;
+  /** Enable NER entity highlighting in assistant messages. */
+  enableNER?: boolean;
 }
 
 /**
@@ -79,6 +81,7 @@ export function ChatSurface<M extends UnifiedMessage>({
   placeholder,
   renderMessageExtras,
   footer,
+  enableNER,
 }: ChatSurfaceProps<M>): React.ReactElement {
   const { t } = useTranslation('common');
 
@@ -113,6 +116,7 @@ export function ChatSurface<M extends UnifiedMessage>({
             streamingContent={streamingContent}
             showTypingIndicator={showTypingIndicator}
             renderExtras={renderMessageExtras}
+            enableNER={enableNER}
           />
         )}
       </div>

@@ -593,6 +593,7 @@
       "sendToWrite": "Send to Write",
       "sentToWrite": "Sent",
       "sendToWriteTitle": "Insert this turn as a draft in Write",
+      "nerToggle": "Entities",
       "sourcesLabel": "Sources",
       "openProjectNotice": "Open a project to start brainstorming.",
       "projectContext": "Project context",

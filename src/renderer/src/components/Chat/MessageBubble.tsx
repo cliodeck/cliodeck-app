@@ -3,16 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { marked } from 'marked';
 import { UnifiedMessage } from './types';
 import { sanitizeChat } from '../../utils/sanitize';
+import { highlightEntitiesInHtml } from '../../utils/ner-highlight';
 import './MessageBubble.css';
 
 interface MessageBubbleProps {
   message: UnifiedMessage;
   isStreaming?: boolean;
   extras?: React.ReactNode;
+  /** Enable NER entity highlighting in assistant messages. */
+  enableNER?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
-  ({ message, isStreaming = false, extras }) => {
+  ({ message, isStreaming = false, extras, enableNER = false }) => {
     const { t } = useTranslation('common');
     const isUser = message.role === 'user';
     const isSystem = message.role === 'system';
@@ -21,12 +24,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
       if (isUser) return null;
       try {
         const raw = marked.parse(message.content, { breaks: true, gfm: true });
-        return sanitizeChat(raw as string);
+        let html = sanitizeChat(raw as string);
+        if (enableNER && !message.pending) {
+          html = highlightEntitiesInHtml(html);
+        }
+        return html;
       } catch (error) {
         console.error('Markdown parsing error:', error);
         return sanitizeChat(message.content);
       }
-    }, [message.content, isUser]);
+    }, [message.content, isUser, enableNER, message.pending]);
 
     const formatTime = (date: Date): string =>
       new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(date);
