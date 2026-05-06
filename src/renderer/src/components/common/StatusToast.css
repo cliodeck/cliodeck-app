@@ -1,0 +1,137 @@
+.status-toast-container {
+  position: fixed;
+  bottom: 36px; /* above the status bar */
+  right: 16px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.status-toast {
+  pointer-events: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: toast-slide-in 0.2s ease-out;
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.status-toast--info {
+  border-left: 3px solid var(--color-accent);
+}
+
+.status-toast--success {
+  border-left: 3px solid var(--color-success);
+}
+
+.status-toast--warning {
+  border-left: 3px solid var(--color-warning);
+}
+
+.status-toast--error {
+  border-left: 3px solid var(--color-danger);
+}
+
+.status-toast__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.status-toast__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.status-toast--info .status-toast__icon {
+  color: var(--color-accent);
+}
+
+.status-toast--success .status-toast__icon {
+  color: var(--color-success);
+}
+
+.status-toast--warning .status-toast__icon {
+  color: var(--color-warning);
+}
+
+.status-toast--error .status-toast__icon {
+  color: var(--color-danger);
+}
+
+.status-toast__text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.status-toast__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.status-toast__message {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.status-toast__actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.status-toast__details-btn,
+.status-toast__dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.status-toast__details-btn:hover,
+.status-toast__dismiss:hover {
+  background: color-mix(in srgb, var(--text-tertiary) 15%, transparent);
+  color: var(--text-primary);
+}
+
+.status-toast__details {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--text-secondary);
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-color);
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
