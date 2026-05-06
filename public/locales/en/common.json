@@ -1318,7 +1318,8 @@
     "origin": "Origin",
     "created": "Created",
     "delete": "Delete",
-    "importObsidian": "Import from Obsidian vault"
+    "importObsidian": "Import from Obsidian vault",
+    "relatedIdeas": "Related ideas"
   },
   "exportHub": {
     "title": "Export",
