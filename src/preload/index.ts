@@ -726,6 +726,8 @@ const api = {
       unlink: () => ipcRenderer.invoke('fusion:vault:unlink'),
       index: (opts?: { force?: boolean }) =>
         ipcRenderer.invoke('fusion:vault:index', opts ?? {}),
+      importAsIdeas: (opts?: { maxFiles?: number }) =>
+        ipcRenderer.invoke('fusion:vault:import-as-ideas', opts ?? {}),
       onProgress: (
         callback: (p: {
           stage: string;

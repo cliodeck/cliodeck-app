@@ -15,6 +15,7 @@ import {
   Link2,
   Trash2,
   X,
+  Download,
 } from 'lucide-react';
 import { useIdeaStore, type Idea, type IdeaLink } from '../../stores/ideaStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -31,6 +32,7 @@ export const IdeasPanel: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [newTagInput, setNewTagInput] = useState('');
   const [newLinkInput, setNewLinkInput] = useState('');
+  const [importing, setImporting] = useState(false);
 
   const filteredIdeas = useMemo(() => {
     if (!searchQuery.trim()) return ideas;
@@ -55,6 +57,45 @@ export const IdeasPanel: React.FC = () => {
     });
     setSelected(id);
     if (projectPath) saveIdeas(projectPath);
+  };
+
+  const handleImportObsidian = async () => {
+    const fusion = window.electron.fusion;
+    if (!fusion) return;
+    setImporting(true);
+    try {
+      const result = await fusion.vault.importAsIdeas({ maxFiles: 200 });
+      if (result.success && result.ideas) {
+        const imported = result.ideas as Array<{
+          title: string;
+          content: string;
+          tags: string[];
+          wikilinks: string[];
+          notePath: string;
+        }>;
+        for (const note of imported) {
+          // Check if idea with same title already exists (avoid duplicates)
+          const existing = ideas.find((i) => i.title === note.title && i.origin.type === 'obsidian');
+          if (existing) continue;
+          addIdea({
+            title: note.title,
+            content: note.content,
+            tags: note.tags,
+            links: note.wikilinks.map((wl) => ({
+              targetId: wl,
+              targetType: 'idea' as const,
+              label: 'wikilink',
+            })),
+            origin: { type: 'obsidian', notePath: note.notePath },
+          });
+        }
+        if (projectPath) saveIdeas(projectPath);
+      }
+    } catch (e) {
+      console.error('Obsidian import failed:', e);
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleTitleChange = (title: string) => {
@@ -129,6 +170,14 @@ export const IdeasPanel: React.FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <button
+            className="ideas-panel__add-btn"
+            onClick={handleImportObsidian}
+            disabled={importing}
+            title={t('ideas.importObsidian')}
+          >
+            <Download size={16} />
+          </button>
           <button
             className="ideas-panel__add-btn"
             onClick={handleCreate}

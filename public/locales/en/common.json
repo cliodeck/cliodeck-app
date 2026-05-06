@@ -1317,7 +1317,8 @@
     "addLink": "Target ID…",
     "origin": "Origin",
     "created": "Created",
-    "delete": "Delete"
+    "delete": "Delete",
+    "importObsidian": "Import from Obsidian vault"
   },
   "exportHub": {
     "title": "Export",

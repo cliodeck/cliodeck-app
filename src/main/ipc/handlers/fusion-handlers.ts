@@ -50,6 +50,7 @@ import {
   ObsidianVaultIndexer,
   obsidianStorePath,
 } from '../../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
+import { importVaultAsIdeas } from '../../../../backend/integrations/obsidian/obsidian-to-ideas.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
@@ -554,6 +555,37 @@ export function setupFusionHandlers(): void {
         store.close();
         await registry.dispose().catch(() => undefined);
       }
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  // MARK: - vault → ideas import (A11.6)
+
+  ipcMain.handle('fusion:vault:import-as-ideas', async (_event, rawOpts: unknown) => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
+      if (!vaultPath) {
+        return errorResponse('no_vault_configured');
+      }
+      if (!fsSync.existsSync(vaultPath)) {
+        return errorResponse('vault path no longer exists');
+      }
+      const opts = (rawOpts ?? {}) as { maxFiles?: number };
+      const imported = await importVaultAsIdeas(vaultPath, { maxFiles: opts.maxFiles ?? 500 });
+      return successResponse({
+        ideas: imported.map((idea) => ({
+          title: idea.title,
+          content: idea.content,
+          tags: idea.tags,
+          wikilinks: idea.wikilinks,
+          notePath: idea.notePath,
+        })),
+        count: imported.length,
+      });
     } catch (e) {
       return errorResponse(e as Error);
     }
