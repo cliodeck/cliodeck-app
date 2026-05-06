@@ -1299,6 +1299,7 @@
   "ideas": {
     "tabChat": "Chat",
     "tabIdeas": "Ideas",
+    "tabGraph": "Graph",
     "newIdeaTitle": "New idea",
     "searchPlaceholder": "Search…",
     "create": "New idea",

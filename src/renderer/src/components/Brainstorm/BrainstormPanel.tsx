@@ -18,9 +18,11 @@ import {
   Settings as SettingsIcon,
   MessageCircle,
   Lightbulb,
+  Network,
 } from 'lucide-react';
 import { BrainstormChat } from './BrainstormChat';
 import { IdeasPanel } from './IdeasPanel';
+import { IdeasGraph } from './IdeasGraph';
 import { useProjectStore } from '../../stores/projectStore';
 import { useIdeaStore } from '../../stores/ideaStore';
 import './BrainstormPanel.css';
@@ -47,7 +49,7 @@ interface VaultStatus {
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
-type BrainstormTab = 'chat' | 'ideas';
+type BrainstormTab = 'chat' | 'ideas' | 'graph';
 
 export const BrainstormPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -165,16 +167,31 @@ export const BrainstormPanel: React.FC = () => {
           <Lightbulb size={14} />
           <span>{t('ideas.tabIdeas')}</span>
         </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'graph'}
+          className={`brainstorm-panel__tab ${activeTab === 'graph' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('graph')}
+        >
+          <Network size={14} />
+          <span>{t('ideas.tabGraph')}</span>
+        </button>
       </nav>
 
       {/* Tab content */}
-      {activeTab === 'chat' ? (
+      {activeTab === 'chat' && (
         <section className="brainstorm-panel__chat">
           <BrainstormChat />
         </section>
-      ) : (
+      )}
+      {activeTab === 'ideas' && (
         <section className="brainstorm-panel__chat">
           <IdeasPanel />
+        </section>
+      )}
+      {activeTab === 'graph' && (
+        <section className="brainstorm-panel__chat">
+          <IdeasGraph />
         </section>
       )}
 

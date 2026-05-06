@@ -597,7 +597,7 @@
       "openProjectNotice": "Ouvrez un projet pour commencer le brainstorming.",
       "projectContext": "Contexte du projet",
       "recipesCount": "{{count}} recettes",
-      "workspaceHints": "Workspace hints",
+      "workspaceHints": "Consignes de projet",
       "noHints": "Aucun fichier .cliohints. Ajoutez-en un dans {{path}} pour injecter un contexte durable dans chaque prompt.",
       "obsidianVault": "Vault Obsidian",
       "vaultReady": "Index prêt à {{path}}",
@@ -1159,7 +1159,7 @@
     }
   },
   "hints": {
-    "title": "Contexte durable",
+    "title": "Consignes de projet",
     "hint": "Ces notes sont injectées comme message système dans chaque conversation Brainstorm (et les recettes qui l'utilisent). Idéal pour rappeler au modèle les conventions du projet, les sources canoniques, les exclusions.",
     "filePath": "Fichier :",
     "errors": {
@@ -1299,6 +1299,7 @@
   "ideas": {
     "tabChat": "Chat",
     "tabIdeas": "Idées",
+    "tabGraph": "Graphe",
     "newIdeaTitle": "Nouvelle idée",
     "searchPlaceholder": "Rechercher…",
     "create": "Nouvelle idée",
