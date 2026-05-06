@@ -1380,6 +1380,15 @@
     "syncing": "Sync",
     "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
   },
+  "security": {
+    "revokeTitle": "Key revocation",
+    "revokeDescription": "Deletes all stored API keys (LLM, Zotero, MCP). You will need to reconfigure them.",
+    "revokeButton": "Revoke all keys",
+    "revokeConfirm": "This will delete all your stored API keys. You will need to reconfigure them in settings. Continue?",
+    "revokeSuccess": "{{count}} key(s) revoked. Reconfigure your API keys in settings.",
+    "revokeError": "Error during revocation",
+    "revoking": "Revoking..."
+  },
   "cloudConsent": {
     "title": "Sending data to an external service",
     "body": "You are using {{provider}}. Your research data (corpus extracts, chat content) will be sent to this cloud service.",

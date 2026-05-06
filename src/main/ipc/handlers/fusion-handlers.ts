@@ -745,6 +745,27 @@ export function setupFusionHandlers(): void {
       return errorResponse(e as Error);
     }
   });
+
+  // MARK: - credential revocation (ADR 0006)
+  ipcMain.handle('fusion:security:revoke-all-keys', async () => {
+    try {
+      const count = secureStorage.revokeAll();
+      // Log revocation event
+      const root = projectManager.getCurrentProjectPath();
+      if (root) {
+        const logPath = v2Paths(root).securityEventsLog;
+        const event = JSON.stringify({
+          kind: 'credential_revocation',
+          keysDeleted: count,
+          at: new Date().toISOString(),
+        });
+        await fs.appendFile(logPath, event + '\n', 'utf8').catch(() => {});
+      }
+      return successResponse({ keysDeleted: count });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
 }
 
 interface RecipeSummary {

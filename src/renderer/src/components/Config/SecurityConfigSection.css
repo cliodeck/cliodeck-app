@@ -255,3 +255,40 @@
   text-overflow: ellipsis;
   max-width: 18rem;
 }
+
+/* Credential revocation (ADR 0006) */
+.security-revoke-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.security-revoke-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.security-revoke-btn {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--color-danger);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.security-revoke-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+}
+
+.security-revoke-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

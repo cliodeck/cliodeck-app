@@ -163,6 +163,20 @@ export class SecureStorage {
   isEncrypted(): boolean {
     return this.encryptionAvailable;
   }
+
+  /**
+   * Revoke all stored keys — wipes every entry from the secrets store.
+   * Returns the number of keys deleted.
+   */
+  revokeAll(): number {
+    const store = this.getStore();
+    const keys = Object.keys(store.store);
+    for (const key of keys) {
+      store.delete(key);
+    }
+    console.log(`🔒 [SecureStorage] Revoked ${keys.length} key(s)`);
+    return keys.length;
+  }
 }
 
 // Singleton instance (requires init() before use)

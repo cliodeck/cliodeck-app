@@ -790,6 +790,12 @@ const api = {
           };
           error?: string;
         }>,
+      revokeAllKeys: () =>
+        ipcRenderer.invoke('fusion:security:revoke-all-keys') as Promise<{
+          success: boolean;
+          keysDeleted?: number;
+          error?: string;
+        }>,
     },
     archives: {
       getStatus: () =>

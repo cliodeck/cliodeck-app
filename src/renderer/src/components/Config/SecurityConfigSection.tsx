@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, HelpCircle, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Shield, HelpCircle, RefreshCw, KeyRound } from 'lucide-react';
 import { HelpModal } from '../common/HelpModal';
+import { useDialogStore } from '../../stores/dialogStore';
 import './SecurityConfigSection.css';
 
 type InspectorMode = 'warn' | 'audit' | 'block';
@@ -37,6 +39,11 @@ interface SecurityApi {
   getEvents?(opts?: { recentLimit?: number }): Promise<{
     success: boolean;
     stats?: SecurityEventStatsRecord;
+    error?: string;
+  }>;
+  revokeAllKeys?(): Promise<{
+    success: boolean;
+    keysDeleted?: number;
     error?: string;
   }>;
 }
@@ -89,6 +96,7 @@ const MODE_OPTIONS: Array<{
 ];
 
 export const SecurityConfigSection: React.FC = () => {
+  const { t } = useTranslation('common');
   const [mode, setMode] = useState<InspectorMode>('warn');
   const [loaded, setLoaded] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
@@ -97,6 +105,7 @@ export const SecurityConfigSection: React.FC = () => {
   const [stats, setStats] = useState<SecurityEventStatsRecord | null>(null);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   const refreshStats = useCallback(async (): Promise<void> => {
     const s = api();
@@ -430,6 +439,46 @@ export const SecurityConfigSection: React.FC = () => {
           ton projet — utile si tu veux scripter une analyse plus poussée.
         </p>
       </HelpModal>
+
+      {/* Credential revocation (ADR 0006) */}
+      <div className="security-revoke-section">
+        <h4 className="security-revoke-title">
+          <KeyRound size={14} /> {t('security.revokeTitle')}
+        </h4>
+        <p className="config-hint">
+          {t('security.revokeDescription')}
+        </p>
+        <button
+          type="button"
+          className="security-revoke-btn"
+          disabled={revoking}
+          onClick={async () => {
+            const confirmed = await useDialogStore
+              .getState()
+              .showConfirm(t('security.revokeConfirm'));
+            if (!confirmed) return;
+            setRevoking(true);
+            try {
+              const s = api();
+              const res = await s?.revokeAllKeys?.();
+              if (res?.success) {
+                setSavedNotice(
+                  t('security.revokeSuccess', { count: res.keysDeleted ?? 0 })
+                );
+                window.setTimeout(() => setSavedNotice(null), 4000);
+              } else {
+                setError(res?.error ?? t('security.revokeError'));
+              }
+            } catch {
+              setError(t('security.revokeError'));
+            } finally {
+              setRevoking(false);
+            }
+          }}
+        >
+          {revoking ? t('security.revoking') : t('security.revokeButton')}
+        </button>
+      </div>
     </section>
   );
 };

@@ -1380,6 +1380,15 @@
     "syncing": "Sync",
     "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
   },
+  "security": {
+    "revokeTitle": "Revocation des cles",
+    "revokeDescription": "Supprime toutes les cles API stockees (LLM, Zotero, MCP). Vous devrez les reconfigurer.",
+    "revokeButton": "Revoquer toutes les cles",
+    "revokeConfirm": "Cette action va supprimer toutes vos cles API stockees. Vous devrez les reconfigurer dans les parametres. Continuer ?",
+    "revokeSuccess": "{{count}} cle(s) revoquee(s). Reconfigurez vos cles API dans les parametres.",
+    "revokeError": "Erreur lors de la revocation",
+    "revoking": "Revocation..."
+  },
   "cloudConsent": {
     "title": "Envoi de donnees vers un service externe",
     "body": "Vous utilisez le fournisseur {{provider}}. Vos donnees de recherche (extraits de corpus, contenu du chat) seront envoyees a ce service cloud.",
