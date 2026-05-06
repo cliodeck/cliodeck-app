@@ -1380,6 +1380,16 @@
     "syncing": "Sync",
     "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
   },
+  "cloudConsent": {
+    "title": "Envoi de donnees vers un service externe",
+    "body": "Vous utilisez le fournisseur {{provider}}. Vos donnees de recherche (extraits de corpus, contenu du chat) seront envoyees a ce service cloud.",
+    "item1": "Les chunks RAG extraits de votre corpus seront transmis",
+    "item2": "Le contenu de votre conversation sera envoye au fournisseur",
+    "item3": "Vous etes responsable de la protection de vos donnees",
+    "hint": "Pour rester en local, configurez un Ollama sur localhost dans les parametres.",
+    "accept": "J'accepte pour cette session",
+    "cancel": "Annuler"
+  },
   "onboarding": {
     "skip": "Passer",
     "skipSetup": "Passer la configuration initiale",

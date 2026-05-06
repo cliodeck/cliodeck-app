@@ -1380,6 +1380,16 @@
     "syncing": "Sync",
     "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
   },
+  "cloudConsent": {
+    "title": "Sending data to an external service",
+    "body": "You are using {{provider}}. Your research data (corpus extracts, chat content) will be sent to this cloud service.",
+    "item1": "RAG chunks extracted from your corpus will be transmitted",
+    "item2": "Your conversation content will be sent to the provider",
+    "item3": "You are responsible for protecting your data",
+    "hint": "To stay local, configure Ollama on localhost in settings.",
+    "accept": "I accept for this session",
+    "cancel": "Cancel"
+  },
   "onboarding": {
     "skip": "Skip",
     "skipSetup": "Skip initial setup",

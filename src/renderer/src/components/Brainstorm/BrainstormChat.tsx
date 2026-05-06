@@ -5,7 +5,7 @@
  * UnifiedMessage and provides the "send to write" action as message extras.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Highlighter, Loader2, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
@@ -13,10 +13,12 @@ import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { useCloudConsentStore, isCloudProvider } from '../../stores/cloudConsentStore';
 import { messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
 import { ModeSelector } from '../Chat/ModeSelector';
 import { RAGSettingsPanel } from '../Chat/RAGSettingsPanel';
+import { CloudConsentDialog } from '../Chat/CloudConsentDialog';
 import { useChatSettingsProjection } from '../Chat/useChatSettingsProjection';
 import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
@@ -41,6 +43,19 @@ export const BrainstormChat: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nerEnabled, setNerEnabled] = useState(false);
   const mcpTools = useMcpToolsList();
+
+  // Cloud consent (ADR 0005, Phase 4.3)
+  const cloudConsented = useCloudConsentStore((s) => s.consented);
+  const grantConsent = useCloudConsentStore((s) => s.grant);
+  const [cloudCheck, setCloudCheck] = useState<{ isCloud: boolean; providerName: string }>({ isCloud: false, providerName: '' });
+  const [showConsentDialog, setShowConsentDialog] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.electron.config.get('llm').then((llm: { backend: string; ollamaURL?: string } | null) => {
+      if (llm) setCloudCheck(isCloudProvider(llm));
+    }).catch(() => {});
+  }, []);
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
   // `fusion.chat.start` from Brainstorm picks up current filters.
@@ -77,10 +92,31 @@ export const BrainstormChat: React.FC = () => {
 
   const handleSend = useCallback(
     async (text: string) => {
+      // If cloud provider and not yet consented this session, show dialog
+      if (cloudCheck.isCloud && !cloudConsented) {
+        setPendingMessage(text);
+        setShowConsentDialog(true);
+        return;
+      }
       await send(text);
     },
-    [send]
+    [send, cloudCheck.isCloud, cloudConsented]
   );
+
+  const handleConsentGranted = useCallback(() => {
+    grantConsent(cloudCheck.providerName);
+    setShowConsentDialog(false);
+    if (pendingMessage) {
+      const msg = pendingMessage;
+      setPendingMessage(null);
+      void send(msg);
+    }
+  }, [grantConsent, cloudCheck.providerName, pendingMessage, send]);
+
+  const handleConsentCancelled = useCallback(() => {
+    setShowConsentDialog(false);
+    setPendingMessage(null);
+  }, []);
 
   const starterPrompts = [
     t('chat.brainstorm.starter1'),
@@ -275,6 +311,13 @@ export const BrainstormChat: React.FC = () => {
           enableNER={nerEnabled}
         />
       </div>
+      {showConsentDialog && (
+        <CloudConsentDialog
+          providerName={cloudCheck.providerName}
+          onConsent={handleConsentGranted}
+          onCancel={handleConsentCancelled}
+        />
+      )}
     </div>
   );
 };
