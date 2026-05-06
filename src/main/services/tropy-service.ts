@@ -400,6 +400,11 @@ class TropyService {
         // Convert to source chunks format and generate embeddings
         for (const rawChunk of optimizedChunks) {
           try {
+            // Score chunk quality if scorer is available
+            const qualityScore = this.qualityScorer
+              ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
+              : undefined;
+
             const sourceChunk = {
               id: rawChunk.id,
               sourceId: source.id,
@@ -407,6 +412,7 @@ class TropyService {
               chunkIndex: rawChunk.chunkIndex,
               startPosition: rawChunk.startPosition,
               endPosition: rawChunk.endPosition,
+              qualityScore,
             };
             const embedding = await this.embedOne(sourceChunk.content);
             this.vectorStore!.saveChunk(sourceChunk, embedding);
@@ -627,6 +633,16 @@ class TropyService {
    */
   getSupportedOCRLanguages(): Array<{ code: string; name: string }> {
     return [...SUPPORTED_OCR_LANGUAGES];
+  }
+
+  // MARK: - OCR Quality Reports
+
+  getSourceOCRReport(sourceId: string) {
+    return this.vectorStore?.getSourceOCRReport(sourceId) ?? null;
+  }
+
+  getCorpusOCRReport() {
+    return this.vectorStore?.getCorpusOCRReport() ?? null;
   }
 
   // MARK: - Transcription Import

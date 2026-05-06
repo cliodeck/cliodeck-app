@@ -68,6 +68,8 @@ export interface PrimarySourceItem {
   photos: PrimarySourcePhoto[];
   transcription?: string;
   transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
+  /** Tesseract OCR confidence 0-100, if OCR was performed. */
+  ocrConfidence?: number;
   lastModified: Date;
   metadata: Record<string, string>;
   /** Structured archival metadata (cote, fonds, repository, producer, …). */

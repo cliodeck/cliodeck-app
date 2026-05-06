@@ -33,6 +33,8 @@ export interface PrimarySourceDocument {
   type?: string;
   transcription?: string;
   transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
+  /** Tesseract OCR confidence 0-100, if OCR was performed. */
+  ocrConfidence?: number;
   language?: string;
   lastModified: string;
   indexedAt: string;
@@ -48,6 +50,8 @@ export interface PrimarySourceChunk {
   chunkIndex: number;
   startPosition: number;
   endPosition: number;
+  /** Composite quality score 0-1 from ChunkQualityScorer. */
+  qualityScore?: number;
 }
 
 export interface PrimarySourceSearchResult {
@@ -364,6 +368,19 @@ export class PrimarySourcesVectorStore {
       console.warn('⚠️ archival_metadata migration check failed:', err);
     }
 
+    // Soft migration: add ocr_confidence column (OCR quality report feature)
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('primary_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'ocr_confidence')) {
+        this.db.exec('ALTER TABLE primary_sources ADD COLUMN ocr_confidence REAL');
+        console.log('🗄️ Migrated primary_sources: added ocr_confidence column');
+      }
+    } catch (err) {
+      console.warn('⚠️ ocr_confidence migration check failed:', err);
+    }
+
     // Table des photos associées aux sources
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS source_photos (
@@ -393,6 +410,19 @@ export class PrimarySourcesVectorStore {
         FOREIGN KEY (source_id) REFERENCES primary_sources(id) ON DELETE CASCADE
       );
     `);
+
+    // Soft migration: add quality_score column to source_chunks
+    try {
+      const chunkCols = this.db
+        .prepare("PRAGMA table_info('source_chunks')")
+        .all() as Array<{ name: string }>;
+      if (!chunkCols.some((c) => c.name === 'quality_score')) {
+        this.db.exec('ALTER TABLE source_chunks ADD COLUMN quality_score REAL');
+        console.log('🗄️ Migrated source_chunks: added quality_score column');
+      }
+    } catch (err) {
+      console.warn('⚠️ quality_score migration check failed:', err);
+    }
 
     // Table des tags (many-to-many)
     this.db.exec(`
@@ -504,8 +534,8 @@ export class PrimarySourcesVectorStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO primary_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
-       transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -523,7 +553,8 @@ export class PrimarySourcesVectorStore {
       source.lastModified.toISOString(),
       now,
       source.metadata ? JSON.stringify(source.metadata) : null,
-      source.archival ? JSON.stringify(source.archival) : null
+      source.archival ? JSON.stringify(source.archival) : null,
+      source.ocrConfidence ?? null
     );
 
     // Sauvegarder les photos
@@ -731,8 +762,8 @@ export class PrimarySourcesVectorStore {
       .prepare(
         `
       INSERT OR REPLACE INTO source_chunks
-      (id, source_id, content, chunk_index, start_position, end_position, embedding)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `
       )
       .run(
@@ -742,7 +773,8 @@ export class PrimarySourcesVectorStore {
         chunk.chunkIndex,
         chunk.startPosition,
         chunk.endPosition,
-        embeddingBuffer
+        embeddingBuffer,
+        chunk.qualityScore ?? null
       );
 
     // Add to HNSW index
@@ -795,8 +827,8 @@ export class PrimarySourcesVectorStore {
   saveChunks(chunks: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }>): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO source_chunks
-      (id, source_id, content, chunk_index, start_position, end_position, embedding)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const transaction = this.db.transaction(() => {
@@ -809,7 +841,8 @@ export class PrimarySourcesVectorStore {
           chunk.chunkIndex,
           chunk.startPosition,
           chunk.endPosition,
-          embeddingBuffer
+          embeddingBuffer,
+          chunk.qualityScore ?? null
         );
       }
     });
@@ -832,6 +865,7 @@ export class PrimarySourcesVectorStore {
       chunkIndex: row.chunk_index,
       startPosition: row.start_position,
       endPosition: row.end_position,
+      qualityScore: row.quality_score ?? undefined,
     }));
   }
 
@@ -1712,6 +1746,7 @@ export class PrimarySourcesVectorStore {
       indexedAt: row.indexed_at,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       archival: row.archival_metadata ? JSON.parse(row.archival_metadata) : undefined,
+      ocrConfidence: row.ocr_confidence ?? undefined,
     };
   }
 
@@ -1720,6 +1755,119 @@ export class PrimarySourcesVectorStore {
    */
   getDatabasePath(): string {
     return this.dbPath;
+  }
+
+  // MARK: - OCR Quality Reports
+
+  /**
+   * Per-document OCR quality report.
+   */
+  getSourceOCRReport(sourceId: string): {
+    sourceId: string;
+    title: string;
+    ocrConfidence: number | null;
+    transcriptionSource: string | null;
+    chunkCount: number;
+    avgQualityScore: number | null;
+    minQualityScore: number | null;
+    maxQualityScore: number | null;
+    transcriptionLength: number;
+  } | null {
+    const source = this.getSource(sourceId);
+    if (!source) return null;
+
+    const row = this.db.prepare(`
+      SELECT
+        COUNT(*) as chunk_count,
+        AVG(quality_score) as avg_quality,
+        MIN(quality_score) as min_quality,
+        MAX(quality_score) as max_quality
+      FROM source_chunks WHERE source_id = ?
+    `).get(sourceId) as { chunk_count: number; avg_quality: number | null; min_quality: number | null; max_quality: number | null };
+
+    return {
+      sourceId,
+      title: source.title,
+      ocrConfidence: source.ocrConfidence ?? null,
+      transcriptionSource: source.transcriptionSource ?? null,
+      chunkCount: row.chunk_count,
+      avgQualityScore: row.avg_quality,
+      minQualityScore: row.min_quality,
+      maxQualityScore: row.max_quality,
+      transcriptionLength: source.transcription?.length ?? 0,
+    };
+  }
+
+  /**
+   * Corpus-wide OCR quality report.
+   */
+  getCorpusOCRReport(): {
+    totalSources: number;
+    sourcesWithOCR: number;
+    sourcesWithTranscription: number;
+    avgOCRConfidence: number | null;
+    confidenceDistribution: { bucket: string; count: number }[];
+    avgChunkQuality: number | null;
+    totalChunks: number;
+    chunksWithQuality: number;
+    worstSources: Array<{ id: string; title: string; ocrConfidence: number }>;
+    bestSources: Array<{ id: string; title: string; ocrConfidence: number }>;
+    byTranscriptionSource: Record<string, number>;
+  } {
+    const totalSources = (this.db.prepare('SELECT COUNT(*) as c FROM primary_sources').get() as { c: number }).c;
+    const sourcesWithOCR = (this.db.prepare('SELECT COUNT(*) as c FROM primary_sources WHERE ocr_confidence IS NOT NULL').get() as { c: number }).c;
+    const sourcesWithTranscription = (this.db.prepare("SELECT COUNT(*) as c FROM primary_sources WHERE transcription IS NOT NULL AND transcription != ''").get() as { c: number }).c;
+    const avgOCR = (this.db.prepare('SELECT AVG(ocr_confidence) as v FROM primary_sources WHERE ocr_confidence IS NOT NULL').get() as { v: number | null }).v;
+
+    // Confidence distribution in buckets: 0-20, 20-40, 40-60, 60-80, 80-100
+    const buckets: { bucket: string; count: number }[] = [];
+    for (const [label, low, high] of [
+      ['0-20', 0, 20], ['20-40', 20, 40], ['40-60', 40, 60], ['60-80', 60, 80], ['80-100', 80, 101],
+    ] as [string, number, number][]) {
+      const row = this.db.prepare(
+        'SELECT COUNT(*) as c FROM primary_sources WHERE ocr_confidence >= ? AND ocr_confidence < ?'
+      ).get(low, high) as { c: number };
+      buckets.push({ bucket: label, count: row.c });
+    }
+
+    // Chunk quality stats
+    const chunkStats = this.db.prepare(`
+      SELECT COUNT(*) as total, COUNT(quality_score) as with_quality, AVG(quality_score) as avg_quality
+      FROM source_chunks
+    `).get() as { total: number; with_quality: number; avg_quality: number | null };
+
+    // Worst 5 sources by OCR confidence
+    const worstRows = this.db.prepare(
+      'SELECT id, title, ocr_confidence FROM primary_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence ASC LIMIT 5'
+    ).all() as Array<{ id: string; title: string; ocr_confidence: number }>;
+
+    // Best 5 sources
+    const bestRows = this.db.prepare(
+      'SELECT id, title, ocr_confidence FROM primary_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence DESC LIMIT 5'
+    ).all() as Array<{ id: string; title: string; ocr_confidence: number }>;
+
+    // By transcription source
+    const srcRows = this.db.prepare(
+      "SELECT transcription_source, COUNT(*) as c FROM primary_sources WHERE transcription_source IS NOT NULL GROUP BY transcription_source"
+    ).all() as Array<{ transcription_source: string; c: number }>;
+    const byTranscriptionSource: Record<string, number> = {};
+    for (const r of srcRows) {
+      byTranscriptionSource[r.transcription_source] = r.c;
+    }
+
+    return {
+      totalSources,
+      sourcesWithOCR,
+      sourcesWithTranscription,
+      avgOCRConfidence: avgOCR,
+      confidenceDistribution: buckets,
+      avgChunkQuality: chunkStats.avg_quality,
+      totalChunks: chunkStats.total,
+      chunksWithQuality: chunkStats.with_quality,
+      worstSources: worstRows.map(r => ({ id: r.id, title: r.title, ocrConfidence: r.ocr_confidence })),
+      bestSources: bestRows.map(r => ({ id: r.id, title: r.title, ocrConfidence: r.ocr_confidence })),
+      byTranscriptionSource,
+    };
   }
 
   /**

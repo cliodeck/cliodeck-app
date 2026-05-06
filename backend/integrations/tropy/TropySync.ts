@@ -228,6 +228,7 @@ export class TropySync {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
     let transcriptionSource: PrimarySourceItem['transcriptionSource'] = undefined;
+    let ocrConfidence: number | undefined;
     let ocrCount = 0;
     let transcriptionCount = 0;
 
@@ -272,6 +273,7 @@ export class TropySync {
       if (ocrResult) {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
+        ocrConfidence = ocrResult.confidence;
         ocrCount = ocrResult.photoCount;
       }
     }
@@ -290,6 +292,7 @@ export class TropySync {
       photos: this.convertPhotos(item),
       transcription: transcription || undefined,
       transcriptionSource,
+      ocrConfidence,
       lastModified: this.reader.getLastModifiedTime(),
       metadata: this.extractMetadata(item),
       archival: archivalFromTropyMetadata(this.extractMetadata(item), {
@@ -363,7 +366,7 @@ export class TropySync {
   private async performOCROnItem(
     item: TropyItem,
     language: string
-  ): Promise<{ text: string; photoCount: number } | null> {
+  ): Promise<{ text: string; photoCount: number; confidence: number } | null> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
     const uniquePaths = [...new Set(item.photos.map((p) => p.path))];
     const photoPaths = uniquePaths.filter((p) => fs.existsSync(p));
@@ -382,6 +385,7 @@ export class TropySync {
         return {
           text: result.text,
           photoCount: photoPaths.length,
+          confidence: result.confidence,
         };
       }
     } catch (error) {

@@ -596,6 +596,11 @@ const api = {
     getStatistics: () => ipcRenderer.invoke('tropy:get-statistics'),
     getAllTags: () => ipcRenderer.invoke('tropy:get-all-tags'),
 
+    // OCR Quality Reports
+    getSourceOCRReport: (sourceId: string) =>
+      ipcRenderer.invoke('tropy:get-source-ocr-report', sourceId),
+    getCorpusOCRReport: () => ipcRenderer.invoke('tropy:get-corpus-ocr-report'),
+
     // Database Management
     purge: () => ipcRenderer.invoke('tropy:purge'),
 

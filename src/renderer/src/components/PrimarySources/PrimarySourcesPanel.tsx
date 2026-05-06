@@ -9,6 +9,7 @@ import {
   FileText,
   Search,
   BarChart3,
+  ScanSearch,
   Archive,
 } from 'lucide-react';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
@@ -17,6 +18,7 @@ import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { PrimarySourceList } from './PrimarySourceList';
 import { PrimarySourceStats } from './PrimarySourceStats';
+import { OCRCorpusReport } from './OCRCorpusReport';
 import { OCRSettingsModal } from './OCRSettingsModal';
 import { TranscriptionImportModal } from './TranscriptionImportModal';
 import './PrimarySourcesPanel.css';
@@ -45,6 +47,7 @@ export const PrimarySourcesPanel: React.FC = () => {
   const [showOCRModal, setShowOCRModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showCorpusReport, setShowCorpusReport] = useState(false);
 
   // Load OCR languages on mount
   useEffect(() => {
@@ -200,6 +203,14 @@ export const PrimarySourcesPanel: React.FC = () => {
             >
               <BarChart3 size={20} strokeWidth={1} />
             </button>
+
+            <button
+              className={`toolbar-btn ${showCorpusReport ? 'active' : ''}`}
+              onClick={() => setShowCorpusReport(!showCorpusReport)}
+              title={t('primarySources.corpusReport', 'Corpus OCR Report')}
+            >
+              <ScanSearch size={20} strokeWidth={1} />
+            </button>
           </>
         )}
       </div>
@@ -239,6 +250,9 @@ export const PrimarySourcesPanel: React.FC = () => {
 
         {/* Statistics Panel */}
         {showStats && statistics && <PrimarySourceStats statistics={statistics} />}
+
+        {/* Corpus OCR Report */}
+        {showCorpusReport && <OCRCorpusReport onClose={() => setShowCorpusReport(false)} />}
 
         {/* Search & Filters */}
         <CollapsibleSection

@@ -313,5 +313,28 @@ export function setupTropyHandlers() {
     }
   });
 
+  // MARK: - OCR Quality Reports
+
+  ipcMain.handle('tropy:get-source-ocr-report', async (_event, rawSourceId: unknown) => {
+    const sourceId = validate(StringIdSchema, rawSourceId);
+    try {
+      const report = tropyService.getSourceOCRReport(sourceId);
+      return { success: true, report };
+    } catch (error: unknown) {
+      console.error('❌ tropy:get-source-ocr-report error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  ipcMain.handle('tropy:get-corpus-ocr-report', async () => {
+    try {
+      const report = tropyService.getCorpusOCRReport();
+      return { success: true, report };
+    } catch (error: unknown) {
+      console.error('❌ tropy:get-corpus-ocr-report error:', error);
+      return errorResponse(error);
+    }
+  });
+
   console.log('✅ Tropy handlers registered');
 }
