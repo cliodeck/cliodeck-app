@@ -612,7 +612,10 @@
       "recipesHeading": "Recettes ({{count}})",
       "noRecipes": "Aucune recette disponible.",
       "fusionApiMissing": "API Fusion non exposée par le preload — reconstruisez le bundle preload.",
-      "stepsSuffix": "étapes"
+      "stepsSuffix": "étapes",
+      "starter1": "Quelles sont les principales thèses dans ma bibliographie sur ce sujet ?",
+      "starter2": "Résume les sources primaires disponibles dans mes archives.",
+      "starter3": "Quelles pistes de recherche émergent des recoupements entre mes sources ?"
     }
   },
   "corpus": {
@@ -1376,5 +1379,30 @@
     "indexingTooltip": "Indexation : {{current}}/{{total}} documents",
     "syncing": "Sync",
     "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
+  },
+  "onboarding": {
+    "skip": "Passer",
+    "skipSetup": "Passer la configuration initiale",
+    "next": "Suivant",
+    "finish": "Terminer",
+    "startWorking": "Commencer",
+    "topicQuestion": "Bienvenue dans le projet \"{{name}}\" ! Sur quel sujet de recherche travaillez-vous ?",
+    "topicPlaceholder": "ex. La Grande Guerre dans la presse luxembourgeoise",
+    "periodQuestion": "Quelle est la periode couverte par votre recherche ?",
+    "periodPlaceholder": "ex. 1914-1918, ou XIXe siecle",
+    "sourcesQuestion": "Quels types de sources allez-vous utiliser ?",
+    "source": {
+      "pdfs": "Articles PDF",
+      "zotero": "Bibliotheque Zotero",
+      "tropy": "Archives Tropy",
+      "obsidian": "Notes Obsidian"
+    },
+    "languageQuestion": "Dans quelle langue souhaitez-vous que l'assistant vous reponde ?",
+    "lang": {
+      "fr": "Francais",
+      "en": "Anglais",
+      "de": "Allemand"
+    },
+    "doneMessage": "Parfait ! Votre espace de travail est configure. L'assistant connait maintenant votre sujet et vos sources. Vous pouvez modifier ces informations a tout moment dans les parametres du projet (fichier .cliohints)."
   }
 }

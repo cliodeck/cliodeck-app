@@ -9,6 +9,7 @@ import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
+import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
 
 // Modals are only rendered when opened — keep them off the main chunk.
@@ -41,6 +42,8 @@ export const ProjectPanel: React.FC = () => {
   const [showPDFExportModal, setShowPDFExportModal] = useState(false);
   const [showWordExportModal, setShowWordExportModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingProjectName, setOnboardingProjectName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectType, setNewProjectType] = useState<'article' | 'book' | 'presentation'>('article');
   const [newProjectPath, setNewProjectPath] = useState('');
@@ -65,6 +68,9 @@ export const ProjectPanel: React.FC = () => {
       setNewProjectName('');
       setNewProjectPath('');
       setNewProjectType('article');
+      // Launch conversational onboarding
+      setOnboardingProjectName(projectName);
+      setShowOnboarding(true);
     } catch (error: unknown) {
       console.error('Failed to create project:', error);
       await useDialogStore.getState().showAlert(t('project.createError') + ': ' + (error instanceof Error ? error.message : String(error)));
@@ -481,6 +487,22 @@ export const ProjectPanel: React.FC = () => {
             onClose={() => setShowReportModal(false)}
           />
         </Suspense>
+      )}
+
+      {/* Onboarding Wizard — appears after project creation */}
+      {showOnboarding && (
+        <OnboardingWizard
+          projectName={onboardingProjectName}
+          onComplete={async (hints) => {
+            try {
+              await window.electron.fusion.hints.write(hints);
+            } catch (err: unknown) {
+              console.error('Failed to write onboarding hints:', err);
+            }
+            setShowOnboarding(false);
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
       )}
     </div>
   );

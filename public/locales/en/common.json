@@ -612,7 +612,10 @@
       "recipesHeading": "Recipes ({{count}})",
       "noRecipes": "No recipes available.",
       "fusionApiMissing": "Fusion API not exposed by preload — rebuild the preload bundle.",
-      "stepsSuffix": "steps"
+      "stepsSuffix": "steps",
+      "starter1": "What are the main theses in my bibliography on this topic?",
+      "starter2": "Summarize the primary sources available in my archives.",
+      "starter3": "What research leads emerge from cross-referencing my sources?"
     }
   },
   "corpus": {
@@ -1376,5 +1379,30 @@
     "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
     "syncing": "Sync",
     "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
+  },
+  "onboarding": {
+    "skip": "Skip",
+    "skipSetup": "Skip initial setup",
+    "next": "Next",
+    "finish": "Finish",
+    "startWorking": "Start working",
+    "topicQuestion": "Welcome to \"{{name}}\"! What research topic are you working on?",
+    "topicPlaceholder": "e.g. The Great War in the Luxembourg press",
+    "periodQuestion": "What time period does your research cover?",
+    "periodPlaceholder": "e.g. 1914-1918, or 19th century",
+    "sourcesQuestion": "What types of sources will you be using?",
+    "source": {
+      "pdfs": "PDF articles",
+      "zotero": "Zotero library",
+      "tropy": "Tropy archive",
+      "obsidian": "Obsidian notes"
+    },
+    "languageQuestion": "What language should the assistant respond in?",
+    "lang": {
+      "fr": "French",
+      "en": "English",
+      "de": "German"
+    },
+    "doneMessage": "All set! Your workspace is configured. The assistant now knows your topic and sources. You can edit this anytime in the project settings (.cliohints file)."
   }
 }

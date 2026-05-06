@@ -122,3 +122,28 @@
   height: 2px;
   border-radius: 1px;
 }
+
+/* Starter prompts (empty state) */
+.brainstorm-chat__starters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.brainstorm-chat__starter {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-app);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.brainstorm-chat__starter:hover {
+  border-color: var(--color-accent);
+  color: var(--text-primary);
+}

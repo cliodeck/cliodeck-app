@@ -82,8 +82,28 @@ export const BrainstormChat: React.FC = () => {
     [send]
   );
 
+  const starterPrompts = [
+    t('chat.brainstorm.starter1'),
+    t('chat.brainstorm.starter2'),
+    t('chat.brainstorm.starter3'),
+  ];
+
   const emptyState = (
-    <p style={{ maxWidth: 420 }}>{t('chat.brainstorm.emptyState')}</p>
+    <div style={{ maxWidth: 420 }}>
+      <p>{t('chat.brainstorm.emptyState')}</p>
+      <div className="brainstorm-chat__starters">
+        {starterPrompts.map((prompt, i) => (
+          <button
+            key={i}
+            type="button"
+            className="brainstorm-chat__starter"
+            onClick={() => void handleSend(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 
   const renderExtras = useCallback((m: BrainstormUnifiedMessage): React.ReactNode => {
