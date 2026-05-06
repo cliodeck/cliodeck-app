@@ -16,9 +16,13 @@ import {
   ChevronDown,
   ChevronRight,
   Settings as SettingsIcon,
+  MessageCircle,
+  Lightbulb,
 } from 'lucide-react';
 import { BrainstormChat } from './BrainstormChat';
+import { IdeasPanel } from './IdeasPanel';
 import { useProjectStore } from '../../stores/projectStore';
+import { useIdeaStore } from '../../stores/ideaStore';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -43,8 +47,11 @@ interface VaultStatus {
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
+type BrainstormTab = 'chat' | 'ideas';
+
 export const BrainstormPanel: React.FC = () => {
   const { t } = useTranslation('common');
+  const [activeTab, setActiveTab] = useState<BrainstormTab>('chat');
   const [hints, setHints] = useState<HintsState | null>(null);
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
@@ -53,6 +60,7 @@ export const BrainstormPanel: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
+  const loadIdeas = useIdeaStore((s) => s.loadIdeas);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +112,10 @@ export const BrainstormPanel: React.FC = () => {
         if (v.success) {
           setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '' });
         }
+        // Load persistent ideas
+        if (currentProjectPath) {
+          loadIdeas(currentProjectPath);
+        }
         setStatus('ready');
       } catch (e) {
         if (!cancelled) {
@@ -133,10 +145,38 @@ export const BrainstormPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Chat — above the fold, takes all available vertical space. */}
-      <section className="brainstorm-panel__chat">
-        <BrainstormChat />
-      </section>
+      {/* Tab bar: Chat | Ideas */}
+      <nav className="brainstorm-panel__tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          className={`brainstorm-panel__tab ${activeTab === 'chat' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('chat')}
+        >
+          <MessageCircle size={14} />
+          <span>{t('ideas.tabChat')}</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'ideas'}
+          className={`brainstorm-panel__tab ${activeTab === 'ideas' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('ideas')}
+        >
+          <Lightbulb size={14} />
+          <span>{t('ideas.tabIdeas')}</span>
+        </button>
+      </nav>
+
+      {/* Tab content */}
+      {activeTab === 'chat' ? (
+        <section className="brainstorm-panel__chat">
+          <BrainstormChat />
+        </section>
+      ) : (
+        <section className="brainstorm-panel__chat">
+          <IdeasPanel />
+        </section>
+      )}
 
       {/* Collapsible drawer: hints / vault / recipes */}
       <section

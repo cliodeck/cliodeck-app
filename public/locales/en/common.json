@@ -1296,6 +1296,25 @@
       "body": "This analytical view is not wired yet — see TODO in MainLayout."
     }
   },
+  "ideas": {
+    "tabChat": "Chat",
+    "tabIdeas": "Ideas",
+    "newIdeaTitle": "New idea",
+    "searchPlaceholder": "Search…",
+    "create": "New idea",
+    "emptyState": "No ideas yet. Click + to create one.",
+    "noResults": "No results.",
+    "selectOrCreate": "Select an idea or create a new one.",
+    "titlePlaceholder": "Idea title",
+    "contentPlaceholder": "Notes, thoughts, hypotheses…",
+    "tags": "Tags",
+    "addTag": "Add tag…",
+    "links": "Links",
+    "addLink": "Target ID…",
+    "origin": "Origin",
+    "created": "Created",
+    "delete": "Delete"
+  },
   "exportHub": {
     "title": "Export",
     "subtitle": "Choose an output format for the current document.",

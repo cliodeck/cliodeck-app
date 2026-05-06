@@ -1296,6 +1296,25 @@
       "body": "Cette vue analytique n'est pas encore branchée — voir TODO dans MainLayout."
     }
   },
+  "ideas": {
+    "tabChat": "Chat",
+    "tabIdeas": "Idées",
+    "newIdeaTitle": "Nouvelle idée",
+    "searchPlaceholder": "Rechercher…",
+    "create": "Nouvelle idée",
+    "emptyState": "Aucune idée pour le moment. Cliquez + pour en créer une.",
+    "noResults": "Aucun résultat.",
+    "selectOrCreate": "Sélectionnez une idée ou créez-en une nouvelle.",
+    "titlePlaceholder": "Titre de l'idée",
+    "contentPlaceholder": "Notes, réflexions, hypothèses…",
+    "tags": "Tags",
+    "addTag": "Ajouter un tag…",
+    "links": "Liens",
+    "addLink": "ID cible…",
+    "origin": "Origine",
+    "created": "Créée le",
+    "delete": "Supprimer"
+  },
   "exportHub": {
     "title": "Exporter",
     "subtitle": "Choisissez un format de sortie pour le document courant.",
