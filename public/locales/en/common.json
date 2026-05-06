@@ -1117,9 +1117,9 @@
     "systemInfo": "System Information"
   },
   "workspaceMode": {
+    "explore": "Explore",
     "brainstorm": "Brainstorm",
     "write": "Write",
-    "analyze": "Analyze",
     "export": "Export"
   },
   "vault": {
@@ -1283,8 +1283,8 @@
       "path": "/absolute/path/…"
     }
   },
-  "analyze": {
-    "title": "Analyze",
+  "explore": {
+    "title": "Explore",
     "subtitle": "Explore your corpus, measure similarity, and surface themes.",
     "tabs": {
       "corpus": "Corpus Explorer",

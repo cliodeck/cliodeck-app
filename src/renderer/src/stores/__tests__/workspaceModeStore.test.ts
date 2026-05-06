@@ -11,11 +11,11 @@ beforeEach(() => {
 });
 
 describe('workspaceModeStore (3.1a)', () => {
-  it('exposes the four canonical modes', () => {
+  it('exposes the four canonical modes in correct order', () => {
     expect(WORKSPACE_MODES).toEqual([
+      'explore',
       'brainstorm',
       'write',
-      'analyze',
       'export',
     ]);
   });
@@ -27,7 +27,7 @@ describe('workspaceModeStore (3.1a)', () => {
   it('switches active mode via setActive', () => {
     useWorkspaceModeStore.getState().setActive('brainstorm');
     expect(useWorkspaceModeStore.getState().active).toBe('brainstorm');
-    useWorkspaceModeStore.getState().setActive('analyze');
-    expect(useWorkspaceModeStore.getState().active).toBe('analyze');
+    useWorkspaceModeStore.getState().setActive('explore');
+    expect(useWorkspaceModeStore.getState().active).toBe('explore');
   });
 });

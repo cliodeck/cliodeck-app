@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MessageCircle, Folder, BookOpen, Network, BookMarked, HelpCircle, Archive } from 'lucide-react';
+import { MessageCircle, Folder, BookOpen, BookMarked, HelpCircle, Archive } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { BibliographyPanel } from '../Bibliography/BibliographyPanel';
 import { ChatInterface } from '../Chat/ChatInterface';
@@ -14,9 +14,6 @@ import { logger } from '../../utils/logger';
 import './MainLayout.css';
 
 // Lazy-loaded heavy components (panels)
-const CorpusExplorerPanel = lazy(() =>
-  import('../Corpus/CorpusExplorerPanel').then(m => ({ default: m.CorpusExplorerPanel }))
-);
 const JournalPanel = lazy(() =>
   import('../Journal/JournalPanel').then(m => ({ default: m.JournalPanel }))
 );
@@ -25,8 +22,8 @@ const PrimarySourcesPanel = lazy(() =>
 );
 
 // Lazy-loaded mode surfaces (only rendered when that workspace mode is active)
-const AnalyzePanel = lazy(() =>
-  import('./AnalyzePanel').then(m => ({ default: m.AnalyzePanel }))
+const ExplorePanel = lazy(() =>
+  import('./ExplorePanel').then(m => ({ default: m.ExplorePanel }))
 );
 const ExportHub = lazy(() =>
   import('./ExportHub').then(m => ({ default: m.ExportHub }))
@@ -47,7 +44,7 @@ const AboutModal = lazy(() =>
 );
 
 type LeftPanelView = 'projects' | 'bibliography' | 'primary-sources';
-type RightPanelView = 'chat' | 'corpus' | 'journal';
+type RightPanelView = 'chat' | 'journal';
 
 export interface MainLayoutProps {
   leftPanel?: React.ReactNode;
@@ -68,10 +65,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 
   // Per-mode memory: restore whichever right-tab the user last used in
   // this mode. If that tab is the (hidden) chat tab in Brainstorm, fall
-  // back to corpus so we don't render a tab that doesn't exist.
+  // back to journal so we don't render a tab that doesn't exist.
   const storedRightView = rightViewByMode[workspaceMode];
   const rightView: RightPanelView =
-    isBrainstorm && storedRightView === 'chat' ? 'corpus' : storedRightView;
+    isBrainstorm && storedRightView === 'chat' ? 'journal' : storedRightView;
 
   const setRightView = (view: RightPanelView) => {
     persistRightView(workspaceMode, view);
@@ -113,9 +110,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           break;
         case 'chat':
           persist(active, 'chat');
-          break;
-        case 'corpus':
-          persist(active, 'corpus');
           break;
         case 'journal':
           persist(active, 'journal');
@@ -240,9 +234,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             <div className="panel center-panel">
               {workspaceMode === 'brainstorm' ? (
                 <BrainstormPanel />
-              ) : workspaceMode === 'analyze' ? (
+              ) : workspaceMode === 'explore' ? (
                 <Suspense fallback={<PanelLoadingFallback />}>
-                  <AnalyzePanel />
+                  <ExplorePanel />
                 </Suspense>
               ) : workspaceMode === 'export' ? (
                 <Suspense fallback={<PanelLoadingFallback />}>
@@ -277,17 +271,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                   </button>
                 )}
                 <button
-                  id="right-tab-corpus"
-                  className={`panel-tab ${rightView === 'corpus' ? 'active' : ''}`}
-                  onClick={() => handleRightViewChange('corpus')}
-                  title={t('corpus.title')}
-                  role="tab"
-                  aria-selected={rightView === 'corpus'}
-                  aria-controls="right-tabpanel-corpus"
-                >
-                  <Network size={20} strokeWidth={1} />
-                </button>
-                <button
                   id="right-tab-journal"
                   className={`panel-tab ${rightView === 'journal' ? 'active' : ''}`}
                   onClick={() => handleRightViewChange('journal')}
@@ -308,11 +291,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 aria-labelledby={`right-tab-${rightView}`}
               >
                 {rightView === 'chat' && !isBrainstorm && <ChatInterface />}
-                {rightView === 'corpus' && (
-                  <Suspense fallback={<PanelLoadingFallback />}>
-                    <CorpusExplorerPanel />
-                  </Suspense>
-                )}
                 {rightView === 'journal' && (
                   <Suspense fallback={<PanelLoadingFallback />}>
                     <JournalPanel />

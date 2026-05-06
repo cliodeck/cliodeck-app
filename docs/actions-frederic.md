@@ -107,6 +107,10 @@
 - **Temps** : 30 minutes de réflexion, idéalement discutée avec 1-2 historiens de ton réseau.
 - **Référence** : Plan Phase 2 item 2.1.
 
+
+NOTE FROM FREDERIC: Au lieu de Brainstorm / Write / Analyze / Export, on va:
+- Renommer "Analyze" en "Explore" et le mettre avant Brainstorm. L'idée: connaître son corpus (avec le graph, le topic modelling, la textométrie, avant de commencer à brainstormer.
+
 ### A11. Ambition du mode Brainstorm : que porte-t-on de ClioBrain ?
 - **Pourquoi** : Brainstorm actuel = chat RAG stylé. Il ne délivre pas la promesse de la fusion (un utilisateur ClioBrain perd notes/idées/tags/relations contre juste « un chat »). Quelles features ClioBrain garder ?
 - **Liste à shortlister** :
@@ -121,6 +125,8 @@
 - **Temps** : 1-2h de réflexion + démarche idéalement avec un ex-utilisateur ClioBrain pour test utilisateur qualitatif.
 - **Référence** : Plan Phase 2 item 2.2.
 
+NOTE FROM FREDERIC: On fait l'ensemble de 1 à 6 (je suis le seul utilisateur, pour le moment, de ces logiciels :))
+
 ### A12. MCP tool-use dans Brainstorm : auto vs opt-in
 - **Pourquoi** : quand un serveur MCP est `ready` (Gallica, HAL, Zotero local, serveur tiers), doit-il automatiquement proposer ses tools dans le chat Brainstorm ? Ou l'utilisateur active manuellement par tool ?
 - **Tension** : auto-activate = puissant mais opaque (le modèle peut appeler un tool que l'utilisateur n'attendait pas) ; opt-in = explicite mais frictionnel.
@@ -132,6 +138,8 @@
 - **Quand** : Phase 2.5.
 - **Temps** : 20 minutes.
 - **Référence** : Plan Phase 2 item 2.5.
+
+NOTE FROM FREDERIC: option (c)
 
 ### A13. Pont Brainstorm → Write : où s'insère le draft ?
 - **Pourquoi** : le bouton *Send to Write* appène actuellement le bloc en queue du document. Pas d'ancrage au curseur, pas d'undo, pas de retour Write→Brainstorm.
@@ -146,6 +154,8 @@
 - **Temps** : 15 minutes.
 - **Référence** : Plan Phase 2 item 2.6.
 
+NOTE FROM FREDERIC: je suis ta recommandation: (c) avec fallback (a)
+
 ### A14. Forme d'édition des Recipes
 - **Pourquoi** : les Recipes builtin sont en YAML dans `backend/recipes/builtin/*.yaml`. Côté UI, on doit permettre de dupliquer et éditer. Trois formes possibles :
   - **(a) Monaco avec validation YAML + Zod schema** — puissant pour power-user, intimidant pour chercheur non-technique.
@@ -156,6 +166,8 @@
 - **Quand** : Phase 2.7.
 - **Temps** : 30 minutes.
 - **Référence** : Plan Phase 2 item 2.7.
+
+NOTE FROM FREDERIC: (b) avec option (a) pour les powerusers
 
 ### A15. Niveau d'alarme `SourceInspector` dans l'UI
 - **Pourquoi** : une fois `SourceInspector` câblé (A2), il génère des événements `security-events.jsonl`. Comment les surfacer dans l'UI ?
@@ -169,6 +181,8 @@
 - **Temps** : 10 minutes.
 - **Référence** : Plan Phase 2 item 2.8.
 
+NOTE FROM FREDERIC: (b)
+
 ### A16. Contenu pédagogique first-run
 - **Pourquoi** : aujourd'hui, ouverture d'une instance fraîche → mur blanc. On veut un onboarding guidé.
 - **À fournir** :
@@ -179,6 +193,8 @@
 - **Quand** : Phase 2.9 / 2.10.
 - **Temps** : 2-3 heures, idéalement réparties sur 2 sessions (rédaction puis relecture).
 - **Référence** : Plan Phase 2 items 2.9, 2.10.
+
+NOTE FROM FREDERIC: on reporte pour le moment.
 
 ---
 
@@ -198,6 +214,8 @@
 - **Temps** : 1h de réflexion.
 - **Référence** : Plan Phase 3 item 3.4.
 
+NOTE FROM FREDERIC: (c) est pour moi plus clair que (a).
+
 ### A18. Status toasts : bloquants ou non ?
 - **Pourquoi** : `notificationStore` + `<StatusToast>` va unifier les retours (vault indexed, recipe done, MCP reconnected). Certaines erreurs sont critiques (provider LLM down), d'autres transitoires (reconnexion MCP).
 - **À décider** : doit-il y avoir des toasts bloquants (modale prenant le focus) pour les erreurs critiques, ou tout reste non-bloquant (disparaît après N secondes) ?
@@ -206,6 +224,8 @@
 - **Temps** : 10 minutes.
 - **Référence** : Plan Phase 3 item 3.5.
 
+NOTE FROM FREDERIC: On suit ta recommandation: tout non-bloquant, avec un bouton « Détails » qui ouvre un tiroir pour les erreurs critiques. Les modales bloquantes cassent le flow.
+
 ### A19. Déduplication Corpus Explorer
 - **Pourquoi** : `CorpusExplorer` est monté à deux endroits : panneau droit (`MainLayout.tsx:278-312`) et mode Analyze (`AnalyzePanel.tsx:44`). Potentiellement visible deux fois simultanément. C'est hérité, pas volontaire.
 - **À décider** : le garder côté **panneau droit** (toujours accessible) ou côté **mode Analyze** (cohérent avec le narratif) ?
@@ -213,6 +233,8 @@
 - **Quand** : Phase 3.6.
 - **Temps** : 5 minutes.
 - **Référence** : Plan Phase 3 item 3.6.
+
+NOTE FROM FREDERIC: On suit ta Recommandation.
 
 ### A20. Dictionnaire FR→EN pour query expansion — public cible ?
 - **Pourquoi** : `retrieval-service.ts:153-161` a 7 termes pédagogiques hardcodés (`taxonomie de bloom`, `zone proximale de développement`, etc.) pour l'expansion FR→EN. Ça sent le corpus-pédagogie, pas l'histoire générale.
@@ -225,6 +247,8 @@
 - **Temps** : 20 minutes de décision + éventuellement rédaction d'une liste initiale.
 - **Référence** : Plan Phase 3 item 3.12.
 
+NOTE FROM FREDERIC: On suit ta recommandation.
+
 ### A21. TTL rotation des logs d'audit
 - **Pourquoi** : `mcp-access.jsonl` et `security-events.jsonl` croissent sans bornage. Sur un projet historien (5-10 ans), ça peut gonfler.
 - **Options de TTL par défaut** : 30 jours / 90 jours / 365 jours / indéfini.
@@ -233,6 +257,8 @@
 - **Quand** : Phase 3.14.
 - **Temps** : 5 minutes.
 - **Référence** : Plan Phase 3 item 3.14.
+
+NOTE FROM FREDERIC: On suit ta recommandation.
 
 ### A22. Terminologie « Workspace hints »
 - **Pourquoi** : actuellement « Workspace hints » apparaît en anglais dans l'UI française. `.cliohints` est le nom technique du fichier.
@@ -245,6 +271,8 @@
 - **Quand** : Phase 3.15.
 - **Temps** : 5 minutes.
 - **Référence** : Plan Phase 3 item 3.15.
+
+NOTE FROM FREDERIC: (a) est le plus clair.
 
 ---
 

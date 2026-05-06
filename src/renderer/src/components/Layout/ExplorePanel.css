@@ -1,4 +1,4 @@
-.analyze-panel {
+.explore-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -8,25 +8,25 @@
   overflow: hidden;
 }
 
-.analyze-panel__header {
+.explore-panel__header {
   padding: 16px 20px 8px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.analyze-panel__title {
+.explore-panel__title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.analyze-panel__subtitle {
+.explore-panel__subtitle {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.analyze-panel__tabs {
+.explore-panel__tabs {
   display: flex;
   gap: 4px;
   padding: 8px 12px;
@@ -34,7 +34,7 @@
   background: var(--bg-panel);
 }
 
-.analyze-panel__tab {
+.explore-panel__tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -48,18 +48,18 @@
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-.analyze-panel__tab:hover {
+.explore-panel__tab:hover {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   color: var(--text-primary);
 }
 
-.analyze-panel__tab--active {
+.explore-panel__tab--active {
   color: var(--text-primary);
   border-color: var(--border-color);
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
-.analyze-panel__body {
+.explore-panel__body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
