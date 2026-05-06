@@ -346,6 +346,7 @@ const api = {
       computeLayout?: boolean;
     }) => ipcRenderer.invoke('corpus:get-graph', options),
     getStatistics: () => ipcRenderer.invoke('corpus:get-statistics'),
+    getSubgraph: (documentIds: string[]) => ipcRenderer.invoke('corpus:get-subgraph', documentIds),
     analyzeTopics: (options?: {
       minTopicSize?: number;
       language?: string;

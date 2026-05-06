@@ -29,6 +29,21 @@ export function setupCorpusHandlers() {
     }
   });
 
+  ipcMain.handle('corpus:get-subgraph', async (_event, documentIds?: unknown) => {
+    try {
+      const projectPath = projectManager.getCurrentProjectPath();
+      requireProject(projectPath);
+
+      const ids = Array.isArray(documentIds) ? documentIds.filter((id): id is string => typeof id === 'string') : [];
+      if (ids.length === 0) return successResponse({ graph: { nodes: [], edges: [] } });
+
+      const graph = await pdfService.getSubgraphForDocuments(ids);
+      return successResponse({ graph });
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error : String(error));
+    }
+  });
+
   ipcMain.handle('corpus:get-statistics', async () => {
     console.log('📞 IPC Call: corpus:get-statistics');
     try {

@@ -448,6 +448,37 @@ class PDFService {
   }
 
   /**
+   * Returns the subgraph containing only the given document IDs and edges between them.
+   * Lightweight: builds the full graph once, then filters. Useful for per-turn visualization.
+   */
+  async getSubgraphForDocuments(documentIds: string[]): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+    this.ensureInitialized();
+    if (documentIds.length === 0) return { nodes: [], edges: [] };
+
+    const full = await this.buildKnowledgeGraph({
+      includeSimilarityEdges: true,
+      includeAuthorNodes: false,
+      computeLayout: false,
+    });
+
+    const idSet = new Set(documentIds);
+    const nodes = full.nodes.filter((n) => idSet.has(n.id));
+    const edges = full.edges.filter(
+      (e) => idSet.has(typeof e.source === 'string' ? e.source : (e.source as GraphNode).id)
+        && idSet.has(typeof e.target === 'string' ? e.target : (e.target as GraphNode).id)
+    );
+
+    // Simple grid layout for the small subgraph
+    const cols = Math.ceil(Math.sqrt(nodes.length));
+    nodes.forEach((n, i) => {
+      n.x = (i % cols) * 150;
+      n.y = Math.floor(i / cols) * 150;
+    });
+
+    return { nodes, edges };
+  }
+
+  /**
    * Retourne les statistiques du corpus
    */
   async getCorpusStatistics() {

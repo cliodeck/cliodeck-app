@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useProjectStore } from '../../stores/projectStore';
+import { useBibliographyStore } from '../../stores/bibliographyStore';
+import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -18,6 +20,13 @@ export const StatusBar: React.FC = () => {
   const { currentProject } = useProjectStore();
   const [mcpClients, setMcpClients] = useState<MCPClientSummary[]>([]);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+
+  // PDF indexing progress from bibliography store
+  const batchIndexing = useBibliographyStore((s) => s.batchIndexing);
+
+  // Tropy sync status from primary sources store
+  const isSyncing = usePrimarySourcesStore((s) => s.isSyncing);
+  const syncProgress = usePrimarySourcesStore((s) => s.syncProgress);
 
   useEffect(() => {
     if (!currentProject) {
@@ -87,6 +96,42 @@ export const StatusBar: React.FC = () => {
       </div>
 
       <div className="status-bar__section status-bar__section--right">
+        {/* PDF indexing in progress */}
+        {batchIndexing.isIndexing && (
+          <span
+            className="status-bar__item status-bar__item--active"
+            title={t('statusBar.indexingTooltip', {
+              current: batchIndexing.current,
+              total: batchIndexing.total,
+              defaultValue: `Indexing: ${batchIndexing.current}/${batchIndexing.total}`,
+            })}
+          >
+            <span className="status-bar__spinner" />
+            {t('statusBar.indexing', { defaultValue: 'Indexing' })} {batchIndexing.current}/{batchIndexing.total}
+          </span>
+        )}
+
+        {/* Tropy sync in progress */}
+        {isSyncing && (
+          <span
+            className="status-bar__item status-bar__item--active"
+            title={syncProgress
+              ? t('statusBar.syncTooltip', {
+                  phase: syncProgress.phase,
+                  current: syncProgress.current,
+                  total: syncProgress.total,
+                  defaultValue: `Sync: ${syncProgress.phase} ${syncProgress.current}/${syncProgress.total}`,
+                })
+              : t('statusBar.syncing', { defaultValue: 'Syncing...' })
+            }
+          >
+            <span className="status-bar__spinner" />
+            {t('statusBar.syncing', { defaultValue: 'Sync' })}{' '}
+            {syncProgress ? `${syncProgress.current}/${syncProgress.total}` : '...'}
+          </span>
+        )}
+
+        {/* MCP clients */}
         {mcpClients.length > 0 && (
           <span
             className={`status-bar__item ${failedCount > 0 ? 'status-bar__item--warning' : ''}`}
@@ -101,6 +146,7 @@ export const StatusBar: React.FC = () => {
           </span>
         )}
 
+        {/* Vault status */}
         {vaultStatus && (
           <span className="status-bar__item" title={t('statusBar.vaultTooltip', {
             count: vaultStatus.noteCount ?? 0,

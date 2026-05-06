@@ -21,6 +21,7 @@ import { useChatSettingsProjection } from '../Chat/useChatSettingsProjection';
 import { UnifiedMessage } from '../Chat/types';
 import { ExplanationPanel } from '../Chat/ExplanationPanel';
 import { McpToolsBanner } from './McpToolsBanner';
+import { ContextGraph } from './ContextGraph';
 import { useMcpToolsList } from './useMcpToolsList';
 import './BrainstormChat.css';
 // RAGExplanation type alias lives in chatStore.
@@ -239,6 +240,7 @@ export const BrainstormChat: React.FC = () => {
         </div>
       )}
       <McpToolsBanner tools={mcpTools} />
+      <ContextGraph />
       <div className="brainstorm-chat__surface-wrap">
         <ChatSurface
           messages={unifiedMessages}

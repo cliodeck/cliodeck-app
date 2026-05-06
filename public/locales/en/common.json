@@ -596,6 +596,9 @@
       "sentToWrite": "Sent",
       "sendToWriteTitle": "Insert this turn as a draft in Write",
       "nerToggle": "Entities",
+      "contextGraph": "Source relations",
+      "graphCitation": "Citation",
+      "graphSimilarity": "Similarity",
       "sourcesLabel": "Sources",
       "openProjectNotice": "Open a project to start brainstorming.",
       "projectContext": "Project context",
@@ -656,6 +659,9 @@
     "nbTopics": "Nb topics:",
     "reanalyze": "Reanalyze",
     "topicTimeline": "Topic temporal evolution",
+    "noTimelineData": "No timeline data available. Documents must have year metadata.",
+    "timelineYear": "Year",
+    "timelineDocCount": "doc(s)",
     "topicDocuments": "documents",
     "hideDocuments": "Hide documents",
     "showDocuments": "Show {{count}} documents",
@@ -1365,6 +1371,10 @@
   },
   "statusBar": {
     "mcpTooltip": "MCP: {{ready}}/{{total}} ready",
-    "vaultTooltip": "Vault: {{count}} notes"
+    "vaultTooltip": "Vault: {{count}} notes",
+    "indexing": "Indexing",
+    "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
+    "syncing": "Sync",
+    "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
   }
 }

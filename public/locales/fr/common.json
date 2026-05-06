@@ -596,6 +596,9 @@
       "sentToWrite": "Envoyé",
       "sendToWriteTitle": "Insère ce tour comme brouillon dans Write",
       "nerToggle": "Entités",
+      "contextGraph": "Relations entre sources",
+      "graphCitation": "Citation",
+      "graphSimilarity": "Similarité",
       "sourcesLabel": "Sources",
       "openProjectNotice": "Ouvrez un projet pour commencer le brainstorming.",
       "projectContext": "Contexte du projet",
@@ -656,6 +659,9 @@
     "nbTopics": "Nb topics:",
     "reanalyze": "Réanalyser",
     "topicTimeline": "Évolution temporelle des topics",
+    "noTimelineData": "Aucune donnée temporelle disponible. Les documents doivent avoir des métadonnées d'année.",
+    "timelineYear": "Année",
+    "timelineDocCount": "doc(s)",
     "topicDocuments": "documents",
     "hideDocuments": "Masquer documents",
     "showDocuments": "Voir {{count}} documents",
@@ -1365,6 +1371,10 @@
   },
   "statusBar": {
     "mcpTooltip": "MCP : {{ready}}/{{total}} prêts",
-    "vaultTooltip": "Vault : {{count}} notes"
+    "vaultTooltip": "Vault : {{count}} notes",
+    "indexing": "Indexation",
+    "indexingTooltip": "Indexation : {{current}}/{{total}} documents",
+    "syncing": "Sync",
+    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
   }
 }

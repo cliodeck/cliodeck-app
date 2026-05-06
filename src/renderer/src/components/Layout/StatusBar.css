@@ -36,6 +36,10 @@
   color: var(--color-warning, #e6a817);
 }
 
+.status-bar__item--active {
+  color: var(--color-accent);
+}
+
 .status-bar__dot {
   width: 6px;
   height: 6px;
@@ -46,4 +50,19 @@
 
 .status-bar__dot--danger {
   background: var(--color-danger, #e53e3e);
+}
+
+.status-bar__spinner {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--color-accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: status-bar-spin 0.8s linear infinite;
+}
+
+@keyframes status-bar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

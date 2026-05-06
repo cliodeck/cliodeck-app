@@ -102,9 +102,9 @@ export const SlideGenerationPanel: React.FC = () => {
       : undefined;
 
     // Fire and forget — streaming comes via events
-    window.electron.slides.generate({ text, language, citations: citationPayload }).catch((err: any) => {
+    window.electron.slides.generate({ text, language, citations: citationPayload }).catch((err: unknown) => {
       setIsGenerating(false);
-      setError(err?.message ?? t('slides.generate.unknownError'));
+      setError(err instanceof Error ? err.message : t('slides.generate.unknownError'));
     });
   };
 

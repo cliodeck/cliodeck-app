@@ -400,7 +400,7 @@ export const ProjectPanel: React.FC = () => {
               <label>{t('project.projectType')}</label>
               <select
                 value={newProjectType}
-                onChange={(e) => setNewProjectType(e.target.value as any)}
+                onChange={(e) => setNewProjectType(e.target.value as 'article' | 'book' | 'presentation')}
               >
                 <option value="article">{t('project.types.article')}</option>
                 <option value="book">{t('project.types.book')}</option>

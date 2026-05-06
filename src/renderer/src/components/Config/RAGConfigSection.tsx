@@ -220,7 +220,7 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             </label>
             <select
               value={config.chunkingConfig}
-              onChange={(e) => handleChunkingChange(e.target.value as any)}
+              onChange={(e) => handleChunkingChange(e.target.value as 'cpuOptimized' | 'standard' | 'large')}
               className="config-select"
             >
               <option value="cpuOptimized">Optimisé CPU (petits chunks, rapide)</option>
@@ -254,7 +254,7 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             </label>
             <select
               value={config.summaryGeneration}
-              onChange={(e) => handleSummaryGenerationChange(e.target.value as any)}
+              onChange={(e) => handleSummaryGenerationChange(e.target.value as 'extractive' | 'abstractive' | 'disabled')}
               className="config-select"
             >
               <option value="disabled">Désactivé</option>

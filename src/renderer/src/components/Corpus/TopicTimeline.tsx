@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AreaChart,
   Area,
@@ -25,7 +26,7 @@ interface TopicTimelineProps {
   topics: TopicInfo[];
 }
 
-// Palette de couleurs pour les topics
+// Data-visualization palette — intentionally hardcoded (not theme tokens)
 const TOPIC_COLORS = [
   '#8884d8',
   '#82ca9d',
@@ -49,41 +50,35 @@ const getTopicColor = (index: number) => {
 };
 
 export const TopicTimeline: React.FC<TopicTimelineProps> = ({ timelineData, topics }) => {
+  const { t } = useTranslation();
+
   if (!timelineData || timelineData.length === 0) {
     return (
       <div className="timeline-empty">
-        <p>Aucune donnée temporelle disponible. Les documents doivent avoir des métadonnées d'année.</p>
+        <p>{t('corpus.noTimelineData')}</p>
       </div>
     );
   }
 
-  // Créer les labels des topics pour la légende
   const topicLabels = topics.reduce((acc, topic) => {
     const label = topic.keywords.slice(0, 3).join(' - ');
     acc[`topic_${topic.id}`] = `Topic ${topic.id}: ${label}`;
     return acc;
   }, {} as Record<string, string>);
 
-  // Custom tooltip pour afficher les informations détaillées
   interface TooltipEntry { dataKey: string; value: number; color: string }
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: TooltipEntry[]; label?: string }) => {
     if (active && payload && payload.length) {
       return (
-        <div
-          style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-            color: 'white',
-            padding: '10px',
-            borderRadius: '5px',
-            fontSize: '12px',
-          }}
-        >
-          <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>Année: {label}</p>
+        <div className="topic-timeline-tooltip">
+          <p className="topic-timeline-tooltip-title">
+            {t('corpus.timelineYear')}: {label}
+          </p>
           {payload
             .sort((a, b) => b.value - a.value)
             .map((entry, index) => (
-              <p key={index} style={{ color: entry.color, margin: '2px 0' }}>
-                {topicLabels[entry.dataKey]}: {entry.value} doc(s)
+              <p key={index} style={{ color: entry.color }} className="topic-timeline-tooltip-entry">
+                {topicLabels[entry.dataKey]}: {entry.value} {t('corpus.timelineDocCount')}
               </p>
             ))}
         </div>
@@ -92,7 +87,6 @@ export const TopicTimeline: React.FC<TopicTimelineProps> = ({ timelineData, topi
     return null;
   };
 
-  // Extraire tous les topics présents dans les données
   const topicKeys = new Set<string>();
   timelineData.forEach((data) => {
     Object.keys(data).forEach((key) => {
@@ -109,16 +103,16 @@ export const TopicTimeline: React.FC<TopicTimelineProps> = ({ timelineData, topi
   });
 
   return (
-    <div className="topic-timeline" style={{ width: '100%', height: '400px' }}>
+    <div className="topic-timeline">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart
           data={timelineData}
           margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
           stackOffset="silhouette"
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-          <XAxis dataKey="year" stroke="#ccc" />
-          <YAxis stroke="#ccc" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+          <XAxis dataKey="year" stroke="var(--text-tertiary)" />
+          <YAxis stroke="var(--text-tertiary)" />
           <Tooltip content={<CustomTooltip />} />
           <Legend
             wrapperStyle={{

@@ -522,3 +522,34 @@
 .topic-expanded {
   border-color: var(--color-accent);
 }
+
+/* Topic Timeline */
+.topic-timeline {
+  width: 100%;
+  height: 400px;
+}
+
+.topic-timeline-tooltip {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.topic-timeline-tooltip-title {
+  font-weight: bold;
+  margin-bottom: 5px;
+  color: var(--text-primary);
+}
+
+.topic-timeline-tooltip-entry {
+  margin: 2px 0;
+}
+
+.timeline-empty {
+  padding: var(--spacing-md);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
