@@ -1,6 +1,6 @@
 # Path A readiness — RAG benchmark gate
 
-Status: scaffolded — 2026-04-14
+Status: scaffolded — 2026-04-14 | updated 2026-05-07
 
 ## What Path A is
 
@@ -109,3 +109,25 @@ unified `RetrievalService` already routes both stores transparently
 (see [ADR 0002](adr/0002-retrieval-service-extraction.md)). Path A is
 purely an internal cleanup whose value is removing one duplicated
 schema, not a feature unlock.
+
+## Recent related work (2026-05-07)
+
+Testing with a real corpus (221 Tropy items, EEC Committee of Governors
+minutes, ministral3:3B via Ollama) revealed two issues relevant to
+benchmark design:
+
+1. **Hallucination with small models**: 3B models supplement RAG context
+   with general knowledge (famous names from the period not in the
+   documents). Fixed via strict anti-hallucination system prompts across
+   all layers (`formatContextAsSystemPrompt`, built-in modes,
+   `DEFAULT_SYSTEM_PROMPTS`). The mode recommendation for
+   `primary-source-analyst` suggests 8B+ parameters.
+
+2. **OCR quality visibility**: added per-document and corpus-wide OCR
+   quality reports (Tesseract confidence 0-100, chunk quality scores).
+   This is important for benchmark design — low-confidence OCR chunks
+   introduce noise into retrieval evaluation.
+
+3. **Query expansion gap**: FR->EN query expansion only applies in
+   `SecondaryRetriever`, not in `TropyService` for primary sources.
+   This may affect recall for French queries against OCR'd text.
