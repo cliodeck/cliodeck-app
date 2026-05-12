@@ -271,14 +271,36 @@ async function extractDocument(
 let inputBuf = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk: string) => { inputBuf += chunk; });
+/**
+ * Write a payload to stdout and exit with `code` only AFTER the write has
+ * actually been flushed.
+ *
+ * `process.exit()` is synchronous: it kills the process without waiting for
+ * the internal Writable buffer to drain. For payloads larger than the kernel
+ * pipe buffer (~64 KB on macOS / Linux) Node will buffer the tail internally
+ * and only flush it on the event loop's next tick; an immediate `process.exit`
+ * after `stdout.write` therefore truncates the response. The parent then sees
+ * a partial JSON string ending mid-token and bails out with
+ * "PDF worker returned unparseable output".
+ *
+ * Honouring the write callback ensures every byte hits the pipe before we
+ * exit. Belt-and-braces: drain the stream if it's still backpressured.
+ */
+function writeAndExit(payload: string, code: number): void {
+  const flushed = process.stdout.write(payload, () => process.exit(code));
+  if (!flushed) {
+    process.stdout.once('drain', () => process.exit(code));
+  }
+}
+
 process.stdin.on('end', async () => {
   let msg: WorkerRequest;
   try {
     msg = JSON.parse(inputBuf.trim());
   } catch {
     const response: WorkerErrorResponse = { ok: false, error: 'Invalid JSON on stdin' };
-    process.stdout.write(JSON.stringify(response) + '\n');
-    process.exit(1);
+    writeAndExit(JSON.stringify(response) + '\n', 1);
+    return;
   }
 
   try {
@@ -289,12 +311,10 @@ process.stdin.on('end', async () => {
       metadata: result.metadata,
       title: result.title,
     };
-    process.stdout.write(JSON.stringify(response) + '\n');
-    process.exit(0);
+    writeAndExit(JSON.stringify(response) + '\n', 0);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const response: WorkerErrorResponse = { ok: false, error: errorMsg };
-    process.stdout.write(JSON.stringify(response) + '\n');
-    process.exit(1);
+    writeAndExit(JSON.stringify(response) + '\n', 1);
   }
 });
