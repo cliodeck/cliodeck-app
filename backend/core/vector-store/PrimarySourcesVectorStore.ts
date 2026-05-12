@@ -119,8 +119,10 @@ export class PrimarySourcesVectorStore {
     }
 
     this.projectPath = projectPath;
-    // Base de données séparée: project/.cliodeck/primary-sources.db
-    this.dbPath = path.join(projectPath, '.cliodeck', 'primary-sources.db');
+    // Tropy primary-source tables live in the shared brain.db (db-fusion step
+    // 3) with `tropy_` prefixes to avoid colliding with the obsidian / PDF
+    // domains. The HNSW binary index stays in its own file — it isn't SQLite.
+    this.dbPath = path.join(projectPath, '.cliodeck', 'brain.db');
     this.hnswIndexPath = path.join(projectPath, '.cliodeck', 'primary-hnsw.index');
 
     console.log(`📁 Primary sources database: ${this.dbPath}`);
@@ -256,7 +258,7 @@ export class PrimarySourcesVectorStore {
     this.bm25Index = new TfIdf();
     this.bm25ChunkMap.clear();
 
-    const rows = this.db.prepare('SELECT * FROM source_chunks').all() as any[];
+    const rows = this.db.prepare('SELECT * FROM tropy_chunks').all() as any[];
     let docIndex = 0;
 
     for (const row of rows) {
@@ -331,10 +333,43 @@ export class PrimarySourcesVectorStore {
     this.db.pragma('foreign_keys = ON');
   }
 
+  /**
+   * Drop and recreate every `tropy_*` table. Used by the "unlink Tropy
+   * project" flow — post db-fusion we can no longer just delete the
+   * underlying file (it now hosts history and other domains too).
+   */
+  purgeAll(): void {
+    this.db.exec(`
+      DROP TABLE IF EXISTS tropy_entity_relations;
+      DROP TABLE IF EXISTS tropy_entity_mentions;
+      DROP TABLE IF EXISTS tropy_entities;
+      DROP TABLE IF EXISTS tropy_chunks;
+      DROP TABLE IF EXISTS tropy_photos;
+      DROP TABLE IF EXISTS tropy_tags;
+      DROP TABLE IF EXISTS tropy_sources;
+      DROP TABLE IF EXISTS tropy_projects;
+    `);
+    this.createTables();
+    // HNSW + BM25 are in-memory / parallel-file artifacts; reset them too.
+    this.bm25IsDirty = true;
+    this.bm25ChunkMap.clear();
+    this.bm25IdfCache.clear();
+    this.hnswLabelMap.clear();
+    this.hnswCurrentSize = 0;
+    this.hnswInitialized = false;
+    if (existsSync(this.hnswIndexPath)) {
+      try {
+        unlinkSync(this.hnswIndexPath);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   private createTables(): void {
     // Table principale des sources primaires
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS primary_sources (
+      CREATE TABLE IF NOT EXISTS tropy_sources (
         id TEXT PRIMARY KEY,
         tropy_id INTEGER NOT NULL,
         title TEXT NOT NULL,
@@ -358,11 +393,11 @@ export class PrimarySourcesVectorStore {
     // IF NOT EXISTS for columns, so we guard with PRAGMA table_info.
     try {
       const cols = this.db
-        .prepare("PRAGMA table_info('primary_sources')")
+        .prepare("PRAGMA table_info('tropy_sources')")
         .all() as Array<{ name: string }>;
       if (!cols.some((c) => c.name === 'archival_metadata')) {
-        this.db.exec('ALTER TABLE primary_sources ADD COLUMN archival_metadata TEXT');
-        console.log('🗄️ Migrated primary_sources: added archival_metadata column');
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN archival_metadata TEXT');
+        console.log('🗄️ Migrated tropy_sources: added archival_metadata column');
       }
     } catch (err) {
       console.warn('⚠️ archival_metadata migration check failed:', err);
@@ -371,11 +406,11 @@ export class PrimarySourcesVectorStore {
     // Soft migration: add ocr_confidence column (OCR quality report feature)
     try {
       const cols = this.db
-        .prepare("PRAGMA table_info('primary_sources')")
+        .prepare("PRAGMA table_info('tropy_sources')")
         .all() as Array<{ name: string }>;
       if (!cols.some((c) => c.name === 'ocr_confidence')) {
-        this.db.exec('ALTER TABLE primary_sources ADD COLUMN ocr_confidence REAL');
-        console.log('🗄️ Migrated primary_sources: added ocr_confidence column');
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN ocr_confidence REAL');
+        console.log('🗄️ Migrated tropy_sources: added ocr_confidence column');
       }
     } catch (err) {
       console.warn('⚠️ ocr_confidence migration check failed:', err);
@@ -383,7 +418,7 @@ export class PrimarySourcesVectorStore {
 
     // Table des photos associées aux sources
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS source_photos (
+      CREATE TABLE IF NOT EXISTS tropy_photos (
         id INTEGER PRIMARY KEY,
         source_id TEXT NOT NULL,
         path TEXT NOT NULL,
@@ -393,13 +428,13 @@ export class PrimarySourcesVectorStore {
         mimetype TEXT,
         has_transcription INTEGER DEFAULT 0,
         transcription TEXT,
-        FOREIGN KEY (source_id) REFERENCES primary_sources(id) ON DELETE CASCADE
+        FOREIGN KEY (source_id) REFERENCES tropy_sources(id) ON DELETE CASCADE
       );
     `);
 
     // Table des chunks avec embeddings
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS source_chunks (
+      CREATE TABLE IF NOT EXISTS tropy_chunks (
         id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL,
         content TEXT NOT NULL,
@@ -407,18 +442,18 @@ export class PrimarySourcesVectorStore {
         start_position INTEGER NOT NULL,
         end_position INTEGER NOT NULL,
         embedding BLOB,
-        FOREIGN KEY (source_id) REFERENCES primary_sources(id) ON DELETE CASCADE
+        FOREIGN KEY (source_id) REFERENCES tropy_sources(id) ON DELETE CASCADE
       );
     `);
 
-    // Soft migration: add quality_score column to source_chunks
+    // Soft migration: add quality_score column to tropy_chunks
     try {
       const chunkCols = this.db
-        .prepare("PRAGMA table_info('source_chunks')")
+        .prepare("PRAGMA table_info('tropy_chunks')")
         .all() as Array<{ name: string }>;
       if (!chunkCols.some((c) => c.name === 'quality_score')) {
-        this.db.exec('ALTER TABLE source_chunks ADD COLUMN quality_score REAL');
-        console.log('🗄️ Migrated source_chunks: added quality_score column');
+        this.db.exec('ALTER TABLE tropy_chunks ADD COLUMN quality_score REAL');
+        console.log('🗄️ Migrated tropy_chunks: added quality_score column');
       }
     } catch (err) {
       console.warn('⚠️ quality_score migration check failed:', err);
@@ -426,11 +461,11 @@ export class PrimarySourcesVectorStore {
 
     // Table des tags (many-to-many)
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS source_tags (
+      CREATE TABLE IF NOT EXISTS tropy_tags (
         source_id TEXT NOT NULL,
         tag TEXT NOT NULL,
         PRIMARY KEY (source_id, tag),
-        FOREIGN KEY (source_id) REFERENCES primary_sources(id) ON DELETE CASCADE
+        FOREIGN KEY (source_id) REFERENCES tropy_sources(id) ON DELETE CASCADE
       );
     `);
 
@@ -447,12 +482,12 @@ export class PrimarySourcesVectorStore {
 
     // Indexes pour performance
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id);
-      CREATE INDEX IF NOT EXISTS idx_source_tags_tag ON source_tags(tag);
-      CREATE INDEX IF NOT EXISTS idx_source_photos_source ON source_photos(source_id);
-      CREATE INDEX IF NOT EXISTS idx_primary_sources_tropy_id ON primary_sources(tropy_id);
-      CREATE INDEX IF NOT EXISTS idx_primary_sources_archive ON primary_sources(archive);
-      CREATE INDEX IF NOT EXISTS idx_primary_sources_collection ON primary_sources(collection);
+      CREATE INDEX IF NOT EXISTS idx_tropy_chunks_source ON tropy_chunks(source_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_tags_tag ON tropy_tags(tag);
+      CREATE INDEX IF NOT EXISTS idx_tropy_photos_source ON tropy_photos(source_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_sources_tropy_id ON tropy_sources(tropy_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_sources_archive ON tropy_sources(archive);
+      CREATE INDEX IF NOT EXISTS idx_tropy_sources_collection ON tropy_sources(collection);
     `);
 
     // Entity tables for Graph RAG
@@ -467,7 +502,7 @@ export class PrimarySourcesVectorStore {
   private createEntityTables(): void {
     // Table des entités uniques
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS entities (
+      CREATE TABLE IF NOT EXISTS tropy_entities (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         type TEXT NOT NULL,
@@ -479,14 +514,14 @@ export class PrimarySourcesVectorStore {
 
     // Index pour recherche rapide
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_entities_normalized ON entities(normalized_name);
-      CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
-      CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entities_normalized ON tropy_entities(normalized_name);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entities_type ON tropy_entities(type);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entities_name ON tropy_entities(name);
     `);
 
     // Mentions d'entités dans les chunks
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS entity_mentions (
+      CREATE TABLE IF NOT EXISTS tropy_entity_mentions (
         id TEXT PRIMARY KEY,
         entity_id TEXT NOT NULL,
         chunk_id TEXT,
@@ -494,28 +529,28 @@ export class PrimarySourcesVectorStore {
         start_position INTEGER,
         end_position INTEGER,
         context TEXT,
-        FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE,
-        FOREIGN KEY (source_id) REFERENCES primary_sources(id) ON DELETE CASCADE
+        FOREIGN KEY (entity_id) REFERENCES tropy_entities(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_id) REFERENCES tropy_sources(id) ON DELETE CASCADE
       );
     `);
 
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id);
-      CREATE INDEX IF NOT EXISTS idx_entity_mentions_chunk ON entity_mentions(chunk_id);
-      CREATE INDEX IF NOT EXISTS idx_entity_mentions_source ON entity_mentions(source_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entity_mentions_entity ON tropy_entity_mentions(entity_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entity_mentions_chunk ON tropy_entity_mentions(chunk_id);
+      CREATE INDEX IF NOT EXISTS idx_tropy_entity_mentions_source ON tropy_entity_mentions(source_id);
     `);
 
     // Relations entre entités (co-occurrences)
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS entity_relations (
+      CREATE TABLE IF NOT EXISTS tropy_entity_relations (
         entity1_id TEXT NOT NULL,
         entity2_id TEXT NOT NULL,
         relation_type TEXT DEFAULT 'co-occurrence',
         weight INTEGER DEFAULT 1,
         source_ids TEXT,
         PRIMARY KEY (entity1_id, entity2_id),
-        FOREIGN KEY (entity1_id) REFERENCES entities(id) ON DELETE CASCADE,
-        FOREIGN KEY (entity2_id) REFERENCES entities(id) ON DELETE CASCADE
+        FOREIGN KEY (entity1_id) REFERENCES tropy_entities(id) ON DELETE CASCADE,
+        FOREIGN KEY (entity2_id) REFERENCES tropy_entities(id) ON DELETE CASCADE
       );
     `);
 
@@ -532,7 +567,7 @@ export class PrimarySourcesVectorStore {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO primary_sources
+      INSERT OR REPLACE INTO tropy_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
        transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -609,7 +644,7 @@ export class PrimarySourcesVectorStore {
     if (fields.length === 0) return;
 
     values.push(id);
-    const stmt = this.db.prepare(`UPDATE primary_sources SET ${fields.join(', ')} WHERE id = ?`);
+    const stmt = this.db.prepare(`UPDATE tropy_sources SET ${fields.join(', ')} WHERE id = ?`);
     stmt.run(...values);
 
     // Mettre à jour les tags si fournis
@@ -622,7 +657,7 @@ export class PrimarySourcesVectorStore {
    * Récupère une source par son ID
    */
   getSource(id: string): PrimarySourceDocument | null {
-    const row = this.db.prepare('SELECT * FROM primary_sources WHERE id = ?').get(id) as any;
+    const row = this.db.prepare('SELECT * FROM tropy_sources WHERE id = ?').get(id) as any;
     if (!row) return null;
     return this.rowToDocument(row);
   }
@@ -632,7 +667,7 @@ export class PrimarySourcesVectorStore {
    */
   getSourceByTropyId(tropyId: number): PrimarySourceDocument | null {
     const row = this.db
-      .prepare('SELECT * FROM primary_sources WHERE tropy_id = ?')
+      .prepare('SELECT * FROM tropy_sources WHERE tropy_id = ?')
       .get(tropyId) as any;
     if (!row) return null;
     return this.rowToDocument(row);
@@ -642,7 +677,7 @@ export class PrimarySourcesVectorStore {
    * Liste toutes les sources
    */
   getAllSources(): PrimarySourceDocument[] {
-    const rows = this.db.prepare('SELECT * FROM primary_sources ORDER BY title').all() as any[];
+    const rows = this.db.prepare('SELECT * FROM tropy_sources ORDER BY title').all() as any[];
     return rows.map((row) => this.rowToDocument(row));
   }
 
@@ -650,7 +685,7 @@ export class PrimarySourcesVectorStore {
    * Supprime une source
    */
   deleteSource(id: string): void {
-    this.db.prepare('DELETE FROM primary_sources WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM tropy_sources WHERE id = ?').run(id);
   }
 
   /**
@@ -658,7 +693,7 @@ export class PrimarySourcesVectorStore {
    */
   sourceExistsByTropyId(tropyId: number): boolean {
     const row = this.db
-      .prepare('SELECT 1 FROM primary_sources WHERE tropy_id = ?')
+      .prepare('SELECT 1 FROM tropy_sources WHERE tropy_id = ?')
       .get(tropyId);
     return row !== undefined;
   }
@@ -667,10 +702,10 @@ export class PrimarySourcesVectorStore {
 
   private saveSourcePhotos(sourceId: string, photos: PrimarySourcePhoto[]): void {
     // Supprimer les photos existantes
-    this.db.prepare('DELETE FROM source_photos WHERE source_id = ?').run(sourceId);
+    this.db.prepare('DELETE FROM tropy_photos WHERE source_id = ?').run(sourceId);
 
     const stmt = this.db.prepare(`
-      INSERT INTO source_photos
+      INSERT INTO tropy_photos
       (id, source_id, path, filename, width, height, mimetype, has_transcription, transcription)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -695,7 +730,7 @@ export class PrimarySourcesVectorStore {
    */
   getSourcePhotos(sourceId: string): PrimarySourcePhoto[] {
     const rows = this.db
-      .prepare('SELECT * FROM source_photos WHERE source_id = ?')
+      .prepare('SELECT * FROM tropy_photos WHERE source_id = ?')
       .all(sourceId) as any[];
 
     return rows.map((row) => ({
@@ -716,7 +751,7 @@ export class PrimarySourcesVectorStore {
    */
   updatePhotoTranscription(photoId: number, transcription: string): void {
     this.db
-      .prepare('UPDATE source_photos SET transcription = ?, has_transcription = 1 WHERE id = ?')
+      .prepare('UPDATE tropy_photos SET transcription = ?, has_transcription = 1 WHERE id = ?')
       .run(transcription, photoId);
   }
 
@@ -724,9 +759,9 @@ export class PrimarySourcesVectorStore {
 
   private saveSourceTags(sourceId: string, tags: string[]): void {
     // Supprimer les tags existants
-    this.db.prepare('DELETE FROM source_tags WHERE source_id = ?').run(sourceId);
+    this.db.prepare('DELETE FROM tropy_tags WHERE source_id = ?').run(sourceId);
 
-    const stmt = this.db.prepare('INSERT INTO source_tags (source_id, tag) VALUES (?, ?)');
+    const stmt = this.db.prepare('INSERT INTO tropy_tags (source_id, tag) VALUES (?, ?)');
     for (const tag of tags) {
       stmt.run(sourceId, tag);
     }
@@ -737,7 +772,7 @@ export class PrimarySourcesVectorStore {
    */
   getSourceTags(sourceId: string): string[] {
     const rows = this.db
-      .prepare('SELECT tag FROM source_tags WHERE source_id = ?')
+      .prepare('SELECT tag FROM tropy_tags WHERE source_id = ?')
       .all(sourceId) as any[];
     return rows.map((row) => row.tag);
   }
@@ -746,7 +781,7 @@ export class PrimarySourcesVectorStore {
    * Liste tous les tags uniques
    */
   getAllTags(): string[] {
-    const rows = this.db.prepare('SELECT DISTINCT tag FROM source_tags ORDER BY tag').all() as any[];
+    const rows = this.db.prepare('SELECT DISTINCT tag FROM tropy_tags ORDER BY tag').all() as any[];
     return rows.map((row) => row.tag);
   }
 
@@ -761,7 +796,7 @@ export class PrimarySourcesVectorStore {
     this.db
       .prepare(
         `
-      INSERT OR REPLACE INTO source_chunks
+      INSERT OR REPLACE INTO tropy_chunks
       (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `
@@ -826,7 +861,7 @@ export class PrimarySourcesVectorStore {
    */
   saveChunks(chunks: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }>): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO source_chunks
+      INSERT OR REPLACE INTO tropy_chunks
       (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -855,7 +890,7 @@ export class PrimarySourcesVectorStore {
    */
   getChunks(sourceId: string): PrimarySourceChunk[] {
     const rows = this.db
-      .prepare('SELECT * FROM source_chunks WHERE source_id = ? ORDER BY chunk_index')
+      .prepare('SELECT * FROM tropy_chunks WHERE source_id = ? ORDER BY chunk_index')
       .all(sourceId) as any[];
 
     return rows.map((row) => ({
@@ -873,7 +908,7 @@ export class PrimarySourcesVectorStore {
    * Récupère tous les chunks avec leurs embeddings
    */
   getAllChunksWithEmbeddings(): Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> {
-    const rows = this.db.prepare('SELECT * FROM source_chunks').all() as any[];
+    const rows = this.db.prepare('SELECT * FROM tropy_chunks').all() as any[];
 
     return rows.map((row) => {
       let embedding: Float32Array;
@@ -911,7 +946,7 @@ export class PrimarySourcesVectorStore {
    * Supprime les chunks d'une source
    */
   deleteChunks(sourceId: string): void {
-    this.db.prepare('DELETE FROM source_chunks WHERE source_id = ?').run(sourceId);
+    this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
   }
 
   // MARK: - Hybrid Search (HNSW + BM25)
@@ -924,7 +959,7 @@ export class PrimarySourcesVectorStore {
     const startTime = Date.now();
 
     // DEBUG: Log index state at search time
-    const dbChunkCount = (this.db.prepare('SELECT COUNT(*) as count FROM source_chunks WHERE embedding IS NOT NULL').get() as any).count;
+    const dbChunkCount = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL').get() as any).count;
     console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize}, BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings=${dbChunkCount}`);
 
     // Check if indexes are out of sync with database
@@ -989,7 +1024,7 @@ export class PrimarySourcesVectorStore {
       if (!chunkId) continue;
 
       // Get chunk from database
-      const chunkRow = this.db.prepare('SELECT * FROM source_chunks WHERE id = ?').get(chunkId) as any;
+      const chunkRow = this.db.prepare('SELECT * FROM tropy_chunks WHERE id = ?').get(chunkId) as any;
       if (!chunkRow) continue;
 
       const chunk: PrimarySourceChunk = {
@@ -1199,8 +1234,8 @@ export class PrimarySourcesVectorStore {
     if (chunks.length === 0) {
       console.log('⚠️ Primary sources: No chunks to index');
       // Additional debug: check if there are any chunks at all
-      const totalChunks = (this.db.prepare('SELECT COUNT(*) as count FROM source_chunks').get() as any).count;
-      const chunksWithEmbedding = (this.db.prepare('SELECT COUNT(*) as count FROM source_chunks WHERE embedding IS NOT NULL').get() as any).count;
+      const totalChunks = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks').get() as any).count;
+      const chunksWithEmbedding = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL').get() as any).count;
       console.log(`🔍 [DEBUG] Total chunks: ${totalChunks}, with embedding: ${chunksWithEmbedding}`);
       return;
     }
@@ -1263,27 +1298,27 @@ export class PrimarySourcesVectorStore {
    */
   getStatistics(): PrimarySourcesStatistics {
     const sourceCount = (
-      this.db.prepare('SELECT COUNT(*) as count FROM primary_sources').get() as any
+      this.db.prepare('SELECT COUNT(*) as count FROM tropy_sources').get() as any
     ).count;
 
     const chunkCount = (
-      this.db.prepare('SELECT COUNT(*) as count FROM source_chunks').get() as any
+      this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks').get() as any
     ).count;
 
     const photoCount = (
-      this.db.prepare('SELECT COUNT(*) as count FROM source_photos').get() as any
+      this.db.prepare('SELECT COUNT(*) as count FROM tropy_photos').get() as any
     ).count;
 
     const withTranscription = (
       this.db
-        .prepare('SELECT COUNT(*) as count FROM primary_sources WHERE transcription IS NOT NULL')
+        .prepare('SELECT COUNT(*) as count FROM tropy_sources WHERE transcription IS NOT NULL')
         .get() as any
     ).count;
 
     // Compter par archive
     const archiveRows = this.db
       .prepare(
-        'SELECT archive, COUNT(*) as count FROM primary_sources WHERE archive IS NOT NULL GROUP BY archive'
+        'SELECT archive, COUNT(*) as count FROM tropy_sources WHERE archive IS NOT NULL GROUP BY archive'
       )
       .all() as any[];
     const byArchive: Record<string, number> = {};
@@ -1294,7 +1329,7 @@ export class PrimarySourcesVectorStore {
     // Compter par collection
     const collectionRows = this.db
       .prepare(
-        'SELECT collection, COUNT(*) as count FROM primary_sources WHERE collection IS NOT NULL GROUP BY collection'
+        'SELECT collection, COUNT(*) as count FROM tropy_sources WHERE collection IS NOT NULL GROUP BY collection'
       )
       .all() as any[];
     const byCollection: Record<string, number> = {};
@@ -1369,7 +1404,7 @@ export class PrimarySourcesVectorStore {
 
     // Check if entity already exists
     const existing = this.db
-      .prepare('SELECT id FROM entities WHERE normalized_name = ? AND type = ?')
+      .prepare('SELECT id FROM tropy_entities WHERE normalized_name = ? AND type = ?')
       .get(normalizedName, entity.type) as any;
 
     if (existing) {
@@ -1381,7 +1416,7 @@ export class PrimarySourcesVectorStore {
 
     this.db
       .prepare(`
-        INSERT INTO entities (id, name, type, normalized_name, aliases, created_at)
+        INSERT INTO tropy_entities (id, name, type, normalized_name, aliases, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `)
       .run(
@@ -1404,7 +1439,7 @@ export class PrimarySourcesVectorStore {
 
     this.db
       .prepare(`
-        INSERT INTO entity_mentions (id, entity_id, chunk_id, source_id, start_position, end_position, context)
+        INSERT INTO tropy_entity_mentions (id, entity_id, chunk_id, source_id, start_position, end_position, context)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
@@ -1426,7 +1461,7 @@ export class PrimarySourcesVectorStore {
     const [id1, id2] = entity1Id < entity2Id ? [entity1Id, entity2Id] : [entity2Id, entity1Id];
 
     const existing = this.db
-      .prepare('SELECT weight, source_ids FROM entity_relations WHERE entity1_id = ? AND entity2_id = ?')
+      .prepare('SELECT weight, source_ids FROM tropy_entity_relations WHERE entity1_id = ? AND entity2_id = ?')
       .get(id1, id2) as any;
 
     if (existing) {
@@ -1438,7 +1473,7 @@ export class PrimarySourcesVectorStore {
 
       this.db
         .prepare(`
-          UPDATE entity_relations
+          UPDATE tropy_entity_relations
           SET weight = weight + 1, source_ids = ?
           WHERE entity1_id = ? AND entity2_id = ?
         `)
@@ -1447,7 +1482,7 @@ export class PrimarySourcesVectorStore {
       // Create new relation
       this.db
         .prepare(`
-          INSERT INTO entity_relations (entity1_id, entity2_id, relation_type, weight, source_ids)
+          INSERT INTO tropy_entity_relations (entity1_id, entity2_id, relation_type, weight, source_ids)
           VALUES (?, ?, 'co-occurrence', 1, ?)
         `)
         .run(id1, id2, JSON.stringify([sourceId]));
@@ -1496,7 +1531,7 @@ export class PrimarySourcesVectorStore {
   getEntitiesByName(name: string, type?: EntityType): Entity[] {
     const normalizedName = entityNormalizer.normalize(name, type || 'PERSON');
 
-    let query = 'SELECT * FROM entities WHERE normalized_name LIKE ?';
+    let query = 'SELECT * FROM tropy_entities WHERE normalized_name LIKE ?';
     const params: any[] = [`%${normalizedName}%`];
 
     if (type) {
@@ -1521,7 +1556,7 @@ export class PrimarySourcesVectorStore {
    */
   getChunkIdsWithEntity(entityId: string): string[] {
     const rows = this.db
-      .prepare('SELECT DISTINCT chunk_id FROM entity_mentions WHERE entity_id = ? AND chunk_id IS NOT NULL')
+      .prepare('SELECT DISTINCT chunk_id FROM tropy_entity_mentions WHERE entity_id = ? AND chunk_id IS NOT NULL')
       .all(entityId) as any[];
 
     return rows.map(r => r.chunk_id);
@@ -1534,8 +1569,8 @@ export class PrimarySourcesVectorStore {
     const rows = this.db
       .prepare(`
         SELECT e.*, er.weight
-        FROM entities e
-        JOIN entity_relations er ON (
+        FROM tropy_entities e
+        JOIN tropy_entity_relations er ON (
           (er.entity1_id = ? AND er.entity2_id = e.id) OR
           (er.entity2_id = ? AND er.entity1_id = e.id)
         )
@@ -1562,19 +1597,19 @@ export class PrimarySourcesVectorStore {
    */
   deleteEntitiesForSource(sourceId: string): void {
     // Delete mentions for this source
-    this.db.prepare('DELETE FROM entity_mentions WHERE source_id = ?').run(sourceId);
+    this.db.prepare('DELETE FROM tropy_entity_mentions WHERE source_id = ?').run(sourceId);
 
     // Clean up orphaned entities (no mentions left)
     this.db.exec(`
-      DELETE FROM entities
-      WHERE id NOT IN (SELECT DISTINCT entity_id FROM entity_mentions)
+      DELETE FROM tropy_entities
+      WHERE id NOT IN (SELECT DISTINCT entity_id FROM tropy_entity_mentions)
     `);
 
     // Clean up orphaned relations
     this.db.exec(`
-      DELETE FROM entity_relations
-      WHERE entity1_id NOT IN (SELECT id FROM entities)
-         OR entity2_id NOT IN (SELECT id FROM entities)
+      DELETE FROM tropy_entity_relations
+      WHERE entity1_id NOT IN (SELECT id FROM tropy_entities)
+         OR entity2_id NOT IN (SELECT id FROM tropy_entities)
     `);
   }
 
@@ -1582,10 +1617,10 @@ export class PrimarySourcesVectorStore {
    * Gets entity statistics
    */
   getEntityStatistics(): EntityStatistics {
-    const totalEntities = (this.db.prepare('SELECT COUNT(*) as count FROM entities').get() as any).count;
+    const totalEntities = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_entities').get() as any).count;
 
     const byTypeRows = this.db
-      .prepare('SELECT type, COUNT(*) as count FROM entities GROUP BY type')
+      .prepare('SELECT type, COUNT(*) as count FROM tropy_entities GROUP BY type')
       .all() as any[];
 
     const byType: Record<EntityType, number> = {
@@ -1601,14 +1636,14 @@ export class PrimarySourcesVectorStore {
       byType[row.type as EntityType] = row.count;
     }
 
-    const totalMentions = (this.db.prepare('SELECT COUNT(*) as count FROM entity_mentions').get() as any).count;
-    const totalRelations = (this.db.prepare('SELECT COUNT(*) as count FROM entity_relations').get() as any).count;
+    const totalMentions = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_entity_mentions').get() as any).count;
+    const totalRelations = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_entity_relations').get() as any).count;
 
     const topEntitiesRows = this.db
       .prepare(`
         SELECT e.*, COUNT(em.id) as mention_count
-        FROM entities e
-        JOIN entity_mentions em ON e.id = em.entity_id
+        FROM tropy_entities e
+        JOIN tropy_entity_mentions em ON e.id = em.entity_id
         GROUP BY e.id
         ORDER BY mention_count DESC
         LIMIT 20
@@ -1782,7 +1817,7 @@ export class PrimarySourcesVectorStore {
         AVG(quality_score) as avg_quality,
         MIN(quality_score) as min_quality,
         MAX(quality_score) as max_quality
-      FROM source_chunks WHERE source_id = ?
+      FROM tropy_chunks WHERE source_id = ?
     `).get(sourceId) as { chunk_count: number; avg_quality: number | null; min_quality: number | null; max_quality: number | null };
 
     return {
@@ -1814,10 +1849,10 @@ export class PrimarySourcesVectorStore {
     bestSources: Array<{ id: string; title: string; ocrConfidence: number }>;
     byTranscriptionSource: Record<string, number>;
   } {
-    const totalSources = (this.db.prepare('SELECT COUNT(*) as c FROM primary_sources').get() as { c: number }).c;
-    const sourcesWithOCR = (this.db.prepare('SELECT COUNT(*) as c FROM primary_sources WHERE ocr_confidence IS NOT NULL').get() as { c: number }).c;
-    const sourcesWithTranscription = (this.db.prepare("SELECT COUNT(*) as c FROM primary_sources WHERE transcription IS NOT NULL AND transcription != ''").get() as { c: number }).c;
-    const avgOCR = (this.db.prepare('SELECT AVG(ocr_confidence) as v FROM primary_sources WHERE ocr_confidence IS NOT NULL').get() as { v: number | null }).v;
+    const totalSources = (this.db.prepare('SELECT COUNT(*) as c FROM tropy_sources').get() as { c: number }).c;
+    const sourcesWithOCR = (this.db.prepare('SELECT COUNT(*) as c FROM tropy_sources WHERE ocr_confidence IS NOT NULL').get() as { c: number }).c;
+    const sourcesWithTranscription = (this.db.prepare("SELECT COUNT(*) as c FROM tropy_sources WHERE transcription IS NOT NULL AND transcription != ''").get() as { c: number }).c;
+    const avgOCR = (this.db.prepare('SELECT AVG(ocr_confidence) as v FROM tropy_sources WHERE ocr_confidence IS NOT NULL').get() as { v: number | null }).v;
 
     // Confidence distribution in buckets: 0-20, 20-40, 40-60, 60-80, 80-100
     const buckets: { bucket: string; count: number }[] = [];
@@ -1825,7 +1860,7 @@ export class PrimarySourcesVectorStore {
       ['0-20', 0, 20], ['20-40', 20, 40], ['40-60', 40, 60], ['60-80', 60, 80], ['80-100', 80, 101],
     ] as [string, number, number][]) {
       const row = this.db.prepare(
-        'SELECT COUNT(*) as c FROM primary_sources WHERE ocr_confidence >= ? AND ocr_confidence < ?'
+        'SELECT COUNT(*) as c FROM tropy_sources WHERE ocr_confidence >= ? AND ocr_confidence < ?'
       ).get(low, high) as { c: number };
       buckets.push({ bucket: label, count: row.c });
     }
@@ -1833,22 +1868,22 @@ export class PrimarySourcesVectorStore {
     // Chunk quality stats
     const chunkStats = this.db.prepare(`
       SELECT COUNT(*) as total, COUNT(quality_score) as with_quality, AVG(quality_score) as avg_quality
-      FROM source_chunks
+      FROM tropy_chunks
     `).get() as { total: number; with_quality: number; avg_quality: number | null };
 
     // Worst 5 sources by OCR confidence
     const worstRows = this.db.prepare(
-      'SELECT id, title, ocr_confidence FROM primary_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence ASC LIMIT 5'
+      'SELECT id, title, ocr_confidence FROM tropy_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence ASC LIMIT 5'
     ).all() as Array<{ id: string; title: string; ocr_confidence: number }>;
 
     // Best 5 sources
     const bestRows = this.db.prepare(
-      'SELECT id, title, ocr_confidence FROM primary_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence DESC LIMIT 5'
+      'SELECT id, title, ocr_confidence FROM tropy_sources WHERE ocr_confidence IS NOT NULL ORDER BY ocr_confidence DESC LIMIT 5'
     ).all() as Array<{ id: string; title: string; ocr_confidence: number }>;
 
     // By transcription source
     const srcRows = this.db.prepare(
-      "SELECT transcription_source, COUNT(*) as c FROM primary_sources WHERE transcription_source IS NOT NULL GROUP BY transcription_source"
+      "SELECT transcription_source, COUNT(*) as c FROM tropy_sources WHERE transcription_source IS NOT NULL GROUP BY transcription_source"
     ).all() as Array<{ transcription_source: string; c: number }>;
     const byTranscriptionSource: Record<string, number> = {};
     for (const r of srcRows) {
@@ -1875,7 +1910,7 @@ export class PrimarySourcesVectorStore {
    */
   getEmbeddingDimension(): number | null {
     const row = this.db
-      .prepare('SELECT embedding FROM source_chunks WHERE embedding IS NOT NULL LIMIT 1')
+      .prepare('SELECT embedding FROM tropy_chunks WHERE embedding IS NOT NULL LIMIT 1')
       .get() as any;
 
     if (!row || !row.embedding) return null;

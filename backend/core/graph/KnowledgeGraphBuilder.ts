@@ -155,8 +155,8 @@ export class KnowledgeGraphBuilder {
 // db to keep its ported queries intact — pragmatic, not the final shape.
 (this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT e.*, COUNT(em.id) as mention_count
-      FROM entities e
-      LEFT JOIN entity_mentions em ON e.id = em.entity_id
+      FROM tropy_entities e
+      LEFT JOIN tropy_entity_mentions em ON e.id = em.entity_id
       GROUP BY e.id
       HAVING mention_count >= ?
       ORDER BY mention_count DESC
@@ -181,7 +181,7 @@ export class KnowledgeGraphBuilder {
 // is generalised. Until then, the graph builder reaches into the private
 // db to keep its ported queries intact — pragmatic, not the final shape.
 (this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(
-        'SELECT DISTINCT document_id FROM entity_mentions WHERE entity_id = ?'
+        'SELECT DISTINCT document_id FROM tropy_entity_mentions WHERE entity_id = ?'
       ).all(row.id) as any[];
 
       for (const mention of mentions) {
@@ -210,8 +210,8 @@ export class KnowledgeGraphBuilder {
 // db to keep its ported queries intact — pragmatic, not the final shape.
 (this.vectorStore as unknown as { db: import('better-sqlite3').Database }).db.prepare(`
       SELECT em1.entity_id as e1, em2.entity_id as e2, COUNT(*) as weight
-      FROM entity_mentions em1
-      JOIN entity_mentions em2 ON em1.chunk_id = em2.chunk_id AND em1.entity_id < em2.entity_id
+      FROM tropy_entity_mentions em1
+      JOIN tropy_entity_mentions em2 ON em1.chunk_id = em2.chunk_id AND em1.entity_id < em2.entity_id
       GROUP BY em1.entity_id, em2.entity_id
       HAVING weight >= ?
     `).all(minWeight) as any[];

@@ -2,13 +2,11 @@
  * search_tropy — MCP tool exposing the workspace's Tropy primary sources
  * (fusion step 2.6).
  *
- * Reads `<workspaceRoot>/.cliodeck/primary-sources.db` in read-only mode.
- * The schema ships by `PrimarySourcesVectorStore`: `primary_sources`,
- * `source_chunks`, `source_tags`. There is no FTS5 virtual table in that
- * schema today, so we fall back to case-insensitive LIKE across
- * chunk content / source title / transcription. When the indexer gains
- * an FTS5 shadow table we can swap the match clause without changing
- * the tool surface.
+ * Reads `<workspaceRoot>/.cliodeck/brain.db` in read-only mode (db-fusion
+ * step 3). The Tropy domain owns `tropy_sources`, `tropy_chunks`,
+ * `tropy_tags` in the shared file. There is no FTS5 virtual table in that
+ * schema today, so we fall back to case-insensitive LIKE across chunk
+ * content / source title / transcription.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -42,11 +40,7 @@ export function registerSearchTropy(
     async ({ query, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const dbPath = path.join(
-        cfg.workspaceRoot,
-        '.cliodeck',
-        'primary-sources.db'
-      );
+      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       let db: Database.Database | null = null;
       try {
         if (!fs.existsSync(dbPath)) {
@@ -65,7 +59,7 @@ export function registerSearchTropy(
                   {
                     query,
                     hits: [],
-                    note: 'No primary-sources.db found. Link a Tropy project first.',
+                    note: 'No brain.db found. Link a Tropy project first.',
                     elapsedMs: Date.now() - start,
                   },
                   null,
@@ -83,8 +77,8 @@ export function registerSearchTropy(
             `SELECT sc.id AS chunk_id, sc.content AS content, sc.chunk_index AS chunk_index,
                     ps.id AS source_id, ps.title AS title, ps.date AS date,
                     ps.creator AS creator, ps.archive AS archive, ps.collection AS collection
-               FROM source_chunks sc
-               JOIN primary_sources ps ON ps.id = sc.source_id
+               FROM tropy_chunks sc
+               JOIN tropy_sources ps ON ps.id = sc.source_id
               WHERE sc.content LIKE ? OR ps.title LIKE ? OR ps.transcription LIKE ?
               ORDER BY ps.date DESC NULLS LAST
               LIMIT ?`

@@ -2,16 +2,15 @@
  * entity_context — MCP tool returning mentions of a named entity across
  * the corpus (fusion step 2.6).
  *
- * NER output currently lives in the primary-sources database
- * (`<workspaceRoot>/.cliodeck/primary-sources.db`, tables `entities` +
- * `entity_mentions`) — see `PrimarySourcesVectorStore.createEntityTables`.
- * The fusion plan calls out `vectors.db` as a target location; when NER
- * expands to secondary sources it will land there too. The tool reads
- * both if both exist so the caller doesn't have to care where a mention
- * was extracted from.
+ * Post db-fusion (step 3), NER tables live in the shared
+ * `<workspaceRoot>/.cliodeck/brain.db` under the `tropy_` prefix:
+ * `tropy_entities`, `tropy_entity_mentions`. Mentions can reference both
+ * primary sources (`tropy_sources`) and — once PDF NER lands —
+ * secondary documents (`pdf_documents`, today still `documents` in the
+ * un-prefixed PDF vector store until step 4 of the consolidation).
  *
  * For each match: entity canonical name, type, and per-mention context
- * (chunk snippet, already persisted on `entity_mentions.context`).
+ * (chunk snippet, already persisted on `tropy_entity_mentions.context`).
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -56,7 +55,10 @@ function queryPrimary(
   if (!fs.existsSync(dbPath)) return [];
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    if (!hasTable(db, 'entities') || !hasTable(db, 'entity_mentions')) {
+    if (
+      !hasTable(db, 'tropy_entities') ||
+      !hasTable(db, 'tropy_entity_mentions')
+    ) {
       return [];
     }
     const like = `%${entityQuery.toLowerCase()}%`;
@@ -65,9 +67,9 @@ function queryPrimary(
         `SELECT e.id AS entity_id, e.name AS entity_name, e.type AS entity_type,
                 em.chunk_id AS chunk_id, em.source_id AS source_id,
                 em.context AS context, ps.title AS source_title
-           FROM entity_mentions em
-           JOIN entities e ON e.id = em.entity_id
-      LEFT JOIN primary_sources ps ON ps.id = em.source_id
+           FROM tropy_entity_mentions em
+           JOIN tropy_entities e ON e.id = em.entity_id
+      LEFT JOIN tropy_sources ps ON ps.id = em.source_id
           WHERE e.normalized_name LIKE ? OR LOWER(e.name) LIKE ?
           LIMIT ?`
       )
@@ -92,9 +94,9 @@ function querySecondary(
   entityQuery: string,
   limit: number
 ): Mention[] {
-  // Best-effort: if vectors.db ever grows the same entity schema
-  // (planned), surface those mentions too. Silently return [] if the
-  // tables aren't there yet — this is the "fail soft" path.
+  // Reads PDF-side entity tables from vectors.db. These still use the
+  // unprefixed legacy names until db-fusion step 4 brings them into brain.db
+  // with `pdf_` prefixes. Silently return [] if the tables aren't there yet.
   if (!fs.existsSync(dbPath)) return [];
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
@@ -147,11 +149,7 @@ export function registerEntityContext(
     async ({ entity, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const primaryDb = path.join(
-        cfg.workspaceRoot,
-        '.cliodeck',
-        'primary-sources.db'
-      );
+      const primaryDb = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       const secondaryDb = path.join(
         cfg.workspaceRoot,
         '.cliodeck',
@@ -165,7 +163,7 @@ export function registerEntityContext(
 
         const note =
           mentions.length === 0
-            ? 'No mentions found. NER tables (entities, entity_mentions) may be missing — run the entity extraction pipeline.'
+            ? 'No mentions found. NER tables (tropy_entities, tropy_entity_mentions) may be missing — run the entity extraction pipeline.'
             : undefined;
 
         logger.log({

@@ -56,14 +56,14 @@ describe('entity_context', () => {
     const p = createTempPrimarySourcesDb(workspaceRoot);
     addEntityTables(p);
     p.prepare(
-      `INSERT INTO entities (id, name, normalized_name, type)
+      `INSERT INTO tropy_entities (id, name, normalized_name, type)
        VALUES ('e1', 'Arthur Greiser', 'arthur greiser', 'PERSON')`
     ).run();
     p.prepare(
-      `INSERT INTO primary_sources (id, title) VALUES ('s1', 'Lester diary')`
+      `INSERT INTO tropy_sources (id, title) VALUES ('s1', 'Lester diary')`
     ).run();
     p.prepare(
-      `INSERT INTO entity_mentions (entity_id, source_id, chunk_id, context)
+      `INSERT INTO tropy_entity_mentions (entity_id, source_id, chunk_id, context)
        VALUES ('e1', 's1', 'ch1', 'Greiser ordered the deportation')`
     ).run();
     p.close();
@@ -95,14 +95,14 @@ describe('entity_context', () => {
     const p = createTempPrimarySourcesDb(workspaceRoot);
     addEntityTables(p);
     p.prepare(
-      `INSERT INTO entities (id, name, normalized_name, type)
+      `INSERT INTO tropy_entities (id, name, normalized_name, type)
        VALUES ('e1', 'Greiser', 'greiser', 'PERSON')`
     ).run();
     p.prepare(
-      `INSERT INTO primary_sources (id, title) VALUES ('s1', 'A')`
+      `INSERT INTO tropy_sources (id, title) VALUES ('s1', 'A')`
     ).run();
     p.prepare(
-      `INSERT INTO entity_mentions (entity_id, source_id, context)
+      `INSERT INTO tropy_entity_mentions (entity_id, source_id, context)
        VALUES ('e1', 's1', 'primary ctx')`
     ).run();
     p.close();

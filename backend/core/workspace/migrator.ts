@@ -165,6 +165,7 @@ export async function migrateWorkspaceToFlat(
   // would skip consolidation and legacy SQLite files would linger forever.
   await consolidateLegacyHistory(workspaceRoot, report);
   await consolidateLegacyObsidian(workspaceRoot, report);
+  await consolidateLegacyPrimarySources(workspaceRoot, report);
 
   // If consolidation produced copies on top of a "no layout work needed"
   // report, drop the misleading noop so callers see something happened.
@@ -353,6 +354,150 @@ function copyObsidianIntoBrain(legacyPath: string, brainPath: string): void {
       );
     } finally {
       db.exec('DETACH DATABASE legacy_obs');
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Fold `.cliodeck/primary-sources.db` into `.cliodeck/brain.db` (db-fusion
+ * step 3). The legacy file uses the unprefixed `primary_sources`,
+ * `source_chunks`, `source_photos`, `source_tags`, `tropy_projects`,
+ * `entities`, `entity_mentions`, `entity_relations` tables — rename them in
+ * place to the `tropy_*` namespace, then either rename the whole file to
+ * `brain.db` (when none exists) or ATTACH+copy into the existing one.
+ *
+ * Same Vitest caveat as the Obsidian step: the SQL path can't be exercised
+ * under the test harness (CLAUDE.md §6); runtime validation only.
+ */
+async function consolidateLegacyPrimarySources(
+  root: string,
+  report: MigrationReport,
+): Promise<void> {
+  const legacy = path.join(root, '.cliodeck', 'primary-sources.db');
+  if (!(await exists(legacy))) return;
+
+  const flat = workspaceFiles(root);
+  try {
+    renamePrimarySourcesTablesInPlace(legacy);
+
+    if (!(await exists(flat.brainDb))) {
+      await fs.rename(legacy, flat.brainDb);
+      report.copied.push({ source: legacy, target: flat.brainDb });
+      return;
+    }
+
+    copyPrimarySourcesIntoBrain(legacy, flat.brainDb);
+    await fs.unlink(legacy);
+    report.copied.push({ source: legacy, target: flat.brainDb });
+  } catch (err) {
+    report.warnings.push(
+      `Primary-sources consolidation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+const PRIMARY_TABLE_RENAMES: Array<[string, string]> = [
+  ['primary_sources', 'tropy_sources'],
+  ['source_chunks', 'tropy_chunks'],
+  ['source_photos', 'tropy_photos'],
+  ['source_tags', 'tropy_tags'],
+  ['entities', 'tropy_entities'],
+  ['entity_mentions', 'tropy_entity_mentions'],
+  ['entity_relations', 'tropy_entity_relations'],
+  // `tropy_projects` was already prefixed.
+];
+
+const PRIMARY_INDEX_DROPS = [
+  'idx_source_chunks_source',
+  'idx_source_tags_tag',
+  'idx_source_photos_source',
+  'idx_primary_sources_tropy_id',
+  'idx_primary_sources_archive',
+  'idx_primary_sources_collection',
+  'idx_entities_normalized',
+  'idx_entities_type',
+  'idx_entities_name',
+  'idx_entity_mentions_entity',
+  'idx_entity_mentions_chunk',
+  'idx_entity_mentions_source',
+];
+
+function renamePrimarySourcesTablesInPlace(dbPath: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    db.exec('BEGIN');
+    try {
+      const objectExists = (name: string): boolean =>
+        Boolean(
+          db
+            .prepare(
+              "SELECT 1 FROM sqlite_master WHERE type IN ('table','index') AND name = ?",
+            )
+            .get(name),
+        );
+
+      for (const [oldName, newName] of PRIMARY_TABLE_RENAMES) {
+        if (objectExists(oldName) && !objectExists(newName)) {
+          db.exec(`ALTER TABLE ${oldName} RENAME TO ${newName}`);
+        }
+      }
+      // Drop legacy indexes; the runtime side will recreate prefixed ones
+      // on next open via `createIndexes`.
+      for (const idx of PRIMARY_INDEX_DROPS) {
+        if (objectExists(idx)) {
+          db.exec(`DROP INDEX ${idx}`);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function copyPrimarySourcesIntoBrain(legacyPath: string, brainPath: string): void {
+  const db = new Database(brainPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    const escapedPath = legacyPath.replace(/'/g, "''");
+    db.exec(`ATTACH DATABASE '${escapedPath}' AS legacy_ps`);
+    try {
+      // For each renamed table, create-if-missing in main and copy rows. The
+      // schema string is whatever the legacy db carried (we copy it verbatim
+      // from sqlite_master), which keeps any historical column drift intact.
+      for (const [, newName] of PRIMARY_TABLE_RENAMES) {
+        const createSql = db
+          .prepare(
+            `SELECT sql FROM legacy_ps.sqlite_master WHERE type='table' AND name=?`,
+          )
+          .get(newName) as { sql: string } | undefined;
+        if (!createSql?.sql) continue;
+        db.exec(createSql.sql);
+        db.exec(
+          `INSERT OR IGNORE INTO ${newName} SELECT * FROM legacy_ps.${newName}`,
+        );
+      }
+      // `tropy_projects` was already prefixed pre-rename, so it isn't in
+      // the table-renames list. Copy it separately.
+      const tropyProjectsSql = db
+        .prepare(
+          `SELECT sql FROM legacy_ps.sqlite_master WHERE type='table' AND name='tropy_projects'`,
+        )
+        .get() as { sql: string } | undefined;
+      if (tropyProjectsSql?.sql) {
+        db.exec(tropyProjectsSql.sql);
+        db.exec(
+          'INSERT OR IGNORE INTO tropy_projects SELECT * FROM legacy_ps.tropy_projects',
+        );
+      }
+    } finally {
+      db.exec('DETACH DATABASE legacy_ps');
     }
   } finally {
     db.close();

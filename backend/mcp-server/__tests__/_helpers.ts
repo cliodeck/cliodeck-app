@@ -145,19 +145,18 @@ export function createTempVectorsDb(root: string): Database.Database {
 }
 
 /**
- * Add the `entities` + `entity_mentions` tables to an existing db. Used
- * by `entityContext` tests; the schema is the same on both vectors.db
- * and primary-sources.db so this helper covers both.
+ * Add the `tropy_entities` + `tropy_entity_mentions` tables to an existing
+ * brain.db. Used by `entityContext` tests.
  */
 export function addEntityTables(db: Database.Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS entities (
+    CREATE TABLE IF NOT EXISTS tropy_entities (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       normalized_name TEXT NOT NULL,
       type TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS entity_mentions (
+    CREATE TABLE IF NOT EXISTS tropy_entity_mentions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       entity_id TEXT NOT NULL,
       source_id TEXT NOT NULL,
@@ -179,15 +178,15 @@ export function addSimilaritiesTable(db: Database.Database): void {
 }
 
 /**
- * Create `<root>/.cliodeck/primary-sources.db` with the columns the
- * `searchTropy` tool reads.
+ * Create `<root>/.cliodeck/brain.db` with the `tropy_sources`/`tropy_chunks`
+ * tables that `searchTropy` reads.
  */
 export function createTempPrimarySourcesDb(root: string): Database.Database {
   const dir = path.join(root, '.cliodeck');
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(path.join(dir, 'primary-sources.db'));
+  const db = new Database(path.join(dir, 'brain.db'));
   db.exec(`
-    CREATE TABLE primary_sources (
+    CREATE TABLE IF NOT EXISTS tropy_sources (
       id TEXT PRIMARY KEY,
       title TEXT,
       transcription TEXT,
@@ -196,7 +195,7 @@ export function createTempPrimarySourcesDb(root: string): Database.Database {
       archive TEXT,
       collection TEXT
     );
-    CREATE TABLE source_chunks (
+    CREATE TABLE IF NOT EXISTS tropy_chunks (
       id TEXT PRIMARY KEY,
       source_id TEXT NOT NULL,
       content TEXT NOT NULL,

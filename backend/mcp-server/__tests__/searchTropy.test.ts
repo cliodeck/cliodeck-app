@@ -1,7 +1,7 @@
 /**
  * Tests for the Tropy MCP tool (fusion 1.9).
  *
- * Exercises the LIKE-search across primary_sources + source_chunks. The
+ * Exercises the LIKE-search across tropy_sources + tropy_chunks. The
  * tool joins on `source_id`, orders by `date DESC NULLS LAST`, and
  * truncates chunk content to 800 chars. We verify each of those.
  */
@@ -48,19 +48,19 @@ describe('search_tropy', () => {
   it('matches by chunk content, source title, AND transcription', async () => {
     const db = createTempPrimarySourcesDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO primary_sources (id, title, transcription, date, creator, archive, collection)
+      `INSERT INTO tropy_sources (id, title, transcription, date, creator, archive, collection)
        VALUES ('s1', 'Lester diary 1941', 'Greiser referenced here', '1941-09', 'Lester','UN','Danzig')`
     ).run();
     db.prepare(
-      `INSERT INTO source_chunks (id, source_id, content, chunk_index)
+      `INSERT INTO tropy_chunks (id, source_id, content, chunk_index)
        VALUES ('c1', 's1', 'Wartheland police report', 0)`
     ).run();
     db.prepare(
-      `INSERT INTO primary_sources (id, title, date)
+      `INSERT INTO tropy_sources (id, title, date)
        VALUES ('s2', 'Other source', '2000')`
     ).run();
     db.prepare(
-      `INSERT INTO source_chunks (id, source_id, content, chunk_index)
+      `INSERT INTO tropy_chunks (id, source_id, content, chunk_index)
        VALUES ('c2', 's2', 'Unrelated', 0)`
     ).run();
     db.close();
@@ -87,17 +87,17 @@ describe('search_tropy', () => {
     const db = createTempPrimarySourcesDb(workspaceRoot);
     const long = 'spam '.repeat(300);
     db.prepare(
-      `INSERT INTO primary_sources (id, title, date) VALUES ('s1', 'old', '1900')`
+      `INSERT INTO tropy_sources (id, title, date) VALUES ('s1', 'old', '1900')`
     ).run();
     db.prepare(
-      `INSERT INTO primary_sources (id, title, date) VALUES ('s2', 'new', '2020')`
+      `INSERT INTO tropy_sources (id, title, date) VALUES ('s2', 'new', '2020')`
     ).run();
     db.prepare(
-      `INSERT INTO source_chunks (id, source_id, content, chunk_index)
+      `INSERT INTO tropy_chunks (id, source_id, content, chunk_index)
        VALUES ('c1', 's1', ?, 0)`
     ).run(long);
     db.prepare(
-      `INSERT INTO source_chunks (id, source_id, content, chunk_index)
+      `INSERT INTO tropy_chunks (id, source_id, content, chunk_index)
        VALUES ('c2', 's2', ?, 0)`
     ).run(long);
     db.close();

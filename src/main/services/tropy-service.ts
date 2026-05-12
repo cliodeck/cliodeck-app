@@ -979,19 +979,11 @@ class TropyService {
         return { success: false, error: 'Service not initialized' };
       }
 
-      // Fermer la base de données actuelle
-      this.vectorStore.close();
-
-      // Supprimer le fichier de base de données
-      const dbPath = path.join(this.projectPath, '.cliodeck', 'primary-sources.db');
-      if (fs.existsSync(dbPath)) {
-        fs.unlinkSync(dbPath);
-        console.log(`🗑️ Deleted primary sources database: ${dbPath}`);
-      }
-
-      // Réinitialiser le vectorStore (crée une nouvelle base vide)
-      this.vectorStore = new PrimarySourcesVectorStore(this.projectPath);
+      // Drop and recreate every `tropy_*` table (post db-fusion brain.db
+      // hosts other domains, so we can't just unlink the file).
+      this.vectorStore.purgeAll();
       this.currentTPYPath = null;
+      console.log('🗑️ Purged tropy_* tables in brain.db');
 
       return { success: true };
     } catch (error: any) {
@@ -1005,7 +997,7 @@ class TropyService {
    */
   getDatabasePath(): string | null {
     if (!this.projectPath) return null;
-    return path.join(this.projectPath, '.cliodeck', 'primary-sources.db');
+    return path.join(this.projectPath, '.cliodeck', 'brain.db');
   }
 }
 
