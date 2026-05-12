@@ -120,12 +120,24 @@ function doExtract(filePath: string): Promise<IsolatedExtractionResult> {
       stdoutBuf += chunk.toString('utf8');
     });
 
-    // Forward stderr for debugging
+    // Forward stderr line-by-line, dropping pdfjs font warnings but keeping
+    // every other line. A chunk may contain multiple lines, possibly mixed
+    // between warnings and a real crash trace — naive `startsWith('Warning:')`
+    // on the whole chunk would swallow the crash.
+    let stderrCarry = '';
     child.stderr.on('data', (chunk: Buffer) => {
-      // Only log non-warning lines (pdfjs spams warnings about fonts)
-      const text = chunk.toString('utf8');
-      if (!text.startsWith('Warning:')) {
-        process.stderr.write(`[pdf-worker:err] ${text}`);
+      stderrCarry += chunk.toString('utf8');
+      const lines = stderrCarry.split('\n');
+      stderrCarry = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line) continue;
+        if (line.startsWith('Warning:')) continue;
+        process.stderr.write(`[pdf-worker:err] ${line}\n`);
+      }
+    });
+    child.stderr.on('end', () => {
+      if (stderrCarry && !stderrCarry.startsWith('Warning:')) {
+        process.stderr.write(`[pdf-worker:err] ${stderrCarry}\n`);
       }
     });
 
@@ -158,7 +170,16 @@ function doExtract(filePath: string): Promise<IsolatedExtractionResult> {
         } else {
           settle({ ok: false, error: result.error || 'Unknown worker error' });
         }
-      } catch {
+      } catch (parseErr) {
+        // Surface diagnostic context so a worker that exits 0 with garbage on
+        // stdout isn't a black box. We log the head of the buffer (truncated)
+        // and the parse error message; the parent's stderr forwarder already
+        // surfaces the worker's own stderr line-by-line.
+        const head = stdoutBuf.length > 400 ? `${stdoutBuf.slice(0, 400)}…` : stdoutBuf;
+        console.error(
+          `[pdf-extract-isolated] exit=${code} stdout(len=${stdoutBuf.length}): ${JSON.stringify(head)}`,
+          parseErr instanceof Error ? parseErr.message : String(parseErr),
+        );
         if (code !== 0) {
           settle({ ok: false, error: `PDF extraction failed (exit code ${code})` });
         } else {
