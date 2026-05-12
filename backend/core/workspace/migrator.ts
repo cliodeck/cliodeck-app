@@ -167,6 +167,7 @@ export async function migrateWorkspaceToFlat(
   await consolidateLegacyObsidian(workspaceRoot, report);
   await consolidateLegacyPrimarySources(workspaceRoot, report);
   await consolidateLegacyVectors(workspaceRoot, report);
+  await renameUnprefixedHistoryTables(workspaceRoot, report);
 
   // If consolidation produced copies on top of a "no layout work needed"
   // report, drop the misleading noop so callers see something happened.
@@ -620,6 +621,114 @@ function copyVectorsIntoBrain(legacyPath: string, brainPath: string): void {
       }
     } finally {
       db.exec('DETACH DATABASE legacy_pdf');
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Prefix history tables with `history_` inside brain.db, in place
+ * (db-fusion step 5). The first history consolidation (step 1) just did
+ * `fs.rename history.db → brain.db`, which preserved the original
+ * unprefixed names (`sessions`, `events`, `chat_messages`,
+ * `ai_operations`, `document_operations`, `pdf_operations` plus their
+ * indexes). Now that obsidian/tropy/pdf are all prefixed, give history
+ * the same treatment for consistency and to avoid future collisions
+ * (e.g. a `chat_messages` table arriving from another domain).
+ *
+ * Runs every project load; the table-existence checks make it a no-op
+ * once the rename has happened.
+ */
+const HISTORY_TABLE_RENAMES: Array<[string, string]> = [
+  ['sessions', 'history_sessions'],
+  ['events', 'history_events'],
+  ['chat_messages', 'history_chat_messages'],
+  ['ai_operations', 'history_ai_operations'],
+  ['document_operations', 'history_document_operations'],
+  ['pdf_operations', 'history_pdf_operations'],
+];
+
+const HISTORY_INDEX_RENAMES: Array<[string, string]> = [
+  ['idx_events_session', 'idx_history_events_session'],
+  ['idx_events_type', 'idx_history_events_type'],
+  ['idx_events_timestamp', 'idx_history_events_timestamp'],
+  ['idx_chat_session', 'idx_history_chat_session'],
+  ['idx_chat_timestamp', 'idx_history_chat_timestamp'],
+  ['idx_chat_mode', 'idx_history_chat_mode'],
+  ['idx_ai_ops_session', 'idx_history_ai_ops_session'],
+  ['idx_ai_ops_type', 'idx_history_ai_ops_type'],
+  ['idx_ai_ops_timestamp', 'idx_history_ai_ops_timestamp'],
+  ['idx_doc_ops_session', 'idx_history_doc_ops_session'],
+  ['idx_doc_ops_timestamp', 'idx_history_doc_ops_timestamp'],
+  ['idx_pdf_ops_session', 'idx_history_pdf_ops_session'],
+  ['idx_pdf_ops_timestamp', 'idx_history_pdf_ops_timestamp'],
+];
+
+async function renameUnprefixedHistoryTables(
+  root: string,
+  report: MigrationReport,
+): Promise<void> {
+  const flat = workspaceFiles(root);
+  if (!(await exists(flat.brainDb))) return;
+
+  let db: Database.Database;
+  try {
+    db = new Database(flat.brainDb);
+  } catch {
+    // brain.db isn't a real SQLite file yet (test fixture, partial migration,
+    // native binding mismatch under Vitest, etc.). The next runtime open
+    // through HistoryManager will produce a proper SQLite db with the new
+    // names, so we silently skip rather than warn.
+    return;
+  }
+
+  try {
+    const objectExists = (name: string): boolean =>
+      Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table','index') AND name = ?",
+          )
+          .get(name),
+      );
+
+    // Nothing to do if no unprefixed history table is left.
+    const anyLegacy = HISTORY_TABLE_RENAMES.some(([oldName]) => objectExists(oldName));
+    if (!anyLegacy) return;
+
+    db.pragma('journal_mode = WAL');
+    db.exec('BEGIN');
+    try {
+      for (const [oldName, newName] of HISTORY_TABLE_RENAMES) {
+        if (objectExists(oldName) && !objectExists(newName)) {
+          db.exec(`ALTER TABLE ${oldName} RENAME TO ${newName}`);
+        }
+      }
+      // SQLite preserves indexes during ALTER TABLE RENAME, but their names
+      // still reference the old table convention. Rename them explicitly
+      // (SQLite ≥ 3.25 supports `ALTER INDEX RENAME`; for older builds the
+      // drop+recreate path runs from `createIndexes` on next open).
+      for (const [oldIdx, newIdx] of HISTORY_INDEX_RENAMES) {
+        if (objectExists(oldIdx) && !objectExists(newIdx)) {
+          try {
+            db.exec(`ALTER INDEX ${oldIdx} RENAME TO ${newIdx}`);
+          } catch {
+            // Fallback: drop the old index; createIndexes will recreate.
+            db.exec(`DROP INDEX ${oldIdx}`);
+          }
+        }
+      }
+      db.exec('COMMIT');
+      report.copied.push({
+        source: `${flat.brainDb}#history_*`,
+        target: `${flat.brainDb}#history_*`,
+      });
+    } catch (e) {
+      db.exec('ROLLBACK');
+      report.warnings.push(
+        `History table rename failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   } finally {
     db.close();

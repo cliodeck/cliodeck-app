@@ -156,7 +156,7 @@ export class HistoryManager {
   private createTables(): void {
     // Sessions table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
+      CREATE TABLE IF NOT EXISTS history_sessions (
         id TEXT PRIMARY KEY,
         project_path TEXT NOT NULL,
         started_at TEXT NOT NULL,
@@ -169,32 +169,32 @@ export class HistoryManager {
 
     // Events table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS events (
+      CREATE TABLE IF NOT EXISTS history_events (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
         timestamp TEXT NOT NULL,
         event_data TEXT,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
 
     // Chat messages table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS chat_messages (
+      CREATE TABLE IF NOT EXISTS history_chat_messages (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         sources_json TEXT,
         timestamp TEXT NOT NULL,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
 
     // AI operations table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS ai_operations (
+      CREATE TABLE IF NOT EXISTS history_ai_operations (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         operation_type TEXT NOT NULL,
@@ -208,13 +208,13 @@ export class HistoryManager {
         output_metadata TEXT,
         success INTEGER DEFAULT 1,
         error_message TEXT,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
 
     // Document operations table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS document_operations (
+      CREATE TABLE IF NOT EXISTS history_document_operations (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         operation_type TEXT NOT NULL,
@@ -225,13 +225,13 @@ export class HistoryManager {
         characters_added INTEGER,
         characters_deleted INTEGER,
         content_hash TEXT,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
 
     // PDF operations table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS pdf_operations (
+      CREATE TABLE IF NOT EXISTS history_pdf_operations (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         operation_type TEXT NOT NULL,
@@ -243,7 +243,7 @@ export class HistoryManager {
         chunks_created INTEGER,
         citations_extracted INTEGER,
         metadata TEXT,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
 
@@ -263,18 +263,18 @@ export class HistoryManager {
 
   private createIndexes(): void {
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-      CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
-      CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
-      CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chat_messages(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_ai_ops_session ON ai_operations(session_id);
-      CREATE INDEX IF NOT EXISTS idx_ai_ops_type ON ai_operations(operation_type);
-      CREATE INDEX IF NOT EXISTS idx_ai_ops_timestamp ON ai_operations(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_doc_ops_session ON document_operations(session_id);
-      CREATE INDEX IF NOT EXISTS idx_doc_ops_timestamp ON document_operations(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_pdf_ops_session ON pdf_operations(session_id);
-      CREATE INDEX IF NOT EXISTS idx_pdf_ops_timestamp ON pdf_operations(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_events_session ON history_events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_events_type ON history_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_history_events_timestamp ON history_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_chat_session ON history_chat_messages(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_chat_timestamp ON history_chat_messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_ai_ops_session ON history_ai_operations(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_ai_ops_type ON history_ai_operations(operation_type);
+      CREATE INDEX IF NOT EXISTS idx_history_ai_ops_timestamp ON history_ai_operations(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_doc_ops_session ON history_document_operations(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_doc_ops_timestamp ON history_document_operations(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_pdf_ops_session ON history_pdf_operations(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_pdf_ops_timestamp ON history_pdf_operations(timestamp);
     `);
   }
 
@@ -294,23 +294,23 @@ export class HistoryManager {
       console.log('📝 History database schema version set to 1');
     }
 
-    // Migration v2: Add mode_id to chat_messages and ai_operations
+    // Migration v2: Add mode_id to history_chat_messages and history_ai_operations
     if (currentVersion < 2) {
       try {
         // Check if column already exists before adding
-        const chatColumns = this.db.pragma('table_info(chat_messages)') as any[];
+        const chatColumns = this.db.pragma('table_info(history_chat_messages)') as any[];
         if (!chatColumns.some((c: any) => c.name === 'mode_id')) {
-          this.db.exec('ALTER TABLE chat_messages ADD COLUMN mode_id TEXT');
-          console.log('📝 Migration v2: Added mode_id to chat_messages');
+          this.db.exec('ALTER TABLE history_chat_messages ADD COLUMN mode_id TEXT');
+          console.log('📝 Migration v2: Added mode_id to history_chat_messages');
         }
 
-        const aiColumns = this.db.pragma('table_info(ai_operations)') as any[];
+        const aiColumns = this.db.pragma('table_info(history_ai_operations)') as any[];
         if (!aiColumns.some((c: any) => c.name === 'mode_id')) {
-          this.db.exec('ALTER TABLE ai_operations ADD COLUMN mode_id TEXT');
-          console.log('📝 Migration v2: Added mode_id to ai_operations');
+          this.db.exec('ALTER TABLE history_ai_operations ADD COLUMN mode_id TEXT');
+          console.log('📝 Migration v2: Added mode_id to history_ai_operations');
         }
 
-        this.db.exec('CREATE INDEX IF NOT EXISTS idx_chat_mode ON chat_messages(mode_id)');
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_history_chat_mode ON history_chat_messages(mode_id)');
 
         this.db
           .prepare('INSERT OR REPLACE INTO history_metadata (key, value) VALUES (?, ?)')
@@ -331,7 +331,7 @@ export class HistoryManager {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO sessions (id, project_path, started_at, metadata)
+      INSERT INTO history_sessions (id, project_path, started_at, metadata)
       VALUES (?, ?, ?, ?)
     `);
 
@@ -358,7 +358,7 @@ export class HistoryManager {
     const durationMs = Date.now() - session.startedAt.getTime();
 
     const stmt = this.db.prepare(`
-      UPDATE sessions
+      UPDATE history_sessions
       SET ended_at = ?, total_duration_ms = ?
       WHERE id = ?
     `);
@@ -390,7 +390,7 @@ export class HistoryManager {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO events (id, session_id, event_type, timestamp, event_data)
+      INSERT INTO history_events (id, session_id, event_type, timestamp, event_data)
       VALUES (?, ?, ?, ?, ?)
     `);
 
@@ -404,7 +404,7 @@ export class HistoryManager {
 
     // Increment session event count
     this.db
-      .prepare('UPDATE sessions SET event_count = event_count + 1 WHERE id = ?')
+      .prepare('UPDATE history_sessions SET event_count = event_count + 1 WHERE id = ?')
       .run(this.currentSessionId);
 
     return eventId;
@@ -424,7 +424,7 @@ export class HistoryManager {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO ai_operations (
+      INSERT INTO history_ai_operations (
         id, session_id, operation_type, timestamp, duration_ms,
         input_text, input_metadata, model_name, model_parameters,
         output_text, output_metadata, success, error_message
@@ -464,7 +464,7 @@ export class HistoryManager {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO document_operations (
+      INSERT INTO history_document_operations (
         id, session_id, operation_type, file_path, timestamp,
         words_added, words_deleted, characters_added, characters_deleted, content_hash
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -502,7 +502,7 @@ export class HistoryManager {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO pdf_operations (
+      INSERT INTO history_pdf_operations (
         id, session_id, operation_type, document_id, timestamp,
         duration_ms, file_path, page_count, chunks_created,
         citations_extracted, metadata
@@ -543,7 +543,7 @@ export class HistoryManager {
     const modeId = message.modeId || message.queryParams?.modeId || null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO chat_messages (id, session_id, role, content, sources_json, timestamp, mode_id)
+      INSERT INTO history_chat_messages (id, session_id, role, content, sources_json, timestamp, mode_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -565,7 +565,7 @@ export class HistoryManager {
   // ==========================================================================
 
   getSession(sessionId: string): Session | null {
-    const stmt = this.db.prepare('SELECT * FROM sessions WHERE id = ?');
+    const stmt = this.db.prepare('SELECT * FROM history_sessions WHERE id = ?');
     const row = stmt.get(sessionId) as any;
 
     if (!row) return null;
@@ -582,7 +582,7 @@ export class HistoryManager {
   }
 
   getAllSessions(): Session[] {
-    const stmt = this.db.prepare('SELECT * FROM sessions ORDER BY started_at DESC');
+    const stmt = this.db.prepare('SELECT * FROM history_sessions ORDER BY started_at DESC');
     const rows = stmt.all() as any[];
 
     return rows.map((row) => ({
@@ -598,7 +598,7 @@ export class HistoryManager {
 
   getEventsForSession(sessionId: string): HistoryEvent[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM events WHERE session_id = ? ORDER BY timestamp ASC
+      SELECT * FROM history_events WHERE session_id = ? ORDER BY timestamp ASC
     `);
     const rows = stmt.all(sessionId) as any[];
 
@@ -613,7 +613,7 @@ export class HistoryManager {
 
   getChatMessagesForSession(sessionId: string): ChatMessage[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC
+      SELECT * FROM history_chat_messages WHERE session_id = ? ORDER BY timestamp ASC
     `);
     const rows = stmt.all(sessionId) as any[];
 
@@ -630,7 +630,7 @@ export class HistoryManager {
 
   getAIOperationsForSession(sessionId: string): AIOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM ai_operations WHERE session_id = ? ORDER BY timestamp ASC
+      SELECT * FROM history_ai_operations WHERE session_id = ? ORDER BY timestamp ASC
     `);
     const rows = stmt.all(sessionId) as any[];
 
@@ -639,7 +639,7 @@ export class HistoryManager {
 
   getDocumentOperationsForSession(sessionId: string): DocumentOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM document_operations WHERE session_id = ? ORDER BY timestamp ASC
+      SELECT * FROM history_document_operations WHERE session_id = ? ORDER BY timestamp ASC
     `);
     const rows = stmt.all(sessionId) as any[];
 
@@ -659,7 +659,7 @@ export class HistoryManager {
 
   getPDFOperationsForSession(sessionId: string): PDFOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM pdf_operations WHERE session_id = ? ORDER BY timestamp ASC
+      SELECT * FROM history_pdf_operations WHERE session_id = ? ORDER BY timestamp ASC
     `);
     const rows = stmt.all(sessionId) as any[];
 
@@ -684,7 +684,7 @@ export class HistoryManager {
 
   getAllEvents(): HistoryEvent[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM events ORDER BY timestamp DESC
+      SELECT * FROM history_events ORDER BY timestamp DESC
     `);
     const rows = stmt.all() as any[];
 
@@ -699,7 +699,7 @@ export class HistoryManager {
 
   getAllAIOperations(): AIOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM ai_operations ORDER BY timestamp DESC
+      SELECT * FROM history_ai_operations ORDER BY timestamp DESC
     `);
     const rows = stmt.all() as any[];
 
@@ -708,7 +708,7 @@ export class HistoryManager {
 
   getAllChatMessages(): ChatMessage[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM chat_messages ORDER BY timestamp DESC
+      SELECT * FROM history_chat_messages ORDER BY timestamp DESC
     `);
     const rows = stmt.all() as any[];
 
@@ -725,7 +725,7 @@ export class HistoryManager {
 
   getAllDocumentOperations(): DocumentOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM document_operations ORDER BY timestamp DESC
+      SELECT * FROM history_document_operations ORDER BY timestamp DESC
     `);
     const rows = stmt.all() as any[];
 
@@ -745,7 +745,7 @@ export class HistoryManager {
 
   getAllPDFOperations(): PDFOperation[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM pdf_operations ORDER BY timestamp DESC
+      SELECT * FROM history_pdf_operations ORDER BY timestamp DESC
     `);
     const rows = stmt.all() as any[];
 
@@ -793,7 +793,7 @@ export class HistoryManager {
     endDate?: Date;
     limit?: number;
   }): HistoryEvent[] {
-    let query = 'SELECT * FROM events WHERE 1=1';
+    let query = 'SELECT * FROM history_events WHERE 1=1';
     const params: any[] = [];
 
     if (filters.sessionId) {
@@ -1021,21 +1021,21 @@ export class HistoryManager {
   getStatistics(): HistoryStatistics {
     const stats = {
       totalSessions: (
-        this.db.prepare('SELECT COUNT(*) as count FROM sessions').get() as any
+        this.db.prepare('SELECT COUNT(*) as count FROM history_sessions').get() as any
       ).count,
-      totalEvents: (this.db.prepare('SELECT COUNT(*) as count FROM events').get() as any)
+      totalEvents: (this.db.prepare('SELECT COUNT(*) as count FROM history_events').get() as any)
         .count,
       totalChatMessages: (
-        this.db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as any
+        this.db.prepare('SELECT COUNT(*) as count FROM history_chat_messages').get() as any
       ).count,
       totalAIOperations: (
-        this.db.prepare('SELECT COUNT(*) as count FROM ai_operations').get() as any
+        this.db.prepare('SELECT COUNT(*) as count FROM history_ai_operations').get() as any
       ).count,
       averageSessionDuration:
         (
           this.db
             .prepare(
-              'SELECT AVG(total_duration_ms) as avg FROM sessions WHERE total_duration_ms IS NOT NULL'
+              'SELECT AVG(total_duration_ms) as avg FROM history_sessions WHERE total_duration_ms IS NOT NULL'
             )
             .get() as any
         ).avg || 0,
