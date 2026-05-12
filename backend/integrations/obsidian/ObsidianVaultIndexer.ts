@@ -4,8 +4,8 @@
  * Reads a vault via `ObsidianVaultReader`, parses notes via
  * `ObsidianMarkdownParser`, chunks section-aware, embeds via an
  * `EmbeddingProvider` from the phase 1.3 registry, and stores everything
- * in an independent `ObsidianVaultStore` under `.cliodeck/
- * obsidian-vectors.db`.
+ * in an `ObsidianVaultStore` whose `obsidian_*` tables live alongside
+ * other domains in `.cliodeck/brain.db`.
  *
  * Returns a typed `VaultScanReport` (step 2.1bis) — partial-success
  * first-class. An unreadable or malformed note doesn't fail the whole
@@ -311,5 +311,5 @@ export class ObsidianVaultIndexer {
 // MARK: - factory helpers
 
 export function obsidianStorePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.cliodeck', 'obsidian-vectors.db');
+  return path.join(workspaceRoot, '.cliodeck', 'brain.db');
 }

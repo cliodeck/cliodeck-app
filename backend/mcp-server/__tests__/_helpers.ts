@@ -207,15 +207,16 @@ export function createTempPrimarySourcesDb(root: string): Database.Database {
 }
 
 /**
- * Create `<root>/.cliodeck/obsidian-vectors.db` with the schema that
- * `ObsidianVaultStore.searchLexical` requires (notes + chunks + chunks_fts).
+ * Create `<root>/.cliodeck/brain.db` with the obsidian schema that
+ * `ObsidianVaultStore.searchLexical` requires
+ * (obsidian_notes + obsidian_chunks + obsidian_chunks_fts).
  */
 export function createTempObsidianDb(root: string): Database.Database {
   const dir = path.join(root, '.cliodeck');
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(path.join(dir, 'obsidian-vectors.db'));
+  const db = new Database(path.join(dir, 'brain.db'));
   db.exec(`
-    CREATE TABLE notes (
+    CREATE TABLE obsidian_notes (
       id TEXT PRIMARY KEY,
       relative_path TEXT NOT NULL UNIQUE,
       vault_path TEXT NOT NULL,
@@ -227,7 +228,7 @@ export function createTempObsidianDb(root: string): Database.Database {
       file_mtime INTEGER NOT NULL,
       indexed_at TEXT NOT NULL
     );
-    CREATE TABLE chunks (
+    CREATE TABLE obsidian_chunks (
       id TEXT PRIMARY KEY,
       note_id TEXT NOT NULL,
       chunk_index INTEGER NOT NULL,
@@ -238,7 +239,7 @@ export function createTempObsidianDb(root: string): Database.Database {
       embedding BLOB,
       dimension INTEGER
     );
-    CREATE VIRTUAL TABLE chunks_fts USING fts5(
+    CREATE VIRTUAL TABLE obsidian_chunks_fts USING fts5(
       id UNINDEXED,
       content,
       tokenize = 'porter unicode61'

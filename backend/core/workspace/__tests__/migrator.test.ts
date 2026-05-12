@@ -141,6 +141,18 @@ describe('migrateWorkspaceToFlat — db consolidation (history → brain)', () =
     const flat = workspaceFiles(tmpRoot);
     expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('HIST');
   });
+
+  it('skips the obsidian consolidation step when obsidian-vectors.db is absent', async () => {
+    // The actual SQL path (rename tables, ATTACH+copy) requires better-sqlite3
+    // native bindings, which fail under Vitest (CLAUDE.md §6). This test
+    // covers only the no-op branch — the happy path is validated at runtime.
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      '{"schema_version":2}',
+    );
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.warnings).toHaveLength(0);
+  });
 });
 
 describe('migrateWorkspaceToFlat — legacy-flat (pre-fusion v1)', () => {

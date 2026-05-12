@@ -39,16 +39,16 @@ function seedNote(
   }
 ): void {
   db.prepare(
-    `INSERT INTO notes (id, relative_path, vault_path, title, tags, frontmatter, wikilinks, file_hash, file_mtime, indexed_at)
+    `INSERT INTO obsidian_notes (id, relative_path, vault_path, title, tags, frontmatter, wikilinks, file_hash, file_mtime, indexed_at)
      VALUES (?, ?, ?, ?, '[]', '{}', '[]', 'hash', 0, '2026-01-01')`
   ).run(opts.noteId, opts.relativePath, '/v/' + opts.relativePath, opts.title);
   let i = 0;
   for (const c of opts.chunks) {
     db.prepare(
-      `INSERT INTO chunks (id, note_id, chunk_index, content, section_title, start_position, end_position)
+      `INSERT INTO obsidian_chunks (id, note_id, chunk_index, content, section_title, start_position, end_position)
        VALUES (?, ?, ?, ?, ?, 0, ?)`
     ).run(c.id, opts.noteId, i, c.content, c.section ?? null, c.content.length);
-    db.prepare(`INSERT INTO chunks_fts (id, content) VALUES (?, ?)`).run(
+    db.prepare(`INSERT INTO obsidian_chunks_fts (id, content) VALUES (?, ?)`).run(
       c.id,
       c.content
     );

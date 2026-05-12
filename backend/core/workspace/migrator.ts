@@ -22,6 +22,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import Database from 'better-sqlite3';
 import {
   defaultWorkspaceConfig,
   writeWorkspaceConfig,
@@ -159,10 +160,11 @@ export async function migrateWorkspaceToFlat(
       break;
   }
 
-  // Phase 2 runs regardless of the layout outcome — it's a no-op when
-  // history.db is absent. Without this, an already-flat workspace would
-  // skip consolidation and history.db would linger forever.
+  // Phase 2 runs regardless of the layout outcome — each step is a no-op
+  // when its legacy file is absent. Without this, an already-flat workspace
+  // would skip consolidation and legacy SQLite files would linger forever.
   await consolidateLegacyHistory(workspaceRoot, report);
+  await consolidateLegacyObsidian(workspaceRoot, report);
 
   // If consolidation produced copies on top of a "no layout work needed"
   // report, drop the misleading noop so callers see something happened.
@@ -183,6 +185,180 @@ export async function migrateWorkspaceToFlat(
  * import, or repeated runs), warn and skip rather than guess at table-level
  * merge semantics — the user is the only authority on which side wins.
  */
+/**
+ * Fold `.cliodeck/obsidian-vectors.db` into `.cliodeck/brain.db` (db-fusion
+ * step 2). The legacy file uses unprefixed `notes` / `chunks` / `chunks_fts`
+ * — we rename them in place to `obsidian_*` (so they don't collide with
+ * future PDF/Tropy domains in brain.db), then either rename the whole file
+ * to `brain.db` (when no brain.db exists yet) or ATTACH+copy into the
+ * existing brain.db.
+ *
+ * Uses `better-sqlite3` synchronously. Native bindings break under Vitest
+ * (`NODE_MODULE_VERSION` mismatch — known issue per CLAUDE.md §6), so the
+ * "happy path" is only exercised at runtime under Electron. Tests cover
+ * the no-op-if-absent case.
+ */
+async function consolidateLegacyObsidian(
+  root: string,
+  report: MigrationReport,
+): Promise<void> {
+  const legacyObs = path.join(root, '.cliodeck', 'obsidian-vectors.db');
+  if (!(await exists(legacyObs))) return;
+
+  const flat = workspaceFiles(root);
+  try {
+    renameObsidianTablesInPlace(legacyObs);
+
+    if (!(await exists(flat.brainDb))) {
+      await fs.rename(legacyObs, flat.brainDb);
+      report.copied.push({ source: legacyObs, target: flat.brainDb });
+      return;
+    }
+
+    // brain.db already exists (typically because history was already folded
+    // in). The obsidian_* tables don't collide with history's, so an ATTACH
+    // copy is safe.
+    copyObsidianIntoBrain(legacyObs, flat.brainDb);
+    await fs.unlink(legacyObs);
+    report.copied.push({ source: legacyObs, target: flat.brainDb });
+  } catch (err) {
+    report.warnings.push(
+      `Obsidian consolidation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function renameObsidianTablesInPlace(dbPath: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    db.exec('BEGIN');
+    try {
+      // ALTER TABLE RENAME (idempotent: skip if the new name already exists).
+      const tableExists = (name: string): boolean =>
+        Boolean(
+          db
+            .prepare(
+              "SELECT 1 FROM sqlite_master WHERE type IN ('table','index') AND name = ?",
+            )
+            .get(name),
+        );
+
+      if (tableExists('notes') && !tableExists('obsidian_notes')) {
+        db.exec('ALTER TABLE notes RENAME TO obsidian_notes');
+      }
+      if (tableExists('chunks') && !tableExists('obsidian_chunks')) {
+        db.exec('ALTER TABLE chunks RENAME TO obsidian_chunks');
+      }
+      // Rename indexes (ALTER INDEX RENAME isn't supported pre-3.25; drop+recreate).
+      if (tableExists('idx_notes_hash')) {
+        db.exec('DROP INDEX idx_notes_hash');
+      }
+      if (tableExists('idx_notes_mtime')) {
+        db.exec('DROP INDEX idx_notes_mtime');
+      }
+      if (tableExists('idx_chunks_note')) {
+        db.exec('DROP INDEX idx_chunks_note');
+      }
+      if (tableExists('obsidian_notes')) {
+        db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_obsidian_notes_hash ON obsidian_notes(file_hash)',
+        );
+        db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_obsidian_notes_mtime ON obsidian_notes(file_mtime)',
+        );
+      }
+      if (tableExists('obsidian_chunks')) {
+        db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_obsidian_chunks_note ON obsidian_chunks(note_id)',
+        );
+      }
+
+      // FTS5 virtual table — can't rename, rebuild instead.
+      if (tableExists('chunks_fts')) {
+        db.exec('DROP TABLE chunks_fts');
+      }
+      if (tableExists('obsidian_chunks') && !tableExists('obsidian_chunks_fts')) {
+        db.exec(
+          "CREATE VIRTUAL TABLE obsidian_chunks_fts USING fts5(id UNINDEXED, content, tokenize='porter unicode61')",
+        );
+        db.exec(
+          'INSERT INTO obsidian_chunks_fts (id, content) SELECT id, content FROM obsidian_chunks',
+        );
+      }
+
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function copyObsidianIntoBrain(legacyPath: string, brainPath: string): void {
+  const db = new Database(brainPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    // ATTACH path is a string literal; escape single quotes.
+    const escapedPath = legacyPath.replace(/'/g, "''");
+    db.exec(`ATTACH DATABASE '${escapedPath}' AS legacy_obs`);
+    try {
+      // Create destination tables with the same shape as the renamed legacy.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS obsidian_notes (
+          id TEXT PRIMARY KEY,
+          relative_path TEXT NOT NULL UNIQUE,
+          vault_path TEXT NOT NULL,
+          title TEXT NOT NULL,
+          tags TEXT NOT NULL,
+          frontmatter TEXT NOT NULL,
+          wikilinks TEXT NOT NULL,
+          file_hash TEXT NOT NULL,
+          file_mtime INTEGER NOT NULL,
+          indexed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_obsidian_notes_hash ON obsidian_notes(file_hash);
+        CREATE INDEX IF NOT EXISTS idx_obsidian_notes_mtime ON obsidian_notes(file_mtime);
+
+        CREATE TABLE IF NOT EXISTS obsidian_chunks (
+          id TEXT PRIMARY KEY,
+          note_id TEXT NOT NULL REFERENCES obsidian_notes(id) ON DELETE CASCADE,
+          chunk_index INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          section_title TEXT,
+          start_position INTEGER NOT NULL,
+          end_position INTEGER NOT NULL,
+          embedding BLOB,
+          dimension INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_obsidian_chunks_note ON obsidian_chunks(note_id);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS obsidian_chunks_fts USING fts5(
+          id UNINDEXED, content, tokenize='porter unicode61'
+        );
+      `);
+      db.exec(
+        'INSERT OR IGNORE INTO obsidian_notes SELECT * FROM legacy_obs.obsidian_notes',
+      );
+      db.exec(
+        'INSERT OR IGNORE INTO obsidian_chunks SELECT * FROM legacy_obs.obsidian_chunks',
+      );
+      // FTS5 rebuild from copied chunks rather than copying the FTS rows
+      // (faster, and the rank/segment metadata is regenerated cleanly).
+      db.exec('DELETE FROM obsidian_chunks_fts');
+      db.exec(
+        'INSERT INTO obsidian_chunks_fts (id, content) SELECT id, content FROM obsidian_chunks',
+      );
+    } finally {
+      db.exec('DETACH DATABASE legacy_obs');
+    }
+  } finally {
+    db.close();
+  }
+}
+
 async function consolidateLegacyHistory(
   root: string,
   report: MigrationReport,

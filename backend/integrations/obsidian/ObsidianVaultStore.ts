@@ -1,11 +1,13 @@
 /**
  * Obsidian vault store (fusion step 2.4b, Path B per ADR 0001).
  *
- * A parallel, self-contained SQLite+FTS5 store for Obsidian notes and their
- * chunks, living at `.cliodeck/obsidian-vectors.db`. Independent of the
- * PDF-centric `VectorStore`/`HNSWVectorStore` so the indexer doesn't need
- * the `PDFDocument` → `SourceDocument` generalisation (that's deferred to
- * Path A with a RAG benchmark).
+ * A self-contained SQLite+FTS5 store for Obsidian notes and their chunks.
+ * Lives in the shared `.cliodeck/brain.db` (db-fusion step 2): tables are
+ * prefixed `obsidian_` so they coexist with the PDF and Tropy domains in
+ * the same file without name collisions. Logically still independent of
+ * the PDF-centric `VectorStore`/`HNSWVectorStore` — the structural
+ * unification (Path A: `PDFDocument` → `SourceDocument`) is a separate
+ * concern deferred behind the RAG benchmark.
  *
  * Search: brute-force cosine similarity over all chunk embeddings + FTS5
  * (BM25-scored) lexical search; reciprocal rank fusion to combine. Works
@@ -102,7 +104,7 @@ export class ObsidianVaultStore {
 
   private initSchema(): void {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS notes (
+      CREATE TABLE IF NOT EXISTS obsidian_notes (
         id TEXT PRIMARY KEY,
         relative_path TEXT NOT NULL UNIQUE,
         vault_path TEXT NOT NULL,
@@ -114,12 +116,12 @@ export class ObsidianVaultStore {
         file_mtime INTEGER NOT NULL,
         indexed_at TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_notes_hash ON notes(file_hash);
-      CREATE INDEX IF NOT EXISTS idx_notes_mtime ON notes(file_mtime);
+      CREATE INDEX IF NOT EXISTS idx_obsidian_notes_hash ON obsidian_notes(file_hash);
+      CREATE INDEX IF NOT EXISTS idx_obsidian_notes_mtime ON obsidian_notes(file_mtime);
 
-      CREATE TABLE IF NOT EXISTS chunks (
+      CREATE TABLE IF NOT EXISTS obsidian_chunks (
         id TEXT PRIMARY KEY,
-        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        note_id TEXT NOT NULL REFERENCES obsidian_notes(id) ON DELETE CASCADE,
         chunk_index INTEGER NOT NULL,
         content TEXT NOT NULL,
         section_title TEXT,
@@ -128,9 +130,9 @@ export class ObsidianVaultStore {
         embedding BLOB,
         dimension INTEGER
       );
-      CREATE INDEX IF NOT EXISTS idx_chunks_note ON chunks(note_id);
+      CREATE INDEX IF NOT EXISTS idx_obsidian_chunks_note ON obsidian_chunks(note_id);
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+      CREATE VIRTUAL TABLE IF NOT EXISTS obsidian_chunks_fts USING fts5(
         id UNINDEXED,
         content,
         tokenize = 'porter unicode61'
@@ -142,7 +144,7 @@ export class ObsidianVaultStore {
 
   upsertNote(note: ObsidianNoteRecord): void {
     const stmt = this.db.prepare(`
-      INSERT INTO notes (id, relative_path, vault_path, title, tags, frontmatter, wikilinks, file_hash, file_mtime, indexed_at)
+      INSERT INTO obsidian_notes (id, relative_path, vault_path, title, tags, frontmatter, wikilinks, file_hash, file_mtime, indexed_at)
       VALUES (@id, @relative_path, @vault_path, @title, @tags, @frontmatter, @wikilinks, @file_hash, @file_mtime, @indexed_at)
       ON CONFLICT(id) DO UPDATE SET
         relative_path = excluded.relative_path,
@@ -170,10 +172,10 @@ export class ObsidianVaultStore {
   }
 
   deleteNoteChunks(noteId: string): void {
-    this.db.prepare('DELETE FROM chunks WHERE note_id = ?').run(noteId);
+    this.db.prepare('DELETE FROM obsidian_chunks WHERE note_id = ?').run(noteId);
     this.db
       .prepare(
-        'DELETE FROM chunks_fts WHERE id IN (SELECT id FROM chunks WHERE note_id = ?)'
+        'DELETE FROM obsidian_chunks_fts WHERE id IN (SELECT id FROM obsidian_chunks WHERE note_id = ?)'
       )
       .run(noteId);
   }
@@ -200,7 +202,7 @@ export class ObsidianVaultStore {
     }
     this.db
       .prepare(
-        `INSERT INTO chunks (id, note_id, chunk_index, content, section_title, start_position, end_position, embedding, dimension)
+        `INSERT INTO obsidian_chunks (id, note_id, chunk_index, content, section_title, start_position, end_position, embedding, dimension)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            chunk_index = excluded.chunk_index,
@@ -225,10 +227,10 @@ export class ObsidianVaultStore {
     // FTS5 virtual tables don't support UPSERT — the indexer guarantees a
     // prior `deleteNoteChunks(noteId)` wipes matching rows first.
     this.db
-      .prepare('DELETE FROM chunks_fts WHERE id = ?')
+      .prepare('DELETE FROM obsidian_chunks_fts WHERE id = ?')
       .run(chunk.id);
     this.db
-      .prepare('INSERT INTO chunks_fts (id, content) VALUES (?, ?)')
+      .prepare('INSERT INTO obsidian_chunks_fts (id, content) VALUES (?, ?)')
       .run(chunk.id, chunk.content);
   }
 
@@ -236,23 +238,23 @@ export class ObsidianVaultStore {
 
   getNoteByPath(relativePath: string): ObsidianNoteRecord | null {
     const row = this.db
-      .prepare('SELECT * FROM notes WHERE relative_path = ?')
+      .prepare('SELECT * FROM obsidian_notes WHERE relative_path = ?')
       .get(relativePath) as RawNoteRow | undefined;
     return row ? rowToNote(row) : null;
   }
 
   getNoteByHash(fileHash: string): ObsidianNoteRecord | null {
     const row = this.db
-      .prepare('SELECT * FROM notes WHERE file_hash = ?')
+      .prepare('SELECT * FROM obsidian_notes WHERE file_hash = ?')
       .get(fileHash) as RawNoteRow | undefined;
     return row ? rowToNote(row) : null;
   }
 
   stats(): { noteCount: number; chunkCount: number } {
-    const n = this.db.prepare('SELECT COUNT(*) AS c FROM notes').get() as {
+    const n = this.db.prepare('SELECT COUNT(*) AS c FROM obsidian_notes').get() as {
       c: number;
     };
-    const c = this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get() as {
+    const c = this.db.prepare('SELECT COUNT(*) AS c FROM obsidian_chunks').get() as {
       c: number;
     };
     return { noteCount: n.c, chunkCount: c.c };
@@ -272,7 +274,7 @@ export class ObsidianVaultStore {
     const denseRows = this.db
       .prepare(
         `SELECT c.id, c.note_id, c.chunk_index, c.content, c.section_title, c.start_position, c.end_position, c.embedding
-         FROM chunks c WHERE c.embedding IS NOT NULL`
+         FROM obsidian_chunks c WHERE c.embedding IS NOT NULL`
       )
       .all() as RawChunkRow[];
 
@@ -290,9 +292,9 @@ export class ObsidianVaultStore {
       try {
         const ftsRows = this.db
           .prepare(
-            `SELECT f.id, bm25(chunks_fts) AS bm
-             FROM chunks_fts f
-             WHERE chunks_fts MATCH ?
+            `SELECT f.id, bm25(obsidian_chunks_fts) AS bm
+             FROM obsidian_chunks_fts f
+             WHERE obsidian_chunks_fts MATCH ?
              ORDER BY bm
              LIMIT ?`
           )
@@ -307,7 +309,7 @@ export class ObsidianVaultStore {
           const rows = this.db
             .prepare(
               `SELECT id, note_id, chunk_index, content, section_title, start_position, end_position, embedding
-               FROM chunks WHERE id IN (${ids.map(() => '?').join(',')})`
+               FROM obsidian_chunks WHERE id IN (${ids.map(() => '?').join(',')})`
             )
             .all(...ids) as RawChunkRow[];
           for (const r of rows) byId.set(r.id, r);
@@ -355,7 +357,7 @@ export class ObsidianVaultStore {
 
     // Hydrate notes (lazy; each hit joins to its note).
     const hits: ObsidianSearchHit[] = [];
-    const noteStmt = this.db.prepare('SELECT * FROM notes WHERE id = ?');
+    const noteStmt = this.db.prepare('SELECT * FROM obsidian_notes WHERE id = ?');
     for (const r of ranked) {
       const noteRow = noteStmt.get(r.row.note_id) as RawNoteRow | undefined;
       if (!noteRow) continue;
@@ -388,9 +390,9 @@ export class ObsidianVaultStore {
     try {
       rows = this.db
         .prepare(
-          `SELECT f.id, bm25(chunks_fts) AS bm
-           FROM chunks_fts f
-           WHERE chunks_fts MATCH ?
+          `SELECT f.id, bm25(obsidian_chunks_fts) AS bm
+           FROM obsidian_chunks_fts f
+           WHERE obsidian_chunks_fts MATCH ?
            ORDER BY bm
            LIMIT ?`
         )
@@ -403,13 +405,13 @@ export class ObsidianVaultStore {
     const chunkRows = this.db
       .prepare(
         `SELECT id, note_id, chunk_index, content, section_title, start_position, end_position
-         FROM chunks WHERE id IN (${ids.map(() => '?').join(',')})`
+         FROM obsidian_chunks WHERE id IN (${ids.map(() => '?').join(',')})`
       )
       .all(...ids) as RawChunkRow[];
     const byId = new Map<string, RawChunkRow>();
     for (const r of chunkRows) byId.set(r.id, r);
 
-    const noteStmt = this.db.prepare('SELECT * FROM notes WHERE id = ?');
+    const noteStmt = this.db.prepare('SELECT * FROM obsidian_notes WHERE id = ?');
     const hits: ObsidianSearchHit[] = [];
     for (const r of rows) {
       const c = byId.get(r.id);
