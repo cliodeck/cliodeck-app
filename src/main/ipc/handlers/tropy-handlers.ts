@@ -322,7 +322,7 @@ export function setupTropyHandlers() {
       return { success: true, report };
     } catch (error: unknown) {
       console.error('❌ tropy:get-source-ocr-report error:', error);
-      return errorResponse(error);
+      return errorResponse(error instanceof Error ? error : String(error));
     }
   });
 
@@ -332,7 +332,7 @@ export function setupTropyHandlers() {
       return { success: true, report };
     } catch (error: unknown) {
       console.error('❌ tropy:get-corpus-ocr-report error:', error);
-      return errorResponse(error);
+      return errorResponse(error instanceof Error ? error : String(error));
     }
   });
 
