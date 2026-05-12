@@ -27,10 +27,11 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 - Registered in `backend/core/llm/providers/registry.ts` (open factory map)
 - Legacy bridges: `createRegistryFromLegacyConfig`, `createRegistryFromClioDeckConfig`
 
-**Workspace v2 layout** — `<projectRoot>/.cliodeck/v2/`:
+**Workspace layout** — `<projectRoot>/.cliodeck/` (flat):
 - `config.json` (`schema_version: 2`), `hints.md`, `recipes/`, `recipes-runs/`
 - `obsidian-vectors.db`, `mcp-access.jsonl`, `security-events.jsonl`
-- Legacy `.cliodeck/*` paths **still coexist** during transition (see §4).
+- The pre-fusion SQLite stores (`vectors.db`, `primary-sources.db`, `history.db`) live alongside at the same flat level — consolidating them into `brain.db` is a Path A concern (ADR 0001).
+- Legacy `.cliodeck/v2/*` (pre-flatten) and pre-fusion v1 layouts are auto-migrated to flat on project load via `migrateWorkspaceToFlat`.
 
 **IPC** — handlers in `src/main/ipc/handlers/*-handlers.ts`, bindings in `src/preload/index.ts`, surfaced as `window.electron.*` in the renderer.
 
@@ -53,7 +54,7 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 
 ## 4. DO NOT touch without asking
 
-- **Legacy `.cliodeck/*` workspace layout** — coexists with v2; the migration swap is **gated on a Path A RAG benchmark** (ADR 0001).
+- **`backend/core/workspace/layout.ts`** — owns the flat path map (`workspaceFiles`/`ensureWorkspaceDirectories`) and the `WorkspaceVersion` detection used by auto-migration. Changing keys or detection rules ripples through every service that opens `.cliodeck/*`.
 - **HNSW index format** — bumping requires re-indexing every user's corpus.
 - **Tropy / Zotero parsers** — non-obvious edge cases.
 - **Provider contract `backend/core/llm/providers/base.ts`** — changes ripple through 5 providers + their tests.
@@ -81,8 +82,8 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 - **RAG** — Retrieval-Augmented Generation (corpus chunks injected into LLM prompts).
 - **RetrievalService** — unified search across PDFs (secondary), Tropy archives (primary), Obsidian vault.
 - **MCP** — Model Context Protocol (Anthropic spec; cliodeck is both a server and a client).
-- **`.cliohints`** — workspace-level system-prompt context, persists across chats (`.cliodeck/v2/hints.md`).
+- **`.cliohints`** — workspace-level system-prompt context, persists across chats (`.cliodeck/hints.md`).
 - **Recipe** — YAML-defined workflow chaining brainstorm / search / graph / write / export steps.
-- **Vault** — an Obsidian markdown notes folder, indexed in `.cliodeck/v2/obsidian-vectors.db`.
+- **Vault** — an Obsidian markdown notes folder, indexed in `.cliodeck/obsidian-vectors.db`.
 - **Primary source** — Tropy archive (archival photos, OCR'd documents).
 - **Secondary source** — PDF in the bibliography (published article, book chapter).

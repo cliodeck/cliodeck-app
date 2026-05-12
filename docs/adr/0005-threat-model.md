@@ -32,7 +32,7 @@ primary threat vector.
 |---|---|---|
 | API keys (LLM providers, Europeana, Zotero) | Electron safeStorage (OS keychain) | Exfiltration via prompt injection |
 | Research content (corpus, notes, drafts) | Local filesystem only | Unintended leakage to cloud providers |
-| Session metadata (MCP logs, security events) | Local `.cliodeck/v2/` JSONL | Low value, integrity matters |
+| Session metadata (MCP logs, security events) | Local `.cliodeck/` JSONL | Low value, integrity matters |
 
 ### Cloud boundary
 

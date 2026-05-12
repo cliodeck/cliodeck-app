@@ -45,7 +45,7 @@ The plan's "branching chunking PDF/OCR de ClioDeck en amont" is partly a non-iss
 The indexer was not ported in 2.1 because it consumes `DocumentChunk` / `VectorStore` / `BM25Index` / `OllamaClient` types that are PDF-centric in ClioDeck (`PDFDocument.pageCount`, `DocumentChunk.pageNumber`). Reactivating it requires one of:
 
 - **Path A — generalise** `PDFDocument` → `SourceDocument` with a `sourceType` discriminant across the entire vector-store surface. Touches `EnhancedVectorStore`, `HNSWVectorStore`, `PrimarySourcesVectorStore`, IPC handlers, renderer search components. 1–2 days, high blast radius.
-- **Path B — parallel store** (now tracked as step 2.4b): give the Obsidian indexer its own SQLite + HNSW files under `.cliodeck/v2/obsidian-vectors.db`, independent of the PDF vector store. Unification to Path A happens when its value exceeds the cost — likely after Phase 3 UI surfaces both sources in Brainstorm.
+- **Path B — parallel store** (now tracked as step 2.4b): give the Obsidian indexer its own SQLite + HNSW files under `.cliodeck/obsidian-vectors.db`, independent of the PDF vector store. Unification to Path A happens when its value exceeds the cost — likely after Phase 3 UI surfaces both sources in Brainstorm.
 
 We proceed with **Path B** first to unblock Phase 3, reserving Path A for a dedicated PR with a benchmark (per the fusion plan's risks table: "Divergence qualité RAG après fusion 2.4 — Élevé").
 

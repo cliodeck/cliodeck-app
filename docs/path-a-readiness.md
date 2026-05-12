@@ -5,7 +5,7 @@ Status: scaffolded — 2026-04-14 | updated 2026-05-07
 ## What Path A is
 
 Per [ADR 0001](adr/0001-rag-pipeline-arbitration.md), Path A is the
-unification of the Obsidian vault store (`.cliodeck/v2/obsidian-vectors.db`,
+unification of the Obsidian vault store (`.cliodeck/obsidian-vectors.db`,
 parallel) into the main `EnhancedVectorStore`
 (`.cliodeck/vectors.db`) using the generalised
 [`SourceDocument` / `SourceChunk` types](../backend/types/source-document.ts).

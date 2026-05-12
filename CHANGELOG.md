@@ -19,16 +19,20 @@ fusion branch reference the step numbers defined there.
 
 ### Added
 
-#### Workspace v2 (additive)
-- `.cliodeck/v2/` directory alongside the existing `.cliodeck/*` layout
-  — both coexist during transition so pre- and post-fusion apps open the
-  same workspace without data loss.
-- `config.json` with `schema_version: 2`, `hints.md`, `mcp-access.jsonl`,
+#### Workspace layout (flat)
+- All workspace artifacts live flat under `.cliodeck/`: `config.json`
+  with `schema_version: 2`, `hints.md`, `mcp-access.jsonl`,
   `security-events.jsonl`, `recipes/`, `recipes-runs/`,
-  `obsidian-vectors.db`.
-- Migrators: `migrateFromCliodeckV1` and `migrateFromCliobrain` return a
-  typed `MigrationReport` (partial-success first-class per the claw-code
-  engineering guidelines).
+  `obsidian-vectors.db`, alongside the pre-fusion SQLite stores
+  (`vectors.db`, `primary-sources.db`, `history.db`, `hnsw.index`).
+- `migrateWorkspaceToFlat` auto-migrates two legacy layouts on project
+  load: the in-flight `.cliodeck/v2/*` subdir produced by earlier fusion
+  commits, and the pre-fusion v1 `.cliodeck/` without `config.json`.
+  Both promotions are idempotent and additive — failures don't block
+  load.
+- Returns a typed `MigrationReport` (partial-success first-class per the
+  claw-code engineering guidelines): `copied`, `skipped` with typed
+  reason, `warnings`.
 
 #### Typed LLM provider layer
 - `LLMProvider` / `EmbeddingProvider` interfaces with a typed
@@ -65,7 +69,7 @@ fusion branch reference the step numbers defined there.
 - **Obsidian vault integration** — `ObsidianVaultReader`,
   `ObsidianMarkdownParser`, `ObsidianVaultExporter` ported; new
   `ObsidianVaultIndexer` + `ObsidianVaultStore` run a parallel
-  SQLite+FTS5 index at `.cliodeck/v2/obsidian-vectors.db` with hybrid
+  SQLite+FTS5 index at `.cliodeck/obsidian-vectors.db` with hybrid
   search (brute-force cosine + FTS5 BM25, RRF K=60).
 - **Knowledge graph** — Graphology-based community detection ported,
   `GraphData` / `GraphNode` / `GraphEdge` types unified with existing

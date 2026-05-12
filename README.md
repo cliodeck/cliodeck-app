@@ -46,7 +46,7 @@ ClioDeck v2 organises work into four top-level modes that share the same project
 
 ### .cliohints
 
-Every workspace can carry a `.cliodeck/v2/hints.md` file — house rules injected into every prompt. Examples: citation style ("always Chicago author-date"), period focus ("WWII France, 1939-1945"), language ("reply in French"). Hints are *local-only* and never leaked to MCP clients unless you opt in per-tool.
+Every workspace can carry a `.cliodeck/hints.md` file — house rules injected into every prompt. Examples: citation style ("always Chicago author-date"), period focus ("WWII France, 1939-1945"), language ("reply in French"). Hints are *local-only* and never leaked to MCP clients unless you opt in per-tool.
 
 ## Quick start
 
@@ -80,7 +80,7 @@ For detailed installation instructions, see:
 npm run cliodeck -- import-cliobrain /path/to/your/cliobrain/workspace
 ```
 
-The importer copies `brain.db`, `hnsw.index`, `hints.md`, and the MCP access log into the v2 layout under `.cliodeck/v2/`, merging your existing `config.json` and preserving unknown keys. See [docs/fusion-cliobrain-strategy.md](docs/fusion-cliobrain-strategy.md) for the full migration rationale. ClioBrain enters maintenance mode; new features go to ClioDeck.
+The importer copies `brain.db`, `hnsw.index`, `hints.md`, and the MCP access log into the workspace's `.cliodeck/`, merging your existing `config.json` and preserving unknown keys. The same command also auto-migrates legacy `.cliodeck/v2/*` layouts (in-flight fusion-branch artifacts) up to the flat layout. See [docs/fusion-cliobrain-strategy.md](docs/fusion-cliobrain-strategy.md) for the full migration rationale. ClioBrain enters maintenance mode; new features go to ClioDeck.
 
 ### Build from source
 
