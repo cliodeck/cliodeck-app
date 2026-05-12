@@ -79,7 +79,7 @@ describe('migrateWorkspaceToFlat — none / flat', () => {
     expect(r.noop).toBeDefined();
   });
 
-  it('no-op when already flat', async () => {
+  it('no-op when already flat and nothing to consolidate', async () => {
     await write(
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       '{"schema_version":2}',
@@ -87,6 +87,59 @@ describe('migrateWorkspaceToFlat — none / flat', () => {
     const r = await migrateWorkspaceToFlat(tmpRoot);
     expect(r.kind).toBe('none');
     expect(r.noop).toMatch(/already at flat/);
+  });
+});
+
+describe('migrateWorkspaceToFlat — db consolidation (history → brain)', () => {
+  it('renames history.db to brain.db on a flat workspace', async () => {
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      '{"schema_version":2}',
+    );
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, 'history.db'),
+      'PRETEND-SQLITE-BYTES',
+    );
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.copied.some((c) => c.target.endsWith('brain.db'))).toBe(true);
+
+    const flat = workspaceFiles(tmpRoot);
+    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('PRETEND-SQLITE-BYTES');
+    await expect(
+      fs.access(path.join(tmpRoot, CLIODECK_DIR, 'history.db')),
+    ).rejects.toThrow();
+  });
+
+  it('warns and skips when both history.db and brain.db exist', async () => {
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      '{"schema_version":2}',
+    );
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HISTORY');
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'), 'BRAIN');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.warnings.some((w) => w.includes('both files exist'))).toBe(true);
+    // Both files stay put — the user is the only authority on what to merge.
+    expect(
+      await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'utf8'),
+    ).toBe('HISTORY');
+    expect(
+      await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'), 'utf8'),
+    ).toBe('BRAIN');
+  });
+
+  it('runs consolidation alongside the legacy-subdir flatten in one pass', async () => {
+    const v2 = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR);
+    await write(path.join(v2, 'config.json'), '{"schema_version":2}');
+    // history.db lived flat in pre-fusion v1 — it never moved into v2/.
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HIST');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('legacy-subdir');
+    const flat = workspaceFiles(tmpRoot);
+    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('HIST');
   });
 });
 

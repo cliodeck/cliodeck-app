@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { existsSync, mkdirSync, chmodSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { workspaceFiles } from '../workspace/layout.js';
 
 // ============================================================================
 // Types & Interfaces
@@ -103,7 +104,11 @@ export class HistoryManager {
     }
 
     this.projectPath = projectPath;
-    this.dbPath = path.join(projectPath, '.cliodeck', 'history.db');
+    // History lives in the consolidated brain.db (db-fusion step 1). The
+    // `CREATE TABLE IF NOT EXISTS` calls below coexist with any other domain
+    // tables that arrive in brain.db (primary sources, PDF vectors, etc.).
+    // Legacy `history.db` files are folded in by `migrateWorkspaceToFlat`.
+    this.dbPath = workspaceFiles(projectPath).brainDb;
 
     // Create .cliodeck directory if needed
     const cliodeckDir = path.join(projectPath, '.cliodeck');

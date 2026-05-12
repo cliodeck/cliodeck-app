@@ -121,29 +121,101 @@ function makeReport(kind: MigrationKind, root: string, noop?: string): Migration
 }
 
 /**
- * Bring the workspace at `root` to flat layout if needed. Idempotent: a
- * workspace already flat returns a no-op report.
+ * Bring the workspace at `root` to flat layout if needed AND consolidate any
+ * legacy per-domain SQLite stores (currently `history.db`) into the shared
+ * `brain.db`. Idempotent: a fully migrated workspace returns a no-op report.
+ *
+ * Two phases:
+ *   1. Layout — flatten `.cliodeck/v2/*`, absorb `.cliobrain/`, write a default
+ *      config for pre-fusion v1 workspaces.
+ *   2. Database consolidation — fold `history.db` into `brain.db`. Future
+ *      stores (`primary-sources.db`, `vectors.db`, `obsidian-vectors.db`)
+ *      will plug in here, one PR at a time.
  */
 export async function migrateWorkspaceToFlat(
   workspaceRoot: string,
   opts: MigrateOptions = {},
 ): Promise<MigrationReport> {
   const version = await detectWorkspaceVersion(workspaceRoot);
+  let report: MigrationReport;
+
   switch (version) {
     case 'none':
-      return makeReport('none', workspaceRoot, 'No workspace artifacts found at root.');
+      report = makeReport('none', workspaceRoot, 'No workspace artifacts found at root.');
+      break;
     case 'flat':
-      if (!opts.overwrite) {
-        return makeReport('none', workspaceRoot, 'Workspace already at flat layout.');
-      }
-      // overwrite:true on a flat workspace = re-run legacy-flat (rewrites config).
-      return migrateLegacyFlat(workspaceRoot, opts);
+      report = opts.overwrite
+        ? await migrateLegacyFlat(workspaceRoot, opts)
+        : makeReport('none', workspaceRoot, 'Workspace already at flat layout.');
+      break;
     case 'legacy-subdir':
-      return migrateLegacySubdir(workspaceRoot, opts);
+      report = await migrateLegacySubdir(workspaceRoot, opts);
+      break;
     case 'legacy-flat':
-      return migrateLegacyFlat(workspaceRoot, opts);
+      report = await migrateLegacyFlat(workspaceRoot, opts);
+      break;
     case 'cliobrain':
-      return migrateCliobrain(workspaceRoot, opts);
+      report = await migrateCliobrain(workspaceRoot, opts);
+      break;
+  }
+
+  // Phase 2 runs regardless of the layout outcome — it's a no-op when
+  // history.db is absent. Without this, an already-flat workspace would
+  // skip consolidation and history.db would linger forever.
+  await consolidateLegacyHistory(workspaceRoot, report);
+
+  // If consolidation produced copies on top of a "no layout work needed"
+  // report, drop the misleading noop so callers see something happened.
+  if (report.noop && report.copied.length > 0) {
+    report.noop = undefined;
+  }
+
+  return report;
+}
+
+/**
+ * Fold `.cliodeck/history.db` into `.cliodeck/brain.db` (db-fusion step 1).
+ *
+ * Strategy: if `brain.db` is absent (the common case for fresh / pre-fusion
+ * workspaces), a single `fs.rename` moves the file atomically — the schema
+ * stays valid because HistoryManager's `CREATE TABLE IF NOT EXISTS` calls
+ * happily reopen the renamed file. If `brain.db` already exists (ClioBrain
+ * import, or repeated runs), warn and skip rather than guess at table-level
+ * merge semantics — the user is the only authority on which side wins.
+ */
+async function consolidateLegacyHistory(
+  root: string,
+  report: MigrationReport,
+): Promise<void> {
+  const legacyHistory = path.join(root, '.cliodeck', 'history.db');
+  if (!(await exists(legacyHistory))) return;
+
+  const flat = workspaceFiles(root);
+  if (await exists(flat.brainDb)) {
+    report.warnings.push(
+      `Cannot consolidate ${legacyHistory} into ${flat.brainDb}: both files exist. ` +
+        `Resolve by hand (back up one, delete the other) before retrying.`,
+    );
+    return;
+  }
+
+  try {
+    await fs.rename(legacyHistory, flat.brainDb);
+    report.copied.push({ source: legacyHistory, target: flat.brainDb });
+  } catch (err) {
+    // EXDEV fallback — unlikely on a single-volume workspace, but cheap to guard.
+    try {
+      await fs.copyFile(legacyHistory, flat.brainDb);
+      await fs.unlink(legacyHistory);
+      report.copied.push({ source: legacyHistory, target: flat.brainDb });
+      report.warnings.push(
+        `history.db rename fell back to copy: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } catch (e2) {
+      report.warnings.push(
+        `Failed to consolidate history.db into brain.db: ${e2 instanceof Error ? e2.message : String(e2)}`,
+      );
+    }
   }
 }
 
