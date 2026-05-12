@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useJournalStore } from '../../stores/journalStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { SessionTimeline } from './SessionTimeline';
 import { AIOperationsTable } from './AIOperationsTable';
 import { ChatHistoryView } from './ChatHistoryView';
@@ -37,11 +38,26 @@ export const JournalPanel: React.FC = () => {
     'sessions'
   );
 
-  // Load sessions and statistics on mount
+  // Reload journal data whenever a project is opened or switched. Mounting
+  // the panel before any project is open would otherwise leave the store
+  // with a stuck "No project open" error and an empty sessions list,
+  // because the IPC handlers fail-soft when `historyService` has no manager
+  // yet. Reacting to `currentProject.path` rerun the loads once the
+  // backend is ready.
+  const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   useEffect(() => {
+    if (!currentProjectPath) return;
+    clearError();
     loadSessions();
     loadStatistics();
-  }, [loadSessions, loadStatistics]);
+    if (viewScope === 'project') {
+      loadAllProjectData();
+    }
+    // viewScope intentionally omitted: switching scope already triggers its
+    // own loader (see the next effect); we only want to refire on project
+    // identity change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProjectPath, loadSessions, loadStatistics, loadAllProjectData, clearError]);
 
   // Load project data when switching to project scope
   useEffect(() => {
