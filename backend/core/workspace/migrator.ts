@@ -166,6 +166,7 @@ export async function migrateWorkspaceToFlat(
   await consolidateLegacyHistory(workspaceRoot, report);
   await consolidateLegacyObsidian(workspaceRoot, report);
   await consolidateLegacyPrimarySources(workspaceRoot, report);
+  await consolidateLegacyVectors(workspaceRoot, report);
 
   // If consolidation produced copies on top of a "no layout work needed"
   // report, drop the misleading noop so callers see something happened.
@@ -498,6 +499,127 @@ function copyPrimarySourcesIntoBrain(legacyPath: string, brainPath: string): voi
       }
     } finally {
       db.exec('DETACH DATABASE legacy_ps');
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Fold `.cliodeck/vectors.db` into `.cliodeck/brain.db` (db-fusion step 4).
+ * Renames every legacy table to the `pdf_*` namespace, then merges.
+ */
+async function consolidateLegacyVectors(
+  root: string,
+  report: MigrationReport,
+): Promise<void> {
+  const legacy = path.join(root, '.cliodeck', 'vectors.db');
+  if (!(await exists(legacy))) return;
+
+  const flat = workspaceFiles(root);
+  try {
+    renameVectorsTablesInPlace(legacy);
+
+    if (!(await exists(flat.brainDb))) {
+      await fs.rename(legacy, flat.brainDb);
+      report.copied.push({ source: legacy, target: flat.brainDb });
+      return;
+    }
+
+    copyVectorsIntoBrain(legacy, flat.brainDb);
+    await fs.unlink(legacy);
+    report.copied.push({ source: legacy, target: flat.brainDb });
+  } catch (err) {
+    report.warnings.push(
+      `Vectors consolidation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+const VECTORS_TABLE_RENAMES: Array<[string, string]> = [
+  ['documents', 'pdf_documents'],
+  ['chunks', 'pdf_chunks'],
+  ['document_citations', 'pdf_citations'],
+  ['document_similarities', 'pdf_similarities'],
+  ['topic_analyses', 'pdf_topic_analyses'],
+  ['topics', 'pdf_topics'],
+  ['topic_assignments', 'pdf_topic_assignments'],
+  ['topic_outliers', 'pdf_topic_outliers'],
+  ['zotero_collections', 'pdf_zotero_collections'],
+  ['document_collections', 'pdf_document_collections'],
+];
+
+const VECTORS_INDEX_DROPS = [
+  'idx_chunks_document_id',
+  'idx_chunks_page_number',
+  'idx_chunks_content_hash',
+  'idx_citations_source',
+  'idx_citations_target',
+  'idx_similarities_doc1',
+  'idx_similarities_doc2',
+  'idx_topics_analysis',
+  'idx_topic_assignments_analysis',
+  'idx_topic_assignments_document',
+  'idx_topic_outliers_analysis',
+  'idx_doc_collections_coll',
+];
+
+function renameVectorsTablesInPlace(dbPath: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    db.exec('BEGIN');
+    try {
+      const objectExists = (name: string): boolean =>
+        Boolean(
+          db
+            .prepare(
+              "SELECT 1 FROM sqlite_master WHERE type IN ('table','index') AND name = ?",
+            )
+            .get(name),
+        );
+
+      for (const [oldName, newName] of VECTORS_TABLE_RENAMES) {
+        if (objectExists(oldName) && !objectExists(newName)) {
+          db.exec(`ALTER TABLE ${oldName} RENAME TO ${newName}`);
+        }
+      }
+      for (const idx of VECTORS_INDEX_DROPS) {
+        if (objectExists(idx)) {
+          db.exec(`DROP INDEX ${idx}`);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function copyVectorsIntoBrain(legacyPath: string, brainPath: string): void {
+  const db = new Database(brainPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    const escapedPath = legacyPath.replace(/'/g, "''");
+    db.exec(`ATTACH DATABASE '${escapedPath}' AS legacy_pdf`);
+    try {
+      for (const [, newName] of VECTORS_TABLE_RENAMES) {
+        const createSql = db
+          .prepare(
+            `SELECT sql FROM legacy_pdf.sqlite_master WHERE type='table' AND name=?`,
+          )
+          .get(newName) as { sql: string } | undefined;
+        if (!createSql?.sql) continue;
+        db.exec(createSql.sql);
+        db.exec(
+          `INSERT OR IGNORE INTO ${newName} SELECT * FROM legacy_pdf.${newName}`,
+        );
+      }
+    } finally {
+      db.exec('DETACH DATABASE legacy_pdf');
     }
   } finally {
     db.close();

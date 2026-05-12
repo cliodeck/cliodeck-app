@@ -31,8 +31,10 @@ export class VectorStore {
     }
 
     this.projectPath = projectPath;
-    // Base de données dans project/.cliodeck/vectors.db
-    this.dbPath = path.join(projectPath, '.cliodeck', 'vectors.db');
+    // PDF tables live in the shared brain.db (db-fusion step 4) with `pdf_`
+    // prefixes to avoid colliding with the history / obsidian / tropy domains.
+    // The HNSW binary index stays at .cliodeck/hnsw.index (separate format).
+    this.dbPath = path.join(projectPath, '.cliodeck', 'brain.db');
 
     console.log(`📁 Base de données projet: ${this.dbPath}`);
 
@@ -78,7 +80,7 @@ export class VectorStore {
   private createTables(): void {
     // Table pour les documents
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS documents (
+      CREATE TABLE IF NOT EXISTS pdf_documents (
         id TEXT PRIMARY KEY,
         file_path TEXT NOT NULL,
         title TEXT NOT NULL,
@@ -99,7 +101,7 @@ export class VectorStore {
 
     // Table pour les chunks avec embeddings
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS chunks (
+      CREATE TABLE IF NOT EXISTS pdf_chunks (
         id TEXT PRIMARY KEY,
         document_id TEXT NOT NULL,
         content TEXT NOT NULL,
@@ -108,39 +110,39 @@ export class VectorStore {
         start_position INTEGER NOT NULL,
         end_position INTEGER NOT NULL,
         embedding BLOB,
-        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        FOREIGN KEY (document_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
     `);
 
     // Table pour les citations entre documents
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS document_citations (
+      CREATE TABLE IF NOT EXISTS pdf_citations (
         id TEXT PRIMARY KEY,
         source_doc_id TEXT NOT NULL,
         target_citation TEXT NOT NULL,
         target_doc_id TEXT,
         context TEXT,
         page_number INTEGER,
-        FOREIGN KEY (source_doc_id) REFERENCES documents(id) ON DELETE CASCADE,
-        FOREIGN KEY (target_doc_id) REFERENCES documents(id) ON DELETE SET NULL
+        FOREIGN KEY (source_doc_id) REFERENCES pdf_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (target_doc_id) REFERENCES pdf_documents(id) ON DELETE SET NULL
       );
     `);
 
     // Table pour les similarités pré-calculées (optionnel, pour performance)
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS document_similarities (
+      CREATE TABLE IF NOT EXISTS pdf_similarities (
         doc_id_1 TEXT NOT NULL,
         doc_id_2 TEXT NOT NULL,
         similarity REAL NOT NULL,
         PRIMARY KEY (doc_id_1, doc_id_2),
-        FOREIGN KEY (doc_id_1) REFERENCES documents(id) ON DELETE CASCADE,
-        FOREIGN KEY (doc_id_2) REFERENCES documents(id) ON DELETE CASCADE
+        FOREIGN KEY (doc_id_1) REFERENCES pdf_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (doc_id_2) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
     `);
 
     // Tables pour la persistance des analyses de topics (BERTopic)
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS topic_analyses (
+      CREATE TABLE IF NOT EXISTS pdf_topic_analyses (
         id TEXT PRIMARY KEY,
         analysis_date TEXT NOT NULL,
         is_current INTEGER DEFAULT 1,
@@ -150,72 +152,72 @@ export class VectorStore {
     `);
 
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS topics (
+      CREATE TABLE IF NOT EXISTS pdf_topics (
         id TEXT PRIMARY KEY,
         analysis_id TEXT NOT NULL,
         topic_id INTEGER NOT NULL,
         label TEXT,
         keywords_json TEXT,
         size INTEGER,
-        FOREIGN KEY (analysis_id) REFERENCES topic_analyses(id) ON DELETE CASCADE
+        FOREIGN KEY (analysis_id) REFERENCES pdf_topic_analyses(id) ON DELETE CASCADE
       );
     `);
 
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS topic_assignments (
+      CREATE TABLE IF NOT EXISTS pdf_topic_assignments (
         id TEXT PRIMARY KEY,
         analysis_id TEXT NOT NULL,
         document_id TEXT NOT NULL,
         topic_id INTEGER,
-        FOREIGN KEY (analysis_id) REFERENCES topic_analyses(id) ON DELETE CASCADE,
-        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        FOREIGN KEY (analysis_id) REFERENCES pdf_topic_analyses(id) ON DELETE CASCADE,
+        FOREIGN KEY (document_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
     `);
 
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS topic_outliers (
+      CREATE TABLE IF NOT EXISTS pdf_topic_outliers (
         id TEXT PRIMARY KEY,
         analysis_id TEXT NOT NULL,
         document_id TEXT NOT NULL,
-        FOREIGN KEY (analysis_id) REFERENCES topic_analyses(id) ON DELETE CASCADE,
-        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        FOREIGN KEY (analysis_id) REFERENCES pdf_topic_analyses(id) ON DELETE CASCADE,
+        FOREIGN KEY (document_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
     `);
 
     // Table des collections Zotero
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS zotero_collections (
+      CREATE TABLE IF NOT EXISTS pdf_zotero_collections (
         key TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         parent_key TEXT,
-        FOREIGN KEY (parent_key) REFERENCES zotero_collections(key) ON DELETE SET NULL
+        FOREIGN KEY (parent_key) REFERENCES pdf_zotero_collections(key) ON DELETE SET NULL
       );
     `);
 
     // Table de liaison documents-collections (many-to-many)
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS document_collections (
+      CREATE TABLE IF NOT EXISTS pdf_document_collections (
         document_id TEXT NOT NULL,
         collection_key TEXT NOT NULL,
         PRIMARY KEY (document_id, collection_key),
-        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
-        FOREIGN KEY (collection_key) REFERENCES zotero_collections(key) ON DELETE CASCADE
+        FOREIGN KEY (document_id) REFERENCES pdf_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (collection_key) REFERENCES pdf_zotero_collections(key) ON DELETE CASCADE
       );
     `);
 
     // Index pour accélérer les recherches
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
-      CREATE INDEX IF NOT EXISTS idx_chunks_page_number ON chunks(page_number);
-      CREATE INDEX IF NOT EXISTS idx_citations_source ON document_citations(source_doc_id);
-      CREATE INDEX IF NOT EXISTS idx_citations_target ON document_citations(target_doc_id);
-      CREATE INDEX IF NOT EXISTS idx_similarities_doc1 ON document_similarities(doc_id_1);
-      CREATE INDEX IF NOT EXISTS idx_similarities_doc2 ON document_similarities(doc_id_2);
-      CREATE INDEX IF NOT EXISTS idx_topics_analysis ON topics(analysis_id);
-      CREATE INDEX IF NOT EXISTS idx_topic_assignments_analysis ON topic_assignments(analysis_id);
-      CREATE INDEX IF NOT EXISTS idx_topic_assignments_document ON topic_assignments(document_id);
-      CREATE INDEX IF NOT EXISTS idx_topic_outliers_analysis ON topic_outliers(analysis_id);
-      CREATE INDEX IF NOT EXISTS idx_doc_collections_coll ON document_collections(collection_key);
+      CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON pdf_chunks(document_id);
+      CREATE INDEX IF NOT EXISTS idx_chunks_page_number ON pdf_chunks(page_number);
+      CREATE INDEX IF NOT EXISTS idx_citations_source ON pdf_citations(source_doc_id);
+      CREATE INDEX IF NOT EXISTS idx_citations_target ON pdf_citations(target_doc_id);
+      CREATE INDEX IF NOT EXISTS idx_similarities_doc1 ON pdf_similarities(doc_id_1);
+      CREATE INDEX IF NOT EXISTS idx_similarities_doc2 ON pdf_similarities(doc_id_2);
+      CREATE INDEX IF NOT EXISTS idx_pdf_topics_analysis ON pdf_topics(analysis_id);
+      CREATE INDEX IF NOT EXISTS idx_pdf_topic_assignments_analysis ON pdf_topic_assignments(analysis_id);
+      CREATE INDEX IF NOT EXISTS idx_pdf_topic_assignments_document ON pdf_topic_assignments(document_id);
+      CREATE INDEX IF NOT EXISTS idx_pdf_topic_outliers_analysis ON pdf_topic_outliers(analysis_id);
+      CREATE INDEX IF NOT EXISTS idx_doc_collections_coll ON pdf_document_collections(collection_key);
     `);
 
     console.log('✅ Tables créées');
@@ -226,7 +228,7 @@ export class VectorStore {
 
   private migrateDatabase(): void {
     // Vérifier si les nouvelles colonnes existent déjà dans documents
-    const tableInfo = this.db.pragma('table_info(documents)') as Array<{ name: string }>;
+    const tableInfo = this.db.pragma('table_info(pdf_documents)') as Array<{ name: string }>;
     const columnNames = tableInfo.map((col) => col.name);
 
     const newColumns = [
@@ -240,20 +242,20 @@ export class VectorStore {
       if (!columnNames.includes(column.name)) {
         console.log(`📝 Migration: Ajout de la colonne ${column.name} à documents`);
         this.db.exec(
-          `ALTER TABLE documents ADD COLUMN ${column.name} ${column.type} DEFAULT ${column.default}`
+          `ALTER TABLE pdf_documents ADD COLUMN ${column.name} ${column.type} DEFAULT ${column.default}`
         );
       }
     }
 
     // Migration chunks table for content_hash (Phase 2 - deduplication)
-    const chunksTableInfo = this.db.pragma('table_info(chunks)') as Array<{ name: string }>;
+    const chunksTableInfo = this.db.pragma('table_info(pdf_chunks)') as Array<{ name: string }>;
     const chunksColumnNames = chunksTableInfo.map((col) => col.name);
 
     if (!chunksColumnNames.includes('content_hash')) {
       console.log('📝 Migration: Ajout de la colonne content_hash à chunks');
-      this.db.exec('ALTER TABLE chunks ADD COLUMN content_hash TEXT DEFAULT NULL');
+      this.db.exec('ALTER TABLE pdf_chunks ADD COLUMN content_hash TEXT DEFAULT NULL');
       // Create index for faster deduplication lookups
-      this.db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON pdf_chunks(content_hash)');
     }
 
     console.log('✅ Migration de la base de données terminée');
@@ -263,7 +265,7 @@ export class VectorStore {
 
   saveDocument(document: PDFDocument): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO documents
+      INSERT OR REPLACE INTO pdf_documents
       (id, file_path, title, author, year, bibtex_key, page_count,
        created_at, indexed_at, last_accessed_at, metadata,
        summary, summary_embedding, citations_extracted, language)
@@ -302,7 +304,7 @@ export class VectorStore {
   }
 
   getDocument(id: string): PDFDocument | null {
-    const stmt = this.db.prepare('SELECT * FROM documents WHERE id = ?');
+    const stmt = this.db.prepare('SELECT * FROM pdf_documents WHERE id = ?');
     const row = stmt.get(id);
 
     if (!row) return null;
@@ -319,13 +321,13 @@ export class VectorStore {
   }
 
   getAllDocuments(): PDFDocument[] {
-    const stmt = this.db.prepare('SELECT * FROM documents ORDER BY indexed_at DESC');
+    const stmt = this.db.prepare('SELECT * FROM pdf_documents ORDER BY indexed_at DESC');
     const rows = stmt.all();
 
     return rows.map((row) => {
       const doc = this.parseDocument(row as any);
       // Add chunk count for this document
-      const chunkCountStmt = this.db.prepare('SELECT COUNT(*) as count FROM chunks WHERE document_id = ?');
+      const chunkCountStmt = this.db.prepare('SELECT COUNT(*) as count FROM pdf_chunks WHERE document_id = ?');
       const chunkCountRow = chunkCountStmt.get(doc.id) as { count: number };
       (doc as any).chunkCount = chunkCountRow.count;
       return doc;
@@ -334,7 +336,7 @@ export class VectorStore {
 
   deleteDocument(id: string): void {
     // Les chunks seront supprimés automatiquement grâce à ON DELETE CASCADE
-    const stmt = this.db.prepare('DELETE FROM documents WHERE id = ?');
+    const stmt = this.db.prepare('DELETE FROM pdf_documents WHERE id = ?');
     stmt.run(id);
 
     console.log(`✅ Document supprimé: ${id}`);
@@ -344,7 +346,7 @@ export class VectorStore {
 
   saveChunk(chunk: DocumentChunk, embedding: Float32Array, contentHash?: string): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO chunks
+      INSERT OR REPLACE INTO pdf_chunks
       (id, document_id, content, page_number, chunk_index,
        start_position, end_position, embedding, content_hash)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -371,8 +373,8 @@ export class VectorStore {
    */
   findChunksByHash(contentHash: string, excludeDocId?: string): string[] {
     const stmt = excludeDocId
-      ? this.db.prepare('SELECT id FROM chunks WHERE content_hash = ? AND document_id != ?')
-      : this.db.prepare('SELECT id FROM chunks WHERE content_hash = ?');
+      ? this.db.prepare('SELECT id FROM pdf_chunks WHERE content_hash = ? AND document_id != ?')
+      : this.db.prepare('SELECT id FROM pdf_chunks WHERE content_hash = ?');
 
     const rows = excludeDocId
       ? stmt.all(contentHash, excludeDocId)
@@ -383,7 +385,7 @@ export class VectorStore {
 
   getChunksForDocument(documentId: string): ChunkWithEmbedding[] {
     const stmt = this.db.prepare(
-      'SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index'
+      'SELECT * FROM pdf_chunks WHERE document_id = ? ORDER BY chunk_index'
     );
     const rows = stmt.all(documentId);
 
@@ -391,7 +393,7 @@ export class VectorStore {
   }
 
   getAllChunksWithEmbeddings(): ChunkWithEmbedding[] {
-    const stmt = this.db.prepare('SELECT * FROM chunks WHERE embedding IS NOT NULL');
+    const stmt = this.db.prepare('SELECT * FROM pdf_chunks WHERE embedding IS NOT NULL');
     const rows = stmt.all();
 
     return rows.map((row) => this.parseChunkWithEmbedding(row as any));
@@ -403,7 +405,7 @@ export class VectorStore {
    */
   getEmbeddingDimension(): number | null {
     try {
-      const stmt = this.db.prepare('SELECT embedding FROM chunks WHERE embedding IS NOT NULL LIMIT 1');
+      const stmt = this.db.prepare('SELECT embedding FROM pdf_chunks WHERE embedding IS NOT NULL LIMIT 1');
       const row = stmt.get() as { embedding: Buffer } | undefined;
 
       console.log('🔍 Checking embedding dimension...', {
@@ -576,14 +578,14 @@ export class VectorStore {
   // MARK: - Statistics
 
   getStatistics(): VectorStoreStatistics {
-    const documentCount = this.db.prepare('SELECT COUNT(*) as count FROM documents').get() as {
+    const documentCount = this.db.prepare('SELECT COUNT(*) as count FROM pdf_documents').get() as {
       count: number;
     };
-    const chunkCount = this.db.prepare('SELECT COUNT(*) as count FROM chunks').get() as {
+    const chunkCount = this.db.prepare('SELECT COUNT(*) as count FROM pdf_chunks').get() as {
       count: number;
     };
     const embeddingCount = this.db
-      .prepare('SELECT COUNT(*) as count FROM chunks WHERE embedding IS NOT NULL')
+      .prepare('SELECT COUNT(*) as count FROM pdf_chunks WHERE embedding IS NOT NULL')
       .get() as { count: number };
 
     return {
@@ -598,10 +600,10 @@ export class VectorStore {
 
   purgeAllData(): void {
     // Supprimer tous les chunks d'abord (pour être sûr)
-    this.db.exec('DELETE FROM chunks;');
+    this.db.exec('DELETE FROM pdf_chunks;');
 
     // Supprimer tous les documents
-    this.db.exec('DELETE FROM documents;');
+    this.db.exec('DELETE FROM pdf_documents;');
 
     // Vacuum pour récupérer l'espace disque
     this.db.exec('VACUUM;');
@@ -613,13 +615,13 @@ export class VectorStore {
     // Compter les chunks orphelins (dont le document n'existe plus)
     const orphanedCount = this.db
       .prepare(
-        `SELECT COUNT(*) as count FROM chunks
-         WHERE document_id NOT IN (SELECT id FROM documents)`
+        `SELECT COUNT(*) as count FROM pdf_chunks
+         WHERE document_id NOT IN (SELECT id FROM pdf_documents)`
       )
       .get() as { count: number };
 
     // Compter tous les chunks
-    const totalCount = this.db.prepare('SELECT COUNT(*) as count FROM chunks').get() as {
+    const totalCount = this.db.prepare('SELECT COUNT(*) as count FROM pdf_chunks').get() as {
       count: number;
     };
 
@@ -638,8 +640,8 @@ export class VectorStore {
   cleanOrphanedChunks(): void {
     // Supprimer les chunks orphelins
     this.db.exec(`
-      DELETE FROM chunks
-      WHERE document_id NOT IN (SELECT id FROM documents)
+      DELETE FROM pdf_chunks
+      WHERE document_id NOT IN (SELECT id FROM pdf_documents)
     `);
 
     console.log('✅ Chunks orphelins supprimés');
@@ -656,7 +658,7 @@ export class VectorStore {
     pageNumber?: number;
   }): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO document_citations
+      INSERT OR REPLACE INTO pdf_citations
       (id, source_doc_id, target_citation, target_doc_id, context, page_number)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
@@ -680,7 +682,7 @@ export class VectorStore {
     pageNumber?: number;
   }> {
     const stmt = this.db.prepare(`
-      SELECT * FROM document_citations
+      SELECT * FROM pdf_citations
       WHERE source_doc_id = ?
       ORDER BY page_number ASC
     `);
@@ -703,7 +705,7 @@ export class VectorStore {
   getMatchedCitationsCount(): number {
     const stmt = this.db.prepare(`
       SELECT COUNT(*) as count
-      FROM document_citations
+      FROM pdf_citations
       WHERE target_doc_id IS NOT NULL
     `);
 
@@ -717,7 +719,7 @@ export class VectorStore {
   getTotalCitationsCount(): number {
     const stmt = this.db.prepare(`
       SELECT COUNT(*) as count
-      FROM document_citations
+      FROM pdf_citations
     `);
 
     const result = stmt.get() as { count: number };
@@ -726,7 +728,7 @@ export class VectorStore {
 
   getDocumentsCitedBy(documentId: string): string[] {
     const stmt = this.db.prepare(`
-      SELECT DISTINCT target_doc_id FROM document_citations
+      SELECT DISTINCT target_doc_id FROM pdf_citations
       WHERE source_doc_id = ? AND target_doc_id IS NOT NULL
     `);
 
@@ -736,7 +738,7 @@ export class VectorStore {
 
   getDocumentsCiting(documentId: string): string[] {
     const stmt = this.db.prepare(`
-      SELECT DISTINCT source_doc_id FROM document_citations
+      SELECT DISTINCT source_doc_id FROM pdf_citations
       WHERE target_doc_id = ?
     `);
 
@@ -745,7 +747,7 @@ export class VectorStore {
   }
 
   deleteCitationsForDocument(documentId: string): void {
-    const stmt = this.db.prepare('DELETE FROM document_citations WHERE source_doc_id = ?');
+    const stmt = this.db.prepare('DELETE FROM pdf_citations WHERE source_doc_id = ?');
     stmt.run(documentId);
   }
 
@@ -756,7 +758,7 @@ export class VectorStore {
     const [id1, id2] = docId1 < docId2 ? [docId1, docId2] : [docId2, docId1];
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO document_similarities
+      INSERT OR REPLACE INTO pdf_similarities
       (doc_id_1, doc_id_2, similarity)
       VALUES (?, ?, ?)
     `);
@@ -776,7 +778,7 @@ export class VectorStore {
           ELSE doc_id_1
         END as other_doc_id,
         similarity
-      FROM document_similarities
+      FROM pdf_similarities
       WHERE (doc_id_1 = ? OR doc_id_2 = ?)
         AND similarity >= ?
       ORDER BY similarity DESC
@@ -796,7 +798,7 @@ export class VectorStore {
 
   deleteSimilaritiesForDocument(documentId: string): void {
     const stmt = this.db.prepare(
-      'DELETE FROM document_similarities WHERE doc_id_1 = ? OR doc_id_2 = ?'
+      'DELETE FROM pdf_similarities WHERE doc_id_1 = ? OR doc_id_2 = ?'
     );
     stmt.run(documentId, documentId);
   }
@@ -870,11 +872,11 @@ export class VectorStore {
     const now = new Date().toISOString();
 
     // Marquer toutes les analyses précédentes comme non-courantes
-    this.db.prepare('UPDATE topic_analyses SET is_current = 0').run();
+    this.db.prepare('UPDATE pdf_topic_analyses SET is_current = 0').run();
 
     // Sauvegarder l'analyse principale
     const insertAnalysis = this.db.prepare(`
-      INSERT INTO topic_analyses (id, analysis_date, is_current, options_json, statistics_json)
+      INSERT INTO pdf_topic_analyses (id, analysis_date, is_current, options_json, statistics_json)
       VALUES (?, ?, 1, ?, ?)
     `);
 
@@ -887,7 +889,7 @@ export class VectorStore {
 
     // Sauvegarder les topics
     const insertTopic = this.db.prepare(`
-      INSERT INTO topics (id, analysis_id, topic_id, label, keywords_json, size)
+      INSERT INTO pdf_topics (id, analysis_id, topic_id, label, keywords_json, size)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
@@ -905,7 +907,7 @@ export class VectorStore {
 
     // Sauvegarder les assignations
     const insertAssignment = this.db.prepare(`
-      INSERT INTO topic_assignments (id, analysis_id, document_id, topic_id)
+      INSERT INTO pdf_topic_assignments (id, analysis_id, document_id, topic_id)
       VALUES (?, ?, ?, ?)
     `);
 
@@ -916,7 +918,7 @@ export class VectorStore {
 
     // Sauvegarder les outliers
     const insertOutlier = this.db.prepare(`
-      INSERT INTO topic_outliers (id, analysis_id, document_id)
+      INSERT INTO pdf_topic_outliers (id, analysis_id, document_id)
       VALUES (?, ?, ?)
     `);
 
@@ -936,7 +938,7 @@ export class VectorStore {
   loadLatestTopicAnalysis(): (TopicAnalysisResult & { analysisDate: string; options: TopicAnalysisOptions }) | null {
     // Récupérer l'analyse la plus récente
     const analysis = this.db.prepare(`
-      SELECT * FROM topic_analyses
+      SELECT * FROM pdf_topic_analyses
       WHERE is_current = 1
       ORDER BY analysis_date DESC
       LIMIT 1
@@ -952,7 +954,7 @@ export class VectorStore {
     // Récupérer les topics
     const topicsRows = this.db.prepare(`
       SELECT topic_id, label, keywords_json, size
-      FROM topics
+      FROM pdf_topics
       WHERE analysis_id = ?
       ORDER BY topic_id
     `).all(analysisId) as Array<{
@@ -973,7 +975,7 @@ export class VectorStore {
     // Récupérer les assignations
     const assignmentsRows = this.db.prepare(`
       SELECT document_id, topic_id
-      FROM topic_assignments
+      FROM pdf_topic_assignments
       WHERE analysis_id = ?
     `).all(analysisId) as Array<{ document_id: string; topic_id: number }>;
 
@@ -991,7 +993,7 @@ export class VectorStore {
     // Récupérer les outliers
     const outliersRows = this.db.prepare(`
       SELECT document_id
-      FROM topic_outliers
+      FROM pdf_topic_outliers
       WHERE analysis_id = ?
     `).all(analysisId) as Array<{ document_id: string }>;
 
@@ -1017,7 +1019,7 @@ export class VectorStore {
   getTopicTimeline(): Array<{ year: number; [topicId: string]: number }> | null {
     // Récupérer l'analyse actuelle
     const analysis = this.db.prepare(`
-      SELECT id FROM topic_analyses
+      SELECT id FROM pdf_topic_analyses
       WHERE is_current = 1
       ORDER BY analysis_date DESC
       LIMIT 1
@@ -1033,8 +1035,8 @@ export class VectorStore {
       SELECT
         d.year,
         ta.topic_id
-      FROM topic_assignments ta
-      JOIN documents d ON ta.document_id = d.id
+      FROM pdf_topic_assignments ta
+      JOIN pdf_documents d ON ta.document_id = d.id
       WHERE ta.analysis_id = ? AND d.year IS NOT NULL
       ORDER BY d.year
     `).all(analysis.id) as Array<{ year: number; topic_id: number }>;
@@ -1081,7 +1083,7 @@ export class VectorStore {
    * Supprime toutes les analyses de topics
    */
   deleteAllTopicAnalyses(): void {
-    this.db.prepare('DELETE FROM topic_analyses').run();
+    this.db.prepare('DELETE FROM pdf_topic_analyses').run();
     console.log('✅ All topic analyses deleted');
   }
 
@@ -1092,7 +1094,7 @@ export class VectorStore {
    */
   saveCollections(collections: Array<{ key: string; name: string; parentKey?: string }>): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO zotero_collections (key, name, parent_key)
+      INSERT OR REPLACE INTO pdf_zotero_collections (key, name, parent_key)
       VALUES (?, ?, ?)
     `);
 
@@ -1110,7 +1112,7 @@ export class VectorStore {
    * Récupère toutes les collections Zotero
    */
   getAllCollections(): Array<{ key: string; name: string; parentKey?: string }> {
-    const stmt = this.db.prepare('SELECT key, name, parent_key FROM zotero_collections ORDER BY name');
+    const stmt = this.db.prepare('SELECT key, name, parent_key FROM pdf_zotero_collections ORDER BY name');
     const rows = stmt.all() as Array<{ key: string; name: string; parent_key: string | null }>;
     return rows.map((row) => ({
       key: row.key,
@@ -1124,12 +1126,12 @@ export class VectorStore {
    */
   setDocumentCollections(documentId: string, collectionKeys: string[]): void {
     // D'abord supprimer les liens existants
-    this.db.prepare('DELETE FROM document_collections WHERE document_id = ?').run(documentId);
+    this.db.prepare('DELETE FROM pdf_document_collections WHERE document_id = ?').run(documentId);
 
     // Puis ajouter les nouveaux liens
     if (collectionKeys.length > 0) {
       const stmt = this.db.prepare(`
-        INSERT OR IGNORE INTO document_collections (document_id, collection_key)
+        INSERT OR IGNORE INTO pdf_document_collections (document_id, collection_key)
         VALUES (?, ?)
       `);
 
@@ -1148,7 +1150,7 @@ export class VectorStore {
    * Récupère les clés de collections pour un document
    */
   getDocumentCollections(documentId: string): string[] {
-    const stmt = this.db.prepare('SELECT collection_key FROM document_collections WHERE document_id = ?');
+    const stmt = this.db.prepare('SELECT collection_key FROM pdf_document_collections WHERE document_id = ?');
     const rows = stmt.all(documentId) as Array<{ collection_key: string }>;
     return rows.map((row) => row.collection_key);
   }
@@ -1184,7 +1186,7 @@ export class VectorStore {
     const placeholders = allCollectionKeys.map(() => '?').join(',');
     const stmt = this.db.prepare(`
       SELECT DISTINCT document_id
-      FROM document_collections
+      FROM pdf_document_collections
       WHERE collection_key IN (${placeholders})
     `);
 
@@ -1196,7 +1198,7 @@ export class VectorStore {
    * Supprime toutes les collections (utile lors d'une re-synchronisation)
    */
   deleteAllCollections(): void {
-    this.db.prepare('DELETE FROM zotero_collections').run();
+    this.db.prepare('DELETE FROM pdf_zotero_collections').run();
     console.log('✅ Toutes les collections supprimées');
   }
 
@@ -1210,7 +1212,7 @@ export class VectorStore {
 
     // Get all documents with their bibtex_key
     const documents = this.db
-      .prepare('SELECT id, bibtex_key FROM documents WHERE bibtex_key IS NOT NULL')
+      .prepare('SELECT id, bibtex_key FROM pdf_documents WHERE bibtex_key IS NOT NULL')
       .all() as Array<{ id: string; bibtex_key: string }>;
 
     console.log(`🔗 Attempting to link ${documents.length} documents to collections...`);
@@ -1228,7 +1230,7 @@ export class VectorStore {
     }
 
     const insertStmt = this.db.prepare(`
-      INSERT OR IGNORE INTO document_collections (document_id, collection_key)
+      INSERT OR IGNORE INTO pdf_document_collections (document_id, collection_key)
       VALUES (?, ?)
     `);
 
@@ -1237,7 +1239,7 @@ export class VectorStore {
         const collectionKeys = bibtexKeyToCollections[doc.bibtex_key];
         if (collectionKeys && collectionKeys.length > 0) {
           // First, remove existing links for this document
-          this.db.prepare('DELETE FROM document_collections WHERE document_id = ?').run(doc.id);
+          this.db.prepare('DELETE FROM pdf_document_collections WHERE document_id = ?').run(doc.id);
 
           // Then add new links
           for (const collKey of collectionKeys) {

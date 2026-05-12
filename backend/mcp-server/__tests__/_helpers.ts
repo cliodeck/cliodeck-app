@@ -107,17 +107,17 @@ export function makeMcpConfig(workspaceRoot: string): MCPRuntimeConfig {
 }
 
 /**
- * Create `<root>/.cliodeck/vectors.db` with the columns
- * `searchDocuments`, `searchZotero`, `graphNeighbors`, `entityContext`
- * read. Returns the open `Database` so the caller can populate it; close
- * it before the tool runs (the tool opens its own readonly handle).
+ * Create `<root>/.cliodeck/brain.db` with the `pdf_*` PDF-domain tables that
+ * `searchDocuments`, `searchZotero`, `graphNeighbors`, `entityContext` read.
+ * Returns the open `Database` so the caller can populate it; close it before
+ * the tool runs (the tool opens its own readonly handle).
  */
 export function createTempVectorsDb(root: string): Database.Database {
   const dir = path.join(root, '.cliodeck');
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(path.join(dir, 'vectors.db'));
+  const db = new Database(path.join(dir, 'brain.db'));
   db.exec(`
-    CREATE TABLE documents (
+    CREATE TABLE IF NOT EXISTS pdf_documents (
       id TEXT PRIMARY KEY,
       title TEXT,
       author TEXT,
@@ -126,14 +126,14 @@ export function createTempVectorsDb(root: string): Database.Database {
       file_path TEXT,
       summary TEXT
     );
-    CREATE TABLE chunks (
+    CREATE TABLE IF NOT EXISTS pdf_chunks (
       id TEXT PRIMARY KEY,
       document_id TEXT NOT NULL,
       content TEXT NOT NULL,
       page_number INTEGER,
       chunk_index INTEGER
     );
-    CREATE TABLE document_citations (
+    CREATE TABLE IF NOT EXISTS pdf_citations (
       source_doc_id TEXT NOT NULL,
       target_doc_id TEXT,
       target_citation TEXT,
@@ -146,7 +146,7 @@ export function createTempVectorsDb(root: string): Database.Database {
 
 /**
  * Add the `tropy_entities` + `tropy_entity_mentions` tables to an existing
- * brain.db. Used by `entityContext` tests.
+ * brain.db. Used by `entityContext` tests for the Tropy (primary) domain.
  */
 export function addEntityTables(db: Database.Database): void {
   db.exec(`
@@ -166,10 +166,33 @@ export function addEntityTables(db: Database.Database): void {
   `);
 }
 
-/** Create `document_similarities` on an existing vectors db. */
+/**
+ * Add the speculative `pdf_entities` + `pdf_entity_mentions` tables to an
+ * existing brain.db. The PDF NER pipeline doesn't ship yet — the
+ * `entityContext` tool reads them when present and fails soft otherwise.
+ */
+export function addPdfEntityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pdf_entities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      type TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS pdf_entity_mentions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      chunk_id TEXT,
+      context TEXT
+    );
+  `);
+}
+
+/** Create `pdf_similarities` on an existing brain.db. */
 export function addSimilaritiesTable(db: Database.Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS document_similarities (
+    CREATE TABLE IF NOT EXISTS pdf_similarities (
       doc_id_1 TEXT NOT NULL,
       doc_id_2 TEXT NOT NULL,
       similarity REAL NOT NULL

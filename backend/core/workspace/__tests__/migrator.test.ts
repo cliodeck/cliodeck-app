@@ -142,10 +142,11 @@ describe('migrateWorkspaceToFlat — db consolidation (history → brain)', () =
     expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('HIST');
   });
 
-  it('skips the obsidian consolidation step when obsidian-vectors.db is absent', async () => {
-    // The actual SQL path (rename tables, ATTACH+copy) requires better-sqlite3
+  it('skips the obsidian/tropy/vectors consolidation steps when their files are absent', async () => {
+    // The actual SQL paths (rename tables, ATTACH+copy) require better-sqlite3
     // native bindings, which fail under Vitest (CLAUDE.md §6). This test
-    // covers only the no-op branch — the happy path is validated at runtime.
+    // covers only the no-op branches — the happy paths are validated at
+    // runtime when the user opens a workspace.
     await write(
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       '{"schema_version":2}',

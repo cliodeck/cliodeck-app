@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('search_zotero', () => {
-  it('returns a "no bibliography db" note when neither vectors.db nor bibliography.db exist', async () => {
+  it('returns a "no bibliography db" note when neither brain.db nor bibliography.db exist', async () => {
     const { server, tools } = createCapturingServer();
     const { logger } = createInMemoryLogger();
     registerSearchZotero(
@@ -44,12 +44,12 @@ describe('search_zotero', () => {
     expect(payload.note).toMatch(/Index a Zotero library first/i);
   });
 
-  it('returns a clear note when the documents table is missing', async () => {
+  it('returns a clear note when the pdf_documents table is missing', async () => {
     const dir = path.join(workspaceRoot, '.cliodeck');
     fs.mkdirSync(dir, { recursive: true });
     // Empty db with no tables. The tool should detect that and bail out
     // gracefully rather than throwing on a malformed prepared statement.
-    const db = new Database(path.join(dir, 'vectors.db'));
+    const db = new Database(path.join(dir, 'brain.db'));
     db.close();
 
     const { server, tools } = createCapturingServer();
@@ -64,13 +64,13 @@ describe('search_zotero', () => {
         .content[0].text
     );
     expect(payload.hits).toEqual([]);
-    expect(payload.note).toMatch(/no `documents` table/i);
+    expect(payload.note).toMatch(/no `pdf_documents` table/i);
   });
 
   it('matches across title / author / bibtex_key, applies the year filter', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     const insert = db.prepare(
-      `INSERT INTO documents (id, title, author, year, bibtex_key, file_path, summary)
+      `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, file_path, summary)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     insert.run('d1', 'Annales 1994', 'Bloch, Marc', '1994', 'bloch1994', null, 'Summary A');
@@ -99,7 +99,7 @@ describe('search_zotero', () => {
     const db = createTempVectorsDb(workspaceRoot);
     const long = 'L'.repeat(2000);
     db.prepare(
-      `INSERT INTO documents (id, title, author, year, bibtex_key, summary)
+      `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, summary)
        VALUES ('d1', 'long summary', 'A', '2020', 'k', ?)`
     ).run(long);
     db.close();

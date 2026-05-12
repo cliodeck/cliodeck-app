@@ -1,15 +1,16 @@
 /**
  * Tests for the entity_context MCP tool (fusion 1.9).
  *
- * The tool reads `entities` + `entity_mentions` from BOTH databases —
- * primary-sources.db (NER over Tropy) and vectors.db (NER over PDFs,
- * planned). We verify it merges results from both, fails soft on
- * missing tables, and applies the topK budget across the union.
+ * Post db-fusion (step 4), the tool reads `tropy_entities`/`tropy_entity_mentions`
+ * (Tropy NER) and `pdf_entities`/`pdf_entity_mentions` (PDF NER, speculative)
+ * from the shared brain.db. We verify it merges results from both, fails
+ * soft on missing tables, and applies the topK budget across the union.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { registerEntityContext } from '../tools/entityContext.js';
 import {
   addEntityTables,
+  addPdfEntityTables,
   createCapturingServer,
   createInMemoryLogger,
   createTempPrimarySourcesDb,
@@ -108,16 +109,16 @@ describe('entity_context', () => {
     p.close();
 
     const v = createTempVectorsDb(workspaceRoot);
-    addEntityTables(v);
+    addPdfEntityTables(v);
     v.prepare(
-      `INSERT INTO entities (id, name, normalized_name, type)
+      `INSERT INTO pdf_entities (id, name, normalized_name, type)
        VALUES ('e2', 'Greiser', 'greiser', 'PERSON')`
     ).run();
     v.prepare(
-      `INSERT INTO documents (id, title) VALUES ('d1', 'doc')`
+      `INSERT INTO pdf_documents (id, title) VALUES ('d1', 'doc')`
     ).run();
     v.prepare(
-      `INSERT INTO entity_mentions (entity_id, source_id, context)
+      `INSERT INTO pdf_entity_mentions (entity_id, source_id, context)
        VALUES ('e2', 'd1', 'sec ctx 1'), ('e2', 'd1', 'sec ctx 2')`
     ).run();
     v.close();

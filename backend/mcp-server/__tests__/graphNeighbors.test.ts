@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe('graph_neighbors', () => {
-  it('emits a "no vectors.db" note before any SQL is run', async () => {
+  it('emits a "no brain.db" note before any SQL is run', async () => {
     const { server, tools } = createCapturingServer();
     const { logger } = createInMemoryLogger();
     registerGraphNeighbors(
@@ -50,13 +50,13 @@ describe('graph_neighbors', () => {
   it('returns outbound + inbound citations decorated with target/source title', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO documents (id, title, year)
+      `INSERT INTO pdf_documents (id, title, year)
        VALUES ('A', 'Source A', '2000'),
               ('B', 'Target B', '1990'),
               ('C', 'Citer C', '2010')`
     ).run();
     db.prepare(
-      `INSERT INTO document_citations (source_doc_id, target_doc_id, target_citation, context, page_number)
+      `INSERT INTO pdf_citations (source_doc_id, target_doc_id, target_citation, context, page_number)
        VALUES ('A', 'B', 'Smith 1990', 'cf. Smith…', 12),
               ('C', 'A', null,         'as A argues', 5)`
     ).run();
@@ -87,13 +87,13 @@ describe('graph_neighbors', () => {
     const db = createTempVectorsDb(workspaceRoot);
     addSimilaritiesTable(db);
     db.prepare(
-      `INSERT INTO documents (id, title, year)
+      `INSERT INTO pdf_documents (id, title, year)
        VALUES ('A', 'src', '2000'),
               ('B', 'b', '1990'),
               ('C', 'c', '2010')`
     ).run();
     db.prepare(
-      `INSERT INTO document_similarities (doc_id_1, doc_id_2, similarity)
+      `INSERT INTO pdf_similarities (doc_id_1, doc_id_2, similarity)
        VALUES ('A', 'B', 0.42),
               ('C', 'A', 0.91)`
     ).run();
@@ -126,7 +126,7 @@ describe('graph_neighbors', () => {
   it('returns an empty `similar` slice (not undefined) when the table is missing', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO documents (id, title, year) VALUES ('A', 'x', '2000')`
+      `INSERT INTO pdf_documents (id, title, year) VALUES ('A', 'x', '2000')`
     ).run();
     db.close();
 

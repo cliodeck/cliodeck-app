@@ -3,8 +3,8 @@
  * knowledge graph (fusion step 2.6).
  *
  * We avoid loading `KnowledgeGraphBuilder` for a single-document lookup
- * and instead query the `document_citations` and `document_similarities`
- * tables in `<workspaceRoot>/.cliodeck/vectors.db` directly. Outbound
+ * and instead query the `pdf_citations` and `pdf_similarities` tables in
+ * `<workspaceRoot>/.cliodeck/brain.db` directly. Outbound
  * edges (this doc cites X) and inbound edges (Y cites this doc) are
  * both returned, plus the top-K pre-computed similarity neighbors when
  * available.
@@ -38,13 +38,13 @@ export function registerGraphNeighbors(
       documentId: z
         .string()
         .min(1)
-        .describe('Document id (as stored in vectors.db `documents.id`).'),
+        .describe('Document id (as stored in brain.db `pdf_documents.id`).'),
       topK: z.number().int().min(1).max(50).optional().default(10),
     },
     async ({ documentId, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'vectors.db');
+      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       let db: Database.Database | null = null;
       try {
         if (!fs.existsSync(dbPath)) {
@@ -62,7 +62,7 @@ export function registerGraphNeighbors(
                 text: JSON.stringify(
                   {
                     documentId,
-                    note: 'No vectors.db found. Index the corpus first.',
+                    note: 'No brain.db found. Index the corpus first.',
                     neighbors: [],
                     elapsedMs: Date.now() - start,
                   },
@@ -77,7 +77,7 @@ export function registerGraphNeighbors(
 
         const self = db
           .prepare(
-            'SELECT id, title, author, year FROM documents WHERE id = ?'
+            'SELECT id, title, author, year FROM pdf_documents WHERE id = ?'
           )
           .get(documentId) as
           | { id: string; title: string; author: string | null; year: string | null }
@@ -89,8 +89,8 @@ export function registerGraphNeighbors(
             `SELECT dc.target_doc_id AS id, dc.target_citation AS citation,
                     dc.context AS context, dc.page_number AS page,
                     d.title AS title, d.author AS author, d.year AS year
-               FROM document_citations dc
-          LEFT JOIN documents d ON d.id = dc.target_doc_id
+               FROM pdf_citations dc
+          LEFT JOIN pdf_documents d ON d.id = dc.target_doc_id
               WHERE dc.source_doc_id = ?
               LIMIT ?`
           )
@@ -102,8 +102,8 @@ export function registerGraphNeighbors(
             `SELECT dc.source_doc_id AS id, dc.context AS context,
                     dc.page_number AS page,
                     d.title AS title, d.author AS author, d.year AS year
-               FROM document_citations dc
-               JOIN documents d ON d.id = dc.source_doc_id
+               FROM pdf_citations dc
+               JOIN pdf_documents d ON d.id = dc.source_doc_id
               WHERE dc.target_doc_id = ?
               LIMIT ?`
           )
@@ -113,7 +113,7 @@ export function registerGraphNeighbors(
         let similar: Array<any> = [];
         const hasSim = db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='document_similarities'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pdf_similarities'"
           )
           .get();
         if (hasSim) {
@@ -121,7 +121,7 @@ export function registerGraphNeighbors(
             .prepare(
               `SELECT CASE WHEN doc_id_1 = ? THEN doc_id_2 ELSE doc_id_1 END AS id,
                       similarity
-                 FROM document_similarities
+                 FROM pdf_similarities
                 WHERE doc_id_1 = ? OR doc_id_2 = ?
                 ORDER BY similarity DESC
                 LIMIT ?`
@@ -133,7 +133,7 @@ export function registerGraphNeighbors(
 
           // Decorate with titles
           const titleStmt = db.prepare(
-            'SELECT id, title, author, year FROM documents WHERE id = ?'
+            'SELECT id, title, author, year FROM pdf_documents WHERE id = ?'
           );
           similar = similar.map((s) => ({
             ...s,

@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('search_documents', () => {
-  it('emits a "no vectors.db" note before any SQL is run', async () => {
+  it('emits a "no brain.db" note before any SQL is run', async () => {
     const { server, tools } = createCapturingServer();
     const { logger } = createInMemoryLogger();
     registerSearchDocuments(
@@ -43,13 +43,13 @@ describe('search_documents', () => {
         .text
     );
     expect(payload.hits).toEqual([]);
-    expect(payload.note).toMatch(/No vectors\.db found/);
+    expect(payload.note).toMatch(/No brain\.db found/);
   });
 
-  it('emits a "no chunks table" note when the schema is incomplete', async () => {
+  it('emits a "no pdf_chunks table" note when the schema is incomplete', async () => {
     const dir = path.join(workspaceRoot, '.cliodeck');
     fs.mkdirSync(dir, { recursive: true });
-    new Database(path.join(dir, 'vectors.db')).close();
+    new Database(path.join(dir, 'brain.db')).close();
 
     const { server, tools } = createCapturingServer();
     const { logger } = createInMemoryLogger();
@@ -62,17 +62,17 @@ describe('search_documents', () => {
       (await tools.get('search_documents')!.handler({ query: 'x' })).content[0]
         .text
     );
-    expect(payload.note).toMatch(/no `chunks` table/i);
+    expect(payload.note).toMatch(/no `pdf_chunks` table/i);
   });
 
   it('returns chunks matching the query, decorated with parent doc metadata', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO documents (id, title, author, year, bibtex_key, file_path)
+      `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, file_path)
        VALUES ('d1', 'Le Front populaire', 'Tartakowsky', '1996', 'tartakowsky1996', '/p/t.pdf')`
     ).run();
     db.prepare(
-      `INSERT INTO chunks (id, document_id, content, page_number, chunk_index)
+      `INSERT INTO pdf_chunks (id, document_id, content, page_number, chunk_index)
        VALUES ('c1', 'd1', 'The Front populaire was a coalition.', 1, 0),
               ('c2', 'd1', 'Unrelated paragraph.', 2, 1)`
     ).run();
@@ -102,10 +102,10 @@ describe('search_documents', () => {
   it('ranks chunks with more occurrences ahead of chunks with fewer', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO documents (id, title, year) VALUES ('d1', 'doc', '2000')`
+      `INSERT INTO pdf_documents (id, title, year) VALUES ('d1', 'doc', '2000')`
     ).run();
     db.prepare(
-      `INSERT INTO chunks (id, document_id, content, page_number, chunk_index)
+      `INSERT INTO pdf_chunks (id, document_id, content, page_number, chunk_index)
        VALUES ('c-rare', 'd1', 'Greiser is mentioned.', 1, 0),
               ('c-dense', 'd1', 'Greiser, Greiser, Greiser everywhere.', 2, 1)`
     ).run();
@@ -132,13 +132,13 @@ describe('search_documents', () => {
   it('applies year + author filters with case-insensitive matching', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
-      `INSERT INTO documents (id, title, author, year)
+      `INSERT INTO pdf_documents (id, title, author, year)
        VALUES ('d1', 'A', 'Bloch, Marc', '1990'),
               ('d2', 'B', 'Bloch, Marc', '2010'),
               ('d3', 'C', 'Le Goff, Jacques', '2010')`
     ).run();
     db.prepare(
-      `INSERT INTO chunks (id, document_id, content, page_number, chunk_index)
+      `INSERT INTO pdf_chunks (id, document_id, content, page_number, chunk_index)
        VALUES ('c1', 'd1', 'mention of Greiser', 1, 0),
               ('c2', 'd2', 'mention of Greiser', 1, 0),
               ('c3', 'd3', 'mention of Greiser', 1, 0)`

@@ -13,8 +13,9 @@
  * Ollama dependency at query time. A hybrid/dense variant can be added
  * in a follow-up by wiring an embedding provider into MCPRuntimeConfig.
  *
- * Reads `<workspaceRoot>/.cliodeck/vectors.db` in read-only mode —
- * same source as `search_zotero` and `graph_neighbors`.
+ * Reads `<workspaceRoot>/.cliodeck/brain.db` in read-only mode (db-fusion
+ * step 4); the PDF domain owns `pdf_documents` + `pdf_chunks` in the shared
+ * file.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -59,7 +60,7 @@ export function registerSearchDocuments(
     async ({ query, year, author, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'vectors.db');
+      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       let db: Database.Database | null = null;
 
       try {
@@ -79,7 +80,7 @@ export function registerSearchDocuments(
                   {
                     query,
                     hits: [],
-                    note: 'No vectors.db found. Index PDFs in ClioDeck first.',
+                    note: 'No brain.db found. Index PDFs in ClioDeck first.',
                     elapsedMs: Date.now() - start,
                   },
                   null,
@@ -92,10 +93,10 @@ export function registerSearchDocuments(
 
         db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
-        // A freshly-created vectors.db may not yet have the chunks table.
+        // A freshly-created brain.db may not yet have the pdf_chunks table.
         const hasChunks = db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pdf_chunks'"
           )
           .get();
         if (!hasChunks) {
@@ -114,7 +115,7 @@ export function registerSearchDocuments(
                   {
                     query,
                     hits: [],
-                    note: 'vectors.db present but no `chunks` table. Index PDFs first.',
+                    note: 'brain.db present but no `pdf_chunks` table. Index PDFs first.',
                     elapsedMs: Date.now() - start,
                   },
                   null,
@@ -130,7 +131,7 @@ export function registerSearchDocuments(
         let sql =
           'SELECT c.id AS chunk_id, c.document_id, c.content, c.page_number, c.chunk_index, ' +
           '       d.title, d.author, d.year, d.bibtex_key, d.file_path ' +
-          'FROM chunks c JOIN documents d ON d.id = c.document_id ' +
+          'FROM pdf_chunks c JOIN pdf_documents d ON d.id = c.document_id ' +
           'WHERE c.content LIKE ? COLLATE NOCASE';
 
         if (year) {

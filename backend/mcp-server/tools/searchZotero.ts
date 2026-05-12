@@ -2,8 +2,8 @@
  * search_zotero — MCP tool exposing the workspace's Zotero-derived
  * bibliography (fusion step 2.6).
  *
- * The Zotero integration populates the `documents` table of
- * `<workspaceRoot>/.cliodeck/vectors.db` with fields extracted from the
+ * The Zotero integration populates the `pdf_documents` table of
+ * `<workspaceRoot>/.cliodeck/brain.db` with fields extracted from the
  * Zotero library (title, author, year, bibtex_key). We do NOT parse
  * `.bib` files directly — too brittle. A dedicated `bibliography.db` is
  * listed in the fusion plan but not yet shipped; when it materialises
@@ -52,7 +52,7 @@ export function registerSearchZotero(
     async ({ query, year, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'vectors.db');
+      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       // Alternative source (listed in fusion plan but not shipped yet).
       const bibDbPath = path.join(
         cfg.workspaceRoot,
@@ -77,7 +77,7 @@ export function registerSearchZotero(
                   {
                     query,
                     hits: [],
-                    note: 'No bibliography database found (.cliodeck/vectors.db or .cliodeck/bibliography.db). Index a Zotero library first.',
+                    note: 'No bibliography database found (.cliodeck/brain.db or .cliodeck/bibliography.db). Index a Zotero library first.',
                     elapsedMs: Date.now() - start,
                   },
                   null,
@@ -88,15 +88,15 @@ export function registerSearchZotero(
           };
         }
 
-        // Prefer vectors.db (shipped today); bibliography.db remains a stub.
+        // Prefer brain.db (shipped today); bibliography.db remains a stub.
         const source = fs.existsSync(dbPath) ? dbPath : bibDbPath;
         db = new Database(source, { readonly: true, fileMustExist: true });
 
-        // Confirm the documents table exists — a freshly created db may not
-        // have it yet.
+        // Confirm the pdf_documents table exists — a freshly created db may
+        // not have it yet.
         const hasDocs = db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pdf_documents'"
           )
           .get();
         if (!hasDocs) {
@@ -115,7 +115,7 @@ export function registerSearchZotero(
                   {
                     query,
                     hits: [],
-                    note: 'Bibliography database present but no `documents` table. Run the Zotero indexer.',
+                    note: 'Bibliography database present but no `pdf_documents` table. Run the Zotero indexer.',
                     elapsedMs: Date.now() - start,
                   },
                   null,
@@ -130,7 +130,7 @@ export function registerSearchZotero(
         const params: any[] = [like, like, like];
         let sql =
           'SELECT id, title, author, year, bibtex_key, file_path, summary ' +
-          'FROM documents WHERE (title LIKE ? OR author LIKE ? OR bibtex_key LIKE ?)';
+          'FROM pdf_documents WHERE (title LIKE ? OR author LIKE ? OR bibtex_key LIKE ?)';
         if (year) {
           sql += ' AND year = ?';
           params.push(year);

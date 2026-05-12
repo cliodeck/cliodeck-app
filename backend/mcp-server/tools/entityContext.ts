@@ -94,13 +94,17 @@ function querySecondary(
   entityQuery: string,
   limit: number
 ): Mention[] {
-  // Reads PDF-side entity tables from vectors.db. These still use the
-  // unprefixed legacy names until db-fusion step 4 brings them into brain.db
-  // with `pdf_` prefixes. Silently return [] if the tables aren't there yet.
+  // Reads PDF-side entity tables from brain.db. The `pdf_entities` and
+  // `pdf_entity_mentions` tables are speculative — they don't exist yet
+  // (no PDF NER pipeline today). Tool returns [] in the fail-soft branch
+  // until the schema lands.
   if (!fs.existsSync(dbPath)) return [];
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    if (!hasTable(db, 'entities') || !hasTable(db, 'entity_mentions')) {
+    if (
+      !hasTable(db, 'pdf_entities') ||
+      !hasTable(db, 'pdf_entity_mentions')
+    ) {
       return [];
     }
     const like = `%${entityQuery.toLowerCase()}%`;
@@ -109,9 +113,9 @@ function querySecondary(
         `SELECT e.id AS entity_id, e.name AS entity_name, e.type AS entity_type,
                 em.chunk_id AS chunk_id, em.source_id AS source_id,
                 em.context AS context, d.title AS source_title
-           FROM entity_mentions em
-           JOIN entities e ON e.id = em.entity_id
-      LEFT JOIN documents d ON d.id = em.source_id
+           FROM pdf_entity_mentions em
+           JOIN pdf_entities e ON e.id = em.entity_id
+      LEFT JOIN pdf_documents d ON d.id = em.source_id
           WHERE e.normalized_name LIKE ? OR LOWER(e.name) LIKE ?
           LIMIT ?`
       )
@@ -149,16 +153,15 @@ export function registerEntityContext(
     async ({ entity, topK }) => {
       const start = Date.now();
       const k = topK ?? 10;
-      const primaryDb = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
-      const secondaryDb = path.join(
-        cfg.workspaceRoot,
-        '.cliodeck',
-        'vectors.db'
-      );
+      const dbPath = path.join(cfg.workspaceRoot, '.cliodeck', 'brain.db');
       try {
+        // Post db-fusion (step 4) both primary (tropy_*) and secondary
+        // (pdf_*) NER tables live in the same brain.db; the two queries
+        // open independent read-only handles, which is fine for the small
+        // result sets here.
         const mentions = [
-          ...queryPrimary(primaryDb, entity, k),
-          ...querySecondary(secondaryDb, entity, k),
+          ...queryPrimary(dbPath, entity, k),
+          ...querySecondary(dbPath, entity, k),
         ].slice(0, k);
 
         const note =
