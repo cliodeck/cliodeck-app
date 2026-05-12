@@ -11,6 +11,7 @@ function fakeLLM(canned: string): LLMProvider {
   return {
     id: 'fake',
     name: 'fake',
+    model: 'fake-model',
     capabilities: { chat: true, streaming: false, tools: false, embeddings: false },
     getStatus: () => ({ state: 'ready', lastReadyAt: 'now' }),
     healthCheck: async () => ({ state: 'ready', lastReadyAt: 'now' }),

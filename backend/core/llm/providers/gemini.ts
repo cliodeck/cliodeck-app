@@ -167,7 +167,7 @@ export class GeminiProvider implements LLMProvider {
 
   private status: ProviderStatus = { state: 'handshaking' };
   private readonly baseUrl: string;
-  private readonly model: string;
+  readonly model: string;
   private readonly apiKey: string;
 
   constructor(cfg: GeminiProviderConfig) {

@@ -113,7 +113,7 @@ export class AnthropicProvider implements LLMProvider {
 
   private status: ProviderStatus = { state: 'handshaking' };
   private readonly baseUrl: string;
-  private readonly model: string;
+  readonly model: string;
   private readonly apiKey: string;
   private readonly apiVersion: string;
 

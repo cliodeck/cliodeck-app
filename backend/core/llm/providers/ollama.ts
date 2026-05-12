@@ -106,7 +106,7 @@ export class OllamaProvider implements LLMProvider {
 
   private status: ProviderStatus = { state: 'unconfigured' };
   private readonly baseUrl: string;
-  private readonly model: string;
+  readonly model: string;
 
   constructor(cfg: OllamaProviderConfig) {
     this.baseUrl = (cfg.baseUrl ?? DEFAULT_BASE).replace(/\/$/, '');

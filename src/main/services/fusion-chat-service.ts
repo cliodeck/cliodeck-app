@@ -539,7 +539,10 @@ class FusionChatService {
         sources: recordedSources,
         durationMs: Date.now() - turnStartedAt,
         modeId: args.systemPrompt?.modeId,
-        providerName: llm?.name ?? 'unknown',
+        // Combine the provider display name and the resolved model — the
+        // journal audit needs both ("which provider, which model"); a bare
+        // `id` like 'ollama' drops the model the user actually ran.
+        providerName: llm ? `${llm.name} (${llm.model})` : 'unknown',
         retrievalOptions: args.retrievalOptions,
       });
     }

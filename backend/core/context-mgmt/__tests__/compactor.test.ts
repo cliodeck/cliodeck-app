@@ -21,6 +21,7 @@ import {
 class FakeLLM implements LLMProvider {
   readonly id = 'fake';
   readonly name = 'Fake';
+  readonly model = 'fake-model';
   readonly capabilities = {
     chat: true,
     streaming: false,

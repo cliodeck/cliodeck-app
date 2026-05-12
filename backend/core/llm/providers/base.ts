@@ -124,6 +124,8 @@ export interface ProviderCapabilities {
 export interface LLMProvider {
   readonly id: string;
   readonly name: string;
+  /** Resolved model identifier (e.g. `qwen3:8b`, `claude-sonnet-4-5`). */
+  readonly model: string;
   readonly capabilities: ProviderCapabilities;
 
   /** Current state; cheap getter backed by internal state machine. */
