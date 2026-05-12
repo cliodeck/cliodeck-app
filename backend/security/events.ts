@@ -4,7 +4,7 @@
  *
  * Discriminated union shared between the SourceInspector (emitter, main
  * process) and the renderer (aggregator). Persisted as JSONL at
- * `.cliodeck/v2/security-events.jsonl` so dashboards, audits, and
+ * `.cliodeck/security-events.jsonl` so dashboards, audits, and
  * follow-up tooling reason over typed records, not free text.
  *
  * Adding a variant: extend the union here, then exhaustive `switch`

@@ -953,7 +953,7 @@
   },
   "vault": {
     "title": "Obsidian-Vault",
-    "hint": "Verknüpfen Sie einen Obsidian-Vault (Ordner mit Markdown-Notizen), damit der Brainstorm-Chat Ihre Notizen zusätzlich zur Bibliografie zitieren kann. Notizen werden lokal in .cliodeck/v2/obsidian-vectors.db indiziert.",
+    "hint": "Verknüpfen Sie einen Obsidian-Vault (Ordner mit Markdown-Notizen), damit der Brainstorm-Chat Ihre Notizen zusätzlich zur Bibliografie zitieren kann. Notizen werden lokal in .cliodeck/obsidian-vectors.db indiziert.",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "noProject": "Öffnen Sie ein Projekt, um den Vault zu konfigurieren.",
@@ -1011,7 +1011,7 @@
     "hintBuiltinLabel": "builtin",
     "hintBuiltinSuffix": "mit der App geliefert,",
     "hintUserLabel": "user",
-    "hintUserSuffix": "im Projekt unter .cliodeck/v2/recipes/ abgelegt. Klicken Sie auf „Ausführen“, um ein Rezept mit interaktiver Parametereingabe auszuführen.",
+    "hintUserSuffix": "im Projekt unter .cliodeck/recipes/ abgelegt. Klicken Sie auf „Ausführen“, um ein Rezept mit interaktiver Parametereingabe auszuführen.",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "loadFailed": "Laden nicht möglich."

@@ -1,5 +1,5 @@
 /**
- * Workspace v2 config schema (fusion step 0.3).
+ * Workspace config schema.
  *
  * `schema_version` is the canonical marker: any loader must refuse to operate
  * on a workspace whose `schema_version` is greater than its own compile-time
@@ -8,7 +8,7 @@
  */
 
 import fs from 'fs/promises';
-import { v2Paths } from './layout.js';
+import { workspaceFiles } from './layout.js';
 
 export const WORKSPACE_SCHEMA_VERSION = 2 as const;
 
@@ -69,7 +69,7 @@ export function defaultWorkspaceConfig(name?: string): WorkspaceConfig {
 export async function readWorkspaceConfig(
   workspaceRoot: string
 ): Promise<WorkspaceConfig> {
-  const p = v2Paths(workspaceRoot);
+  const p = workspaceFiles(workspaceRoot);
   const raw = await fs.readFile(p.config, 'utf8');
   const parsed = JSON.parse(raw) as Partial<WorkspaceConfig>;
   if (parsed.schema_version !== WORKSPACE_SCHEMA_VERSION) {
@@ -84,7 +84,7 @@ export async function writeWorkspaceConfig(
   workspaceRoot: string,
   cfg: WorkspaceConfig
 ): Promise<void> {
-  const p = v2Paths(workspaceRoot);
+  const p = workspaceFiles(workspaceRoot);
   const toWrite: WorkspaceConfig = {
     ...cfg,
     schema_version: WORKSPACE_SCHEMA_VERSION,

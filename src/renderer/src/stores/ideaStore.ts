@@ -5,7 +5,7 @@
  * typed links (to other ideas or bibliography citations), spatial position
  * (for the canvas/board view), and origin tracking.
  *
- * Persisted project-level in `.cliodeck/v2/ideas.json`.
+ * Persisted project-level in `.cliodeck/ideas.json`.
  */
 
 import { create } from 'zustand';
@@ -83,7 +83,7 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
   loadIdeas: async (projectPath: string) => {
     set({ isLoading: true });
     try {
-      const ideasPath = `${projectPath}/.cliodeck/v2/ideas.json`;
+      const ideasPath = `${projectPath}/.cliodeck/ideas.json`;
       const exists = await window.electron.fs.exists(ideasPath);
       if (exists) {
         const content = await window.electron.fs.readFile(ideasPath);
@@ -188,7 +188,7 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
 
   saveIdeas: async (projectPath: string) => {
     try {
-      const ideasPath = `${projectPath}/.cliodeck/v2/ideas.json`;
+      const ideasPath = `${projectPath}/.cliodeck/ideas.json`;
       const data = JSON.stringify({ ideas: get().ideas }, null, 2);
       await window.electron.fs.writeFile(ideasPath, data);
     } catch (error) {

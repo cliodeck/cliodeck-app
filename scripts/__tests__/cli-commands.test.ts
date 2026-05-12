@@ -7,7 +7,7 @@ import {
   defaultWorkspaceConfig,
   writeWorkspaceConfig,
 } from '../../backend/core/workspace/config.js';
-import { ensureV2Directories } from '../../backend/core/workspace/layout.js';
+import { ensureWorkspaceDirectories } from '../../backend/core/workspace/layout.js';
 
 let tmp = '';
 let stdoutChunks: string[] = [];
@@ -46,7 +46,7 @@ function stderr(): string {
 }
 
 async function initWorkspace(): Promise<void> {
-  await ensureV2Directories(tmp);
+  await ensureWorkspaceDirectories(tmp);
   await writeWorkspaceConfig(tmp, defaultWorkspaceConfig('cli-test'));
 }
 

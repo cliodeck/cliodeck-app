@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   if (!arg) {
     console.error(
       'Usage: cliodeck-mcp <workspace-root>\n' +
-        '  workspace-root: path to a ClioDeck v2 workspace (contains .cliodeck/v2/)'
+        '  workspace-root: path to a ClioDeck workspace (contains .cliodeck/config.json)'
     );
     process.exit(2);
   }

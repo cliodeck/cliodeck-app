@@ -8,7 +8,7 @@ import { parseRecipe, type Recipe } from '../../backend/recipes/schema.js';
 import { RecipeRunner } from '../../backend/recipes/runner.js';
 import { buildRegistryFromWorkspace } from './registry-from-v2.js';
 import { coerceInputs, type ParsedArgs } from './args.js';
-import { v2Paths } from '../../backend/core/workspace/layout.js';
+import { workspaceFiles } from '../../backend/core/workspace/layout.js';
 
 const BUILTIN_DIR = path.join(
   process.cwd(),
@@ -21,7 +21,7 @@ async function loadRecipeByName(
   workspaceRoot: string,
   name: string
 ): Promise<{ source: 'builtin' | 'user'; recipe: Recipe; path: string }> {
-  const userDir = v2Paths(workspaceRoot).recipesDir;
+  const userDir = workspaceFiles(workspaceRoot).recipesDir;
   for (const [source, dir] of [
     ['user', userDir],
     ['builtin', BUILTIN_DIR],
@@ -62,7 +62,7 @@ export async function cmdRecipeList(args: ParsedArgs): Promise<number> {
   for (const [source, dir] of [
     ['builtin', BUILTIN_DIR] as const,
     ...(workspace
-      ? ([['user', v2Paths(workspace).recipesDir]] as const)
+      ? ([['user', workspaceFiles(workspace).recipesDir]] as const)
       : []),
   ]) {
     let files: string[];

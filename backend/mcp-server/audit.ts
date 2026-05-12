@@ -2,7 +2,7 @@
  * Audit-log redaction helper (companion to `logger.ts` / `events.ts`).
  *
  * The MCP tools and the main-process MCP client manager both write JSONL
- * events to `.cliodeck/v2/mcp-access.jsonl`. Some of those events carry
+ * events to `.cliodeck/mcp-access.jsonl`. Some of those events carry
  * user-supplied text (`query`, `entity`, snippets pulled from notes, etc.)
  * that a historian may consider sensitive — oral-history witness names,
  * anonymised informants, draft hypotheses. Writing those in clear to disk

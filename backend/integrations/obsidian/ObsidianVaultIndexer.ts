@@ -4,7 +4,7 @@
  * Reads a vault via `ObsidianVaultReader`, parses notes via
  * `ObsidianMarkdownParser`, chunks section-aware, embeds via an
  * `EmbeddingProvider` from the phase 1.3 registry, and stores everything
- * in an independent `ObsidianVaultStore` under `.cliodeck/v2/
+ * in an independent `ObsidianVaultStore` under `.cliodeck/
  * obsidian-vectors.db`.
  *
  * Returns a typed `VaultScanReport` (step 2.1bis) — partial-success
@@ -311,10 +311,5 @@ export class ObsidianVaultIndexer {
 // MARK: - factory helpers
 
 export function obsidianStorePath(workspaceRoot: string): string {
-  return path.join(
-    workspaceRoot,
-    '.cliodeck',
-    'v2',
-    'obsidian-vectors.db'
-  );
+  return path.join(workspaceRoot, '.cliodeck', 'obsidian-vectors.db');
 }

@@ -24,7 +24,7 @@ const setFusion = (overrides: {
                 present: false,
                 raw: '',
                 normalized: '',
-                sourcePath: '.cliodeck/v2/hints.md',
+                sourcePath: '.cliodeck/hints.md',
               },
             }
           : { success: false, error: overrides.hintsError ?? 'no_project' }

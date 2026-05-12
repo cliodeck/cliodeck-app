@@ -39,7 +39,7 @@ import {
   type InspectableChunk,
   type InspectorMode,
 } from '../../../backend/security/source-inspector.js';
-import { v2Paths } from '../../../backend/core/workspace/layout.js';
+import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { readWorkspaceConfig } from '../../../backend/core/workspace/config.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
@@ -660,7 +660,7 @@ class RetrievalService {
 
   /**
    * Pass each retrieved chunk through the SourceInspector. Events are
-   * appended to `.cliodeck/v2/security-events.jsonl` (best-effort —
+   * appended to `.cliodeck/security-events.jsonl` (best-effort —
    * persistence failures must not break retrieval). In `warn` mode the
    * input list is returned unchanged; in `audit`/`block` mode chunks
    * flagged as injection attempts are filtered out.
@@ -670,7 +670,7 @@ class RetrievalService {
   ): MultiSourceSearchResult[] {
     if (results.length === 0) return results;
     const logPath = this.workspaceRoot
-      ? v2Paths(this.workspaceRoot).securityEventsLog
+      ? workspaceFiles(this.workspaceRoot).securityEventsLog
       : null;
     const inspector = new SourceInspector({
       mode: this.inspectorMode,

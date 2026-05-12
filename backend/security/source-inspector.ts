@@ -50,7 +50,7 @@ export interface InspectionResult {
 export interface InspectorConfig {
   mode: InspectorMode;
   /** Optional sink for emitted events (defaults to no-op; main wires it
-   * to the JSONL appender at `.cliodeck/v2/security-events.jsonl`). */
+   * to the JSONL appender at `.cliodeck/security-events.jsonl`). */
   onEvent?: (e: SecurityEvent) => void;
 }
 
@@ -231,7 +231,7 @@ export class SourceInspector {
 
 /**
  * File-backed event sink. Each call appends one JSONL line to
- * `.cliodeck/v2/security-events.jsonl`. Callers buffer + flush as needed;
+ * `.cliodeck/security-events.jsonl`. Callers buffer + flush as needed;
  * we don't keep an open handle here to stay safe across crashes.
  */
 export async function appendSecurityEvent(

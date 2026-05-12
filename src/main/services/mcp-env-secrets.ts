@@ -3,7 +3,7 @@
  *
  * MCP stdio clients are typically invoked with API keys passed via the
  * `env` field on `MCPClientConfig`. Until 1.5 those values landed
- * verbatim in `.cliodeck/v2/config.json` — i.e. on disk in plain text,
+ * verbatim in `.cliodeck/config.json` — i.e. on disk in plain text,
  * trivially readable by anyone with filesystem access. The audit log
  * already masked `env` values (see `backend/mcp-server/audit.ts`); this
  * module closes the same hole on the persisted config.

@@ -3,12 +3,12 @@
  *
  * Standalone config reader that runs without Electron — the MCP server is
  * invoked from a separate Node process (Claude Desktop spawns it via
- * stdio). Reads the workspace v2 config to find the data dir and the
+ * stdio). Reads the workspace config to find the data dir and the
  * mcp-server enable flag.
  *
  * **Inactive by default.** The plan's ethics line is load-bearing here:
  * the server refuses to start unless `mcpServer.enabled === true` is
- * explicitly set in `.cliodeck/v2/config.json`. This is a config-level
+ * explicitly set in `.cliodeck/config.json`. This is a config-level
  * gate, not just a runtime flag — accidentally launching the binary
  * without prior consent of the historian must fail loud.
  */
@@ -16,8 +16,9 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  v2Paths,
-  type V2Paths,
+  workspaceFiles,
+  workspacePaths,
+  type WorkspaceFiles,
 } from '../core/workspace/layout.js';
 import {
   WORKSPACE_SCHEMA_VERSION,
@@ -32,7 +33,7 @@ export interface MCPServerSettings {
 
 export interface MCPRuntimeConfig {
   workspaceRoot: string;
-  paths: V2Paths;
+  paths: WorkspaceFiles;
   workspace: WorkspaceConfig;
   mcp: MCPServerSettings;
 }
@@ -41,17 +42,26 @@ export interface MCPRuntimeConfig {
  * Read and gate-check the MCP runtime config for a given workspace.
  *
  * Throws if:
- *   - the workspace v2 config is missing or unreadable;
+ *   - the workspace config is missing or unreadable;
+ *   - the workspace still uses the pre-flatten `.cliodeck/v2/` layout (open in
+ *     ClioDeck once to auto-migrate);
  *   - the schema version is wrong;
  *   - mcpServer.enabled is not `true` (default refusal).
  */
 export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
   const abs = path.resolve(workspaceRoot);
-  const paths = v2Paths(abs);
+  const paths = workspaceFiles(abs);
+  const legacyV2Config = path.join(workspacePaths(abs).legacyV2Dir, 'config.json');
 
   if (!fs.existsSync(paths.config)) {
+    if (fs.existsSync(legacyV2Config)) {
+      throw new Error(
+        `Workspace at ${abs} still uses the legacy .cliodeck/v2/ layout. ` +
+          `Open it once in ClioDeck to auto-migrate to the flat layout, then retry.`,
+      );
+    }
     throw new Error(
-      `No ClioDeck v2 workspace at ${abs} (expected ${paths.config}). Open it in the app first.`
+      `No ClioDeck workspace at ${abs} (expected ${paths.config}). Open it in the app first.`
     );
   }
 
@@ -72,7 +82,7 @@ export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
     throw new Error(
       [
         'MCP server is disabled for this workspace.',
-        'Set `mcpServer.enabled: true` in `.cliodeck/v2/config.json` to allow',
+        'Set `mcpServer.enabled: true` in `.cliodeck/config.json` to allow',
         'external clients (e.g. Claude Desktop) to read the corpus.',
         'This is intentional: the historian must opt-in explicitly.',
       ].join('\n')

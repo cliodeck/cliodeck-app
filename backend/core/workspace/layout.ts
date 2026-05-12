@@ -1,47 +1,53 @@
 /**
- * Workspace layout + version detection (fusion step 0.3).
+ * Workspace layout + version detection.
  *
- * v1 (pre-fusion, shipped): flat `.cliodeck/*` with `hnsw.index`,
- *   `vectors.db`, `primary-sources.db`, `history.db`, `similarity_cache.json`,
- *   `<bibliography>.json`. No version marker.
- * v2 (post-fusion): `.cliodeck/v2/*` with `brain.db`, `hnsw.index`,
- *   `config.json` (schema_version:2), `hints.md`, `mcp-access.jsonl`,
- *   `security-events.jsonl`, `recipes/`, `recipes-runs/`.
+ * Post-flatten layout: `.cliodeck/*` (flat) with `config.json`
+ * (schema_version:2), `brain.db`, `hnsw.index`, `hints.md`, `mcp-access.jsonl`,
+ * `security-events.jsonl`, `recipes/`, `recipes-runs/`, plus the SQLite stores
+ * `vectors.db`, `primary-sources.db`, `history.db`, `obsidian-vectors.db` and
+ * the renderer-owned `ideas.json`.
  *
- * v1 and v2 coexist: migration copies/upgrades rather than overwriting, so
- * a workspace can be opened by both the pre- and post-fusion app during the
- * transition without data loss.
+ * Two legacy layouts are still recognized for auto-migration on workspace open:
+ * - `legacy-subdir`: an in-flight `.cliodeck/v2/*` directory left over from the
+ *   pre-flatten fusion branch. Migration moves every entry up one level.
+ * - `legacy-flat`: pre-fusion v1 — `.cliodeck/` with no `config.json` anywhere.
+ *   Migration writes a default `config.json`; every other file is already at
+ *   its target path.
  */
 
 import path from 'path';
 import fs from 'fs/promises';
 
 export const CLIODECK_DIR = '.cliodeck';
-export const V2_SUBDIR = 'v2';
 export const CLIOBRAIN_DIR = '.cliobrain';
+/** Pre-flatten subdir, kept here only so the migrator can recognize and unwind it. */
+export const LEGACY_V2_SUBDIR = 'v2';
 
-export type WorkspaceVersion = 'none' | 'v1' | 'v2' | 'cliobrain';
+export type WorkspaceVersion =
+  | 'none'
+  | 'flat'
+  | 'legacy-subdir'
+  | 'legacy-flat'
+  | 'cliobrain';
 
 export interface WorkspacePaths {
   root: string;
-  /** `.cliodeck/` — present for v1 and v2 */
   cliodeckDir: string;
-  /** `.cliodeck/v2/` — present only for v2 */
-  v2Dir: string;
-  /** `.cliobrain/` — present when migrating from ClioBrain */
   cliobrainDir: string;
+  /** Only meaningful when version === 'legacy-subdir'; emptied during migration. */
+  legacyV2Dir: string;
 }
 
 export function workspacePaths(root: string): WorkspacePaths {
   return {
     root,
     cliodeckDir: path.join(root, CLIODECK_DIR),
-    v2Dir: path.join(root, CLIODECK_DIR, V2_SUBDIR),
     cliobrainDir: path.join(root, CLIOBRAIN_DIR),
+    legacyV2Dir: path.join(root, CLIODECK_DIR, LEGACY_V2_SUBDIR),
   };
 }
 
-export interface V2Paths {
+export interface WorkspaceFiles {
   root: string;
   config: string;
   brainDb: string;
@@ -53,8 +59,8 @@ export interface V2Paths {
   recipesRunsDir: string;
 }
 
-export function v2Paths(workspaceRoot: string): V2Paths {
-  const root = path.join(workspaceRoot, CLIODECK_DIR, V2_SUBDIR);
+export function workspaceFiles(workspaceRoot: string): WorkspaceFiles {
+  const root = path.join(workspaceRoot, CLIODECK_DIR);
   return {
     root,
     config: path.join(root, 'config.json'),
@@ -78,23 +84,24 @@ async function exists(p: string): Promise<boolean> {
 }
 
 /**
- * Detect the version of a workspace directory. A directory can legitimately
- * host multiple markers during migration (v1 present AND v2 being populated);
- * detection reports the *highest* upgradeable state so the UI can show
- * "already migrated" vs "migration available".
+ * Detect the workspace state at `root`. Priority order: flat > legacy-subdir >
+ * legacy-flat > cliobrain > none. A workspace can transiently host more than
+ * one marker (e.g. legacy-subdir co-existing with a half-written flat config);
+ * the highest-priority match wins and auto-migration handles the rest.
  */
-export async function detectWorkspaceVersion(
-  root: string
-): Promise<WorkspaceVersion> {
+export async function detectWorkspaceVersion(root: string): Promise<WorkspaceVersion> {
   const p = workspacePaths(root);
-  if (await exists(path.join(p.v2Dir, 'config.json'))) return 'v2';
-  if (await exists(p.cliodeckDir)) return 'v1';
+  if (await exists(path.join(p.cliodeckDir, 'config.json'))) return 'flat';
+  if (await exists(path.join(p.legacyV2Dir, 'config.json'))) return 'legacy-subdir';
+  if (await exists(p.cliodeckDir)) return 'legacy-flat';
   if (await exists(p.cliobrainDir)) return 'cliobrain';
   return 'none';
 }
 
-export async function ensureV2Directories(workspaceRoot: string): Promise<V2Paths> {
-  const p = v2Paths(workspaceRoot);
+export async function ensureWorkspaceDirectories(
+  workspaceRoot: string,
+): Promise<WorkspaceFiles> {
+  const p = workspaceFiles(workspaceRoot);
   await fs.mkdir(p.root, { recursive: true });
   await fs.mkdir(p.recipesDir, { recursive: true });
   await fs.mkdir(p.recipesRunsDir, { recursive: true });

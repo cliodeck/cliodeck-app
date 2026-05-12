@@ -24,7 +24,7 @@
  */
 
 import fs from 'fs/promises';
-import { v2Paths } from '../workspace/layout.js';
+import { workspaceFiles } from '../workspace/layout.js';
 import type { ChatMessage } from '../llm/providers/base.js';
 
 export interface WorkspaceHints {
@@ -41,7 +41,7 @@ export interface WorkspaceHints {
 export async function loadWorkspaceHints(
   workspaceRoot: string
 ): Promise<WorkspaceHints> {
-  const sourcePath = v2Paths(workspaceRoot).hints;
+  const sourcePath = workspaceFiles(workspaceRoot).hints;
   let raw = '';
   try {
     raw = await fs.readFile(sourcePath, 'utf8');
@@ -66,7 +66,7 @@ export async function writeWorkspaceHints(
   workspaceRoot: string,
   markdown: string
 ): Promise<void> {
-  const sourcePath = v2Paths(workspaceRoot).hints;
+  const sourcePath = workspaceFiles(workspaceRoot).hints;
   await fs.writeFile(sourcePath, markdown, 'utf8');
 }
 

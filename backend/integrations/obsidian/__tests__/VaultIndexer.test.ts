@@ -65,7 +65,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
 
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
     const indexer = new ObsidianVaultIndexer(reader, store, fakeEmbedder());
@@ -85,7 +85,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
     writeNote('A.md', '# A\nhello world hello world.');
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
     let embedCalls = 0;
@@ -117,7 +117,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
 
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
     const embedder = fakeEmbedder();
@@ -140,7 +140,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
     writeNote('A.md', '# A\ncontent.');
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
     const embedder = fakeEmbedder();
@@ -159,7 +159,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
 
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
     const indexer = new ObsidianVaultIndexer(reader, store, fakeEmbedder());
@@ -180,7 +180,7 @@ describe('ObsidianVaultIndexer (2.4b)', () => {
 
     const reader = new ObsidianVaultReader(vault);
     store = new ObsidianVaultStore({
-      dbPath: path.join(vault, '.cliodeck', 'v2', 'obsidian-vectors.db'),
+      dbPath: path.join(vault, '.cliodeck', 'obsidian-vectors.db'),
       dimension: DIMENSION,
     });
 

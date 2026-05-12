@@ -1163,7 +1163,7 @@
   },
   "vault": {
     "title": "Vault Obsidian",
-    "hint": "Lie un vault Obsidian (dossier de notes Markdown) pour que le chat Brainstorm puisse citer tes notes en plus de ta bibliographie. Les notes sont indexées localement dans .cliodeck/v2/obsidian-vectors.db.",
+    "hint": "Lie un vault Obsidian (dossier de notes Markdown) pour que le chat Brainstorm puisse citer tes notes en plus de ta bibliographie. Les notes sont indexées localement dans .cliodeck/obsidian-vectors.db.",
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
       "noProject": "Ouvrez un projet pour configurer le vault.",
@@ -1221,7 +1221,7 @@
     "hintBuiltinLabel": "builtin",
     "hintBuiltinSuffix": "livrées avec l'app,",
     "hintUserLabel": "user",
-    "hintUserSuffix": "placées dans .cliodeck/v2/recipes/ du projet. Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.",
+    "hintUserSuffix": "placées dans .cliodeck/recipes/ du projet. Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.",
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
       "loadFailed": "Chargement impossible."

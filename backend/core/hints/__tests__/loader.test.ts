@@ -8,14 +8,14 @@ import {
   prependAsSystemMessage,
   writeWorkspaceHints,
 } from '../loader.js';
-import { ensureV2Directories } from '../../workspace/layout.js';
+import { ensureWorkspaceDirectories } from '../../workspace/layout.js';
 import type { ChatMessage } from '../../llm/providers/base.js';
 
 let tmp = '';
 
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'cliodeck-hints-'));
-  await ensureV2Directories(tmp);
+  await ensureWorkspaceDirectories(tmp);
 });
 
 afterEach(async () => {

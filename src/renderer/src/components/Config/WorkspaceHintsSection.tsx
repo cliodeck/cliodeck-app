@@ -22,7 +22,7 @@ function api(): HintsApi | null {
 export const WorkspaceHintsSection: React.FC = () => {
   const { t } = useTranslation();
   const [value, setValue] = useState('');
-  const [sourcePath, setSourcePath] = useState<string>('.cliodeck/v2/hints.md');
+  const [sourcePath, setSourcePath] = useState<string>('.cliodeck/hints.md');
   const [status, setStatus] = useState<
     { kind: 'idle' } | { kind: 'saving' } | { kind: 'ok' } | { kind: 'error'; message: string }
   >({ kind: 'idle' });

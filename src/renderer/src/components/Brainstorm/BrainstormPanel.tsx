@@ -256,7 +256,7 @@ export const BrainstormPanel: React.FC = () => {
               ) : (
                 <p className="brainstorm-panel__muted">
                   {t('chat.brainstorm.noHints', {
-                    path: hints?.sourcePath ?? '.cliodeck/v2/hints.md',
+                    path: hints?.sourcePath ?? '.cliodeck/hints.md',
                   })}
                 </p>
               )}

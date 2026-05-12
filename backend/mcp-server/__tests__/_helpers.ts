@@ -22,7 +22,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import type { MCPRuntimeConfig } from '../config.js';
-import { v2Paths } from '../../core/workspace/layout.js';
+import { workspaceFiles } from '../../core/workspace/layout.js';
 
 export interface CapturedTool {
   name: string;
@@ -84,9 +84,9 @@ export function createInMemoryLogger(): {
 /** Make an isolated workspace dir under the OS temp tree. */
 export function createTempWorkspace(prefix = 'cliodeck-mcp-tools-'): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  // The MCP tools never check that .cliodeck/v2 exists; they only build
-  // paths off it. Create it so callers that drop a v2 config there work.
-  fs.mkdirSync(path.join(root, '.cliodeck', 'v2'), { recursive: true });
+  // The MCP tools never check that .cliodeck exists; they only build paths off
+  // it. Create it so callers that drop a config there work.
+  fs.mkdirSync(path.join(root, '.cliodeck'), { recursive: true });
   return root;
 }
 
@@ -98,7 +98,7 @@ export function createTempWorkspace(prefix = 'cliodeck-mcp-tools-'): string {
 export function makeMcpConfig(workspaceRoot: string): MCPRuntimeConfig {
   return {
     workspaceRoot,
-    paths: v2Paths(workspaceRoot),
+    paths: workspaceFiles(workspaceRoot),
     workspace: {
       schema_version: 2,
     },
@@ -207,11 +207,11 @@ export function createTempPrimarySourcesDb(root: string): Database.Database {
 }
 
 /**
- * Create `<root>/.cliodeck/v2/obsidian-vectors.db` with the schema that
+ * Create `<root>/.cliodeck/obsidian-vectors.db` with the schema that
  * `ObsidianVaultStore.searchLexical` requires (notes + chunks + chunks_fts).
  */
 export function createTempObsidianDb(root: string): Database.Database {
-  const dir = path.join(root, '.cliodeck', 'v2');
+  const dir = path.join(root, '.cliodeck');
   fs.mkdirSync(dir, { recursive: true });
   const db = new Database(path.join(dir, 'obsidian-vectors.db'));
   db.exec(`

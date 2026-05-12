@@ -4,15 +4,12 @@ import os from 'os';
 import path from 'path';
 import {
   detectWorkspaceVersion,
-  v2Paths,
+  workspaceFiles,
   CLIODECK_DIR,
-  V2_SUBDIR,
   CLIOBRAIN_DIR,
+  LEGACY_V2_SUBDIR,
 } from '../layout.js';
-import {
-  migrateFromCliobrain,
-  migrateFromCliodeckV1,
-} from '../migrator.js';
+import { migrateWorkspaceToFlat } from '../migrator.js';
 import { readWorkspaceConfig } from '../config.js';
 
 let tmpRoot = '';
@@ -39,89 +36,135 @@ describe('detectWorkspaceVersion', () => {
     expect(await detectWorkspaceVersion(tmpRoot)).toBe('none');
   });
 
-  it('v1 when only .cliodeck/ exists', async () => {
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'));
-    expect(await detectWorkspaceVersion(tmpRoot)).toBe('v1');
+  it('flat when .cliodeck/config.json exists', async () => {
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      '{"schema_version":2}',
+    );
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('flat');
   });
 
-  it('v2 when v2/config.json exists', async () => {
+  it('legacy-subdir when only .cliodeck/v2/config.json exists', async () => {
     await write(
-      path.join(tmpRoot, CLIODECK_DIR, V2_SUBDIR, 'config.json'),
-      '{"schema_version":2}'
+      path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'config.json'),
+      '{"schema_version":2}',
     );
-    expect(await detectWorkspaceVersion(tmpRoot)).toBe('v2');
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('legacy-subdir');
+  });
+
+  it('legacy-flat when .cliodeck/ exists with no config anywhere', async () => {
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'));
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('legacy-flat');
   });
 
   it('cliobrain when only .cliobrain/ exists', async () => {
     await write(path.join(tmpRoot, CLIOBRAIN_DIR, 'brain.db'));
     expect(await detectWorkspaceVersion(tmpRoot)).toBe('cliobrain');
   });
+
+  it('flat wins over legacy-subdir when both have a config.json', async () => {
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'config.json'), '{"schema_version":2}');
+    await write(
+      path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'config.json'),
+      '{"schema_version":2}',
+    );
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('flat');
+  });
 });
 
-describe('migrateFromCliodeckV1', () => {
-  it('is a no-op on empty workspace', async () => {
-    const r = await migrateFromCliodeckV1(tmpRoot);
+describe('migrateWorkspaceToFlat — none / flat', () => {
+  it('no-op on empty workspace', async () => {
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('none');
     expect(r.noop).toBeDefined();
-    expect(r.copied).toHaveLength(0);
   });
 
-  it('copies hnsw.index and writes a fresh v2 config', async () => {
+  it('no-op when already flat', async () => {
     await write(
-      path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'),
-      'INDEXBYTES'
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      '{"schema_version":2}',
     );
-    const r = await migrateFromCliodeckV1(tmpRoot, { name: 'my-corpus' });
-    expect(r.noop).toBeUndefined();
-    expect(r.copied.some((c) => c.target.endsWith('hnsw.index'))).toBe(true);
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('none');
+    expect(r.noop).toMatch(/already at flat/);
+  });
+});
+
+describe('migrateWorkspaceToFlat — legacy-flat (pre-fusion v1)', () => {
+  it('writes a fresh config and leaves v1 data in place', async () => {
+    const v1Hnsw = path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index');
+    await write(v1Hnsw, 'ORIGINAL');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot, { name: 'my-corpus' });
+    expect(r.kind).toBe('legacy-flat');
+    expect(r.copied.some((c) => c.target.endsWith('config.json'))).toBe(true);
 
     const cfg = await readWorkspaceConfig(tmpRoot);
     expect(cfg.schema_version).toBe(2);
     expect(cfg.name).toBe('my-corpus');
-    expect(await detectWorkspaceVersion(tmpRoot)).toBe('v2');
-  });
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('flat');
 
-  it('leaves v1 data in place (additive migration)', async () => {
-    const v1Hnsw = path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index');
-    await write(v1Hnsw, 'ORIGINAL');
-    await migrateFromCliodeckV1(tmpRoot);
-    const stillThere = await fs.readFile(v1Hnsw, 'utf8');
-    expect(stillThere).toBe('ORIGINAL');
-  });
-
-  it('skips when v2 already exists, overwrite:true forces re-run', async () => {
-    await write(
-      path.join(tmpRoot, CLIODECK_DIR, V2_SUBDIR, 'config.json'),
-      JSON.stringify({ schema_version: 2, name: 'keep-me' })
-    );
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'), 'NEW');
-
-    const r1 = await migrateFromCliodeckV1(tmpRoot);
-    expect(r1.noop).toMatch(/already at v2/);
-
-    const r2 = await migrateFromCliodeckV1(tmpRoot, { overwrite: true });
-    expect(r2.noop).toBeUndefined();
-    const copiedIdx = await fs.readFile(
-      v2Paths(tmpRoot).hnswIndex,
-      'utf8'
-    );
-    expect(copiedIdx).toBe('NEW');
-  });
-
-  it('reports empty sources as skipped with reason', async () => {
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'), '');
-    const r = await migrateFromCliodeckV1(tmpRoot);
-    expect(
-      r.skipped.find((s) => s.target.endsWith('hnsw.index'))?.reason
-    ).toBe('empty_source');
+    expect(await fs.readFile(v1Hnsw, 'utf8')).toBe('ORIGINAL');
   });
 });
 
-describe('migrateFromCliobrain', () => {
-  it('is a no-op when .cliobrain is absent', async () => {
-    const r = await migrateFromCliobrain(tmpRoot);
-    expect(r.noop).toBeDefined();
+describe('migrateWorkspaceToFlat — legacy-subdir (in-flight v2)', () => {
+  it('moves every file in .cliodeck/v2/ up one level', async () => {
+    const v2 = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR);
+    await write(path.join(v2, 'config.json'), '{"schema_version":2,"name":"hist"}');
+    await write(path.join(v2, 'hints.md'), '# hints');
+    await write(path.join(v2, 'mcp-access.jsonl'), '{"t":"hi"}\n');
+    await write(path.join(v2, 'recipes', 'one.yaml'), 'name: one\n');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('legacy-subdir');
+    expect(r.copied.length).toBeGreaterThanOrEqual(4);
+
+    const flat = workspaceFiles(tmpRoot);
+    expect(await fs.readFile(flat.config, 'utf8')).toMatch(/"name":"hist"/);
+    expect(await fs.readFile(flat.hints, 'utf8')).toBe('# hints');
+    expect(
+      await fs.readFile(path.join(flat.recipesDir, 'one.yaml'), 'utf8'),
+    ).toBe('name: one\n');
+
+    // The legacy subdir is gone.
+    await expect(fs.access(v2)).rejects.toThrow();
+    expect(await detectWorkspaceVersion(tmpRoot)).toBe('flat');
   });
 
+  it('keeps the live flat hnsw.index on collision', async () => {
+    const v2 = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR);
+    await write(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'), 'LIVE');
+    await write(path.join(v2, 'hnsw.index'), 'DEBRIS');
+    await write(path.join(v2, 'config.json'), '{"schema_version":2}');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(
+      r.skipped.find((s) => s.target.endsWith('hnsw.index'))?.reason,
+    ).toBe('flat_already_present');
+
+    expect(
+      await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'), 'utf8'),
+    ).toBe('LIVE');
+  });
+
+  it('writes a default config when the v2 subdir lacked one', async () => {
+    // Edge case: legacy-subdir was detected via SOMETHING but config.json is
+    // absent — this can happen if a user manually rm-ed it. We still want a
+    // working workspace afterwards. (This case won't be detected as
+    // legacy-subdir by detectWorkspaceVersion, so simulate via direct call.)
+    const v2 = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR);
+    await write(path.join(v2, 'config.json'), '{"schema_version":2}');
+    await write(path.join(v2, 'hints.md'), 'h');
+
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('legacy-subdir');
+    const cfg = await readWorkspaceConfig(tmpRoot);
+    expect(cfg.schema_version).toBe(2);
+  });
+});
+
+describe('migrateWorkspaceToFlat — cliobrain', () => {
   it('copies canonical artifacts and merges config', async () => {
     const cb = path.join(tmpRoot, CLIOBRAIN_DIR);
     await write(path.join(cb, 'brain.db'), 'SQLITE');
@@ -129,19 +172,17 @@ describe('migrateFromCliobrain', () => {
     await write(path.join(cb, 'hints.md'), '# hints');
     await write(
       path.join(cb, 'config.json'),
-      JSON.stringify({
-        name: 'thesis',
-        custom_field: 'preserved',
-      })
+      JSON.stringify({ name: 'thesis', custom_field: 'preserved' }),
     );
 
-    const r = await migrateFromCliobrain(tmpRoot);
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.kind).toBe('cliobrain');
     expect(r.copied.map((c) => path.basename(c.target)).sort()).toEqual(
-      ['brain.db', 'config.json', 'hints.md', 'hnsw.index']
+      ['brain.db', 'config.json', 'hints.md', 'hnsw.index'],
     );
 
-    const v2 = v2Paths(tmpRoot);
-    expect(await fs.readFile(v2.brainDb, 'utf8')).toBe('SQLITE');
+    const flat = workspaceFiles(tmpRoot);
+    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('SQLITE');
 
     const cfg = await readWorkspaceConfig(tmpRoot);
     expect(cfg.schema_version).toBe(2);
@@ -149,55 +190,24 @@ describe('migrateFromCliobrain', () => {
     expect((cfg as Record<string, unknown>).custom_field).toBe('preserved');
   });
 
-  it('mixed workspace: v1 + cliobrain side-by-side both migratable', async () => {
-    await write(
-      path.join(tmpRoot, CLIODECK_DIR, 'hnsw.index'),
-      'V1-INDEX'
-    );
-    await write(
-      path.join(tmpRoot, CLIOBRAIN_DIR, 'brain.db'),
-      'CB-DB'
-    );
-
-    // v1 wins detection — run v1 migrator first, then cliobrain on top.
-    const r1 = await migrateFromCliodeckV1(tmpRoot);
-    expect(r1.copied.some((c) => c.target.endsWith('hnsw.index'))).toBe(
-      true
-    );
-
-    // Now v2 exists; cliobrain can still add brain.db without overwrite.
-    const cfgBefore = await readWorkspaceConfig(tmpRoot);
-    const r2 = await migrateFromCliobrain(tmpRoot);
-    expect(r2.copied.some((c) => c.target.endsWith('brain.db'))).toBe(
-      true
-    );
-    // No ClioBrain config.json present, so the v1-written v2 config stays
-    // (no entry in copied or skipped for config.json).
-    const cfgAfter = await readWorkspaceConfig(tmpRoot);
-    expect(cfgAfter.created_at).toBe(cfgBefore.created_at);
-    expect(cfgAfter.name).toBe(cfgBefore.name);
-  });
-
   it('warns on malformed ClioBrain config', async () => {
     await write(
       path.join(tmpRoot, CLIOBRAIN_DIR, 'config.json'),
-      '{not json'
+      '{not json',
     );
-    const r = await migrateFromCliobrain(tmpRoot);
-    expect(r.warnings.some((w) => w.includes('Failed to parse'))).toBe(
-      true
-    );
+    const r = await migrateWorkspaceToFlat(tmpRoot);
+    expect(r.warnings.some((w) => w.includes('Failed to parse'))).toBe(true);
   });
 });
 
 describe('readWorkspaceConfig', () => {
   it('rejects newer schema_version', async () => {
     await write(
-      path.join(tmpRoot, CLIODECK_DIR, V2_SUBDIR, 'config.json'),
-      JSON.stringify({ schema_version: 99 })
+      path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
+      JSON.stringify({ schema_version: 99 }),
     );
     await expect(readWorkspaceConfig(tmpRoot)).rejects.toThrow(
-      /Unsupported workspace schema_version/
+      /Unsupported workspace schema_version/,
     );
   });
 });

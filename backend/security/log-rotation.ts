@@ -88,14 +88,14 @@ export async function rotateJsonlFile(
 }
 
 /**
- * Rotate all audit JSONL files in a workspace v2 directory.
+ * Rotate all audit JSONL files in a workspace.
  */
 export async function rotateWorkspaceAuditLogs(
   workspacePath: string,
   options?: RotationOptions
 ): Promise<{ mcpAccess: { purged: number; kept: number }; securityEvents: { purged: number; kept: number } }> {
-  const mcpPath = path.join(workspacePath, '.cliodeck', 'v2', 'mcp-access.jsonl');
-  const secPath = path.join(workspacePath, '.cliodeck', 'v2', 'security-events.jsonl');
+  const mcpPath = path.join(workspacePath, '.cliodeck', 'mcp-access.jsonl');
+  const secPath = path.join(workspacePath, '.cliodeck', 'security-events.jsonl');
 
   const [mcpAccess, securityEvents] = await Promise.all([
     rotateJsonlFile(mcpPath, options),

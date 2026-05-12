@@ -30,8 +30,8 @@ import {
   writeWorkspaceHints,
 } from '../../../../backend/core/hints/loader.js';
 import {
-  ensureV2Directories,
-  v2Paths,
+  ensureWorkspaceDirectories,
+  workspaceFiles,
 } from '../../../../backend/core/workspace/layout.js';
 import {
   defaultWorkspaceConfig,
@@ -60,7 +60,7 @@ interface VaultConfigBlock {
 }
 
 async function readOrInitWorkspaceConfig(root: string): Promise<WorkspaceConfig> {
-  await ensureV2Directories(root);
+  await ensureWorkspaceDirectories(root);
   try {
     return await readWorkspaceConfig(root);
   } catch {
@@ -100,7 +100,7 @@ export function setupFusionHandlers(): void {
     }
     try {
       // Ensure v2 dir exists before writing.
-      await fs.mkdir(v2Paths(root).root, { recursive: true });
+      await fs.mkdir(workspaceFiles(root).root, { recursive: true });
       await writeWorkspaceHints(root, rawMarkdown);
       const h = await loadWorkspaceHints(root);
       return successResponse({ hints: h });
@@ -117,7 +117,7 @@ export function setupFusionHandlers(): void {
       const builtin = await listRecipes(BUILTIN_RECIPES_DIR);
       let user: RecipeSummary[] = [];
       if (root) {
-        const userDir = v2Paths(root).recipesDir;
+        const userDir = workspaceFiles(root).recipesDir;
         try {
           await fs.access(userDir);
           user = await listRecipes(userDir);
@@ -145,7 +145,7 @@ export function setupFusionHandlers(): void {
           ? BUILTIN_RECIPES_DIR
           : (() => {
               const root = projectManager.getCurrentProjectPath();
-              return root ? v2Paths(root).recipesDir : null;
+              return root ? workspaceFiles(root).recipesDir : null;
             })();
       if (!baseDir) return noProject();
       try {
@@ -173,7 +173,7 @@ export function setupFusionHandlers(): void {
           ? BUILTIN_RECIPES_DIR
           : (() => {
               const root = projectManager.getCurrentProjectPath();
-              return root ? v2Paths(root).recipesDir : null;
+              return root ? workspaceFiles(root).recipesDir : null;
             })();
       if (!baseDir) return noProject();
       try {
@@ -203,7 +203,7 @@ export function setupFusionHandlers(): void {
       } catch (e) {
         return errorResponse(e as Error);
       }
-      const userDir = v2Paths(root).recipesDir;
+      const userDir = workspaceFiles(root).recipesDir;
       try {
         await fs.mkdir(userDir, { recursive: true });
         await fs.writeFile(path.join(userDir, rawFileName), rawYaml, 'utf8');
@@ -232,7 +232,7 @@ export function setupFusionHandlers(): void {
       }
       const inputs = (rawInputs ?? {}) as Record<string, unknown>;
       const baseDir =
-        rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : v2Paths(root).recipesDir;
+        rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : workspaceFiles(root).recipesDir;
       let recipe: Recipe;
       try {
         const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
@@ -377,7 +377,7 @@ export function setupFusionHandlers(): void {
     // Audit log location (may be unavailable if no project is open; in that
     // case `addClient` will reject with "No project loaded" below anyway).
     const root = projectManager.getCurrentProjectPath();
-    const auditPath = root ? v2Paths(root).mcpAccessLog : null;
+    const auditPath = root ? workspaceFiles(root).mcpAccessLog : null;
 
     // 1. Whitelist validation (command + env shape).
     const check = validateMcpAddRequest(normalized);
@@ -720,7 +720,7 @@ export function setupFusionHandlers(): void {
     }
   });
 
-  // Stats over `.cliodeck/v2/security-events.jsonl` (fusion 2.8).
+  // Stats over `.cliodeck/security-events.jsonl` (fusion 2.8).
   // Read + aggregate is fast (typical workspaces have hundreds of
   // events at most), so we hand the renderer a fully shaped payload
   // each call rather than streaming. Rotation lands later in 3.14.
@@ -737,7 +737,7 @@ export function setupFusionHandlers(): void {
         '../../../../backend/security/events-reader.js'
       );
       const events = await readSecurityEventsLog(
-        v2Paths(root).securityEventsLog
+        workspaceFiles(root).securityEventsLog
       );
       const stats = aggregateSecurityEvents(events, { recentLimit });
       return successResponse({ stats });
@@ -753,7 +753,7 @@ export function setupFusionHandlers(): void {
       // Log revocation event
       const root = projectManager.getCurrentProjectPath();
       if (root) {
-        const logPath = v2Paths(root).securityEventsLog;
+        const logPath = workspaceFiles(root).securityEventsLog;
         const event = JSON.stringify({
           kind: 'credential_revocation',
           keysDeleted: count,

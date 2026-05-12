@@ -56,7 +56,7 @@ export type ExpandQuery = (query: string) => string[];
 
 /**
  * Default FR↔EN academic-term map. Minimal bootstrap — the real dictionary
- * is loaded from `.cliodeck/v2/config.json` → `rag.queryExpansionDictionary`
+ * is loaded from `.cliodeck/config.json` → `rag.queryExpansionDictionary`
  * at runtime and merged on top of these defaults (A20).
  */
 export const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {

@@ -3,7 +3,7 @@
  *
  * Executes a Recipe's steps sequentially. The run log is a stream of typed
  * events (claw-code lesson 6.2 — *events over scraped prose*) persisted as
- * JSONL to `.cliodeck/v2/recipes-runs/<iso>-<name>.jsonl`, so dashboards,
+ * JSONL to `.cliodeck/recipes-runs/<iso>-<name>.jsonl`, so dashboards,
  * tests, and recipe debugging consumers can reason over structured data.
  *
  * Step failures never trigger automatic retry (claw-code lesson 6.4 —
@@ -20,7 +20,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { ProviderRegistry } from '../core/llm/providers/registry.js';
-import { v2Paths, ensureV2Directories } from '../core/workspace/layout.js';
+import { workspaceFiles, ensureWorkspaceDirectories } from '../core/workspace/layout.js';
 import { validateInputs, type Recipe, type StepKind } from './schema.js';
 
 export type RunEvent =
@@ -199,8 +199,8 @@ export class RecipeRunner {
     signal?: AbortSignal
   ): Promise<RunResult> {
     const violations = validateInputs(recipe, inputs);
-    const paths = v2Paths(this.workspaceRoot);
-    await ensureV2Directories(this.workspaceRoot);
+    const paths = workspaceFiles(this.workspaceRoot);
+    await ensureWorkspaceDirectories(this.workspaceRoot);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeName = recipe.name.replace(/[^\w.-]/g, '_');
     const logPath = path.join(paths.recipesRunsDir, `${stamp}-${safeName}.jsonl`);

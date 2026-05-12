@@ -4,7 +4,7 @@
  *
  * Every interaction the MCP server has with an external client is recorded
  * as one of these typed records, written line-by-line to
- * `.cliodeck/v2/mcp-access.jsonl`. This is the *contre-archivage* the
+ * `.cliodeck/mcp-access.jsonl`. This is the *contre-archivage* the
  * fusion plan calls for: a historian must be able to audit exactly what
  * their corpus told a third-party model, when, and which client asked.
  *

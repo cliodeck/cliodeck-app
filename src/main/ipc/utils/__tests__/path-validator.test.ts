@@ -25,7 +25,7 @@ let projectDir: string;
 beforeAll(async () => {
   tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'cliodeck-pv-'));
   projectDir = path.join(tmpRoot, 'my-project');
-  await mkdir(path.join(projectDir, '.cliodeck', 'v2'), { recursive: true });
+  await mkdir(path.join(projectDir, '.cliodeck'), { recursive: true });
   await writeFile(path.join(projectDir, 'document.md'), '# doc');
   projectPathRef.current = projectDir;
 });
@@ -41,7 +41,7 @@ describe('validateReadPath', () => {
   });
 
   it('allows reads inside the project .cliodeck/ subtree', async () => {
-    const p = path.join(projectDir, '.cliodeck', 'v2', 'config.json');
+    const p = path.join(projectDir, '.cliodeck', 'config.json');
     expect(await validateReadPath(p)).toBe(p);
   });
 

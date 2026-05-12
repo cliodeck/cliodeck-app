@@ -29,7 +29,10 @@ import {
   type MCPClientConfig as WorkspaceClientConfig,
   type WorkspaceConfig,
 } from '../../../backend/core/workspace/config.js';
-import { ensureV2Directories, v2Paths } from '../../../backend/core/workspace/layout.js';
+import {
+  ensureWorkspaceDirectories,
+  workspaceFiles,
+} from '../../../backend/core/workspace/layout.js';
 import path from 'path';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
@@ -87,7 +90,7 @@ class MCPClientsService {
   }
 
   private async readOrInitConfig(root: string): Promise<WorkspaceConfig> {
-    await ensureV2Directories(root);
+    await ensureWorkspaceDirectories(root);
     try {
       return await readWorkspaceConfig(root);
     } catch {
@@ -102,8 +105,8 @@ class MCPClientsService {
     this.workspaceRoot = root;
 
     try {
-      await ensureV2Directories(root);
-      this.auditLogStream = createWriteStream(v2Paths(root).mcpAccessLog, {
+      await ensureWorkspaceDirectories(root);
+      this.auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
         flags: 'a',
       });
       this.auditLogStream.on('error', (err) => {

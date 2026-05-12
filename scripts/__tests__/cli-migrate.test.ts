@@ -58,44 +58,56 @@ describe('cliodeck import-cliobrain (5.2)', () => {
     await writeFile('.cliobrain/hnsw.index', 'VEC');
     await writeFile(
       '.cliobrain/config.json',
-      JSON.stringify({ name: 'thesis', custom: 'kept' })
+      JSON.stringify({ name: 'thesis', custom: 'kept' }),
     );
 
     const code = await runCli(['import-cliobrain', tmp]);
     expect(code).toBe(0);
 
     const parsed = JSON.parse(stdout()) as {
-      cliobrain: { copied: unknown[]; skipped: unknown[]; warnings: unknown[] };
-      cliodeckV1: { copied: unknown[]; skipped: unknown[] };
+      kind: string;
+      copied: unknown[];
+      skipped: unknown[];
+      warnings: unknown[];
     };
-    expect(parsed.cliobrain.copied.length).toBeGreaterThan(0);
+    expect(parsed.kind).toBe('cliobrain');
+    expect(parsed.copied.length).toBeGreaterThan(0);
 
-    // The v2 layout should now hold the copied files.
-    const brainDb = path.join(tmp, '.cliodeck', 'v2', 'brain.db');
+    // The flat layout should now hold the copied files.
+    const brainDb = path.join(tmp, '.cliodeck', 'brain.db');
     expect(await fs.readFile(brainDb, 'utf8')).toBe('SQLITE');
-    expect(stderr()).toMatch(/cliobrain → v2:/);
+    expect(stderr()).toMatch(/migration kind:/);
   });
 
   it('exits 1 when cliobrain config.json is malformed', async () => {
     await writeFile('.cliobrain/config.json', '{bad json');
     const code = await runCli(['import-cliobrain', tmp]);
     expect(code).toBe(1);
-    const report = JSON.parse(stdout()) as {
-      cliobrain: { warnings: string[] };
-    };
-    expect(report.cliobrain.warnings.some((w) => w.includes('Failed to parse'))).toBe(
-      true
-    );
+    const report = JSON.parse(stdout()) as { warnings: string[] };
+    expect(report.warnings.some((w) => w.includes('Failed to parse'))).toBe(true);
   });
 
-  it('reports noop on both sides when neither source exists', async () => {
+  it('reports noop when neither source exists', async () => {
     const code = await runCli(['import-cliobrain', tmp]);
     expect(code).toBe(0);
-    const report = JSON.parse(stdout()) as {
-      cliobrain: { noop?: string };
-      cliodeckV1: { noop?: string };
-    };
-    expect(report.cliobrain.noop).toBeDefined();
-    expect(report.cliodeckV1.noop).toBeDefined();
+    const report = JSON.parse(stdout()) as { kind: string; noop?: string };
+    expect(report.kind).toBe('none');
+    expect(report.noop).toBeDefined();
+  });
+
+  it('promotes a legacy-subdir workspace to flat', async () => {
+    await writeFile(
+      '.cliodeck/v2/config.json',
+      JSON.stringify({ schema_version: 2, name: 'preexisting' }),
+    );
+    await writeFile('.cliodeck/v2/hints.md', '# h');
+
+    const code = await runCli(['import-cliobrain', tmp]);
+    expect(code).toBe(0);
+    const report = JSON.parse(stdout()) as { kind: string };
+    expect(report.kind).toBe('legacy-subdir');
+    expect(
+      await fs.readFile(path.join(tmp, '.cliodeck', 'config.json'), 'utf8'),
+    ).toMatch(/preexisting/);
   });
 });

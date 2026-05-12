@@ -4,12 +4,12 @@
  * Exposes the workspace's Obsidian vault to MCP clients (Claude Desktop,
  * Cursor, etc.) over stdio. Inactive by default — the config gate in
  * `loadMCPConfig` refuses to start unless the historian explicitly enables
- * the server in `.cliodeck/v2/config.json`.
+ * the server in `.cliodeck/config.json`.
  *
  * Scope of this scaffold:
  *   - One tool: `search_obsidian` (lexical / FTS5).
  *   - Typed access log via `MCPAccessLogger` writing
- *     `.cliodeck/v2/mcp-access.jsonl`.
+ *     `.cliodeck/mcp-access.jsonl`.
  *   - Resources / prompts / additional tools (Zotero, Tropy, graph,
  *     dense search) arrive in follow-up commits.
  */

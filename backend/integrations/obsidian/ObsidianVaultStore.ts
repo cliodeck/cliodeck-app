@@ -2,7 +2,7 @@
  * Obsidian vault store (fusion step 2.4b, Path B per ADR 0001).
  *
  * A parallel, self-contained SQLite+FTS5 store for Obsidian notes and their
- * chunks, living at `.cliodeck/v2/obsidian-vectors.db`. Independent of the
+ * chunks, living at `.cliodeck/obsidian-vectors.db`. Independent of the
  * PDF-centric `VectorStore`/`HNSWVectorStore` so the indexer doesn't need
  * the `PDFDocument` → `SourceDocument` generalisation (that's deferred to
  * Path A with a RAG benchmark).

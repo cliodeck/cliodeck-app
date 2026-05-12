@@ -359,7 +359,7 @@ export const SecurityConfigSection: React.FC = () => {
         <p>
           L’inspecteur de sources scanne chaque extrait avant injection dans
           le prompt et journalise les cas suspects dans{' '}
-          <code>.cliodeck/v2/security-events.jsonl</code>. Tu choisis le
+          <code>.cliodeck/security-events.jsonl</code>. Tu choisis le
           comportement quand un pattern est détecté :
         </p>
 
@@ -435,7 +435,7 @@ export const SecurityConfigSection: React.FC = () => {
           Le panneau <strong>Événements détectés</strong> juste sous les
           modes affiche le total, la répartition par type / sévérité, et
           les derniers événements consignés. La source brute reste{' '}
-          <code>.cliodeck/v2/security-events.jsonl</code> à la racine de
+          <code>.cliodeck/security-events.jsonl</code> à la racine de
           ton projet — utile si tu veux scripter une analyse plus poussée.
         </p>
       </HelpModal>
