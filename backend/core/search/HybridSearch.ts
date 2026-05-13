@@ -188,39 +188,50 @@ export class HybridSearch {
 
     // Sort by RRF score (drives ordering: the fusion's real contribution)
     // and return `similarity` as a unified relevance score so downstream
-    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) still keep
-    // the strong matches. Returning rrfScore directly would not work —
+    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) keep the
+    // strong matches. Returning rrfScore directly would not work —
     // top-1 RRF peaks near 1/(K+1) ≈ 0.016, well below any sensible
     // threshold, and every result would be filtered out.
     //
-    // For chunks ranked by both retrievers, use the actual dense cosine
-    // (well-calibrated against the 0.12 floor). For BM25-only hits (no
-    // dense hit in the candidate pool), synthesize a similarity from the
-    // sparse rank so the threshold doesn't silently drop them. This is
-    // the case hybrid search exists for: rare proper nouns and acronyms
-    // the embedding model has never seen — exact-keyword evidence is
-    // strong even though dense similarity is meaningless. The previous
-    // behaviour (similarity = denseScore = 0 for BM25-only hits) failed
-    // exactly on these queries, dropping every legitimate match while
-    // surfacing only semantic neighbours.
+    // The downstream consumer (secondary-retriever.ts) resorts by
+    // `similarity` and then applies the 0.12 cosine threshold. That
+    // means a chunk's *similarity* value controls both its final rank
+    // and whether it survives at all. For rare proper nouns and acronyms
+    // the embedding model has never seen, the actual dense cosine is
+    // low (often 0.25–0.35) — well above the threshold but well below
+    // semantic neighbours scoring 0.45–0.55. The chunk survives the
+    // threshold but gets out-competed in the resort. Hybrid search
+    // exists for exactly this case: BM25 has strong evidence (rank 1–10
+    // on exact term match) and we need that to outweigh semantic
+    // out-competition.
+    //
+    // Fix: for any chunk with a strong sparse rank (top SPARSE_BOOST_RANK),
+    // synthesize a sparse-derived similarity and take the MAX of that
+    // and the dense cosine. Chunks scoring well on either retriever
+    // get the better of the two. BM25-only hits (no dense rank at all)
+    // get the synthetic value directly so they pass the cosine threshold
+    // they have no business being measured against. `denseScore` is
+    // still exposed verbatim for callers that need the real cosine.
     const SPARSE_BASE = 0.7;
     const SPARSE_DECAY = 0.02;
     const SPARSE_FLOOR = 0.15;
+    const SPARSE_BOOST_RANK = 50;
 
     const fusedResults = Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
       .map((entry) => {
-        const isSparseOnly = entry.denseRank === null && entry.sparseRank !== null;
-        const syntheticSparseSim = isSparseOnly
-          ? Math.max(
-              SPARSE_FLOOR,
-              SPARSE_BASE - SPARSE_DECAY * (entry.sparseRank! - 1),
-            )
-          : entry.denseScore;
+        const sparseSynthetic =
+          entry.sparseRank !== null && entry.sparseRank <= SPARSE_BOOST_RANK
+            ? Math.max(
+                SPARSE_FLOOR,
+                SPARSE_BASE - SPARSE_DECAY * (entry.sparseRank - 1),
+              )
+            : 0;
+        const similarity = Math.max(entry.denseScore, sparseSynthetic);
         return {
           chunk: entry.chunk,
-          similarity: syntheticSparseSim,
+          similarity,
           document: null as any, // Will be populated later
           denseScore: entry.denseScore,
           sparseScore: entry.sparseScore,
