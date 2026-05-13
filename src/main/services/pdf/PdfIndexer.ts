@@ -43,8 +43,20 @@ export class PdfIndexer {
   constructor(deps: PdfIndexerDeps) {
     this.vectorStore = deps.vectorStore;
 
+    // Defensive cap on text length sent to the embedding endpoint.
+    // Ollama defaults `num_ctx` to 2048 tokens for most embedding models.
+    // The AdaptiveChunker can emit a single chunk that exceeds
+    // `maxChunkSize` when a paragraph itself is bigger than the limit
+    // (see chunkSection's empty-currentChunk branch). Char-based truncation
+    // at ~6000 chars keeps even nomic-embed-text's 2048-token window safe
+    // (≈4 chars/token English) and prevents a single pathological chunk
+    // from aborting the whole indexing run with HTTP 500
+    // "input length exceeds the context length".
+    const EMBED_CHAR_CAP = 6000;
     const embeddingFn = async (text: string): Promise<Float32Array> => {
-      const [vec] = await deps.embeddingProvider.embed([text]);
+      const safeText =
+        text.length > EMBED_CHAR_CAP ? text.slice(0, EMBED_CHAR_CAP) : text;
+      const [vec] = await deps.embeddingProvider.embed([safeText]);
       return Float32Array.from(vec);
     };
 

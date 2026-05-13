@@ -162,12 +162,23 @@ export class BibliographyMetadataService {
 
       if (citationMeta) {
         mergedCount++;
+        const attachments = citationMeta.zoteroAttachments || citation.zoteroAttachments;
+        // Derive citation.file from a previously-downloaded Zotero attachment
+        // when the BibTeX entry carries no `file =` field. Without this, a
+        // citation that was first indexed via the Zotero download flow comes
+        // back without a `file` after a reload — the renderer sees
+        // `hasPDF === false`, and the re-index button throws "No PDF file
+        // associated with this citation". BibTeX-provided paths always win.
+        const downloadedAttachment = attachments?.find(
+          (a) => a.downloaded && a.localPath,
+        );
         return {
           ...citation,
           zoteroKey: citationMeta.zoteroKey || citation.zoteroKey,
-          zoteroAttachments: citationMeta.zoteroAttachments || citation.zoteroAttachments,
+          zoteroAttachments: attachments,
           dateAdded: citationMeta.dateAdded || citation.dateAdded,
           dateModified: citationMeta.dateModified || citation.dateModified,
+          file: citation.file ?? downloadedAttachment?.localPath,
         };
       }
 

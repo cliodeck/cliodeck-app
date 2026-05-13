@@ -88,8 +88,45 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       const { citations } = get();
       const citation = citations.find((c) => c.id === citationId);
 
-      if (!citation || !citation.file) {
-        throw new Error('No PDF file associated with this citation');
+      if (!citation) {
+        throw new Error('Citation not found');
+      }
+
+      // Resolution order for the PDF path on disk:
+      //   1. `citation.file` — what BibTeX or the in-memory Zotero download
+      //      flow gave us. Cheapest and most accurate when available.
+      //   2. Existing indexed document's `fileURL` — the previous index
+      //      knows exactly which file it ran on. Restoring this covers the
+      //      Zotero-only flow whose BibTeX has no `file =` and whose
+      //      metadata.json got saved with an empty attachments array
+      //      (separate bug — saveMetadata can overwrite populated state).
+      //   3. First downloaded Zotero attachment's `localPath`.
+      // If none of the three resolves, indexing is genuinely impossible.
+      let filePath: string | undefined = citation.file ?? undefined;
+      if (!filePath) {
+        try {
+          const allDocs = await window.electron.pdf.getAll();
+          if (allDocs.success && Array.isArray(allDocs.documents)) {
+            const existing = allDocs.documents.find(
+              (d: { bibtexKey?: string; fileURL?: string }) =>
+                d.bibtexKey === citationId,
+            );
+            if (existing?.fileURL) filePath = existing.fileURL;
+          }
+        } catch (e) {
+          console.warn('reindex: failed to look up existing document path:', e);
+        }
+      }
+      if (!filePath) {
+        const downloadedAttachment = citation.zoteroAttachments?.find(
+          (a) => a.downloaded && a.localPath,
+        );
+        if (downloadedAttachment?.localPath) filePath = downloadedAttachment.localPath;
+      }
+      if (!filePath) {
+        throw new Error(
+          'No PDF file associated with this citation (BibTeX has no `file` field, no previously indexed copy found, no downloaded Zotero attachment).',
+        );
       }
 
       // Find and delete existing indexed document
@@ -101,7 +138,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         // Remove from indexed set
         set((state) => {
           const newIndexedPaths = new Set(state.indexedFilePaths);
-          newIndexedPaths.delete(citation.file!);
+          newIndexedPaths.delete(filePath!);
           return { indexedFilePaths: newIndexedPaths };
         });
       }
@@ -110,7 +147,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       console.log(`🔄 Re-indexing PDF for citation: ${citation.title}`);
 
       window.dispatchEvent(new CustomEvent('bibliography:indexing-start', {
-        detail: { citationId, title: citation.title, filePath: citation.file }
+        detail: { citationId, title: citation.title, filePath }
       }));
 
       const bibliographyMetadata = {
@@ -119,7 +156,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         year: citation.year,
       };
 
-      const result = await window.electron.pdf.index(citation.file, citationId, bibliographyMetadata);
+      const result = await window.electron.pdf.index(filePath, citationId, bibliographyMetadata);
 
       if (!result.success) {
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -130,7 +167,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
       // Add back to indexed set
       set((state) => ({
-        indexedFilePaths: new Set([...state.indexedFilePaths, citation.file!])
+        indexedFilePaths: new Set([...state.indexedFilePaths, filePath!])
       }));
 
       window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
