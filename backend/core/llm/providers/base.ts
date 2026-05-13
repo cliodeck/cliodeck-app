@@ -85,6 +85,15 @@ export interface ChatOptions {
   topK?: number;
   maxTokens?: number;
   stop?: string[];
+  /**
+   * Override the context window the backend uses for this call.
+   * Only meaningful for backends that let the caller resize the prompt
+   * window per request (Ollama's `options.num_ctx`); cloud providers
+   * with a fixed model-level window MUST ignore this field. When
+   * omitted, the backend keeps its own default — usually too small for
+   * long brainstorm sessions on local models (Ollama defaults to 2048).
+   */
+  numCtx?: number;
   /** Tool-calling, when `capabilities.tools` is true. */
   tools?: ToolDescriptor[];
   /** Abort cooperatively. */

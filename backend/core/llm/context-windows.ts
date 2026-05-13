@@ -77,6 +77,13 @@ const TABLE: readonly Entry[] = [
   { pattern: /qwen-?2/i, window: 32_768 },
 
   // Other common open-weight models served via Ollama
+  // Gemma 4: MoE (~4B active per token); 26B build advertises 256K but
+  // 128K is the stability sweet spot per Google's model card.
+  { pattern: /gemma-?4/i, window: 131_072 },
+  // Gemma 3: 128K for 4B / 12B / 27B (1B caps at 32K — accept the
+  // pattern-level overstatement so the compactor errs on the side of
+  // never firing too early; a too-small slot is caught by Ollama).
+  { pattern: /gemma-?3/i, window: 131_072 },
   { pattern: /gemma-?2/i, window: 8_192 },
   { pattern: /phi-?3/i, window: 4_096 },
   { pattern: /nomic-embed/i, window: 8_192 }, // embedding (irrelevant but listed for completeness)

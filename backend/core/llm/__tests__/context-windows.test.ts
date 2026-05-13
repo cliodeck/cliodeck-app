@@ -58,6 +58,10 @@ describe('getContextWindow', () => {
     expect(getContextWindow('qwen2.5:7b')).toBe(32_768);
     expect(getContextWindow('qwen3:32b')).toBe(131_072);
     expect(getContextWindow('gemma2:2b')).toBe(8_192);
+    // Gemma 3 and Gemma 4 expose 128K+ windows — the compactor must not
+    // trigger at gemma2's 8K once a user picks a newer build.
+    expect(getContextWindow('gemma3:27b')).toBe(131_072);
+    expect(getContextWindow('gemma4:26b')).toBe(131_072);
     expect(getContextWindow('phi3:mini')).toBe(4_096);
   });
 

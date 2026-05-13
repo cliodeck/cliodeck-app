@@ -295,6 +295,7 @@ export function setupFusionHandlers(): void {
         model?: string;
         temperature?: number;
         maxTokens?: number;
+        numCtx?: number;
         retrievalOptions?: {
           documentIds?: string[];
           collectionKeys?: string[];
@@ -305,10 +306,23 @@ export function setupFusionHandlers(): void {
         systemPrompt?: { modeId?: string; customText?: string };
         enabledTools?: string[];
       };
+      // Clamp `numCtx` defensively — Ollama silently ignores absurd
+      // values, but the validation here surfaces user-config errors
+      // ("0 = use default" stays as undefined, < 512 is too small for
+      // even a single RAG chunk, > 262144 is past any current model).
+      const rawNumCtx = rawOptsObj.numCtx;
+      const numCtx =
+        typeof rawNumCtx === 'number' &&
+        Number.isFinite(rawNumCtx) &&
+        rawNumCtx >= 512 &&
+        rawNumCtx <= 262_144
+          ? Math.floor(rawNumCtx)
+          : undefined;
       const opts = {
         model: rawOptsObj.model,
         temperature: rawOptsObj.temperature,
         maxTokens: rawOptsObj.maxTokens,
+        numCtx,
       };
       const sessionId = fusionChatService.start({
         webContents: event.sender,

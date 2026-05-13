@@ -12,6 +12,14 @@ const MODEL_CONTEXT_SIZES: Record<string, { maxContext: number; recommended: num
   'gemma2:9b': { maxContext: 8192, recommended: 8192 },
   'gemma:2b': { maxContext: 8192, recommended: 4096 },
   'gemma:7b': { maxContext: 8192, recommended: 8192 },
+  // Gemma 3 family — 128K window across 4B / 12B / 27B (1B is 32K but rarely picked here).
+  'gemma3:1b': { maxContext: 32768, recommended: 16384 },
+  'gemma3:4b': { maxContext: 131072, recommended: 65536 },
+  'gemma3:12b': { maxContext: 131072, recommended: 65536 },
+  'gemma3:27b': { maxContext: 131072, recommended: 65536 },
+  // Gemma 4 family — MoE, ~4B active per token. The 26B build accepts up
+  // to 256K but Google's own card recommends 128K for stability.
+  'gemma4:26b': { maxContext: 262144, recommended: 131072 },
   'llama3.2:1b': { maxContext: 131072, recommended: 32768 },
   'llama3.2:3b': { maxContext: 131072, recommended: 32768 },
   'llama3.1:8b': { maxContext: 131072, recommended: 32768 },

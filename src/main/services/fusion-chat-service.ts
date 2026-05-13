@@ -215,6 +215,12 @@ export interface ChatStartArgs {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    /**
+     * Override Ollama's `num_ctx` for this call. Useful for models with
+     * a 128K/256K window that Ollama otherwise truncates to 2048 by
+     * default. Ignored by cloud providers (fixed window per model).
+     */
+    numCtx?: number;
   };
   /** Filters forwarded to `RetrievalService`. */
   retrievalOptions?: FusionChatRetrievalOptions;
@@ -347,7 +353,11 @@ class FusionChatService {
     // third-person summary.
     const compactor = new ContextCompactor({
       llm,
-      contextWindow: getContextWindow(activeModel),
+      // When the caller explicitly sized `num_ctx` for this turn, honour
+      // that as the compaction budget — otherwise the compactor would
+      // assume the model's full advertised window and let the prompt
+      // overflow the smaller per-call allocation.
+      contextWindow: getContextWindow(activeModel, args.opts?.numCtx),
       summarizeOptions: {
         // Lower temperature for the summary call to stay faithful.
         temperature: 0,

@@ -184,6 +184,12 @@ export interface RunChatTurnArgs<TSource = unknown> {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    /**
+     * Per-call context-window override. Forwarded to the provider as
+     * `ChatOptions.numCtx`. Only meaningful for Ollama; cloud providers
+     * ignore it. Omit (or pass 0) to keep the backend default.
+     */
+    numCtx?: number;
   };
   tools?: ToolDescriptor[];
   toolHandler?: ChatEngineToolHandler;
@@ -393,6 +399,7 @@ export async function runChatTurn<TSource = unknown>(
         model: args.opts?.model,
         temperature: args.opts?.temperature,
         maxTokens: args.opts?.maxTokens,
+        numCtx: args.opts?.numCtx,
         tools: args.tools && args.tools.length ? args.tools : undefined,
         signal: args.signal,
       })) {

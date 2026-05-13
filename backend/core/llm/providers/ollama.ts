@@ -186,6 +186,13 @@ export class OllamaProvider implements LLMProvider {
         top_k: opts.topK,
         num_predict: opts.maxTokens,
         stop: opts.stop,
+        // Ollama defaults `num_ctx` to 2048 — far too small for long
+        // brainstorm/RAG turns on 128K-capable models (gemma3/gemma4,
+        // qwen3, llama 3.2+, etc.). Only emit when the caller specified
+        // a positive value so unaware call sites keep the backend default.
+        ...(typeof opts.numCtx === 'number' && opts.numCtx > 0
+          ? { num_ctx: opts.numCtx }
+          : {}),
       },
       ...(opts.tools
         ? {

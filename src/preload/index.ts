@@ -829,6 +829,11 @@ const api = {
           model?: string;
           temperature?: number;
           maxTokens?: number;
+          /**
+           * Override Ollama's `num_ctx` for this turn (512–262_144).
+           * Ignored by cloud providers (fixed model window).
+           */
+          numCtx?: number;
           retrievalOptions?: {
             documentIds?: string[];
             collectionKeys?: string[];

@@ -18,6 +18,7 @@ import {
   selectEnabledToolNames,
 } from '../../stores/mcpToolsStore';
 import { useMcpToolsList } from './useMcpToolsList';
+import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {
@@ -38,6 +39,7 @@ interface FusionChatApi {
       model?: string;
       temperature?: number;
       maxTokens?: number;
+      numCtx?: number;
       retrievalOptions?: {
         documentIds?: string[];
         collectionKeys?: string[];
@@ -200,6 +202,7 @@ export function useBrainstormChat(): UseBrainstormChat {
       // every turn. Undefined fields are fine — the main-side handler
       // treats the whole bag as optional.
       const settings = useChatStore.getState().chatSettings;
+      const ragParams = useRAGQueryStore.getState().params;
       const startOpts: Parameters<typeof chat.start>[1] = {};
       if (settings.retrieval) startOpts.retrievalOptions = settings.retrieval;
       if (settings.modeId || settings.customSystemPrompt) {
@@ -207,6 +210,12 @@ export function useBrainstormChat(): UseBrainstormChat {
           modeId: settings.modeId,
           customText: settings.customSystemPrompt,
         };
+      }
+      // Forward the user-chosen context window. 0 means "use Ollama's
+      // default" — same convention as ragQueryStore — so we skip the
+      // field entirely in that case rather than sending 0.
+      if (typeof ragParams.numCtx === 'number' && ragParams.numCtx > 0) {
+        startOpts.numCtx = ragParams.numCtx;
       }
       // Fusion 2.5 — pass the user-validated MCP tool subset. When no
       // MCP server is registered the list is empty and we send no
