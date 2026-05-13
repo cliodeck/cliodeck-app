@@ -111,13 +111,25 @@ export class HybridSearch {
   ): SearchResult[] {
     const scores = new Map<string, RRFScore & { hasExactMatch?: boolean }>();
 
-    // Extract potential keywords (words > 4 chars, likely proper nouns or significant terms)
+    // Extract potential keywords. Two paths because a single length threshold
+    // either lets in stopwords ("the", "what") or excludes short acronyms
+    // ("KAQG", "CIA"). Both fail us — common words make the boost meaningless,
+    // short acronyms are exactly the case hybrid search needs to rescue.
+    //   (1) Acronyms in the original (pre-lowercase) query: 2–6 chars, all
+    //       uppercase. These are usually proper-noun identifiers the embedding
+    //       model has never seen, so BM25 is the only retriever that finds
+    //       them and they desperately need the boost.
+    //   (2) Long lowercase tokens (>= 5 chars): the original behaviour, for
+    //       ordinary proper nouns and significant terms.
     const queryKeywords = originalQuery
-      ? originalQuery
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-          .split(/\s+/)
-          .filter(t => t.length > 4)
+      ? Array.from(new Set([
+          ...((originalQuery.match(/\b[A-Z][A-Z0-9]{1,5}\b/g) ?? []).map(t => t.toLowerCase())),
+          ...originalQuery
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+            .split(/\s+/)
+            .filter(t => t.length >= 5),
+        ]))
       : [];
 
     // Helper to check if chunk contains exact keyword matches
