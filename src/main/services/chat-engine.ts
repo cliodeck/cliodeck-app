@@ -299,7 +299,7 @@ export async function runChatTurn<TSource = unknown>(
     const totalMs = Date.now() - startedAt;
     const llmStats: ChatEngineLLMStats = {
       provider: args.provider.id,
-      model: args.opts?.model ?? args.provider.name,
+      model: args.opts?.model ?? args.provider.model ?? args.provider.name,
       // Surface the compactor's window when wired so the renderer can
       // display "context: 200 000" alongside the response. 0 = unknown.
       contextWindow: args.compactor?.contextWindow ?? 0,
@@ -347,7 +347,7 @@ export async function runChatTurn<TSource = unknown>(
   const logTurnDone = (): void => {
     console.log('[chat-engine] turn done', {
       provider: args.provider.id,
-      model: args.opts?.model ?? args.provider.name,
+      model: args.opts?.model ?? args.provider.model ?? args.provider.name,
       turns: turnsUsed,
       chunkCount: totalChunkCount,
       finishReason: finalFinishReason,
