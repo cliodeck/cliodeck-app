@@ -13,6 +13,8 @@
  */
 
 import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { app } from 'electron';
 import type { DocumentPage, PDFMetadata } from '../../../backend/types/pdf-document.js';
@@ -53,14 +55,57 @@ function resolveWorkerPath(): string {
 }
 
 /**
- * Find the system Node binary. In dev, `node` from PATH is fine.
- * In packaged mode, we look for common locations.
+ * Find the system Node binary. In dev (`npm start`) the inherited shell
+ * PATH always includes the user's Homebrew/nvm/etc. paths, so `'node'`
+ * resolves fine. In a packaged app launched from Finder/Dock on macOS,
+ * the process inherits the minimal GUI PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+ * — Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`) and nvm shims are
+ * NOT on it. `spawn('node')` then ENOENTs and every PDF fails identically.
+ *
+ * Probe order: explicit Homebrew/nvm/Volta locations first, then bare
+ * `'node'` as a last resort. Cached for the life of the process — Node
+ * doesn't move while we run.
  */
+let cachedNodeBin: string | null = null;
 function resolveNodeBinary(): string {
-  // Prefer the system node, not Electron's embedded one
-  if (process.platform === 'win32') return 'node.exe';
-  // On unix, /usr/bin/node or /usr/local/bin/node; let PATH resolve it
-  return 'node';
+  if (cachedNodeBin) return cachedNodeBin;
+
+  if (process.platform === 'win32') {
+    cachedNodeBin = 'node.exe';
+    return cachedNodeBin;
+  }
+
+  const home = os.homedir();
+  const candidates: string[] = [
+    '/opt/homebrew/bin/node', // Apple Silicon Homebrew
+    '/usr/local/bin/node',    // Intel Homebrew (also nvm default symlinks)
+    '/usr/bin/node',          // OS-bundled (rare on macOS, common on Linux)
+    `${home}/.volta/bin/node`,
+    `${home}/.nvm/current/bin/node`,
+  ];
+
+  // NVM exposes its active version dir via `NVM_BIN` when sourced. The GUI
+  // launch usually loses it, but if some launcher kept it around, honour it.
+  if (process.env.NVM_BIN) {
+    candidates.unshift(path.join(process.env.NVM_BIN, 'node'));
+  }
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        cachedNodeBin = p;
+        return cachedNodeBin;
+      }
+    } catch {
+      // ignore — fall through to next candidate
+    }
+  }
+
+  // Last resort: bare `node`. Works in `npm start` (inherits shell PATH),
+  // fails with ENOENT in packaged-from-Finder. The `child.on('error')`
+  // handler downstream will surface the ENOENT to the renderer.
+  cachedNodeBin = 'node';
+  return cachedNodeBin;
 }
 
 // ── Concurrency queue ───────────────────────────────────────────────────
@@ -150,7 +195,11 @@ function doExtract(filePath: string): Promise<IsolatedExtractionResult> {
     }, TIMEOUT_MS);
 
     child.on('error', (err: Error) => {
-      settle({ ok: false, error: `PDF worker spawn error: ${err.message}` });
+      const isEnoent = (err as NodeJS.ErrnoException).code === 'ENOENT';
+      const msg = isEnoent
+        ? `PDF extraction requires a system Node.js binary (v20+). ClioDeck looked for it at /opt/homebrew/bin/node, /usr/local/bin/node, and on PATH (tried "${nodeBin}") but found none. Install Node 20+ (e.g. \`brew install node\`).`
+        : `PDF worker spawn error: ${err.message}`;
+      settle({ ok: false, error: msg });
     });
 
     child.on('close', (code: number | null, signal: string | null) => {
