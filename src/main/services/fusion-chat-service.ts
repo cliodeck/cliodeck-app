@@ -657,9 +657,9 @@ function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
   const lines: string[] = [
     'Contexte extrait du corpus indexé (sources numérotées ci-dessous).',
     "RÈGLE : réponds UNIQUEMENT à partir des sources ci-dessous (champs TITRE, AUTEUR et EXTRAIT). Ne complète JAMAIS avec tes connaissances générales.",
-    "Le TITRE d'un document fait partie intégrante de son contenu : tu peux t'en servir pour répondre à une question d'identification (par exemple « qu'est-ce que X ? » où X est un nom ou un acronyme).",
-    "Si l'information demandée n'apparaît ni dans un TITRE ni dans un EXTRAIT, dis-le explicitement : « Cette information n'apparaît pas dans les sources consultées. »",
+    "Le TITRE d'un document fait partie intégrante de son contenu. Pour une question d'identification (« qu'est-ce que X ? » où X est un nom ou un acronyme), un TITRE qui contient X est une réponse valide que tu dois utiliser.",
     "Cite le numéro de la source [N] pour chaque affirmation.",
+    "Si après lecture des TITRES et des EXTRAITS l'information est réellement absente, indique-le brièvement et avec tes propres mots (n'utilise aucune formule pré-écrite).",
     '',
   ];
   hits.forEach((h, i) => {

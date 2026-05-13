@@ -187,33 +187,48 @@ export class HybridSearch {
     }
 
     // Sort by RRF score (drives ordering: the fusion's real contribution)
-    // and return `similarity` as the dense cosine score so downstream
-    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) still mean
-    // what they used to before the hybrid switch. Returning rrfScore here
-    // made everything look unrelated — a top-1 RRF score peaks near
-    // 1/(K+1) ≈ 0.016, well below any sensible cosine threshold, so every
-    // result got filtered out and the fallback kept the same top-3 for
-    // every query.
+    // and return `similarity` as a unified relevance score so downstream
+    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) still keep
+    // the strong matches. Returning rrfScore directly would not work —
+    // top-1 RRF peaks near 1/(K+1) ≈ 0.016, well below any sensible
+    // threshold, and every result would be filtered out.
     //
-    // Trade-off: chunks found only by BM25 (no dense hit in the top
-    // candidate pool) will have denseScore=0 and get filtered by the
-    // cosine threshold. That's usually right — if the dense index
-    // doesn't surface a chunk among 50+ candidates, it isn't a strong
-    // semantic match even if it has an exact keyword. sparseScore is
-    // still exposed for callers that want to see it.
+    // For chunks ranked by both retrievers, use the actual dense cosine
+    // (well-calibrated against the 0.12 floor). For BM25-only hits (no
+    // dense hit in the candidate pool), synthesize a similarity from the
+    // sparse rank so the threshold doesn't silently drop them. This is
+    // the case hybrid search exists for: rare proper nouns and acronyms
+    // the embedding model has never seen — exact-keyword evidence is
+    // strong even though dense similarity is meaningless. The previous
+    // behaviour (similarity = denseScore = 0 for BM25-only hits) failed
+    // exactly on these queries, dropping every legitimate match while
+    // surfacing only semantic neighbours.
+    const SPARSE_BASE = 0.7;
+    const SPARSE_DECAY = 0.02;
+    const SPARSE_FLOOR = 0.15;
+
     const fusedResults = Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
-      .map((entry) => ({
-        chunk: entry.chunk,
-        similarity: entry.denseScore,
-        document: null as any, // Will be populated later
-        denseScore: entry.denseScore,
-        sparseScore: entry.sparseScore,
-        rrfScore: entry.rrfScore,
-        denseRank: entry.denseRank,
-        sparseRank: entry.sparseRank,
-      }));
+      .map((entry) => {
+        const isSparseOnly = entry.denseRank === null && entry.sparseRank !== null;
+        const syntheticSparseSim = isSparseOnly
+          ? Math.max(
+              SPARSE_FLOOR,
+              SPARSE_BASE - SPARSE_DECAY * (entry.sparseRank! - 1),
+            )
+          : entry.denseScore;
+        return {
+          chunk: entry.chunk,
+          similarity: syntheticSparseSim,
+          document: null as any, // Will be populated later
+          denseScore: entry.denseScore,
+          sparseScore: entry.sparseScore,
+          rrfScore: entry.rrfScore,
+          denseRank: entry.denseRank,
+          sparseRank: entry.sparseRank,
+        };
+      });
 
     return fusedResults;
   }
