@@ -637,15 +637,28 @@ class FusionChatService {
 export const fusionChatService = new FusionChatService();
 
 /**
- * Render a set of retrieval hits as a system-prompt block. Kept minimal
- * (title + snippet, numbered) — the full explainable-AI panel lives in
- * the legacy chat and will be ported to Brainstorm once B3 lands.
+ * Render a set of retrieval hits as a system-prompt block.
+ *
+ * Each hit is structured (TITRE / AUTEUR / EXTRAIT) so the model can
+ * treat the document title as first-class grounded content — a model
+ * that sees `[Doc: ...]` inline in a chunk body tends to dismiss it as
+ * metadata and refuse to answer identification questions ("What is X?")
+ * even when X is literally the paper's title. The redundant
+ * `[Doc: ... | Section: ...]` prefix the chunker prepends is stripped
+ * from the extract for the same reason.
+ *
+ * Snippet length bumped from 800 → 1500 chars so a single chunk has
+ * enough prose for the model to ground a definition.
  */
 function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
+  const SNIPPET_CHARS = 1500;
+  const DOC_HEADER_RE = /^\[Doc:[^\]]*\]\s*/;
+
   const lines: string[] = [
-    'Contexte extrait du corpus indexé (sources citées ci-dessous).',
-    "RÈGLE ABSOLUE : réponds UNIQUEMENT à partir de ces extraits. Ne complète JAMAIS avec tes connaissances générales.",
-    "Si l'information demandée n'apparaît pas dans les extraits ci-dessous, dis-le explicitement : « Cette information n'apparaît pas dans les sources consultées. »",
+    'Contexte extrait du corpus indexé (sources numérotées ci-dessous).',
+    "RÈGLE : réponds UNIQUEMENT à partir des sources ci-dessous (champs TITRE, AUTEUR et EXTRAIT). Ne complète JAMAIS avec tes connaissances générales.",
+    "Le TITRE d'un document fait partie intégrante de son contenu : tu peux t'en servir pour répondre à une question d'identification (par exemple « qu'est-ce que X ? » où X est un nom ou un acronyme).",
+    "Si l'information demandée n'apparaît ni dans un TITRE ni dans un EXTRAIT, dis-le explicitement : « Cette information n'apparaît pas dans les sources consultées. »",
     "Cite le numéro de la source [N] pour chaque affirmation.",
     '',
   ];
@@ -657,9 +670,31 @@ function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
         : h.sourceType === 'vault'
           ? 'note'
           : 'bibliographie';
-    const snippet = h.chunk.content.replace(/\s+/g, ' ').slice(0, 800);
-    lines.push(`[${i + 1}] (${kind}) ${title}`);
-    lines.push(snippet);
+
+    const author =
+      h.sourceType !== 'vault' ? (h.document.author as string | undefined) : undefined;
+    const year =
+      h.sourceType === 'secondary'
+        ? ((h.document as { year?: string }).year as string | undefined)
+        : undefined;
+    const page =
+      h.sourceType === 'secondary'
+        ? (h.chunk as { pageNumber?: number }).pageNumber
+        : undefined;
+
+    const rawSnippet = h.chunk.content
+      .replace(DOC_HEADER_RE, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, SNIPPET_CHARS);
+
+    lines.push(`[${i + 1}] type : ${kind}`);
+    lines.push(`TITRE : ${title}`);
+    if (author || year) {
+      lines.push(`AUTEUR : ${[author, year].filter(Boolean).join(', ')}`);
+    }
+    lines.push(page ? `EXTRAIT (p. ${page}) :` : 'EXTRAIT :');
+    lines.push(rawSnippet);
     lines.push('');
   });
   return lines.join('\n').trimEnd();
