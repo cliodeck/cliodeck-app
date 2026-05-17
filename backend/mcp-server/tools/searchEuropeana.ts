@@ -81,7 +81,7 @@ export function registerSearchEuropeana(
     'Search Europeana — aggregated catalogue of European museums, libraries, archives (~50M items). Requires a free API key (configure in Settings → Archives).',
     {
       query: z.string().min(1),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
       mediaType: z.enum(['IMAGE', 'TEXT', 'VIDEO', 'SOUND', '3D']).optional(),
     },
     async ({ query, topK, mediaType }) => {

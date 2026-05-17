@@ -32,7 +32,7 @@ import type { MCPRuntimeConfig } from '../config.js';
 const TOOL_NAME = 'search_gallica';
 const SRU_ENDPOINT = 'https://gallica.bnf.fr/SRU';
 const DEFAULT_TIMEOUT_MS = 15_000;
-const SNIPPET_MAX = 400;
+const SNIPPET_MAX = 2000;
 
 export interface GallicaHit {
   id: string;
@@ -188,7 +188,7 @@ export function registerSearchGallica(
     'Search Gallica (Bibliothèque nationale de France) — ~10M digitised primary sources: books, periodicals, manuscripts, maps, images. Returns bibliographic records with ARK identifiers and direct URLs.',
     {
       query: z.string().min(1).describe('Free-text query (French or any language Gallica indexes)'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
       dateFrom: z.number().int().min(0).max(9999).optional().describe('Earliest publication year (inclusive)'),
       dateTo: z.number().int().min(0).max(9999).optional().describe('Latest publication year (inclusive)'),
       docType: z.string().optional().describe('Filter on Dublin Core dc:type (e.g. "monographie", "périodique", "carte")'),

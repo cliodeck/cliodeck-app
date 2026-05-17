@@ -505,6 +505,78 @@ export function setupFusionHandlers(): void {
     }
   });
 
+  // MARK: - MCP server (this project exposed AS a server to external clients)
+
+  ipcMain.handle('fusion:mcpServer:get', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const cfg = await readOrInitWorkspaceConfig(root);
+      const block = (cfg.mcpServer as { enabled?: unknown; serverName?: unknown } | undefined) ?? {};
+      const enabled = block.enabled === true;
+      const serverName =
+        typeof block.serverName === 'string' && block.serverName.trim().length > 0
+          ? block.serverName.trim()
+          : path.basename(root);
+      // Resolve the wrapper script. In dev it lives in <repo>/bin; when
+      // packaged it ships under resources/. The renderer needs an absolute
+      // path so the snippets can be copy-pasted verbatim.
+      const devBin = path.join(process.cwd(), 'bin', 'cliodeck-mcp');
+      const packagedBin = path.join(process.resourcesPath ?? '', 'bin', 'cliodeck-mcp');
+      let binaryPath: string | null = null;
+      if (!app.isPackaged && fsSync.existsSync(devBin)) {
+        binaryPath = devBin;
+      } else if (app.isPackaged && fsSync.existsSync(packagedBin)) {
+        binaryPath = packagedBin;
+      } else if (fsSync.existsSync(devBin)) {
+        binaryPath = devBin;
+      }
+      return successResponse({
+        enabled,
+        serverName,
+        workspaceRoot: root,
+        binaryPath,
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  ipcMain.handle(
+    'fusion:mcpServer:set',
+    async (_e, rawPatch: unknown) => {
+      const root = projectManager.getCurrentProjectPath();
+      if (!root) return noProject();
+      if (!rawPatch || typeof rawPatch !== 'object') {
+        return errorResponse('patch must be an object');
+      }
+      const patch = rawPatch as { enabled?: unknown; serverName?: unknown };
+      try {
+        const cfg = await readOrInitWorkspaceConfig(root);
+        const current =
+          (cfg.mcpServer as { enabled?: boolean; serverName?: string } | undefined) ?? {};
+        const next: { enabled: boolean; serverName?: string } = {
+          enabled:
+            typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled === true,
+        };
+        if (typeof patch.serverName === 'string') {
+          const trimmed = patch.serverName.trim();
+          if (trimmed.length > 0) next.serverName = trimmed;
+        } else if (typeof current.serverName === 'string') {
+          next.serverName = current.serverName;
+        }
+        cfg.mcpServer = next;
+        await writeWorkspaceConfig(root, cfg);
+        return successResponse({
+          enabled: next.enabled,
+          serverName: next.serverName ?? path.basename(root),
+        });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
+  );
+
   // MARK: - vault status (read-only — indexing/search land with chat IPC)
 
   ipcMain.handle('fusion:vault:status', async () => {

@@ -729,6 +729,24 @@ const api = {
         return () => ipcRenderer.removeListener('fusion:mcp:event', listener);
       },
     },
+    mcpServer: {
+      get: () =>
+        ipcRenderer.invoke('fusion:mcpServer:get') as Promise<{
+          success: boolean;
+          enabled?: boolean;
+          serverName?: string;
+          workspaceRoot?: string;
+          binaryPath?: string | null;
+          error?: string;
+        }>,
+      set: (patch: { enabled?: boolean; serverName?: string }) =>
+        ipcRenderer.invoke('fusion:mcpServer:set', patch) as Promise<{
+          success: boolean;
+          enabled?: boolean;
+          serverName?: string;
+          error?: string;
+        }>,
+    },
     vault: {
       status: () => ipcRenderer.invoke('fusion:vault:status'),
       setPath: (vaultPath: string) =>

@@ -1300,6 +1300,32 @@
       "summary_other": "Tools exposed ({{count}})"
     }
   },
+  "mcpServer": {
+    "title": "Expose this project as an MCP server",
+    "hint": "Let external clients (Claude Desktop, Claude Code, any MCP-compliant tool) read this project's corpus over stdio. Opt-in per project — turning the toggle off below leaves no server running.",
+    "toggle": "Enable MCP server for this project",
+    "serverName": "Server name",
+    "serverNamePlaceholder": "my-project",
+    "serverNameHint": "Display name shown to connected clients. Defaults to the project folder name.",
+    "binary": "Wrapper binary",
+    "binaryMissing": "Binary not found — run `npm run build` in the cliodeck-app repo first.",
+    "disabledNote": "The server refuses to start until this toggle is on, even if a client tries to launch it.",
+    "tools": {
+      "title": "Tools exposed to connected clients",
+      "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets)."
+    },
+    "snippets": {
+      "title": "Configure your client",
+      "claudeDesktop": "Claude Desktop",
+      "claudeDesktopHint": "Add this block to the `mcpServers` object in `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\\Claude\\`).",
+      "claudeCode": "Claude Code CLI",
+      "claudeCodeHint": "Run this once in your terminal to register the server with the `claude` CLI.",
+      "generic": "Generic MCP (stdio)",
+      "genericHint": "For any MCP-compliant client: invoke this command directly. It speaks the MCP protocol over stdin/stdout.",
+      "copy": "Copy",
+      "copied": "Copied"
+    }
+  },
   "a11y": {
     "skipToMain": "Skip to main content"
   },

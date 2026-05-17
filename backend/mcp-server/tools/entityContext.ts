@@ -22,7 +22,7 @@ import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
 
 const TOOL_NAME = 'entity_context';
-const TRUNCATE = 800;
+const TRUNCATE = 4000;
 
 function truncate(s: string | null | undefined): string {
   if (!s) return '';
@@ -148,7 +148,7 @@ export function registerEntityContext(
         .string()
         .min(1)
         .describe('Entity name to look up (fuzzy match on normalized name).'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
     },
     async ({ entity, topK }) => {
       const start = Date.now();

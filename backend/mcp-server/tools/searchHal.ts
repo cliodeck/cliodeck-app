@@ -33,7 +33,7 @@ import type { MCPRuntimeConfig } from '../config.js';
 const TOOL_NAME = 'search_hal';
 const HAL_ENDPOINT = 'https://api.archives-ouvertes.fr/search/';
 const DEFAULT_TIMEOUT_MS = 15_000;
-const SNIPPET_MAX = 400;
+const SNIPPET_MAX = 2000;
 
 const FIELD_LIST = [
   'halId_s',
@@ -183,7 +183,7 @@ export function registerSearchHal(
     'Search HAL (Hyper Articles en Ligne, CNRS/CCSD) — ~3M open-access scholarly records in French & other languages: peer-reviewed articles, book chapters, theses, conference papers, reports. SECONDARY source — use this for scholarship *about* a topic, not for primary archival material (for primary sources, prefer search_gallica).',
     {
       query: z.string().min(1).describe('Free-text Solr query (any language HAL indexes)'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
       dateFrom: z.number().int().min(0).max(9999).optional().describe('Earliest production year (inclusive)'),
       dateTo: z.number().int().min(0).max(9999).optional().describe('Latest production year (inclusive)'),
       docType: z.string().optional().describe('Filter on HAL docType_s (e.g. "ART" journal article, "COMM" conference paper, "THESE" thesis, "OUV" book, "COUV" book chapter, "REPORT")'),

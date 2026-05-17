@@ -14,6 +14,7 @@ import { WorkspaceHintsSection } from './WorkspaceHintsSection';
 import { RecipesSection } from './RecipesSection';
 import { VaultConfigSection } from './VaultConfigSection';
 import { MCPClientsSection } from './MCPClientsSection';
+import { MCPServerSection } from './MCPServerSection';
 import { ArchivesConfigSection } from './ArchivesConfigSection';
 import { SecurityConfigSection } from './SecurityConfigSection';
 import { CitationStyleSection } from './CitationStyleSection';
@@ -402,6 +403,8 @@ export const ConfigPanel: React.FC = () => {
             <RecipesSection />
 
             <MCPClientsSection />
+
+            <MCPServerSection />
 
             <ArchivesConfigSection />
 

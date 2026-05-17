@@ -1300,6 +1300,32 @@
       "summary_other": "Outils exposés ({{count}})"
     }
   },
+  "mcpServer": {
+    "title": "Exposer ce projet comme serveur MCP",
+    "hint": "Permet à des clients externes (Claude Desktop, Claude Code, n'importe quel outil compatible MCP) de lire le corpus de ce projet via stdio. Opt-in par projet : tant que l'interrupteur ci-dessous est désactivé, aucun serveur ne démarre.",
+    "toggle": "Activer le serveur MCP pour ce projet",
+    "serverName": "Nom du serveur",
+    "serverNamePlaceholder": "mon-projet",
+    "serverNameHint": "Nom affiché aux clients connectés. Par défaut, le nom du dossier projet.",
+    "binary": "Binaire wrapper",
+    "binaryMissing": "Binaire introuvable — exécutez `npm run build` dans le dépôt cliodeck-app.",
+    "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer.",
+    "tools": {
+      "title": "Outils exposés aux clients connectés",
+      "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL)."
+    },
+    "snippets": {
+      "title": "Configurer votre client",
+      "claudeDesktop": "Claude Desktop",
+      "claudeDesktopHint": "Ajoutez ce bloc à l'objet `mcpServers` dans `claude_desktop_config.json` (macOS : `~/Library/Application Support/Claude/`, Windows : `%APPDATA%\\Claude\\`).",
+      "claudeCode": "Claude Code CLI",
+      "claudeCodeHint": "Exécutez cette commande dans votre terminal pour enregistrer le serveur dans la CLI `claude`.",
+      "generic": "MCP générique (stdio)",
+      "genericHint": "Pour tout client compatible MCP : invoquez cette commande directement. Elle parle le protocole MCP sur stdin/stdout.",
+      "copy": "Copier",
+      "copied": "Copié"
+    }
+  },
   "a11y": {
     "skipToMain": "Aller au contenu principal"
   },

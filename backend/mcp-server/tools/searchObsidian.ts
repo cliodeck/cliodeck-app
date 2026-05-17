@@ -10,9 +10,8 @@
  *
  * Output is summarised before being returned to the model: each hit
  * carries the note's relative path, title, the chunk content (truncated
- * to 800 chars), and section title. The full chunk content stays
- * accessible to the model — the truncation only protects the audit log
- * length, not the model.
+ * to TRUNCATE chars), and section title. The truncation caps the JSON
+ * payload size both for the connected client and the audit log.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -23,7 +22,7 @@ import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
 
 const TOOL_NAME = 'search_obsidian';
-const TRUNCATE = 800;
+const TRUNCATE = 4000;
 
 export function registerSearchObsidian(
   server: McpServer,
@@ -35,7 +34,7 @@ export function registerSearchObsidian(
     'Lexical search across the workspace Obsidian vault. Returns the top-K matching chunks with their note path, title, and surrounding section.',
     {
       query: z.string().min(1).describe('Search query (BM25 ranked)'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
     },
     async ({ query, topK }) => {
       const start = Date.now();

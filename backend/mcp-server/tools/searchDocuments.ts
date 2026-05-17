@@ -27,7 +27,7 @@ import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
 
 const TOOL_NAME = 'search_documents';
-const TRUNCATE = 800;
+const TRUNCATE = 4000;
 
 function truncate(s: string | null | undefined): string {
   if (!s) return '';
@@ -55,7 +55,7 @@ export function registerSearchDocuments(
         .string()
         .optional()
         .describe('Optional filter on the parent document author (case-insensitive substring).'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
     },
     async ({ query, year, author, topK }) => {
       const start = Date.now();

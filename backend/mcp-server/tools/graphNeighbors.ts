@@ -19,7 +19,7 @@ import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
 
 const TOOL_NAME = 'graph_neighbors';
-const TRUNCATE = 800;
+const TRUNCATE = 4000;
 
 function truncate(s: string | null | undefined): string {
   if (!s) return '';
@@ -39,7 +39,7 @@ export function registerGraphNeighbors(
         .string()
         .min(1)
         .describe('Document id (as stored in brain.db `pdf_documents.id`).'),
-      topK: z.number().int().min(1).max(50).optional().default(10),
+      topK: z.number().int().min(1).max(200).optional().default(10),
     },
     async ({ documentId, topK }) => {
       const start = Date.now();
