@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Network, Plus, RefreshCw, Trash2, Play } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Play } from 'lucide-react';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface ClientInstance {
   name: string;
@@ -171,10 +172,9 @@ export const MCPClientsSection: React.FC = () => {
   );
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <Network size={16} /> {t('mcp.title')}
-      </h3>
+    <CollapsibleSection title={t('mcp.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
       <p className="config-hint">{t('mcp.hint')}</p>
 
       {error && (
@@ -370,6 +370,8 @@ export const MCPClientsSection: React.FC = () => {
           ))}
         </ul>
       )}
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };

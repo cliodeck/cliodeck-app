@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpen, Pencil, Play, RefreshCw } from 'lucide-react';
+import { Pencil, Play, RefreshCw } from 'lucide-react';
 import { RecipeRunModal } from './RecipeRunModal';
 import { RecipeEditor } from './RecipeEditor';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface RecipeSummary {
   fileName: string;
@@ -139,10 +140,9 @@ export const RecipesSection: React.FC = () => {
   );
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <BookOpen size={16} /> {t('recipes.title')}
-      </h3>
+    <CollapsibleSection title={t('recipes.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
       <p className="config-hint">
         {t('recipes.hintIntro')} <em>{t('recipes.hintBuiltinLabel')}</em>{' '}
         {t('recipes.hintBuiltinSuffix')} <em>{t('recipes.hintUserLabel')}</em>{' '}
@@ -179,6 +179,8 @@ export const RecipesSection: React.FC = () => {
           onSaved={() => void refresh()}
         />
       )}
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };

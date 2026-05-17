@@ -1300,9 +1300,46 @@
       "summary_other": "Tools exposed ({{count}})"
     }
   },
+  "archives": {
+    "title": "Archive connectors",
+    "hint": "Enable external connectors (Europeana, and later Transkribus, FranceArchives) by storing their API keys. Keys are encrypted by the operating system (Electron safeStorage); they are never written to config.json nor shipped with a project.",
+    "errors": {
+      "noFusionApi": "Archives API not exposed by the preload.",
+      "saveFailed": "Could not store the key.",
+      "deleteFailed": "Deletion failed."
+    },
+    "status": {
+      "configured": "configured",
+      "notConfigured": "not configured"
+    },
+    "buttons": {
+      "save": "Save",
+      "delete": "Delete",
+      "hideKey": "Hide",
+      "showKey": "Show",
+      "hideKeyAria": "Hide key",
+      "showKeyAria": "Show key"
+    },
+    "input": {
+      "replacePlaceholder": "Paste a new key to replace"
+    },
+    "notice": {
+      "saved": "{{name}} key saved (OS-encrypted).",
+      "deleted": "{{name}} key deleted."
+    },
+    "europeana": {
+      "name": "Europeana",
+      "description": "~50M European GLAM items (museums, archives, libraries)",
+      "keyPlaceholder": "Europeana wskey (free at pro.europeana.eu)",
+      "mcpHint": "To use `search_europeana` from a third-party MCP client (Claude Desktop), also set `EUROPEANA_API_KEY` in the client config — the key stored here is consumed only by the built-in MCP server that ClioDeck spawns itself."
+    }
+  },
   "mcpServer": {
     "title": "Expose this project as an MCP server",
     "hint": "Let external clients (Claude Desktop, Claude Code, any MCP-compliant tool) read this project's corpus over stdio. Opt-in per project — turning the toggle off below leaves no server running.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload."
+    },
     "toggle": "Enable MCP server for this project",
     "serverName": "Server name",
     "serverNamePlaceholder": "my-project",

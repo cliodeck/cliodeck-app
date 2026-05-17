@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Library, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 type Connector = 'europeana';
 
@@ -26,6 +28,7 @@ function api(): ArchivesApi | null {
 }
 
 export const ArchivesConfigSection: React.FC = () => {
+  const { t } = useTranslation();
   const [europeanaConfigured, setEuropeanaConfigured] = useState(false);
   const [europeanaInput, setEuropeanaInput] = useState('');
   const [revealed, setRevealed] = useState(false);
@@ -36,7 +39,7 @@ export const ArchivesConfigSection: React.FC = () => {
   const refresh = async (): Promise<void> => {
     const a = api();
     if (!a) {
-      setError('API archives non exposée par le preload.');
+      setError(t('archives.errors.noFusionApi'));
       return;
     }
     const res = await a.getStatus();
@@ -59,13 +62,13 @@ export const ArchivesConfigSection: React.FC = () => {
     const res = await a.setKey('europeana', europeanaInput);
     setBusy(false);
     if (!res.success) {
-      setError(res.error ?? 'Impossible de stocker la clé.');
+      setError(res.error ?? t('archives.errors.saveFailed'));
       return;
     }
     setEuropeanaInput('');
     setRevealed(false);
     await refresh();
-    setSavedNotice('Clé Europeana enregistrée (chiffrée par l’OS).');
+    setSavedNotice(t('archives.notice.saved', { name: t('archives.europeana.name') }));
     window.setTimeout(() => setSavedNotice(null), 3000);
   };
 
@@ -77,26 +80,19 @@ export const ArchivesConfigSection: React.FC = () => {
     const res = await a.deleteKey('europeana');
     setBusy(false);
     if (!res.success) {
-      setError(res.error ?? 'Suppression échouée.');
+      setError(res.error ?? t('archives.errors.deleteFailed'));
       return;
     }
     await refresh();
-    setSavedNotice('Clé Europeana supprimée.');
+    setSavedNotice(t('archives.notice.deleted', { name: t('archives.europeana.name') }));
     window.setTimeout(() => setSavedNotice(null), 3000);
   };
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <Library size={16} /> Connecteurs d’archives
-      </h3>
-      <p className="config-hint">
-        Activer des connecteurs externes (Europeana, et plus tard Transkribus,
-        FranceArchives) en stockant leurs clés API. Les clés sont chiffrées
-        par le système d’exploitation (Electron <code>safeStorage</code>) ;
-        elles ne sont jamais écrites dans <code>config.json</code> ni
-        envoyées avec un projet.
-      </p>
+    <CollapsibleSection title={t('archives.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
+      <p className="config-hint">{t('archives.hint')}</p>
 
       {error && (
         <p
@@ -130,9 +126,9 @@ export const ArchivesConfigSection: React.FC = () => {
           }}
         >
           <div>
-            <strong style={{ fontSize: 13 }}>Europeana</strong>{' '}
+            <strong style={{ fontSize: 13 }}>{t('archives.europeana.name')}</strong>{' '}
             <span style={{ fontSize: 11, opacity: 0.7 }}>
-              ~50M items GLAM européens (musées, archives, bibliothèques)
+              {t('archives.europeana.description')}
             </span>
           </div>
           <span
@@ -153,10 +149,10 @@ export const ArchivesConfigSection: React.FC = () => {
           >
             {europeanaConfigured ? (
               <>
-                <Check size={12} /> configurée
+                <Check size={12} /> {t('archives.status.configured')}
               </>
             ) : (
-              <>non configurée</>
+              <>{t('archives.status.notConfigured')}</>
             )}
           </span>
         </div>
@@ -168,8 +164,8 @@ export const ArchivesConfigSection: React.FC = () => {
             onChange={(e) => setEuropeanaInput(e.target.value)}
             placeholder={
               europeanaConfigured
-                ? 'Coller une nouvelle clé pour remplacer'
-                : 'wskey Europeana (gratuit sur pro.europeana.eu)'
+                ? t('archives.input.replacePlaceholder')
+                : t('archives.europeana.keyPlaceholder')
             }
             disabled={busy}
             style={{
@@ -188,8 +184,8 @@ export const ArchivesConfigSection: React.FC = () => {
             className="toolbar-btn"
             onClick={() => setRevealed((v) => !v)}
             disabled={!europeanaInput || busy}
-            aria-label={revealed ? 'Masquer la clé' : 'Afficher la clé'}
-            title={revealed ? 'Masquer' : 'Afficher'}
+            aria-label={revealed ? t('archives.buttons.hideKeyAria') : t('archives.buttons.showKeyAria')}
+            title={revealed ? t('archives.buttons.hideKey') : t('archives.buttons.showKey')}
             style={{ padding: '6px 8px' }}
           >
             {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -200,7 +196,7 @@ export const ArchivesConfigSection: React.FC = () => {
             onClick={() => void handleSave()}
             disabled={!europeanaInput.trim() || busy}
           >
-            {busy ? '…' : 'Enregistrer'}
+            {busy ? '…' : t('archives.buttons.save')}
           </button>
           {europeanaConfigured && (
             <button
@@ -210,17 +206,13 @@ export const ArchivesConfigSection: React.FC = () => {
               disabled={busy}
               style={{ color: 'var(--color-danger)' }}
             >
-              Supprimer
+              {t('archives.buttons.delete')}
             </button>
           )}
         </div>
 
         <p style={{ fontSize: 11, marginTop: 8, opacity: 0.75 }}>
-          Pour utiliser <code>search_europeana</code> depuis un client MCP
-          tiers (Claude Desktop), définir aussi{' '}
-          <code>EUROPEANA_API_KEY</code> dans la config du client — la clé
-          stockée ici est consommée uniquement par le serveur MCP intégré que
-          ClioDeck spawne lui-même.
+          {t('archives.europeana.mcpHint')}
         </p>
       </div>
 
@@ -229,6 +221,8 @@ export const ArchivesConfigSection: React.FC = () => {
           {savedNotice}
         </p>
       )}
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };

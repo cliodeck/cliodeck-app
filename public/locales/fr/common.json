@@ -1300,9 +1300,46 @@
       "summary_other": "Outils exposés ({{count}})"
     }
   },
+  "archives": {
+    "title": "Connecteurs d'archives",
+    "hint": "Activer des connecteurs externes (Europeana, et plus tard Transkribus, FranceArchives) en stockant leurs clés API. Les clés sont chiffrées par le système d'exploitation (Electron safeStorage) ; elles ne sont jamais écrites dans config.json ni envoyées avec un projet.",
+    "errors": {
+      "noFusionApi": "API archives non exposée par le preload.",
+      "saveFailed": "Impossible de stocker la clé.",
+      "deleteFailed": "Suppression échouée."
+    },
+    "status": {
+      "configured": "configurée",
+      "notConfigured": "non configurée"
+    },
+    "buttons": {
+      "save": "Enregistrer",
+      "delete": "Supprimer",
+      "hideKey": "Masquer",
+      "showKey": "Afficher",
+      "hideKeyAria": "Masquer la clé",
+      "showKeyAria": "Afficher la clé"
+    },
+    "input": {
+      "replacePlaceholder": "Coller une nouvelle clé pour remplacer"
+    },
+    "notice": {
+      "saved": "Clé {{name}} enregistrée (chiffrée par l'OS).",
+      "deleted": "Clé {{name}} supprimée."
+    },
+    "europeana": {
+      "name": "Europeana",
+      "description": "~50M items GLAM européens (musées, archives, bibliothèques)",
+      "keyPlaceholder": "wskey Europeana (gratuit sur pro.europeana.eu)",
+      "mcpHint": "Pour utiliser `search_europeana` depuis un client MCP tiers (Claude Desktop), définir aussi `EUROPEANA_API_KEY` dans la config du client — la clé stockée ici est consommée uniquement par le serveur MCP intégré que ClioDeck spawne lui-même."
+    }
+  },
   "mcpServer": {
     "title": "Exposer ce projet comme serveur MCP",
     "hint": "Permet à des clients externes (Claude Desktop, Claude Code, n'importe quel outil compatible MCP) de lire le corpus de ce projet via stdio. Opt-in par projet : tant que l'interrupteur ci-dessous est désactivé, aucun serveur ne démarre.",
+    "errors": {
+      "noFusionApi": "API Fusion non exposée par le preload."
+    },
     "toggle": "Activer le serveur MCP pour ce projet",
     "serverName": "Nom du serveur",
     "serverNamePlaceholder": "mon-projet",

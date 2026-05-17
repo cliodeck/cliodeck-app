@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Database, FolderOpen, Link2Off, Play } from 'lucide-react';
+import { FolderOpen, Link2Off, Play } from 'lucide-react';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface VaultStatus {
   indexed: boolean;
@@ -157,10 +158,9 @@ export const VaultConfigSection: React.FC = () => {
   }, [refresh]);
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <Database size={16} /> {t('vault.title')}
-      </h3>
+    <CollapsibleSection title={t('vault.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
       <p className="config-hint">{t('vault.hint')}</p>
 
       {error && (
@@ -251,6 +251,8 @@ export const VaultConfigSection: React.FC = () => {
           {lastReport.vaultName ? ` · ${lastReport.vaultName}` : ''}
         </p>
       )}
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };

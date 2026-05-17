@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface HintsApi {
   read(): Promise<{
@@ -61,11 +62,12 @@ export const WorkspaceHintsSection: React.FC = () => {
   }, [value, t]);
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <FileText size={16} /> {t('hints.title')} (<code>.cliohints</code>)
-      </h3>
-      <p className="config-hint">{t('hints.hint')}</p>
+    <CollapsibleSection title={t('hints.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
+      <p className="config-hint">
+        {t('hints.hint')} (<code>.cliohints</code>)
+      </p>
       <p className="config-hint" style={{ fontSize: 11, opacity: 0.7 }}>
         {t('hints.filePath')} <code>{sourcePath}</code>
       </p>
@@ -106,6 +108,8 @@ export const WorkspaceHintsSection: React.FC = () => {
           <span style={{ color: 'var(--color-danger)' }}>{status.message}</span>
         )}
       </div>
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };

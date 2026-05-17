@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Server, Check, Copy } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
+import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface MCPServerState {
   enabled: boolean;
@@ -135,7 +136,7 @@ export const MCPServerSection: React.FC = () => {
   const refresh = useCallback(async () => {
     const a = api();
     if (!a) {
-      setError('Fusion API not exposed.');
+      setError(t('mcpServer.errors.noFusionApi'));
       return;
     }
     const res = await a.get();
@@ -151,7 +152,7 @@ export const MCPServerSection: React.FC = () => {
     } else {
       setError(res.error ?? 'unknown');
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -194,10 +195,9 @@ export const MCPServerSection: React.FC = () => {
   }, [activeSnippet, state]);
 
   return (
-    <section className="config-section">
-      <h3 className="config-section-title">
-        <Server size={16} /> {t('mcpServer.title')}
-      </h3>
+    <CollapsibleSection title={t('mcpServer.title')} defaultExpanded={false}>
+      <div className="config-section">
+        <div className="config-section-content">
       <p className="config-hint">{t('mcpServer.hint')}</p>
 
       {error && (
@@ -352,6 +352,8 @@ export const MCPServerSection: React.FC = () => {
           )}
         </>
       )}
-    </section>
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };
