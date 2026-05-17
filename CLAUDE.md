@@ -4,7 +4,7 @@
 
 ## 1. Orientation
 
-ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). You are currently on branch **`feat/fusion-cliobrain`** (~50 commits ahead of `main`, not yet pushed to origin) which **absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode** so historians get one app instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/fusion-cliobrain-strategy.md`](docs/fusion-cliobrain-strategy.md) and [`docs/fusion-cliobrain-implementation-plan.md`](docs/fusion-cliobrain-implementation-plan.md) — commit messages reference the step numbers defined there.
+ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). You are currently on branch **`feat/fusion-cliobrain`** — the working branch for the ClioBrain fusion + RC1/RC2 cycle, pushed to `origin/feat/fusion-cliobrain`. It **absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode** so historians get one app instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/archive/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md) — commit messages reference the step numbers defined there.
 
 ## 2. Architecture quick-tour
 
@@ -73,9 +73,9 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 
 - **21 preexisting test failures**: `better-sqlite3` native bindings issues under Vitest + Ollama live-backend tests that timeout when no Ollama is running.
 - **No React component tests** — jsdom + `@testing-library/react` setup pending.
-- **`feat/fusion-cliobrain`** has ~50 unmerged commits, **not yet pushed to origin**.
+- **`feat/fusion-cliobrain`** is the active release branch — pushed to origin; merged into `main` at the `v1.0.0-rc.2` tag.
 - **Recipe `export` step ignores `document_id` input** — hardcoded to `<project>/document.md`.
-- **Ollama provider exposes `capabilities.tools` per-model** via a whitelist (`ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo`); other models (notably the Llama 3.x and 4.x families) get `tools: false`. See `OLLAMA_TOOL_CAPABLE_PATTERNS` in `backend/core/llm/providers/ollama.ts` and `docs/research-ollama-tools-1.8.md` for the source-cited rationale. The 4 cloud providers (OpenAI-compatible, Anthropic, Mistral, Gemini) advertise tool-use unconditionally.
+- **Ollama provider exposes `capabilities.tools` per-model** via a whitelist (`ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo`); other models (notably the Llama 3.x and 4.x families) get `tools: false`. See `OLLAMA_TOOL_CAPABLE_PATTERNS` in `backend/core/llm/providers/ollama.ts` and `docs/archive/research-ollama-tools-1.8.md` for the source-cited rationale. The 4 cloud providers (OpenAI-compatible, Anthropic, Mistral, Gemini) advertise tool-use unconditionally.
 
 ## 7. Glossary
 
