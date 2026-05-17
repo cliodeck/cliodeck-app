@@ -94,6 +94,8 @@
   },
   "settings": {
     "title": "Settings",
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
     "save": "Save",
     "saved": "Configuration saved",
     "saveError": "Error saving configuration",
@@ -339,7 +341,13 @@
       "error": "Export error"
     },
     "exportToPDF": "Export to PDF",
-    "exportToWord": "Export to Word"
+    "exportToWord": "Export to Word",
+    "citation": {
+      "toggle": "Format citations with CSL (Chicago, MLA…)",
+      "style": "Style",
+      "locale": "Locale",
+      "help": "[@key] markers become numbered footnotes and a bibliography is appended at the end."
+    }
   },
   "rag": {
     "title": "RAG Configuration",
@@ -499,6 +507,9 @@
   },
   "chat": {
     "title": "Chat",
+    "settings": {
+      "toggle": "Chat settings"
+    },
     "askQuestion": "Ask a question",
     "placeholder": "Ask a question about your documents...",
     "send": "Send (Enter)",
@@ -506,11 +517,26 @@
     "clearHistory": "Clear history",
     "clearConfirm": "Clear all conversation history?",
     "generating": "Generating...",
-    "newLineHint": "Shift + Enter for new line",
+    "newLineHint": "Cmd/Ctrl + Enter to send",
     "you": "You",
     "assistant": "Assistant",
     "noContextWarning": "This response is not based on your documents. No relevant passages were found in your corpus.",
-    "sources": "Sources",
+    "sources": {
+      "open": "Open source",
+      "opening": "Opening…",
+      "close": "Close",
+      "openFailed": "Failed to open.",
+      "openUnavailable": "Source opening unavailable (preload missing).",
+      "untrackablePdf": "PDF document not traceable (missing documentId).",
+      "untrackableTropy": "Tropy source not traceable (missing itemId).",
+      "untrackableNote": "Obsidian note not traceable (missing path).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
+    },
     "source": "Source",
     "excerpt": "Excerpt:",
     "page": "Page",
@@ -525,6 +551,71 @@
     "readyState": {
       "title": "Ready to assist",
       "message": "{{count}} indexed document(s) available.\n\nAsk a question to get started."
+    },
+    "explanation": {
+      "searchHeading": "🔎 Search",
+      "resultsFound": "Results found:",
+      "duration": "Duration:",
+      "cacheHitSuffix": "(cache)",
+      "sourceTypeLabel": "Source type:",
+      "sourceTypePrimary": "Archives (Tropy)",
+      "sourceTypeSecondary": "Bibliography (PDFs)",
+      "sourceTypeAll": "All",
+      "documentsConsulted": "Documents consulted",
+      "chunks": "chunks",
+      "score": "score",
+      "compressionHeading": "🗜️ Compression",
+      "state": "State:",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "chunksLabel": "Chunks:",
+      "size": "Size:",
+      "chars": "chars",
+      "reduction": "Reduction:",
+      "strategy": "Strategy:",
+      "graphHeading": "🔗 Knowledge graph",
+      "relatedDocs": "Related documents:",
+      "titles": "Titles:",
+      "generationHeading": "🤖 Generation",
+      "provider": "Provider:",
+      "model": "Model:",
+      "contextWindow": "Context window:",
+      "temperature": "Temperature:",
+      "promptSize": "Prompt size:",
+      "timingHeading": "⏱️ Execution time",
+      "searchTime": "Search:",
+      "compressionTime": "Compression:",
+      "generationTime": "Generation:",
+      "totalTime": "Total:"
+    },
+    "brainstorm": {
+      "emptyState": "Start a free-form exploration. Your .cliohints and indexed sources are injected automatically.",
+      "placeholder": "Question, hypothesis, lead to explore… (Cmd/Ctrl + Enter to send)",
+      "citationBadge": "citation",
+      "sendToWrite": "Send to Write",
+      "sentToWrite": "Sent",
+      "sendToWriteTitle": "Insert this turn as a draft in Write",
+      "nerToggle": "Entities",
+      "contextGraph": "Source relations",
+      "graphCitation": "Citation",
+      "graphSimilarity": "Similarity",
+      "sourcesLabel": "Sources",
+      "openProjectNotice": "Open a project to start brainstorming.",
+      "projectContext": "Project context",
+      "recipesCount": "{{count}} recipes",
+      "workspaceHints": "Workspace hints",
+      "noHints": "No .cliohints set. Add one at {{path}} to inject durable context into every prompt.",
+      "obsidianVault": "Obsidian vault",
+      "vaultReady": "Index ready at {{path}}",
+      "vaultNotIndexed": "Not indexed yet — link a vault from Settings.",
+      "vaultChecking": "checking…",
+      "recipesHeading": "Recipes ({{count}})",
+      "noRecipes": "No recipes available.",
+      "fusionApiMissing": "Fusion API not exposed by preload — rebuild the preload bundle.",
+      "stepsSuffix": "steps",
+      "starter1": "What are the main theses in my bibliography on this topic?",
+      "starter2": "Summarize the primary sources available in my archives.",
+      "starter3": "What research leads emerge from cross-referencing my sources?"
     }
   },
   "corpus": {
@@ -571,6 +662,9 @@
     "nbTopics": "Nb topics:",
     "reanalyze": "Reanalyze",
     "topicTimeline": "Topic temporal evolution",
+    "noTimelineData": "No timeline data available. Documents must have year metadata.",
+    "timelineYear": "Year",
+    "timelineDocCount": "doc(s)",
     "topicDocuments": "documents",
     "hideDocuments": "Hide documents",
     "showDocuments": "Show {{count}} documents",
@@ -649,7 +743,16 @@
     "providerAutoDesc": "Tries Ollama first, uses embedded model if Ollama is not available",
     "providerOllamaDesc": "Uses Ollama exclusively for generation (requires Ollama running)",
     "providerEmbeddedDesc": "Uses the embedded Qwen model (requires download in settings)",
-    "notDownloaded": "not downloaded"
+    "notDownloaded": "not downloaded",
+    "sources": "Sources",
+    "includeBibliography": "Bibliography",
+    "includeBibliographyHint": "Zotero PDFs and references",
+    "includePrimary": "Primary sources",
+    "includePrimaryHint": "Tropy archives",
+    "includeNotes": "Notes",
+    "includeNotesHint": "Obsidian notes",
+    "searchIn": "Searching in: {{list}}",
+    "noSourceWarning": "Select at least one source."
   },
   "beamer": {
     "title": "Beamer Configuration",
@@ -976,7 +1079,34 @@
     "noProject": "No Tropy Project",
     "openPrompt": "Click the folder icon to open a Tropy project (.tropy or .tpy)",
     "noSources": "No Sources",
-    "syncPrompt": "Click sync to import sources from Tropy"
+    "syncPrompt": "Click sync to import sources from Tropy",
+    "ocrReport": "OCR Report",
+    "ocrQuality": "OCR Quality",
+    "ocrConfidence": "OCR Confidence",
+    "chunkQuality": "Chunk Quality",
+    "avgQuality": "Avg score",
+    "minQuality": "Min score",
+    "maxQuality": "Max score",
+    "chunks": "chunks",
+    "transcriptionSource": "Transcription source",
+    "transcriptionLength": "Length",
+    "characters": "characters",
+    "noOCRData": "No OCR data available for this document.",
+    "corpusReport": "Corpus Report",
+    "corpusOCRTitle": "Corpus OCR Quality",
+    "sourcesWithOCR": "Sources with OCR",
+    "sourcesTranscribed": "Sources transcribed",
+    "avgCorpusConfidence": "Average confidence",
+    "confidenceDistribution": "Confidence distribution",
+    "worstSources": "Least reliable sources",
+    "bestSources": "Most reliable sources",
+    "byTranscriptionSource": "By transcription source",
+    "tesseract": "Tesseract (OCR)",
+    "tropy-notes": "Tropy Notes",
+    "transkribus": "Transkribus",
+    "manual": "Manual",
+    "noCorpusData": "No OCR data. Run OCR during synchronization.",
+    "closeReport": "Close"
   },
   "modes": {
     "selector": {
@@ -1024,5 +1154,364 @@
     "submit": "Open on GitHub",
     "submitted": "The form has been opened in your browser. Click 'Submit new issue' on GitHub to confirm.",
     "systemInfo": "System Information"
+  },
+  "workspaceMode": {
+    "explore": "Explore",
+    "brainstorm": "Brainstorm",
+    "write": "Write",
+    "export": "Export"
+  },
+  "vault": {
+    "title": "Obsidian Vault",
+    "hint": "Link an Obsidian vault (folder of Markdown notes) so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally in .cliodeck/obsidian-vectors.db.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "noProject": "Open a project to configure the vault.",
+      "statusFailed": "Could not read the vault status.",
+      "configRefused": "Configuration refused.",
+      "indexFailed": "Indexing failed."
+    },
+    "dialog": {
+      "pickTitle": "Select the Obsidian vault folder"
+    },
+    "labels": {
+      "path": "Path:",
+      "noVaultLinked": "no vault linked",
+      "index": "Index:",
+      "ready": "ready",
+      "notIndexed": "not indexed"
+    },
+    "buttons": {
+      "linkVault": "Link a vault…",
+      "changeVault": "Change vault…",
+      "index": "Index",
+      "indexTitle": "Index new or modified notes",
+      "reindex": "Reindex (force)",
+      "reindexTitle": "Force a full reindex",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink the vault and remove the local index"
+    },
+    "report": {
+      "indexed": "Indexed",
+      "skipped": "skipped",
+      "failed": "failed"
+    }
+  },
+  "hints": {
+    "title": "Persistent context",
+    "hint": "These notes are injected as a system message into every Brainstorm conversation (and the recipes that use it). Useful for reminding the model of project conventions, canonical sources, and exclusions.",
+    "filePath": "File:",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "noProject": "Open a project to edit hints.",
+      "saveFailed": "Save failed."
+    },
+    "buttons": {
+      "save": "Save",
+      "saveTitle": "Save hints"
+    },
+    "status": {
+      "saved": "✓ saved"
+    },
+    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n"
+  },
+  "recipes": {
+    "title": "Recipes (read-only)",
+    "hintIntro": "Available YAML recipes —",
+    "hintBuiltinLabel": "builtin",
+    "hintBuiltinSuffix": "shipped with the app,",
+    "hintUserLabel": "user",
+    "hintUserSuffix": "placed in .cliodeck/recipes/ in the project. Click \"Run\" to execute a recipe with interactive parameter input.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload.",
+      "loadFailed": "Could not load."
+    },
+    "groups": {
+      "builtin": "Builtin",
+      "user": "User",
+      "empty": "No recipes."
+    },
+    "buttons": {
+      "run": "Run",
+      "runTitle": "Run this recipe",
+      "edit": "Edit",
+      "editTitle": "Edit this recipe",
+      "refresh": "Refresh",
+      "refreshTitle": "Reload the list"
+    },
+    "card": {
+      "stepsCount_one": "{{count}} step",
+      "stepsCount_other": "{{count}} steps"
+    }
+  },
+  "recipeEditor": {
+    "readOnly": "read-only",
+    "unsaved": "unsaved",
+    "modeForm": "Form",
+    "modeYaml": "YAML",
+    "save": "Save",
+    "sections": {
+      "metadata": "Metadata",
+      "inputs": "Parameters",
+      "steps": "Steps"
+    },
+    "fields": {
+      "name": "Name",
+      "version": "Version",
+      "description": "Description"
+    },
+    "addInput": "Add",
+    "addStep": "Add",
+    "noInputs": "No parameters defined.",
+    "noSteps": "No steps."
+  },
+  "mcp": {
+    "title": "MCP Clients",
+    "hint": "External MCP (Model Context Protocol) servers consumed by ClioDeck. Transport stdio (local process) or sse (remote HTTP SSE). Using MCP tools from the Brainstorm chat (tool-use) is coming in a later wave — for now this section is for configuring clients and verifying that their tools expose correctly.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed.",
+      "listFailed": "List unavailable.",
+      "addFailed": "Add refused."
+    },
+    "buttons": {
+      "refresh": "Refresh",
+      "addClient": "Add a client",
+      "cancel": "Cancel",
+      "save": "Save & start",
+      "restart": "Restart",
+      "remove": "Remove"
+    },
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "my-server",
+      "transport": "Transport",
+      "transportStdio": "stdio (local process)",
+      "transportSse": "sse (remote HTTP SSE)",
+      "command": "Command",
+      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "args": "Arguments (space-separated)",
+      "argsPlaceholder": "--stdio --workspace /path/to/ws",
+      "url": "URL",
+      "urlPlaceholder": "https://example.com/mcp/sse"
+    },
+    "empty": "No MCP client configured for this project.",
+    "tools": {
+      "summary_one": "Tool exposed ({{count}})",
+      "summary_other": "Tools exposed ({{count}})"
+    }
+  },
+  "archives": {
+    "title": "Archive connectors",
+    "hint": "Enable external connectors (Europeana, and later Transkribus, FranceArchives) by storing their API keys. Keys are encrypted by the operating system (Electron safeStorage); they are never written to config.json nor shipped with a project.",
+    "errors": {
+      "noFusionApi": "Archives API not exposed by the preload.",
+      "saveFailed": "Could not store the key.",
+      "deleteFailed": "Deletion failed."
+    },
+    "status": {
+      "configured": "configured",
+      "notConfigured": "not configured"
+    },
+    "buttons": {
+      "save": "Save",
+      "delete": "Delete",
+      "hideKey": "Hide",
+      "showKey": "Show",
+      "hideKeyAria": "Hide key",
+      "showKeyAria": "Show key"
+    },
+    "input": {
+      "replacePlaceholder": "Paste a new key to replace"
+    },
+    "notice": {
+      "saved": "{{name}} key saved (OS-encrypted).",
+      "deleted": "{{name}} key deleted."
+    },
+    "europeana": {
+      "name": "Europeana",
+      "description": "~50M European GLAM items (museums, archives, libraries)",
+      "keyPlaceholder": "Europeana wskey (free at pro.europeana.eu)",
+      "mcpHint": "To use `search_europeana` from a third-party MCP client (Claude Desktop), also set `EUROPEANA_API_KEY` in the client config — the key stored here is consumed only by the built-in MCP server that ClioDeck spawns itself."
+    }
+  },
+  "mcpServer": {
+    "title": "Expose this project as an MCP server",
+    "hint": "Let external clients (Claude Desktop, Claude Code, any MCP-compliant tool) read this project's corpus over stdio. Opt-in per project — turning the toggle off below leaves no server running.",
+    "errors": {
+      "noFusionApi": "Fusion API not exposed by the preload."
+    },
+    "toggle": "Enable MCP server for this project",
+    "serverName": "Server name",
+    "serverNamePlaceholder": "my-project",
+    "serverNameHint": "Display name shown to connected clients. Defaults to the project folder name.",
+    "binary": "Wrapper binary",
+    "binaryMissing": "Binary not found — run `npm run build` in the cliodeck-app repo first.",
+    "disabledNote": "The server refuses to start until this toggle is on, even if a client tries to launch it.",
+    "tools": {
+      "title": "Tools exposed to connected clients",
+      "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets)."
+    },
+    "snippets": {
+      "title": "Configure your client",
+      "claudeDesktop": "Claude Desktop",
+      "claudeDesktopHint": "Add this block to the `mcpServers` object in `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\\Claude\\`).",
+      "claudeCode": "Claude Code CLI",
+      "claudeCodeHint": "Run this once in your terminal to register the server with the `claude` CLI.",
+      "generic": "Generic MCP (stdio)",
+      "genericHint": "For any MCP-compliant client: invoke this command directly. It speaks the MCP protocol over stdin/stdout.",
+      "copy": "Copy",
+      "copied": "Copied"
+    }
+  },
+  "a11y": {
+    "skipToMain": "Skip to main content"
+  },
+  "mcpTools": {
+    "summary": "{{enabled}} / {{total}} MCP tools active",
+    "groups": {
+      "read": "Read-only · auto-enabled",
+      "write": "Write / network · opt-in"
+    }
+  },
+  "recipeRun": {
+    "errors": {
+      "noFusionApi": "Fusion API not exposed.",
+      "loadFailed": "Could not load.",
+      "unknownFailure": "Unknown failure."
+    },
+    "sections": {
+      "params": "Parameters",
+      "log": "Log",
+      "outputs_one": "Output ({{count}})",
+      "outputs_other": "Outputs ({{count}})"
+    },
+    "buttons": {
+      "run": "Run",
+      "running": "Running…"
+    },
+    "stepsCount_one": "{{count}} step",
+    "stepsCount_other": "{{count}} steps",
+    "result": {
+      "ok": "Done. Log:",
+      "failed": "Failed:"
+    },
+    "log": {
+      "runStarted": "▶ Run started — {{recipe}}",
+      "stepInProgress": "… step {{stepId}} ({{kind}})",
+      "stepOk": "✓ step {{stepId}}",
+      "stepOkStub": "✓ step {{stepId}} (stub)",
+      "stepFailed": "✗ step {{stepId}} — {{message}}",
+      "runCompleted": "✓ Run completed",
+      "runFailed": "✗ Run failed — {{message}}"
+    },
+    "placeholder": {
+      "path": "/absolute/path/…"
+    }
+  },
+  "explore": {
+    "title": "Explore",
+    "subtitle": "Explore your corpus, measure similarity, and surface themes.",
+    "tabs": {
+      "corpus": "Corpus Explorer",
+      "similarity": "Similarity",
+      "textometrics": "Textometrics"
+    },
+    "placeholder": {
+      "title": "Coming soon",
+      "body": "This analytical view is not wired yet — see TODO in MainLayout."
+    }
+  },
+  "ideas": {
+    "tabChat": "Chat",
+    "tabIdeas": "Ideas",
+    "tabCanvas": "Board",
+    "tabGraph": "Graph",
+    "canvasEmpty": "Empty board. Click + to add an idea.",
+    "newIdeaTitle": "New idea",
+    "searchPlaceholder": "Search…",
+    "create": "New idea",
+    "emptyState": "No ideas yet. Click + to create one.",
+    "noResults": "No results.",
+    "selectOrCreate": "Select an idea or create a new one.",
+    "titlePlaceholder": "Idea title",
+    "contentPlaceholder": "Notes, thoughts, hypotheses…",
+    "tags": "Tags",
+    "addTag": "Add tag…",
+    "links": "Links",
+    "addLink": "Target ID…",
+    "origin": "Origin",
+    "created": "Created",
+    "delete": "Delete",
+    "importObsidian": "Import from Obsidian vault",
+    "relatedIdeas": "Related ideas"
+  },
+  "exportHub": {
+    "title": "Export",
+    "subtitle": "Choose an output format for the current document.",
+    "pdf": {
+      "title": "PDF",
+      "description": "Typeset PDF via Pandoc + XeLaTeX."
+    },
+    "word": {
+      "title": "Word (.docx)",
+      "description": "Editable DOCX with template support."
+    },
+    "presentation": {
+      "title": "Presentation",
+      "description": "Slides (online, offline, or PDF)."
+    },
+    "action": "Open exporter"
+  },
+  "statusBar": {
+    "mcpTooltip": "MCP: {{ready}}/{{total}} ready",
+    "vaultTooltip": "Vault: {{count}} notes",
+    "indexing": "Indexing",
+    "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
+    "syncing": "Sync",
+    "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
+  },
+  "security": {
+    "revokeTitle": "Key revocation",
+    "revokeDescription": "Deletes all stored API keys (LLM, Zotero, MCP). You will need to reconfigure them.",
+    "revokeButton": "Revoke all keys",
+    "revokeConfirm": "This will delete all your stored API keys. You will need to reconfigure them in settings. Continue?",
+    "revokeSuccess": "{{count}} key(s) revoked. Reconfigure your API keys in settings.",
+    "revokeError": "Error during revocation",
+    "revoking": "Revoking..."
+  },
+  "cloudConsent": {
+    "title": "Sending data to an external service",
+    "body": "You are using {{provider}}. Your research data (corpus extracts, chat content) will be sent to this cloud service.",
+    "item1": "RAG chunks extracted from your corpus will be transmitted",
+    "item2": "Your conversation content will be sent to the provider",
+    "item3": "You are responsible for protecting your data",
+    "hint": "To stay local, configure Ollama on localhost in settings.",
+    "accept": "I accept for this session",
+    "cancel": "Cancel"
+  },
+  "onboarding": {
+    "skip": "Skip",
+    "skipSetup": "Skip initial setup",
+    "next": "Next",
+    "finish": "Finish",
+    "startWorking": "Start working",
+    "topicQuestion": "Welcome to \"{{name}}\"! What research topic are you working on?",
+    "topicPlaceholder": "e.g. The Great War in the Luxembourg press",
+    "periodQuestion": "What time period does your research cover?",
+    "periodPlaceholder": "e.g. 1914-1918, or 19th century",
+    "sourcesQuestion": "What types of sources will you be using?",
+    "source": {
+      "pdfs": "PDF articles",
+      "zotero": "Zotero library",
+      "tropy": "Tropy archive",
+      "obsidian": "Obsidian notes"
+    },
+    "languageQuestion": "What language should the assistant respond in?",
+    "lang": {
+      "fr": "French",
+      "en": "English",
+      "de": "German"
+    },
+    "doneMessage": "All set! Your workspace is configured. The assistant now knows your topic and sources. You can edit this anytime in the project settings (.cliohints file)."
   }
 }

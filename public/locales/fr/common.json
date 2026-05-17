@@ -94,6 +94,8 @@
   },
   "settings": {
     "title": "Paramètres",
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
     "save": "Enregistrer",
     "saved": "Configuration sauvegardée",
     "saveError": "Erreur lors de la sauvegarde",
@@ -339,7 +341,13 @@
       "error": "Erreur lors de l'export"
     },
     "exportToPDF": "Exporter en PDF",
-    "exportToWord": "Exporter en Word"
+    "exportToWord": "Exporter en Word",
+    "citation": {
+      "toggle": "Formater les citations avec CSL (Chicago, MLA…)",
+      "style": "Style",
+      "locale": "Locale",
+      "help": "Les marqueurs [@key] deviendront des notes de bas de page numérotées et la bibliographie sera ajoutée à la fin."
+    }
   },
   "rag": {
     "title": "Configuration RAG",
@@ -499,6 +507,9 @@
   },
   "chat": {
     "title": "Chat",
+    "settings": {
+      "toggle": "Paramètres du chat"
+    },
     "askQuestion": "Posez une question",
     "placeholder": "Posez une question sur vos documents...",
     "send": "Envoyer (Enter)",
@@ -506,11 +517,26 @@
     "clearHistory": "Effacer l'historique",
     "clearConfirm": "Effacer tout l'historique de conversation ?",
     "generating": "Génération en cours...",
-    "newLineHint": "Shift + Enter pour nouvelle ligne",
+    "newLineHint": "Cmd/Ctrl + Enter pour envoyer",
     "you": "Vous",
     "assistant": "Assistant",
     "noContextWarning": "Cette réponse n'est pas basée sur vos documents. Aucun passage pertinent n'a été trouvé dans votre corpus.",
-    "sources": "Sources",
+    "sources": {
+      "open": "Ouvrir la source",
+      "opening": "Ouverture…",
+      "close": "Fermer",
+      "openFailed": "Échec de l’ouverture.",
+      "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
+      "untrackablePdf": "Document PDF non traçable (documentId manquant).",
+      "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
+      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
+      "position": {
+        "pageWithOffset": "page {{page}} · offset {{offset}}",
+        "page": "page {{page}}",
+        "noteWithLine": "{{path}} · L{{line}}",
+        "item": "item #{{id}}"
+      }
+    },
     "source": "Source",
     "excerpt": "Extrait:",
     "page": "Page",
@@ -525,6 +551,71 @@
     "readyState": {
       "title": "Prêt à vous aider",
       "message": "{{count}} document(s) indexé(s) disponible(s).\n\nPosez une question pour commencer."
+    },
+    "explanation": {
+      "searchHeading": "🔎 Recherche",
+      "resultsFound": "Résultats trouvés:",
+      "duration": "Durée:",
+      "cacheHitSuffix": "(cache)",
+      "sourceTypeLabel": "Type de sources:",
+      "sourceTypePrimary": "Archives (Tropy)",
+      "sourceTypeSecondary": "Bibliographie (PDFs)",
+      "sourceTypeAll": "Toutes",
+      "documentsConsulted": "Documents consultés",
+      "chunks": "chunks",
+      "score": "score",
+      "compressionHeading": "🗜️ Compression",
+      "state": "État:",
+      "enabled": "Activée",
+      "disabled": "Désactivée",
+      "chunksLabel": "Chunks:",
+      "size": "Taille:",
+      "chars": "caractères",
+      "reduction": "Réduction:",
+      "strategy": "Stratégie:",
+      "graphHeading": "🔗 Graphe de connaissances",
+      "relatedDocs": "Documents liés:",
+      "titles": "Titres:",
+      "generationHeading": "🤖 Génération",
+      "provider": "Fournisseur:",
+      "model": "Modèle:",
+      "contextWindow": "Fenêtre de contexte:",
+      "temperature": "Température:",
+      "promptSize": "Taille du prompt:",
+      "timingHeading": "⏱️ Temps d'exécution",
+      "searchTime": "Recherche:",
+      "compressionTime": "Compression:",
+      "generationTime": "Génération:",
+      "totalTime": "Total:"
+    },
+    "brainstorm": {
+      "emptyState": "Commencez une exploration libre. Les .cliohints et les sources indexées seront injectés automatiquement.",
+      "placeholder": "Question, hypothèse, piste à explorer… (Cmd/Ctrl + Enter pour envoyer)",
+      "citationBadge": "citation",
+      "sendToWrite": "Envoyer vers Write",
+      "sentToWrite": "Envoyé",
+      "sendToWriteTitle": "Insère ce tour comme brouillon dans Write",
+      "nerToggle": "Entités",
+      "contextGraph": "Relations entre sources",
+      "graphCitation": "Citation",
+      "graphSimilarity": "Similarité",
+      "sourcesLabel": "Sources",
+      "openProjectNotice": "Ouvrez un projet pour commencer le brainstorming.",
+      "projectContext": "Contexte du projet",
+      "recipesCount": "{{count}} recettes",
+      "workspaceHints": "Consignes de projet",
+      "noHints": "Aucun fichier .cliohints. Ajoutez-en un dans {{path}} pour injecter un contexte durable dans chaque prompt.",
+      "obsidianVault": "Vault Obsidian",
+      "vaultReady": "Index prêt à {{path}}",
+      "vaultNotIndexed": "Pas encore indexé — liez un vault depuis les Réglages.",
+      "vaultChecking": "vérification…",
+      "recipesHeading": "Recettes ({{count}})",
+      "noRecipes": "Aucune recette disponible.",
+      "fusionApiMissing": "API Fusion non exposée par le preload — reconstruisez le bundle preload.",
+      "stepsSuffix": "étapes",
+      "starter1": "Quelles sont les principales thèses dans ma bibliographie sur ce sujet ?",
+      "starter2": "Résume les sources primaires disponibles dans mes archives.",
+      "starter3": "Quelles pistes de recherche émergent des recoupements entre mes sources ?"
     }
   },
   "corpus": {
@@ -571,6 +662,9 @@
     "nbTopics": "Nb topics:",
     "reanalyze": "Réanalyser",
     "topicTimeline": "Évolution temporelle des topics",
+    "noTimelineData": "Aucune donnée temporelle disponible. Les documents doivent avoir des métadonnées d'année.",
+    "timelineYear": "Année",
+    "timelineDocCount": "doc(s)",
     "topicDocuments": "documents",
     "hideDocuments": "Masquer documents",
     "showDocuments": "Voir {{count}} documents",
@@ -649,7 +743,16 @@
     "providerAutoDesc": "Essaie d'abord Ollama, utilise le modèle embarqué si Ollama n'est pas disponible",
     "providerOllamaDesc": "Utilise exclusivement Ollama pour la génération (nécessite Ollama actif)",
     "providerEmbeddedDesc": "Utilise le modèle embarqué Qwen (nécessite le téléchargement dans les paramètres)",
-    "notDownloaded": "non téléchargé"
+    "notDownloaded": "non téléchargé",
+    "sources": "Sources",
+    "includeBibliography": "Bibliographie",
+    "includeBibliographyHint": "PDFs et références Zotero",
+    "includePrimary": "Sources primaires",
+    "includePrimaryHint": "Archives Tropy",
+    "includeNotes": "Notes",
+    "includeNotesHint": "Notes Obsidian",
+    "searchIn": "Recherche dans : {{list}}",
+    "noSourceWarning": "Sélectionnez au moins une source."
   },
   "beamer": {
     "title": "Configuration Beamer",
@@ -976,7 +1079,34 @@
     "noProject": "Aucun projet Tropy",
     "openPrompt": "Cliquez sur l'icône dossier pour ouvrir un projet Tropy (.tropy ou .tpy)",
     "noSources": "Aucune source",
-    "syncPrompt": "Cliquez sur synchroniser pour importer les sources depuis Tropy"
+    "syncPrompt": "Cliquez sur synchroniser pour importer les sources depuis Tropy",
+    "ocrReport": "Rapport OCR",
+    "ocrQuality": "Qualité OCR",
+    "ocrConfidence": "Confiance OCR",
+    "chunkQuality": "Qualité des chunks",
+    "avgQuality": "Score moyen",
+    "minQuality": "Score min",
+    "maxQuality": "Score max",
+    "chunks": "chunks",
+    "transcriptionSource": "Source de transcription",
+    "transcriptionLength": "Longueur",
+    "characters": "caractères",
+    "noOCRData": "Aucune donnée OCR disponible pour ce document.",
+    "corpusReport": "Rapport corpus",
+    "corpusOCRTitle": "Qualité OCR du corpus",
+    "sourcesWithOCR": "Sources avec OCR",
+    "sourcesTranscribed": "Sources transcrites",
+    "avgCorpusConfidence": "Confiance moyenne",
+    "confidenceDistribution": "Distribution de la confiance",
+    "worstSources": "Sources les moins fiables",
+    "bestSources": "Sources les plus fiables",
+    "byTranscriptionSource": "Par source de transcription",
+    "tesseract": "Tesseract (OCR)",
+    "tropy-notes": "Notes Tropy",
+    "transkribus": "Transkribus",
+    "manual": "Manuel",
+    "noCorpusData": "Aucune donnée OCR. Lancez un OCR lors de la synchronisation.",
+    "closeReport": "Fermer"
   },
   "modes": {
     "selector": {
@@ -1024,5 +1154,364 @@
     "submit": "Ouvrir sur GitHub",
     "submitted": "Le formulaire a été ouvert dans votre navigateur. Cliquez sur 'Submit new issue' sur GitHub pour valider.",
     "systemInfo": "Informations système"
+  },
+  "workspaceMode": {
+    "explore": "Explorer",
+    "brainstorm": "Brainstormer",
+    "write": "Écrire",
+    "export": "Exporter"
+  },
+  "vault": {
+    "title": "Vault Obsidian",
+    "hint": "Lie un vault Obsidian (dossier de notes Markdown) pour que le chat Brainstorm puisse citer tes notes en plus de ta bibliographie. Les notes sont indexées localement dans .cliodeck/obsidian-vectors.db.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "noProject": "Ouvrez un projet pour configurer le vault.",
+      "statusFailed": "Impossible de lire le statut du vault.",
+      "configRefused": "Configuration refusée.",
+      "indexFailed": "Indexation échouée."
+    },
+    "dialog": {
+      "pickTitle": "Sélectionner le dossier du vault Obsidian"
+    },
+    "labels": {
+      "path": "Chemin :",
+      "noVaultLinked": "aucun vault lié",
+      "index": "Index :",
+      "ready": "prêt",
+      "notIndexed": "non indexé"
+    },
+    "buttons": {
+      "linkVault": "Lier un vault…",
+      "changeVault": "Changer de vault…",
+      "index": "Indexer",
+      "indexTitle": "Indexe les notes nouvelles ou modifiées",
+      "reindex": "Réindexer (force)",
+      "reindexTitle": "Force la réindexation complète",
+      "unlink": "Détacher",
+      "unlinkTitle": "Détache le vault et supprime l'index local"
+    },
+    "report": {
+      "indexed": "Indexé",
+      "skipped": "ignoré",
+      "failed": "échecs"
+    }
+  },
+  "hints": {
+    "title": "Consignes de projet",
+    "hint": "Ces notes sont injectées comme message système dans chaque conversation Brainstorm (et les recettes qui l'utilisent). Idéal pour rappeler au modèle les conventions du projet, les sources canoniques, les exclusions.",
+    "filePath": "Fichier :",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "noProject": "Ouvrez un projet pour éditer les hints.",
+      "saveFailed": "Échec de la sauvegarde."
+    },
+    "buttons": {
+      "save": "Enregistrer",
+      "saveTitle": "Enregistrer les hints"
+    },
+    "status": {
+      "saved": "✓ enregistré"
+    },
+    "placeholder": "# Contexte\n\n- Corpus : articles en FR sur …\n- Évite de citer Wikipedia\n- Utilise la chronologie stricte\n"
+  },
+  "recipes": {
+    "title": "Recettes (lecture seule)",
+    "hintIntro": "Recettes YAML disponibles —",
+    "hintBuiltinLabel": "builtin",
+    "hintBuiltinSuffix": "livrées avec l'app,",
+    "hintUserLabel": "user",
+    "hintUserSuffix": "placées dans .cliodeck/recipes/ du projet. Bouton « Lancer » pour exécuter une recette avec saisie interactive des paramètres.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée par le preload.",
+      "loadFailed": "Chargement impossible."
+    },
+    "groups": {
+      "builtin": "Builtin",
+      "user": "User",
+      "empty": "Aucune recette."
+    },
+    "buttons": {
+      "run": "Lancer",
+      "runTitle": "Lancer cette recette",
+      "edit": "Éditer",
+      "editTitle": "Modifier cette recette",
+      "refresh": "Actualiser",
+      "refreshTitle": "Recharger la liste"
+    },
+    "card": {
+      "stepsCount_one": "{{count}} étape",
+      "stepsCount_other": "{{count}} étapes"
+    }
+  },
+  "recipeEditor": {
+    "readOnly": "lecture seule",
+    "unsaved": "non enregistré",
+    "modeForm": "Formulaire",
+    "modeYaml": "YAML",
+    "save": "Enregistrer",
+    "sections": {
+      "metadata": "Métadonnées",
+      "inputs": "Paramètres",
+      "steps": "Étapes"
+    },
+    "fields": {
+      "name": "Nom",
+      "version": "Version",
+      "description": "Description"
+    },
+    "addInput": "Ajouter",
+    "addStep": "Ajouter",
+    "noInputs": "Aucun paramètre défini.",
+    "noSteps": "Aucune étape."
+  },
+  "mcp": {
+    "title": "Clients MCP",
+    "hint": "Serveurs MCP (Model Context Protocol) externes consommés par ClioDeck. Transport stdio (processus local) ou sse (HTTP SSE distant). L'utilisation des outils MCP depuis le chat Brainstorm (tool-use) arrive dans une vague suivante — pour l'instant cette section sert à configurer les clients et vérifier que leurs outils s'exposent correctement.",
+    "errors": {
+      "noFusionApi": "Fusion API non exposée.",
+      "listFailed": "Liste indisponible.",
+      "addFailed": "Ajout refusé."
+    },
+    "buttons": {
+      "refresh": "Actualiser",
+      "addClient": "Ajouter un client",
+      "cancel": "Annuler",
+      "save": "Enregistrer & démarrer",
+      "restart": "Redémarrer",
+      "remove": "Supprimer"
+    },
+    "form": {
+      "name": "Nom",
+      "namePlaceholder": "mon-serveur",
+      "transport": "Transport",
+      "transportStdio": "stdio (processus local)",
+      "transportSse": "sse (HTTP SSE distant)",
+      "command": "Commande",
+      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "args": "Arguments (séparés par espaces)",
+      "argsPlaceholder": "--stdio --workspace /path/to/ws",
+      "url": "URL",
+      "urlPlaceholder": "https://example.com/mcp/sse"
+    },
+    "empty": "Aucun client MCP configuré pour ce projet.",
+    "tools": {
+      "summary_one": "Outil exposé ({{count}})",
+      "summary_other": "Outils exposés ({{count}})"
+    }
+  },
+  "archives": {
+    "title": "Connecteurs d'archives",
+    "hint": "Activer des connecteurs externes (Europeana, et plus tard Transkribus, FranceArchives) en stockant leurs clés API. Les clés sont chiffrées par le système d'exploitation (Electron safeStorage) ; elles ne sont jamais écrites dans config.json ni envoyées avec un projet.",
+    "errors": {
+      "noFusionApi": "API archives non exposée par le preload.",
+      "saveFailed": "Impossible de stocker la clé.",
+      "deleteFailed": "Suppression échouée."
+    },
+    "status": {
+      "configured": "configurée",
+      "notConfigured": "non configurée"
+    },
+    "buttons": {
+      "save": "Enregistrer",
+      "delete": "Supprimer",
+      "hideKey": "Masquer",
+      "showKey": "Afficher",
+      "hideKeyAria": "Masquer la clé",
+      "showKeyAria": "Afficher la clé"
+    },
+    "input": {
+      "replacePlaceholder": "Coller une nouvelle clé pour remplacer"
+    },
+    "notice": {
+      "saved": "Clé {{name}} enregistrée (chiffrée par l'OS).",
+      "deleted": "Clé {{name}} supprimée."
+    },
+    "europeana": {
+      "name": "Europeana",
+      "description": "~50M items GLAM européens (musées, archives, bibliothèques)",
+      "keyPlaceholder": "wskey Europeana (gratuit sur pro.europeana.eu)",
+      "mcpHint": "Pour utiliser `search_europeana` depuis un client MCP tiers (Claude Desktop), définir aussi `EUROPEANA_API_KEY` dans la config du client — la clé stockée ici est consommée uniquement par le serveur MCP intégré que ClioDeck spawne lui-même."
+    }
+  },
+  "mcpServer": {
+    "title": "Exposer ce projet comme serveur MCP",
+    "hint": "Permet à des clients externes (Claude Desktop, Claude Code, n'importe quel outil compatible MCP) de lire le corpus de ce projet via stdio. Opt-in par projet : tant que l'interrupteur ci-dessous est désactivé, aucun serveur ne démarre.",
+    "errors": {
+      "noFusionApi": "API Fusion non exposée par le preload."
+    },
+    "toggle": "Activer le serveur MCP pour ce projet",
+    "serverName": "Nom du serveur",
+    "serverNamePlaceholder": "mon-projet",
+    "serverNameHint": "Nom affiché aux clients connectés. Par défaut, le nom du dossier projet.",
+    "binary": "Binaire wrapper",
+    "binaryMissing": "Binaire introuvable — exécutez `npm run build` dans le dépôt cliodeck-app.",
+    "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer.",
+    "tools": {
+      "title": "Outils exposés aux clients connectés",
+      "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL)."
+    },
+    "snippets": {
+      "title": "Configurer votre client",
+      "claudeDesktop": "Claude Desktop",
+      "claudeDesktopHint": "Ajoutez ce bloc à l'objet `mcpServers` dans `claude_desktop_config.json` (macOS : `~/Library/Application Support/Claude/`, Windows : `%APPDATA%\\Claude\\`).",
+      "claudeCode": "Claude Code CLI",
+      "claudeCodeHint": "Exécutez cette commande dans votre terminal pour enregistrer le serveur dans la CLI `claude`.",
+      "generic": "MCP générique (stdio)",
+      "genericHint": "Pour tout client compatible MCP : invoquez cette commande directement. Elle parle le protocole MCP sur stdin/stdout.",
+      "copy": "Copier",
+      "copied": "Copié"
+    }
+  },
+  "a11y": {
+    "skipToMain": "Aller au contenu principal"
+  },
+  "mcpTools": {
+    "summary": "{{enabled}} / {{total}} outils MCP actifs",
+    "groups": {
+      "read": "Lecture seule · activés par défaut",
+      "write": "Écriture / réseau · sur consentement"
+    }
+  },
+  "recipeRun": {
+    "errors": {
+      "noFusionApi": "Fusion API non exposée.",
+      "loadFailed": "Chargement impossible.",
+      "unknownFailure": "Échec inconnu."
+    },
+    "sections": {
+      "params": "Paramètres",
+      "log": "Journal",
+      "outputs_one": "Sortie ({{count}})",
+      "outputs_other": "Sorties ({{count}})"
+    },
+    "buttons": {
+      "run": "Lancer",
+      "running": "En cours…"
+    },
+    "stepsCount_one": "{{count}} étape",
+    "stepsCount_other": "{{count}} étapes",
+    "result": {
+      "ok": "Terminé. Journal :",
+      "failed": "Échec :"
+    },
+    "log": {
+      "runStarted": "▶ Run started — {{recipe}}",
+      "stepInProgress": "… step {{stepId}} ({{kind}})",
+      "stepOk": "✓ step {{stepId}}",
+      "stepOkStub": "✓ step {{stepId}} (stub)",
+      "stepFailed": "✗ step {{stepId}} — {{message}}",
+      "runCompleted": "✓ Run completed",
+      "runFailed": "✗ Run failed — {{message}}"
+    },
+    "placeholder": {
+      "path": "/absolute/path/…"
+    }
+  },
+  "explore": {
+    "title": "Explorer",
+    "subtitle": "Explorez votre corpus, mesurez la similarité et faites émerger les thèmes.",
+    "tabs": {
+      "corpus": "Explorateur de corpus",
+      "similarity": "Similarité",
+      "textometrics": "Textométrie"
+    },
+    "placeholder": {
+      "title": "Bientôt",
+      "body": "Cette vue analytique n'est pas encore branchée — voir TODO dans MainLayout."
+    }
+  },
+  "ideas": {
+    "tabChat": "Chat",
+    "tabIdeas": "Idées",
+    "tabCanvas": "Tableau",
+    "tabGraph": "Graphe",
+    "canvasEmpty": "Tableau vide. Cliquez + pour ajouter une idée.",
+    "newIdeaTitle": "Nouvelle idée",
+    "searchPlaceholder": "Rechercher…",
+    "create": "Nouvelle idée",
+    "emptyState": "Aucune idée pour le moment. Cliquez + pour en créer une.",
+    "noResults": "Aucun résultat.",
+    "selectOrCreate": "Sélectionnez une idée ou créez-en une nouvelle.",
+    "titlePlaceholder": "Titre de l'idée",
+    "contentPlaceholder": "Notes, réflexions, hypothèses…",
+    "tags": "Tags",
+    "addTag": "Ajouter un tag…",
+    "links": "Liens",
+    "addLink": "ID cible…",
+    "origin": "Origine",
+    "created": "Créée le",
+    "delete": "Supprimer",
+    "importObsidian": "Importer depuis le vault Obsidian",
+    "relatedIdeas": "Idées liées"
+  },
+  "exportHub": {
+    "title": "Exporter",
+    "subtitle": "Choisissez un format de sortie pour le document courant.",
+    "pdf": {
+      "title": "PDF",
+      "description": "PDF mis en page via Pandoc + XeLaTeX."
+    },
+    "word": {
+      "title": "Word (.docx)",
+      "description": "DOCX éditable avec prise en charge des modèles."
+    },
+    "presentation": {
+      "title": "Présentation",
+      "description": "Diapositives (en ligne, hors-ligne ou PDF)."
+    },
+    "action": "Ouvrir l'exportateur"
+  },
+  "statusBar": {
+    "mcpTooltip": "MCP : {{ready}}/{{total}} prêts",
+    "vaultTooltip": "Vault : {{count}} notes",
+    "indexing": "Indexation",
+    "indexingTooltip": "Indexation : {{current}}/{{total}} documents",
+    "syncing": "Sync",
+    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
+  },
+  "security": {
+    "revokeTitle": "Revocation des cles",
+    "revokeDescription": "Supprime toutes les cles API stockees (LLM, Zotero, MCP). Vous devrez les reconfigurer.",
+    "revokeButton": "Revoquer toutes les cles",
+    "revokeConfirm": "Cette action va supprimer toutes vos cles API stockees. Vous devrez les reconfigurer dans les parametres. Continuer ?",
+    "revokeSuccess": "{{count}} cle(s) revoquee(s). Reconfigurez vos cles API dans les parametres.",
+    "revokeError": "Erreur lors de la revocation",
+    "revoking": "Revocation..."
+  },
+  "cloudConsent": {
+    "title": "Envoi de donnees vers un service externe",
+    "body": "Vous utilisez le fournisseur {{provider}}. Vos donnees de recherche (extraits de corpus, contenu du chat) seront envoyees a ce service cloud.",
+    "item1": "Les chunks RAG extraits de votre corpus seront transmis",
+    "item2": "Le contenu de votre conversation sera envoye au fournisseur",
+    "item3": "Vous etes responsable de la protection de vos donnees",
+    "hint": "Pour rester en local, configurez un Ollama sur localhost dans les parametres.",
+    "accept": "J'accepte pour cette session",
+    "cancel": "Annuler"
+  },
+  "onboarding": {
+    "skip": "Passer",
+    "skipSetup": "Passer la configuration initiale",
+    "next": "Suivant",
+    "finish": "Terminer",
+    "startWorking": "Commencer",
+    "topicQuestion": "Bienvenue dans le projet \"{{name}}\" ! Sur quel sujet de recherche travaillez-vous ?",
+    "topicPlaceholder": "ex. La Grande Guerre dans la presse luxembourgeoise",
+    "periodQuestion": "Quelle est la periode couverte par votre recherche ?",
+    "periodPlaceholder": "ex. 1914-1918, ou XIXe siecle",
+    "sourcesQuestion": "Quels types de sources allez-vous utiliser ?",
+    "source": {
+      "pdfs": "Articles PDF",
+      "zotero": "Bibliotheque Zotero",
+      "tropy": "Archives Tropy",
+      "obsidian": "Notes Obsidian"
+    },
+    "languageQuestion": "Dans quelle langue souhaitez-vous que l'assistant vous reponde ?",
+    "lang": {
+      "fr": "Francais",
+      "en": "Anglais",
+      "de": "Allemand"
+    },
+    "doneMessage": "Parfait ! Votre espace de travail est configure. L'assistant connait maintenant votre sujet et vos sources. Vous pouvez modifier ces informations a tout moment dans les parametres du projet (fichier .cliohints)."
   }
 }

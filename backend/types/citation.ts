@@ -3,6 +3,8 @@ export interface ZoteroAttachmentInfo {
   filename: string;
   contentType: string;
   downloaded: boolean;
+  /** Local path to the downloaded PDF, set after Zotero copy completes. */
+  localPath?: string;
   dateModified?: string;
   md5?: string;
 }

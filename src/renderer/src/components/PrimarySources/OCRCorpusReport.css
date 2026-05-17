@@ -1,0 +1,159 @@
+.ocr-corpus-report {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ocr-corpus-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.ocr-corpus-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.ocr-corpus-close {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+}
+
+.ocr-corpus-close:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.ocr-corpus-empty {
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Summary stats */
+.ocr-corpus-summary {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.ocr-corpus-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.ocr-corpus-stat-num {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ocr-corpus-stat-label {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+}
+
+/* Sections */
+.ocr-corpus-section {
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.ocr-corpus-section h5 {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+/* Histogram */
+.ocr-corpus-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.3rem;
+  height: 50px;
+  margin-bottom: 0.2rem;
+}
+
+.ocr-histogram-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  position: relative;
+  justify-content: flex-end;
+}
+
+.ocr-histogram-bar {
+  width: 100%;
+  min-height: 2px;
+  background: var(--color-accent);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.7;
+}
+
+.ocr-histogram-label {
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.ocr-histogram-count {
+  position: absolute;
+  top: -2px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Lists */
+.ocr-corpus-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.ocr-corpus-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+  color: var(--text-secondary);
+}
+
+.ocr-corpus-list li strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.ocr-corpus-source-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}

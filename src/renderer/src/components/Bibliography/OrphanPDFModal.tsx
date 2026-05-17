@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Archive, FolderOpen, AlertTriangle, X, RefreshCw } from 'lucide-react';
 import { useDialogStore } from '../../stores/dialogStore';
+import type { Citation } from '../../stores/bibliography/types';
 import './OrphanPDFModal.css';
 
 interface OrphanPDFInfo {
@@ -23,7 +24,7 @@ interface OrphanPDFModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectPath: string;
-  citations: any[];
+  citations: Citation[];
 }
 
 export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
@@ -65,7 +66,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
       if (result.success && result.data) {
         setScanResult(result.data);
         // Select all by default
-        const allPaths = new Set(result.data.orphans?.map((o: OrphanPDFInfo) => o.filePath) || []);
+        const allPaths = new Set<string>(result.data.orphans?.map((o: OrphanPDFInfo) => o.filePath) ?? []);
         setSelectedOrphans(allPaths);
       } else {
         console.error('Failed to scan for orphan PDFs:', result.error);

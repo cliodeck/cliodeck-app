@@ -27,8 +27,8 @@ export const SlidePreviewPanel: React.FC = () => {
       } else {
         setError(result.error ?? t('slides.preview.error'));
       }
-    } catch (err: any) {
-      setError(err?.message ?? t('slides.preview.error'));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('slides.preview.error'));
     } finally {
       setIsLoading(false);
     }

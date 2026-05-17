@@ -8,6 +8,7 @@ interface Citation {
   author: string;
   year: string;
   type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- arbitrary BibTeX fields
   [key: string]: any;
 }
 
@@ -28,6 +29,7 @@ interface SyncPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   diff: SyncDiff;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- resolution shape varies by strategy
   onApplySync: (strategy: 'local' | 'remote' | 'manual', selectedChanges?: any) => void;
 }
 

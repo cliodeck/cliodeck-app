@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import {
+  ExportCitationSection,
+  loadDefaultCitationValue,
+  type ExportCitationValue,
+} from './ExportCitationSection';
 import './PDFExportModal.css';
 
 interface PDFExportModalProps {
@@ -23,6 +28,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
+  const [citation, setCitation] = useState<ExportCitationValue>({
+    useEngine: false,
+    style: 'chicago-note-bibliography',
+    locale: 'fr-FR',
+  });
 
   // Check dependencies on mount
   useEffect(() => {
@@ -38,6 +48,18 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       setOutputPath(`${currentProject.path}/${currentProject.name}.pdf`);
     }
   }, [currentProject, isOpen]);
+
+  // Load citation defaults from workspace config when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void loadDefaultCitationValue().then((v) => {
+      if (!cancelled) setCitation(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Listen for progress updates
   useEffect(() => {
@@ -64,8 +86,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           `Dépendances manquantes:\n${!result.pandoc ? '- Pandoc (installez avec: brew install pandoc)\n' : ''}${!result.xelatex ? '- XeLaTeX (installez avec: brew install --cask mactex)' : ''}`
         );
       }
-    } catch (err: any) {
-      setError('Erreur lors de la vérification des dépendances: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de la vérification des dépendances: ' + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -82,7 +104,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       if (!result.canceled && result.filePath) {
         setOutputPath(result.filePath);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to select output path:', err);
     }
   };
@@ -150,6 +172,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           date: new Date().toLocaleDateString('fr-FR'),
         },
         beamerConfig,
+        citation: {
+          useEngine: citation.useEngine,
+          style: citation.style,
+          locale: citation.locale,
+        },
       });
 
       if (result.success) {
@@ -166,8 +193,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         setError(result.error || 'Erreur inconnue lors de l\'export');
         setIsExporting(false);
       }
-    } catch (err: any) {
-      setError('Erreur lors de l\'export: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
       setIsExporting(false);
     }
   };
@@ -240,15 +267,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
-            <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: '#4ec9b0' }}>abstract.md</code> de votre projet
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: 'var(--color-success)' }}>abstract.md</code> de votre projet
             </div>
           )}
 
           {/* Info about presentations */}
           {currentProject?.type === 'presentation' && (
-            <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-              🎬 Présentation Beamer : Le contenu sera lu depuis <code style={{ color: '#4ec9b0' }}>slides.md</code>
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+              🎬 Présentation Beamer : Le contenu sera lu depuis <code style={{ color: 'var(--color-success)' }}>slides.md</code>
               <br /><br />
               <strong>Syntaxe :</strong>
               <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
@@ -258,6 +285,12 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
               </ul>
             </div>
           )}
+
+          <ExportCitationSection
+            value={citation}
+            onChange={setCitation}
+            disabled={isExporting}
+          />
 
           <div className="form-field">
             <label>Fichier de sortie</label>

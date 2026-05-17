@@ -64,7 +64,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       onCSLChange?.();
 
       console.log('✅ CSL path saved:', finalPath);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save CSL path:', error);
       await useDialogStore.getState().showAlert(t('project.cslSaveError') || 'Error saving CSL path');
     } finally {

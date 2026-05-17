@@ -47,7 +47,7 @@ export const ChatHistoryView: React.FC<Props> = ({ messages }) => {
                 <div className="message-sources">
                   <strong>{t('chat.sources')}:</strong>
                   <ul>
-                    {msg.sources.map((source: any, idx: number) => (
+                    {(msg.sources as Array<{ documentTitle?: string; pageNumber?: number; similarity: number }>).map((source, idx) => (
                       <li key={idx}>
                         {source.documentTitle || 'Document'} ({t('chat.page')} {source.pageNumber}, {t('chat.similarity')}: {source.similarity.toFixed(2)})
                       </li>

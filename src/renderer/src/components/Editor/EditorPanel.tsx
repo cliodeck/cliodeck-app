@@ -1,10 +1,15 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Eye, Code2, Search } from 'lucide-react';
 import { MilkdownEditor } from './MilkdownEditor';
 import { MarkdownEditor } from './MarkdownEditor';
 import { DocumentStats } from './DocumentStats';
-import { SimilarityPanel } from '../Similarity/SimilarityPanel';
+
+// SimilarityPanel self-hides via `isPanelOpen` — lazy-loading keeps its heavy
+// dependency tree off the editor's initial chunk.
+const SimilarityPanel = lazy(() =>
+  import('../Similarity/SimilarityPanel').then((m) => ({ default: m.SimilarityPanel })),
+);
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
@@ -57,9 +62,10 @@ export const EditorPanel: React.FC = () => {
     try {
       await saveFile();
       logger.component('EditorPanel', 'File saved successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If no file path, show save dialog
-      if (error.message.includes('No file path')) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.includes('No file path')) {
         logger.component('EditorPanel', 'No file path, showing save dialog');
         const result = await window.electron.dialog.saveFile({
           filters: [
@@ -185,7 +191,11 @@ export const EditorPanel: React.FC = () => {
       </div>
 
       {/* Similarity Panel (floating) */}
-      <SimilarityPanel />
+      {isSimilarityPanelOpen && (
+        <Suspense fallback={null}>
+          <SimilarityPanel />
+        </Suspense>
+      )}
     </div>
   );
 };

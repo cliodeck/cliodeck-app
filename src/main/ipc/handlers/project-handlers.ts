@@ -8,6 +8,7 @@ import { historyService } from '../../services/history-service.js';
 import { modeService } from '../../services/mode-service.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { tropyService } from '../../services/tropy-service.js';
+import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -57,6 +58,14 @@ export function setupProjectHandlers() {
 
           // Initialize Tropy service
           await tropyService.init(projectPath);
+
+          // Initialize MCP clients (fire-and-forget so a dead server
+          // doesn't block project loading).
+          void mcpClientsService
+            .loadProject(projectPath)
+            .catch((e) =>
+              console.warn('[mcp-clients] loadProject failed:', e)
+            );
 
           console.log('✅ All services initialized successfully');
         }

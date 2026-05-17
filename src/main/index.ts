@@ -1,6 +1,29 @@
 // Console filter must be imported first to filter logs in production
 import '../shared/console-filter.js';
 
+// Capture otherwise-silent async errors. Electron exits without a trace
+// when a promise is rejected unhandled or an uncaught exception escapes
+// an event-loop callback — which is how indexing crashes have been
+// disappearing. We record to stderr AND append to ~/.cliodeck-crash.log
+// so the trace survives the terminal being closed.
+import { appendFileSync } from 'fs';
+import { homedir } from 'os';
+import { join as pathJoin } from 'path';
+
+const CRASH_LOG = pathJoin(homedir(), '.cliodeck-crash.log');
+
+function recordFatal(kind: 'uncaughtException' | 'unhandledRejection', err: unknown): void {
+  const stamp = new Date().toISOString();
+  const message =
+    err instanceof Error ? err.stack || err.message : typeof err === 'string' ? err : JSON.stringify(err);
+  const line = `\n=== ${stamp} ${kind} ===\n${message}\n`;
+  try { process.stderr.write(line); } catch { /* ignore */ }
+  try { appendFileSync(CRASH_LOG, line); } catch { /* ignore */ }
+}
+
+process.on('uncaughtException', (err) => recordFatal('uncaughtException', err));
+process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', reason));
+
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -33,8 +56,14 @@ function createWindow() {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
     },
   });
+
+  // Deny all window.open / target=_blank attempts at the main-process level.
+  // Links that should open externally must go through a dedicated IPC path.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // En dev : charger depuis Vite
   // En production : charger depuis dist
@@ -65,6 +94,21 @@ app.whenReady().then(async () => {
   console.log('🔧 Initializing configManager...');
   await configManager.init();
   console.log('✅ configManager initialized');
+
+  // Propagate connector secrets from secureStorage into process.env so
+  // any MCP-server-as-tools subprocess we spawn inherits them. Third-party
+  // MCP clients (Claude Desktop) don't share our env, so they still need
+  // EUROPEANA_API_KEY explicitly in their own config — see archive-mcp-connectors.md.
+  try {
+    const { secureStorage } = await import('./services/secure-storage.js');
+    const europeanaKey = secureStorage.getKey('mcp.europeana.apiKey');
+    if (europeanaKey) {
+      process.env.EUROPEANA_API_KEY = europeanaKey;
+      console.log('🔑 [Secrets] EUROPEANA_API_KEY propagated to process.env');
+    }
+  } catch (e) {
+    console.warn('[Secrets] Failed to propagate connector keys:', e);
+  }
 
   // Charger les traductions des menus
   loadMenuTranslations();

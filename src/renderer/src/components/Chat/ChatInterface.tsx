@@ -1,157 +1,200 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Trash2 } from 'lucide-react';
-import { useChatStore } from '../../stores/chatStore';
+import {
+  type ChatMessage,
+  useChatStore,
+} from '../../stores/chatStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { MessageList } from './MessageList';
-import { MessageInput } from './MessageInput';
-import { RAGSettingsPanel } from './RAGSettingsPanel';
+import { useModeStore } from '../../stores/modeStore';
+import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
+import { ChatSurface } from './ChatSurface';
+import { RAGMessageExtras } from './RAGMessageExtras';
 import { ModeSelector } from './ModeSelector';
+import { RAGSettingsPanel } from './RAGSettingsPanel';
+import { useChatSettingsProjection } from './useChatSettingsProjection';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
-import './ChatInterface.css';
+import { UnifiedMessage } from './types';
 import { logger } from '../../utils/logger';
+import './ChatInterface.css';
 
+interface ChatUnifiedMessage extends UnifiedMessage {
+  original: ChatMessage;
+}
+
+/**
+ * ChatInterface (Write mode).
+ *
+ * Post-fusion (step 4b): runs on the unified `fusion:chat:*` pipeline via
+ * `useBrainstormChat`. The legacy `chat:send` / `chat:onStream` handlers
+ * are left in place (deprecated) until step 5 of the fusion plan.
+ */
 export const ChatInterface: React.FC = () => {
-  const { t } = useTranslation('common');
-  const { messages, isProcessing, sendMessage, cancelGeneration, clearChat } = useChatStore();
+  const { t, i18n } = useTranslation('common');
+  const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
+  const messages = useChatStore((s) => s.messages);
+  const pendingAssistantId = useChatStore((s) => s.pendingAssistantId);
+  const resetChat = useChatStore((s) => s.reset);
+  const { send, cancel } = useBrainstormChat();
   const { indexedFilePaths, refreshIndexedPDFs } = useBibliographyStore();
-  const [inputValue, setInputValue] = useState('');
-  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(null);
+  const { modes } = useModeStore();
+  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(
+    null
+  );
+
+  // Project RAG params + active mode onto chatStore.chatSettings so every
+  // `fusion.chat.start` picks up current filters.
+  useChatSettingsProjection();
 
   const indexedCount = indexedFilePaths.size;
+  const isProcessing = pendingAssistantId !== null;
 
-  // Refresh indexed PDFs when component mounts and when project changes
   useEffect(() => {
     refreshIndexedPDFs();
   }, [refreshIndexedPDFs]);
 
-  // Listen for RAG status updates
+  // Status banner: subscribe to the fusion status stream.
   useEffect(() => {
-    const handleStatus = (_event: unknown, data: { stage: string; message: string }) => {
-      setRagStatus({
-        message: data.message,
-        isError: data.stage === 'error',
-      });
+    const w = window as unknown as {
+      electron?: {
+        fusion?: {
+          chat?: {
+            onStatus?: (
+              cb: (env: {
+                sessionId: string;
+                status: { phase: string; label?: string };
+              }) => void
+            ) => () => void;
+          };
+        };
+      };
     };
-
-    // @ts-expect-error - electron IPC
-    window.electron?.ipcRenderer?.on('chat:status', handleStatus);
-
-    return () => {
-      // @ts-expect-error - electron IPC
-      window.electron?.ipcRenderer?.removeListener('chat:status', handleStatus);
-    };
+    const onStatus = w.electron?.fusion?.chat?.onStatus;
+    if (!onStatus) return;
+    const unsub = onStatus((env) => {
+      const phase = env.status.phase;
+      const label = env.status.label ?? phase;
+      setRagStatus({ message: label, isError: phase === 'error' });
+    });
+    return () => unsub();
   }, []);
 
-  // Clear status when processing ends (with delay for errors)
   useEffect(() => {
     if (!isProcessing && ragStatus) {
-      // Keep error messages visible longer
       const delay = ragStatus.isError ? 5000 : 0;
       const timer = setTimeout(() => setRagStatus(null), delay);
       return () => clearTimeout(timer);
     }
   }, [isProcessing, ragStatus]);
 
-  const handleSend = useCallback(async () => {
-    logger.component('ChatInterface', 'handleSend called', { inputValue, isProcessing });
-    if (!inputValue.trim() || isProcessing) {
-      logger.component('ChatInterface', 'Send blocked - empty input or processing');
-      return;
-    }
+  const unifiedMessages = useMemo<ChatUnifiedMessage[]>(
+    () =>
+      messages.map((m) => {
+        const mode =
+          m.modeId && m.modeId !== 'default-assistant'
+            ? modes.find((x) => x.metadata.id === m.modeId)
+            : undefined;
+        const badge = mode ? mode.metadata.name[lang] || m.modeId : undefined;
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          pending: m.pending,
+          isError: !!m.error || !!m.isError,
+          badge,
+          original: m,
+        };
+      }),
+    [messages, modes, lang]
+  );
 
-    const query = inputValue.trim();
-    setInputValue('');
+  const handleSend = useCallback(
+    async (text: string) => {
+      try {
+        logger.component('ChatInterface', 'sendMessage', { query: text });
+        await send(text);
+      } catch (error) {
+        logger.error('ChatInterface', error);
+      }
+    },
+    [send]
+  );
 
-    try {
-      logger.component('ChatInterface', 'Calling sendMessage', { query });
-      await sendMessage(query);
-    } catch (error) {
-      logger.error('ChatInterface', error);
-    }
-  }, [inputValue, isProcessing, sendMessage]);
-
-  const handleCancel = useCallback(() => {
-    logger.component('ChatInterface', 'handleCancel called');
-    cancelGeneration();
-  }, [cancelGeneration]);
+  const handleCancel = useCallback(async () => {
+    await cancel();
+  }, [cancel]);
 
   const handleClear = useCallback(async () => {
-    logger.component('ChatInterface', 'handleClear called');
     if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'))) {
-      clearChat();
+      resetChat();
     }
-  }, [clearChat, t]);
+  }, [resetChat, t]);
 
   const handleLearnMore = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } }));
+    window.dispatchEvent(
+      new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } })
+    );
   }, []);
 
+  const emptyState = (
+    <>
+      {indexedCount > 0 ? (
+        <>
+          <h4>{t('chat.readyState.title')}</h4>
+          <p>{t('chat.readyState.message', { count: indexedCount })}</p>
+        </>
+      ) : (
+        <>
+          <h4>{t('chat.emptyState.title')}</h4>
+          <p>{t('chat.emptyState.message')}</p>
+        </>
+      )}
+    </>
+  );
+
+  const banner =
+    ragStatus && (isProcessing || ragStatus.isError) ? (
+      <div
+        className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`}
+        role="status"
+        aria-live="polite"
+      >
+        {ragStatus.message}
+      </div>
+    ) : undefined;
+
+  const renderRAGExtras = useCallback(
+    (m: ChatUnifiedMessage) => <RAGMessageExtras message={m.original} />,
+    []
+  );
+
+  // Streaming content: the pending assistant message already carries the
+  // running content; ChatSurface renders it in-place, so no separate
+  // streamingContent prop is needed now that messages carry `pending`.
+
+  const headerExtras = (
+    <>
+      <HelperTooltip content={t('chat.helpText')} onLearnMore={handleLearnMore} />
+      <ModeSelector />
+    </>
+  );
+
   return (
-    <div className="chat-interface">
-      {/* Header */}
-      <div className="chat-header">
-        <div className="chat-title">
-          <h3>{t('chat.aiAssistant')}</h3>
-          <HelperTooltip
-            content={t('chat.helpText')}
-            onLearnMore={handleLearnMore}
-          />
-        </div>
-        <ModeSelector />
-        <button
-          className="toolbar-btn"
-          onClick={handleClear}
-          title={t('chat.clearHistory')}
-          disabled={messages.length === 0}
-        >
-          <Trash2 size={20} strokeWidth={1} />
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div className="chat-messages">
-        {messages.length === 0 ? (
-          <div className="chat-empty">
-            {indexedCount > 0 ? (
-              <>
-                <h4>{t('chat.readyState.title')}</h4>
-                <p>
-                  {t('chat.readyState.message', { count: indexedCount })}
-                </p>
-              </>
-            ) : (
-              <>
-                <h4>{t('chat.emptyState.title')}</h4>
-                <p>
-                  {t('chat.emptyState.message')}
-                </p>
-              </>
-            )}
-          </div>
-        ) : (
-          <MessageList messages={messages} />
-        )}
-        {/* RAG Status indicator */}
-        {ragStatus && (isProcessing || ragStatus.isError) && (
-          <div className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`} role="status" aria-live="polite">
-            {ragStatus.message}
-          </div>
-        )}
-      </div>
-
-      {/* Input */}
-      <MessageInput
-        value={inputValue}
-        onChange={setInputValue}
+    <>
+      <ChatSurface
+        title={t('chat.aiAssistant')}
+        headerExtras={headerExtras}
+        messages={unifiedMessages}
+        isProcessing={isProcessing}
         onSend={handleSend}
         onCancel={handleCancel}
-        isProcessing={isProcessing}
+        onClear={messages.length > 0 ? handleClear : undefined}
+        emptyState={emptyState}
+        banner={banner}
+        renderMessageExtras={renderRAGExtras}
       />
-
-      {/* RAG Settings Panel */}
       <RAGSettingsPanel />
-    </div>
+    </>
   );
 };

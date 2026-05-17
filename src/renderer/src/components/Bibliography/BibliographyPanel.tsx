@@ -281,17 +281,16 @@ export const BibliographyPanel: React.FC = () => {
     try {
       // Re-index each PDF
       for (const citation of toReindex) {
-        if (citation.file) {
-          await window.electron.pdf.index(
-            citation.file,
-            citation.key,
-            {
-              title: citation.title,
-              author: citation.author,
-              year: citation.year,
-            }
-          );
-        }
+        if (!citation || !citation.file) continue;
+        await window.electron.pdf.index(
+          citation.file,
+          citation.key,
+          {
+            title: citation.title,
+            author: citation.author,
+            year: citation.year,
+          }
+        );
       }
 
       // Refresh indexed PDFs

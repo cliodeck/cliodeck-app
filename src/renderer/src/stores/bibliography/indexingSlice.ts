@@ -73,7 +73,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       const result = await window.electron.pdf.getAll();
       if (result.success && Array.isArray(result.documents)) {
         // Find document with matching bibtexKey
-        const doc = result.documents.find((d: any) => d.bibtexKey === citationId);
+        const doc = result.documents.find((d: { bibtexKey?: string; id?: string }) => d.bibtexKey === citationId);
         return doc?.id || null;
       }
       return null;
@@ -88,8 +88,45 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       const { citations } = get();
       const citation = citations.find((c) => c.id === citationId);
 
-      if (!citation || !citation.file) {
-        throw new Error('No PDF file associated with this citation');
+      if (!citation) {
+        throw new Error('Citation not found');
+      }
+
+      // Resolution order for the PDF path on disk:
+      //   1. `citation.file` — what BibTeX or the in-memory Zotero download
+      //      flow gave us. Cheapest and most accurate when available.
+      //   2. Existing indexed document's `fileURL` — the previous index
+      //      knows exactly which file it ran on. Restoring this covers the
+      //      Zotero-only flow whose BibTeX has no `file =` and whose
+      //      metadata.json got saved with an empty attachments array
+      //      (separate bug — saveMetadata can overwrite populated state).
+      //   3. First downloaded Zotero attachment's `localPath`.
+      // If none of the three resolves, indexing is genuinely impossible.
+      let filePath: string | undefined = citation.file ?? undefined;
+      if (!filePath) {
+        try {
+          const allDocs = await window.electron.pdf.getAll();
+          if (allDocs.success && Array.isArray(allDocs.documents)) {
+            const existing = allDocs.documents.find(
+              (d: { bibtexKey?: string; fileURL?: string }) =>
+                d.bibtexKey === citationId,
+            );
+            if (existing?.fileURL) filePath = existing.fileURL;
+          }
+        } catch (e) {
+          console.warn('reindex: failed to look up existing document path:', e);
+        }
+      }
+      if (!filePath) {
+        const downloadedAttachment = citation.zoteroAttachments?.find(
+          (a) => a.downloaded && a.localPath,
+        );
+        if (downloadedAttachment?.localPath) filePath = downloadedAttachment.localPath;
+      }
+      if (!filePath) {
+        throw new Error(
+          'No PDF file associated with this citation (BibTeX has no `file` field, no previously indexed copy found, no downloaded Zotero attachment).',
+        );
       }
 
       // Find and delete existing indexed document
@@ -101,7 +138,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         // Remove from indexed set
         set((state) => {
           const newIndexedPaths = new Set(state.indexedFilePaths);
-          newIndexedPaths.delete(citation.file!);
+          newIndexedPaths.delete(filePath!);
           return { indexedFilePaths: newIndexedPaths };
         });
       }
@@ -110,7 +147,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       console.log(`🔄 Re-indexing PDF for citation: ${citation.title}`);
 
       window.dispatchEvent(new CustomEvent('bibliography:indexing-start', {
-        detail: { citationId, title: citation.title, filePath: citation.file }
+        detail: { citationId, title: citation.title, filePath }
       }));
 
       const bibliographyMetadata = {
@@ -119,7 +156,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         year: citation.year,
       };
 
-      const result = await window.electron.pdf.index(citation.file, citationId, bibliographyMetadata);
+      const result = await window.electron.pdf.index(filePath, citationId, bibliographyMetadata);
 
       if (!result.success) {
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -130,7 +167,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
       // Add back to indexed set
       set((state) => ({
-        indexedFilePaths: new Set([...state.indexedFilePaths, citation.file!])
+        indexedFilePaths: new Set([...state.indexedFilePaths, filePath!])
       }));
 
       window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -150,13 +187,36 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     // Refresh indexed PDFs list first
     await get().refreshIndexedPDFs();
 
-    // Get citations with PDFs that are not yet indexed
-    const citationsWithPDFs = citations.filter(
-      (c) => c.file && !get().indexedFilePaths.has(c.file)
-    );
+    // Get citations with PDFs that are not yet indexed, deduplicated by
+    // filePath. A Zotero library can have many bibliography items pointing
+    // to the same PDF (e.g. per-day diary entries in one monthly scan);
+    // indexing each item separately re-extracts, re-embeds and re-stores
+    // the same PDF — O(items) instead of O(PDFs). Dedup at batch-entry
+    // because `indexedFilePaths` only updates after each IPC returns, so
+    // the pre-existing `.has()` check alone does not deduplicate within
+    // a single batch.
+    const alreadyIndexed = get().indexedFilePaths;
+    const seenInBatch = new Set<string>();
+    const citationsWithPDFs = citations.filter((c) => {
+      if (!c.file) return false;
+      if (alreadyIndexed.has(c.file)) return false;
+      if (seenInBatch.has(c.file)) return false;
+      seenInBatch.add(c.file);
+      return true;
+    });
 
     if (citationsWithPDFs.length === 0) {
       return { indexed: 0, skipped: 0, errors: [] };
+    }
+
+    const itemsWithFile = citations.filter((c) => c.file).length;
+    if (itemsWithFile > citationsWithPDFs.length) {
+      const duplicates = itemsWithFile - citationsWithPDFs.length;
+      console.log(
+        `📚 [indexing] Deduped batch: ${duplicates} of ${itemsWithFile} items skipped — ` +
+          `their filePath is already queued by another item. ` +
+          `This usually means bibtexKey collision in the bibtex export or multiple Zotero items sharing a single attachment.`
+      );
     }
 
     const errors: string[] = [];
@@ -267,7 +327,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           console.log('📄 Sample document structure:', JSON.stringify(result.documents[0], null, 2));
         }
 
-        result.documents.forEach((doc: any) => {
+        result.documents.forEach((doc: { fileURL?: string; bibtexKey?: string }) => {
           // Document stores file path as fileURL (from backend)
           if (doc.fileURL) {
             indexedPaths.add(doc.fileURL);

@@ -3,6 +3,10 @@ import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { editor } from 'monaco-editor';
 import { logger } from '../utils/logger';
+import {
+  appendDraftToContent,
+  insertDraftAtOffset,
+} from '../components/Brainstorm/messageToDraft';
 
 // MARK: - Types
 
@@ -63,6 +67,15 @@ interface EditorState {
   insertCitation: (citationKey: string) => void;
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => void;
   insertTextAtCursor: (text: string) => void;
+
+  /**
+   * Splice a multi-line draft into the document at the user's current
+   * cursor (fusion 2.6, A13 option a). When neither editor is mounted
+   * the call falls back to appending. Returns the mode actually used so
+   * the caller can adapt the UX confirmation ("inserted at cursor" vs
+   * "appended").
+   */
+  insertDraftAtCursor: (draft: string) => { mode: 'cursor' | 'append' };
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => { definitionPosition: number; footnoteNumber: number } | null;
@@ -424,6 +437,66 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         logger.error('Editor', 'Failed to insert text at cursor');
       }
     }
+  },
+
+  insertDraftAtCursor: (draft: string): { mode: 'cursor' | 'append' } => {
+    const { content, milkdownEditor, monacoEditor, editorMode } = get();
+
+    // Source mode (Monaco) — clean offset → markdown position mapping.
+    if (editorMode === 'source' && monacoEditor) {
+      const model = monacoEditor.getModel();
+      const pos = monacoEditor.getPosition();
+      if (model && pos) {
+        const offset = model.getOffsetAt(pos);
+        const newContent = insertDraftAtOffset(content, offset, draft);
+        set({ content: newContent, isDirty: true });
+        // Keep the cursor just after the inserted draft so the user
+        // continues writing where they left off.
+        try {
+          const newPos = model.getPositionAt(
+            offset + (newContent.length - content.length)
+          );
+          monacoEditor.setPosition(newPos);
+          monacoEditor.focus();
+        } catch {
+          /* ignore positioning failure — content is already in place */
+        }
+        return { mode: 'cursor' };
+      }
+    }
+
+    // WYSIWYG mode (Milkdown) — approximate cursor → plain-text offset.
+    // Doc.textBetween yields the rendered text length, which is a close
+    // enough proxy for the markdown source position when the document
+    // doesn't have heavy inline formatting. The padding logic in
+    // `insertDraftAtOffset` keeps the result on a block boundary.
+    if (editorMode === 'wysiwyg' && milkdownEditor) {
+      let offset = content.length;
+      try {
+        milkdownEditor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { state } = view;
+          const textBeforeCursor = state.doc.textBetween(
+            0,
+            state.selection.from,
+            '\n'
+          );
+          offset = Math.min(textBeforeCursor.length, content.length);
+        });
+      } catch {
+        /* fall through with offset = end-of-content */
+      }
+      const newContent = insertDraftAtOffset(content, offset, draft);
+      set({ content: newContent, isDirty: true });
+      return { mode: 'cursor' };
+    }
+
+    // No editor mounted (or mode/editor mismatch) — fall back to append.
+    set({
+      content: appendDraftToContent(content, draft),
+      isDirty: true,
+    });
+    return { mode: 'append' };
   },
 
   // Direct footnote insertion - returns definition position for scrolling

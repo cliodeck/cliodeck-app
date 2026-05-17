@@ -4,6 +4,28 @@ import path from 'path';
 import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
+import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
+
+async function autoMigrateWorkspace(projectDir: string): Promise<void> {
+  // Best-effort: a failed migration must not block project load. The next
+  // load will retry. Most-common case (already-flat workspace) is a no-op.
+  try {
+    const report = await migrateWorkspaceToFlat(projectDir);
+    if (report.copied.length > 0 || report.warnings.length > 0) {
+      console.log('[workspace] auto-migration:', {
+        kind: report.kind,
+        copied: report.copied.length,
+        skipped: report.skipped.length,
+        warnings: report.warnings.length,
+      });
+    }
+  } catch (e) {
+    console.warn(
+      '[workspace] auto-migration failed (non-fatal):',
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+}
 
 interface Project {
   id?: string;
@@ -96,6 +118,9 @@ export class ProjectManager {
     if (!existsSync(projectPath)) {
       await mkdir(projectPath, { recursive: true });
     }
+
+    // Ensure flat .cliodeck/ layout (with config.json) from day 1. Idempotent.
+    await autoMigrateWorkspace(projectPath);
 
     // Issue #13: path is computed dynamically, not stored in project.json
     const project: Project = {
@@ -201,6 +226,10 @@ Note: N'oubliez pas de mentionner les perspectives futures.
       const content = await readFile(projectPath, 'utf-8');
       const project: Project = JSON.parse(content);
       const projectDir = path.dirname(projectPath);
+
+      // Promote in-flight v2-subdir or pre-fusion v1 workspaces to flat layout
+      // before any service opens DB handles into `.cliodeck/`.
+      await autoMigrateWorkspace(projectDir);
 
       // Migration: Convert absolute paths to relative paths
       let needsSave = false;

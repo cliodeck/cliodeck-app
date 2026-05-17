@@ -155,7 +155,14 @@ export const PDFExportSchema = z.object({
     })
     .optional(),
   beamerConfig: z.record(z.string(), z.unknown()).optional(),
-});
+  citation: z
+    .object({
+      useEngine: z.boolean().optional(),
+      style: z.string().optional(),
+      locale: z.string().optional(),
+    })
+    .optional(),
+}).passthrough();
 
 export const RevealJSExportSchema = z.object({
   projectPath: z.string().min(1),
@@ -488,6 +495,13 @@ export const WordExportSchema = z.object({
     date: z.string().optional(),
     abstract: z.string().optional(),
   }).optional(),
+  citation: z
+    .object({
+      useEngine: z.boolean().optional(),
+      style: z.string().optional(),
+      locale: z.string().optional(),
+    })
+    .optional(),
 }).passthrough();
 
 // History session ID schema (for handlers that take a sessionId)

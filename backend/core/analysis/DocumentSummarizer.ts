@@ -1,5 +1,8 @@
-import type { OllamaClient } from '../llm/OllamaClient';
 import type { PDFMetadata } from '../../types/pdf-document';
+import type {
+  EmbeddingProvider,
+  LLMProvider,
+} from '../llm/providers/base';
 
 export interface SummarizerConfig {
   enabled: boolean;
@@ -17,11 +20,25 @@ interface Sentence {
 /**
  * DocumentSummarizer génère des résumés de documents PDF
  * - Extractif : sélection de phrases importantes (sans dépendance externe)
- * - Abstractif : génération via LLM (Ollama)
+ * - Abstractif : génération via le typed `LLMProvider` (1.2d)
+ *
+ * Embeddings are produced through one of:
+ *   - an `embeddingFunction(text) -> Float32Array` callback (the path
+ *     used by `PDFIndexer` so it can share its own embed wiring), or
+ *   - a typed `EmbeddingProvider` set via `setEmbeddingProvider()`
+ *     (used by tests / CLI).
+ *
+ * The legacy `OllamaClient` slot was removed in fusion step 1.2d.
  */
+export interface SummarizerProviders {
+  llm?: LLMProvider;
+  embedding?: EmbeddingProvider;
+}
+
 export class DocumentSummarizer {
   private config: SummarizerConfig;
-  private ollamaClient?: OllamaClient;
+  private llm?: LLMProvider;
+  private embeddingProvider?: EmbeddingProvider;
 
   // Mots-clés académiques importants (FR + EN)
   private readonly academicKeywords = [
@@ -140,10 +157,26 @@ export class DocumentSummarizer {
 
   private embeddingFunction?: (text: string) => Promise<Float32Array>;
 
-  constructor(config: SummarizerConfig, ollamaClient?: OllamaClient, embeddingFunction?: (text: string) => Promise<Float32Array>) {
+  constructor(
+    config: SummarizerConfig,
+    embeddingFunction?: (text: string) => Promise<Float32Array>,
+    providers?: SummarizerProviders
+  ) {
     this.config = config;
-    this.ollamaClient = ollamaClient;
     this.embeddingFunction = embeddingFunction;
+    this.llm = providers?.llm;
+    this.embeddingProvider = providers?.embedding;
+  }
+
+  /** Test / CLI hook — swap in typed providers after construction. */
+  setProviders(providers: SummarizerProviders): void {
+    if (providers.llm) this.llm = providers.llm;
+    if (providers.embedding) this.embeddingProvider = providers.embedding;
+  }
+
+  /** Returns true when an LLM path is reachable. */
+  hasLLM(): boolean {
+    return Boolean(this.llm);
   }
 
   /**
@@ -159,13 +192,14 @@ export class DocumentSummarizer {
 
     if (this.config.method === 'extractive') {
       return this.generateExtractiveSummary(fullText);
-    } else {
-      if (!this.ollamaClient) {
-        console.warn('⚠️ OllamaClient required for abstractive summarization, falling back to extractive');
-        return this.generateExtractiveSummary(fullText);
-      }
-      return this.generateAbstractiveSummary(fullText, metadata);
     }
+    if (!this.hasLLM()) {
+      console.warn(
+        '⚠️ No LLM configured for abstractive summarization, falling back to extractive'
+      );
+      return this.generateExtractiveSummary(fullText);
+    }
+    return this.generateAbstractiveSummary(fullText, metadata);
   }
 
   /**
@@ -177,12 +211,13 @@ export class DocumentSummarizer {
     if (this.embeddingFunction) {
       return this.embeddingFunction(summary);
     }
-
-    if (!this.ollamaClient) {
-      throw new Error('OllamaClient or embeddingFunction required for embedding generation');
+    if (this.embeddingProvider) {
+      const [vec] = await this.embeddingProvider.embed([summary]);
+      return Float32Array.from(vec);
     }
-
-    return this.ollamaClient.generateEmbedding(summary);
+    throw new Error(
+      'DocumentSummarizer: no embedding path configured (set embeddingFunction or embeddingProvider)'
+    );
   }
 
   // MARK: - Extractive Summarization
@@ -349,8 +384,8 @@ export class DocumentSummarizer {
     fullText: string,
     metadata?: PDFMetadata
   ): Promise<string> {
-    if (!this.ollamaClient) {
-      throw new Error('OllamaClient not configured');
+    if (!this.hasLLM()) {
+      throw new Error('No LLM configured (neither providers.llm nor ollamaClient)');
     }
 
     // Limiter la taille du texte envoyé au LLM (contexte max)
@@ -362,9 +397,12 @@ export class DocumentSummarizer {
     const prompt = this.buildAbstractiveSummaryPrompt(truncatedText, metadata);
 
     try {
-      // Générer le résumé via Ollama (sans contexte RAG, juste le prompt)
-      const summary = await this.ollamaClient.generateResponse(prompt, []);
-
+      if (!this.llm) {
+        throw new Error(
+          'DocumentSummarizer: abstractive summarization requires an LLM provider (call setProviders or pass via constructor)'
+        );
+      }
+      const summary = await this.llm.complete(prompt);
       return summary.trim();
     } catch (error) {
       console.error('❌ Abstractive summarization failed:', error);

@@ -1,0 +1,42 @@
+name: brainstorm-chapitre
+version: 0.1.0
+description: >
+  Brainstorm structuré d'un chapitre à partir d'un plan : génère des pistes
+  argumentatives section par section, propose des sources à consulter.
+inputs:
+  titre:
+    type: string
+    required: true
+    description: Titre du chapitre.
+  plan:
+    type: string
+    required: true
+    description: Plan du chapitre (sections séparées par ---).
+  question_directrice:
+    type: string
+    required: false
+    description: Question historique directrice du chapitre.
+steps:
+  - id: expand_plan
+    kind: brainstorm
+    with:
+      prompt: |
+        Chapitre : {{ inputs.titre }}
+        Question directrice : {{ inputs.question_directrice }}
+        Plan :
+        {{ inputs.plan }}
+
+        Pour chaque section du plan, propose 3-4 pistes argumentatives
+        et identifie les types de sources primaires / secondaires à
+        mobiliser. Reste au stade de la prospection, pas de rédaction.
+      maxTokens: 1500
+      temperature: 0.8
+  - id: suggest_sources
+    kind: search
+    with:
+      source: zotero
+      query: "{{ inputs.titre }} {{ inputs.question_directrice }}"
+      limit: 20
+outputs:
+  pistes: "{{ expand_plan }}"
+  sources_suggerees: "{{ suggest_sources }}"

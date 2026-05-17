@@ -27,7 +27,10 @@ interface ModeState {
   };
 
   // CRUD for custom modes
-  saveCustomMode: (mode: any, target: 'global' | 'project') => Promise<void>;
+  saveCustomMode: (
+    mode: Parameters<typeof window.electron.mode.save>[0],
+    target: 'global' | 'project'
+  ) => Promise<void>;
   deleteCustomMode: (modeId: string, source: 'global' | 'project') => Promise<void>;
   importMode: (target: 'global' | 'project') => Promise<void>;
   exportMode: (modeId: string) => Promise<void>;
@@ -72,7 +75,7 @@ export const useModeStore = create<ModeState>()(
           // Apply mode's generation params and RAG overrides to ragQueryStore
           if (mode) {
             const { useRAGQueryStore } = await import('./ragQueryStore');
-            const overrides: Record<string, any> = {
+            const overrides: Record<string, unknown> = {
               temperature: mode.generationParams.temperature,
               top_p: mode.generationParams.top_p,
               top_k: mode.generationParams.top_k,
@@ -129,7 +132,10 @@ export const useModeStore = create<ModeState>()(
         return { compatible: true };
       },
 
-      saveCustomMode: async (mode: any, target: 'global' | 'project') => {
+      saveCustomMode: async (
+        mode: Parameters<typeof window.electron.mode.save>[0],
+        target: 'global' | 'project'
+      ) => {
         try {
           await window.electron.mode.save(mode, target);
           await get().loadModes();

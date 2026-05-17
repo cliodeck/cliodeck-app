@@ -101,6 +101,22 @@ const DEFAULT_OPTIONS: SimilarityOptions = {
 
 class SimilarityService {
   private abortController: AbortController | null = null;
+  /**
+   * Typed LLM provider (fusion 1.2a). Callers (similarity-handlers IPC,
+   * tests) wire this from a `ProviderRegistry` built off the active
+   * workspace config before invoking `analyzeDocument`. `rerankWithLLM`
+   * fails loud if it isn't set — the previous legacy `OllamaClient`
+   * fallback is gone.
+   */
+  private llm: import('../../../backend/core/llm/providers/base').LLMProvider | null = null;
+
+  setLLMProvider(
+    llm:
+      | import('../../../backend/core/llm/providers/base').LLMProvider
+      | null
+  ): void {
+    this.llm = llm;
+  }
 
   /**
    * Analyze a document and find similar PDFs for each segment
@@ -671,9 +687,10 @@ class SimilarityService {
     query: string,
     candidates: PDFRecommendation[]
   ): Promise<PDFRecommendation[]> {
-    const ollamaClient = pdfService.getOllamaClient();
-    if (!ollamaClient) {
-      throw new Error('Ollama client not available');
+    if (!this.llm) {
+      throw new Error(
+        'similarity-service: LLM provider not wired (call setLLMProvider before analyzeDocument)'
+      );
     }
 
     // Limit candidates to avoid context length issues
@@ -709,8 +726,8 @@ Your ranking:`;
     console.log('🔄 [SIMILARITY] Sending reranking request to LLM...');
     const startTime = Date.now();
 
-    // Use generateResponse (non-streaming) for efficiency
-    const response = await ollamaClient.generateResponse(prompt, []);
+    // Use complete() (non-streaming) for efficiency.
+    const response = await this.llm.complete(prompt);
     const duration = Date.now() - startTime;
 
     console.log('🔄 [SIMILARITY] LLM reranking response:', {

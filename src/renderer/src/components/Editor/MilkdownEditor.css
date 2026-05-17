@@ -284,8 +284,9 @@
   transition: background-color 0.15s;
 }
 
-.citation-autocomplete-item:hover {
-  background-color: var(--bg-hover, rgba(255, 255, 255, 0.1));
+.citation-autocomplete-item:hover,
+.citation-autocomplete-item--active {
+  background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 .citation-autocomplete-item:not(:last-child) {

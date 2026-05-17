@@ -15,7 +15,7 @@ function parseSlidesFromContent(content: string): Slide[] {
   let currentSlideStartLine = 1;
   let currentSlideTitle = '';
 
-  const pushSlide = (endLine: number) => {
+  const pushSlide = (_endLine: number) => {
     slides.push({
       index: slideIndex,
       title: currentSlideTitle || `Slide ${slideIndex + 1}`,

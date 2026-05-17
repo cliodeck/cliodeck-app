@@ -15,7 +15,10 @@ import { safeStorage } from 'electron';
 export const SENSITIVE_KEYS = [
   'llm.claudeAPIKey',
   'llm.openaiAPIKey',
+  'llm.mistralAPIKey',
+  'llm.geminiAPIKey',
   'zotero.apiKey',
+  'mcp.europeana.apiKey',
 ] as const;
 
 export type SensitiveKeyName = (typeof SENSITIVE_KEYS)[number];
@@ -159,6 +162,20 @@ export class SecureStorage {
    */
   isEncrypted(): boolean {
     return this.encryptionAvailable;
+  }
+
+  /**
+   * Revoke all stored keys — wipes every entry from the secrets store.
+   * Returns the number of keys deleted.
+   */
+  revokeAll(): number {
+    const store = this.getStore();
+    const keys = Object.keys(store.store);
+    for (const key of keys) {
+      store.delete(key);
+    }
+    console.log(`🔒 [SecureStorage] Revoked ${keys.length} key(s)`);
+    return keys.length;
   }
 }
 

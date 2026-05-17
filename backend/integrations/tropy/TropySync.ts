@@ -11,7 +11,8 @@ import {
   PrimarySourceDocument,
 } from '../../core/vector-store/PrimarySourcesVectorStore';
 import { NERService } from '../../core/ner/NERService';
-import type { OllamaClient } from '../../core/llm/OllamaClient';
+import type { LLMProvider } from '../../core/llm/providers/base';
+import { archivalFromTropyMetadata } from '../../types/archival-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,7 +24,11 @@ export interface TropySyncOptions {
   transcriptionDirectory?: string;
   forceReindex?: boolean;
   extractEntities?: boolean;  // Enable NER extraction (default: false - opt-in due to slow performance)
-  ollamaClient?: OllamaClient;  // Required for NER extraction
+  /**
+   * Typed provider for NER. Required when `extractEntities === true` —
+   * the legacy `ollamaClient` slot was removed in fusion step 1.2c.
+   */
+  llm?: LLMProvider;
 }
 
 export interface TropySyncResult {
@@ -64,11 +69,12 @@ export class TropySync {
   }
 
   /**
-   * Initializes the NER service with an Ollama client
+   * Initialises the NER service with a typed LLMProvider. As of fusion
+   * step 1.2d, NERService takes the provider directly — no stub needed.
    */
-  initNERService(ollamaClient: OllamaClient): void {
-    this.nerService = new NERService(ollamaClient);
-    console.log('🏷️ [TROPY-SYNC] NER service initialized');
+  initNERServiceWithProvider(llm: LLMProvider): void {
+    this.nerService = new NERService(llm, undefined, 'fr');
+    console.log('🏷️ [TROPY-SYNC] NER service initialized (LLMProvider)');
   }
 
   /**
@@ -179,13 +185,10 @@ export class TropySync {
       }
 
       // Phase 2.5: Extract named entities (if enabled)
-      const shouldExtractEntities = options.extractEntities === true;
-      if (shouldExtractEntities && options.ollamaClient) {
-        // Initialize NER service if not already done
+      if (options.extractEntities === true && options.llm) {
         if (!this.nerService) {
-          this.initNERService(options.ollamaClient);
+          this.initNERServiceWithProvider(options.llm);
         }
-
         if (this.nerService) {
           await this.extractEntitiesForSources(vectorStore, onProgress);
         }
@@ -225,6 +228,7 @@ export class TropySync {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
     let transcriptionSource: PrimarySourceItem['transcriptionSource'] = undefined;
+    let ocrConfidence: number | undefined;
     let ocrCount = 0;
     let transcriptionCount = 0;
 
@@ -269,6 +273,7 @@ export class TropySync {
       if (ocrResult) {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
+        ocrConfidence = ocrResult.confidence;
         ocrCount = ocrResult.photoCount;
       }
     }
@@ -287,8 +292,15 @@ export class TropySync {
       photos: this.convertPhotos(item),
       transcription: transcription || undefined,
       transcriptionSource,
+      ocrConfidence,
       lastModified: this.reader.getLastModifiedTime(),
       metadata: this.extractMetadata(item),
+      archival: archivalFromTropyMetadata(this.extractMetadata(item), {
+        archive: item.archive,
+        collection: item.collection,
+        creator: item.creator,
+        date: item.date,
+      }),
     };
 
     // Sauvegarder
@@ -354,7 +366,7 @@ export class TropySync {
   private async performOCROnItem(
     item: TropyItem,
     language: string
-  ): Promise<{ text: string; photoCount: number } | null> {
+  ): Promise<{ text: string; photoCount: number; confidence: number } | null> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
     const uniquePaths = [...new Set(item.photos.map((p) => p.path))];
     const photoPaths = uniquePaths.filter((p) => fs.existsSync(p));
@@ -373,6 +385,7 @@ export class TropySync {
         return {
           text: result.text,
           photoCount: photoPaths.length,
+          confidence: result.confidence,
         };
       }
     } catch (error) {

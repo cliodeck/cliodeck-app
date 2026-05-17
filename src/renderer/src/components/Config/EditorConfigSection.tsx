@@ -18,7 +18,7 @@ interface EditorConfigSectionProps {
 export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config, onChange }) => {
   const { t } = useTranslation('common');
 
-  const handleFieldChange = (field: keyof EditorConfig, value: any) => {
+  const handleFieldChange = (field: keyof EditorConfig, value: EditorConfig[keyof EditorConfig]) => {
     onChange({ ...config, [field]: value });
   };
 

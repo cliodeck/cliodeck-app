@@ -10,6 +10,14 @@ import { LanguageConfigSection } from './LanguageConfigSection';
 import { TopicModelingSection } from './TopicModelingSection';
 import { ModeManagerSection } from './ModeManagerSection';
 import { ZoteroConfigSection, type ZoteroConfig } from './ZoteroConfigSection';
+import { WorkspaceHintsSection } from './WorkspaceHintsSection';
+import { RecipesSection } from './RecipesSection';
+import { VaultConfigSection } from './VaultConfigSection';
+import { MCPClientsSection } from './MCPClientsSection';
+import { MCPServerSection } from './MCPServerSection';
+import { ArchivesConfigSection } from './ArchivesConfigSection';
+import { SecurityConfigSection } from './SecurityConfigSection';
+import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import './ConfigPanel.css';
@@ -66,19 +74,37 @@ export interface RAGConfig {
 
   // === Context Compression ===
   enableContextCompression?: boolean; // Enable context compression before sending to LLM (default: true)
+
+  // === Obsidian vault as RAG source ===
+  includeObsidianVault?: boolean;
 }
 
 export interface LLMConfig {
-  backend: 'ollama' | 'claude' | 'openai';
+  backend: 'ollama' | 'claude' | 'openai' | 'mistral' | 'gemini';
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
   embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';
+  // Cloud providers — keys persisted via secureStorage by config-manager.
+  claudeAPIKey?: string;
+  claudeModel?: string;
+  openaiAPIKey?: string;
+  openaiModel?: string;
+  mistralAPIKey?: string;
+  mistralModel?: string;
+  geminiAPIKey?: string;
+  geminiModel?: string;
+  useCloudEmbeddings?: boolean;
 }
+
+type SettingsMode = 'simple' | 'expert';
 
 export const ConfigPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const { settings: editorSettings, updateSettings } = useEditorStore();
+  const [settingsMode, setSettingsMode] = useState<SettingsMode>(() => {
+    return (localStorage.getItem('cliodeck-settings-mode') as SettingsMode) || 'simple';
+  });
 
   const [ragConfig, setRagConfig] = useState<RAGConfig>({
     topK: 10,
@@ -134,9 +160,11 @@ export const ConfigPanel: React.FC = () => {
   });
 
   const [zoteroConfig, setZoteroConfig] = useState<ZoteroConfig>({
+    mode: 'api',
     userId: '',
     apiKey: '',
     autoSync: false,
+    dataDirectory: '',
   });
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -155,7 +183,7 @@ export const ConfigPanel: React.FC = () => {
     try {
       const response = await window.electron.ollama.listModels();
       if (response.success && response.models) {
-        setAvailableModels(response.models.map((m: any) => m.name || m.id));
+        setAvailableModels(response.models.map((m: { name?: string; id?: string }) => m.name || m.id || ''));
       }
     } catch (error) {
       console.error('Failed to refresh Ollama models:', error);
@@ -285,9 +313,30 @@ export const ConfigPanel: React.FC = () => {
     }
   };
 
+  const handleModeChange = (mode: SettingsMode) => {
+    setSettingsMode(mode);
+    localStorage.setItem('cliodeck-settings-mode', mode);
+  };
+
   return (
     <div className="config-panel">
       <div className="config-header">
+        <div className="config-mode-toggle">
+          <button
+            type="button"
+            className={`config-mode-btn ${settingsMode === 'simple' ? 'is-active' : ''}`}
+            onClick={() => handleModeChange('simple')}
+          >
+            {t('settings.modeSimple')}
+          </button>
+          <button
+            type="button"
+            className={`config-mode-btn ${settingsMode === 'expert' ? 'is-active' : ''}`}
+            onClick={() => handleModeChange('expert')}
+          >
+            {t('settings.modeExpert')}
+          </button>
+        </div>
         <div className="config-actions">
           {saveMessage && (
             <span className={`save-message ${saveMessageType}`}>{saveMessage}</span>
@@ -311,14 +360,8 @@ export const ConfigPanel: React.FC = () => {
       </div>
 
       <div className="config-content">
-        <UIConfigSection />
-
+        {/* Simple mode: essentials only */}
         <LanguageConfigSection />
-
-        <RAGConfigSection
-          config={ragConfig}
-          onChange={setRagConfig}
-        />
 
         <LLMConfigSection
           config={llmConfig}
@@ -326,10 +369,6 @@ export const ConfigPanel: React.FC = () => {
           availableModels={availableModels}
           onRefreshModels={handleRefreshModels}
         />
-
-        <EmbeddedLLMSection />
-
-        <ModeManagerSection />
 
         <EditorConfigSection
           config={editorConfig}
@@ -341,7 +380,39 @@ export const ConfigPanel: React.FC = () => {
           onChange={setZoteroConfig}
         />
 
-        <TopicModelingSection />
+        <VaultConfigSection />
+
+        {/* Expert mode: everything else */}
+        {settingsMode === 'expert' && (
+          <>
+            <UIConfigSection />
+
+            <RAGConfigSection
+              config={ragConfig}
+              onChange={setRagConfig}
+            />
+
+            <EmbeddedLLMSection />
+
+            <ModeManagerSection />
+
+            <TopicModelingSection />
+
+            <WorkspaceHintsSection />
+
+            <RecipesSection />
+
+            <MCPClientsSection />
+
+            <MCPServerSection />
+
+            <ArchivesConfigSection />
+
+            <SecurityConfigSection />
+
+            <CitationStyleSection />
+          </>
+        )}
       </div>
     </div>
   );

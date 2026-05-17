@@ -1,0 +1,35 @@
+name: analyse-corpus-tropy
+version: 0.1.0
+description: >
+  Analyse thématique d'un projet Tropy : graphe des sources primaires,
+  identification des nœuds denses, note interprétative.
+inputs:
+  project:
+    type: path
+    required: true
+    description: Chemin du projet Tropy (.tpy).
+steps:
+  - id: search_sources
+    kind: search
+    with:
+      source: tropy
+      project: "{{ inputs.project }}"
+  - id: build_graph
+    kind: graph
+    with:
+      input: "{{ search_sources }}"
+      algorithm: louvain
+      min_community_size: 3
+  - id: interpret
+    kind: brainstorm
+    with:
+      prompt: |
+        Le graphe ci-dessous a été extrait d'un corpus Tropy de sources
+        primaires. Identifie 3 clusters notables, caractérise-les
+        historiographiquement et propose une hypothèse de travail.
+
+        Graphe: {{ build_graph }}
+      maxTokens: 1000
+outputs:
+  interpretation: "{{ interpret }}"
+  graph: "{{ build_graph }}"

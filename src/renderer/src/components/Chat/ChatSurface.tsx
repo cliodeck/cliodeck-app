@@ -1,0 +1,136 @@
+import React, { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Trash2 } from 'lucide-react';
+import { MessageList } from './MessageList';
+import { MessageInput } from './MessageInput';
+import { UnifiedMessage } from './types';
+import './ChatSurface.css';
+
+interface ChatSurfaceProps<M extends UnifiedMessage> {
+  title?: string;
+  headerExtras?: React.ReactNode;
+  messages: M[];
+  isProcessing: boolean;
+  streamingContent?: string;
+  onSend: (text: string) => void | Promise<void>;
+  onCancel?: () => void;
+  onClear?: () => void;
+  emptyState?: React.ReactNode;
+  banner?: React.ReactNode;
+  placeholder?: string;
+  renderMessageExtras?: (message: M) => React.ReactNode;
+  footer?: React.ReactNode;
+  /** Enable NER entity highlighting in assistant messages. */
+  enableNER?: boolean;
+}
+
+/**
+ * Sub-component that owns its own `inputValue` state so keystrokes in the
+ * composer do NOT re-render the parent ChatSurface (and therefore do not
+ * re-render MessageList / MessageBubble on every keypress).
+ */
+interface ComposerProps {
+  onSend: (text: string) => void | Promise<void>;
+  onCancel?: () => void;
+  isProcessing: boolean;
+  placeholder?: string;
+}
+
+const Composer: React.FC<ComposerProps> = ({
+  onSend,
+  onCancel,
+  isProcessing,
+  placeholder,
+}) => {
+  const [inputValue, setInputValue] = useState('');
+
+  const handleSend = useCallback(async () => {
+    const text = inputValue.trim();
+    if (!text || isProcessing) return;
+    setInputValue('');
+    await onSend(text);
+  }, [inputValue, isProcessing, onSend]);
+
+  const handleCancel = useCallback(() => {
+    onCancel?.();
+  }, [onCancel]);
+
+  return (
+    <MessageInput
+      value={inputValue}
+      onChange={setInputValue}
+      onSend={handleSend}
+      onCancel={handleCancel}
+      isProcessing={isProcessing}
+      placeholder={placeholder}
+    />
+  );
+};
+
+export function ChatSurface<M extends UnifiedMessage>({
+  title,
+  headerExtras,
+  messages,
+  isProcessing,
+  streamingContent,
+  onSend,
+  onCancel,
+  onClear,
+  emptyState,
+  banner,
+  placeholder,
+  renderMessageExtras,
+  footer,
+  enableNER,
+}: ChatSurfaceProps<M>): React.ReactElement {
+  const { t } = useTranslation('common');
+
+  const showTypingIndicator = isProcessing && !streamingContent;
+
+  return (
+    <div className="chat-surface">
+      {(title || headerExtras || onClear) && (
+        <div className="chat-surface__header">
+          {title && <h3 className="chat-surface__title">{title}</h3>}
+          <div className="chat-surface__header-extras">{headerExtras}</div>
+          {onClear && (
+            <button
+              type="button"
+              className="chat-surface__header-btn"
+              onClick={onClear}
+              title={t('chat.clearHistory')}
+              disabled={messages.length === 0}
+            >
+              <Trash2 size={20} strokeWidth={1} />
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="chat-surface__messages">
+        {messages.length === 0 && !streamingContent && !isProcessing ? (
+          <div className="chat-surface__empty">{emptyState}</div>
+        ) : (
+          <MessageList
+            messages={messages}
+            streamingContent={streamingContent}
+            showTypingIndicator={showTypingIndicator}
+            renderExtras={renderMessageExtras}
+            enableNER={enableNER}
+          />
+        )}
+      </div>
+
+      {banner && <div className="chat-surface__banner">{banner}</div>}
+
+      <Composer
+        onSend={onSend}
+        onCancel={onCancel}
+        isProcessing={isProcessing}
+        placeholder={placeholder}
+      />
+
+      {footer}
+    </div>
+  );
+}

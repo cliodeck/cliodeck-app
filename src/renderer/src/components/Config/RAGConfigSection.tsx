@@ -45,6 +45,10 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
     onChange({ ...config, includeSummaries: value });
   };
 
+  const handleIncludeObsidianVaultChange = (value: boolean) => {
+    onChange({ ...config, includeObsidianVault: value });
+  };
+
   const handleEnableTopicModelingChange = (value: boolean) => {
     onChange({ ...config, enableTopicModeling: value });
   };
@@ -216,7 +220,7 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             </label>
             <select
               value={config.chunkingConfig}
-              onChange={(e) => handleChunkingChange(e.target.value as any)}
+              onChange={(e) => handleChunkingChange(e.target.value as 'cpuOptimized' | 'standard' | 'large')}
               className="config-select"
             >
               <option value="cpuOptimized">Optimisé CPU (petits chunks, rapide)</option>
@@ -226,8 +230,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#fff3cd',
-                border: '1px solid #ffc107',
+                backgroundColor: 'var(--color-warning-bg)',
+                border: '1px solid var(--color-warning)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
@@ -250,7 +254,7 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             </label>
             <select
               value={config.summaryGeneration}
-              onChange={(e) => handleSummaryGenerationChange(e.target.value as any)}
+              onChange={(e) => handleSummaryGenerationChange(e.target.value as 'extractive' | 'abstractive' | 'disabled')}
               className="config-select"
             >
               <option value="disabled">Désactivé</option>
@@ -418,6 +422,31 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             </div>
           </div>
 
+          {/* Include Obsidian vault in RAG */}
+          <div className="config-field">
+            <label className="config-label">
+              Inclure le vault Obsidian
+              <span className="config-help">
+                Aussi interroger les notes Obsidian indexées (en plus des PDFs et archives Tropy)
+              </span>
+            </label>
+            <div className="config-input-group">
+              <input
+                type="checkbox"
+                checked={config.includeObsidianVault === true}
+                onChange={(e) => handleIncludeObsidianVaultChange(e.target.checked)}
+                className="config-checkbox"
+              />
+              <span>{config.includeObsidianVault ? 'Activé' : 'Désactivé'}</span>
+            </div>
+            <div className="config-description">
+              <small>
+                Le chat Brainstorm interroge toujours le vault s'il est lié.
+                Cette option ajoute aussi le vault aux recherches du chat RAG classique.
+              </small>
+            </div>
+          </div>
+
           {/* Exploration Similarity Threshold */}
           <div className="config-field">
             <label className="config-label">
@@ -484,8 +513,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
           </div>
 
           {/* === CHUNK QUALITY OPTIMIZATION === */}
-          <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid #ddd', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 16px 0', color: '#666' }}>🎯 Optimisation qualité des chunks</h4>
+          <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)' }}>🎯 Optimisation qualité des chunks</h4>
           </div>
 
           {/* Custom Chunking */}
@@ -785,8 +814,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#e3f2fd',
-                border: '1px solid #2196f3',
+                backgroundColor: 'var(--color-accent-bg)',
+                border: '1px solid var(--color-accent)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
@@ -865,8 +894,8 @@ export const RAGConfigSection: React.FC<RAGConfigSectionProps> = ({ config, onCh
             <div className="config-description">
               <div style={{
                 padding: '8px 12px',
-                backgroundColor: '#fff3e0',
-                border: '1px solid #ff9800',
+                backgroundColor: 'var(--color-warning-bg)',
+                border: '1px solid var(--color-warning)',
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>

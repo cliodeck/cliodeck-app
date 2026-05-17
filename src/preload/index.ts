@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 // Security: Whitelist of IPC channels allowed through the generic ipcRenderer bridge.
 // All other channels are blocked to prevent unauthorized IPC communication.
@@ -12,8 +12,6 @@ const ALLOWED_RECEIVE_CHANNELS: string[] = [
   'menu:toggle-preview', 'menu:switch-panel', 'menu:import-bibtex',
   'menu:search-citations', 'menu:connect-zotero', 'menu:open-settings',
   'menu:about',
-  // Chat status updates
-  'chat:status',
   // Language sync
   'language-changed',
 ];
@@ -80,16 +78,6 @@ const api = {
       ipcRenderer.on('pdf:indexing-progress', listener);
       return () => ipcRenderer.removeListener('pdf:indexing-progress', listener);
     },
-  },
-
-  // Chat RAG
-  chat: {
-    send: (message: string, options?: any) =>
-      ipcRenderer.invoke('chat:send', message, options),
-    onStream: (callback: (chunk: string) => void) => {
-      ipcRenderer.on('chat:stream', (_event, chunk) => callback(chunk));
-    },
-    cancel: () => ipcRenderer.invoke('chat:cancel'),
   },
 
   // Bibliography
@@ -161,6 +149,14 @@ const api = {
   dialog: {
     openFile: (options: any) => ipcRenderer.invoke('dialog:open-file', options),
     saveFile: (options: any) => ipcRenderer.invoke('dialog:save-file', options),
+  },
+
+  // Renderer-side helpers from Electron's web-utils. Replaces the
+  // pre-Electron-32 `File.path` non-standard property — that field was
+  // removed for web-platform compliance, and `webUtils.getPathForFile`
+  // is the supported replacement (sync, no IPC round-trip).
+  webUtils: {
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
   },
 
   // File system
@@ -258,6 +254,13 @@ const api = {
       content: string;
       outputPath?: string;
       bibliographyPath?: string;
+      cslPath?: string;
+      beamerConfig?: unknown;
+      citation?: {
+        useEngine?: boolean;
+        style?: string;
+        locale?: string;
+      };
       metadata?: {
         title?: string;
         author?: string;
@@ -281,6 +284,11 @@ const api = {
       bibliographyPath?: string;
       cslPath?: string;
       templatePath?: string;
+      citation?: {
+        useEngine?: boolean;
+        style?: string;
+        locale?: string;
+      };
       metadata?: {
         title?: string;
         author?: string;
@@ -338,6 +346,7 @@ const api = {
       computeLayout?: boolean;
     }) => ipcRenderer.invoke('corpus:get-graph', options),
     getStatistics: () => ipcRenderer.invoke('corpus:get-statistics'),
+    getSubgraph: (documentIds: string[]) => ipcRenderer.invoke('corpus:get-subgraph', documentIds),
     analyzeTopics: (options?: {
       minTopicSize?: number;
       language?: string;
@@ -522,6 +531,27 @@ const api = {
     openPath: (path: string) => ipcRenderer.invoke('shell:open-path', path),
   },
 
+  // Source traceability (Brainstorm citation click-through).
+  // See docs/source-traceability.md.
+  sources: {
+    openPdf: (documentId: string, pageNumber?: number) =>
+      ipcRenderer.invoke('sources:open-pdf', documentId, pageNumber),
+    revealTropy: (itemId: string) =>
+      ipcRenderer.invoke('sources:reveal-tropy', itemId),
+    openNote: (relativePath: string, lineNumber?: number) =>
+      ipcRenderer.invoke('sources:open-note', relativePath, lineNumber),
+  },
+
+  // Citation (CSL / citeproc-js) — style picker + live preview in Settings.
+  citation: {
+    listStyles: () => ipcRenderer.invoke('citation:listStyles'),
+    listLocales: () => ipcRenderer.invoke('citation:listLocales'),
+    format: (items: unknown[], styleId: string, locale: string) =>
+      ipcRenderer.invoke('citation:format', items, styleId, locale),
+    preview: (bibKey: string, styleId: string, locale: string) =>
+      ipcRenderer.invoke('citation:preview', bibKey, styleId, locale),
+  },
+
   // Tropy (Primary Sources)
   tropy: {
     // Project Management
@@ -565,6 +595,11 @@ const api = {
     // Statistics
     getStatistics: () => ipcRenderer.invoke('tropy:get-statistics'),
     getAllTags: () => ipcRenderer.invoke('tropy:get-all-tags'),
+
+    // OCR Quality Reports
+    getSourceOCRReport: (sourceId: string) =>
+      ipcRenderer.invoke('tropy:get-source-ocr-report', sourceId),
+    getCorpusOCRReport: () => ipcRenderer.invoke('tropy:get-corpus-ocr-report'),
 
     // Database Management
     purge: () => ipcRenderer.invoke('tropy:purge'),
@@ -641,6 +676,277 @@ const api = {
       const listener = (_event: any, progress: any) => callback(progress);
       ipcRenderer.on('similarity:progress', listener);
       return () => ipcRenderer.removeListener('similarity:progress', listener);
+    },
+  },
+
+  // Fusion (phase 3.0+3.2): hints, recipes, vault status, streamed chat.
+  fusion: {
+    hints: {
+      read: () => ipcRenderer.invoke('fusion:hints:read'),
+      write: (markdown: string) =>
+        ipcRenderer.invoke('fusion:hints:write', markdown),
+    },
+    recipes: {
+      list: () => ipcRenderer.invoke('fusion:recipes:list'),
+      read: (scope: 'builtin' | 'user', fileName: string) =>
+        ipcRenderer.invoke('fusion:recipes:read', scope, fileName),
+      readYaml: (scope: 'builtin' | 'user', fileName: string) =>
+        ipcRenderer.invoke('fusion:recipes:read-yaml', scope, fileName),
+      save: (fileName: string, yaml: string) =>
+        ipcRenderer.invoke('fusion:recipes:save', fileName, yaml),
+      run: (
+        scope: 'builtin' | 'user',
+        fileName: string,
+        inputs: Record<string, unknown>
+      ) => ipcRenderer.invoke('fusion:recipes:run', scope, fileName, inputs),
+      onEvent: (
+        callback: (env: { runId: string; event: unknown }) => void
+      ) => {
+        const listener = (_e: unknown, env: unknown): void =>
+          callback(env as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:recipes:event', listener);
+        return () =>
+          ipcRenderer.removeListener('fusion:recipes:event', listener);
+      },
+    },
+    mcp: {
+      list: () => ipcRenderer.invoke('fusion:mcp:list'),
+      add: (client: {
+        name: string;
+        transport: 'stdio' | 'sse';
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+        url?: string;
+      }) => ipcRenderer.invoke('fusion:mcp:add', client),
+      remove: (name: string) => ipcRenderer.invoke('fusion:mcp:remove', name),
+      restart: (name: string) => ipcRenderer.invoke('fusion:mcp:restart', name),
+      callTool: (name: string, tool: string, args: Record<string, unknown>) =>
+        ipcRenderer.invoke('fusion:mcp:call-tool', name, tool, args),
+      onEvent: (callback: (event: unknown) => void) => {
+        const listener = (_e: unknown, ev: unknown): void => callback(ev);
+        ipcRenderer.on('fusion:mcp:event', listener);
+        return () => ipcRenderer.removeListener('fusion:mcp:event', listener);
+      },
+    },
+    mcpServer: {
+      get: () =>
+        ipcRenderer.invoke('fusion:mcpServer:get') as Promise<{
+          success: boolean;
+          enabled?: boolean;
+          serverName?: string;
+          workspaceRoot?: string;
+          binaryPath?: string | null;
+          error?: string;
+        }>,
+      set: (patch: { enabled?: boolean; serverName?: string }) =>
+        ipcRenderer.invoke('fusion:mcpServer:set', patch) as Promise<{
+          success: boolean;
+          enabled?: boolean;
+          serverName?: string;
+          error?: string;
+        }>,
+    },
+    vault: {
+      status: () => ipcRenderer.invoke('fusion:vault:status'),
+      setPath: (vaultPath: string) =>
+        ipcRenderer.invoke('fusion:vault:set-path', vaultPath),
+      unlink: () => ipcRenderer.invoke('fusion:vault:unlink'),
+      index: (opts?: { force?: boolean }) =>
+        ipcRenderer.invoke('fusion:vault:index', opts ?? {}),
+      importAsIdeas: (opts?: { maxFiles?: number }) =>
+        ipcRenderer.invoke('fusion:vault:import-as-ideas', opts ?? {}),
+      onProgress: (
+        callback: (p: {
+          stage: string;
+          processed: number;
+          total: number;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, p: unknown): void =>
+          callback(p as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:vault:progress', listener);
+        return () => ipcRenderer.removeListener('fusion:vault:progress', listener);
+      },
+    },
+    security: {
+      getMode: () =>
+        ipcRenderer.invoke('fusion:security:get-mode') as Promise<{
+          success: boolean;
+          mode?: 'warn' | 'audit' | 'block';
+          error?: string;
+        }>,
+      setMode: (mode: 'warn' | 'audit' | 'block') =>
+        ipcRenderer.invoke('fusion:security:set-mode', mode) as Promise<{
+          success: boolean;
+          mode?: 'warn' | 'audit' | 'block';
+          error?: string;
+        }>,
+      /**
+       * Fusion 2.8 — aggregated stats over the workspace
+       * `security-events.jsonl`. Optional `recentLimit` caps the
+       * `recent` slice the renderer wants to render (default 50).
+       */
+      getEvents: (opts?: { recentLimit?: number }) =>
+        ipcRenderer.invoke(
+          'fusion:security:get-events',
+          opts ?? {}
+        ) as Promise<{
+          success: boolean;
+          stats?: {
+            total: number;
+            byKind: Record<string, number>;
+            bySeverity: Record<'low' | 'medium' | 'high', number>;
+            firstAt?: string;
+            lastAt?: string;
+            recent: Array<{
+              kind: string;
+              chunkId: string;
+              at: string;
+              severity?: 'low' | 'medium' | 'high';
+              pattern?: string;
+              url?: string;
+              detail?: string;
+              mode?: 'warn' | 'audit' | 'block';
+              source?: { kind?: string; documentId?: string; chunkId?: string };
+            }>;
+          };
+          error?: string;
+        }>,
+      revokeAllKeys: () =>
+        ipcRenderer.invoke('fusion:security:revoke-all-keys') as Promise<{
+          success: boolean;
+          keysDeleted?: number;
+          error?: string;
+        }>,
+    },
+    archives: {
+      getStatus: () =>
+        ipcRenderer.invoke('fusion:archives:get-status') as Promise<{
+          success: boolean;
+          connectors?: { europeana: { configured: boolean } };
+          error?: string;
+        }>,
+      setKey: (connector: 'europeana', key: string) =>
+        ipcRenderer.invoke('fusion:archives:set-key', connector, key) as Promise<{
+          success: boolean;
+          connector?: string;
+          error?: string;
+        }>,
+      deleteKey: (connector: 'europeana') =>
+        ipcRenderer.invoke('fusion:archives:delete-key', connector) as Promise<{
+          success: boolean;
+          connector?: string;
+          error?: string;
+        }>,
+    },
+    chat: {
+      start: (
+        messages: unknown[],
+        opts?: {
+          model?: string;
+          temperature?: number;
+          maxTokens?: number;
+          /**
+           * Override Ollama's `num_ctx` for this turn (512–262_144).
+           * Ignored by cloud providers (fixed model window).
+           */
+          numCtx?: number;
+          retrievalOptions?: {
+            documentIds?: string[];
+            collectionKeys?: string[];
+            sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+            includeVault?: boolean;
+            topK?: number;
+          };
+          systemPrompt?: { modeId?: string; customText?: string };
+          /**
+           * Namespaced MCP tool names (`clientName__bareName`) the
+           * renderer wants exposed to the model on this turn (fusion
+           * 2.5). Omit to fall back to the legacy "every ready tool".
+           */
+          enabledTools?: string[];
+        }
+      ) => ipcRenderer.invoke('fusion:chat:start', messages, opts ?? {}),
+      cancel: (sessionId: string) =>
+        ipcRenderer.invoke('fusion:chat:cancel', sessionId),
+      onChunk: (
+        callback: (envelope: {
+          sessionId: string;
+          chunk: {
+            delta: string;
+            done?: boolean;
+            finishReason?: string;
+            usage?: Record<string, number>;
+          };
+          error?: { code: string; message: string };
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:chunk', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:chunk', listener);
+      },
+      onToolCall: (
+        callback: (env: {
+          sessionId: string;
+          callId: string;
+          name: string;
+          status: 'started' | 'done';
+          startedAt?: number;
+          durationMs?: number;
+          ok?: boolean;
+          errorMessage?: string;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:tool-call', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:tool-call', listener);
+      },
+      onExplanation: (
+        callback: (envelope: {
+          sessionId: string;
+          explanation: unknown;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:explanation', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:explanation', listener);
+      },
+      onStatus: (
+        callback: (envelope: {
+          sessionId: string;
+          status: {
+            phase: 'retrieving' | 'compressing' | 'generating' | 'done';
+            label?: string;
+          };
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:status', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:status', listener);
+      },
+      onContext: (
+        callback: (envelope: {
+          sessionId: string;
+          sources: Array<{
+            kind: 'archive' | 'bibliographie' | 'note';
+            sourceType: 'primary' | 'secondary' | 'vault';
+            title: string;
+            snippet: string;
+            similarity: number;
+            relativePath?: string;
+          }>;
+        }) => void
+      ) => {
+        const listener = (_e: unknown, envelope: unknown): void =>
+          callback(envelope as Parameters<typeof callback>[0]);
+        ipcRenderer.on('fusion:chat:context', listener);
+        return () => ipcRenderer.removeListener('fusion:chat:context', listener);
+      },
     },
   },
 };

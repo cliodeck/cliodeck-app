@@ -1,48 +1,28 @@
-import { PDFIndexer, type IndexingProgress } from '../../../backend/core/pdf/PDFIndexer.js';
+import { type IndexingProgress } from '../../../backend/core/pdf/PDFIndexer.js';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
-import { OllamaClient } from '../../../backend/core/llm/OllamaClient.js';
-import { LLMProviderManager, type LLMProvider } from '../../../backend/core/llm/LLMProviderManager.js';
+import { PdfVectorStore } from './pdf/PdfVectorStore.js';
+import { PdfIndexer } from './pdf/PdfIndexer.js';
+import {
+  createRegistryFromClioDeckConfig,
+} from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import type {
+  EmbeddingProvider,
+  LLMProvider,
+} from '../../../backend/core/llm/providers/base.js';
+import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 import { KnowledgeGraphBuilder, type GraphNode, type GraphEdge } from '../../../backend/core/analysis/KnowledgeGraphBuilder.js';
 import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../backend/core/analysis/TopicModelingService.js';
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
-import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
-import type { SearchResult, PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
-import type { PrimarySourceSearchResult, PrimarySourceDocument } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
 import { configManager } from './config-manager.js';
-import { tropyService } from './tropy-service.js';
+import { retrievalService, type SourceType } from './retrieval-service.js';
+import { extractPdfIsolated } from './pdf-extract-isolated.js';
 import path from 'path';
 import fs from 'fs';
 
-// Source type for multi-source search
-export type SourceType = 'secondary' | 'primary' | 'both';
-
-/** A secondary source search result, augmented with sourceType marker */
-interface SecondarySearchResult extends SearchResult {
-  sourceType: 'secondary';
-}
-
-/** A primary source search result mapped to a common format, with sourceType marker */
-interface PrimaryMappedSearchResult {
-  chunk: {
-    id: string;
-    content: string;
-    documentId: string | undefined;
-    chunkIndex: number;
-  };
-  document: {
-    id: string | undefined;
-    title: string | undefined;
-    author: string | undefined;
-    bibtexKey: null;
-  };
-  source: PrimarySourceDocument | undefined;
-  similarity: number;
-  sourceType: 'primary';
-}
-
-/** Union of all search result types returned by multi-source search */
-type MultiSourceSearchResult = SecondarySearchResult | PrimaryMappedSearchResult;
+// Re-exported for back-compat with existing imports of pdf-service.
+export type { SourceType };
 
 /** Options for building a knowledge graph */
 interface KnowledgeGraphOptions {
@@ -60,54 +40,23 @@ interface AnalyzeTopicsOptions {
   nGramRange?: [number, number];
 }
 
-// Dictionnaire de termes académiques FR→EN pour query expansion
-const ACADEMIC_TERMS_FR_TO_EN: Record<string, string[]> = {
-  'taxonomie de bloom': ['bloom\'s taxonomy', 'bloom taxonomy', 'blooms taxonomy'],
-  'zone proximale développement': ['zone of proximal development', 'zpd', 'vygotsky'],
-  'apprentissage significatif': ['meaningful learning', 'significant learning'],
-  'constructivisme': ['constructivism', 'constructivist'],
-  'socioconstructivisme': ['social constructivism', 'socioconstructivism'],
-  'métacognition': ['metacognition', 'metacognitive'],
-  'pédagogie active': ['active learning', 'active pedagogy'],
-  // Ajoutez d'autres termes selon vos besoins
-};
-
-/**
- * Détecte et traduit les termes académiques français en anglais
- */
-function expandQueryMultilingual(query: string): string[] {
-  const queries = [query]; // Version originale
-  const lowerQuery = query.toLowerCase();
-
-  // Chercher des termes connus à traduire
-  for (const [frTerm, enTranslations] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
-    if (lowerQuery.includes(frTerm)) {
-      // Ajouter chaque traduction anglaise
-      enTranslations.forEach(enTerm => {
-        const translatedQuery = query.replace(new RegExp(frTerm, 'gi'), enTerm);
-        queries.push(translatedQuery);
-      });
-    }
-  }
-
-  console.log('🌐 [MULTILINGUAL] Query expansion:', {
-    original: query,
-    expanded: queries,
-    count: queries.length
-  });
-
-  return queries;
-}
-
 class PDFService {
-  private pdfIndexer: PDFIndexer | null = null;
+  private pdfIndexer: PdfIndexer | null = null;
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
-  private ollamaClient: OllamaClient | null = null;
-  private llmProviderManager: LLMProviderManager | null = null;
   private currentProjectPath: string | null = null;
 
-  // Query embedding cache for faster repeated searches
-  private queryEmbeddingCache = new QueryEmbeddingCache(500, 60);
+  /**
+   * Typed provider registry (fusion 1.2e). pdf-service owns the
+   * `ProviderRegistry` lifecycle for the active project: built from
+   * the workspace LLM config in `init()`, rebuilt by
+   * `updateEmbeddedModel()` / `disableEmbeddedModel()` / etc., disposed
+   * at `init()` re-entry. Replaces the legacy `OllamaClient` +
+   * `LLMProviderManager` pair that this service used to instantiate
+   * twice per project.
+   */
+  private registry: ProviderRegistry | null = null;
+  private llm: LLMProvider | null = null;
+  private embedding: EmbeddingProvider | null = null;
 
   /**
    * Initialise le PDF Service pour un projet spécifique
@@ -137,76 +86,28 @@ class PDFService {
       const config = configManager.getLLMConfig();
       const ragConfig = configManager.getRAGConfig();
 
-      // Initialiser Ollama client avec la config actuelle
-      this.ollamaClient = new OllamaClient(
-        config.ollamaURL,
-        config.ollamaChatModel,
-        config.ollamaEmbeddingModel,
-        config.embeddingStrategy || 'nomic-fallback'
-      );
-
-      // Initialiser le LLM Provider Manager (gère Ollama + modèle embarqué pour génération ET embeddings)
-      this.llmProviderManager = new LLMProviderManager({
-        provider: (config.generationProvider as LLMProvider) || 'auto',
-        embeddedModelPath: config.embeddedModelPath,
-        embeddedModelId: config.embeddedModelId,
-        ollamaURL: config.ollamaURL,
-        ollamaChatModel: config.ollamaChatModel,
-        ollamaEmbeddingModel: config.ollamaEmbeddingModel,
-        // Embedded embedding model support
-        embeddedEmbeddingModelPath: config.embeddedEmbeddingModelPath,
-        embeddedEmbeddingModelId: config.embeddedEmbeddingModelId,
-        embeddingProvider: config.embeddingProvider,
-      });
-
-      // Start LLM initialization (runs in parallel with VectorStore)
-      const llmInitPromise = this.llmProviderManager.initialize();
+      // Build the typed provider registry from the active config.
+      // Replaces the previous `new OllamaClient(...)` + `new LLMProviderManager(...)`
+      // pair (the latter held a *third* OllamaClient internally — that's
+      // gone now too).
+      await this.rebuildLLMRegistry();
 
       // Initialiser VectorStore (Enhanced ou Standard selon config)
-      const useEnhancedSearch =
-        ragConfig.useHNSWIndex !== false || ragConfig.useHybridSearch !== false;
+      const { store, initPromise: vsInitPromise } = PdfVectorStore.create(
+        projectPath,
+        ragConfig,
+        { onRebuildProgress }
+      );
+      this.vectorStore = store;
 
-      let vsInitPromise: Promise<void> | undefined;
-
-      if (useEnhancedSearch) {
-        console.log('🚀 [PDF-SERVICE] Using EnhancedVectorStore (HNSW + BM25)');
-        this.vectorStore = new EnhancedVectorStore(projectPath);
-
-        // Set rebuild progress callback if provided
-        if (onRebuildProgress) {
-          this.vectorStore.setRebuildProgressCallback(onRebuildProgress);
-        }
-
-        vsInitPromise = this.vectorStore.initialize();
-      } else {
-        console.log('📊 [PDF-SERVICE] Using standard VectorStore (linear search)');
-        this.vectorStore = new VectorStore(projectPath);
+      if (vsInitPromise) {
+        await vsInitPromise;
       }
 
-      // Wait for both LLM and VectorStore to finish initializing in parallel
-      await Promise.all([llmInitPromise, vsInitPromise].filter(Boolean));
-
-      // Post-init: configure enhanced vector store (after initialization is complete)
-      if (useEnhancedSearch && this.vectorStore instanceof EnhancedVectorStore) {
-        // Check if indexes need to be rebuilt - run in background to avoid blocking UI
-        if (this.vectorStore.needsRebuild()) {
-          console.log('🔨 [PDF-SERVICE] Indexes need rebuild, starting rebuild in background...');
-          // Don't await - let it run in background
-          this.vectorStore.rebuildIndexes().then(() => {
-            console.log('✅ [PDF-SERVICE] Indexes rebuilt successfully');
-          }).catch((error: unknown) => {
-            console.error('❌ [PDF-SERVICE] Rebuild failed:', error);
-          });
-        }
-
-        // Configure search modes
-        if (ragConfig.useHNSWIndex !== undefined) {
-          this.vectorStore.setUseHNSW(ragConfig.useHNSWIndex);
-        }
-        if (ragConfig.useHybridSearch !== undefined) {
-          this.vectorStore.setUseHybrid(ragConfig.useHybridSearch);
-        }
-      }
+      // Post-init: configure search modes on the enhanced store. Any
+      // rebuild is deferred until after warmup (see below) so we don't
+      // run embedding warmup + a large batched rebuild concurrently.
+      PdfVectorStore.configureEnhanced(this.vectorStore, ragConfig);
 
       // Convertir le nouveau format de config en ancien format pour le summarizer
       // Support pour compatibilité ascendante et descendante
@@ -232,30 +133,46 @@ class PDFService {
         customChunkingEnabled: ragConfig.customChunkingEnabled ?? false,
       });
 
-      // Créer la fonction d'embedding qui route via LLMProviderManager
-      const embeddingFn = (text: string) => this.llmProviderManager!.generateEmbedding(text);
-
-      // Initialiser PDFIndexer avec configuration complète du RAG
-      this.pdfIndexer = new PDFIndexer(
-        this.vectorStore,
-        embeddingFn,
-        ragConfig.chunkingConfig,
+      // Initialiser l'indexeur (façade — la fonction d'embedding et la
+      // construction du backend PDFIndexer vivent maintenant dans
+      // ./pdf/PdfIndexer.ts).
+      if (!this.embedding) {
+        throw new Error('PDF Service: embedding provider not configured');
+      }
+      this.pdfIndexer = new PdfIndexer({
+        vectorStore: this.vectorStore,
+        embeddingProvider: this.embedding,
+        ragConfig,
         summarizerConfig,
-        ragConfig.useAdaptiveChunking !== false, // Enable by default
-        ragConfig // Pass full RAG config for optimization features
-      );
+      });
 
       this.currentProjectPath = projectPath;
 
+      // Wire the shared RetrievalService to this project's vector store.
+      // (As of 1.2b, RetrievalService owns its own typed embedding
+      // provider, built from the workspace config — no manager handoff.)
+      retrievalService.configure({
+        vectorStore: this.vectorStore,
+        workspaceRoot: projectPath,
+      });
+
       console.log('✅ PDF Service initialized for project');
       console.log(`   Project: ${projectPath}`);
-      console.log(`   VectorStore DB: ${projectPath}/.cliodeck/vectors.db`);
+      console.log(`   VectorStore DB: ${projectPath}/.cliodeck/brain.db (pdf_*)`);
       console.log(`   Ollama URL: ${config.ollamaURL}`);
       console.log(`   Chat Model: ${config.ollamaChatModel}`);
       console.log(`   Embedding Model: ${config.ollamaEmbeddingModel}`);
 
-      // Warmup embedding model (Phase 6) - run in background
-      this.warmupEmbeddingModel();
+      // Warmup embedding model (Phase 6), then trigger any pending
+      // HNSW/BM25 rebuild. Serialized to avoid the warmup embedding
+      // call racing with a batched rebuild that also hits the embedder.
+      const storeForRebuild = this.vectorStore;
+      void this.warmupEmbeddingModel().then(() => {
+        if (storeForRebuild) {
+          return PdfVectorStore.maybeRebuild(storeForRebuild);
+        }
+        return undefined;
+      });
     } catch (error: unknown) {
       console.error('❌ Failed to initialize PDF Service:', error);
       throw error;
@@ -266,11 +183,11 @@ class PDFService {
    * Warmup embedding model to reduce first-query latency
    */
   private async warmupEmbeddingModel(): Promise<void> {
-    if (!this.llmProviderManager) return;
+    if (!this.embedding) return;
 
     console.log('🔥 [WARMUP] Pre-loading embedding model...');
     try {
-      await this.llmProviderManager.generateEmbedding('warmup query');
+      await this.embedding.embed(['warmup query']);
       console.log('✅ [WARMUP] Embedding model ready');
     } catch (_e: unknown) {
       console.warn('⚠️  [WARMUP] Failed - first query may be slower');
@@ -278,52 +195,60 @@ class PDFService {
   }
 
   /**
-   * Get query embedding with caching
-   * Returns cached embedding if available, otherwise generates and caches
-   * Uses generateQueryEmbedding for proper query prefixing with embedded models
+   * Build (or rebuild) the typed provider registry from the active
+   * workspace LLM config. Disposes the previous registry first so the
+   * native handles / HTTP agents it owns are released cleanly. Used by
+   * `init()` and by the embedded-model setters below — the latter are
+   * called after `embedded-llm-handlers` updates `configManager`.
    */
-  private async getQueryEmbedding(query: string): Promise<Float32Array> {
-    // Check cache first
-    const cached = this.queryEmbeddingCache.get(query);
-    if (cached) {
-      return cached;
+  private async rebuildLLMRegistry(): Promise<void> {
+    const prev = this.registry;
+    this.registry = null;
+    this.llm = null;
+    this.embedding = null;
+    if (prev) {
+      await prev.dispose().catch(() => undefined);
     }
 
-    // Generate and cache (uses query prefix for embedded models)
-    const embedding = await this.llmProviderManager!.generateQueryEmbedding(query);
-    this.queryEmbeddingCache.set(query, embedding);
-    return embedding;
+    try {
+      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      this.llm = this.registry.getLLM();
+      this.embedding = this.registry.getEmbedding();
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to build provider registry:', e);
+      this.registry = null;
+      this.llm = null;
+      this.embedding = null;
+      throw e;
+    }
   }
 
   /**
    * Vérifie si le service est initialisé
    */
   private ensureInitialized() {
-    if (!this.vectorStore || !this.pdfIndexer || !this.llmProviderManager) {
+    if (!this.vectorStore || !this.pdfIndexer || !this.llm || !this.embedding) {
       throw new Error('PDF Service not initialized. Call init(projectPath) first.');
     }
   }
 
   async extractPDFMetadata(filePath: string) {
-    // This doesn't require initialization since we're just extracting metadata
-    const PDFExtractor = (await import('../../../backend/core/pdf/PDFExtractor.js')).PDFExtractor;
-    const extractor = new PDFExtractor();
+    // Uses isolated worker so a pdfjs SIGSEGV does not crash the app
+    const result = await extractPdfIsolated(filePath);
 
-    try {
-      const extracted = await extractor.extractDocument(filePath);
-      return {
-        title: extracted.title || filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
-        author: extracted.metadata.creator,
-        pageCount: extracted.pages.length,
-      };
-    } catch (error: unknown) {
-      console.error('Failed to extract PDF metadata:', error);
-      // Fallback to filename
+    if (result.ok === false) {
+      console.error('Failed to extract PDF metadata (isolated):', result.error);
       return {
         title: filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
         pageCount: 0,
       };
     }
+
+    return {
+      title: result.title || filePath.split('/').pop()?.replace('.pdf', '') || 'Untitled',
+      author: result.metadata.creator as string | undefined,
+      pageCount: result.pages.length,
+    };
   }
 
   async indexPDF(
@@ -334,215 +259,45 @@ class PDFService {
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
     this.ensureInitialized();
-    const document = await this.pdfIndexer!.indexPDF(filePath, bibtexKey, onProgress, bibliographyMetadata);
-
-    // Link document to collections if provided
-    if (collectionKeys && collectionKeys.length > 0) {
-      this.vectorStore!.setDocumentCollections(document.id, collectionKeys);
-      console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${collectionKeys.length} collection(s)`);
-    }
-
-    return document;
-  }
-
-  async search(query: string, options?: { topK?: number; threshold?: number; documentIds?: string[]; collectionKeys?: string[]; sourceType?: SourceType }) {
-    this.ensureInitialized();
-
-    const sourceType = options?.sourceType || 'both';
-    const searchStart = Date.now();
-    const ragConfig = configManager.getRAGConfig();
-    const topK = options?.topK || ragConfig.topK;
-    const threshold = options?.threshold || ragConfig.similarityThreshold;
-
-    console.log(`🔍 [PDF-SERVICE] Multi-source search: sourceType=${sourceType}, topK=${topK}`);
-
-    // Container for all results (both sources)
-    const allSourceResults: MultiSourceSearchResult[] = [];
-
-    // Search secondary sources (bibliography/PDFs) if needed
-    if (sourceType === 'secondary' || sourceType === 'both') {
-      const secondaryResults = await this.searchSecondary(query, {
-        topK: sourceType === 'both' ? Math.ceil(topK * 0.6) : topK,
-        threshold,
-        documentIds: options?.documentIds,
-        collectionKeys: options?.collectionKeys,
-      });
-      // Mark results with source type
-      allSourceResults.push(...secondaryResults.map((r: SearchResult): SecondarySearchResult => ({
-        ...r,
-        sourceType: 'secondary' as const,
-      })));
-      console.log(`📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`);
-    }
-
-    // Search primary sources (Tropy archives) if needed
-    if (sourceType === 'primary' || sourceType === 'both') {
-      try {
-        const primaryResults = await tropyService.search(query, {
-          topK: sourceType === 'both' ? Math.ceil(topK * 0.4) : topK,
-          threshold,
-        });
-        // Map primary source results to match the expected format
-        const mappedPrimaryResults: PrimaryMappedSearchResult[] = primaryResults.map((r: PrimarySourceSearchResult & { source?: PrimarySourceDocument }): PrimaryMappedSearchResult => ({
-          chunk: {
-            id: r.chunk.id,
-            content: r.chunk.content,
-            documentId: r.chunk.sourceId,
-            chunkIndex: r.chunk.chunkIndex,
-          },
-          document: {
-            id: r.source?.id,
-            title: r.source?.title,
-            author: r.source?.creator,
-            bibtexKey: null, // Primary sources don't have bibtexKey
-          },
-          source: r.source,
-          similarity: r.similarity,
-          sourceType: 'primary' as const,
-        }));
-        allSourceResults.push(...mappedPrimaryResults);
-        console.log(`📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`);
-      } catch (error: unknown) {
-        console.warn('⚠️ [PDF-SERVICE] Primary source search failed (Tropy not initialized?):', error);
-        // Continue with secondary sources only
-      }
-    }
-
-    // Sort all results by similarity and take top K
-    const sortedResults = allSourceResults
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
-
-    console.log(`🔍 [PDF-SERVICE] Final combined results: ${sortedResults.length} (from ${allSourceResults.length} total)`);
-    console.log(`🔍 [PDF-SERVICE] Total search duration: ${Date.now() - searchStart}ms`);
-
-    return sortedResults;
+    return this.pdfIndexer!.indexPDF(
+      filePath,
+      bibtexKey,
+      onProgress,
+      bibliographyMetadata,
+      collectionKeys
+    );
   }
 
   /**
-   * Search in secondary sources (bibliography/PDFs)
-   * This is the original search logic, refactored into a separate method
+   * Thin facade: delegates to RetrievalService (fusion B1). Legacy callers
+   * (incl. the `pdf:search` IPC handler consumed by the renderer) keep
+   * the flat-array return shape they expect; the typed
+   * `RetrievalSearchResult` envelope (fusion 1.7) is unwrapped here.
+   * Per-corpus outcomes are still available to internal callers via
+   * `retrievalService.search(...)` directly.
    */
-  private async searchSecondary(query: string, options?: { topK?: number; threshold?: number; documentIds?: string[]; collectionKeys?: string[] }) {
-    const searchStart = Date.now();
-    const ragConfig = configManager.getRAGConfig();
-    const topK = options?.topK || ragConfig.topK;
-    const threshold = options?.threshold || ragConfig.similarityThreshold;
-
-    // Resolve collection filter to document IDs
-    let documentIdsFilter = options?.documentIds;
-
-    if (options?.collectionKeys && options.collectionKeys.length > 0) {
-      const docsInCollections = this.vectorStore!.getDocumentIdsInCollections(
-        options.collectionKeys,
-        true // recursive: include subcollections
-      );
-
-      console.log(`🔍 [PDF-SERVICE] Collection filter: ${options.collectionKeys.length} collection(s) -> ${docsInCollections.length} document(s)`);
-
-      // Intersect with existing documentIds filter if provided
-      if (documentIdsFilter && documentIdsFilter.length > 0) {
-        documentIdsFilter = documentIdsFilter.filter((id) => docsInCollections.includes(id));
-        console.log(`🔍 [PDF-SERVICE] After intersection with documentIds: ${documentIdsFilter.length} document(s)`);
-      } else {
-        documentIdsFilter = docsInCollections;
-      }
-
-      // If no documents match the collection filter, return empty results
-      if (documentIdsFilter.length === 0) {
-        console.log('🔍 [PDF-SERVICE] No documents match the collection filter, returning empty results');
-        return [];
-      }
+  async search(
+    query: string,
+    options?: {
+      topK?: number;
+      threshold?: number;
+      documentIds?: string[];
+      collectionKeys?: string[];
+      sourceType?: SourceType;
+      includeVault?: boolean;
     }
-
-    // 🆕 Query expansion multilingue
-    const expandedQueries = expandQueryMultilingual(query);
-    const allResults = new Map<string, SearchResult>(); // chunk.id → meilleur résultat
-
-    // 🚀 PARALLEL: Generate all embeddings in parallel (using cache)
-    const embeddingStart = Date.now();
-    console.log(`🔍 [PDF-SERVICE] Generating ${expandedQueries.length} embeddings in parallel...`);
-
-    const embeddingPromises = expandedQueries.map(q => this.getQueryEmbedding(q));
-    const embeddings = await Promise.all(embeddingPromises);
-
-    const embeddingDuration = Date.now() - embeddingStart;
-    console.log(`✅ [PDF-SERVICE] All embeddings generated in ${embeddingDuration}ms`);
-
-    // Log cache stats periodically
-    const cacheStats = this.queryEmbeddingCache.getStats();
-    if ((cacheStats.hits + cacheStats.misses) % 10 === 0) {
-      console.log(`💾 [EMB CACHE] Stats: ${cacheStats.hits} hits, ${cacheStats.misses} misses (${cacheStats.hitRate})`);
-    }
-
-    // 🚀 PARALLEL: Search with all embeddings in parallel
-    const searchStart2 = Date.now();
-    const searchPromises = embeddings.map((queryEmbedding, i) => {
-      const expandedQuery = expandedQueries[i];
-
-      if (this.vectorStore instanceof EnhancedVectorStore) {
-        return this.vectorStore.search(
-          expandedQuery,
-          queryEmbedding,
-          topK,
-          documentIdsFilter
-        );
-      } else {
-        return Promise.resolve(this.vectorStore!.search(
-          queryEmbedding,
-          topK,
-          documentIdsFilter
-        ));
-      }
+  ) {
+    this.ensureInitialized();
+    const { hits } = await retrievalService.search({
+      query,
+      topK: options?.topK,
+      threshold: options?.threshold,
+      documentIds: options?.documentIds,
+      collectionKeys: options?.collectionKeys,
+      sourceType: options?.sourceType,
+      includeVault: options?.includeVault,
     });
-
-    const allSearchResults = await Promise.all(searchPromises);
-    const searchDuration = Date.now() - searchStart2;
-    console.log(`✅ [PDF-SERVICE] All searches completed in ${searchDuration}ms`);
-
-    // Merge results (keep best score per chunk)
-    for (let i = 0; i < allSearchResults.length; i++) {
-      const results = allSearchResults[i];
-      for (const result of results) {
-        const chunkId = result.chunk.id;
-        const existing = allResults.get(chunkId);
-
-        if (!existing || result.similarity > existing.similarity) {
-          allResults.set(chunkId, result);
-        }
-      }
-    }
-
-    console.log(`🔍 [PDF-SERVICE] Merged ${allResults.size} unique chunks from ${expandedQueries.length} query variants`);
-
-    // Convertir Map en array et trier par similarité
-    let mergedResults = Array.from(allResults.values())
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK); // Garder seulement top K résultats
-
-    // Filter by similarity threshold
-    let filteredResults = mergedResults.filter(r => r.similarity >= threshold);
-
-    // 🆕 Fallback automatique pour recherche multilingue
-    if (filteredResults.length === 0 && mergedResults.length > 0) {
-      const minFallbackResults = Math.min(3, mergedResults.length);
-      console.warn('⚠️  [PDF-SERVICE DEBUG] All results filtered out by threshold!');
-      console.warn('⚠️  [PDF-SERVICE DEBUG] Applying fallback: keeping top', minFallbackResults, 'results');
-      console.warn('⚠️  [PDF-SERVICE DEBUG] Best similarity:', mergedResults[0]?.similarity.toFixed(4));
-      console.warn('⚠️  [PDF-SERVICE DEBUG] This may indicate cross-language search (e.g., FR query → EN docs)');
-
-      filteredResults = mergedResults.slice(0, minFallbackResults);
-    }
-
-    console.log('🔍 [PDF-SERVICE DEBUG] Secondary search results:', {
-      totalUniqueChunks: mergedResults.length,
-      filteredResults: filteredResults.length,
-      threshold: threshold,
-      fallbackApplied: filteredResults.length > 0 && filteredResults.length < mergedResults.filter(r => r.similarity >= threshold).length,
-      totalDuration: `${Date.now() - searchStart}ms`,
-    });
-
-    return filteredResults;
+    return hits;
   }
 
   async getAllDocuments() {
@@ -555,8 +310,9 @@ class PDFService {
    */
   async getDocument(documentId: string) {
     this.ensureInitialized();
-    const documents = this.vectorStore!.getAllDocuments();
-    return documents.find((doc) => doc.id === documentId) || null;
+    // Indexed lookup — avoids hydrating the full document list (+ N
+    // chunk-count queries) just to find one by id.
+    return PdfVectorStore.getDocumentById(this.vectorStore!, documentId) || null;
   }
 
   async deleteDocument(documentId: string) {
@@ -576,90 +332,68 @@ class PDFService {
     return this.currentProjectPath;
   }
 
-  getOllamaClient() {
-    return this.ollamaClient;
+  /**
+   * Public typed-provider accessors (fusion 1.2e). Replace the legacy
+   * `getOllamaClient()` / `getLLMProviderManager()` getters that were
+   * the last entry points into the OllamaClient + LLMProviderManager
+   * pair. Callers use these to drive chat / embedding work without
+   * caring about backend choice.
+   */
+  getLLMProvider(): LLMProvider | null {
+    return this.llm;
+  }
+  getEmbeddingProvider(): EmbeddingProvider | null {
+    return this.embedding;
   }
 
   /**
-   * Retourne le LLM Provider Manager pour la génération de texte
-   * Gère automatiquement le fallback entre Ollama et le modèle embarqué
+   * Embedded-model lifecycle. Each call assumes `embedded-llm-handlers`
+   * has already updated `configManager` with the new (or cleared)
+   * embedded model paths; we just rebuild the registry so the next
+   * chat / embedding call picks up the change.
    */
-  getLLMProviderManager() {
-    return this.llmProviderManager;
-  }
-
-  /**
-   * Met à jour le modèle embarqué dans le LLMProviderManager
-   * Appelé après le téléchargement d'un nouveau modèle
-   */
-  async updateEmbeddedModel(modelPath: string, modelId?: string): Promise<boolean> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized, cannot update embedded model');
-      return false;
-    }
-
+  async updateEmbeddedModel(modelPath: string, _modelId?: string): Promise<boolean> {
     console.log(`🔄 [PDF-SERVICE] Updating embedded model: ${modelPath}`);
-    const success = await this.llmProviderManager.setEmbeddedModelPath(modelPath, modelId);
-
-    if (success) {
+    try {
+      await this.rebuildLLMRegistry();
       console.log('✅ [PDF-SERVICE] Embedded model updated successfully');
-    } else {
-      console.error('❌ [PDF-SERVICE] Failed to update embedded model');
-    }
-
-    return success;
-  }
-
-  /**
-   * Désactive le modèle embarqué dans le LLMProviderManager
-   * Appelé après la suppression d'un modèle
-   */
-  async disableEmbeddedModel(): Promise<void> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized');
-      return;
-    }
-
-    console.log('🔄 [PDF-SERVICE] Disabling embedded model');
-    await this.llmProviderManager.disableEmbedded();
-    console.log('✅ [PDF-SERVICE] Embedded model disabled');
-  }
-
-  /**
-   * Met à jour le modèle d'embedding embarqué dans le LLMProviderManager
-   * Appelé après le téléchargement d'un nouveau modèle d'embedding
-   */
-  async updateEmbeddedEmbeddingModel(modelPath: string, modelId?: string): Promise<boolean> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized, cannot update embedded embedding model');
+      return true;
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-model change:', e);
       return false;
     }
-
-    console.log(`🔄 [PDF-SERVICE] Updating embedded embedding model: ${modelPath}`);
-    const success = await this.llmProviderManager.setEmbeddedEmbeddingModelPath(modelPath, modelId);
-
-    if (success) {
-      console.log('✅ [PDF-SERVICE] Embedded embedding model updated successfully');
-    } else {
-      console.error('❌ [PDF-SERVICE] Failed to update embedded embedding model');
-    }
-
-    return success;
   }
 
-  /**
-   * Désactive le modèle d'embedding embarqué dans le LLMProviderManager
-   * Appelé après la suppression d'un modèle d'embedding
-   */
-  async disableEmbeddedEmbeddingModel(): Promise<void> {
-    if (!this.llmProviderManager) {
-      console.warn('⚠️  [PDF-SERVICE] LLMProviderManager not initialized');
-      return;
+  async disableEmbeddedModel(): Promise<void> {
+    console.log('🔄 [PDF-SERVICE] Disabling embedded model');
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded model disabled');
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded model:', e);
     }
+  }
 
+  async updateEmbeddedEmbeddingModel(modelPath: string, _modelId?: string): Promise<boolean> {
+    console.log(`🔄 [PDF-SERVICE] Updating embedded embedding model: ${modelPath}`);
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded embedding model updated successfully');
+      return true;
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-embedding change:', e);
+      return false;
+    }
+  }
+
+  async disableEmbeddedEmbeddingModel(): Promise<void> {
     console.log('🔄 [PDF-SERVICE] Disabling embedded embedding model');
-    await this.llmProviderManager.disableEmbeddedEmbedding();
-    console.log('✅ [PDF-SERVICE] Embedded embedding model disabled');
+    try {
+      await this.rebuildLLMRegistry();
+      console.log('✅ [PDF-SERVICE] Embedded embedding model disabled');
+    } catch (e) {
+      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded embedding:', e);
+    }
   }
 
   getVectorStore() {
@@ -711,6 +445,37 @@ class PDFService {
     });
 
     return graphBuilder.exportForVisualization(graph);
+  }
+
+  /**
+   * Returns the subgraph containing only the given document IDs and edges between them.
+   * Lightweight: builds the full graph once, then filters. Useful for per-turn visualization.
+   */
+  async getSubgraphForDocuments(documentIds: string[]): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+    this.ensureInitialized();
+    if (documentIds.length === 0) return { nodes: [], edges: [] };
+
+    const full = await this.buildKnowledgeGraph({
+      includeSimilarityEdges: true,
+      includeAuthorNodes: false,
+      computeLayout: false,
+    });
+
+    const idSet = new Set(documentIds);
+    const nodes = full.nodes.filter((n) => idSet.has(n.id));
+    const edges = full.edges.filter(
+      (e) => idSet.has(typeof e.source === 'string' ? e.source : (e.source as GraphNode).id)
+        && idSet.has(typeof e.target === 'string' ? e.target : (e.target as GraphNode).id)
+    );
+
+    // Simple grid layout for the small subgraph
+    const cols = Math.ceil(Math.sqrt(nodes.length));
+    nodes.forEach((n, i) => {
+      n.x = (i % cols) * 150;
+      n.y = Math.floor(i / cols) * 150;
+    });
+
+    return { nodes, edges };
   }
 
   /**
@@ -771,24 +536,24 @@ class PDFService {
 
     console.log(`📊 Analyzing text statistics for ${documents.length} documents...`);
 
-    // Récupérer le texte de chaque document
-    const corpusDocuments: Array<{ id: string; text: string }> = [];
-
-    for (const doc of documents) {
+    // Stream doc-by-doc: build the corpus list lazily without keeping
+    // intermediate per-chunk arrays or emitting a per-doc log line per
+    // document (which quickly gets expensive for large corpora). The
+    // previous code also forced a full `reduce` over every doc.text
+    // just for a summary log; that's been dropped.
+    const corpusDocuments: Array<{ id: string; text: string }> = new Array(documents.length);
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i];
       const chunks = this.vectorStore!.getChunksForDocument(doc.id);
-      console.log(`   Document ${doc.id.substring(0, 8)}: ${chunks.length} chunks`);
-
-      const fullText = chunks.map((chunkWithEmbedding) => chunkWithEmbedding.chunk.content).join(' ');
-      console.log(`   Text length: ${fullText.length} characters`);
-
-      corpusDocuments.push({
-        id: doc.id,
-        text: fullText,
-      });
+      // Single pass: accumulate content into one string per doc without
+      // an intermediate `.map()` array.
+      let text = '';
+      for (let c = 0; c < chunks.length; c++) {
+        if (c > 0) text += ' ';
+        text += chunks[c].chunk.content;
+      }
+      corpusDocuments[i] = { id: doc.id, text };
     }
-
-    console.log(`📊 Total corpus documents prepared: ${corpusDocuments.length}`);
-    console.log(`📊 Total text length: ${corpusDocuments.reduce((sum, doc) => sum + doc.text.length, 0)} characters`);
 
     // Analyser avec le service textométrique
     const textometricsService = new TextometricsService();
@@ -828,17 +593,21 @@ class PDFService {
       throw new Error('Topic modeling requires at least 5 documents');
     }
 
-    // Récupérer les embeddings et textes
-    const embeddings: Float32Array[] = [];
-    const texts: string[] = [];
-    const documentIds: string[] = [];
-
-    // D'abord, déterminer la dimension d'embedding la plus commune
+    // Single-pass collection: in one iteration we both tally embedding
+    // dimensions *and* stash the candidate (text, embedding, id) for
+    // each document. The previous implementation iterated the corpus
+    // twice (once just to pick the dominant dim, once to actually
+    // build the arrays) which meant fetching per-chunk rows from
+    // SQLite twice for every document lacking a summary embedding.
+    interface Candidate { id: string; text: string; embedding: Float32Array }
+    const candidates: Candidate[] = [];
     const dimensionCounts = new Map<number, number>();
 
     for (const doc of documents) {
-      let embedding: Float32Array | null = null;
+      const text = doc.summary || doc.title;
+      if (!text) continue;
 
+      let embedding: Float32Array | null = null;
       if (doc.summaryEmbedding) {
         embedding = doc.summaryEmbedding;
       } else {
@@ -848,16 +617,16 @@ class PDFService {
         }
       }
 
-      if (embedding && embedding.length > 0) {
-        const count = dimensionCounts.get(embedding.length) || 0;
-        dimensionCounts.set(embedding.length, count + 1);
-      }
+      if (!embedding || embedding.length === 0) continue;
+
+      dimensionCounts.set(embedding.length, (dimensionCounts.get(embedding.length) || 0) + 1);
+      candidates.push({ id: doc.id, text, embedding });
     }
 
-    // Trouver la dimension la plus fréquente
+    // Pick the dominant dimension (ties broken by first-seen via Map order).
     let expectedDimension = 0;
     let maxCount = 0;
-    for (const [dim, count] of dimensionCounts.entries()) {
+    for (const [dim, count] of dimensionCounts) {
       if (count > maxCount) {
         maxCount = count;
         expectedDimension = dim;
@@ -869,41 +638,30 @@ class PDFService {
       console.warn(`⚠️ Found ${dimensionCounts.size} different embedding dimensions:`, Array.from(dimensionCounts.entries()));
     }
 
-    // Maintenant collecter les embeddings avec la bonne dimension
-    for (const doc of documents) {
-      // Utiliser le résumé si disponible, sinon le titre
-      const text = doc.summary || doc.title;
-      let embedding: Float32Array | null = null;
-
-      // Essayer d'utiliser l'embedding du résumé
-      if (doc.summaryEmbedding) {
-        embedding = doc.summaryEmbedding;
-      } else {
-        // Sinon, utiliser l'embedding du premier chunk
-        const chunks = this.vectorStore!.getChunksForDocument(doc.id);
-        if (chunks.length > 0 && chunks[0].embedding) {
-          embedding = chunks[0].embedding;
-        }
+    // Filter candidates to the dominant dimension and drop any with
+    // NaN/null components.
+    const embeddings: Float32Array[] = [];
+    const texts: string[] = [];
+    const documentIds: string[] = [];
+    for (const cand of candidates) {
+      if (cand.embedding.length !== expectedDimension) {
+        console.warn(`⚠️ Skipping document ${cand.id}: wrong embedding dimension (expected ${expectedDimension}, got ${cand.embedding.length})`);
+        continue;
       }
-
-      if (text && embedding) {
-        // Vérifier la dimension
-        if (embedding.length !== expectedDimension) {
-          console.warn(`⚠️ Skipping document ${doc.id}: wrong embedding dimension (expected ${expectedDimension}, got ${embedding.length})`);
-          continue;
-        }
-
-        // Valider que l'embedding est complet (pas de valeurs null/undefined)
-        const isValid = embedding.length > 0 && !Array.from(embedding).some(v => v === null || v === undefined || isNaN(v));
-
-        if (isValid) {
-          embeddings.push(embedding);
-          texts.push(text);
-          documentIds.push(doc.id);
-        } else {
-          console.warn(`⚠️ Skipping document ${doc.id}: invalid embedding (contains null/NaN values)`);
-        }
+      // Early-exit scan for invalid values — avoids Array.from on
+      // large Float32Arrays.
+      let invalid = false;
+      for (let i = 0; i < cand.embedding.length; i++) {
+        const v = cand.embedding[i];
+        if (v === null || v === undefined || Number.isNaN(v)) { invalid = true; break; }
       }
+      if (invalid) {
+        console.warn(`⚠️ Skipping document ${cand.id}: invalid embedding (contains null/NaN values)`);
+        continue;
+      }
+      embeddings.push(cand.embedding);
+      texts.push(cand.text);
+      documentIds.push(cand.id);
     }
 
     if (embeddings.length < 5) {
@@ -1040,15 +798,16 @@ class PDFService {
       this.vectorStore = null;
     }
 
-    // Libérer les ressources du LLM Provider Manager
-    if (this.llmProviderManager) {
-      console.log('🔒 Disposing LLM Provider Manager...');
-      await this.llmProviderManager.dispose();
-      this.llmProviderManager = null;
+    // Libérer les ressources du registry typé (HTTP agents, native handles).
+    if (this.registry) {
+      console.log('🔒 Disposing LLM provider registry...');
+      await this.registry.dispose().catch(() => undefined);
+      this.registry = null;
+      this.llm = null;
+      this.embedding = null;
     }
 
     this.pdfIndexer = null;
-    this.ollamaClient = null;
     this.currentProjectPath = null;
 
     console.log('✅ PDF Service closed');

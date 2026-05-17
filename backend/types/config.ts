@@ -1,5 +1,5 @@
 export interface LLMConfig {
-  backend: 'ollama' | 'claude' | 'openai';
+  backend: 'ollama' | 'claude' | 'openai' | 'mistral' | 'gemini';
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
@@ -7,6 +7,19 @@ export interface LLMConfig {
   claudeModel?: string;
   openaiAPIKey?: string;
   openaiModel?: string;
+  mistralAPIKey?: string;
+  mistralModel?: string;
+  geminiAPIKey?: string;
+  geminiModel?: string;
+
+  /**
+   * When true and the selected `backend` is a cloud provider with an
+   * embeddings endpoint (gemini / openai / mistral), use that provider
+   * for embeddings too instead of Ollama. Useful for users who don't
+   * have a local Ollama. Changing this WILL invalidate the vector index
+   * (dimensions differ across providers) — the user must re-index.
+   */
+  useCloudEmbeddings?: boolean;
 
   // Embedding strategy
   /** Embedding model strategy: 'nomic-fallback' (nomic with mxbai fallback), 'mxbai-only', 'custom' */
@@ -101,6 +114,14 @@ export interface RAGConfig {
 
   // === Context Compression ===
   enableContextCompression?: boolean; // Enable context compression before sending to LLM (default: true)
+
+  // === Obsidian vault as RAG source ===
+  /** Include the workspace Obsidian vault (if indexed) in the retrieval pipeline. */
+  includeObsidianVault?: boolean;
+
+  // === Query expansion (A20) ===
+  /** User-defined FR→EN term dictionary merged on top of built-in defaults. */
+  queryExpansionDictionary?: Record<string, string[]>;
 }
 
 export interface ZoteroConfig {

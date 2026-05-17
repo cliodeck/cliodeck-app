@@ -59,3 +59,8 @@ coverage/
 
 # Native module build artifacts
 build/Release/
+
+# Playwright
+test-results/
+playwright-report/
+e2e/.auth/

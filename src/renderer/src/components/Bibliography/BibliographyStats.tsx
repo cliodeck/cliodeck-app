@@ -10,6 +10,7 @@ import {
   PieChart,
   Tag
 } from 'lucide-react';
+import type { Citation } from '../../stores/bibliography/types';
 import './BibliographyStats.css';
 
 interface PublicationsByYear {
@@ -67,7 +68,7 @@ interface BibliographyStatistics {
 }
 
 interface BibliographyStatsProps {
-  citations: any[];
+  citations: Citation[];
   onClose?: () => void;
 }
 

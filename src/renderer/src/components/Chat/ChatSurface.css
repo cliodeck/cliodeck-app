@@ -1,0 +1,245 @@
+.chat-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  background-color: var(--bg-app);
+}
+
+.chat-surface__header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: var(--bg-panel);
+  min-height: 25px;
+}
+
+.chat-surface__title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chat-surface__header-extras {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.chat-surface__header-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-normal);
+}
+
+.chat-surface__header-btn:hover:not(:disabled) {
+  background-color: var(--border-color);
+}
+
+.chat-surface__header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-surface__messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing-lg);
+}
+
+.chat-surface__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: var(--spacing-lg);
+}
+
+.chat-surface__inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.chat-surface__inline-btn:hover {
+  background: var(--bg-hover, var(--border-color));
+}
+
+.brainstorm-chat__error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.brainstorm-chat__msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.brainstorm-chat__sources {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.brainstorm-chat__sources > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  user-select: none;
+}
+
+.brainstorm-chat__sources > ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.brainstorm-chat__source {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.brainstorm-chat__source-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.brainstorm-chat__source-kind {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--text-primary);
+}
+
+.brainstorm-chat__source--vault .brainstorm-chat__source-kind {
+  background: color-mix(in srgb, #22c55e 25%, transparent);
+}
+
+.brainstorm-chat__source--primary .brainstorm-chat__source-kind {
+  background: color-mix(in srgb, #f59e0b 25%, transparent);
+}
+
+.brainstorm-chat__source-score {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.brainstorm-chat__source-snippet {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+.brainstorm-chat__tool-calls {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brainstorm-chat__tool-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  align-self: flex-start;
+}
+
+.brainstorm-chat__tool-call--running {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.brainstorm-chat__tool-call--done {
+  opacity: 0.75;
+}
+
+.brainstorm-chat__tool-call--error {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.brainstorm-chat__tool-call-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.brainstorm-chat__tool-call-arrow {
+  opacity: 0.6;
+}
+
+.brainstorm-chat__tool-call-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: transparent;
+  padding: 0;
+}
+
+.brainstorm-chat__tool-call-duration {
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes brainstorm-chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.brainstorm-chat__spin {
+  animation: brainstorm-chat-spin 1s linear infinite;
+}
+
+.chat-surface__banner {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  border-top: 1px solid var(--color-danger);
+}

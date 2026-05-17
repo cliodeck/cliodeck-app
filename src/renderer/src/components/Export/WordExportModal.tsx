@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import {
+  ExportCitationSection,
+  loadDefaultCitationValue,
+  type ExportCitationValue,
+} from './ExportCitationSection';
 import './PDFExportModal.css'; // Reuse the same CSS
 
 interface WordExportModalProps {
@@ -22,6 +27,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [success, setSuccess] = useState(false);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
+  const [citation, setCitation] = useState<ExportCitationValue>({
+    useEngine: false,
+    style: 'chicago-note-bibliography',
+    locale: 'fr-FR',
+  });
 
   // Initialize with project data
   useEffect(() => {
@@ -33,6 +43,18 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       checkForTemplate();
     }
   }, [currentProject, isOpen]);
+
+  // Load citation defaults from workspace config when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void loadDefaultCitationValue().then((v) => {
+      if (!cancelled) setCitation(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Listen for progress updates
   useEffect(() => {
@@ -79,7 +101,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       if (!result.canceled && result.filePath) {
         setOutputPath(result.filePath);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to select output path:', err);
     }
   };
@@ -126,6 +148,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           author: author || 'ClioDesk',
           date: new Date().toLocaleDateString('fr-FR'),
         },
+        citation: {
+          useEngine: citation.useEngine,
+          style: citation.style,
+          locale: citation.locale,
+        },
       });
 
       if (result.success) {
@@ -142,8 +169,8 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         setError(result.error || 'Erreur inconnue lors de l\'export');
         setIsExporting(false);
       }
-    } catch (err: any) {
-      setError('Erreur lors de l\'export: ' + err.message);
+    } catch (err: unknown) {
+      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
       setIsExporting(false);
     }
   };
@@ -173,9 +200,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         <div className="pdf-export-body">
           {/* Template Detection */}
           {hasTemplate && templatePath && (
-            <div style={{ fontSize: '0.875rem', color: '#4CAF50', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
+            <div style={{ fontSize: '0.875rem', color: 'var(--color-success)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
               <CheckCircle size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
-              Modèle Word détecté: <code style={{ color: '#4ec9b0' }}>{templatePath.split('/').pop()}</code>
+              Modèle Word détecté: <code style={{ color: 'var(--color-success)' }}>{templatePath.split('/').pop()}</code>
             </div>
           )}
 
@@ -204,10 +231,16 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
-            <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#2a2a2a', borderRadius: '4px' }}>
-              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: '#4ec9b0' }}>abstract.md</code> de votre projet
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: 'var(--color-success)' }}>abstract.md</code> de votre projet
             </div>
           )}
+
+          <ExportCitationSection
+            value={citation}
+            onChange={setCitation}
+            disabled={isExporting}
+          />
 
           <div className="form-field">
             <label>Fichier de sortie</label>

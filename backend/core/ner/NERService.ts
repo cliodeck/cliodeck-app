@@ -1,21 +1,29 @@
 /**
- * NERService - Named Entity Recognition using Ollama LLM
+ * NERService — Named Entity Recognition using Ollama LLM
  *
- * Extracts named entities (persons, locations, dates, organizations, events)
- * from historical documents using a local LLM via Ollama.
+ * Extracts named entities (persons, locations, dates, organizations, events,
+ * concepts) from historical documents using a local LLM via Ollama.
+ *
+ * Consolidated in fusion step 2.3: kept the ClioDeck impl (richer — chunking,
+ * deduplication via EntityNormalizer, query-specific extraction, multi-format
+ * JSON parsing with regex fallback) and folded in ClioBrain's multilingual
+ * prompts (fr/en/de) + the CONCEPT entity type. Language is selectable per
+ * instance; default 'fr' preserves the existing call-site behavior.
  */
 
-import { OllamaClient, GENERATION_PRESETS } from '../llm/OllamaClient';
 import { EntityNormalizer, entityNormalizer } from './EntityNormalizer';
 import type {
   EntityType,
   ExtractedEntity,
   NERExtractionResult,
 } from '../../types/entity';
+import type { LLMProvider } from '../llm/providers/base';
+
+export type NERLanguage = 'fr' | 'en' | 'de';
 
 // MARK: - Constants
 
-const NER_PROMPT_TEMPLATE = `Tu es un expert en reconnaissance d'entités nommées pour documents historiques.
+const NER_PROMPT_FR = `Tu es un expert en reconnaissance d'entités nommées pour documents historiques.
 Extrait TOUTES les entités du texte suivant et retourne-les au format JSON.
 
 Types d'entités à extraire:
@@ -24,6 +32,7 @@ Types d'entités à extraire:
 - DATE: Dates et périodes (ex: "1914", "18 juin 1940", "XIXe siècle", "1914-1918")
 - ORGANIZATION: Organisations, institutions, partis (ex: "OTAN", "Académie française", "Parti communiste")
 - EVENT: Événements historiques (ex: "Bataille de Verdun", "Révolution française", "Appel du 18 juin")
+- CONCEPT: Concepts / notions historiographiques (ex: "totalitarisme", "longue durée", "mémoire collective")
 
 Texte:
 """
@@ -36,16 +45,94 @@ IMPORTANT:
 - Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après
 
 Format de réponse:
-[{"name": "...", "type": "PERSON|LOCATION|DATE|ORGANIZATION|EVENT", "context": "phrase où apparaît l'entité"}]`;
+[{"name": "...", "type": "PERSON|LOCATION|DATE|ORGANIZATION|EVENT|CONCEPT", "context": "phrase où apparaît l'entité"}]`;
 
-const NER_QUERY_PROMPT_TEMPLATE = `Extrait les entités nommées de cette question de recherche.
+const NER_PROMPT_EN = `You are a named-entity recognition expert for historical documents.
+Extract ALL entities from the following text and return them as JSON.
 
-Types: PERSON, LOCATION, DATE, ORGANIZATION, EVENT
+Entity types:
+- PERSON: Names of people (e.g. "Winston Churchill", "Marie Curie")
+- LOCATION: Geographic places (e.g. "Paris", "the Rhine", "London")
+- DATE: Dates and periods (e.g. "1914", "18 June 1940", "19th century")
+- ORGANIZATION: Organizations, institutions, parties
+- EVENT: Historical events (e.g. "Battle of Verdun", "French Revolution")
+- CONCEPT: Historiographical concepts (e.g. "totalitarianism", "longue durée")
+
+Text:
+"""
+{TEXT}
+"""
+
+IMPORTANT:
+- Extract ALL entities, even if they appear multiple times
+- For each entity, include the sentence it appears in as "context"
+- Reply ONLY with valid JSON, no text before or after
+
+Response format:
+[{"name": "...", "type": "PERSON|LOCATION|DATE|ORGANIZATION|EVENT|CONCEPT", "context": "sentence where the entity appears"}]`;
+
+const NER_PROMPT_DE = `Du bist Experte für die Erkennung benannter Entitäten in historischen Dokumenten.
+Extrahiere ALLE Entitäten aus dem folgenden Text und gib sie als JSON zurück.
+
+Entitätstypen:
+- PERSON: Personennamen
+- LOCATION: Geografische Orte
+- DATE: Daten und Zeiträume
+- ORGANIZATION: Organisationen, Institutionen, Parteien
+- EVENT: Historische Ereignisse
+- CONCEPT: Historiografische Konzepte
+
+Text:
+"""
+{TEXT}
+"""
+
+WICHTIG:
+- Extrahiere ALLE Entitäten, auch wenn sie mehrfach vorkommen
+- Füge für jede Entität den umgebenden Satz als "context" hinzu
+- Antworte NUR mit gültigem JSON, ohne Text davor oder danach
+
+Antwortformat:
+[{"name": "...", "type": "PERSON|LOCATION|DATE|ORGANIZATION|EVENT|CONCEPT", "context": "Satz mit der Entität"}]`;
+
+const NER_PROMPTS: Record<NERLanguage, string> = {
+  fr: NER_PROMPT_FR,
+  en: NER_PROMPT_EN,
+  de: NER_PROMPT_DE,
+};
+
+const NER_QUERY_PROMPT_FR = `Extrait les entités nommées de cette question de recherche.
+
+Types: PERSON, LOCATION, DATE, ORGANIZATION, EVENT, CONCEPT
 
 Question: "{QUERY}"
 
 Réponds UNIQUEMENT avec un JSON:
 [{"name": "...", "type": "..."}]`;
+
+const NER_QUERY_PROMPT_EN = `Extract named entities from this research query.
+
+Types: PERSON, LOCATION, DATE, ORGANIZATION, EVENT, CONCEPT
+
+Query: "{QUERY}"
+
+Reply ONLY with JSON:
+[{"name": "...", "type": "..."}]`;
+
+const NER_QUERY_PROMPT_DE = `Extrahiere benannte Entitäten aus dieser Forschungsfrage.
+
+Typen: PERSON, LOCATION, DATE, ORGANIZATION, EVENT, CONCEPT
+
+Frage: "{QUERY}"
+
+Antworte NUR mit JSON:
+[{"name": "...", "type": "..."}]`;
+
+const NER_QUERY_PROMPTS: Record<NERLanguage, string> = {
+  fr: NER_QUERY_PROMPT_FR,
+  en: NER_QUERY_PROMPT_EN,
+  de: NER_QUERY_PROMPT_DE,
+};
 
 // Maximum text length to process at once (to avoid context limits)
 const MAX_TEXT_LENGTH = 3000;
@@ -53,14 +140,33 @@ const MAX_TEXT_LENGTH = 3000;
 // MARK: - NERService
 
 export class NERService {
-  private ollamaClient: OllamaClient;
+  private llm: LLMProvider;
   private normalizer: EntityNormalizer;
   private modelOverride?: string;
+  private language: NERLanguage;
 
-  constructor(ollamaClient: OllamaClient, modelOverride?: string) {
-    this.ollamaClient = ollamaClient;
+  /**
+   * Construct an NER service bound to a typed `LLMProvider`. Fusion step
+   * 1.2d removed the legacy `OllamaClient` slot; callers pass a provider
+   * built off `ProviderRegistry.getLLM()` (or a stub in tests).
+   */
+  constructor(
+    llm: LLMProvider,
+    modelOverride?: string,
+    language: NERLanguage = 'fr'
+  ) {
+    this.llm = llm;
     this.normalizer = entityNormalizer;
     this.modelOverride = modelOverride;
+    this.language = language;
+  }
+
+  setLanguage(language: NERLanguage): void {
+    this.language = language;
+  }
+
+  setLLMProvider(llm: LLMProvider): void {
+    this.llm = llm;
   }
 
   /**
@@ -68,7 +174,7 @@ export class NERService {
    */
   async extractEntities(text: string): Promise<NERExtractionResult> {
     const startTime = Date.now();
-    const modelUsed = this.modelOverride || this.ollamaClient.chatModel;
+    const modelUsed = this.modelOverride || this.llm.id;
 
     if (!text || text.trim().length < 10) {
       return {
@@ -117,19 +223,13 @@ export class NERService {
     const startTime = Date.now();
 
     try {
-      const prompt = NER_QUERY_PROMPT_TEMPLATE.replace('{QUERY}', query);
+      const prompt = NER_QUERY_PROMPTS[this.language].replace('{QUERY}', query);
 
       // Use lower temperature for consistency
-      let response = '';
-      for await (const chunk of this.ollamaClient.generateResponseStream(
-        prompt,
-        [],
-        this.modelOverride,
-        30000, // 30s timeout for queries
-        { ...GENERATION_PRESETS.deterministic }
-      )) {
-        response += chunk;
-      }
+      const response = await this.runPrompt(prompt, {
+        timeoutMs: 30000,
+        temperature: 0,
+      });
 
       const entities = this.parseEntitiesFromResponse(response);
 
@@ -146,20 +246,35 @@ export class NERService {
    * Extracts entities from a single chunk of text
    */
   private async extractFromChunk(text: string): Promise<ExtractedEntity[]> {
-    const prompt = NER_PROMPT_TEMPLATE.replace('{TEXT}', text);
-
-    let response = '';
-    for await (const chunk of this.ollamaClient.generateResponseStream(
-      prompt,
-      [],
-      this.modelOverride,
-      120000, // 2 min timeout for long texts
-      { ...GENERATION_PRESETS.academic, temperature: 0.1 }
-    )) {
-      response += chunk;
-    }
-
+    const prompt = NER_PROMPTS[this.language].replace('{TEXT}', text);
+    const response = await this.runPrompt(prompt, {
+      timeoutMs: 120000, // 2 min for long texts
+      temperature: 0.1,
+    });
     return this.parseEntitiesFromResponse(response);
+  }
+
+  /**
+   * Run a prompt through the typed `LLMProvider`, accumulating the stream
+   * via `complete()`. The legacy `OllamaClient.generateResponseStream`
+   * fallback was retired in fusion step 1.2d.
+   */
+  private async runPrompt(
+    prompt: string,
+    opts: { timeoutMs: number; temperature?: number; maxTokens?: number }
+  ): Promise<string> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+    try {
+      return await this.llm.complete(prompt, {
+        model: this.modelOverride,
+        temperature: opts.temperature,
+        maxTokens: opts.maxTokens,
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -251,7 +366,7 @@ export class NERService {
    * Checks if a type string is a valid EntityType
    */
   private isValidType(type: string): boolean {
-    const validTypes = ['PERSON', 'LOCATION', 'DATE', 'ORGANIZATION', 'EVENT'];
+    const validTypes = ['PERSON', 'LOCATION', 'DATE', 'ORGANIZATION', 'EVENT', 'CONCEPT'];
     return validTypes.includes(type.toUpperCase());
   }
 
@@ -260,7 +375,7 @@ export class NERService {
    */
   private normalizeType(type: string): EntityType {
     const upper = type.toUpperCase() as EntityType;
-    if (['PERSON', 'LOCATION', 'DATE', 'ORGANIZATION', 'EVENT'].includes(upper)) {
+    if (['PERSON', 'LOCATION', 'DATE', 'ORGANIZATION', 'EVENT', 'CONCEPT'].includes(upper)) {
       return upper;
     }
     // Default to EVENT for unknown types
@@ -356,6 +471,6 @@ export class NERService {
 
 // MARK: - Factory
 
-export function createNERService(ollamaClient: OllamaClient, modelOverride?: string): NERService {
-  return new NERService(ollamaClient, modelOverride);
+export function createNERService(llm: LLMProvider, modelOverride?: string): NERService {
+  return new NERService(llm, modelOverride);
 }

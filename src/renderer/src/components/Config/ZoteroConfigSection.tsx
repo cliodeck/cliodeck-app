@@ -189,12 +189,12 @@ export const ZoteroConfigSection: React.FC<ZoteroConfigSectionProps> = ({
               t('zotero.testing')
             ) : testStatus === 'success' ? (
               <>
-                <CheckCircle size={16} style={{ color: '#4caf50' }} />
+                <CheckCircle size={16} style={{ color: 'var(--color-success)' }} />
                 {mode === 'api' ? t('zotero.connectionOk') : t('zotero.localConnectionOk')}
               </>
             ) : testStatus === 'error' ? (
               <>
-                <XCircle size={16} style={{ color: '#f44336' }} />
+                <XCircle size={16} style={{ color: 'var(--color-danger)' }} />
                 {mode === 'api' ? t('zotero.connectionFailed') : t('zotero.localConnectionFailed')}
               </>
             ) : (

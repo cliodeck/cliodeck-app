@@ -1,0 +1,275 @@
+/**
+ * Shared test fixtures for MCP tool tests (fusion 1.9).
+ *
+ * The tools register against a real `McpServer` from `@modelcontextprotocol/sdk`
+ * and execute SQL on the workspace's sqlite databases. Spinning up the SDK
+ * just to invoke a tool handler is overkill — the only thing each test
+ * needs is the handler itself, the `cfg` it reads from, and a logger.
+ *
+ * `createCapturingServer()` records the `(name, schema, handler)` triple
+ * that `registerXxx(server, …)` produces so a test can pull the handler
+ * out and call it directly. `createInMemoryLogger()` mirrors the
+ * `MCPAccessLogger` surface but stores events in an array for assertion.
+ *
+ * SQLite fixtures (`createTempVectorsDb`, `createTempPrimarySourcesDb`)
+ * build minimal schemas — only the columns the tools read — so a test
+ * can populate them without dragging in `PrimarySourcesVectorStore` or
+ * `ObsidianVaultStore`.
+ */
+
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import Database from 'better-sqlite3';
+import type { MCPRuntimeConfig } from '../config.js';
+import { workspaceFiles } from '../../core/workspace/layout.js';
+
+export interface CapturedTool {
+  name: string;
+  description: string;
+  schema: unknown;
+  handler: (input: Record<string, unknown>) => Promise<{
+    content: Array<{ type: string; text: string }>;
+    isError?: boolean;
+  }>;
+}
+
+export function createCapturingServer(): {
+  server: { tool: (...args: unknown[]) => void };
+  tools: Map<string, CapturedTool>;
+} {
+  const tools = new Map<string, CapturedTool>();
+  return {
+    tools,
+    server: {
+      tool: (...args: unknown[]) => {
+        // The McpServer.tool overload we care about is
+        // (name, description, schema, handler). Other overloads exist
+        // but the cliodeck tools only use this one.
+        const [name, description, schema, handler] = args as [
+          string,
+          string,
+          unknown,
+          CapturedTool['handler'],
+        ];
+        tools.set(name, { name, description, schema, handler });
+      },
+    },
+  };
+}
+
+export interface CapturedLogEvent {
+  kind: string;
+  name: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  at: string;
+}
+
+export function createInMemoryLogger(): {
+  logger: { log: (e: CapturedLogEvent) => void };
+  events: CapturedLogEvent[];
+} {
+  const events: CapturedLogEvent[] = [];
+  return {
+    events,
+    logger: {
+      log: (e: CapturedLogEvent) => {
+        events.push(e);
+      },
+    },
+  };
+}
+
+/** Make an isolated workspace dir under the OS temp tree. */
+export function createTempWorkspace(prefix = 'cliodeck-mcp-tools-'): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // The MCP tools never check that .cliodeck exists; they only build paths off
+  // it. Create it so callers that drop a config there work.
+  fs.mkdirSync(path.join(root, '.cliodeck'), { recursive: true });
+  return root;
+}
+
+/**
+ * Build a minimal `MCPRuntimeConfig` pointing at a temp workspace. Only
+ * the fields a tool reads are filled in — `mcp` settings are irrelevant
+ * to the tool handlers themselves.
+ */
+export function makeMcpConfig(workspaceRoot: string): MCPRuntimeConfig {
+  return {
+    workspaceRoot,
+    paths: workspaceFiles(workspaceRoot),
+    workspace: {
+      schema_version: 2,
+    },
+    mcp: { enabled: true },
+  };
+}
+
+/**
+ * Create `<root>/.cliodeck/brain.db` with the `pdf_*` PDF-domain tables that
+ * `searchDocuments`, `searchZotero`, `graphNeighbors`, `entityContext` read.
+ * Returns the open `Database` so the caller can populate it; close it before
+ * the tool runs (the tool opens its own readonly handle).
+ */
+export function createTempVectorsDb(root: string): Database.Database {
+  const dir = path.join(root, '.cliodeck');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new Database(path.join(dir, 'brain.db'));
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pdf_documents (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      author TEXT,
+      year TEXT,
+      bibtex_key TEXT,
+      file_path TEXT,
+      summary TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pdf_chunks (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      page_number INTEGER,
+      chunk_index INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS pdf_citations (
+      source_doc_id TEXT NOT NULL,
+      target_doc_id TEXT,
+      target_citation TEXT,
+      context TEXT,
+      page_number INTEGER
+    );
+  `);
+  return db;
+}
+
+/**
+ * Add the `tropy_entities` + `tropy_entity_mentions` tables to an existing
+ * brain.db. Used by `entityContext` tests for the Tropy (primary) domain.
+ */
+export function addEntityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tropy_entities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      type TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS tropy_entity_mentions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      chunk_id TEXT,
+      context TEXT
+    );
+  `);
+}
+
+/**
+ * Add the speculative `pdf_entities` + `pdf_entity_mentions` tables to an
+ * existing brain.db. The PDF NER pipeline doesn't ship yet — the
+ * `entityContext` tool reads them when present and fails soft otherwise.
+ */
+export function addPdfEntityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pdf_entities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      type TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS pdf_entity_mentions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      chunk_id TEXT,
+      context TEXT
+    );
+  `);
+}
+
+/** Create `pdf_similarities` on an existing brain.db. */
+export function addSimilaritiesTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pdf_similarities (
+      doc_id_1 TEXT NOT NULL,
+      doc_id_2 TEXT NOT NULL,
+      similarity REAL NOT NULL
+    );
+  `);
+}
+
+/**
+ * Create `<root>/.cliodeck/brain.db` with the `tropy_sources`/`tropy_chunks`
+ * tables that `searchTropy` reads.
+ */
+export function createTempPrimarySourcesDb(root: string): Database.Database {
+  const dir = path.join(root, '.cliodeck');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new Database(path.join(dir, 'brain.db'));
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tropy_sources (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      transcription TEXT,
+      date TEXT,
+      creator TEXT,
+      archive TEXT,
+      collection TEXT
+    );
+    CREATE TABLE IF NOT EXISTS tropy_chunks (
+      id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      chunk_index INTEGER
+    );
+  `);
+  return db;
+}
+
+/**
+ * Create `<root>/.cliodeck/brain.db` with the obsidian schema that
+ * `ObsidianVaultStore.searchLexical` requires
+ * (obsidian_notes + obsidian_chunks + obsidian_chunks_fts).
+ */
+export function createTempObsidianDb(root: string): Database.Database {
+  const dir = path.join(root, '.cliodeck');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new Database(path.join(dir, 'brain.db'));
+  db.exec(`
+    CREATE TABLE obsidian_notes (
+      id TEXT PRIMARY KEY,
+      relative_path TEXT NOT NULL UNIQUE,
+      vault_path TEXT NOT NULL,
+      title TEXT NOT NULL,
+      tags TEXT NOT NULL,
+      frontmatter TEXT NOT NULL,
+      wikilinks TEXT NOT NULL,
+      file_hash TEXT NOT NULL,
+      file_mtime INTEGER NOT NULL,
+      indexed_at TEXT NOT NULL
+    );
+    CREATE TABLE obsidian_chunks (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      section_title TEXT,
+      start_position INTEGER NOT NULL,
+      end_position INTEGER NOT NULL,
+      embedding BLOB,
+      dimension INTEGER
+    );
+    CREATE VIRTUAL TABLE obsidian_chunks_fts USING fts5(
+      id UNINDEXED,
+      content,
+      tokenize = 'porter unicode61'
+    );
+  `);
+  return db;
+}
+
+export function rmrf(root: string): void {
+  fs.rmSync(root, { recursive: true, force: true });
+}

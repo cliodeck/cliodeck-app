@@ -1,23 +1,33 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MessageCircle, Folder, BookOpen, Network, BookMarked, HelpCircle, Archive } from 'lucide-react';
+import { MessageCircle, Folder, BookOpen, BookMarked, HelpCircle, Archive } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { BibliographyPanel } from '../Bibliography/BibliographyPanel';
 import { ChatInterface } from '../Chat/ChatInterface';
 import { ProjectPanel } from '../Project/ProjectPanel';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
+import { WorkspaceModeBar } from './WorkspaceModeBar';
+import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
+import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { StatusBar } from './StatusBar';
+import { StatusToast } from '../common/StatusToast';
 import { logger } from '../../utils/logger';
 import './MainLayout.css';
 
 // Lazy-loaded heavy components (panels)
-const CorpusExplorerPanel = lazy(() =>
-  import('../Corpus/CorpusExplorerPanel').then(m => ({ default: m.CorpusExplorerPanel }))
-);
 const JournalPanel = lazy(() =>
   import('../Journal/JournalPanel').then(m => ({ default: m.JournalPanel }))
 );
 const PrimarySourcesPanel = lazy(() =>
   import('../PrimarySources/PrimarySourcesPanel').then(m => ({ default: m.PrimarySourcesPanel }))
+);
+
+// Lazy-loaded mode surfaces (only rendered when that workspace mode is active)
+const ExplorePanel = lazy(() =>
+  import('./ExplorePanel').then(m => ({ default: m.ExplorePanel }))
+);
+const ExportHub = lazy(() =>
+  import('./ExportHub').then(m => ({ default: m.ExportHub }))
 );
 
 // Lazy-loaded modals (only rendered when opened)
@@ -35,7 +45,7 @@ const AboutModal = lazy(() =>
 );
 
 type LeftPanelView = 'projects' | 'bibliography' | 'primary-sources';
-type RightPanelView = 'chat' | 'corpus' | 'journal';
+type RightPanelView = 'chat' | 'journal';
 
 export interface MainLayoutProps {
   leftPanel?: React.ReactNode;
@@ -48,8 +58,22 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   centerPanel,
 }) => {
   const { t } = useTranslation('common');
+  const workspaceMode = useWorkspaceModeStore((s) => s.active);
+  const rightViewByMode = useWorkspaceModeStore((s) => s.rightViewByMode);
+  const persistRightView = useWorkspaceModeStore((s) => s.setRightView);
   const [leftView, setLeftView] = useState<LeftPanelView>('projects');
-  const [rightView, setRightView] = useState<RightPanelView>('chat');
+  const isBrainstorm = workspaceMode === 'brainstorm';
+
+  // Per-mode memory: restore whichever right-tab the user last used in
+  // this mode. If that tab is the (hidden) chat tab in Brainstorm, fall
+  // back to journal so we don't render a tab that doesn't exist.
+  const storedRightView = rightViewByMode[workspaceMode];
+  const rightView: RightPanelView =
+    isBrainstorm && storedRightView === 'chat' ? 'journal' : storedRightView;
+
+  const setRightView = (view: RightPanelView) => {
+    persistRightView(workspaceMode, view);
+  };
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
@@ -71,6 +95,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     const handleSwitchPanel = (event: Event) => {
       const customEvent = event as CustomEvent;
       const panel = customEvent.detail;
+      // Read store fresh each event so menu shortcuts target the *current*
+      // workspace mode even though this effect is set up once.
+      const { active, setRightView: persist } = useWorkspaceModeStore.getState();
 
       switch (panel) {
         case 'projects':
@@ -83,13 +110,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           setLeftView('primary-sources');
           break;
         case 'chat':
-          setRightView('chat');
-          break;
-        case 'corpus':
-          setRightView('corpus');
+          persist(active, 'chat');
           break;
         case 'journal':
-          setRightView('journal');
+          persist(active, 'journal');
           break;
       }
     };
@@ -138,8 +162,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         <HelpCircle size={12} />
       </button>
 
-      {/* Main 3-panel layout */}
-      <div className="main-content">
+      {/* Workspace mode bar (fusion phase 3.1a) */}
+      <WorkspaceModeBar />
+
+      {/* Main 3-panel layout. `id` + `tabIndex` are the skip-link
+          target (fusion 3.3) — keyboard users hit Enter on the
+          skip-link to land focus here. */}
+      <div className="main-content" id="main-content" tabIndex={-1}>
         <PanelGroup direction="horizontal">
           {/* Left Panel - Projects / Bibliography */}
           <Panel defaultSize={20} minSize={15} maxSize={35}>
@@ -201,11 +230,23 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 
           <PanelResizeHandle className="resize-handle" />
 
-          {/* Center Panel - Markdown Editor */}
+          {/* Center Panel - Markdown Editor (or Brainstorm scaffold) */}
           <Panel defaultSize={50} minSize={30}>
             <div className="panel center-panel">
-              {centerPanel || (
-                <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
+              {workspaceMode === 'brainstorm' ? (
+                <BrainstormPanel />
+              ) : workspaceMode === 'explore' ? (
+                <Suspense fallback={<PanelLoadingFallback />}>
+                  <ExplorePanel />
+                </Suspense>
+              ) : workspaceMode === 'export' ? (
+                <Suspense fallback={<PanelLoadingFallback />}>
+                  <ExportHub />
+                </Suspense>
+              ) : (
+                centerPanel || (
+                  <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
+                )
               )}
             </div>
           </Panel>
@@ -217,28 +258,19 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             <div className="panel right-panel">
               {/* Panel tabs */}
               <div className="panel-tabs" role="tablist" aria-label={t('chat.title')}>
-                <button
-                  id="right-tab-chat"
-                  className={`panel-tab ${rightView === 'chat' ? 'active' : ''}`}
-                  onClick={() => handleRightViewChange('chat')}
-                  title={t('chat.title')}
-                  role="tab"
-                  aria-selected={rightView === 'chat'}
-                  aria-controls="right-tabpanel-chat"
-                >
-                  <MessageCircle size={20} strokeWidth={1} />
-                </button>
-                <button
-                  id="right-tab-corpus"
-                  className={`panel-tab ${rightView === 'corpus' ? 'active' : ''}`}
-                  onClick={() => handleRightViewChange('corpus')}
-                  title={t('corpus.title')}
-                  role="tab"
-                  aria-selected={rightView === 'corpus'}
-                  aria-controls="right-tabpanel-corpus"
-                >
-                  <Network size={20} strokeWidth={1} />
-                </button>
+                {!isBrainstorm && (
+                  <button
+                    id="right-tab-chat"
+                    className={`panel-tab ${rightView === 'chat' ? 'active' : ''}`}
+                    onClick={() => handleRightViewChange('chat')}
+                    title={t('chat.title')}
+                    role="tab"
+                    aria-selected={rightView === 'chat'}
+                    aria-controls="right-tabpanel-chat"
+                  >
+                    <MessageCircle size={20} strokeWidth={1} />
+                  </button>
+                )}
                 <button
                   id="right-tab-journal"
                   className={`panel-tab ${rightView === 'journal' ? 'active' : ''}`}
@@ -259,12 +291,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 id={`right-tabpanel-${rightView}`}
                 aria-labelledby={`right-tab-${rightView}`}
               >
-                {rightView === 'chat' && <ChatInterface />}
-                {rightView === 'corpus' && (
-                  <Suspense fallback={<PanelLoadingFallback />}>
-                    <CorpusExplorerPanel />
-                  </Suspense>
-                )}
+                {rightView === 'chat' && !isBrainstorm && <ChatInterface />}
                 {rightView === 'journal' && (
                   <Suspense fallback={<PanelLoadingFallback />}>
                     <JournalPanel />
@@ -310,6 +337,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           <AboutModal isOpen={showAboutModal} onClose={() => setShowAboutModal(false)} />
         </Suspense>
       )}
+
+      {/* Status Bar — persistent bottom bar (fusion 3.7) */}
+      <StatusToast />
+      <StatusBar />
     </div>
   );
 };

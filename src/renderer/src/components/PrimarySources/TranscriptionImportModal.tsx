@@ -63,10 +63,10 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
         }
         setIsImporting(false);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setImportResult({
         success: false,
-        message: error.message || t('primarySources.importFailed', 'Import failed'),
+        message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
     }
@@ -74,7 +74,9 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
 
   const handleDirectoryImport = async () => {
     try {
-      const result = await window.electron.dialog.openDirectory();
+      const result = await window.electron.dialog.openFile({
+        properties: ['openDirectory'],
+      });
 
       if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
         setIsImporting(true);
@@ -104,10 +106,10 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
         }
         setIsImporting(false);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setImportResult({
         success: false,
-        message: error.message || t('primarySources.importFailed', 'Import failed'),
+        message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
     }

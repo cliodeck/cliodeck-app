@@ -12,13 +12,14 @@ import {
   PenTool,
   Compass,
   Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useModeStore } from '../../stores/modeStore';
 import type { ResolvedMode } from '../../../../../backend/types/mode';
 import './ModeManagerSection.css';
 
-const ICON_MAP: Record<string, React.FC<{ size?: number }>> = {
+const ICON_MAP: Record<string, LucideIcon> = {
   MessageSquare,
   BookOpen,
   FileSearch,

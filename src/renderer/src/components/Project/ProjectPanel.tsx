@@ -1,31 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
-import { useProjectStore } from '../../stores/projectStore';
+import { useProjectStore, type Project } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
-import { PDFExportModal } from '../Export/PDFExportModal';
-import { WordExportModal } from '../Export/WordExportModal';
-import { BeamerConfig } from './BeamerConfig';
 import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
 import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
-import { ReportIssueModal } from '../Report/ReportIssueModal';
+import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
+
+// Modals are only rendered when opened — keep them off the main chunk.
+const PDFExportModal = lazy(() =>
+  import('../Export/PDFExportModal').then((m) => ({ default: m.PDFExportModal })),
+);
+const WordExportModal = lazy(() =>
+  import('../Export/WordExportModal').then((m) => ({ default: m.WordExportModal })),
+);
+const ReportIssueModal = lazy(() =>
+  import('../Report/ReportIssueModal').then((m) => ({ default: m.ReportIssueModal })),
+);
 
 export const ProjectPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const {
     currentProject,
     recentProjects,
-    isLoading,
+    loadState,
     loadProject,
     createProject,
     closeProject,
     loadRecentProjects,
   } = useProjectStore();
+  const isLoading = loadState.kind === 'loading';
 
   const { loadFile } = useEditorStore();
 
@@ -33,6 +42,8 @@ export const ProjectPanel: React.FC = () => {
   const [showPDFExportModal, setShowPDFExportModal] = useState(false);
   const [showWordExportModal, setShowWordExportModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingProjectName, setOnboardingProjectName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectType, setNewProjectType] = useState<'article' | 'book' | 'presentation'>('article');
   const [newProjectPath, setNewProjectPath] = useState('');
@@ -57,9 +68,12 @@ export const ProjectPanel: React.FC = () => {
       setNewProjectName('');
       setNewProjectPath('');
       setNewProjectType('article');
-    } catch (error: any) {
+      // Launch conversational onboarding
+      setOnboardingProjectName(projectName);
+      setShowOnboarding(true);
+    } catch (error: unknown) {
       console.error('Failed to create project:', error);
-      await useDialogStore.getState().showAlert(t('project.createError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.createError') + ': ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsCreating(false);
     }
@@ -78,9 +92,9 @@ export const ProjectPanel: React.FC = () => {
       if (!result.canceled && result.filePaths.length > 0) {
         await loadProject(result.filePaths[0]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to open project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -93,27 +107,27 @@ export const ProjectPanel: React.FC = () => {
       if (!result.canceled && result.filePaths.length > 0) {
         setNewProjectPath(result.filePaths[0]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to select path:', error);
     }
   };
 
-  const handleLoadRecentProject = async (project: any) => {
+  const handleLoadRecentProject = async (project: Project) => {
     try {
       const projectPath = `${project.path}/project.json`;
       await loadProject(projectPath);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load recent project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
-  const handleRemoveRecentProject = async (project: any) => {
+  const handleRemoveRecentProject = async (project: Project) => {
     try {
       const projectPath = `${project.path}/project.json`;
       await window.electron.project.removeRecent(projectPath);
       await loadRecentProjects();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to remove recent project:', error);
     }
   };
@@ -134,9 +148,9 @@ export const ProjectPanel: React.FC = () => {
   const handleFileSelect = async (filePath: string) => {
     try {
       await loadFile(filePath);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load file:', error);
-      await useDialogStore.getState().showAlert(t('toolbar.openError') + ': ' + error.message);
+      await useDialogStore.getState().showAlert(t('toolbar.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -144,9 +158,9 @@ export const ProjectPanel: React.FC = () => {
     if (currentProject?.path) {
       try {
         await window.electron.shell.openPath(currentProject.path);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to open project folder:', error);
-        await useDialogStore.getState().showAlert(t('project.openFolderError') + ': ' + error.message);
+        await useDialogStore.getState().showAlert(t('project.openFolderError') + ': ' + (error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -312,9 +326,9 @@ export const ProjectPanel: React.FC = () => {
                             : null,
                         }));
                         useEditorStore.getState().setEditorMode(newMode);
-                      } catch (err: any) {
+                      } catch (err: unknown) {
                         console.error('Failed to update default editor:', err);
-                        await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + err.message);
+                        await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + (err instanceof Error ? err.message : String(err)));
                       }
                     }}
                     style={{ width: '100%', padding: '0.4rem 0.5rem', borderRadius: '4px' }}
@@ -392,7 +406,7 @@ export const ProjectPanel: React.FC = () => {
               <label>{t('project.projectType')}</label>
               <select
                 value={newProjectType}
-                onChange={(e) => setNewProjectType(e.target.value as any)}
+                onChange={(e) => setNewProjectType(e.target.value as 'article' | 'book' | 'presentation')}
               >
                 <option value="article">{t('project.types.article')}</option>
                 <option value="book">{t('project.types.book')}</option>
@@ -446,22 +460,50 @@ export const ProjectPanel: React.FC = () => {
       )}
 
       {/* PDF Export Modal (for all project types including presentations) */}
-      <PDFExportModal
-        isOpen={showPDFExportModal}
-        onClose={() => setShowPDFExportModal(false)}
-      />
+      {showPDFExportModal && (
+        <Suspense fallback={null}>
+          <PDFExportModal
+            isOpen={showPDFExportModal}
+            onClose={() => setShowPDFExportModal(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Word Export Modal */}
-      <WordExportModal
-        isOpen={showWordExportModal}
-        onClose={() => setShowWordExportModal(false)}
-      />
+      {showWordExportModal && (
+        <Suspense fallback={null}>
+          <WordExportModal
+            isOpen={showWordExportModal}
+            onClose={() => setShowWordExportModal(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Report Issue Modal */}
-      <ReportIssueModal
-        isOpen={showReportModal}
-        onClose={() => setShowReportModal(false)}
-      />
+      {showReportModal && (
+        <Suspense fallback={null}>
+          <ReportIssueModal
+            isOpen={showReportModal}
+            onClose={() => setShowReportModal(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Onboarding Wizard — appears after project creation */}
+      {showOnboarding && (
+        <OnboardingWizard
+          projectName={onboardingProjectName}
+          onComplete={async (hints) => {
+            try {
+              await window.electron.fusion.hints.write(hints);
+            } catch (err: unknown) {
+              console.error('Failed to write onboarding hints:', err);
+            }
+            setShowOnboarding(false);
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
+      )}
     </div>
   );
 };

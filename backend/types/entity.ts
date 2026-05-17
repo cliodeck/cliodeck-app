@@ -7,7 +7,13 @@
 
 // MARK: - Entity Types
 
-export type EntityType = 'PERSON' | 'LOCATION' | 'DATE' | 'ORGANIZATION' | 'EVENT';
+export type EntityType =
+  | 'PERSON'
+  | 'LOCATION'
+  | 'DATE'
+  | 'ORGANIZATION'
+  | 'EVENT'
+  | 'CONCEPT';
 
 /**
  * Weights for entity types in search scoring
@@ -19,7 +25,33 @@ export const ENTITY_TYPE_WEIGHTS: Record<EntityType, number> = {
   DATE: 1.3,         // Temporal context is important
   LOCATION: 1.2,     // Geographic context
   ORGANIZATION: 1.1, // Institutions, groups
+  CONCEPT: 1.0,      // Abstract concepts / themes (from ClioBrain fusion)
 };
+
+// MARK: - Knowledge graph types (from ClioBrain fusion, step 2.2)
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  communities?: Record<string, number>;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: 'document' | 'entity' | 'note';
+  entityType?: EntityType;
+  metadata?: Record<string, unknown>;
+  community?: number;
+  size?: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: 'citation' | 'similarity' | 'co-occurrence' | 'mention' | 'link';
+  weight: number;
+}
 
 // MARK: - Entity Interfaces
 

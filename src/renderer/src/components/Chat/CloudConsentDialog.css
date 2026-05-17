@@ -1,0 +1,87 @@
+.cloud-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-app) 80%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.cloud-consent-dialog {
+  width: min(440px, 90vw);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.75rem;
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--bg-app) 60%, transparent);
+}
+
+.cloud-consent-dialog__icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+  color: var(--color-warning, var(--color-accent));
+}
+
+.cloud-consent-dialog__title {
+  text-align: center;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+}
+
+.cloud-consent-dialog__body {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.cloud-consent-dialog__list {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.cloud-consent-dialog__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  margin-bottom: 1.25rem;
+}
+
+.cloud-consent-dialog__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.cloud-consent-dialog__btn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  transition: opacity 0.15s;
+}
+
+.cloud-consent-dialog__btn:hover {
+  opacity: 0.85;
+}
+
+.cloud-consent-dialog__btn--cancel {
+  background: var(--bg-app);
+  color: var(--text-secondary);
+}
+
+.cloud-consent-dialog__btn--accept {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}

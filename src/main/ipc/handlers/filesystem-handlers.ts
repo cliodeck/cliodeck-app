@@ -30,8 +30,10 @@ export function setupFilesystemHandlers() {
       const entries = await readdir(validatedPath);
       const items = await Promise.all(
         entries.map(async (name) => {
-          const fullPath = path.join(dirPath, name);
+          const fullPath = path.join(validatedPath, name);
           try {
+            // Re-validate each entry so symlinks cannot escape the perimeter.
+            await validateReadPath(fullPath);
             const stats = await stat(fullPath);
             return {
               name,
@@ -172,7 +174,10 @@ export function setupFilesystemHandlers() {
     const path = validate(StringPathSchema, rawPath);
     console.log('📞 IPC Call: shell:open-path', { path });
     try {
-      const result = await shell.openPath(path);
+      // Restrict to paths the renderer is already allowed to read, to prevent
+      // arbitrary filesystem opens via a compromised renderer.
+      const validatedPath = await validateReadPath(path);
+      const result = await shell.openPath(validatedPath);
       if (result) {
         // shell.openPath returns non-empty string on failure
         console.error('❌ shell:open-path failed:', result);

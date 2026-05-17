@@ -10,6 +10,8 @@ import { projectManager } from '../../services/project-manager.js';
 import { similarityService, type SimilarityOptions } from '../../services/similarity-service.js';
 import { successResponse, errorResponse, requireProject } from '../utils/error-handler.js';
 import { validate, StringIdSchema } from '../utils/validation.js';
+import { configManager } from '../../services/config-manager.js';
+import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 
 // MARK: - Validation Schemas
 
@@ -40,14 +42,22 @@ export function setupSimilarityHandlers() {
       options,
     });
 
+    const projectPath = projectManager.getCurrentProjectPath();
+
+    // Build a typed-provider registry for this analysis. The service uses
+    // it for LLM reranking; we dispose at the end so a config change between
+    // runs picks up cleanly.
+    let registry: ReturnType<typeof createRegistryFromClioDeckConfig> | null = null;
     try {
-      const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
 
       // Validate input
       const validatedData = validate(SimilarityAnalyzeSchema, { text, options });
 
       const window = BrowserWindow.fromWebContents(event.sender);
+
+      registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      similarityService.setLLMProvider(registry.getLLM());
 
       // Run analysis with progress reporting
       const results = await similarityService.analyzeDocument(
@@ -69,6 +79,11 @@ export function setupSimilarityHandlers() {
     } catch (error: any) {
       console.error('❌ similarity:analyze error:', error);
       return errorResponse(error);
+    } finally {
+      similarityService.setLLMProvider(null);
+      if (registry) {
+        await registry.dispose().catch(() => undefined);
+      }
     }
   });
 

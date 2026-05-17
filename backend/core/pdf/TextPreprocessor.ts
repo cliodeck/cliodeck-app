@@ -109,9 +109,17 @@ export class TextPreprocessor {
     // Remove non-printable characters (except newlines and tabs)
     cleaned = cleaned.replace(/[^\p{L}\p{N}\p{P}\p{S}\s]/gu, '');
 
-    // Fix common OCR issues: separated letters (e.g., "h e l l o" -> "hello")
-    // Only for sequences of single letters separated by spaces
-    cleaned = cleaned.replace(/\b(\p{L})\s+(?=\p{L}\s+\p{L}\b)/gu, '$1');
+    // Fix OCR fragmentation: sequences of ≥3 single letters separated by
+    // spaces ("O z f i c i a l" → "Ozficial"). The minimum of 3 keeps
+    // the regex safe against legitimate 1- and 2-letter runs in normal
+    // text ("I am", "a cat is here", "he said"). Boundaries use
+    // (?<!\p{L}) / (?!\p{L}) so the match can end against punctuation
+    // ("r i f l e-bearing" → "rifle-bearing") while still declining to
+    // consume letters that belong to a neighboring word.
+    cleaned = cleaned.replace(
+      /(?<!\p{L})\p{L}(?:\s+\p{L}){2,}(?!\p{L})/gu,
+      (match) => match.replace(/\s+/g, '')
+    );
 
     // Remove pipe/line artifacts (common in scanned docs)
     cleaned = cleaned.replace(/[|l1I]{5,}/g, '');

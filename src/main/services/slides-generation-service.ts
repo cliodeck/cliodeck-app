@@ -1,5 +1,4 @@
 import { BrowserWindow } from 'electron';
-import { pdfService } from './pdf-service.js';
 import { getSlideGenerationPrompt } from '../../../backend/core/llm/SystemPrompts.js';
 import { logger } from '../utils/logger.js';
 
@@ -136,6 +135,24 @@ function normaliseToRevealFormat(raw: string): string {
 
 export class SlidesGenerationService {
   private abortController: AbortController | null = null;
+  /**
+   * Typed LLM provider (fusion 1.2a). The `slides-handlers` IPC builds a
+   * `ProviderRegistry` from the active workspace config and wires this
+   * field before each `generateSlides` call (and clears it in `finally`).
+   * `generateSlides` fails loud if the provider isn't set — the previous
+   * legacy `LLMProviderManager.generateWithoutSources` fallback is gone.
+   */
+  private llm:
+    | import('../../../backend/core/llm/providers/base').LLMProvider
+    | null = null;
+
+  setLLMProvider(
+    llm:
+      | import('../../../backend/core/llm/providers/base').LLMProvider
+      | null
+  ): void {
+    this.llm = llm;
+  }
 
   /**
    * Génère des slides à partir d'un texte source.
@@ -148,10 +165,10 @@ export class SlidesGenerationService {
     window: BrowserWindow,
     citations?: Array<{ id: string; author: string; title: string; year: string }>
   ): Promise<string> {
-    const llmManager = pdfService.getLLMProviderManager();
-
-    if (!llmManager) {
-      throw new Error('LLM non initialisé. Ouvrez un projet avant de générer des slides.');
+    if (!this.llm) {
+      throw new Error(
+        'slides-generation-service: LLM provider not wired (call setLLMProvider before generateSlides)'
+      );
     }
 
     this.abortController = new AbortController();
@@ -196,20 +213,25 @@ export class SlidesGenerationService {
     try {
       logger.info('slides', 'generateSlides:start', { textLength: sourceText.length, language });
 
-      const stream = llmManager.generateWithoutSources(prompt, [], {
-        systemPrompt,
-        generationOptions: {
-          temperature: 0.3,
-        },
-      });
-
-      for await (const chunk of stream) {
+      // Stream via the typed provider. Single system+user turn,
+      // per-token forwarding to the renderer, signal-driven cancellation.
+      const iter = this.llm.chat(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        { temperature: 0.3, signal }
+      );
+      for await (const chunk of iter) {
         if (signal.aborted) {
           logger.info('slides', 'generateSlides:cancelled');
           break;
         }
-        fullResponse += chunk;
-        window.webContents.send('slides:stream', chunk);
+        if (chunk.delta) {
+          fullResponse += chunk.delta;
+          window.webContents.send('slides:stream', chunk.delta);
+        }
+        if (chunk.done) break;
       }
 
       // Post-process: normalise LLM output to reveal.js format

@@ -1,9 +1,12 @@
 {
   "name": "cliodeck",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "type": "module",
   "description": "Assistant d'écriture pour historiens avec RAG et intégration Zotero/Tropy",
   "main": "dist/src/main/index.js",
+  "bin": {
+    "cliodeck-mcp": "bin/cliodeck-mcp"
+  },
   "author": {
     "name": "Frédéric Clavert",
     "email": "frederic.clavert@uni.lu"
@@ -20,20 +23,25 @@
     "build:main": "tsc -p tsconfig.node.json --noEmitOnError false && node scripts/fix-imports.mjs && node scripts/fix-backend.mjs",
     "build:preload": "tsc -p tsconfig.preload.json --noEmitOnError false",
     "build:renderer": "vite build",
-    "build:all": "npm run build && electron-builder",
+    "build:all": "npm run typecheck && npm run build && npm run rebuild:native && electron-builder",
     "build:linux": "npm run build && npm run rebuild:native && electron-builder --linux",
     "build:mac": "npm run build && npm run rebuild:native && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
     "build:dir": "npm run build && electron-builder --dir",
-    "rebuild:native": "npm run rebuild:x64",
-    "rebuild:x64": "electron-rebuild -f -a x64",
-    "rebuild:arm64": "electron-rebuild -f -a arm64",
+    "rebuild:native": "electron-builder install-app-deps",
+    "rebuild:x64": "electron-builder install-app-deps --arch=x64",
+    "rebuild:arm64": "electron-builder install-app-deps --arch=arm64",
     "preview": "vite preview",
-    "start": "env -u ELECTRON_RUN_AS_NODE npx electron . --no-sandbox",
+    "start": "env -u ELECTRON_RUN_AS_NODE npx electron .",
     "start:prod": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
+    "test:integration": "npm rebuild better-sqlite3 && vitest run; npm run rebuild:native",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:provider-parity": "vitest run backend/core/llm/providers/__tests__/parity.test.ts",
+    "cliodeck": "node --experimental-strip-types scripts/cliodeck-cli.ts",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
@@ -46,9 +54,12 @@
   "dependencies": {
     "@milkdown/crepe": "^7.18.0",
     "@milkdown/kit": "^7.18.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.6.0",
     "@types/dompurify": "^3.0.5",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.9.0",
+    "chokidar": "^3.6.0",
+    "citeproc": "^2.4.63",
     "docx": "^9.5.1",
     "docxtemplater": "^3.55.7",
     "dompurify": "^3.3.1",
@@ -58,7 +69,8 @@
     "graphology-layout-forceatlas2": "^0.10.1",
     "hnswlib-node": "^3.0.0",
     "i18next": "^25.7.3",
-    "lru-cache": "^11.2.4",
+    "js-yaml": "^4.1.1",
+    "lru-cache": "^10.4.3",
     "lucide-react": "^0.562.0",
     "marked": "^17.0.1",
     "natural": "^8.1.0",
@@ -66,7 +78,6 @@
     "pdf-poppler": "^0.2.3",
     "pdfjs-dist": "^3.11.174",
     "pizzip": "^3.1.7",
-    "puppeteer": "^24.33.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-error-boundary": "^6.0.2",
@@ -76,13 +87,18 @@
     "react-resizable-panels": "^2.1.9",
     "recharts": "^3.6.0",
     "tesseract.js": "^7.0.0",
-    "zod": "^4.3.5",
+    "zod": "^4.3.6",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.2",
+    "@playwright/test": "^1.59.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/babel__generator": "^7.27.0",
     "@types/better-sqlite3": "^7.6.9",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
@@ -90,14 +106,20 @@
     "@typescript-eslint/parser": "^6.19.0",
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^9.2.1",
-    "electron": "^28.0.0",
+    "electron": "^40.9.2",
     "electron-builder": "^24.0.0",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^8.56.0",
+    "jsdom": "^29.0.2",
     "node-gyp": "^12.1.0",
+    "playwright": "^1.59.1",
     "typescript": "^5.3.0",
     "vite": "^7.3.0",
     "vitest": "^4.0.16"
+  },
+  "overrides": {
+    "pdfjs-dist": {
+      "canvas": "^3.2.3"
+    }
   },
   "build": {
     "appId": "com.cliodeck.app",
@@ -113,7 +135,9 @@
     "asarUnpack": [
       "node_modules/node-llama-cpp/**/*",
       "node_modules/better-sqlite3/**/*",
-      "node_modules/hnswlib-node/**/*"
+      "node_modules/hnswlib-node/**/*",
+      "node_modules/pdfjs-dist/**/*",
+      "dist/src/main/workers/**/*"
     ],
     "extraResources": [
       {
@@ -131,6 +155,21 @@
           "!**/.venv",
           "!**/__pycache__",
           "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "backend/recipes/builtin",
+        "to": "recipes-builtin",
+        "filter": [
+          "*.yaml",
+          "*.yml"
+        ]
+      },
+      {
+        "from": "public/locales",
+        "to": "public/locales",
+        "filter": [
+          "**/*.json"
         ]
       }
     ],
@@ -151,7 +190,6 @@
         "StartupWMClass": "ClioDeck"
       },
       "executableArgs": [
-        "--no-sandbox",
         "%U"
       ]
     },
@@ -172,7 +210,6 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
-    "afterPack": "./scripts/after-pack.cjs",
     "win": {
       "target": [
         "nsis"

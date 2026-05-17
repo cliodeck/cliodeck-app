@@ -8,7 +8,6 @@
 import { setupConfigHandlers } from './handlers/config-handlers.js';
 import { setupProjectHandlers } from './handlers/project-handlers.js';
 import { setupPDFHandlers } from './handlers/pdf-handlers.js';
-import { setupChatHandlers } from './handlers/chat-handlers.js';
 import { setupBibliographyHandlers } from './handlers/bibliography-handlers.js';
 import { setupEditorHandlers } from './handlers/editor-handlers.js';
 import { setupFilesystemHandlers } from './handlers/filesystem-handlers.js';
@@ -22,6 +21,9 @@ import { setupEmbeddedLLMHandlers } from './handlers/embedded-llm-handlers.js';
 import { setupSimilarityHandlers } from './handlers/similarity-handlers.js';
 import { setupTropyHandlers } from './handlers/tropy-handlers.js';
 import { setupSlidesHandlers } from './handlers/slides-handlers.js';
+import { setupFusionHandlers } from './handlers/fusion-handlers.js';
+import { setupSourcesHandlers } from './handlers/sources-handlers.js';
+import { setupCitationHandlers } from './handlers/citation-handlers.js';
 
 /**
  * Setup all IPC handlers
@@ -50,7 +52,6 @@ export function setupIPCHandlers() {
   setupConfigHandlers();
   setupProjectHandlers();
   setupPDFHandlers();
-  setupChatHandlers();
   setupBibliographyHandlers();
   setupEditorHandlers();
   setupFilesystemHandlers();
@@ -64,6 +65,9 @@ export function setupIPCHandlers() {
   setupSimilarityHandlers();
   setupTropyHandlers();
   setupSlidesHandlers();
+  setupFusionHandlers();
+  setupSourcesHandlers();
+  setupCitationHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
 }

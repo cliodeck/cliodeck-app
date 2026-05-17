@@ -74,7 +74,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
     }
   };
 
-  const handleChange = (key: keyof RevealJsConfig, value: any) => {
+  const handleChange = (key: keyof RevealJsConfig, value: RevealJsConfig[keyof RevealJsConfig]) => {
     const newConfig = { ...config, [key]: value };
     saveConfig(newConfig);
   };
@@ -90,7 +90,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
         <label>Thème</label>
         <select
           value={config.theme}
-          onChange={(e) => handleChange('theme', e.target.value)}
+          onChange={(e) => handleChange('theme', e.target.value as RevealJsConfig['theme'])}
           disabled={isSaving}
         >
           <option value="black">Black (défaut)</option>
@@ -111,7 +111,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
         <label>Transition</label>
         <select
           value={config.transition}
-          onChange={(e) => handleChange('transition', e.target.value)}
+          onChange={(e) => handleChange('transition', e.target.value as RevealJsConfig['transition'])}
           disabled={isSaving}
         >
           <option value="none">Aucune</option>

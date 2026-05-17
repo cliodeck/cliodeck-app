@@ -111,13 +111,25 @@ export class HybridSearch {
   ): SearchResult[] {
     const scores = new Map<string, RRFScore & { hasExactMatch?: boolean }>();
 
-    // Extract potential keywords (words > 4 chars, likely proper nouns or significant terms)
+    // Extract potential keywords. Two paths because a single length threshold
+    // either lets in stopwords ("the", "what") or excludes short acronyms
+    // ("KAQG", "CIA"). Both fail us — common words make the boost meaningless,
+    // short acronyms are exactly the case hybrid search needs to rescue.
+    //   (1) Acronyms in the original (pre-lowercase) query: 2–6 chars, all
+    //       uppercase. These are usually proper-noun identifiers the embedding
+    //       model has never seen, so BM25 is the only retriever that finds
+    //       them and they desperately need the boost.
+    //   (2) Long lowercase tokens (>= 5 chars): the original behaviour, for
+    //       ordinary proper nouns and significant terms.
     const queryKeywords = originalQuery
-      ? originalQuery
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-          .split(/\s+/)
-          .filter(t => t.length > 4)
+      ? Array.from(new Set([
+          ...((originalQuery.match(/\b[A-Z][A-Z0-9]{1,5}\b/g) ?? []).map(t => t.toLowerCase())),
+          ...originalQuery
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+            .split(/\s+/)
+            .filter(t => t.length >= 5),
+        ]))
       : [];
 
     // Helper to check if chunk contains exact keyword matches
@@ -186,19 +198,60 @@ export class HybridSearch {
       console.log(`🎯 Hybrid search: Boosted ${boostedCount} chunks with exact keyword matches`);
     }
 
-    // Sort by RRF score and convert to SearchResult
+    // Sort by RRF score (drives ordering: the fusion's real contribution)
+    // and return `similarity` as a unified relevance score so downstream
+    // threshold filters (retrieval-service.ts, seuil ≈ 0.12) keep the
+    // strong matches. Returning rrfScore directly would not work —
+    // top-1 RRF peaks near 1/(K+1) ≈ 0.016, well below any sensible
+    // threshold, and every result would be filtered out.
+    //
+    // The downstream consumer (secondary-retriever.ts) resorts by
+    // `similarity` and then applies the 0.12 cosine threshold. That
+    // means a chunk's *similarity* value controls both its final rank
+    // and whether it survives at all. For rare proper nouns and acronyms
+    // the embedding model has never seen, the actual dense cosine is
+    // low (often 0.25–0.35) — well above the threshold but well below
+    // semantic neighbours scoring 0.45–0.55. The chunk survives the
+    // threshold but gets out-competed in the resort. Hybrid search
+    // exists for exactly this case: BM25 has strong evidence (rank 1–10
+    // on exact term match) and we need that to outweigh semantic
+    // out-competition.
+    //
+    // Fix: for any chunk with a strong sparse rank (top SPARSE_BOOST_RANK),
+    // synthesize a sparse-derived similarity and take the MAX of that
+    // and the dense cosine. Chunks scoring well on either retriever
+    // get the better of the two. BM25-only hits (no dense rank at all)
+    // get the synthetic value directly so they pass the cosine threshold
+    // they have no business being measured against. `denseScore` is
+    // still exposed verbatim for callers that need the real cosine.
+    const SPARSE_BASE = 0.7;
+    const SPARSE_DECAY = 0.02;
+    const SPARSE_FLOOR = 0.15;
+    const SPARSE_BOOST_RANK = 50;
+
     const fusedResults = Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
-      .map((entry) => ({
-        chunk: entry.chunk,
-        similarity: entry.rrfScore, // Use RRF score as similarity
-        document: null as any, // Will be populated later
-        denseScore: entry.denseScore,
-        sparseScore: entry.sparseScore,
-        denseRank: entry.denseRank,
-        sparseRank: entry.sparseRank,
-      }));
+      .map((entry) => {
+        const sparseSynthetic =
+          entry.sparseRank !== null && entry.sparseRank <= SPARSE_BOOST_RANK
+            ? Math.max(
+                SPARSE_FLOOR,
+                SPARSE_BASE - SPARSE_DECAY * (entry.sparseRank - 1),
+              )
+            : 0;
+        const similarity = Math.max(entry.denseScore, sparseSynthetic);
+        return {
+          chunk: entry.chunk,
+          similarity,
+          document: null as any, // Will be populated later
+          denseScore: entry.denseScore,
+          sparseScore: entry.sparseScore,
+          rrfScore: entry.rrfScore,
+          denseRank: entry.denseRank,
+          sparseRank: entry.sparseRank,
+        };
+      });
 
     return fusedResults;
   }

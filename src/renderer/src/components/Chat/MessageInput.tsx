@@ -8,6 +8,7 @@ interface MessageInputProps {
   onSend: () => void;
   onCancel: () => void;
   isProcessing: boolean;
+  placeholder?: string;
 }
 
 export const MessageInput: React.FC<MessageInputProps> = ({
@@ -16,11 +17,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
   onCancel,
   isProcessing,
+  placeholder,
 }) => {
   const { t } = useTranslation('common');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -29,7 +30,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   }, [value]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Cmd/Ctrl + Enter sends; bare Enter inserts a newline.
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (!isProcessing && value.trim()) {
         onSend();
@@ -37,14 +39,16 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   };
 
+  const resolvedPlaceholder = placeholder ?? t('chat.placeholder');
+
   return (
     <div className="message-input">
       <div className="input-container">
         <textarea
           ref={textareaRef}
           className="input-textarea"
-          placeholder={t('chat.placeholder')}
-          aria-label={t('chat.placeholder')}
+          placeholder={resolvedPlaceholder}
+          aria-label={resolvedPlaceholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}

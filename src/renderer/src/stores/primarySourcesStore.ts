@@ -174,9 +174,9 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       }
 
       return { success: false, error: result.error };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to open TPY project:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   },
 
@@ -228,9 +228,9 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       }
 
       return { success: false, errors: result.errors };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Sync failed:', error);
-      return { success: false, errors: [error.message] };
+      return { success: false, errors: [error instanceof Error ? error.message : String(error)] };
     } finally {
       unsubscribe();
       set({ isSyncing: false, syncProgress: null });
@@ -303,7 +303,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       }
 
       return { success: false };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OCR failed:', error);
       return { success: false };
     } finally {
@@ -323,9 +323,9 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       }
 
       return { success: false, error: result.error };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Import transcription failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   },
 
@@ -347,15 +347,15 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       const result = await window.electron.tropy.getAllSources();
 
       if (result.success && result.sources) {
-        const sources: PrimarySource[] = result.sources.map((s: any) => ({
-          id: s.id,
+        const sources: PrimarySource[] = result.sources.map((s: Partial<PrimarySource>) => ({
+          id: s.id ?? '',
           tropyId: s.tropyId,
-          title: s.title,
+          title: s.title ?? '',
           date: s.date,
           creator: s.creator,
           archive: s.archive,
           collection: s.collection,
-          type: s.type,
+          type: s.type ?? 'document',
           tags: [],
           transcription: s.transcription,
           transcriptionSource: s.transcriptionSource,

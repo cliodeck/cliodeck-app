@@ -12,6 +12,7 @@ interface Citation {
   keywords?: string;
   notes?: string;
   customFields?: Record<string, string>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- arbitrary BibTeX fields
   [key: string]: any;
 }
 

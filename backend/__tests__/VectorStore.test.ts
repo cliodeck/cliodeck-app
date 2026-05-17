@@ -2,22 +2,28 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { VectorStore } from '../core/vector-store/VectorStore';
 import type { PDFDocument, DocumentChunk } from '../types/pdf-document';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 describe('VectorStore', () => {
   let vectorStore: VectorStore;
-  const testDbPath = path.join(__dirname, 'test-vectors.db');
+  let testProjectDir: string;
 
   beforeEach(() => {
-    // Create a test database
-    vectorStore = new VectorStore(path.dirname(testDbPath));
+    // Use an isolated temp project dir per test; VectorStore writes to
+    // <projectPath>/.cliodeck/vectors.db, so sharing a dir leaks state between tests.
+    testProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vectorstore-test-'));
+    vectorStore = new VectorStore(testProjectDir);
   });
 
   afterEach(() => {
-    // Clean up test database
-    vectorStore.close();
-    if (fs.existsSync(testDbPath)) {
-      fs.unlinkSync(testDbPath);
+    try {
+      vectorStore.close();
+    } catch {
+      // ignore — some tests may leave the store in an already-closed state
+    }
+    if (fs.existsSync(testProjectDir)) {
+      fs.rmSync(testProjectDir, { recursive: true, force: true });
     }
   });
 
@@ -46,6 +52,34 @@ describe('VectorStore', () => {
       expect(retrieved).toBeDefined();
       expect(retrieved?.title).toBe('Test Document');
       expect(retrieved?.author).toBe('Test Author');
+    });
+
+    it('getDocumentById should return the same row as getDocument and null when missing', () => {
+      const doc: PDFDocument = {
+        id: 'doc-byid',
+        fileURL: '/test/byid.pdf',
+        title: 'Indexed Lookup',
+        author: 'A',
+        year: '2024',
+        pageCount: 3,
+        metadata: { keywords: [] },
+        createdAt: new Date(),
+        indexedAt: new Date(),
+        lastAccessedAt: new Date(),
+        get displayString() {
+          return this.title;
+        },
+      };
+
+      vectorStore.saveDocument(doc);
+
+      const viaGet = vectorStore.getDocument('doc-byid');
+      const viaById = vectorStore.getDocumentById('doc-byid');
+      expect(viaById).toBeDefined();
+      expect(viaById?.id).toBe('doc-byid');
+      expect(viaById?.title).toBe(viaGet?.title);
+
+      expect(vectorStore.getDocumentById('does-not-exist')).toBeNull();
     });
 
     it('should list all documents', () => {
