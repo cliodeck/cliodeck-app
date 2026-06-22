@@ -194,10 +194,9 @@ describe('Provider parity (mock-replay)', () => {
   for (const fixture of embeddingFixtures) {
     describe(`scenario: ${fixture.name}`, () => {
       it('ollama returns expected vectors', async () => {
-        let call = 0;
         handlers.push((url) => {
-          if (url.endsWith('/api/embeddings')) {
-            return jsonResponse(fixture.wire.ollama[call++]);
+          if (url.endsWith('/api/embed')) {
+            return jsonResponse(fixture.wire.ollama);
           }
           return null;
         });

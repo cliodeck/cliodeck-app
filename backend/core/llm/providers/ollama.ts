@@ -29,6 +29,16 @@ export interface OllamaEmbeddingProviderConfig {
   model: string;
   /** Declared vector dimension; used before any live call. Verified on first embed. */
   dimension: number;
+  /**
+   * Override Ollama's `num_ctx` for embedding requests. Most embedding
+   * models hard-cap their context in the model file — e.g. nomic-embed-text
+   * advertises `nomic-bert.context_length = 2048` and ignores any larger
+   * value — so this only helps long-context embedders such as bge-m3 or
+   * nomic-embed-text-v2. Leave undefined to use the model default. Inputs
+   * that still overflow are truncated server-side (see `embed`) rather than
+   * failing the request.
+   */
+  numCtx?: number;
 }
 
 const DEFAULT_BASE = 'http://127.0.0.1:11434';
@@ -355,11 +365,13 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
   private status: ProviderStatus = { state: 'unconfigured' };
   private readonly baseUrl: string;
+  private readonly numCtx?: number;
 
   constructor(cfg: OllamaEmbeddingProviderConfig) {
     this.baseUrl = (cfg.baseUrl ?? DEFAULT_BASE).replace(/\/$/, '');
     this.model = cfg.model;
     this.dimension = cfg.dimension;
+    this.numCtx = cfg.numCtx;
     this.status = { state: 'handshaking' };
   }
 
@@ -405,21 +417,50 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     texts: string[],
     opts: { signal?: AbortSignal } = {}
   ): Promise<number[][]> {
-    const out: number[][] = [];
-    for (const t of texts) {
-      const res = await fetchJson<{ embedding: number[] }>(
-        `${this.baseUrl}/api/embeddings`,
-        { model: this.model, prompt: t },
-        opts.signal
+    if (texts.length === 0) return [];
+
+    // Use the modern `/api/embed` endpoint with `truncate: true`. Two reasons:
+    //   1. It clamps over-length inputs to the model's context window instead
+    //      of failing with HTTP 500 "the input length exceeds the context
+    //      length". The legacy `/api/embeddings` endpoint ignores `truncate`
+    //      and 500s — which is exactly the PDF-indexing crash this replaces.
+    //   2. It batches all texts in one round-trip (returns `embeddings[]`).
+    // `num_ctx` is forwarded only when explicitly configured; most embedding
+    // models hard-cap their context (e.g. nomic = 2048) and ignore it, but
+    // long-context embedders (bge-m3, nomic-embed-text-v2) honour it.
+    const body: {
+      model: string;
+      input: string[];
+      truncate: boolean;
+      options?: { num_ctx: number };
+    } = {
+      model: this.model,
+      input: texts,
+      truncate: true,
+    };
+    if (typeof this.numCtx === 'number' && this.numCtx > 0) {
+      body.options = { num_ctx: this.numCtx };
+    }
+
+    const res = await fetchJson<{ embeddings: number[][] }>(
+      `${this.baseUrl}/api/embed`,
+      body,
+      opts.signal
+    );
+    const vectors = res.embeddings ?? [];
+    if (vectors.length !== texts.length) {
+      throw new Error(
+        `Embedding count mismatch: requested ${texts.length}, got ${vectors.length}`
       );
-      if (res.embedding.length !== this.dimension) {
+    }
+    for (const vec of vectors) {
+      if (vec.length !== this.dimension) {
         throw new Error(
-          `Embedding dimension mismatch: got ${res.embedding.length}, declared ${this.dimension}`
+          `Embedding dimension mismatch: got ${vec.length}, declared ${this.dimension}`
         );
       }
-      out.push(res.embedding);
     }
-    return out;
+    return vectors;
   }
 
   async dispose(): Promise<void> {

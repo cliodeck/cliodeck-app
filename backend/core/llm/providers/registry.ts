@@ -52,6 +52,8 @@ export interface EmbeddingConfig {
   dimension: number;
   baseUrl?: string;
   apiKey?: string;
+  /** Ollama-only: override `num_ctx` for embedding requests (see `OllamaEmbeddingProviderConfig`). */
+  numCtx?: number;
 }
 
 export interface RegistryConfig {
@@ -94,6 +96,7 @@ registerEmbeddingProvider('ollama', (cfg) =>
     model: cfg.model,
     dimension: cfg.dimension,
     baseUrl: cfg.baseUrl,
+    numCtx: cfg.numCtx,
   } satisfies OllamaEmbeddingProviderConfig)
 );
 
