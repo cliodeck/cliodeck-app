@@ -132,6 +132,13 @@ const getLatexTemplate = (projectType: string): string => {
 \\setsansfont{${sansFont}}[Ligatures=TeX]
 \\setmonofont{${monoFont}}[Scale=0.9]
 
+% Pandoc compatibility - define commands that Pandoc may generate
+% These are not defined in standard LaTeX classes but used by Pandoc
+\\providecommand{\\tightlist}{}           % Compact lists
+\\providecommand{\\textquotesingle}{'}     % Straight single quote
+\\providecommand{\\textendash}{-}        % En dash
+\\providecommand{\\textemdash}{--}       % Em dash
+
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
 \\setlength{\\cslhangindent}{1.5em}
@@ -202,6 +209,13 @@ $body$
 \\setsansfont{${sansFont}}[Ligatures=TeX]
 \\setmonofont{${monoFont}}[Scale=0.9]
 
+% Pandoc compatibility - define commands that Pandoc may generate
+% These are not defined in standard LaTeX classes but used by Pandoc
+\\providecommand{\\tightlist}{}           % Compact lists
+\\providecommand{\\textquotesingle}{'}     % Straight single quote
+\\providecommand{\\textendash}{-}        % En dash
+\\providecommand{\\textemdash}{--}       % Em dash
+
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
 \\setlength{\\cslhangindent}{1.5em}
@@ -270,8 +284,13 @@ $body$
 \\usepackage{booktabs}
 \\usepackage{caption}
 
-% Pandoc compatibility - define tightlist BEFORE any Beamer configuration
-\\providecommand{\\tightlist}{}
+% Pandoc compatibility - define commands that Pandoc may generate
+% These are not defined in standard LaTeX classes but used by Pandoc
+% Must be defined BEFORE any Beamer configuration
+\\providecommand{\\tightlist}{}           % Compact lists
+\\providecommand{\\textquotesingle}{'}     % Straight single quote
+\\providecommand{\\textendash}{-}        % En dash
+\\providecommand{\\textemdash}{--}       % Em dash
 
 % ============================================================================
 % Elegant Slides Theme - Adapted for Pandoc
