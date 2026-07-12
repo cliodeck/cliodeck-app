@@ -13,6 +13,7 @@ import type {
   LLMProvider,
   ProviderStatus,
 } from './base.js';
+import { instrumentEmbedding, instrumentLLM } from './instrument.js';
 import {
   OllamaEmbeddingProvider,
   OllamaProvider,
@@ -191,7 +192,8 @@ export class ProviderRegistry {
           `Unknown LLM provider: ${this.config.llm.provider}. Registered: ${[...llmFactories.keys()].join(', ')}`
         );
       }
-      this.llm = f(this.config.llm);
+      // Décoré pour le journal d'usage IA (best-effort ; inerte si journal absent).
+      this.llm = instrumentLLM(f(this.config.llm), this.config.llm.provider);
     }
     return this.llm;
   }
@@ -204,7 +206,10 @@ export class ProviderRegistry {
           `Unknown embedding provider: ${this.config.embedding.provider}`
         );
       }
-      this.embedding = f(this.config.embedding);
+      this.embedding = instrumentEmbedding(
+        f(this.config.embedding),
+        this.config.embedding.provider
+      );
     }
     return this.embedding;
   }

@@ -22,6 +22,7 @@ import { UsageJournalStore } from '../../../backend/core/usage-journal/UsageJour
 import {
   getJournalContext,
   setBatchSink,
+  setInferenceSink,
   type BatchAccumulator,
   type JournalContext,
 } from '../../../backend/core/usage-journal/context.js';
@@ -60,6 +61,7 @@ class UsageJournalService {
       this.store = new UsageJournalStore(dbPath);
       this.workspaceRoot = projectRoot;
       this.session = null;
+      setInferenceSink((input) => this.record(input));
       setBatchSink((acc, ctx) => this.recordBatch(acc, ctx));
       console.log('🧾 Usage journal initialized:', dbPath);
     } catch (err) {
@@ -70,6 +72,7 @@ class UsageJournalService {
   }
 
   close(): void {
+    setInferenceSink(undefined);
     setBatchSink(undefined);
     this.flush();
     if (this.flushTimer) {

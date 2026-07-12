@@ -14,6 +14,7 @@ import type { RAGConfig } from '../../../../backend/types/config.js';
 import type { VectorStore } from '../../../../backend/core/vector-store/VectorStore.js';
 import type { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 import { extractPdfIsolated } from '../pdf-extract-isolated.js';
+import { runBatch } from '../../../../backend/core/usage-journal/context.js';
 
 export type { IndexingProgress };
 
@@ -88,7 +89,11 @@ export class PdfIndexer {
     bibliographyMetadata?: { title?: string; author?: string; year?: string },
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
-    const document = await this.backend.indexPDF(filePath, bibtexKey, onProgress, bibliographyMetadata);
+    // Scope de batch : les embeddings par chunk sont agrégés en un seul
+    // `embedding_batch` (journal d'usage IA) plutôt qu'un événement par chunk.
+    const document = await runBatch('pdf', () =>
+      this.backend.indexPDF(filePath, bibtexKey, onProgress, bibliographyMetadata)
+    );
     if (collectionKeys && collectionKeys.length > 0) {
       this.vectorStore.setDocumentCollections(document.id, collectionKeys);
       console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${collectionKeys.length} collection(s)`);

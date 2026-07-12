@@ -18,6 +18,7 @@ import { ChunkDeduplicator } from '../../../backend/core/chunking/ChunkDeduplica
 // `pdfService.getOllamaClient() / getLLMProviderManager()` pattern.
 import { configManager } from './config-manager.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { runBatch } from '../../../backend/core/usage-journal/context.js';
 import type {
   EmbeddingProvider,
   LLMProvider,
@@ -273,7 +274,11 @@ class TropyService {
     if (result.success) {
       try {
         console.log('📐 [TROPY-SERVICE] Starting embedding generation...');
-        const embeddingResult = await this.generateEmbeddingsForSources(onProgress);
+        // Scope de batch : agrège les embeddings par chunk en un seul
+        // `embedding_batch` (journal d'usage IA) pour cette synchro Tropy.
+        const embeddingResult = await runBatch('tropy', () =>
+          this.generateEmbeddingsForSources(onProgress)
+        );
         console.log(`📐 [TROPY-SERVICE] Embeddings generated: ${embeddingResult.chunksCreated} chunks for ${embeddingResult.sourcesProcessed} sources`);
 
         // Save HNSW index after embedding generation

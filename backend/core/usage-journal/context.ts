@@ -12,7 +12,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { BatchCorpus, UsageMode } from './types.js';
+import type { BatchCorpus, RecordInferenceInput, UsageMode } from './types.js';
 
 /**
  * Accumulateur d'un scope d'indexation en masse. Tant qu'il est présent dans le
@@ -61,6 +61,27 @@ export function runWithJournalContext<T>(ctx: JournalContext, fn: () => T): T {
 export function patchJournalContext(patch: Partial<JournalContext>): void {
   const ctx = storage.getStore();
   if (ctx) Object.assign(ctx, patch);
+}
+
+/**
+ * Sink d'inférence : appelé par le hook providers pour chaque événement factuel
+ * (completion / embedding hors batch). Enregistré par le service ; `undefined` si le
+ * journal n'est pas initialisé — la capture est best-effort, l'app tourne sans journal.
+ */
+type InferenceSink = (input: RecordInferenceInput) => void;
+let inferenceSink: InferenceSink | undefined;
+
+export function setInferenceSink(sink: InferenceSink | undefined): void {
+  inferenceSink = sink;
+}
+
+/** Émet un événement factuel vers le sink, sans jamais lever (best-effort). */
+export function recordInference(input: RecordInferenceInput): void {
+  try {
+    inferenceSink?.(input);
+  } catch {
+    // La journalisation ne doit jamais faire échouer un appel LLM.
+  }
 }
 
 /**
