@@ -9,6 +9,7 @@ import { modeService } from '../../services/mode-service.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { tropyService } from '../../services/tropy-service.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
+import { usageJournalService } from '../../services/usage-journal-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -111,6 +112,7 @@ export function setupProjectHandlers() {
           await Promise.all([
             historyService.init(projectPath),
             Promise.resolve(modeService.init(projectPath)),
+            Promise.resolve(usageJournalService.init(projectPath)),
             tropyService.init(projectPath),
           ]);
 
@@ -139,6 +141,9 @@ export function setupProjectHandlers() {
 
       // Close History Service (ends session and closes DB)
       historyService.close();
+
+      // Close Usage Journal Service (flush buffer, close DB)
+      usageJournalService.close();
 
       // Close PDF Service and free resources
       pdfService.close();
