@@ -40,7 +40,8 @@ ClioDeck v2 organises work into four top-level modes that share the same project
 - **MCP clients** (scaffold) — schema is in place (`WorkspaceConfig.mcpClients` with stdio + SSE transports); runtime lifecycle + UI land in a follow-up.
 - **Source inspector** — scans RAG chunks for prompt-injection patterns before they reach the model (warn / block modes).
 - **`.cliohints`** — durable workspace context injected into every prompt (style guide, period focus, language preference).
-- **Headless CLI** — `cliodeck recipe run`, `cliodeck search`, `cliodeck hints`, `cliodeck import-cliobrain` for batch / CI workflows.
+- **AI usage journal** — a reflexive, ethics-oriented record of your inference use (volumes, tasks, corpora) plus a manual decision layer (what non-AI alternative existed, why it was set aside, was it worth it). Local-first, kept in a separate `.cliodeck/journal.db` so it can be archived and published independently. Distinct from the research journal — it logs volumes and decisions, never prompts. See [`docs/journal-usage-ia.md`](docs/journal-usage-ia.md).
+- **Headless CLI** — `cliodeck recipe run`, `cliodeck search`, `cliodeck hints`, `cliodeck import-cliobrain` for batch / CI workflows; `cliodeck journal today|week|export` (via `bin/cliodeck-journal`) to review and annotate AI usage.
 - **Local-first** — all data stays on your machine; works offline with embedded LLM.
 - **Export** — PDF (via Pandoc/LaTeX) and Word with template support; RevealJS slide generation.
 
@@ -113,6 +114,7 @@ Full documentation is available in the **[ClioDeck Wiki](https://github.com/inac
 - [Build Guide](https://github.com/inactinique/cliodeck/wiki/2.1-Build-and-Deployment-Guide) — development setup
 - [Fusion strategy](docs/fusion-cliobrain-strategy.md) — why v2 absorbs ClioBrain
 - [ADR 0001](docs/adr/0001-rag-pipeline-arbitration.md) — RAG pipeline arbitration
+- [AI usage journal](docs/journal-usage-ia.md) — reflexive inference-use record ([ADR 0007](docs/adr/0007-usage-journal-separate-db-and-provider-hook.md))
 
 ## Tech stack
 

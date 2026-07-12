@@ -104,12 +104,38 @@ fusion branch reference the step numbers defined there.
   typed `SecurityEvent` JSONL log. Threat model is explicit:
   defends against malicious *sources*, not a compromised local LLM.
 
+#### AI usage journal (journal d'usage IA)
+- Reflexive, ethics-oriented record of AI inference use — **not telemetry**,
+  and strictly separate from the research journal (`history_*`): it logs
+  volumes and usage *decisions*, never prompts.
+- Two layers: a **factual** layer captured automatically via a decorator on
+  the provider registry (`getLLM()`/`getEmbedding()`) covering completions,
+  embeddings, CLI and recipes; and a **decisional** layer of manual daily
+  annotations (task / non-AI alternative / justification / verdict).
+- Bulk indexing aggregated into one `embedding_batch` per run; tokens real
+  when the API reports them (Ollama, Anthropic, Gemini), else estimated
+  (chars/4, flagged). Non-blocking writes — a journal failure never fails a
+  call.
+- Separate SQLite store `.cliodeck/journal.db` (so it can be archived and
+  published independently), tables `inference_events`, `usage_decisions`,
+  `session_decision`, `journal_meta`.
+- CLI `cliodeck journal today|week|export` via `bin/cliodeck-journal`
+  (Electron-node wrapper for the native better-sqlite3 ABI), with interactive
+  annotation and Markdown / JSONL / CSV export (`--anonymize` for stable
+  aliases). Markdown is structured by week with a "violations" section for
+  substantial un-annotated sessions.
+- Minimal UI: Settings → « Journal d'usage IA » (daily summary + annotation
+  form + discreet badge). Workspace mode mirrored to the main process so
+  events are tagged with the real mode.
+- ADR 0007; see `docs/journal-usage-ia.md`.
+
 #### Headless CLI
 - `cliodeck recipe list [--workspace]`
 - `cliodeck recipe run <name> --workspace <path> [--input k=v …]`
 - `cliodeck search "query" --workspace <path> [--topK 10]`
 - `cliodeck hints show|set --workspace <path>`
 - `cliodeck import-cliobrain <workspace> [--overwrite] [--name <label>]`
+- `cliodeck journal today|week|export --workspace <path>` (via `bin/cliodeck-journal`)
 - Unix-convention exit codes (0 / 1 / 2).
 
 #### RAG preparation (2.4a gate)
