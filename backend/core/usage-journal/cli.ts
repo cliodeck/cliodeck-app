@@ -15,14 +15,20 @@
  */
 
 import path from 'path';
+import { randomUUID } from 'crypto';
+import readline from 'node:readline';
 import { workspaceFiles } from '../workspace/layout.js';
 import { UsageJournalStore } from './UsageJournalStore.js';
-import { summarize, type UsageSummary } from './aggregate.js';
+import { summarize, type SessionSummary, type UsageSummary } from './aggregate.js';
+import { localDateKey, parseSessionSelection, parseVerdict } from './annotate.js';
+import type { UsageDecision } from './types.js';
 
 interface JournalArgs {
   workspace?: string;
   from?: string;
   to?: string;
+  annotate?: boolean;
+  noAnnotate?: boolean;
 }
 
 function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
@@ -44,7 +50,11 @@ function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
         i += 1;
       }
     }
-    if (value === undefined) continue;
+    if (value === undefined) {
+      if (key === 'annotate') args.annotate = true;
+      else if (key === 'no-annotate') args.noAnnotate = true;
+      continue;
+    }
     if (key === 'workspace') args.workspace = value;
     else if (key === 'from') args.from = value;
     else if (key === 'to') args.to = value;
@@ -52,11 +62,14 @@ function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
   return { positional, args };
 }
 
-const USAGE = `cliodeck journal — journal d'usage IA (lecture)
+const USAGE = `cliodeck journal — journal d'usage IA
 
 Usage:
-  cliodeck journal today --workspace <path>
+  cliodeck journal today --workspace <path> [--annotate | --no-annotate]
   cliodeck journal week  --workspace <path>
+
+  today invite à annoter les décisions du jour si le terminal est interactif.
+  --no-annotate force l'affichage seul ; --annotate force l'invite.
 `;
 
 /** Bornes ISO [début de journée locale, lendemain) pour un décalage de jours. */
@@ -171,9 +184,132 @@ export async function runJournalCli(argv: string[]): Promise<number> {
     const title =
       sub === 'today' ? "Journal d'usage IA — aujourd'hui" : "Journal d'usage IA — 7 derniers jours";
     process.stdout.write(renderSummary(summary, title) + '\n');
+
+    if (sub === 'today') {
+      const interactive = args.annotate || (!args.noAnnotate && !!process.stdin.isTTY);
+      if (interactive && summary.sessions.length > 0) {
+        await annotateLoop(store, summary.sessions, args.workspace);
+      }
+    }
     return 0;
   } finally {
     store.close();
+  }
+}
+
+/**
+ * Lecteur de lignes événementiel. On n'utilise PAS `readline/promises` : sous le Node
+ * embarqué d'Electron, son `question()` séquentiel ne délivre que la première ligne
+ * d'un stdin en pipe puis se bloque. L'API `.on('line')` délivre bien toutes les
+ * lignes (TTY comme pipe).
+ */
+class LineReader {
+  private queue: string[] = [];
+  private waiters: Array<(line: string) => void> = [];
+  private ended = false;
+  private readonly rl: readline.Interface;
+
+  constructor() {
+    this.rl = readline.createInterface({ input: process.stdin });
+    this.rl.on('line', (l) => {
+      const w = this.waiters.shift();
+      if (w) w(l);
+      else this.queue.push(l);
+    });
+    this.rl.on('close', () => {
+      this.ended = true;
+      let w: ((line: string) => void) | undefined;
+      while ((w = this.waiters.shift())) w('');
+    });
+  }
+
+  question(prompt: string): Promise<string> {
+    process.stdout.write(prompt);
+    const next = this.queue.shift();
+    if (next !== undefined) return Promise.resolve(next);
+    if (this.ended) return Promise.resolve('');
+    return new Promise((res) => this.waiters.push(res));
+  }
+
+  close(): void {
+    this.rl.close();
+  }
+}
+
+/**
+ * Invite interactive d'annotation. Objectif d'ergonomie : annoter une journée
+ * normale en moins de deux minutes (instructions §4.2). Champs courts, verdict à
+ * une lettre, rattachement des sessions par indices. Boucle tant que l'utilisateur
+ * veut ajouter des décisions (1 à 4 par jour typiquement).
+ */
+async function annotateLoop(
+  store: UsageJournalStore,
+  sessions: SessionSummary[],
+  workspace: string
+): Promise<void> {
+  const rl = new LineReader();
+  try {
+    process.stdout.write('\n');
+    const first = (await rl.question('Annoter une décision d’usage ? [o/N] ')).trim().toLowerCase();
+    if (first !== 'o' && first !== 'oui' && first !== 'y') return;
+
+    let more = true;
+    while (more) {
+      const task = (await rl.question('Tâche (description courte) : ')).trim();
+      if (!task) {
+        process.stdout.write('Tâche vide — décision abandonnée.\n');
+      } else {
+        const alternative =
+          (await rl.question('Alternative non-IA (vide = « aucune raisonnable ») : ')).trim() ||
+          'aucune raisonnable';
+        const justification = (await rl.question('Pourquoi l’alternative a été écartée : ')).trim();
+
+        let verdict = parseVerdict(
+          await rl.question('Verdict [w=valait, n=pas, u=incertain, p=en attente] : ')
+        );
+        while (verdict === null) {
+          verdict = parseVerdict(await rl.question('  saisie non reconnue, réessayer [w/n/u/p] : '));
+        }
+        const verdictNote = (await rl.question('Note de verdict (optionnel) : ')).trim();
+
+        // Rattachement manuel des sessions du jour.
+        process.stdout.write('\nSessions du jour :\n');
+        sessions.forEach((s, i) => {
+          const cov = s.covered ? ' (déjà rattachée à une décision)' : '';
+          process.stdout.write(
+            `  ${i + 1}. ${timeOf(s.startedAt)}–${timeOf(s.endedAt)} · ${calls(s.events)}, ` +
+              `${fmt(s.totalTokens)} tokens · [${s.modes.join(', ')}]${cov}\n`
+          );
+        });
+        const picked = parseSessionSelection(
+          await rl.question('Rattacher quelles sessions ? (ex: 1,3  |  1-2  |  all  |  vide) : '),
+          sessions.length
+        );
+
+        const decision: UsageDecision = {
+          id: randomUUID(),
+          date: localDateKey(new Date()),
+          workspace,
+          task,
+          alternative,
+          justification,
+          verdict,
+          verdictNote: verdictNote || undefined,
+        };
+        store.upsertDecision(decision);
+        for (const idx of picked) {
+          store.linkSessionDecision({ sessionId: sessions[idx].id, decisionId: decision.id });
+        }
+        process.stdout.write(
+          `✓ Décision enregistrée (${verdict}), ${picked.length} session(s) rattachée(s).\n`
+        );
+      }
+
+      const again = (await rl.question('\nAjouter une autre décision ? [o/N] ')).trim().toLowerCase();
+      more = again === 'o' || again === 'oui' || again === 'y';
+    }
+  } finally {
+    rl.close();
   }
 }
 
