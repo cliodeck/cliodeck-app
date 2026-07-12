@@ -25,6 +25,19 @@
   border: 1px solid var(--border-color);
   border-radius: 6px;
   font-size: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-journal__badge {
+  margin-left: auto;
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
 }
 
 .usage-journal__chips {
