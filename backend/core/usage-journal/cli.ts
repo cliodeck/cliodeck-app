@@ -21,14 +21,17 @@ import { workspaceFiles } from '../workspace/layout.js';
 import { UsageJournalStore } from './UsageJournalStore.js';
 import { summarize, type SessionSummary, type UsageSummary } from './aggregate.js';
 import { localDateKey, parseSessionSelection, parseVerdict } from './annotate.js';
+import { buildCsv, buildJsonl, buildMarkdown } from './export.js';
 import type { UsageDecision } from './types.js';
 
 interface JournalArgs {
   workspace?: string;
   from?: string;
   to?: string;
+  format?: string;
   annotate?: boolean;
   noAnnotate?: boolean;
+  anonymize?: boolean;
 }
 
 function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
@@ -53,11 +56,13 @@ function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
     if (value === undefined) {
       if (key === 'annotate') args.annotate = true;
       else if (key === 'no-annotate') args.noAnnotate = true;
+      else if (key === 'anonymize') args.anonymize = true;
       continue;
     }
     if (key === 'workspace') args.workspace = value;
     else if (key === 'from') args.from = value;
     else if (key === 'to') args.to = value;
+    else if (key === 'format') args.format = value;
   }
   return { positional, args };
 }
@@ -65,11 +70,14 @@ function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
 const USAGE = `cliodeck journal — journal d'usage IA
 
 Usage:
-  cliodeck journal today --workspace <path> [--annotate | --no-annotate]
-  cliodeck journal week  --workspace <path>
+  cliodeck journal today  --workspace <path> [--annotate | --no-annotate]
+  cliodeck journal week   --workspace <path>
+  cliodeck journal export --workspace <path> [--format md|jsonl|csv]
+                          [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--anonymize]
 
   today invite à annoter les décisions du jour si le terminal est interactif.
   --no-annotate force l'affichage seul ; --annotate force l'invite.
+  export écrit sur la sortie standard (rediriger vers un fichier avec >).
 `;
 
 /** Bornes ISO [début de journée locale, lendemain) pour un décalage de jours. */
@@ -163,7 +171,7 @@ export async function runJournalCli(argv: string[]): Promise<number> {
     process.stdout.write(USAGE);
     return sub ? 0 : 2;
   }
-  if (sub !== 'today' && sub !== 'week') {
+  if (sub !== 'today' && sub !== 'week' && sub !== 'export') {
     process.stderr.write(USAGE);
     return 2;
   }
@@ -176,6 +184,15 @@ export async function runJournalCli(argv: string[]): Promise<number> {
 
   const dbPath = path.join(workspaceFiles(args.workspace).root, 'journal.db');
   const store = new UsageJournalStore(dbPath);
+
+  if (sub === 'export') {
+    try {
+      return runExport(store, args);
+    } finally {
+      store.close();
+    }
+  }
+
   try {
     const range = sub === 'today' ? dayRange(0) : weekRange();
     const events = store.getEventsBetween(range.from, range.to);
@@ -311,6 +328,39 @@ async function annotateLoop(
   } finally {
     rl.close();
   }
+}
+
+/** Exporte le journal (md|jsonl|csv) sur la sortie standard. */
+function runExport(store: UsageJournalStore, args: JournalArgs): number {
+  const format = (args.format ?? 'md').toLowerCase();
+  if (format !== 'md' && format !== 'jsonl' && format !== 'csv') {
+    process.stderr.write(`format inconnu: ${format} (attendu md|jsonl|csv)\n`);
+    return 2;
+  }
+
+  // Bornes : dates YYYY-MM-DD optionnelles → ISO. Par défaut, tout l'historique.
+  const fromISO = args.from ? `${args.from}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z';
+  const toISO = args.to ? `${args.to}T23:59:59.999Z` : '2999-12-31T23:59:59.999Z';
+  const fromDate = args.from ?? '1970-01-01';
+  const toDate = args.to ?? '2999-12-31';
+
+  const input = {
+    events: store.getEventsBetween(fromISO, toISO),
+    decisions: store.getDecisionsBetween(fromDate, `${toDate}~`), // borne haute inclusive
+    links: store.getAllLinks(),
+    from: fromISO,
+    to: toISO,
+  };
+  const opts = { anonymize: !!args.anonymize };
+
+  const out =
+    format === 'md'
+      ? buildMarkdown(input, opts)
+      : format === 'jsonl'
+        ? buildJsonl(input, opts)
+        : buildCsv(input, opts);
+  process.stdout.write(out.endsWith('\n') ? out : out + '\n');
+  return 0;
 }
 
 /** [il y a 6 jours 00:00 local, demain 00:00 local) — fenêtre glissante de 7 jours. */
