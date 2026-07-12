@@ -309,6 +309,18 @@ export class UsageJournalStore {
       .run(link.sessionId, link.decisionId);
   }
 
+  /** Remplace l'ensemble des sessions rattachées à une décision (transaction). */
+  replaceDecisionLinks(decisionId: string, sessionIds: string[]): void {
+    const tx = this.db.transaction((ids: string[]) => {
+      this.db.prepare('DELETE FROM session_decision WHERE decision_id = ?').run(decisionId);
+      const stmt = this.db.prepare(
+        'INSERT OR IGNORE INTO session_decision (session_id, decision_id) VALUES (?, ?)'
+      );
+      for (const sid of ids) stmt.run(sid, decisionId);
+    });
+    tx(sessionIds);
+  }
+
   unlinkSessionDecision(link: SessionDecisionLink): void {
     this.db
       .prepare(

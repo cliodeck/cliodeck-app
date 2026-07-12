@@ -514,6 +514,28 @@ export const BibliographyGetStatisticsSchema = z.object({
   citations: z.array(z.record(z.string(), z.unknown())).optional(),
 });
 
+// Usage journal (journal d'usage IA) schemas
+export const UsageSetModeSchema = z.enum([
+  'brainstorm',
+  'write',
+  'explore',
+  'export',
+  'recipe',
+  'mcp',
+  'cli',
+  'unknown',
+]);
+
+export const UsageSaveDecisionSchema = z.object({
+  id: z.string().min(1).optional(),
+  task: z.string().min(1, 'Tâche requise'),
+  alternative: z.string(),
+  justification: z.string(),
+  verdict: z.enum(['worth_it', 'not_worth_it', 'unsure', 'pending']),
+  verdictNote: z.string().optional(),
+  sessionIds: z.array(z.string()),
+});
+
 /**
  * Validates input data against a Zod schema
  * @param schema Zod schema to validate against

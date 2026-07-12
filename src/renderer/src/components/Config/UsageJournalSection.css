@@ -1,0 +1,150 @@
+.usage-journal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-primary);
+}
+
+.usage-journal__intro {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.usage-journal__muted {
+  color: var(--text-tertiary);
+}
+
+.usage-journal__error {
+  color: var(--color-danger);
+}
+
+.usage-journal__totals {
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.usage-journal__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usage-journal__chip {
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.usage-journal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-journal__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.usage-journal__form input,
+.usage-journal__form textarea,
+.usage-journal__form select {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+
+.usage-journal__form input:focus,
+.usage-journal__form textarea:focus,
+.usage-journal__form select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.usage-journal__sessions {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-journal__sessions legend {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding: 0 4px;
+}
+
+.usage-journal__session {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.usage-journal__tag {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-tertiary) 20%, transparent);
+  color: var(--text-secondary);
+}
+
+.usage-journal__tag--warn {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
+}
+
+.usage-journal__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-journal__actions button {
+  background: var(--color-accent);
+  color: var(--bg-app);
+  border: none;
+  border-radius: 5px;
+  padding: 7px 14px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.usage-journal__actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.usage-journal__ok {
+  color: var(--color-accent);
+  font-size: 0.85rem;
+}
+
+.usage-journal__decisions h4 {
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.usage-journal__decisions ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+}

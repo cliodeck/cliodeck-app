@@ -26,11 +26,32 @@ import {
   type BatchAccumulator,
   type JournalContext,
 } from '../../../backend/core/usage-journal/context.js';
+import { summarize, type UsageSummary } from '../../../backend/core/usage-journal/aggregate.js';
+import { localDateKey } from '../../../backend/core/usage-journal/annotate.js';
 import type {
   InferenceEvent,
   RecordInferenceInput,
+  UsageDecision,
   UsageMode,
+  Verdict,
 } from '../../../backend/core/usage-journal/types.js';
+
+/** Charge utile d'enregistrement d'une décision depuis l'UI. */
+export interface SaveDecisionInput {
+  id?: string;
+  task: string;
+  alternative: string;
+  justification: string;
+  verdict: Verdict;
+  verdictNote?: string;
+  sessionIds: string[];
+}
+
+/** Vue du jour pour l'UI : résumé + décisions du jour. */
+export interface TodayView {
+  summary: UsageSummary;
+  decisions: UsageDecision[];
+}
 
 /** Providers exécutés localement (le reste = cloud). */
 const LOCAL_PROVIDERS = new Set(['ollama']);
@@ -104,6 +125,46 @@ class UsageJournalService {
 
   getStore(): UsageJournalStore | null {
     return this.store;
+  }
+
+  /**
+   * Vue du jour pour l'UI : résumé (ventilations, sessions, violations) + décisions
+   * du jour. Flush préalable pour que les événements récents soient visibles.
+   */
+  getToday(): TodayView | null {
+    if (!this.store) return null;
+    this.flush();
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const range = { from: start.toISOString(), to: end.toISOString() };
+    const events = this.store.getEventsBetween(range.from, range.to);
+    const links = this.store.getAllLinks();
+    const summary = summarize(events, links, range);
+    const dayKey = localDateKey(now);
+    const decisions = this.store.getDecisionsBetween(dayKey, `${dayKey}~`);
+    return { summary, decisions };
+  }
+
+  /**
+   * Enregistre (ou met à jour) une décision d'usage et remplace ses rattachements
+   * de sessions. Retourne la vue du jour rafraîchie.
+   */
+  saveDecision(input: SaveDecisionInput): TodayView | null {
+    if (!this.store) return null;
+    const decision: UsageDecision = {
+      id: input.id ?? randomUUID(),
+      date: localDateKey(new Date()),
+      workspace: this.workspaceRoot ?? '',
+      task: input.task,
+      alternative: input.alternative,
+      justification: input.justification,
+      verdict: input.verdict,
+      verdictNote: input.verdictNote,
+    };
+    this.store.upsertDecision(decision);
+    this.store.replaceDecisionLinks(decision.id, input.sessionIds);
+    return this.getToday();
   }
 
   /**

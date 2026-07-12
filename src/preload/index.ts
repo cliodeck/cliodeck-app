@@ -502,6 +502,21 @@ const api = {
       ipcRenderer.invoke('mode:export', modeId, outputPath),
   },
 
+  // Journal d'usage IA (distinct du journal de recherche `history`)
+  usage: {
+    getToday: () => ipcRenderer.invoke('usage:get-today'),
+    saveDecision: (input: {
+      id?: string;
+      task: string;
+      alternative: string;
+      justification: string;
+      verdict: 'worth_it' | 'not_worth_it' | 'unsure' | 'pending';
+      verdictNote?: string;
+      sessionIds: string[];
+    }) => ipcRenderer.invoke('usage:save-decision', input),
+    setMode: (mode: string) => ipcRenderer.invoke('usage:set-mode', mode),
+  },
+
   // IPC Renderer for menu shortcuts (filtered by channel whitelist)
   ipcRenderer: {
     on: (channel: string, listener: (...args: any[]) => void) => {
