@@ -17,9 +17,84 @@ import { existsSync, mkdirSync, chmodSync } from 'fs';
 import path from 'path';
 import type {
   InferenceEvent,
+  InferenceKind,
+  InferenceStatus,
   SessionDecisionLink,
   UsageDecision,
+  UsageMode,
+  Verdict,
 } from './types.js';
+
+/** Ligne brute de `inference_events` (colonnes snake_case, booléens en 0/1). */
+interface EventRow {
+  id: string;
+  session_id: string;
+  at: string;
+  duration_ms: number;
+  kind: string;
+  provider: string;
+  model: string;
+  is_local: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  tokens_estimated: number;
+  chunk_count: number | null;
+  mode: string;
+  workspace: string;
+  corpus: string | null;
+  recipe_id: string | null;
+  status: string;
+  ref: string | null;
+}
+
+interface DecisionRow {
+  id: string;
+  date: string;
+  workspace: string;
+  task: string;
+  alternative: string;
+  justification: string;
+  verdict: string;
+  verdict_note: string | null;
+}
+
+function rowToEvent(r: EventRow): InferenceEvent {
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    at: r.at,
+    durationMs: r.duration_ms,
+    kind: r.kind as InferenceKind,
+    provider: r.provider,
+    model: r.model,
+    isLocal: r.is_local === 1,
+    promptTokens: r.prompt_tokens ?? undefined,
+    completionTokens: r.completion_tokens ?? undefined,
+    totalTokens: r.total_tokens ?? undefined,
+    tokensEstimated: r.tokens_estimated === 1,
+    chunkCount: r.chunk_count ?? undefined,
+    mode: r.mode as UsageMode,
+    workspace: r.workspace,
+    corpus: r.corpus ?? undefined,
+    recipeId: r.recipe_id ?? undefined,
+    status: r.status as InferenceStatus,
+    ref: r.ref ?? undefined,
+  };
+}
+
+function rowToDecision(r: DecisionRow): UsageDecision {
+  return {
+    id: r.id,
+    date: r.date,
+    workspace: r.workspace,
+    task: r.task,
+    alternative: r.alternative,
+    justification: r.justification,
+    verdict: r.verdict as Verdict,
+    verdictNote: r.verdict_note ?? undefined,
+  };
+}
 
 const SCHEMA_VERSION = 1;
 
@@ -190,6 +265,40 @@ export class UsageJournalStore {
         verdict: d.verdict,
         verdictNote: d.verdictNote ?? null,
       });
+  }
+
+  /** Événements dont l'horodatage est dans [fromISO, toISO), triés par date. */
+  getEventsBetween(fromISO: string, toISO: string): InferenceEvent[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM inference_events WHERE at >= ? AND at < ? ORDER BY at ASC'
+      )
+      .all(fromISO, toISO) as EventRow[];
+    return rows.map(rowToEvent);
+  }
+
+  /** Décisions dont la date (jour) est dans [fromDate, toDate). */
+  getDecisionsBetween(fromDate: string, toDate: string): UsageDecision[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM usage_decisions WHERE date >= ? AND date < ? ORDER BY date ASC'
+      )
+      .all(fromDate, toDate) as DecisionRow[];
+    return rows.map(rowToDecision);
+  }
+
+  getAllDecisions(): UsageDecision[] {
+    const rows = this.db
+      .prepare('SELECT * FROM usage_decisions ORDER BY date ASC')
+      .all() as DecisionRow[];
+    return rows.map(rowToDecision);
+  }
+
+  getAllLinks(): SessionDecisionLink[] {
+    const rows = this.db
+      .prepare('SELECT session_id, decision_id FROM session_decision')
+      .all() as Array<{ session_id: string; decision_id: string }>;
+    return rows.map((r) => ({ sessionId: r.session_id, decisionId: r.decision_id }));
   }
 
   linkSessionDecision(link: SessionDecisionLink): void {
