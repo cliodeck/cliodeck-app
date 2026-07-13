@@ -18,7 +18,6 @@ import { MCPServerSection } from './MCPServerSection';
 import { ArchivesConfigSection } from './ArchivesConfigSection';
 import { SecurityConfigSection } from './SecurityConfigSection';
 import { CitationStyleSection } from './CitationStyleSection';
-import { UsageJournalSection } from './UsageJournalSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import './ConfigPanel.css';
@@ -414,8 +413,6 @@ export const ConfigPanel: React.FC = () => {
             <SecurityConfigSection />
 
             <CitationStyleSection />
-
-            <UsageJournalSection />
           </>
         )}
       </div>

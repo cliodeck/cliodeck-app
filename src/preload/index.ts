@@ -11,6 +11,7 @@ const ALLOWED_RECEIVE_CHANNELS: string[] = [
   'menu:insert-blockquote', 'menu:toggle-stats', 'menu:check-citations',
   'menu:toggle-preview', 'menu:switch-panel', 'menu:import-bibtex',
   'menu:search-citations', 'menu:connect-zotero', 'menu:open-settings',
+  'menu:open-usage-journal',
   'menu:about',
   // Language sync
   'language-changed',

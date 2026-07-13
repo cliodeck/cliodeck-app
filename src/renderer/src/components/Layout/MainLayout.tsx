@@ -34,6 +34,9 @@ const ExportHub = lazy(() =>
 const SettingsModal = lazy(() =>
   import('../Config/SettingsModal').then(m => ({ default: m.SettingsModal }))
 );
+const UsageJournalModal = lazy(() =>
+  import('../UsageJournal/UsageJournalModal').then(m => ({ default: m.UsageJournalModal }))
+);
 const PDFExportModal = lazy(() =>
   import('../Export/PDFExportModal').then(m => ({ default: m.PDFExportModal }))
 );
@@ -76,6 +79,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   };
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showUsageJournalModal, setShowUsageJournalModal] = useState(false);
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
   const [methodologyInitialFeature, setMethodologyInitialFeature] = useState<string | undefined>(undefined);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -126,6 +130,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       setShowSettingsModal(true);
     };
 
+    const handleShowUsageJournal = () => {
+      setShowUsageJournalModal(true);
+    };
+
     const handleShowMethodology = (event: Event) => {
       const customEvent = event as CustomEvent;
       setMethodologyInitialFeature(customEvent.detail?.feature);
@@ -139,6 +147,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     window.addEventListener('switch-panel', handleSwitchPanel);
     window.addEventListener('show-pdf-export-dialog', handleShowPDFExport);
     window.addEventListener('show-settings-modal', handleShowSettings);
+    window.addEventListener('show-usage-journal', handleShowUsageJournal);
     window.addEventListener('show-methodology-modal', handleShowMethodology);
     window.addEventListener('show-about-dialog', handleShowAbout);
 
@@ -146,6 +155,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       window.removeEventListener('switch-panel', handleSwitchPanel);
       window.removeEventListener('show-pdf-export-dialog', handleShowPDFExport);
       window.removeEventListener('show-settings-modal', handleShowSettings);
+      window.removeEventListener('show-usage-journal', handleShowUsageJournal);
       window.removeEventListener('show-methodology-modal', handleShowMethodology);
       window.removeEventListener('show-about-dialog', handleShowAbout);
     };
@@ -314,6 +324,16 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       {showSettingsModal && (
         <Suspense fallback={null}>
           <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
+        </Suspense>
+      )}
+
+      {/* Usage Journal Modal (menu Affichage · Cmd/Ctrl+J) */}
+      {showUsageJournalModal && (
+        <Suspense fallback={null}>
+          <UsageJournalModal
+            isOpen={showUsageJournalModal}
+            onClose={() => setShowUsageJournalModal(false)}
+          />
         </Suspense>
       )}
 

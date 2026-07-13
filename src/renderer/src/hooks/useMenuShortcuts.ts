@@ -167,6 +167,11 @@ export function useMenuShortcuts() {
       window.dispatchEvent(new CustomEvent('show-settings-modal'));
     };
 
+    // Usage journal (journal d'usage IA)
+    const handleOpenUsageJournal = () => {
+      window.dispatchEvent(new CustomEvent('show-usage-journal'));
+    };
+
     // About
     const handleAbout = () => {
       window.dispatchEvent(new CustomEvent('show-about-dialog'));
@@ -194,6 +199,7 @@ export function useMenuShortcuts() {
     window.electron.ipcRenderer.on('menu:search-citations', handleSearchCitations);
     window.electron.ipcRenderer.on('menu:connect-zotero', handleConnectZotero);
     window.electron.ipcRenderer.on('menu:open-settings', handleOpenSettings);
+    window.electron.ipcRenderer.on('menu:open-usage-journal', handleOpenUsageJournal);
     window.electron.ipcRenderer.on('menu:about', handleAbout);
 
     // Cleanup listeners on unmount
@@ -219,6 +225,7 @@ export function useMenuShortcuts() {
       window.electron.ipcRenderer.removeListener('menu:search-citations', handleSearchCitations);
       window.electron.ipcRenderer.removeListener('menu:connect-zotero', handleConnectZotero);
       window.electron.ipcRenderer.removeListener('menu:open-settings', handleOpenSettings);
+      window.electron.ipcRenderer.removeListener('menu:open-usage-journal', handleOpenUsageJournal);
       window.electron.ipcRenderer.removeListener('menu:about', handleAbout);
     };
   }, [

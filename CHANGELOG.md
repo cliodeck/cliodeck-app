@@ -124,9 +124,10 @@ fusion branch reference the step numbers defined there.
   annotation and Markdown / JSONL / CSV export (`--anonymize` for stable
   aliases). Markdown is structured by week with a "violations" section for
   substantial un-annotated sessions.
-- Minimal UI: Settings → « Journal d'usage IA » (daily summary + annotation
-  form + discreet badge). Workspace mode mirrored to the main process so
-  events are tagged with the real mode.
+- Minimal UI: a dedicated modal opened from the **View menu** (« Journal
+  d'usage IA », `Cmd/Ctrl+J`) — daily summary + annotation form + discreet
+  badge. Workspace mode mirrored to the main process so events are tagged
+  with the real mode.
 - ADR 0007; see `docs/journal-usage-ia.md`.
 
 #### Headless CLI

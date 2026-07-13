@@ -126,10 +126,12 @@ bin/cliodeck-journal export --workspace <path> [--format md|jsonl|csv]
 
 ### UI
 
-Settings (mode expert) → section **« Journal d'usage IA »** : résumé du jour ventilé,
-formulaire à trois champs + verdict, rattachement des sessions par cases à cocher, et un
-**badge discret** « N à annoter » quand des sessions substantielles ne sont couvertes par
-aucune décision. Aucune notification intrusive.
+Menu **Affichage → « Journal d'usage IA »** (raccourci `Cmd/Ctrl+J`) ouvre une modale
+dédiée : résumé du jour ventilé, formulaire à trois champs + verdict, rattachement des
+sessions par cases à cocher, et un **badge discret** « N à annoter » quand des sessions
+substantielles ne sont couvertes par aucune décision. Aucune notification intrusive. Le
+journal est un rituel récurrent, volontairement hors des Settings (qui servent à
+configurer).
 
 ## 8. Export pour publication
 

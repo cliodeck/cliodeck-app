@@ -231,6 +231,14 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           },
         },
         { type: 'separator' as const },
+        {
+          label: t('usageJournal'),
+          accelerator: 'CmdOrCtrl+J',
+          click: () => {
+            mainWindow.webContents.send('menu:open-usage-journal');
+          },
+        },
+        { type: 'separator' as const },
         { role: 'reload' as const },
         { role: 'forceReload' as const },
         { role: 'toggleDevTools' as const },
