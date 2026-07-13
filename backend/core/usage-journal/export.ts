@@ -187,7 +187,7 @@ export function buildMarkdown(rawInput: ExportInput, opts: ExportOptions = {}): 
       for (const d of weekDecisions) {
         const verdict = VERDICT_LABELS[d.verdict] ?? d.verdict;
         lines.push(`- **${d.task}** _(${d.date})_`);
-        lines.push(`  - Alternative : ${d.alternative}`);
+        lines.push(`  - Alternative : ${d.alternative || 'aucune raisonnable'}`);
         lines.push(`  - Justification : ${d.justification}`);
         lines.push(`  - Verdict : ${verdict}${d.verdictNote ? ` — ${d.verdictNote}` : ''}`);
       }

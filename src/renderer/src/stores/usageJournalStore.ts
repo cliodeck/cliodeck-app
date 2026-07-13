@@ -82,6 +82,8 @@ interface IpcResult {
   success: boolean;
   today?: TodayView | null;
   error?: string;
+  /** Code d'erreur stable (ex. 'NO_PROJECT') pour un affichage i18n côté UI. */
+  code?: string;
 }
 
 function errMsg(e: unknown): string {
@@ -93,6 +95,8 @@ interface UsageJournalState {
   loading: boolean;
   saving: boolean;
   error: string | null;
+  /** Code d'erreur stable de la dernière opération ('NO_PROJECT', …). */
+  errorCode: string | null;
 
   /** Nombre de sessions substantielles du jour non couvertes par une décision. */
   uncoveredCount: () => number;
@@ -107,15 +111,21 @@ export const useUsageJournalStore = create<UsageJournalState>((set, get) => ({
   loading: false,
   saving: false,
   error: null,
+  errorCode: null,
 
   uncoveredCount: () => get().today?.summary.violations.length ?? 0,
 
   loadToday: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, errorCode: null });
     try {
       const res = (await window.electron.usage.getToday()) as IpcResult;
       if (!res.success || !res.today) {
-        set({ today: null, loading: false, error: res.error ?? null });
+        set({
+          today: null,
+          loading: false,
+          error: res.error ?? null,
+          errorCode: res.code ?? null,
+        });
         return;
       }
       set({ today: res.today, loading: false });
@@ -125,11 +135,15 @@ export const useUsageJournalStore = create<UsageJournalState>((set, get) => ({
   },
 
   saveDecision: async (input) => {
-    set({ saving: true, error: null });
+    set({ saving: true, error: null, errorCode: null });
     try {
       const res = (await window.electron.usage.saveDecision(input)) as IpcResult;
       if (!res.success || !res.today) {
-        set({ saving: false, error: res.error ?? 'Échec de l’enregistrement' });
+        set({
+          saving: false,
+          error: res.error ?? null,
+          errorCode: res.code ?? 'SAVE_FAILED',
+        });
         return false;
       }
       set({ today: res.today, saving: false });

@@ -1476,7 +1476,10 @@
     "indexing": "Indexation",
     "indexingTooltip": "Indexation : {{current}}/{{total}} documents",
     "syncing": "Sync",
-    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
+    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}",
+    "usageJournalBadge_one": "{{count}} session à annoter",
+    "usageJournalBadge_other": "{{count}} sessions à annoter",
+    "usageJournalTooltip": "Sessions d'usage IA substantielles sans décision — cliquer pour ouvrir le journal (Cmd/Ctrl+J)"
   },
   "security": {
     "revokeTitle": "Revocation des cles",
@@ -1521,5 +1524,39 @@
       "de": "Allemand"
     },
     "doneMessage": "Parfait ! Votre espace de travail est configure. L'assistant connait maintenant votre sujet et vos sources. Vous pouvez modifier ces informations a tout moment dans les parametres du projet (fichier .cliohints)."
+  },
+  "usageJournal": {
+    "title": "Journal d'usage IA",
+    "close": "Fermer",
+    "intro": "Instrument réflexif sur vos usages d'inférence (volumes et décisions), distinct du journal de recherche. Aucun prompt n'est enregistré ici.",
+    "loading": "Chargement…",
+    "noProject": "Ouvrez ou créez un projet pour consulter votre journal d'usage.",
+    "saveFailed": "Échec de l'enregistrement de la décision.",
+    "calls": "appels",
+    "tokens": "tokens",
+    "tokensBreakdown": "tokens (local {{local}} / cloud {{cloud}})",
+    "badge_one": "{{count}} session à annoter",
+    "badge_other": "{{count}} sessions à annoter",
+    "task": "Tâche",
+    "taskPlaceholder": "ex. ré-indexation corpus Lester après +40 documents",
+    "alternative": "Alternative non-IA",
+    "alternativePlaceholder": "vide = « aucune raisonnable »",
+    "noAlternative": "aucune raisonnable",
+    "justification": "Pourquoi l'alternative a été écartée",
+    "verdict": "Verdict",
+    "verdictNote": "Note de verdict (optionnel)",
+    "verdicts": {
+      "worth_it": "Valait le coup",
+      "not_worth_it": "Ne valait pas le coup",
+      "unsure": "Incertain",
+      "pending": "En attente"
+    },
+    "attachSessions": "Rattacher des sessions du jour",
+    "covered": "déjà rattachée",
+    "uncovered": "non annotée",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer la décision",
+    "saved": "✓ Enregistré",
+    "todayDecisions": "Décisions du jour"
   }
 }

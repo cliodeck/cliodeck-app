@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { UsageJournalPanel } from './UsageJournalPanel';
 import './UsageJournalModal.css';
@@ -13,6 +14,7 @@ interface UsageJournalModalProps {
  * Même idiome que SettingsModal (overlay in-renderer, pas une fenêtre OS).
  */
 export const UsageJournalModal: React.FC<UsageJournalModalProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation('common');
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -34,8 +36,12 @@ export const UsageJournalModal: React.FC<UsageJournalModalProps> = ({ isOpen, on
         onClick={(e) => e.stopPropagation()}
       >
         <div className="usage-modal__header">
-          <h3 id="usage-modal-title">Journal d&apos;usage IA</h3>
-          <button className="usage-modal__close" onClick={onClose} aria-label="Fermer">
+          <h3 id="usage-modal-title">{t('usageJournal.title')}</h3>
+          <button
+            className="usage-modal__close"
+            onClick={onClose}
+            aria-label={t('usageJournal.close')}
+          >
             <X size={20} />
           </button>
         </div>

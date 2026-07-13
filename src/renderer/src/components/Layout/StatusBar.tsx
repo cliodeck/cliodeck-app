@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useProjectStore } from '../../stores/projectStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
+import { useUsageJournalStore } from '../../stores/usageJournalStore';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -28,6 +29,14 @@ export const StatusBar: React.FC = () => {
   const isSyncing = usePrimarySourcesStore((s) => s.isSyncing);
   const syncProgress = usePrimarySourcesStore((s) => s.syncProgress);
 
+  // Usage journal: substantial sessions of the day not yet covered by a
+  // decision. Shared store with the Cmd/Ctrl+J modal, so annotating there
+  // updates the badge immediately.
+  const uncoveredSessions = useUsageJournalStore(
+    (s) => s.today?.summary.violations.length ?? 0
+  );
+  const loadUsageToday = useUsageJournalStore((s) => s.loadToday);
+
   useEffect(() => {
     if (!currentProject) {
       setMcpClients([]);
@@ -49,6 +58,8 @@ export const StatusBar: React.FC = () => {
       } catch {
         // MCP not available
       }
+
+      void loadUsageToday();
 
       try {
         const vaultResult = await window.electron.fusion?.vault?.status();
@@ -80,7 +91,7 @@ export const StatusBar: React.FC = () => {
       clearInterval(timer);
       unsub?.();
     };
-  }, [currentProject]);
+  }, [currentProject, loadUsageToday]);
 
   if (!currentProject) return null;
 
@@ -144,6 +155,18 @@ export const StatusBar: React.FC = () => {
             MCP {readyCount}/{mcpClients.length}
             {failedCount > 0 && <span className="status-bar__dot status-bar__dot--danger" />}
           </span>
+        )}
+
+        {/* Usage journal: sessions waiting for annotation (opens the Cmd/Ctrl+J modal) */}
+        {uncoveredSessions > 0 && (
+          <button
+            type="button"
+            className="status-bar__item status-bar__item--warning status-bar__button"
+            title={t('statusBar.usageJournalTooltip')}
+            onClick={() => window.dispatchEvent(new CustomEvent('show-usage-journal'))}
+          >
+            {t('statusBar.usageJournalBadge', { count: uncoveredSessions })}
+          </button>
         )}
 
         {/* Vault status */}

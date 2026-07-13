@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useUsageJournalStore,
   type UsageSessionSummary,
@@ -14,16 +15,7 @@ import './UsageJournalPanel.css';
  * Rendu dans une modale ouverte depuis le menu Affichage (Cmd/Ctrl+J).
  */
 
-const VERDICT_LABELS: Record<Verdict, string> = {
-  worth_it: 'Valait le coup',
-  not_worth_it: 'Ne valait pas le coup',
-  unsure: 'Incertain',
-  pending: 'En attente',
-};
-
-function fmt(n: number): string {
-  return n.toLocaleString('fr-FR');
-}
+const VERDICTS: Verdict[] = ['worth_it', 'not_worth_it', 'unsure', 'pending'];
 
 function hhmm(iso: string): string {
   const d = new Date(iso);
@@ -31,10 +23,12 @@ function hhmm(iso: string): string {
 }
 
 export const UsageJournalPanel: React.FC = () => {
+  const { t, i18n } = useTranslation('common');
   const today = useUsageJournalStore((s) => s.today);
   const loading = useUsageJournalStore((s) => s.loading);
   const saving = useUsageJournalStore((s) => s.saving);
   const error = useUsageJournalStore((s) => s.error);
+  const errorCode = useUsageJournalStore((s) => s.errorCode);
   const loadToday = useUsageJournalStore((s) => s.loadToday);
   const saveDecision = useUsageJournalStore((s) => s.saveDecision);
 
@@ -49,6 +43,9 @@ export const UsageJournalPanel: React.FC = () => {
   useEffect(() => {
     void loadToday();
   }, [loadToday]);
+
+  const fmt = (n: number): string => n.toLocaleString(i18n.language);
+  const verdictLabel = (v: Verdict): string => t(`usageJournal.verdicts.${v}`);
 
   const summary = today?.summary;
   const sessions = summary?.sessions ?? [];
@@ -68,7 +65,9 @@ export const UsageJournalPanel: React.FC = () => {
   const onSave = async () => {
     const ok = await saveDecision({
       task: task.trim(),
-      alternative: alternative.trim() || 'aucune raisonnable',
+      // Vide = « aucune alternative raisonnable » : on persiste la chaîne vide
+      // (valeur neutre en langue) et on traduit à l'affichage.
+      alternative: alternative.trim(),
       justification: justification.trim(),
       verdict,
       verdictNote: verdictNote.trim() || undefined,
@@ -88,22 +87,32 @@ export const UsageJournalPanel: React.FC = () => {
 
   return (
     <div className="usage-journal">
-      <p className="usage-journal__intro">
-        Instrument réflexif sur vos usages d’inférence (volumes et décisions), distinct du
-        journal de recherche. Aucun prompt n’est enregistré ici.
-      </p>
+      <p className="usage-journal__intro">{t('usageJournal.intro')}</p>
 
-      {loading && <p className="usage-journal__muted">Chargement…</p>}
-      {error && <p className="usage-journal__error">{error}</p>}
+      {loading && <p className="usage-journal__muted">{t('usageJournal.loading')}</p>}
+      {errorCode === 'NO_PROJECT' ? (
+        <p className="usage-journal__muted">{t('usageJournal.noProject')}</p>
+      ) : (
+        error && (
+          <p className="usage-journal__error">
+            {errorCode === 'SAVE_FAILED' ? t('usageJournal.saveFailed') : error}
+          </p>
+        )
+      )}
 
       {summary && (
         <>
           <div className="usage-journal__totals">
-            <strong>{fmt(summary.totalEvents)}</strong> appels ·{' '}
-            <strong>{fmt(summary.totalTokens)}</strong> tokens (local {fmt(summary.localTokens)} /
-            cloud {fmt(summary.cloudTokens)})
+            <strong>{fmt(summary.totalEvents)}</strong> {t('usageJournal.calls')} ·{' '}
+            <strong>{fmt(summary.totalTokens)}</strong>{' '}
+            {t('usageJournal.tokensBreakdown', {
+              local: fmt(summary.localTokens),
+              cloud: fmt(summary.cloudTokens),
+            })}
             {uncovered > 0 && (
-              <span className="usage-journal__badge">{uncovered} session(s) à annoter</span>
+              <span className="usage-journal__badge">
+                {t('usageJournal.badge', { count: uncovered })}
+              </span>
             )}
           </div>
 
@@ -119,25 +128,25 @@ export const UsageJournalPanel: React.FC = () => {
 
           <div className="usage-journal__form">
             <label>
-              Tâche
+              {t('usageJournal.task')}
               <input
                 type="text"
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
-                placeholder="ex. ré-indexation corpus Lester après +40 documents"
+                placeholder={t('usageJournal.taskPlaceholder')}
               />
             </label>
             <label>
-              Alternative non-IA
+              {t('usageJournal.alternative')}
               <input
                 type="text"
                 value={alternative}
                 onChange={(e) => setAlternative(e.target.value)}
-                placeholder="vide = « aucune raisonnable »"
+                placeholder={t('usageJournal.alternativePlaceholder')}
               />
             </label>
             <label>
-              Pourquoi l’alternative a été écartée
+              {t('usageJournal.justification')}
               <textarea
                 rows={2}
                 value={justification}
@@ -145,17 +154,17 @@ export const UsageJournalPanel: React.FC = () => {
               />
             </label>
             <label>
-              Verdict
+              {t('usageJournal.verdict')}
               <select value={verdict} onChange={(e) => setVerdict(e.target.value as Verdict)}>
-                {(Object.keys(VERDICT_LABELS) as Verdict[]).map((v) => (
+                {VERDICTS.map((v) => (
                   <option key={v} value={v}>
-                    {VERDICT_LABELS[v]}
+                    {verdictLabel(v)}
                   </option>
                 ))}
               </select>
             </label>
             <label>
-              Note de verdict (optionnel)
+              {t('usageJournal.verdictNote')}
               <input
                 type="text"
                 value={verdictNote}
@@ -165,7 +174,7 @@ export const UsageJournalPanel: React.FC = () => {
 
             {sessions.length > 0 && (
               <fieldset className="usage-journal__sessions">
-                <legend>Rattacher des sessions du jour</legend>
+                <legend>{t('usageJournal.attachSessions')}</legend>
                 {sessions.map((s: UsageSessionSummary) => (
                   <label key={s.id} className="usage-journal__session">
                     <input
@@ -174,12 +183,15 @@ export const UsageJournalPanel: React.FC = () => {
                       onChange={() => toggleSession(s.id)}
                     />
                     <span>
-                      {hhmm(s.startedAt)}–{hhmm(s.endedAt)} · {fmt(s.events)} appels,{' '}
-                      {fmt(s.totalTokens)} tokens · [{s.modes.join(', ')}]
-                      {s.covered && <span className="usage-journal__tag">déjà rattachée</span>}
+                      {hhmm(s.startedAt)}–{hhmm(s.endedAt)} · {fmt(s.events)}{' '}
+                      {t('usageJournal.calls')}, {fmt(s.totalTokens)} {t('usageJournal.tokens')} ·{' '}
+                      [{s.modes.join(', ')}]
+                      {s.covered && (
+                        <span className="usage-journal__tag">{t('usageJournal.covered')}</span>
+                      )}
                       {!s.covered && s.substantial && (
                         <span className="usage-journal__tag usage-journal__tag--warn">
-                          non annotée
+                          {t('usageJournal.uncovered')}
                         </span>
                       )}
                     </span>
@@ -190,19 +202,19 @@ export const UsageJournalPanel: React.FC = () => {
 
             <div className="usage-journal__actions">
               <button onClick={onSave} disabled={!canSave}>
-                {saving ? 'Enregistrement…' : 'Enregistrer la décision'}
+                {saving ? t('usageJournal.saving') : t('usageJournal.save')}
               </button>
-              {savedFlash && <span className="usage-journal__ok">✓ Enregistré</span>}
+              {savedFlash && <span className="usage-journal__ok">{t('usageJournal.saved')}</span>}
             </div>
           </div>
 
           {today && today.decisions.length > 0 && (
             <div className="usage-journal__decisions">
-              <h4>Décisions du jour</h4>
+              <h4>{t('usageJournal.todayDecisions')}</h4>
               <ul>
                 {today.decisions.map((d) => (
                   <li key={d.id}>
-                    <strong>{d.task}</strong> — {VERDICT_LABELS[d.verdict]}
+                    <strong>{d.task}</strong> — {verdictLabel(d.verdict)}
                   </li>
                 ))}
               </ul>

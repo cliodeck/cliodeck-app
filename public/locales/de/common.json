@@ -1476,7 +1476,10 @@
     "indexing": "Indexierung",
     "indexingTooltip": "Indexierung: {{current}}/{{total}} Dokumente",
     "syncing": "Sync",
-    "syncTooltip": "Synchronisierung: {{phase}} {{current}}/{{total}}"
+    "syncTooltip": "Synchronisierung: {{phase}} {{current}}/{{total}}",
+    "usageJournalBadge_one": "{{count}} Sitzung zu annotieren",
+    "usageJournalBadge_other": "{{count}} Sitzungen zu annotieren",
+    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)"
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",
@@ -1521,5 +1524,39 @@
       "de": "Deutsch"
     },
     "doneMessage": "Fertig! Ihr Arbeitsbereich ist konfiguriert. Der Assistent kennt jetzt Ihr Thema und Ihre Quellen. Sie können diese Angaben jederzeit in den Projekteinstellungen ändern (Datei .cliohints)."
+  },
+  "usageJournal": {
+    "title": "KI-Nutzungsjournal",
+    "close": "Schließen",
+    "intro": "Ein reflexives Protokoll Ihrer Inferenz-Nutzung (Volumen und Entscheidungen), getrennt vom Forschungsjournal. Prompts werden hier nie gespeichert.",
+    "loading": "Wird geladen…",
+    "noProject": "Öffnen oder erstellen Sie ein Projekt, um Ihr Nutzungsjournal einzusehen.",
+    "saveFailed": "Die Entscheidung konnte nicht gespeichert werden.",
+    "calls": "Aufrufe",
+    "tokens": "Tokens",
+    "tokensBreakdown": "Tokens (lokal {{local}} / Cloud {{cloud}})",
+    "badge_one": "{{count}} Sitzung zu annotieren",
+    "badge_other": "{{count}} Sitzungen zu annotieren",
+    "task": "Aufgabe",
+    "taskPlaceholder": "z. B. Neuindexierung des Lester-Korpus nach +40 Dokumenten",
+    "alternative": "Nicht-KI-Alternative",
+    "alternativePlaceholder": "leer = „keine sinnvolle“",
+    "noAlternative": "keine sinnvolle",
+    "justification": "Warum die Alternative verworfen wurde",
+    "verdict": "Urteil",
+    "verdictNote": "Anmerkung zum Urteil (optional)",
+    "verdicts": {
+      "worth_it": "Hat sich gelohnt",
+      "not_worth_it": "Hat sich nicht gelohnt",
+      "unsure": "Unsicher",
+      "pending": "Ausstehend"
+    },
+    "attachSessions": "Sitzungen des Tages zuordnen",
+    "covered": "bereits zugeordnet",
+    "uncovered": "nicht annotiert",
+    "saving": "Wird gespeichert…",
+    "save": "Entscheidung speichern",
+    "saved": "✓ Gespeichert",
+    "todayDecisions": "Entscheidungen des Tages"
   }
 }

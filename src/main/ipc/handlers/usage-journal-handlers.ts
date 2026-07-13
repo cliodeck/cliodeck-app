@@ -19,7 +19,9 @@ export function setupUsageJournalHandlers() {
     try {
       const today = usageJournalService.getToday();
       if (!today) {
-        return { ...errorResponse('No project open'), today: null };
+        // `code` permet au renderer d'afficher un état vide i18n propre au
+        // lieu du message technique brut.
+        return { ...errorResponse('No project open'), code: 'NO_PROJECT', today: null };
       }
       return successResponse({ today });
     } catch (error: any) {
@@ -34,7 +36,7 @@ export function setupUsageJournalHandlers() {
     try {
       const today = usageJournalService.saveDecision(input);
       if (!today) {
-        return { ...errorResponse('No project open'), today: null };
+        return { ...errorResponse('No project open'), code: 'NO_PROJECT', today: null };
       }
       return successResponse({ today });
     } catch (error: any) {

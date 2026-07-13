@@ -276,9 +276,11 @@ async function annotateLoop(
       if (!task) {
         process.stdout.write('Tâche vide — décision abandonnée.\n');
       } else {
-        const alternative =
-          (await rl.question('Alternative non-IA (vide = « aucune raisonnable ») : ')).trim() ||
-          'aucune raisonnable';
+        // Vide = « aucune raisonnable » : on persiste la chaîne vide (neutre en
+        // langue, cohérent avec l'UI) et on traduit à l'affichage/export.
+        const alternative = (
+          await rl.question('Alternative non-IA (vide = « aucune raisonnable ») : ')
+        ).trim();
         const justification = (await rl.question('Pourquoi l’alternative a été écartée : ')).trim();
 
         let verdict = parseVerdict(

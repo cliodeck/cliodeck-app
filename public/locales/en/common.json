@@ -1476,7 +1476,10 @@
     "indexing": "Indexing",
     "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
     "syncing": "Sync",
-    "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}"
+    "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}",
+    "usageJournalBadge_one": "{{count}} session to annotate",
+    "usageJournalBadge_other": "{{count}} sessions to annotate",
+    "usageJournalTooltip": "Substantial AI usage sessions without a decision — click to open the journal (Cmd/Ctrl+J)"
   },
   "security": {
     "revokeTitle": "Key revocation",
@@ -1521,5 +1524,39 @@
       "de": "German"
     },
     "doneMessage": "All set! Your workspace is configured. The assistant now knows your topic and sources. You can edit this anytime in the project settings (.cliohints file)."
+  },
+  "usageJournal": {
+    "title": "AI Usage Journal",
+    "close": "Close",
+    "intro": "A reflexive record of your inference usage (volumes and decisions), separate from the research journal. No prompt is ever stored here.",
+    "loading": "Loading…",
+    "noProject": "Open or create a project to view your usage journal.",
+    "saveFailed": "Failed to save the decision.",
+    "calls": "calls",
+    "tokens": "tokens",
+    "tokensBreakdown": "tokens (local {{local}} / cloud {{cloud}})",
+    "badge_one": "{{count}} session to annotate",
+    "badge_other": "{{count}} sessions to annotate",
+    "task": "Task",
+    "taskPlaceholder": "e.g. re-indexing the Lester corpus after +40 documents",
+    "alternative": "Non-AI alternative",
+    "alternativePlaceholder": "empty = “none reasonable”",
+    "noAlternative": "none reasonable",
+    "justification": "Why the alternative was set aside",
+    "verdict": "Verdict",
+    "verdictNote": "Verdict note (optional)",
+    "verdicts": {
+      "worth_it": "Worth it",
+      "not_worth_it": "Not worth it",
+      "unsure": "Unsure",
+      "pending": "Pending"
+    },
+    "attachSessions": "Attach today's sessions",
+    "covered": "already attached",
+    "uncovered": "not annotated",
+    "saving": "Saving…",
+    "save": "Save decision",
+    "saved": "✓ Saved",
+    "todayDecisions": "Today's decisions"
   }
 }
