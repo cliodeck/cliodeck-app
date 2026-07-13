@@ -23,6 +23,8 @@ export interface BatchAccumulator {
   corpus: BatchCorpus;
   provider?: string;
   model?: string;
+  /** Localité résolue par le décorateur (baseUrl connu), sinon heuristique du sink. */
+  isLocal?: boolean;
   chunkCount: number;
   totalTokens: number;
   tokensEstimated: boolean;

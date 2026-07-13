@@ -115,6 +115,9 @@ export class UsageJournalStore {
       // permissions best-effort
     }
     this.db.pragma('journal_mode = WAL');
+    // L'app et le CLI peuvent écrire en même temps : attendre le verrou
+    // plutôt que d'échouer en SQLITE_BUSY.
+    this.db.pragma('busy_timeout = 3000');
     this.createTables();
     this.migrate();
   }

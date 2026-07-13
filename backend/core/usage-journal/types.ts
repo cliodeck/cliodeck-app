@@ -88,6 +88,11 @@ export interface RecordInferenceInput {
   workspaceRoot?: string;
   corpus?: string;
   recipeId?: string;
+  /**
+   * Localité résolue par le décorateur (qui connaît le baseUrl : un
+   * openai-compatible sur localhost est local). Sinon, heuristique du sink.
+   */
+  isLocal?: boolean;
 }
 
 /** Décision d'usage (couche décisionnelle), table `usage_decisions`. */

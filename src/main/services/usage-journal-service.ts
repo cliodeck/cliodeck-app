@@ -198,6 +198,7 @@ class UsageJournalService {
       recipeId: ctx.recipeId,
       workspaceRoot: ctx.workspaceRoot,
       mode: ctx.mode,
+      isLocal: acc.isLocal,
     });
   }
 
@@ -219,7 +220,7 @@ class UsageJournalService {
       kind: input.kind,
       provider: input.provider,
       model: input.model,
-      isLocal: LOCAL_PROVIDERS.has(input.provider),
+      isLocal: input.isLocal ?? LOCAL_PROVIDERS.has(input.provider),
       promptTokens: input.promptTokens,
       completionTokens: input.completionTokens,
       totalTokens: input.totalTokens,

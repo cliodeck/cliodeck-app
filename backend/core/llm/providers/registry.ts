@@ -193,7 +193,11 @@ export class ProviderRegistry {
         );
       }
       // Décoré pour le journal d'usage IA (best-effort ; inerte si journal absent).
-      this.llm = instrumentLLM(f(this.config.llm), this.config.llm.provider);
+      this.llm = instrumentLLM(
+        f(this.config.llm),
+        this.config.llm.provider,
+        this.config.llm.baseUrl
+      );
     }
     return this.llm;
   }
@@ -208,7 +212,8 @@ export class ProviderRegistry {
       }
       this.embedding = instrumentEmbedding(
         f(this.config.embedding),
-        this.config.embedding.provider
+        this.config.embedding.provider,
+        this.config.embedding.baseUrl
       );
     }
     return this.embedding;

@@ -26,6 +26,7 @@ import type {
   ProviderStatus,
 } from './base.js';
 import { getJournalContext, recordInference } from '../../usage-journal/context.js';
+import { isLocalProvider } from '../../usage-journal/is-local.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
 function estimateTokens(chars: number): number {
@@ -33,10 +34,15 @@ function estimateTokens(chars: number): number {
 }
 
 class InstrumentedLLM implements LLMProvider {
+  private readonly isLocal: boolean;
+
   constructor(
     private readonly inner: LLMProvider,
-    private readonly providerId: string
-  ) {}
+    private readonly providerId: string,
+    baseUrl?: string
+  ) {
+    this.isLocal = isLocalProvider(providerId, baseUrl);
+  }
 
   get id(): string {
     return this.inner.id;
@@ -131,15 +137,21 @@ class InstrumentedLLM implements LLMProvider {
       totalTokens: usage?.totalTokens ?? promptTokens + completionTokens,
       tokensEstimated: estimated,
       status: errored ? 'error' : 'ok',
+      isLocal: this.isLocal,
     });
   }
 }
 
 class InstrumentedEmbedding implements EmbeddingProvider {
+  private readonly isLocal: boolean;
+
   constructor(
     private readonly inner: EmbeddingProvider,
-    private readonly providerId: string
-  ) {}
+    private readonly providerId: string,
+    baseUrl?: string
+  ) {
+    this.isLocal = isLocalProvider(providerId, baseUrl);
+  }
 
   get id(): string {
     return this.inner.id;
@@ -184,6 +196,7 @@ class InstrumentedEmbedding implements EmbeddingProvider {
         ctx.batch.totalTokens += tokens;
         ctx.batch.provider ??= this.providerId;
         ctx.batch.model ??= this.inner.model;
+        ctx.batch.isLocal ??= this.isLocal;
         if (errored) ctx.batch.anyError = true;
       } else {
         recordInference({
@@ -195,19 +208,25 @@ class InstrumentedEmbedding implements EmbeddingProvider {
           tokensEstimated: true,
           chunkCount: texts.length,
           status: errored ? 'error' : 'ok',
+          isLocal: this.isLocal,
         });
       }
     }
   }
 }
 
-export function instrumentLLM(inner: LLMProvider, providerId: string): LLMProvider {
-  return new InstrumentedLLM(inner, providerId);
+export function instrumentLLM(
+  inner: LLMProvider,
+  providerId: string,
+  baseUrl?: string
+): LLMProvider {
+  return new InstrumentedLLM(inner, providerId, baseUrl);
 }
 
 export function instrumentEmbedding(
   inner: EmbeddingProvider,
-  providerId: string
+  providerId: string,
+  baseUrl?: string
 ): EmbeddingProvider {
-  return new InstrumentedEmbedding(inner, providerId);
+  return new InstrumentedEmbedding(inner, providerId, baseUrl);
 }

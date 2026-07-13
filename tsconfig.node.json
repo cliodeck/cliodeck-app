@@ -18,6 +18,16 @@
       "@shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src/main/**/*", "src/shared/**/*", "backend/**/*"],
-  "exclude": ["backend/__tests__/**/*", "src/main/**/__tests__/**/*"]
+  "include": [
+    "src/main/**/*",
+    "src/shared/**/*",
+    "backend/**/*",
+    "scripts/cliodeck-cli.ts",
+    "scripts/cli/**/*"
+  ],
+  "exclude": [
+    "backend/__tests__/**/*",
+    "src/main/**/__tests__/**/*",
+    "scripts/__tests__/**/*"
+  ]
 }
