@@ -51,7 +51,7 @@ function redactConfig(config: AppConfig): AppConfig {
  * 'zotero') that config-manager enriches with keys in clear.
  */
 function maskSectionKeys<T extends object>(sectionKey: string, section: T): T {
-  const masked: Record<string, unknown> = { ...section };
+  const masked = { ...(section as Record<string, unknown>) };
   for (const keyPath of SENSITIVE_KEYS) {
     if (!keyPath.startsWith(`${sectionKey}.`)) continue;
     const field = keyPath.slice(sectionKey.length + 1);
