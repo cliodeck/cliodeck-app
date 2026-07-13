@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 /**
- * `cliodeck journal` — entrée CLI headless du journal d'usage IA.
+ * `cliodeck-journal` — entrée CLI headless du journal d'usage IA.
  *
  * À invoquer via le wrapper `bin/cliodeck-journal`, qui l'exécute sous le Node
  * embarqué d'Electron pour que l'ABI de better-sqlite3 corresponde à celle produite
  * par `electron-builder install-app-deps`. L'invoquer avec le Node système échouerait
  * en NODE_MODULE_VERSION mismatch (voir `bin/cliodeck-mcp` pour le même motif).
  *
- * Sous-commandes (v1) :
- *   cliodeck journal today --workspace <path>
- *   cliodeck journal week  --workspace <path>
- *
- * L'annotation interactive (étape 4) et l'export (étape 5) arrivent ensuite.
+ * Sous-commandes :
+ *   cliodeck-journal today  --workspace <path> [--annotate | --no-annotate]
+ *   cliodeck-journal week   --workspace <path>
+ *   cliodeck-journal export --workspace <path> [--format md|jsonl|csv] [--from] [--to] [--anonymize]
  */
 
 import path from 'path';
@@ -67,12 +66,12 @@ function parse(argv: string[]): { positional: string[]; args: JournalArgs } {
   return { positional, args };
 }
 
-const USAGE = `cliodeck journal — journal d'usage IA
+const USAGE = `cliodeck-journal — journal d'usage IA
 
 Usage:
-  cliodeck journal today  --workspace <path> [--annotate | --no-annotate]
-  cliodeck journal week   --workspace <path>
-  cliodeck journal export --workspace <path> [--format md|jsonl|csv]
+  cliodeck-journal today  --workspace <path> [--annotate | --no-annotate]
+  cliodeck-journal week   --workspace <path>
+  cliodeck-journal export --workspace <path> [--format md|jsonl|csv]
                           [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--anonymize]
 
   today invite à annoter les décisions du jour si le terminal est interactif.

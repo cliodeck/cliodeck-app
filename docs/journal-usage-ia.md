@@ -30,7 +30,7 @@ Le **journal d'usage IA** est une fonctionnalité **différente et indépendante
 | Prompts | oui | **jamais** |
 | Stockage | `brain.db` (`history_*`) | `journal.db` (séparé) |
 | IPC | `history:*` | `usage:*` |
-| UI | panneau Journal | section Settings « Journal d'usage IA » |
+| UI | panneau Journal | modale menu Affichage (`Cmd/Ctrl+J`) |
 
 Les deux couches ne partagent **ni tables, ni modèle de données, ni code**. Le journal
 d'usage IA ne journalise **aucun prompt** : ce point est tranché.
@@ -51,16 +51,21 @@ La capture est posée sur la **couche de providers typée**, via un décorateur 
 dans `ProviderRegistry.getLLM()` / `getEmbedding()`
 (`backend/core/llm/providers/instrument.ts`). Tous les appels de complétion (`chat`,
 `complete`) et d'embedding (`embed`) y transitent — un seul point de passage, y compris
-CLI et recipes. Best-effort : si le journal n'est pas initialisé, le décorateur est
-inerte ; **une panne du journal ne fait jamais échouer un appel LLM**.
+CLI et recipes. Le sink est posé par l'app au chargement d'un projet
+(`usageJournalService.init`) et par le CLI headless (`initHeadlessJournal`, pour
+`cliodeck recipe run` et `cliodeck search`). Best-effort : si le journal n'est pas
+initialisé, le décorateur est inerte ; **une panne du journal ne fait jamais échouer un
+appel LLM**.
 
 ### Événements capturés
 
 Pour chaque appel : horodatage, durée, type (`completion` | `embedding` |
-`embedding_batch`), provider et modèle, exécution locale ou cloud, tokens
-prompt/réponse (réels quand l'API les fournit — Ollama, Anthropic, Gemini — sinon
-estimés à ~4 caractères/token, `tokens_estimated: true`), contexte applicatif (mode,
-workspace, corpus, recipe), identifiant de session, statut.
+`embedding_batch`), provider et modèle, exécution locale ou cloud (`is_local` :
+Ollama, ou provider openai-compatible dont le baseUrl pointe en loopback — llama.cpp,
+LM Studio ; le reste est compté cloud), tokens prompt/réponse (réels quand l'API les
+fournit — Ollama, Anthropic, Gemini, openai-compatible ; Mistral reste estimé à
+~4 caractères/token, `tokens_estimated: true`), contexte applicatif (mode, workspace,
+corpus, recipe), identifiant de session, statut.
 
 Cas particuliers :
 
@@ -69,12 +74,15 @@ Cas particuliers :
   Obsidian, Tropy), plutôt qu'un événement par chunk.
 - **Mode applicatif** — le mode (`explore|brainstorm|write|export`) vit dans le renderer ;
   il est miroité vers le main via `usage:set-mode`. Les contextes backend posent leur
-  littéral (`recipe`, `cli`, `mcp`).
+  littéral : `recipe` (runner, avec `recipeId` — il écrase le `cli` parent quand une
+  recipe est lancée depuis le CLI, une recipe reste une recipe) et `cli` (commandes
+  headless). Le contexte `mcp` et le kind `mcp_session` sont réservés dans le schéma ;
+  la capture côté serveur MCP viendra plus tard.
 
 ### Sessions
 
 Découpage cosmétique (lisibilité du résumé), non contraignant : une session se ferme
-après une **fenêtre d'inactivité de 30 min** (configurable) **ou** un changement de
+après une **fenêtre d'inactivité de 30 min** **ou** un changement de
 workspace ; le changement de mode ne découpe pas. Les `session_id` sont persistés à
 l'écriture ; l'agrégation les regroupe sans les redécouper.
 

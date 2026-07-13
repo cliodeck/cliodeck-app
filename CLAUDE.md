@@ -4,7 +4,7 @@
 
 ## 1. Orientation
 
-ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). You are currently on branch **`feat/fusion-cliobrain`** — the working branch for the ClioBrain fusion + RC1/RC2 cycle, pushed to `origin/feat/fusion-cliobrain`. It **absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode** so historians get one app instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/archive/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md) — commit messages reference the step numbers defined there.
+ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). Work happens on per-feature branches off `main` (check `git status` for the current one — e.g. `feat/usage-journal` for the AI usage journal). The fusion cycle (branch `feat/fusion-cliobrain`, merged into `main` at `v1.0.0-rc.2`) **absorbed [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode** so historians get one app instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/archive/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md) — commit messages reference the step numbers defined there.
 
 ## 2. Architecture quick-tour
 
@@ -19,7 +19,8 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 - `retrieval-service.ts` — multi-source RAG: **PDFs (secondary) + Tropy archives (primary) + optional Obsidian vault**
 - `mcp-clients-service.ts` — lifecycle of external MCP servers (stdio + SSE)
 - `fusion-chat-service.ts` — Brainstorm chat: retrieval injection + **agent loop for tool-use**
-- `chat-service.ts` — legacy RAG chat (still active)
+- `chat-engine.ts` — legacy RAG chat engine (still active)
+- `usage-journal-service.ts` — AI usage journal sink (`.cliodeck/journal.db`, never logs prompts)
 - `tropy-service.ts`, `history-service.ts`, `mode-service.ts`, `pdf-export.ts`, etc.
 
 **Provider abstraction** — `backend/core/llm/providers/base.ts` defines `LLMProvider` and `EmbeddingProvider` with a **typed `ProviderState`** state machine (`unconfigured | spawning | handshaking | ready | degraded | failed | stopped`), never a boolean. `ChatMessageMeta.ragCitation` marks retrieval messages so the compactor keeps them verbatim.
@@ -73,7 +74,7 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 
 - **21 preexisting test failures**: `better-sqlite3` native bindings issues under Vitest + Ollama live-backend tests that timeout when no Ollama is running.
 - **No React component tests** — jsdom + `@testing-library/react` setup pending.
-- **`feat/fusion-cliobrain`** is the active release branch — pushed to origin; merged into `main` at the `v1.0.0-rc.2` tag.
+- **`feat/fusion-cliobrain`** was the fusion release branch — merged into `main` at the `v1.0.0-rc.2` tag; new work happens on per-feature branches off `main`.
 - **Recipe `export` step ignores `document_id` input** — hardcoded to `<project>/document.md`.
 - **Ollama provider exposes `capabilities.tools` per-model** via a whitelist (`ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo`); other models (notably the Llama 3.x and 4.x families) get `tools: false`. See `OLLAMA_TOOL_CAPABLE_PATTERNS` in `backend/core/llm/providers/ollama.ts` and `docs/archive/research-ollama-tools-1.8.md` for the source-cited rationale. The 4 cloud providers (OpenAI-compatible, Anthropic, Mistral, Gemini) advertise tool-use unconditionally.
 
