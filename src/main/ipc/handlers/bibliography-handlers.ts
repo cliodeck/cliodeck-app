@@ -6,6 +6,7 @@ import { bibliographyService } from '../../services/bibliography-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { OrphanPDFDetector } from '../../../../backend/services/OrphanPDFDetector.js';
 import { BibliographyMetadataService } from '../../../../backend/services/BibliographyMetadataService.js';
+import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
 import {
   validate,
   StringPathSchema,
@@ -19,6 +20,30 @@ import {
   BibliographyLoadWithMetadataSchema,
   BibliographyGetStatisticsSchema,
 } from '../utils/validation.js';
+
+/**
+ * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
+ * paths are reported through the same `failed` channel the UI already renders,
+ * so one bad path never blocks the rest of the batch.
+ */
+async function partitionWritablePaths(filePaths: string[]): Promise<{
+  allowed: string[];
+  rejected: { path: string; error: string }[];
+}> {
+  const allowed: string[] = [];
+  const rejected: { path: string; error: string }[] = [];
+  for (const filePath of filePaths) {
+    try {
+      allowed.push(await validateWritePath(filePath));
+    } catch (error) {
+      rejected.push({
+        path: filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { allowed, rejected };
+}
 
 export function setupBibliographyHandlers() {
   ipcMain.handle('bibliography:load', async (_event, rawFilePath: unknown) => {
@@ -120,6 +145,7 @@ export function setupBibliographyHandlers() {
       pdfSubdirectory: options.pdfSubdirectory
     });
     try {
+      await validateReadPath(options.projectPath);
       const detector = new OrphanPDFDetector();
       const result = await detector.detectOrphans(options as any);
       console.log('📤 IPC Response: bibliography:detect-orphan-pdfs', {
@@ -140,8 +166,10 @@ export function setupBibliographyHandlers() {
       fileCount: filePaths.length
     });
     try {
+      const { allowed, rejected } = await partitionWritablePaths(filePaths);
       const detector = new OrphanPDFDetector();
-      const result = await detector.deleteOrphans(filePaths);
+      const result = await detector.deleteOrphans(allowed);
+      result.failed.push(...rejected);
       console.log('📤 IPC Response: bibliography:delete-orphan-pdfs', {
         deleted: result.deleted,
         failed: result.failed.length
@@ -161,12 +189,15 @@ export function setupBibliographyHandlers() {
       archiveSubdir: options.archiveSubdir
     });
     try {
+      const projectPath = await validateWritePath(options.projectPath);
+      const { allowed, rejected } = await partitionWritablePaths(options.filePaths);
       const detector = new OrphanPDFDetector();
       const result = await detector.archiveOrphans(
-        options.filePaths,
-        options.projectPath,
+        allowed,
+        projectPath,
         options.archiveSubdir
       );
+      result.failed.push(...rejected);
       console.log('📤 IPC Response: bibliography:archive-orphan-pdfs', {
         archived: result.archived,
         failed: result.failed.length,
