@@ -89,7 +89,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           ? []
           : [
               {
-                label: 'Paramètres',
+                label: t('settings'),
                 accelerator: 'Ctrl+,',
                 click: () => {
                   mainWindow.webContents.send('menu:open-settings');
@@ -173,13 +173,6 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           },
         },
         {
-          label: t('citationSuggestions'),
-          accelerator: 'CmdOrCtrl+Shift+L',
-          click: () => {
-            mainWindow.webContents.send('menu:toggle-suggestions');
-          },
-        },
-        {
           label: t('checkCitations'),
           accelerator: 'CmdOrCtrl+Shift+C',
           click: () => {
@@ -223,13 +216,6 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
             mainWindow.webContents.send('menu:switch-panel', 'chat');
           },
         },
-        {
-          label: t('panelCorpus'),
-          accelerator: 'Alt+4',
-          click: () => {
-            mainWindow.webContents.send('menu:switch-panel', 'corpus');
-          },
-        },
         { type: 'separator' as const },
         {
           label: t('usageJournal'),
@@ -262,14 +248,6 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
             mainWindow.webContents.send('menu:import-bibtex');
           },
         },
-        {
-          label: t('searchCitations'),
-          accelerator: 'CmdOrCtrl+F',
-          click: () => {
-            mainWindow.webContents.send('menu:search-citations');
-          },
-        },
-        { type: 'separator' as const },
         {
           label: t('connectZotero'),
           click: () => {

@@ -12,7 +12,7 @@ export function useMenuShortcuts() {
   const { saveCurrentFile, loadFile, createNewFile, insertFormatting, togglePreview, toggleStats } =
     useEditorStore();
   const { createProject, loadProject } = useProjectStore();
-  const { searchCitations, citations } = useBibliographyStore();
+  const { citations } = useBibliographyStore();
 
   useEffect(() => {
     // Vérifier que l'API Electron est disponible
@@ -154,10 +154,6 @@ export function useMenuShortcuts() {
       window.dispatchEvent(new CustomEvent('show-bibtex-import-dialog'));
     };
 
-    const handleSearchCitations = () => {
-      window.dispatchEvent(new CustomEvent('focus-citation-search'));
-    };
-
     const handleConnectZotero = () => {
       window.dispatchEvent(new CustomEvent('show-zotero-connect-dialog'));
     };
@@ -196,7 +192,6 @@ export function useMenuShortcuts() {
     window.electron.ipcRenderer.on('menu:toggle-preview', handleTogglePreview);
     window.electron.ipcRenderer.on('menu:switch-panel', handleSwitchPanel);
     window.electron.ipcRenderer.on('menu:import-bibtex', handleImportBibTeX);
-    window.electron.ipcRenderer.on('menu:search-citations', handleSearchCitations);
     window.electron.ipcRenderer.on('menu:connect-zotero', handleConnectZotero);
     window.electron.ipcRenderer.on('menu:open-settings', handleOpenSettings);
     window.electron.ipcRenderer.on('menu:open-usage-journal', handleOpenUsageJournal);
@@ -222,7 +217,6 @@ export function useMenuShortcuts() {
       window.electron.ipcRenderer.removeListener('menu:toggle-preview', handleTogglePreview);
       window.electron.ipcRenderer.removeListener('menu:switch-panel', handleSwitchPanel);
       window.electron.ipcRenderer.removeListener('menu:import-bibtex', handleImportBibTeX);
-      window.electron.ipcRenderer.removeListener('menu:search-citations', handleSearchCitations);
       window.electron.ipcRenderer.removeListener('menu:connect-zotero', handleConnectZotero);
       window.electron.ipcRenderer.removeListener('menu:open-settings', handleOpenSettings);
       window.electron.ipcRenderer.removeListener('menu:open-usage-journal', handleOpenUsageJournal);
@@ -237,7 +231,6 @@ export function useMenuShortcuts() {
     toggleStats,
     createProject,
     loadProject,
-    searchCitations,
     citations,
   ]);
 }
