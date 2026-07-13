@@ -451,7 +451,10 @@
     "readyState": {
       "title": "Bereit zu helfen",
       "message": "{{count}} indexierte(s) Dokument(e) verfügbar.\n\nStellen Sie eine Frage, um zu beginnen."
-    }
+    },
+    "notConfigured": "Das Modell antwortet nicht. Prüfen Sie, ob Ollama läuft, oder wählen Sie in den Einstellungen einen anderen Anbieter.",
+    "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
+    "openSettings": "Einstellungen öffnen"
   },
   "corpus": {
     "title": "Korpus",

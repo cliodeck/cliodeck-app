@@ -620,7 +620,10 @@
       "starter1": "Quelles sont les principales thèses dans ma bibliographie sur ce sujet ?",
       "starter2": "Résume les sources primaires disponibles dans mes archives.",
       "starter3": "Quelles pistes de recherche émergent des recoupements entre mes sources ?"
-    }
+    },
+    "notConfigured": "Le modèle ne répond pas. Vérifiez qu'Ollama est lancé, ou choisissez un autre fournisseur dans les Paramètres.",
+    "startFailed": "Le modèle ne répond pas : {{error}}. Vérifiez votre configuration dans les Paramètres.",
+    "openSettings": "Ouvrir les paramètres"
   },
   "corpus": {
     "title": "Corpus",

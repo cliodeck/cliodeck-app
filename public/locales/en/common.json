@@ -620,7 +620,10 @@
       "starter1": "What are the main theses in my bibliography on this topic?",
       "starter2": "Summarize the primary sources available in my archives.",
       "starter3": "What research leads emerge from cross-referencing my sources?"
-    }
+    },
+    "notConfigured": "The model is not responding. Check that Ollama is running, or pick another provider in Settings.",
+    "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
+    "openSettings": "Open Settings"
   },
   "corpus": {
     "title": "Corpus",
