@@ -623,7 +623,8 @@
     },
     "notConfigured": "The model is not responding. Check that Ollama is running, or pick another provider in Settings.",
     "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
-    "openSettings": "Open Settings"
+    "openSettings": "Open Settings",
+    "sourcesLabel": "Sources"
   },
   "corpus": {
     "title": "Corpus",

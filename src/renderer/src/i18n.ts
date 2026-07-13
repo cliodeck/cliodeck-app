@@ -37,7 +37,9 @@ i18n
       }
     },
     lng: 'fr', // Langue par défaut
-    fallbackLng: 'fr',
+    // L'anglais est la langue pivot : une clé manquante en de/fr retombe sur
+    // un texte lisible internationalement plutôt que sur du français.
+    fallbackLng: 'en',
     ns: ['common', 'menu'],
     defaultNS: 'common',
     interpolation: {
