@@ -55,6 +55,9 @@ function App() {
             showMinimap: editorConfig.showMinimap,
             fontFamily: editorConfig.fontFamily,
             defaultEditorMode: editorConfig.defaultEditorMode || 'wysiwyg',
+            // Flag de transition CM6 (plan CM6, Phase 1) — opt-in via
+            // config.json : "editor": { "engine": "cm6" }.
+            engine: editorConfig.engine === 'cm6' ? 'cm6' : 'milkdown',
           });
           initializeEditorMode();
         }

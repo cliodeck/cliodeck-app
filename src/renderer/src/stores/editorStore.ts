@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { editor } from 'monaco-editor';
+import type { EditorFacade } from '@/editor/facade';
 import { logger } from '../utils/logger';
 import {
   appendDraftToContent,
@@ -21,6 +22,12 @@ export interface EditorSettings {
   autoSave: boolean;
   autoSaveDelay: number; // in milliseconds
   defaultEditorMode: 'wysiwyg' | 'source'; // Issue #12: éditeur par défaut
+  /**
+   * Moteur d'éditeur de prose (migration CM6, Phase 1). `milkdown` conserve
+   * la paire actuelle Milkdown/Monaco ; `cm6` remplace les deux modes par
+   * l'éditeur CodeMirror unique. Le flag disparaît en Phase 5.
+   */
+  engine: 'milkdown' | 'cm6';
 }
 
 interface EditorState {
@@ -47,6 +54,20 @@ interface EditorState {
   // Monaco editor reference
   monacoEditor: editor.IStandaloneCodeEditor | null;
 
+  /**
+   * Façade éditeur-agnostique posée par l'éditeur actif (CM6 ou Monaco).
+   * Point de contact unique pour les Slides, l'IPC et les insertions —
+   * quand elle est présente, elle prime sur les références directes.
+   */
+  editorFacade: EditorFacade | null;
+
+  /**
+   * Incrémenté à chaque remplacement externe du document (loadFile,
+   * createNewFile) : l'éditeur CM6 se recrée sur ce signal au lieu
+   * d'observer `content` (interdit — boucle de resynchronisation).
+   */
+  documentVersion: number;
+
   // Actions
   setContent: (content: string) => void;
   loadFile: (filePath: string) => Promise<void>;
@@ -62,6 +83,9 @@ interface EditorState {
   setEditorMode: (mode: 'wysiwyg' | 'source') => void;
   initializeEditorMode: () => void; // Issue #12: initialise le mode depuis settings
   setMonacoEditor: (editor: editor.IStandaloneCodeEditor | null) => void;
+  setEditorFacade: (facade: EditorFacade | null) => void;
+  /** Contenu réel : l'éditeur vivant s'il est monté, sinon le miroir du store. */
+  getLiveContent: () => string;
 
   insertText: (text: string) => void;
   insertCitation: (citationKey: string) => void;
@@ -95,6 +119,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   autoSave: true,
   autoSaveDelay: 3000, // 3 seconds
   defaultEditorMode: 'wysiwyg', // Issue #12: WYSIWYG par défaut
+  engine: 'milkdown', // CM6 opt-in pendant la transition (plan CM6, Phase 1)
 };
 
 // MARK: - Store
@@ -109,6 +134,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pendingFootnoteScroll: null,
   milkdownEditor: null,
   monacoEditor: null,
+  editorFacade: null,
+  documentVersion: 0,
 
   setContent: (content: string) => {
     set({
@@ -125,11 +152,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.loadFile response', result);
 
       if (result.success && result.content !== undefined) {
-        set({
+        set((state) => ({
           content: result.content,
           filePath,
           isDirty: false,
-        });
+          documentVersion: state.documentVersion + 1,
+        }));
         logger.store('Editor', 'File loaded successfully', { contentLength: result.content.length });
       } else {
         throw new Error(result.error || 'Failed to load file');
@@ -141,7 +169,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   saveFile: async () => {
-    const { content, filePath } = get();
+    // La sauvegarde lit l'éditeur vivant, jamais le miroir du store : la
+    // synchronisation CM6 → store est debouncée et peut être en retard.
+    const content = get().getLiveContent();
+    const { filePath } = get();
     logger.store('Editor', 'saveFile called', { filePath, contentLength: content.length });
 
     if (!filePath) {
@@ -154,7 +185,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.saveFile response', result);
 
       if (result.success) {
-        set({ isDirty: false });
+        set({ content, isDirty: false });
         logger.store('Editor', 'File saved successfully');
       } else {
         throw new Error(result.error || 'Failed to save file');
@@ -166,7 +197,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   saveFileAs: async (newFilePath: string) => {
-    const { content } = get();
+    const content = get().getLiveContent();
     logger.store('Editor', 'saveFileAs called', { newFilePath, contentLength: content.length });
 
     try {
@@ -176,6 +207,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       if (result.success) {
         set({
+          content,
           filePath: newFilePath,
           isDirty: false,
         });
@@ -233,6 +265,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ monacoEditor: editor });
   },
 
+  setEditorFacade: (facade: EditorFacade | null) => {
+    set({ editorFacade: facade });
+  },
+
+  getLiveContent: () => {
+    const { editorFacade, content } = get();
+    return editorFacade ? editorFacade.getValue() : content;
+  },
+
   insertText: (text: string) => {
     set((state) => ({
       content: state.content + text,
@@ -251,20 +292,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   createNewFile: () => {
     logger.store('Editor', 'createNewFile called');
-    set({
+    get().editorFacade?.setValue('');
+    set((state) => ({
       content: '',
       filePath: null,
       isDirty: false,
-    });
+      documentVersion: state.documentVersion + 1,
+    }));
   },
 
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => {
     logger.store('Editor', 'insertFormatting called', { type });
-    const { content } = get();
+    const { content, editorFacade } = get();
     const editor = get().milkdownEditor;
 
     // Footnotes: get cursor position and insert directly
     if (type === 'footnote') {
+      // Via la façade (CM6 ou Monaco), l'offset du curseur est exact :
+      // aucun mapping heuristique nécessaire.
+      if (editorFacade) {
+        get().insertFootnoteAtPosition(editorFacade.getCursorOffset());
+        return;
+      }
       if (!editor) {
         logger.error('Editor', 'No editor available for footnote insertion');
         return;
@@ -390,6 +439,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         break;
     }
 
+    // Via la façade (CM6 ou Monaco) : insertion à la sélection courante.
+    if (editorFacade) {
+      editorFacade.replaceSelection(textToInsert);
+      set({ isDirty: true });
+      return;
+    }
+
     // Try to insert at cursor position using Milkdown editor
     if (editor) {
       try {
@@ -421,6 +477,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   insertTextAtCursor: (text: string) => {
     logger.store('Editor', 'insertTextAtCursor called', { text });
+    const { editorFacade } = get();
+    if (editorFacade) {
+      editorFacade.replaceSelection(text);
+      set({ isDirty: true });
+      return;
+    }
     const editor = get().milkdownEditor;
     if (editor) {
       try {
@@ -440,7 +502,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   insertDraftAtCursor: (draft: string): { mode: 'cursor' | 'append' } => {
-    const { content, milkdownEditor, monacoEditor, editorMode } = get();
+    const { content, milkdownEditor, monacoEditor, editorMode, editorFacade } = get();
+
+    // CM6 via la façade — offsets exacts, édition dispatchée à l'éditeur
+    // (une seule entrée d'historique, curseur placé après le draft).
+    if (editorFacade && editorFacade.engine === 'cm6') {
+      const current = editorFacade.getValue();
+      const offset = editorFacade.getCursorOffset();
+      const newContent = insertDraftAtOffset(current, offset, draft);
+      editorFacade.setValue(newContent, offset + (newContent.length - current.length));
+      editorFacade.focus();
+      set({ content: newContent, isDirty: true });
+      return { mode: 'cursor' };
+    }
 
     // Source mode (Monaco) — clean offset → markdown position mapping.
     if (editorMode === 'source' && monacoEditor) {
@@ -501,7 +575,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => {
-    const { content } = get();
+    const content = get().getLiveContent();
 
     // Calculate the next footnote number
     const footnoteRefs = content.match(/\[\^(\d+)\]/g) || [];
@@ -547,11 +621,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       definitionPosition,
     });
 
-    set({
-      content: newContent,
-      isDirty: true,
-      pendingFootnoteScroll: definitionPosition,
-    });
+    const { editorFacade } = get();
+    if (editorFacade) {
+      // L'éditeur reçoit l'édition directement, curseur dans la définition ;
+      // pendingFootnoteScroll reste le canal du chemin Milkdown.
+      editorFacade.setValue(newContent, definitionPosition);
+      editorFacade.focus();
+      set({ content: newContent, isDirty: true });
+    } else {
+      set({
+        content: newContent,
+        isDirty: true,
+        pendingFootnoteScroll: definitionPosition,
+      });
+    }
 
     return { definitionPosition, footnoteNumber };
   },

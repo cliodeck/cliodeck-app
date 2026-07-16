@@ -72,9 +72,37 @@ Le contrat CM6 (« l'éditeur ne sérialise jamais ») rend le test trivial par 
 | Phase | État | PR / commit |
 |:------|:-----|:------------|
 | 0 — Inventaire + harnais | **faite** (ce document) | branche `feat/editor-cm6` |
-| 1 — Socle CM6 + façade Slides | à faire | |
+| 1 — Socle CM6 + façade Slides | **faite** — voir §4 | branche `feat/editor-cm6` |
 | 2 — Rendu live | à faire | |
 | 3a — Extensions Lezer (‖ P2) | à faire | |
 | 3b — Notes + citations | à faire | |
 | 4 — Contrat propositionnel + journaux | à faire | |
 | 5 — Retrait Milkdown/Monaco | à faire | |
+
+## 4. Phase 1 — ce qui est en place
+
+- **Flag** : `editor.engine = "cm6"` dans la config app (electron-store,
+  `~/Library/Application Support/cliodeck/cliodeck-config.json`), défaut
+  `milkdown`. En mode cm6, l'éditeur unique remplace la paire wysiwyg/source
+  et la bascule disparaît de la toolbar.
+- **Wrapper** : `src/renderer/src/components/Editor/CodeMirrorEditor.tsx` —
+  aucun `value` contrôlé ; sync CM6→store debouncée (300 ms), `isDirty`
+  immédiat ; recréation sur le signal `documentVersion` (jamais d'observation
+  de `content`). Réglages/thème reconfigurés à chaud par `Compartment`.
+- **Fidélité** : `src/editor/cm/fidelity.ts` — fichier uniformément CRLF →
+  facet `lineSeparator: "\r\n"` ; sinon `"\n"` et les `\r` de fichiers mixtes
+  restent des caractères du document (rendus par `highlightSpecialChars`).
+  Round-trip vérifié octet par octet sur tout le corpus (tests) **et** dans
+  l'app réelle (ouvrir → Save → `cmp`), y compris le fichier mixte.
+- **Façade** : `src/editor/facade.ts` (`EditorFacade`), implémentée par CM6
+  (wrapper) et Monaco (`MarkdownEditor`), posée dans
+  `editorStore.editorFacade`. Les 4 panneaux Slides, l'IPC `insert-text`,
+  `insertFormatting`, `insertTextAtCursor`, `insertDraftAtCursor` et
+  `insertFootnoteAtPosition` passent par elle. La sauvegarde lit l'éditeur
+  vivant (`getLiveContent`), jamais le miroir du store.
+- **Gains latéraux** : en mode source (Monaco), le formatage s'insère
+  désormais au curseur (avant : append en fin de document) et l'insertion de
+  footnote fonctionne (avant : no-op) — offsets exacts via la façade.
+- **Reste hors périmètre P1** (assumé) : autocomplete citations `[@` dans
+  CM6 (Phase 3b), navigation footnote référence↔définition (Phase 3b),
+  rendu live (Phase 2).

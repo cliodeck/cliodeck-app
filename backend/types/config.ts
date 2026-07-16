@@ -147,6 +147,10 @@ export interface EditorConfig {
   theme: 'light' | 'dark';
   wordWrap: boolean;
   showMinimap: boolean;
+  /** Issue #12 — mode par défaut de la paire Milkdown/Monaco. */
+  defaultEditorMode?: 'wysiwyg' | 'source';
+  /** Flag de transition CM6 (plan CM6, Phase 1) ; retiré en Phase 5. */
+  engine?: 'milkdown' | 'cm6';
 }
 
 export interface AppConfig {

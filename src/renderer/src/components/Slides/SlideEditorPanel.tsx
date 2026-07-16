@@ -21,7 +21,7 @@ const PresentationExportModal = lazy(() =>
 
 export const SlideEditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const { saveFile, monacoEditor, isDirty } = useEditorStore();
+  const { saveFile, editorFacade, isDirty } = useEditorStore();
   const { currentProject } = useProjectStore();
   const { isPanelOpen, openPanel, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -37,13 +37,7 @@ export const SlideEditorPanel: React.FC = () => {
   };
 
   const insertAtCursor = (text: string) => {
-    if (monacoEditor) {
-      const selection = monacoEditor.getSelection();
-      if (selection) {
-        monacoEditor.executeEdits('slide-toolbar', [{ range: selection, text }]);
-        monacoEditor.focus();
-      }
-    }
+    editorFacade?.replaceSelection(text);
   };
 
   const handleAddSection = () => {

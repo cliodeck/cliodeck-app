@@ -1,13 +1,81 @@
 import React, { useRef, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor, Position } from 'monaco-editor';
+import type { EditorFacade } from '@/editor/facade';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
 import './MarkdownEditor.css';
 
+/**
+ * Implémentation Monaco de la façade éditeur-agnostique (plan CM6, Phase 1).
+ * Les Slides et le store passent par elle plutôt que par l'API Monaco
+ * directe, pour que CM6 puisse prendre le relais derrière le flag.
+ */
+function createMonacoFacade(ed: editor.IStandaloneCodeEditor): EditorFacade {
+  return {
+    engine: 'monaco',
+    getValue: () => ed.getValue(),
+    getCursorOffset: () => {
+      const model = ed.getModel();
+      const pos = ed.getPosition();
+      return model && pos ? model.getOffsetAt(pos) : 0;
+    },
+    getSelectionText: () => {
+      const model = ed.getModel();
+      const sel = ed.getSelection();
+      if (!model || !sel || sel.isEmpty()) return null;
+      return model.getValueInRange(sel);
+    },
+    replaceSelection: (text) => {
+      const sel = ed.getSelection();
+      if (!sel) return;
+      ed.executeEdits('facade', [{ range: sel, text }]);
+      ed.focus();
+    },
+    setValue: (text, cursorOffset) => {
+      const model = ed.getModel();
+      if (!model) return;
+      ed.executeEdits('facade', [{ range: model.getFullModelRange(), text }]);
+      if (cursorOffset !== undefined) {
+        const bounded = Math.max(0, Math.min(cursorOffset, text.length));
+        ed.setPosition(model.getPositionAt(bounded));
+      }
+    },
+    appendText: (text) => {
+      const model = ed.getModel();
+      if (!model) return;
+      const lastLine = model.getLineCount();
+      const lastCol = model.getLineMaxColumn(lastLine);
+      ed.executeEdits('facade', [
+        {
+          range: {
+            startLineNumber: lastLine,
+            startColumn: lastCol,
+            endLineNumber: lastLine,
+            endColumn: lastCol,
+          },
+          text,
+        },
+      ]);
+    },
+    revealLine: (lineNumber) => {
+      ed.revealLineInCenter(lineNumber);
+      ed.setPosition({ lineNumber, column: 1 });
+      ed.focus();
+    },
+    focus: () => ed.focus(),
+    onContentChange: (callback) => {
+      const disposable = ed.onDidChangeModelContent(() =>
+        callback(ed.getValue())
+      );
+      return () => disposable.dispose();
+    },
+  };
+}
+
 export const MarkdownEditor: React.FC = () => {
-  const { content, setContent, settings, setMonacoEditor } = useEditorStore();
+  const { content, setContent, settings, setMonacoEditor, setEditorFacade } = useEditorStore();
   useBibliographyStore(); // Keep store subscription active
   const { currentTheme } = useTheme();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -44,12 +112,14 @@ export const MarkdownEditor: React.FC = () => {
   useEffect(() => {
     return () => {
       setMonacoEditor(null);
+      setEditorFacade(null);
     };
-  }, [setMonacoEditor]);
+  }, [setMonacoEditor, setEditorFacade]);
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     setMonacoEditor(editor);
+    setEditorFacade(createMonacoFacade(editor));
 
     // Configure markdown language
     monaco.languages.setLanguageConfiguration('markdown', {

@@ -8,7 +8,7 @@ const DEBOUNCE_MS = 600;
 
 export const SlidePreviewPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const { monacoEditor, content } = useEditorStore();
+  const { editorFacade, content } = useEditorStore();
   const { closePreview } = useSlidesStore();
 
   const [previewHtml, setPreviewHtml] = useState<string>('');
@@ -41,19 +41,18 @@ export const SlidePreviewPanel: React.FC = () => {
 
   // Debounced reload on content change
   useEffect(() => {
-    if (!monacoEditor) return;
+    if (!editorFacade) return;
 
-    const disposable = monacoEditor.onDidChangeModelContent(() => {
-      const text = monacoEditor.getValue();
+    const unsubscribe = editorFacade.onContentChange((text) => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => loadPreview(text), DEBOUNCE_MS);
     });
 
     return () => {
-      disposable.dispose();
+      unsubscribe();
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [monacoEditor, loadPreview]);
+  }, [editorFacade, loadPreview]);
 
   return (
     <div className="slide-preview-panel">

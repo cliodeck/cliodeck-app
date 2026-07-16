@@ -54,16 +54,12 @@ interface SlideNavigatorProps {
 
 export const SlideNavigator: React.FC<SlideNavigatorProps> = ({ activeLineNumber }) => {
   const content = useEditorStore((state) => state.content);
-  const monacoEditor = useEditorStore((state) => state.monacoEditor);
+  const editorFacade = useEditorStore((state) => state.editorFacade);
 
   const slides = useMemo(() => parseSlidesFromContent(content), [content]);
 
   const handleSlideClick = (lineNumber: number) => {
-    if (monacoEditor) {
-      monacoEditor.revealLineInCenter(lineNumber);
-      monacoEditor.setPosition({ lineNumber, column: 1 });
-      monacoEditor.focus();
-    }
+    editorFacade?.revealLine(lineNumber);
   };
 
   const activeSlideIndex = useMemo(() => {

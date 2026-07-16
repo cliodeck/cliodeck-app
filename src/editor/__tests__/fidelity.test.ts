@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { detectLineSeparator, roundTrip as cm6RoundTrip } from '../cm/fidelity';
+
 /**
  * Test de fidélité de l'éditeur — Phase 0 du plan de migration CM6
  * (docs/PLAN_migration-editeur-cm6.md, décision cadre n°1).
@@ -24,9 +26,7 @@ interface EditorEngine {
   roundTrip(source: string): string | Promise<string>;
 }
 
-const ENGINES: EditorEngine[] = [
-  // Phase 1 : { name: 'cm6', roundTrip: (s) => EditorState.create({doc: s}).doc.toString() }
-];
+const ENGINES: EditorEngine[] = [{ name: 'cm6', roundTrip: cm6RoundTrip }];
 
 const CORPUS_DIR = fileURLToPath(
   new URL('../../../test-fixtures/editor/', import.meta.url)
@@ -97,11 +97,18 @@ describe('corpus de fidélité (intégrité des fixtures)', () => {
   });
 });
 
-describe('fidélité octet par octet : charger(doc) → sauvegarder() === doc', () => {
-  if (ENGINES.length === 0) {
-    it.todo('Phase 1 : enregistrer le moteur CM6 dans ENGINES');
-  }
+describe('détection du séparateur de ligne', () => {
+  it('choisit CRLF pour un fichier uniformément CRLF', () => {
+    expect(detectLineSeparator('a\r\nb\r\n')).toBe('\r\n');
+  });
+  it('choisit LF pour un fichier LF ou mixte (les \\r restent du contenu)', () => {
+    expect(detectLineSeparator('a\nb\n')).toBe('\n');
+    expect(detectLineSeparator('a\r\nb\n')).toBe('\n');
+    expect(detectLineSeparator('sans saut')).toBe('\n');
+  });
+});
 
+describe('fidélité octet par octet : charger(doc) → sauvegarder() === doc', () => {
   for (const engine of ENGINES) {
     describe(engine.name, () => {
       for (const fixture of fixtures) {

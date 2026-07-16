@@ -1,0 +1,13 @@
+.codemirror-editor {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-panel);
+}
+
+.codemirror-editor .cm-editor {
+  height: 100%;
+}
+
+.codemirror-editor .cm-scroller {
+  overflow: auto;
+}
