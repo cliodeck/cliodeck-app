@@ -1,0 +1,4 @@
+# Le corpus de fidélité de l'éditeur teste la préservation octet par octet,
+# y compris les fins de ligne CRLF/mixtes et l'absence de saut de ligne
+# final : git ne doit jamais les normaliser.
+test-fixtures/editor/** -text
