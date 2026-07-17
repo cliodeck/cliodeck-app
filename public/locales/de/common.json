@@ -137,7 +137,11 @@
     "defaultEditorMode": "Standard-Editor",
     "defaultEditorModeHelp": "Wählen Sie den Editor, der beim Öffnen eines Dokuments angezeigt wird",
     "modeWysiwyg": "Visuell (Milkdown)",
-    "modeSource": "Quellcode (Monaco)"
+    "modeSource": "Quellcode (Monaco)",
+    "citationNotFound": "Schlüssel nicht in der Bibliografie gefunden",
+    "footnoteNoDefinition": "Fehlende Definition — Cmd/Strg+Klick zum Erstellen",
+    "frontmatterFolded": "Frontmatter eingeklappt — zum Aufklappen klicken",
+    "frontmatterFold": "Frontmatter einklappen"
   },
   "ui": {
     "title": "Benutzeroberfläche",
@@ -741,7 +745,8 @@
     "openError": "Fehler beim Öffnen der Datei",
     "saveError": "Fehler beim Speichern der Datei",
     "wysiwygMode": "Visueller Modus (WYSIWYG)",
-    "sourceMode": "Quellmodus (Markdown)"
+    "sourceMode": "Quellmodus (Markdown)",
+    "renumberFootnotes": "Fußnoten neu nummerieren"
   },
   "ragSettings": {
     "provider": "LLM-Anbieter",

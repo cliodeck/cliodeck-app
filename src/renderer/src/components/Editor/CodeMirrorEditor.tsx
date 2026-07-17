@@ -22,10 +22,18 @@ import {
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { createDocState } from '@/editor/cm/fidelity';
-import { liveRender } from '@/editor/cm/live-render';
+import {
+  liveRender,
+  liveRenderRefresh,
+  type ResolvedCitation,
+} from '@/editor/cm/live-render';
+import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
+import { scholarlyMarkdown } from '@/editor/lezer-extensions';
 import type { EditorFacade } from '@/editor/facade';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
+import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
+import { useTranslation } from 'react-i18next';
 import './CodeMirrorEditor.css';
 
 /**
@@ -59,6 +67,37 @@ function resolveImageSrc(src: string): string | null {
   if (slash < 0) return null;
   const abs = src.startsWith('/') ? src : filePath.slice(0, slash + 1) + src;
   return encodeURI('file://' + abs);
+}
+
+/**
+ * Résolution des clés de citation contre la bibliographie du store, avec un
+ * cache invalidé par identité du tableau `citations` (le rendu live résout
+ * chaque clé du viewport à chaque recalcul).
+ */
+let citationCache: {
+  source: unknown;
+  map: Map<string, ResolvedCitation>;
+} | null = null;
+
+function resolveCitation(key: string): ResolvedCitation | null {
+  const { citations } = useBibliographyStore.getState();
+  if (!citationCache || citationCache.source !== citations) {
+    const map = new Map<string, ResolvedCitation>();
+    for (const c of citations) {
+      map.set(c.id, { author: c.author, year: c.year, title: c.title });
+    }
+    citationCache = { source: citations, map };
+  }
+  return citationCache.map.get(key) ?? null;
+}
+
+function getCitations(): CitationCandidate[] {
+  return useBibliographyStore.getState().citations.map((c) => ({
+    id: c.id,
+    author: c.author,
+    year: c.year,
+    title: c.title,
+  }));
 }
 
 function getFontFamily(fontFamily: string): string {
@@ -223,6 +262,7 @@ export const CodeMirrorEditor: React.FC = () => {
   const documentVersion = useEditorStore((s) => s.documentVersion);
   const settings = useEditorStore((s) => s.settings);
   const { currentTheme } = useTheme();
+  const { t } = useTranslation('common');
 
   // Création / recréation de la vue : au montage et à chaque remplacement
   // externe du document (chargement de fichier, nouveau fichier).
@@ -253,9 +293,26 @@ export const CodeMirrorEditor: React.FC = () => {
         bracketMatching(),
         highlightSelectionMatches(),
         search({ top: true }),
-        markdown({ base: markdownLanguage, codeLanguages: languages }),
+        markdown({
+          base: markdownLanguage,
+          codeLanguages: languages,
+          extensions: scholarlyMarkdown,
+        }),
         syntaxHighlighting(markdownHighlight),
-        liveRender({ resolveImageSrc }),
+        liveRender({ resolveImageSrc, resolveCitation }),
+        scholarly({
+          resolveCitation,
+          getCitations,
+          labels: {
+            citationNotFound: t('editor.citationNotFound'),
+            bibliographyEmpty: t('editor.noCitations'),
+            footnoteNoDefinition: t('editor.footnoteNoDefinition'),
+            save: t('toolbar.save'),
+            cancel: t('common.cancel'),
+            frontmatterFolded: t('editor.frontmatterFolded'),
+            frontmatterFold: t('editor.frontmatterFold'),
+          },
+        }),
         cliodeckTheme,
         dynamicCompartment.of(dynamicExtensions(settings, currentTheme === 'dark')),
         EditorView.updateListener.of((update) => {
@@ -275,7 +332,19 @@ export const CodeMirrorEditor: React.FC = () => {
     viewRef.current = view;
     useEditorStore.getState().setEditorFacade(createFacade(view, changeListeners));
 
+    // La bibliographie charge en asynchrone : quand `citations` change, la
+    // résolution des clés change sans transaction de document — on demande
+    // un recalcul des décorations.
+    let lastCitations = useBibliographyStore.getState().citations;
+    const unsubscribeBibliography = useBibliographyStore.subscribe((s) => {
+      if (s.citations !== lastCitations) {
+        lastCitations = s.citations;
+        view.dispatch({ effects: liveRenderRefresh.of(null) });
+      }
+    });
+
     return () => {
+      unsubscribeBibliography();
       // Ordre : retirer la façade, purger la sync en attente vers le store,
       // puis détruire la vue.
       useEditorStore.getState().setEditorFacade(null);

@@ -23,6 +23,22 @@ export type LiveDeco =
   | { kind: 'checkbox'; from: number; to: number; checked: boolean }
   | { kind: 'hr'; from: number; to: number };
 
+/** Référence bibliographique résolue (Phase 3b). */
+export interface ResolvedCitation {
+  author: string;
+  year: string;
+  title: string;
+}
+
+export interface LiveModelOptions {
+  /**
+   * Résolution d'une clé de citation vers la bibliographie. `null` → clé
+   * inconnue, signalée visuellement (soulignement ondulé) sans bloquer.
+   * Absent → aucune vérification (les clés ne sont pas soulignées).
+   */
+  resolveCitation?: (key: string) => ResolvedCitation | null;
+}
+
 export interface ImageSpec {
   /** Fin de la ligne contenant l'image (position du widget bloc). */
   widgetPos: number;
@@ -58,7 +74,8 @@ export function computeLiveDecorations(
   state: EditorState,
   tree: Tree,
   visible: readonly Span[],
-  selection: readonly Span[]
+  selection: readonly Span[],
+  options: LiveModelOptions = {}
 ): LiveDeco[] {
   const out: LiveDeco[] = [];
   const doc = state.doc;
@@ -125,10 +142,80 @@ export function computeLiveDecorations(
           return;
         }
 
+        // ---- Notes de bas de page (Phase 3b) -----------------------------
+        // Appel : label en exposant, marqueurs `[^` / `]` masqués hors nœud
+        // actif. Le span cliquable (navigation, popup Cmd+clic) est le nœud
+        // entier — les handlers vivent dans scholarly/.
+        if (name === 'FootnoteReference') {
+          const label = node.node.getChild('FootnoteLabel');
+          if (!label) return false;
+          out.push({
+            kind: 'mark',
+            from: node.from,
+            to: node.to,
+            class: 'cm-live-footnote-ref',
+          });
+          if (!touches(selection, node.from, node.to)) {
+            hide(node.from, label.from); // `[^`
+            hide(label.to, node.to); // `]`
+          }
+          return false;
+        }
+
+        // Définition : `[^id]:` stylé, contenu normal (jamais masqué —
+        // c'est le texte de la note).
+        if (name === 'FootnoteDefinition') {
+          const label = node.node.getChild('FootnoteLabel');
+          const marks = node.node.getChildren('FootnoteMark');
+          if (label && marks.length >= 2) {
+            out.push({
+              kind: 'mark',
+              from: marks[0].from,
+              to: marks[marks.length - 1].to,
+              class: 'cm-live-footnote-def',
+            });
+          }
+          return; // le corps (paragraphes enfants) se rend normalement
+        }
+
+        // ---- Citations pandoc (Phase 3b) ---------------------------------
+        // Pastille sur le cluster ; `[`, `]`, `@` masqués hors nœud actif
+        // (les `;` restent : ils séparent les clés d'un cluster). Clé non
+        // résolue → soulignement ondulé, sans bloquer.
+        if (name === 'PandocCitation') {
+          out.push({
+            kind: 'mark',
+            from: node.from,
+            to: node.to,
+            class: 'cm-live-citation',
+          });
+          const revealed = touches(selection, node.from, node.to);
+          const cursor = node.node.cursor();
+          if (cursor.firstChild()) {
+            do {
+              if (cursor.name === 'CitationMark' && !revealed) {
+                const ch = doc.sliceString(cursor.from, cursor.to);
+                if (ch !== ';') hide(cursor.from, cursor.to);
+              } else if (
+                cursor.name === 'CitationKey' &&
+                options.resolveCitation &&
+                options.resolveCitation(
+                  doc.sliceString(cursor.from, cursor.to)
+                ) === null
+              ) {
+                out.push({
+                  kind: 'mark',
+                  from: cursor.from,
+                  to: cursor.to,
+                  class: 'cm-live-citation-unresolved',
+                });
+              }
+            } while (cursor.nextSibling());
+          }
+          return false;
+        }
+
         // ---- Liens ------------------------------------------------------
-        // Uniquement les liens inline avec URL : `[^note]` et `[@citation]`
-        // parsent aussi comme Link (sans enfant URL) et appartiennent à la
-        // Phase 3 — on ne les touche pas.
         if (name === 'Link') {
           const url = node.node.getChild('URL');
           if (!url) return;

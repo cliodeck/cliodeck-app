@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Eye, Code2, Search } from 'lucide-react';
+import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Eye, Code2, Search, ListOrdered } from 'lucide-react';
+import { renumberFootnotes } from '@/editor/footnote-tools';
 import { MilkdownEditor } from './MilkdownEditor';
 import { MarkdownEditor } from './MarkdownEditor';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
@@ -103,6 +104,20 @@ export const EditorPanel: React.FC = () => {
     insertFormatting('footnote');
   };
 
+  // Renumérotation manuelle des notes (arbitrage 2 du plan CM6 : commande
+  // explicite, jamais silencieuse). CM6 uniquement.
+  const handleRenumberFootnotes = () => {
+    logger.component('EditorPanel', 'handleRenumberFootnotes clicked');
+    const store = useEditorStore.getState();
+    const result = renumberFootnotes(store.getLiveContent());
+    if (!result.changed) return;
+    if (store.editorFacade) {
+      store.editorFacade.setValue(result.content);
+    } else {
+      setContent(result.content);
+    }
+  };
+
   const handleCheckCitations = async () => {
     logger.component('EditorPanel', 'handleCheckCitations clicked');
     // Extract all citations from content
@@ -155,6 +170,15 @@ export const EditorPanel: React.FC = () => {
           <button className="toolbar-btn" onClick={handleFootnote} title={t('toolbar.footnote')}>
             <Superscript size={18} strokeWidth={1.5} />
           </button>
+          {useCM6 && (
+            <button
+              className="toolbar-btn"
+              onClick={handleRenumberFootnotes}
+              title={t('toolbar.renumberFootnotes')}
+            >
+              <ListOrdered size={18} strokeWidth={1.5} />
+            </button>
+          )}
         </div>
 
         {/* Validation and Similarity */}

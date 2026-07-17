@@ -7,7 +7,8 @@ import {
 } from '@codemirror/view';
 import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
-import { computeLiveDecorations } from './model';
+import { computeLiveDecorations, type LiveModelOptions } from './model';
+import { liveRenderRefresh } from './refresh';
 import { CheckboxWidget, HrWidget } from './widgets';
 
 /**
@@ -23,12 +24,16 @@ import { CheckboxWidget, HrWidget } from './widgets';
  * dans le StateField d'images.ts.
  */
 
-function buildDecorations(view: EditorView): DecorationSet {
+function buildDecorations(
+  view: EditorView,
+  options: LiveModelOptions
+): DecorationSet {
   const decos = computeLiveDecorations(
     view.state,
     syntaxTree(view.state),
     view.visibleRanges,
-    view.state.selection.ranges
+    view.state.selection.ranges,
+    options
   );
   const ranges: Range<Decoration>[] = [];
   for (const d of decos) {
@@ -80,17 +85,30 @@ function openExternal(url: string): void {
   api?.shell?.openExternal?.(url);
 }
 
-export const liveRenderPlugin = ViewPlugin.fromClass(
+/** Un rafraîchissement externe (bibliographie) a-t-il été demandé ? */
+function hasRefreshEffect(update: ViewUpdate): boolean {
+  return update.transactions.some((tr) =>
+    tr.effects.some((e) => e.is(liveRenderRefresh))
+  );
+}
+
+export const liveRenderPlugin = (options: LiveModelOptions) =>
+  ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
 
     constructor(view: EditorView) {
-      this.decorations = buildDecorations(view);
+      this.decorations = buildDecorations(view, options);
     }
 
     update(update: ViewUpdate): void {
-      if (update.docChanged || update.selectionSet || update.viewportChanged) {
-        this.decorations = buildDecorations(update.view);
+      if (
+        update.docChanged ||
+        update.selectionSet ||
+        update.viewportChanged ||
+        hasRefreshEffect(update)
+      ) {
+        this.decorations = buildDecorations(update.view, options);
       }
     }
   },

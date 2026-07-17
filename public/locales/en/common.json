@@ -137,7 +137,11 @@
     "defaultEditorMode": "Default editor",
     "defaultEditorModeHelp": "Choose the editor displayed when opening a document",
     "modeWysiwyg": "Visual (Milkdown)",
-    "modeSource": "Source (Monaco)"
+    "modeSource": "Source (Monaco)",
+    "citationNotFound": "Key not found in bibliography",
+    "footnoteNoDefinition": "Missing definition — Cmd/Ctrl+click to create it",
+    "frontmatterFolded": "Frontmatter folded — click to expand",
+    "frontmatterFold": "Fold frontmatter"
   },
   "ui": {
     "title": "Appearance",
@@ -741,7 +745,8 @@
     "openError": "Error opening file",
     "saveError": "Error saving file",
     "wysiwygMode": "Visual mode (WYSIWYG)",
-    "sourceMode": "Source mode (Markdown)"
+    "sourceMode": "Source mode (Markdown)",
+    "renumberFootnotes": "Renumber footnotes"
   },
   "ragSettings": {
     "provider": "LLM Provider",

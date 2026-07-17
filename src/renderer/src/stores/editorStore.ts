@@ -3,6 +3,7 @@ import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { editor } from 'monaco-editor';
 import type { EditorFacade } from '@/editor/facade';
+import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
 import {
   appendDraftToContent,
@@ -577,13 +578,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   insertFootnoteAtPosition: (markdownPosition: number) => {
     const content = get().getLiveContent();
 
-    // Calculate the next footnote number
-    const footnoteRefs = content.match(/\[\^(\d+)\]/g) || [];
-    const numbers = footnoteRefs.map(ref => {
-      const match = ref.match(/\[\^(\d+)\]/);
-      return match ? parseInt(match[1], 10) : 0;
-    });
-    const footnoteNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+    // Prochain numéro par parse Lezer : un `[^99]` dans un bloc de code
+    // n'est pas une note (l'ancienne regex comptait tout le contenu).
+    const footnoteNumber = nextFootnoteNumber(content);
 
     const refText = `[^${footnoteNumber}]`;
     const defText = `[^${footnoteNumber}]: `;

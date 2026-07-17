@@ -68,4 +68,32 @@ export const liveRenderTheme = EditorView.baseTheme({
     fontStyle: 'italic',
     fontSize: '0.9em',
   },
+
+  // ---- Notes de bas de page (Phase 3b) -----------------------------------
+  '.cm-live-footnote-ref': {
+    color: 'var(--color-accent)',
+    fontSize: '0.78em',
+    verticalAlign: 'super',
+    lineHeight: '1',
+    cursor: 'pointer',
+    fontWeight: '600',
+  },
+  '.cm-live-footnote-def': {
+    color: 'var(--color-accent)',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+
+  // ---- Citations pandoc (Phase 3b) ---------------------------------------
+  '.cm-live-citation': {
+    background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+    borderRadius: '4px',
+    padding: '0 3px',
+    color: 'var(--color-accent)',
+  },
+  '.cm-live-citation-unresolved': {
+    textDecoration: 'underline wavy',
+    textDecorationColor: 'var(--color-danger)',
+    textUnderlineOffset: '3px',
+  },
 });

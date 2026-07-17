@@ -18,7 +18,7 @@ import { ImageWidget } from './widgets';
  * plage modifiée).
  */
 
-export interface LiveRenderOptions {
+export interface ImageWidgetOptions {
   /**
    * Résout la source d'une image vers une URL chargeable (les chemins
    * relatifs dépendent du projet ouvert). `null` → placeholder.
@@ -28,7 +28,7 @@ export interface LiveRenderOptions {
 
 function computeAll(
   state: EditorState,
-  options: LiveRenderOptions,
+  options: ImageWidgetOptions,
   eager: boolean
 ): DecorationSet {
   const tree = eager
@@ -44,7 +44,7 @@ function computeAll(
   return Decoration.set(ranges, true);
 }
 
-export function imageWidgets(options: LiveRenderOptions) {
+export function imageWidgets(options: ImageWidgetOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => computeAll(state, options, true),
 
