@@ -216,8 +216,10 @@ export const EditorPanel: React.FC = () => {
         )}
       </div>
 
-      {/* Editor content */}
-      <div className="editor-content">
+      {/* Editor content — en mode cm6, colonne flex : l'éditeur prend
+          l'espace restant et la barre de stats garde ses 28 px visibles
+          (les modes hérités conservent leur layout, Milkdown est gelé). */}
+      <div className={`editor-content${useCM6 ? ' editor-content-cm6' : ''}`}>
         {useCM6 ? (
           <CodeMirrorEditor />
         ) : editorMode === 'wysiwyg' ? (
