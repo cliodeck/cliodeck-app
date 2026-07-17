@@ -73,9 +73,9 @@ Le contrat CM6 (« l'éditeur ne sérialise jamais ») rend le test trivial par 
 |:------|:-----|:------------|
 | 0 — Inventaire + harnais | **faite** (ce document) | branche `feat/editor-cm6` |
 | 1 — Socle CM6 + façade Slides | **faite** — voir §4 | branche `feat/editor-cm6` |
-| 2 — Rendu live | **faite** — `src/editor/cm/live-render/` (model pur + ViewPlugin + StateField images), révélation au nœud/ligne actif, viewport only ; vérifiée app réelle (fidélité, checkbox→source, 61 900 mots fluides). Limites : frontmatter en source (P3b), Setext non stylés, `changeOrigin` TODO P4 | branche `feat/editor-cm6` |
-| 3a — Extensions Lezer (‖ P2) | **faite** — `src/editor/lezer-extensions/` (Footnotes + PandocCitations, MarkdownConfig, 0 import ClioDeck, 34 tests parsing). Non câblées dans l'éditeur : c'est la première étape de la 3b. Limites v1 documentées en tête de module (locator = suffixe, pas de nœud dédié) | branche `feat/editor-cm6` |
-| 3b — Notes + citations | à faire | |
+| 2 — Rendu live | **faite** (`57e8433`) — `src/editor/cm/live-render/` (model pur + ViewPlugin + StateField images), révélation au nœud/ligne actif, viewport only ; vérifiée app réelle (fidélité, checkbox→source, 61 900 mots fluides). Limites : frontmatter en source (P3b), Setext non stylés, `changeOrigin` TODO P4 | branche `feat/editor-cm6` |
+| 3a — Extensions Lezer (‖ P2) | **faite** (`4a75974`) — `src/editor/lezer-extensions/` (Footnotes + PandocCitations, MarkdownConfig, 0 import ClioDeck, 34 tests parsing). Non câblées dans l'éditeur : c'est la première étape de la 3b. Limites v1 documentées en tête de module (locator = suffixe, pas de nœud dédié) | branche `feat/editor-cm6` |
+| 3b — Notes + citations | **faite** (`ba2dfeb`) — exposants + infobulles + popup Zettlr + navigation, pastilles de citations + autocomplete `@` (bibliographyStore), frontmatter replié, renumérotation manuelle, fix numérotation (Lezer). Reste : test manuel avec bibliographie Zotero réelle | branche `feat/editor-cm6` |
 | 4 — Contrat propositionnel + journaux | à faire | |
 | 5 — Retrait Milkdown/Monaco | à faire | |
 
