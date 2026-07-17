@@ -79,6 +79,23 @@ Cas particuliers :
   headless). Le contexte `mcp` et le kind `mcp_session` sont réservés dans le schéma ;
   la capture côté serveur MCP viendra plus tard.
 
+### Adjudications de propositions IA (schéma v2 — éditeur CM6, Phase 4)
+
+Quand l'éditeur affiche une proposition IA (contrat propositionnel, voir
+`docs/editor-proposals.md`), chaque **adjudication** — `accepted` | `rejected` |
+`modified`, plus les fins de vie sans jugement `invalidated` (édition humaine
+sur le texte visé) et `expired` (fermeture du document) — est journalisée dans
+une table dédiée `proposal_adjudications` : `{décision, catégorie, modèle,
+tâche, horodatage, workspace}` et **rien d'autre**.
+
+**Aucun contenu textuel n'entre dans le journal d'usage** — ni le texte
+original, ni le texte proposé, ni la version finale : ces contenus relèvent du
+journal de recherche (`history_proposal_events` dans `brain.db`). La
+granularité est imposée par le typage (le type d'entrée du store ne possède
+pas de champ de contenu), pas seulement par la discipline de l'appelant. Les
+taux d'acceptation (par catégorie, par modèle, par période) sont calculés côté
+journal (`summarizeAdjudications`), jamais côté éditeur.
+
 ### Sessions
 
 Découpage cosmétique (lisibilité du résumé), non contraignant : une session se ferme
@@ -97,6 +114,16 @@ Le **rattachement session→décision est entièrement manuel** : l'utilisateur 
 lui-même les sessions du jour à ses décisions. Une session non rattachée reste visible
 comme telle — c'est la matière de la section « violations ».
 
+### Brouillons issus des rejets de propositions (v2)
+
+Au rejet d'une proposition IA, l'éditeur propose — de façon échantillonnée
+(1 rejet sur 5, jamais deux fois de suite) — un champ « pourquoi ? » optionnel.
+La note saisie est stockée dans `decision_drafts` comme **brouillon** de la
+couche décisionnelle : elle n'est **jamais** promue automatiquement en
+décision d'usage (la sémantique de `usage_decisions` — tâche/alternative/
+justification/verdict — reste intacte). C'est l'utilisateur qui, le cas
+échéant, s'en servira comme point de départ d'une annotation quotidienne.
+
 ## 6. Stockage (`.cliodeck/journal.db`)
 
 Base **SQLite séparée** de `brain.db`, volontairement : le journal doit pouvoir être
@@ -110,8 +137,13 @@ inference_events(id, session_id, at, duration_ms, kind, provider, model, is_loca
                  chunk_count, mode, workspace, corpus, recipe_id, status, ref)
 usage_decisions(id, date, workspace, task, alternative, justification, verdict, verdict_note)
 session_decision(session_id, decision_id)   -- rattachement manuel
-journal_meta(key, value)                     -- schema_version
+proposal_adjudications(id, at, decision, category, model, task, workspace)  -- v2, sans contenu
+decision_drafts(id, at, category, model, task, note, status)                -- v2, brouillons
+journal_meta(key, value)                     -- schema_version (courante : 2)
 ```
+
+Migration v1 → v2 : purement additive (deux nouvelles tables) ; les données
+v1 ne sont pas touchées.
 
 ## 7. Interfaces
 

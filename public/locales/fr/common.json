@@ -141,7 +141,12 @@
     "citationNotFound": "Clé introuvable dans la bibliographie",
     "footnoteNoDefinition": "Définition manquante — Cmd/Ctrl+clic pour la créer",
     "frontmatterFolded": "Frontmatter replié — cliquer pour déplier",
-    "frontmatterFold": "Replier le frontmatter"
+    "frontmatterFold": "Replier le frontmatter",
+    "proposalAccept": "Accepter la proposition (Tab)",
+    "proposalReject": "Rejeter la proposition (Échap)",
+    "proposalModify": "Modifier la proposition",
+    "proposalWhy": "Pourquoi ? (optionnel, Entrée pour envoyer)",
+    "proposalApply": "Appliquer"
   },
   "ui": {
     "title": "Apparence",

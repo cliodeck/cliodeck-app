@@ -6,6 +6,7 @@ import {
 } from '@codemirror/view';
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
 import { findDefinition } from './footnote-lookup';
+import { changeOrigin } from '../change-origin';
 import type { ScholarlyLabels } from './types';
 
 /**
@@ -80,6 +81,7 @@ function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
               to: current.contentTo,
               insert: text,
             },
+            annotations: changeOrigin.of('programmatic'),
           });
         } else {
           const doc = view.state.doc;
@@ -91,6 +93,7 @@ function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
               from: doc.length,
               insert: `${sep}[^${value.label}]: ${text}`,
             },
+            annotations: changeOrigin.of('programmatic'),
           });
         }
         close();

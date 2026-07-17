@@ -7,6 +7,7 @@ import {
 import type { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import type { CitationCandidate, ScholarlyLabels } from './types';
+import { changeOrigin } from '../change-origin';
 
 /**
  * Autocomplétion des citations (Phase 3b) : déclenchée par `@` précédé de
@@ -57,6 +58,7 @@ function applyCitation(candidate: CitationCandidate) {
     view.dispatch({
       changes: { from, to, insert },
       selection: { anchor: from + insert.length },
+      annotations: changeOrigin.of('programmatic'),
     });
   };
 }

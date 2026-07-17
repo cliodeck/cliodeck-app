@@ -5,6 +5,7 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { replaceAll } from '@milkdown/utils';
 import { Selection } from 'prosemirror-state';
+import { normalizeInsertPayload, wrapLegacyProvenance } from './insert-payload';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -145,9 +146,13 @@ export const MilkdownEditor: React.FC = () => {
     }, 100);
   }, [content, isEditorReady]);
 
-  // Handle IPC text insertion from bibliography panel
+  // Handle IPC text insertion from bibliography panel.
+  // Phase 4 : payload { text, metadata? } — l'enveloppe cliodeck-gen du
+  // contenu IA est reconstruite localement (comportement hérité, gelé).
   useEffect(() => {
-    const handler = (text: string) => {
+    const handler = (raw: unknown) => {
+      const text = wrapLegacyProvenance(normalizeInsertPayload(raw));
+      if (!text) return;
       safeEditorAction((ctx) => {
         const view = ctx.get(editorViewCtx);
         const { state } = view;

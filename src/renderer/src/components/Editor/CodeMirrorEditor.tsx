@@ -29,7 +29,15 @@ import {
 } from '@/editor/cm/live-render';
 import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
 import { scholarlyMarkdown } from '@/editor/lezer-extensions';
+import { changeOrigin, changeOriginGuard } from '@/editor/cm/change-origin';
+import {
+  proposals,
+  type Proposal,
+  type ProposalsInstance,
+} from '@/editor/proposals';
 import type { EditorFacade } from '@/editor/facade';
+import { recordAdjudication } from './proposals-ipc';
+import { normalizeInsertPayload } from './insert-payload';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -207,7 +215,8 @@ function dynamicExtensions(settings: EditorSettings, dark: boolean): Extension {
 
 function createFacade(
   view: EditorView,
-  changeListeners: Set<(content: string) => void>
+  changeListeners: Set<(content: string) => void>,
+  proposalsInstance: ProposalsInstance
 ): EditorFacade {
   return {
     engine: 'cm6',
@@ -217,23 +226,32 @@ function createFacade(
       const { from, to } = view.state.selection.main;
       return from === to ? null : view.state.sliceDoc(from, to);
     },
-    replaceSelection: (text) => {
-      view.dispatch(view.state.replaceSelection(text));
+    replaceSelection: (text, origin) => {
+      view.dispatch({
+        ...view.state.replaceSelection(text),
+        annotations: changeOrigin.of(origin ?? 'programmatic'),
+      });
       view.focus();
     },
-    setValue: (text, cursorOffset) => {
+    setValue: (text, cursorOffset, origin) => {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: text },
         selection:
           cursorOffset !== undefined
             ? EditorSelection.cursor(Math.max(0, Math.min(cursorOffset, text.length)))
             : undefined,
+        annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
     },
-    appendText: (text) => {
+    appendText: (text, origin) => {
       view.dispatch({
         changes: { from: view.state.doc.length, insert: text },
+        annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
+    },
+    propose: (partial) => {
+      proposalsInstance.inject(view, partial);
+      return true;
     },
     revealLine: (lineNumber) => {
       const line = view.state.doc.line(
@@ -256,6 +274,7 @@ function createFacade(
 export const CodeMirrorEditor: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const proposalsRef = useRef<ProposalsInstance | null>(null);
   const dynamicCompartment = useRef(new Compartment()).current;
 
   const filePath = useEditorStore((s) => s.filePath);
@@ -281,6 +300,21 @@ export const CodeMirrorEditor: React.FC = () => {
       useEditorStore.setState({ content, isDirty: true });
       for (const listener of changeListeners) listener(content);
     };
+
+    // Contrat propositionnel (Phase 4b) : les adjudications partent vers le
+    // main (routage journaux) via l'accesseur défensif.
+    const proposalsInstance = proposals({
+      onEvent: recordAdjudication,
+      labels: {
+        accept: t('editor.proposalAccept'),
+        reject: t('editor.proposalReject'),
+        modify: t('editor.proposalModify'),
+        rejectionPrompt: t('editor.proposalWhy'),
+        apply: t('editor.proposalApply'),
+        cancel: t('common.cancel'),
+      },
+    });
+    proposalsRef.current = proposalsInstance;
 
     const view: EditorView = new EditorView({
       state: createDocState(store.content, [
@@ -313,6 +347,8 @@ export const CodeMirrorEditor: React.FC = () => {
             frontmatterFold: t('editor.frontmatterFold'),
           },
         }),
+        proposalsInstance.extension,
+        changeOriginGuard(),
         cliodeckTheme,
         dynamicCompartment.of(dynamicExtensions(settings, currentTheme === 'dark')),
         EditorView.updateListener.of((update) => {
@@ -330,7 +366,19 @@ export const CodeMirrorEditor: React.FC = () => {
     });
 
     viewRef.current = view;
-    useEditorStore.getState().setEditorFacade(createFacade(view, changeListeners));
+    useEditorStore
+      .getState()
+      .setEditorFacade(createFacade(view, changeListeners, proposalsInstance));
+
+    // Hook de dev (critère d'acceptation Phase 4) : injection d'une
+    // proposition factice sans aucun modèle — utilisé par la vérification
+    // pilotée et les démonstrations. Voir docs/editor-proposals.md.
+    const devHost = window as unknown as {
+      __cliodeckProposals?: { inject: (p: Partial<Proposal>) => Proposal };
+    };
+    devHost.__cliodeckProposals = {
+      inject: (p) => proposalsInstance.inject(view, p),
+    };
 
     // La bibliographie charge en asynchrone : quand `citations` change, la
     // résolution des clés change sans transaction de document — on demande
@@ -346,7 +394,8 @@ export const CodeMirrorEditor: React.FC = () => {
     return () => {
       unsubscribeBibliography();
       // Ordre : retirer la façade, purger la sync en attente vers le store,
-      // puis détruire la vue.
+      // puis détruire la vue (la destruction émet `expired` pour les
+      // propositions en attente — arbitrage 5).
       useEditorStore.getState().setEditorFacade(null);
       if (syncTimer) clearTimeout(syncTimer);
       if (pendingSync) {
@@ -356,6 +405,8 @@ export const CodeMirrorEditor: React.FC = () => {
         });
       }
       changeListeners.clear();
+      delete devHost.__cliodeckProposals;
+      proposalsRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
@@ -371,14 +422,35 @@ export const CodeMirrorEditor: React.FC = () => {
     });
   }, [settings, currentTheme, dynamicCompartment, documentVersion, filePath]);
 
-  // Commande d'insertion IPC (bibliographie, modes IA) — même canal que les
-  // autres éditeurs.
+  // Commande d'insertion IPC (bibliographie, modes IA). Le contenu balisé
+  // IA (metadata.modeId) devient une PROPOSITION adjudicable — plus de
+  // marqueurs cliodeck-gen côté CM6 (Phase 4) ; le reste s'insère annoté
+  // `programmatic`.
   useEffect(() => {
-    const unsubscribe = window.electron.editor.onInsertText((text: string) => {
+    const unsubscribe = window.electron.editor.onInsertText((raw: unknown) => {
       const view = viewRef.current;
       if (!view) return;
-      view.dispatch(view.state.replaceSelection(text));
-      view.focus();
+      const payload = normalizeInsertPayload(raw);
+      if (!payload.text) return;
+      if (payload.metadata?.modeId && proposalsRef.current) {
+        const head = view.state.selection.main.head;
+        proposalsRef.current.inject(view, {
+          range: { from: head, to: head },
+          original: '',
+          proposed: payload.text,
+          category: 'ai-insert',
+          source: {
+            model: payload.metadata.model ?? 'unknown',
+            task: payload.metadata.modeId,
+          },
+        });
+      } else {
+        view.dispatch({
+          ...view.state.replaceSelection(payload.text),
+          annotations: changeOrigin.of('programmatic'),
+        });
+        view.focus();
+      }
     });
     return () => {
       unsubscribe();

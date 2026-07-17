@@ -13,6 +13,7 @@ import {
   RevealJSExportSchema,
   HistoryExportReportSchema,
   HistorySearchEventsSchema,
+  ProposalAdjudicationSchema,
 } from '../validation';
 
 describe('validate() helper', () => {
@@ -304,5 +305,54 @@ describe('HistorySearchEventsSchema', () => {
       eventType: 'query',
     });
     expect(result.eventType).toBe('query');
+  });
+});
+
+describe('ProposalAdjudicationSchema', () => {
+  const valid = {
+    proposalId: 'prop-1',
+    decision: 'accepted',
+    category: 'reformulation',
+    model: 'qwen3:14b',
+    task: 'write-assist',
+    latencyMs: 1234,
+    at: '2026-07-17T10:00:00.000Z',
+  };
+
+  it('accepts a minimal adjudication (no contents)', () => {
+    const result = ProposalAdjudicationSchema.parse(valid);
+    expect(result.decision).toBe('accepted');
+    expect(result.original).toBeUndefined();
+  });
+
+  it('accepts full contents for the research journal route', () => {
+    const result = ProposalAdjudicationSchema.parse({
+      ...valid,
+      decision: 'modified',
+      original: 'a',
+      proposed: 'b',
+      final: 'c',
+      rejectionNote: 'note',
+    });
+    expect(result.final).toBe('c');
+  });
+
+  it('rejects unknown decisions', () => {
+    expect(() =>
+      ProposalAdjudicationSchema.parse({ ...valid, decision: 'maybe' })
+    ).toThrow();
+  });
+
+  it('rejects malformed events (missing fields, bad types)', () => {
+    expect(() => ProposalAdjudicationSchema.parse({})).toThrow();
+    expect(() =>
+      ProposalAdjudicationSchema.parse({ ...valid, latencyMs: -5 })
+    ).toThrow();
+    expect(() =>
+      ProposalAdjudicationSchema.parse({ ...valid, proposalId: '' })
+    ).toThrow();
+    expect(() =>
+      ProposalAdjudicationSchema.parse({ ...valid, latencyMs: 'fast' })
+    ).toThrow();
   });
 });

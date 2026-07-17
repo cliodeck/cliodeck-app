@@ -1,4 +1,4 @@
-import { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
+import { HistoryManager, type ProposalEvent } from '../../../backend/core/history/HistoryManager.js';
 
 /**
  * History Service
@@ -68,6 +68,18 @@ class HistoryService {
 
     this.currentProjectPath = null;
     console.log('✅ HistoryService closed');
+  }
+
+  /**
+   * Journal de recherche — adjudication d'une proposition IA (plan CM6,
+   * Phase 4), contenus complets. Rattachée à la session active ; no-op si
+   * aucun projet n'est ouvert (retourne '').
+   */
+  logProposalAdjudication(
+    event: Omit<ProposalEvent, 'id' | 'sessionId'>
+  ): string {
+    if (!this.historyManager) return '';
+    return this.historyManager.logProposalAdjudication(event);
   }
 
   /**

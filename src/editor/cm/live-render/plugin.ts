@@ -9,6 +9,7 @@ import type { Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { computeLiveDecorations, type LiveModelOptions } from './model';
 import { liveRenderRefresh } from './refresh';
+import { changeOrigin } from '../change-origin';
 import { CheckboxWidget, HrWidget } from './widgets';
 
 /**
@@ -119,7 +120,8 @@ export const liveRenderPlugin = (options: LiveModelOptions) =>
         const target = event.target as HTMLElement;
 
         // Case à cocher : le clic édite le SOURCE via une transaction,
-        // jamais le DOM. TODO Phase 4 : annotation changeOrigin.
+        // jamais le DOM. Origine `programmatic` (Phase 4a) : édition
+        // médiée par l'app, pas de la frappe.
         if (
           target instanceof HTMLInputElement &&
           target.classList.contains('cm-live-task')
@@ -133,6 +135,7 @@ export const liveRenderPlugin = (options: LiveModelOptions) =>
                 to: pos + 3,
                 insert: /[xX]/.test(marker) ? '[ ]' : '[x]',
               },
+              annotations: changeOrigin.of('programmatic'),
             });
             event.preventDefault();
             return true;

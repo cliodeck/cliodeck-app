@@ -141,7 +141,12 @@
     "citationNotFound": "Schlüssel nicht in der Bibliografie gefunden",
     "footnoteNoDefinition": "Fehlende Definition — Cmd/Strg+Klick zum Erstellen",
     "frontmatterFolded": "Frontmatter eingeklappt — zum Aufklappen klicken",
-    "frontmatterFold": "Frontmatter einklappen"
+    "frontmatterFold": "Frontmatter einklappen",
+    "proposalAccept": "Vorschlag annehmen (Tab)",
+    "proposalReject": "Vorschlag ablehnen (Esc)",
+    "proposalModify": "Vorschlag bearbeiten",
+    "proposalWhy": "Warum? (optional, Eingabe zum Senden)",
+    "proposalApply": "Übernehmen"
   },
   "ui": {
     "title": "Benutzeroberfläche",

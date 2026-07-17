@@ -83,16 +83,14 @@ export function setupEditorHandlers() {
   ipcMain.handle('editor:insert-text', async (event, rawText: unknown, rawMetadata?: unknown) => {
     const { text, metadata } = validate(EditorInsertTextSchema, { text: rawText, metadata: rawMetadata });
     console.log('📞 IPC Call: editor:insert-text', { textLength: text.length, metadata });
-    // Wrap text with cliodeck-gen provenance tags if mode metadata is provided
-    let wrappedText = text;
-    if (metadata?.modeId) {
-      const date = new Date().toISOString();
-      wrappedText = `<!-- cliodeck-gen mode="${metadata.modeId}" model="${metadata.model || 'unknown'}" date="${date}" -->\n${text}\n<!-- /cliodeck-gen -->`;
-    }
-    // Send to renderer for insertion into editor
+    // Phase 4 (plan CM6) : le main n'enveloppe plus le texte de marqueurs
+    // <!-- cliodeck-gen --> — la provenance est portée par l'annotation
+    // changeOrigin des transactions CM6. Le renderer reçoit { text, metadata }
+    // et décide : proposition IA (CM6, si metadata.modeId), enveloppe héritée
+    // (Milkdown/Monaco, comportement inchangé), insertion simple sinon.
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window) {
-      window.webContents.send('editor:insert-text-command', wrappedText);
+      window.webContents.send('editor:insert-text-command', { text, metadata });
       console.log('📤 IPC Response: editor:insert-text - command sent');
     }
     return successResponse();

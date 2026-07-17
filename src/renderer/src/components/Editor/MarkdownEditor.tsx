@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor, Position } from 'monaco-editor';
 import type { EditorFacade } from '@/editor/facade';
+import { normalizeInsertPayload, wrapLegacyProvenance } from './insert-payload';
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -80,10 +81,14 @@ export const MarkdownEditor: React.FC = () => {
   const { currentTheme } = useTheme();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
-  // Listen for insert text commands from bibliography
+  // Listen for insert text commands from bibliography.
+  // Phase 4 : le main émet { text, metadata? } sans marqueurs ; le
+  // comportement hérité (enveloppe cliodeck-gen pour le contenu IA) est
+  // reconstruit ici — Monaco/Milkdown sont gelés jusqu'à la Phase 5.
   useEffect(() => {
-    const unsubscribe = window.electron.editor.onInsertText((text: string) => {
-      if (editorRef.current) {
+    const unsubscribe = window.electron.editor.onInsertText((raw: unknown) => {
+      const text = wrapLegacyProvenance(normalizeInsertPayload(raw));
+      if (text && editorRef.current) {
         const selection = editorRef.current.getSelection();
         if (selection) {
           editorRef.current.executeEdits('insert-citation', [

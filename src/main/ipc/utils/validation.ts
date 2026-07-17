@@ -526,6 +526,26 @@ export const UsageSetModeSchema = z.enum([
   'unknown',
 ]);
 
+/**
+ * Adjudication d'une proposition IA de l'éditeur (plan CM6, Phase 4).
+ * Les champs de contenu (original/proposed/final/rejectionNote) sont bornés :
+ * ils vont au journal de recherche ; le handler ne transmet JAMAIS de contenu
+ * au journal d'usage.
+ */
+export const ProposalAdjudicationSchema = z.object({
+  proposalId: z.string().min(1, 'proposalId is required').max(200),
+  decision: z.enum(['accepted', 'rejected', 'modified', 'invalidated', 'expired']),
+  category: z.string().min(1, 'category is required').max(200),
+  model: z.string().max(200),
+  task: z.string().max(500),
+  latencyMs: z.number().min(0).finite(),
+  at: z.string().min(1, 'at (ISO 8601) is required').max(64),
+  original: z.string().max(100_000).optional(),
+  proposed: z.string().max(100_000).optional(),
+  final: z.string().max(100_000).optional(),
+  rejectionNote: z.string().max(2_000).optional(),
+});
+
 export const UsageSaveDecisionSchema = z.object({
   id: z.string().min(1).optional(),
   task: z.string().min(1, 'Tâche requise'),

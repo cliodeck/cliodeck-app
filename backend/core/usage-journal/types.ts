@@ -113,3 +113,68 @@ export interface SessionDecisionLink {
   sessionId: string;
   decisionId: string;
 }
+
+// ============================================================================
+// Adjudications de propositions (plan CM6, Phase 4 — schéma v2)
+// ============================================================================
+
+/**
+ * Décision d'adjudication d'une proposition IA dans l'éditeur.
+ * `invalidated` (édition humaine sur le range) et `expired` (fermeture du
+ * document) sont des fins de vie sans jugement — comptées à part des taux.
+ */
+export type AdjudicationDecision =
+  | 'accepted'
+  | 'rejected'
+  | 'modified'
+  | 'invalidated'
+  | 'expired';
+
+/**
+ * Adjudication telle que persistée dans `proposal_adjudications`.
+ *
+ * AUCUN champ de contenu, par construction : les textes (original/proposé/
+ * final, note de rejet) relèvent du journal de recherche (`history_*` dans
+ * `brain.db`) — ce type ne peut pas les recevoir, la granularité est imposée
+ * par le typage et pas seulement par l'omission à l'écriture.
+ */
+export interface ProposalAdjudication {
+  id: string;
+  /** ISO 8601 — horodatage de l'adjudication (posé côté éditeur). */
+  at: string;
+  decision: AdjudicationDecision;
+  /** Catégorie applicative de la proposition (ex. "reformulation"). */
+  category: string;
+  model: string;
+  /** Tâche applicative à l'origine de la proposition. */
+  task: string;
+  workspace?: string;
+}
+
+/** Entrée du service pour une adjudication (le service génère l'id et résout le workspace). */
+export interface RecordAdjudicationInput {
+  at: string;
+  decision: AdjudicationDecision;
+  category: string;
+  model: string;
+  task: string;
+  workspace?: string;
+}
+
+/**
+ * Brouillon de la couche décisionnelle issu d'une annotation de rejet
+ * échantillonnée (« pourquoi ? »), table `decision_drafts`. Distinct de
+ * `usage_decisions` : un brouillon n'est JAMAIS promu automatiquement en
+ * décision — c'est l'utilisateur qui décide, via l'UI, de s'en servir comme
+ * point de départ d'une annotation quotidienne (sémantique worth_it intacte).
+ */
+export interface DecisionDraft {
+  id: string;
+  /** ISO 8601 — horodatage du rejet annoté. */
+  at: string;
+  category: string;
+  model: string;
+  task: string;
+  note: string;
+  status: 'draft' | 'promoted' | 'dismissed';
+}

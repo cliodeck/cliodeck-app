@@ -505,8 +505,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   insertDraftAtCursor: (draft: string): { mode: 'cursor' | 'append' } => {
     const { content, milkdownEditor, monacoEditor, editorMode, editorFacade } = get();
 
-    // CM6 via la façade — offsets exacts, édition dispatchée à l'éditeur
-    // (une seule entrée d'historique, curseur placé après le draft).
+    // CM6 : le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
+    // proposition d'insertion adjudicable au curseur, jamais d'écriture
+    // directe (« aucune fonctionnalité IA d'écriture ne contourne cette
+    // API », docs/editor-proposals.md). Le document ne change qu'à
+    // l'acceptation.
+    if (editorFacade && editorFacade.engine === 'cm6' && editorFacade.propose) {
+      const current = editorFacade.getValue();
+      const offset = editorFacade.getCursorOffset();
+      const newContent = insertDraftAtOffset(current, offset, draft);
+      // Segment exactement inséré par insertDraftAtOffset (padding de bloc
+      // compris) : premier point de divergence des deux chaînes.
+      let at = 0;
+      while (at < current.length && current[at] === newContent[at]) at += 1;
+      const inserted = newContent.slice(
+        at,
+        at + (newContent.length - current.length)
+      );
+      editorFacade.propose({
+        range: { from: at, to: at },
+        original: '',
+        proposed: inserted,
+        category: 'brainstorm-draft',
+        source: { model: 'unknown', task: 'brainstorm' },
+      });
+      editorFacade.focus();
+      return { mode: 'cursor' };
+    }
+
+    // CM6 sans support des propositions (défensif) — comportement Phase 1.
     if (editorFacade && editorFacade.engine === 'cm6') {
       const current = editorFacade.getValue();
       const offset = editorFacade.getCursorOffset();

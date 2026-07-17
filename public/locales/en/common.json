@@ -141,7 +141,12 @@
     "citationNotFound": "Key not found in bibliography",
     "footnoteNoDefinition": "Missing definition — Cmd/Ctrl+click to create it",
     "frontmatterFolded": "Frontmatter folded — click to expand",
-    "frontmatterFold": "Fold frontmatter"
+    "frontmatterFold": "Fold frontmatter",
+    "proposalAccept": "Accept proposal (Tab)",
+    "proposalReject": "Reject proposal (Esc)",
+    "proposalModify": "Edit proposal",
+    "proposalWhy": "Why? (optional, Enter to send)",
+    "proposalApply": "Apply"
   },
   "ui": {
     "title": "Appearance",
