@@ -1,0 +1,302 @@
+import type { EditorState } from '@codemirror/state';
+import type { Tree } from '@lezer/common';
+
+/**
+ * Rendu live — partie pure (plan CM6, Phase 2).
+ *
+ * Calcule, à partir de l'arbre Lezer et de la sélection, des DESCRIPTEURS de
+ * décorations : quels marqueurs masquer, quelles lignes styler, quels widgets
+ * poser. Aucune dépendance DOM — testable en node. La traduction en
+ * `Decoration` CM6 vit dans plugin.ts.
+ *
+ * Règle de révélation : un marqueur est masqué SAUF si une sélection
+ * intersecte la portée de révélation de sa construction — le nœud pour
+ * l'inline (emphase, lien...), la ligne pour les constructions de ligne
+ * (titres, quotes, tâches, règles), le bloc entier pour les fences.
+ * Le document n'est JAMAIS modifié : uniquement des décorations.
+ */
+
+export type LiveDeco =
+  | { kind: 'hide'; from: number; to: number }
+  | { kind: 'line'; at: number; class: string }
+  | { kind: 'mark'; from: number; to: number; class: string; url?: string }
+  | { kind: 'checkbox'; from: number; to: number; checked: boolean }
+  | { kind: 'hr'; from: number; to: number };
+
+export interface ImageSpec {
+  /** Fin de la ligne contenant l'image (position du widget bloc). */
+  widgetPos: number;
+  from: number;
+  to: number;
+  src: string;
+  alt: string;
+}
+
+interface Span {
+  from: number;
+  to: number;
+}
+
+/** Intersection large : un curseur posé à la frontière révèle aussi. */
+function touches(ranges: readonly Span[], from: number, to: number): boolean {
+  for (const r of ranges) {
+    if (r.from <= to && r.to >= from) return true;
+  }
+  return false;
+}
+
+const ATX_HEADING = /^ATXHeading(\d)$/;
+const INLINE_WRAPPERS = new Set([
+  'Emphasis',
+  'StrongEmphasis',
+  'Strikethrough',
+  'InlineCode',
+]);
+const INLINE_MARKS = new Set(['EmphasisMark', 'StrikethroughMark', 'CodeMark']);
+
+export function computeLiveDecorations(
+  state: EditorState,
+  tree: Tree,
+  visible: readonly Span[],
+  selection: readonly Span[]
+): LiveDeco[] {
+  const out: LiveDeco[] = [];
+  const doc = state.doc;
+  const lineClasses = new Set<string>(); // dédup "at:class"
+
+  const addLine = (at: number, cls: string) => {
+    const key = `${at}:${cls}`;
+    if (lineClasses.has(key)) return;
+    lineClasses.add(key);
+    out.push({ kind: 'line', at, class: cls });
+  };
+
+  const hide = (from: number, to: number) => {
+    if (to > from) out.push({ kind: 'hide', from, to });
+  };
+
+  /** Masque un marqueur en absorbant l'espace qui le suit (`# `, `> `). */
+  const hideWithTrailingSpace = (from: number, to: number) => {
+    hide(from, doc.sliceString(to, to + 1) === ' ' ? to + 1 : to);
+  };
+
+  const lineTouched = (pos: number): boolean => {
+    const line = doc.lineAt(pos);
+    return touches(selection, line.from, line.to);
+  };
+
+  for (const range of visible) {
+    tree.iterate({
+      from: range.from,
+      to: range.to,
+      enter: (node) => {
+        const name = node.name;
+
+        // ---- Titres ATX -------------------------------------------------
+        const h = ATX_HEADING.exec(name);
+        if (h) {
+          addLine(doc.lineAt(node.from).from, `cm-live-h cm-live-h${h[1]}`);
+          if (!touches(selection, node.from, node.to)) {
+            for (const mark of node.node.getChildren('HeaderMark')) {
+              hideWithTrailingSpace(mark.from, mark.to);
+            }
+          }
+          return;
+        }
+
+        // ---- Emphase / gras / barré / code inline -----------------------
+        if (INLINE_WRAPPERS.has(name)) {
+          if (name === 'InlineCode') {
+            out.push({
+              kind: 'mark',
+              from: node.from,
+              to: node.to,
+              class: 'cm-live-inline-code',
+            });
+          }
+          if (!touches(selection, node.from, node.to)) {
+            const cursor = node.node.cursor();
+            if (cursor.firstChild()) {
+              do {
+                if (INLINE_MARKS.has(cursor.name)) hide(cursor.from, cursor.to);
+              } while (cursor.nextSibling());
+            }
+          }
+          return;
+        }
+
+        // ---- Liens ------------------------------------------------------
+        // Uniquement les liens inline avec URL : `[^note]` et `[@citation]`
+        // parsent aussi comme Link (sans enfant URL) et appartiennent à la
+        // Phase 3 — on ne les touche pas.
+        if (name === 'Link') {
+          const url = node.node.getChild('URL');
+          if (!url) return;
+          const marks = node.node.getChildren('LinkMark');
+          if (marks.length < 2) return;
+          const textFrom = marks[0].to;
+          const textTo = marks[1].from;
+          out.push({
+            kind: 'mark',
+            from: textFrom,
+            to: textTo,
+            class: 'cm-live-link',
+            url: doc.sliceString(url.from, url.to),
+          });
+          if (!touches(selection, node.from, node.to)) {
+            hide(node.from, textFrom);
+            hide(textTo, node.to);
+          }
+          return false;
+        }
+
+        if (name === 'Autolink') {
+          const url = node.node.getChild('URL');
+          if (!url) return;
+          out.push({
+            kind: 'mark',
+            from: url.from,
+            to: url.to,
+            class: 'cm-live-link',
+            url: doc.sliceString(url.from, url.to),
+          });
+          if (!touches(selection, node.from, node.to)) {
+            for (const mark of node.node.getChildren('LinkMark')) {
+              hide(mark.from, mark.to);
+            }
+          }
+          return false;
+        }
+
+        // ---- Images : la source devient une légende, le visuel est un
+        // widget bloc posé par le StateField (images.ts) ------------------
+        if (name === 'Image') {
+          const url = node.node.getChild('URL');
+          const marks = node.node.getChildren('LinkMark');
+          if (!url || marks.length < 2) return;
+          const altFrom = marks[0].to;
+          const altTo = marks[1].from;
+          out.push({
+            kind: 'mark',
+            from: altFrom,
+            to: altTo,
+            class: 'cm-live-image-alt',
+          });
+          if (!touches(selection, node.from, node.to)) {
+            hide(node.from, altFrom);
+            hide(altTo, node.to);
+          }
+          return false;
+        }
+
+        // ---- Échappements Milkdown (`\[`) : masquer le backslash --------
+        if (name === 'Escape') {
+          if (!touches(selection, node.from, node.to)) {
+            hide(node.from, node.from + 1);
+          }
+          return;
+        }
+
+        // ---- Blockquotes -------------------------------------------------
+        if (name === 'Blockquote') {
+          const first = doc.lineAt(node.from).number;
+          const last = doc.lineAt(node.to).number;
+          for (let n = first; n <= last; n++) {
+            addLine(doc.line(n).from, 'cm-live-quote');
+          }
+          return; // les QuoteMark sont des descendants, traités ci-dessous
+        }
+
+        if (name === 'QuoteMark') {
+          if (!lineTouched(node.from)) {
+            hideWithTrailingSpace(node.from, node.to);
+          }
+          return;
+        }
+
+        // ---- Règles horizontales -----------------------------------------
+        if (name === 'HorizontalRule') {
+          // Un `---` en tout début de document ouvre un frontmatter YAML
+          // (P3b) : ne pas le rendre comme une règle.
+          if (node.from === 0) return;
+          if (!lineTouched(node.from)) {
+            out.push({ kind: 'hr', from: node.from, to: node.to });
+          }
+          return;
+        }
+
+        // ---- Cases à cocher ----------------------------------------------
+        if (name === 'TaskMarker') {
+          if (!lineTouched(node.from)) {
+            const text = doc.sliceString(node.from, node.to);
+            out.push({
+              kind: 'checkbox',
+              from: node.from,
+              to: node.to,
+              checked: /[xX]/.test(text),
+            });
+          }
+          return;
+        }
+
+        // ---- Blocs de code -----------------------------------------------
+        if (name === 'FencedCode') {
+          const firstLine = doc.lineAt(node.from);
+          const lastLine = doc.lineAt(node.to);
+          for (let n = firstLine.number; n <= lastLine.number; n++) {
+            addLine(doc.line(n).from, 'cm-live-code');
+          }
+          if (!touches(selection, node.from, node.to)) {
+            const marks = node.node.getChildren('CodeMark');
+            const closing = marks.length >= 2 ? marks[marks.length - 1] : null;
+            if (closing && doc.lineAt(closing.from).number > firstLine.number) {
+              hide(firstLine.from, firstLine.to);
+              const closingLine = doc.lineAt(closing.from);
+              hide(closingLine.from, closingLine.to);
+            }
+          }
+          // La coloration interne (CodeText) est faite par le parseur de la
+          // langue (codeLanguages), pas par le rendu live.
+          return false;
+        }
+
+        return;
+      },
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Localise les images d'une plage du document (pour les widgets bloc).
+ * Pure ; utilisée par le StateField avec l'arbre complet.
+ */
+export function findImages(
+  state: EditorState,
+  tree: Tree,
+  from: number,
+  to: number
+): ImageSpec[] {
+  const out: ImageSpec[] = [];
+  const doc = state.doc;
+  tree.iterate({
+    from,
+    to,
+    enter: (node) => {
+      if (node.name !== 'Image') return;
+      const url = node.node.getChild('URL');
+      const marks = node.node.getChildren('LinkMark');
+      if (!url || marks.length < 2) return false;
+      out.push({
+        widgetPos: doc.lineAt(node.from).to,
+        from: node.from,
+        to: node.to,
+        src: doc.sliceString(url.from, url.to),
+        alt: doc.sliceString(marks[0].to, marks[1].from),
+      });
+      return false;
+    },
+  });
+  return out;
+}

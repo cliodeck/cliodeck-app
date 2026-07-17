@@ -14,6 +14,7 @@ import {
   searchKeymap,
 } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { languages } from '@codemirror/language-data';
 import {
   HighlightStyle,
   bracketMatching,
@@ -21,6 +22,7 @@ import {
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { createDocState } from '@/editor/cm/fidelity';
+import { liveRender } from '@/editor/cm/live-render';
 import type { EditorFacade } from '@/editor/facade';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -43,6 +45,21 @@ const SYNC_DEBOUNCE_MS = 300;
 
 // Délai court : assez long pour absorber la frappe, assez court pour que
 // DocumentStats / la preview Slides restent « frais » à l'œil nu.
+
+/**
+ * Résout la source d'une image du document vers une URL chargeable : les
+ * chemins relatifs le sont par rapport au fichier ouvert. `null` (pas de
+ * fichier, chemin irrésoluble) → placeholder du widget.
+ */
+function resolveImageSrc(src: string): string | null {
+  if (/^(https?:|data:|file:)/.test(src)) return src;
+  const { filePath } = useEditorStore.getState();
+  if (!filePath) return null;
+  const slash = filePath.lastIndexOf('/');
+  if (slash < 0) return null;
+  const abs = src.startsWith('/') ? src : filePath.slice(0, slash + 1) + src;
+  return encodeURI('file://' + abs);
+}
 
 function getFontFamily(fontFamily: string): string {
   switch (fontFamily) {
@@ -236,8 +253,9 @@ export const CodeMirrorEditor: React.FC = () => {
         bracketMatching(),
         highlightSelectionMatches(),
         search({ top: true }),
-        markdown({ base: markdownLanguage }),
+        markdown({ base: markdownLanguage, codeLanguages: languages }),
         syntaxHighlighting(markdownHighlight),
+        liveRender({ resolveImageSrc }),
         cliodeckTheme,
         dynamicCompartment.of(dynamicExtensions(settings, currentTheme === 'dark')),
         EditorView.updateListener.of((update) => {
