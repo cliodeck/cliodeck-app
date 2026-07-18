@@ -26,7 +26,12 @@ import {
   type BatchAccumulator,
   type JournalContext,
 } from '../../../backend/core/usage-journal/context.js';
-import { summarize, type UsageSummary } from '../../../backend/core/usage-journal/aggregate.js';
+import {
+  summarize,
+  summarizeAdjudications,
+  type UsageSummary,
+  type AdjudicationSummary,
+} from '../../../backend/core/usage-journal/aggregate.js';
 import { localDateKey } from '../../../backend/core/usage-journal/annotate.js';
 import type {
   DecisionDraft,
@@ -191,6 +196,26 @@ class UsageJournalService {
    * Les adjudications sont des actions humaines (rares) — écriture directe,
    * pas de buffer. Le type d'entrée ne PEUT pas transporter de contenu.
    */
+  /**
+   * Vue « propositions IA » du jour pour la modale : taux d'adjudication
+   * (global / catégorie / modèle) + nombre de brouillons de rejet en attente.
+   */
+  getAdjudicationsToday(): {
+    summary: AdjudicationSummary;
+    draftCount: number;
+  } | null {
+    if (!this.store) return null;
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const range = { from: start.toISOString(), to: end.toISOString() };
+    const adjudications = this.store.getAdjudicationsBetween(range.from, range.to);
+    return {
+      summary: summarizeAdjudications(adjudications, range),
+      draftCount: this.store.getDecisionDrafts('draft').length,
+    };
+  }
+
   recordAdjudication(input: RecordAdjudicationInput): void {
     if (!this.store) return;
     try {

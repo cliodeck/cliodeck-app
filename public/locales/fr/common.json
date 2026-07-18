@@ -1556,6 +1556,23 @@
     "saving": "Enregistrement…",
     "save": "Enregistrer la décision",
     "saved": "✓ Enregistré",
-    "todayDecisions": "Décisions du jour"
+    "todayDecisions": "Décisions du jour",
+    "adjudications": {
+      "title": "Propositions IA",
+      "empty": "Aucune proposition adjugée aujourd'hui.",
+      "summaryLine": "{{accepted}} acceptées · {{modified}} modifiées · {{rejected}} rejetées",
+      "otherLine": "{{invalidated}} invalidées, {{expired}} expirées",
+      "draftsPending_one": "{{count}} brouillon de rejet en attente",
+      "draftsPending_other": "{{count}} brouillons de rejet en attente",
+      "rateLabel": "d'acceptation"
+    }
+  },
+  "stats": {
+    "words": "mots",
+    "chars": "car.",
+    "charsWithSpaces": "car. esp.",
+    "paragraphs": "par.",
+    "citations": "cit.",
+    "footnotes": "notes"
   }
 }

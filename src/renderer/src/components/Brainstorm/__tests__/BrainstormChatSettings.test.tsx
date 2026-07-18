@@ -31,6 +31,11 @@ import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 describe('BrainstormChat settings panel', () => {
   beforeEach(() => {
     useChatStore.getState().reset();
+    // BrainstormChat lit window.electron.config.get('llm') au montage
+    // (cloud check + modèle actif) — le mock minimal évite le crash.
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
   });
   afterEach(() => {
     cleanup();

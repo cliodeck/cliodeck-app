@@ -30,6 +30,8 @@ export const UsageJournalPanel: React.FC = () => {
   const error = useUsageJournalStore((s) => s.error);
   const errorCode = useUsageJournalStore((s) => s.errorCode);
   const loadToday = useUsageJournalStore((s) => s.loadToday);
+  const loadAdjudications = useUsageJournalStore((s) => s.loadAdjudications);
+  const adjudications = useUsageJournalStore((s) => s.adjudications);
   const saveDecision = useUsageJournalStore((s) => s.saveDecision);
 
   const [task, setTask] = useState('');
@@ -42,7 +44,8 @@ export const UsageJournalPanel: React.FC = () => {
 
   useEffect(() => {
     void loadToday();
-  }, [loadToday]);
+    void loadAdjudications();
+  }, [loadToday, loadAdjudications]);
 
   const fmt = (n: number): string => n.toLocaleString(i18n.language);
   const verdictLabel = (v: Verdict): string => t(`usageJournal.verdicts.${v}`);
@@ -125,6 +128,77 @@ export const UsageJournalPanel: React.FC = () => {
               ))}
             </div>
           )}
+
+          {/* Propositions IA (Phase 4c) : couche factuelle sans contenu —
+              taux d'adjudication du jour, invalidées/expirées à part. */}
+          <div className="usage-journal__adjudications">
+            <h4>{t('usageJournal.adjudications.title')}</h4>
+            {adjudications && adjudications.summary.total > 0 ? (
+              <>
+                <div className="usage-journal__totals">
+                  {adjudications.summary.overall.acceptanceRate !== null && (
+                    <>
+                      <strong>
+                        {Math.round(adjudications.summary.overall.acceptanceRate * 100)}
+                        {' %'}
+                      </strong>{' '}
+                      {t('usageJournal.adjudications.rateLabel')}
+                      {' · '}
+                    </>
+                  )}
+                  {t('usageJournal.adjudications.summaryLine', {
+                    accepted: fmt(adjudications.summary.overall.accepted),
+                    modified: fmt(adjudications.summary.overall.modified),
+                    rejected: fmt(adjudications.summary.overall.rejected),
+                  })}
+                  {adjudications.summary.overall.invalidated +
+                    adjudications.summary.overall.expired >
+                    0 && (
+                    <span className="usage-journal__muted">
+                      {' · '}
+                      {t('usageJournal.adjudications.otherLine', {
+                        invalidated: fmt(adjudications.summary.overall.invalidated),
+                        expired: fmt(adjudications.summary.overall.expired),
+                      })}
+                    </span>
+                  )}
+                </div>
+                {adjudications.summary.byCategory.length > 0 && (
+                  <div className="usage-journal__chips">
+                    {adjudications.summary.byCategory.map((b) => (
+                      <span key={b.key} className="usage-journal__chip">
+                        {b.key}
+                        {b.acceptanceRate !== null &&
+                          ` · ${Math.round(b.acceptanceRate * 100)} %`}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {adjudications.summary.byModel.length > 0 && (
+                  <div className="usage-journal__chips">
+                    {adjudications.summary.byModel.map((b) => (
+                      <span key={b.key} className="usage-journal__chip">
+                        {b.key}
+                        {b.acceptanceRate !== null &&
+                          ` · ${Math.round(b.acceptanceRate * 100)} %`}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="usage-journal__muted">
+                {t('usageJournal.adjudications.empty')}
+              </p>
+            )}
+            {adjudications && adjudications.draftCount > 0 && (
+              <p className="usage-journal__muted">
+                {t('usageJournal.adjudications.draftsPending', {
+                  count: adjudications.draftCount,
+                })}
+              </p>
+            )}
+          </div>
 
           <div className="usage-journal__form">
             <label>
