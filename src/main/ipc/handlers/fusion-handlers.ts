@@ -52,6 +52,7 @@ import {
 } from '../../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import { importVaultAsIdeas } from '../../../../backend/integrations/obsidian/obsidian-to-ideas.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { runBatch } from '../../../../backend/core/usage-journal/context.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 
@@ -673,19 +674,23 @@ export function setupFusionHandlers(): void {
       });
 
       try {
-        const report = await reader.scan().then(() =>
-          new ObsidianVaultIndexer(reader, store, embedder).indexAll({
-            force: !!opts.force,
-            onProgress: (p) => {
-              try {
-                if (!event.sender.isDestroyed()) {
-                  event.sender.send('fusion:vault:progress', p);
+        // Scope de batch : agrège les embeddings du vault en un seul
+        // `embedding_batch` (journal d'usage IA) pour cette indexation.
+        const report = await runBatch('obsidian', () =>
+          reader.scan().then(() =>
+            new ObsidianVaultIndexer(reader, store, embedder).indexAll({
+              force: !!opts.force,
+              onProgress: (p) => {
+                try {
+                  if (!event.sender.isDestroyed()) {
+                    event.sender.send('fusion:vault:progress', p);
+                  }
+                } catch {
+                  // Renderer gone — continue indexing anyway.
                 }
-              } catch {
-                // Renderer gone — continue indexing anyway.
-              }
-            },
-          })
+              },
+            })
+          )
         );
         return successResponse({
           indexed: report.indexed.length,

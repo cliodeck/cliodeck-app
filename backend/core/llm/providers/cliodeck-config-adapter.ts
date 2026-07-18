@@ -41,6 +41,9 @@ export function clioDeckConfigToRegistryConfig(
     model: ollamaEmbeddingModel,
     dimension: ollamaDimension,
     baseUrl: cfg.ollamaURL,
+    // Only forwarded when the model honours a larger window (e.g. bge-m3);
+    // nomic-embed-text ignores it. Overflow is truncated server-side regardless.
+    numCtx: cfg.ollamaEmbeddingNumCtx,
   };
 
   // Cloud-provider embedding fallbacks — only used when `useCloudEmbeddings`

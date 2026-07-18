@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useChatStore,
   type BrainstormSource,
@@ -86,6 +87,7 @@ export interface UseBrainstormChat {
 
 export function useBrainstormChat(): UseBrainstormChat {
   const store = useChatStore();
+  const { t } = useTranslation('common');
   // Track the current MCP tools list in a ref so the `send` callback
   // doesn't get recreated every time the catalogue changes (fusion 2.5).
   const mcpTools = useMcpToolsList();
@@ -184,15 +186,17 @@ export function useBrainstormChat(): UseBrainstormChat {
       const trimmed = content.trim();
       if (!trimmed) return;
       const chat = api();
-      if (!chat) {
-        // eslint-disable-next-line no-console
-        console.warn('[brainstorm] fusion API not exposed');
-        return;
-      }
       // Capture user message, then prep the assistant placeholder before
       // firing IPC — chunks may land before the IPC promise resolves.
       const priorMessages = useChatStore.getState().messages;
       store.appendUser(trimmed);
+      if (!chat) {
+        // eslint-disable-next-line no-console
+        console.warn('[brainstorm] fusion API not exposed');
+        const aId = store.beginAssistant('local-error');
+        store.finishAssistant(aId, 'error', t('chat.notConfigured'));
+        return;
+      }
 
       const payload = [
         ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -233,6 +237,14 @@ export function useBrainstormChat(): UseBrainstormChat {
       if (!res.success || !res.sessionId) {
         // eslint-disable-next-line no-console
         console.error('[brainstorm] start failed', res.error);
+        const aId = store.beginAssistant('local-error');
+        store.finishAssistant(
+          aId,
+          'error',
+          res.error
+            ? t('chat.startFailed', { error: res.error })
+            : t('chat.notConfigured')
+        );
         return;
       }
       const aId = store.beginAssistant(res.sessionId);
@@ -270,7 +282,7 @@ export function useBrainstormChat(): UseBrainstormChat {
         pendingExplanation.current.delete(res.sessionId);
       }
     },
-    [store]
+    [store, t]
   );
 
   const cancel = useCallback(async () => {

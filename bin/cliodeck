@@ -1,0 +1,32 @@
+#!/bin/sh
+# cliodeck — opérations headless sur un workspace (recipe/search/hints/…).
+#
+# Wraps the CLI so it runs under Electron's embedded Node, matching the ABI of
+# the native better-sqlite3 / hnswlib bindings compiled by
+# `electron-builder install-app-deps`. Using system Node instead would fail
+# with NODE_MODULE_VERSION mismatch — same rationale as bin/cliodeck-journal.
+#
+# Usage:
+#   bin/cliodeck recipe run <name> --workspace <path>
+#   bin/cliodeck search "query" --workspace <path>
+set -e
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+
+CLI_JS="$REPO_ROOT/dist/scripts/cliodeck-cli.js"
+ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
+
+if [ ! -x "$ELECTRON_BIN" ]; then
+  echo "[cliodeck] electron not found at $ELECTRON_BIN" >&2
+  echo "  Run 'npm install' in $REPO_ROOT first." >&2
+  exit 2
+fi
+
+if [ ! -f "$CLI_JS" ]; then
+  echo "[cliodeck] CLI bundle not found at $CLI_JS" >&2
+  echo "  Run 'npm run build' in $REPO_ROOT first." >&2
+  exit 2
+fi
+
+exec env ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" "$CLI_JS" "$@"

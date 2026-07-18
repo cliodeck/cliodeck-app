@@ -3,6 +3,13 @@ export interface LLMConfig {
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
+  /**
+   * Override Ollama's `num_ctx` for embedding requests. Most embedding models
+   * hard-cap their context (nomic-embed-text = 2048) and ignore this; it only
+   * helps long-context embedders such as bge-m3. Leave undefined for the model
+   * default — over-length inputs are truncated server-side, never rejected.
+   */
+  ollamaEmbeddingNumCtx?: number;
   claudeAPIKey?: string;
   claudeModel?: string;
   openaiAPIKey?: string;

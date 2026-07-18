@@ -28,7 +28,7 @@ export const RAGMessageExtras: React.FC<{ message: ChatMessage }> = ({ message }
           <div className="sources-header">
             <span className="sources-icon">📚</span>
             <span className="sources-title">
-              {t('chat.sources')} ({message.sources.length})
+              {t('chat.sourcesLabel')} ({message.sources.length})
             </span>
           </div>
           <div className="sources-list">

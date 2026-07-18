@@ -40,8 +40,8 @@ export interface EmbeddingFixture {
     vectors: number[][];
   };
   wire: {
-    // Ollama: one /api/embeddings call per text — array indexed by call.
-    ollama: Array<{ embedding: number[] }>;
+    // Ollama: one batched /api/embed call returning embeddings[].
+    ollama: { embeddings: number[][] };
     // OpenAI-compat: one /embeddings call with data[].
     openai: { data: Array<{ embedding: number[]; index: number }> };
   };
@@ -210,7 +210,7 @@ export const embeddingPair: EmbeddingFixture = {
   dimension: 4,
   expected: { vectors: [V1, V2] },
   wire: {
-    ollama: [{ embedding: V1 }, { embedding: V2 }],
+    ollama: { embeddings: [V1, V2] },
     openai: {
       data: [
         { embedding: V1, index: 0 },

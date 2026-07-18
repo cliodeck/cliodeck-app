@@ -12,8 +12,8 @@ ClioDeck as the **Brainstorm** mode. One app now covers the whole
 historian cycle — *Explorer → Brainstormer → Écrire → Exporter* — on a
 shared workspace, sources, and index.
 
-See [`docs/fusion-cliobrain-strategy.md`](docs/fusion-cliobrain-strategy.md)
-and [`docs/fusion-cliobrain-implementation-plan.md`](docs/fusion-cliobrain-implementation-plan.md)
+See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md)
+and [`docs/archive/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md)
 for the full rationale and step-by-step plan. Commit messages in the
 fusion branch reference the step numbers defined there.
 
@@ -37,8 +37,8 @@ fusion branch reference the step numbers defined there.
 #### Typed LLM provider layer
 - `LLMProvider` / `EmbeddingProvider` interfaces with a typed
   `ProviderState` state machine (never a boolean `connected`).
-- Four providers: Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM,
-  OpenAI native), Anthropic, Mistral.
+- Five providers: Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM,
+  OpenAI native), Anthropic, Mistral, Gemini.
 - `ProviderRegistry` with open factory map; new providers plug in via
   `registerLLMProvider` without touching call sites.
 - Mock-replay parity harness (`npm run test:provider-parity`) comparing
@@ -104,12 +104,46 @@ fusion branch reference the step numbers defined there.
   typed `SecurityEvent` JSONL log. Threat model is explicit:
   defends against malicious *sources*, not a compromised local LLM.
 
+#### AI usage journal (journal d'usage IA)
+- Reflexive, ethics-oriented record of AI inference use — **not telemetry**,
+  and strictly separate from the research journal (`history_*`): it logs
+  volumes and usage *decisions*, never prompts.
+- Two layers: a **factual** layer captured automatically via a decorator on
+  the provider registry (`getLLM()`/`getEmbedding()`) covering completions,
+  embeddings, recipes and the headless CLI (`recipe run`, `search` — sink set
+  by `initHeadlessJournal`; MCP-side capture is reserved in the schema and
+  lands later); and a **decisional** layer of manual daily annotations
+  (task / non-AI alternative / justification / verdict).
+- Bulk indexing aggregated into one `embedding_batch` per run; tokens real
+  when the API reports them (Ollama, Anthropic, Gemini, OpenAI-compatible),
+  else estimated (chars/4, flagged). `is_local` covers Ollama and
+  OpenAI-compatible backends on loopback (llama.cpp, LM Studio). Non-blocking
+  writes — a journal failure never fails a call.
+- Separate SQLite store `.cliodeck/journal.db` (so it can be archived and
+  published independently), tables `inference_events`, `usage_decisions`,
+  `session_decision`, `journal_meta`.
+- CLI `cliodeck journal today|week|export` via `bin/cliodeck-journal`
+  (Electron-node wrapper for the native better-sqlite3 ABI), with interactive
+  annotation and Markdown / JSONL / CSV export (`--anonymize` for stable
+  aliases). Markdown is structured by week with a "violations" section for
+  substantial un-annotated sessions.
+- Minimal UI: a dedicated modal opened from the **View menu** (« Journal
+  d'usage IA », `Cmd/Ctrl+J`) — daily summary + annotation form + discreet
+  badge. Workspace mode mirrored to the main process so events are tagged
+  with the real mode.
+- ADR 0007; see `docs/journal-usage-ia.md`.
+
 #### Headless CLI
 - `cliodeck recipe list [--workspace]`
 - `cliodeck recipe run <name> --workspace <path> [--input k=v …]`
 - `cliodeck search "query" --workspace <path> [--topK 10]`
 - `cliodeck hints show|set --workspace <path>`
 - `cliodeck import-cliobrain <workspace> [--overwrite] [--name <label>]`
+- `cliodeck rag-benchmark --corpus <docs.json> --queries <queries.json>`
+- `cliodeck-journal today|week|export --workspace <path>` (separate binary)
+- Both binaries are `bin/` wrappers running under the Electron-embedded Node
+  (native better-sqlite3 / hnswlib ABI). `recipe run` and `search` record
+  their inference in the AI usage journal (`mode: cli`).
 - Unix-convention exit codes (0 / 1 / 2).
 
 #### RAG preparation (2.4a gate)

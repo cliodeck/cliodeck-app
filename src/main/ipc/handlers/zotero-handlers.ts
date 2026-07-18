@@ -5,6 +5,8 @@
 import { ipcMain } from 'electron';
 import { zoteroService } from '../../services/zotero-service.js';
 import { pdfService } from '../../services/pdf-service.js';
+import { configManager } from '../../services/config-manager.js';
+import { maskAPIKey } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -18,11 +20,28 @@ import {
   ZoteroApplyUpdatesSchema,
 } from '../utils/validation.js';
 
+/**
+ * The renderer only ever receives masked API keys (config:get redaction), so
+ * the apiKey it round-trips in handler options may be a mask. Substitute the
+ * real stored key when the incoming value matches the mask of the stored one.
+ */
+function withResolvedZoteroApiKey<T extends object>(options: T): T {
+  if (!('apiKey' in options)) return options;
+  const incoming = (options as { apiKey?: unknown }).apiKey;
+  if (typeof incoming !== 'string') return options;
+  const stored = configManager.getAPIKey('zotero.apiKey');
+  if (!stored) return options;
+  if (incoming === '' || incoming === maskAPIKey(stored)) {
+    return { ...options, apiKey: stored };
+  }
+  return options;
+}
+
 export function setupZoteroHandlers() {
   ipcMain.handle('zotero:test-connection', async (_event, options: unknown) => {
     console.log('📞 IPC Call: zotero:test-connection');
     try {
-      const validatedData = validate(ZoteroTestConnectionSchema, options);
+      const validatedData = withResolvedZoteroApiKey(validate(ZoteroTestConnectionSchema, options));
       const result = await zoteroService.testConnection(validatedData);
       console.log('📤 IPC Response: zotero:test-connection', result);
       return result;
@@ -51,7 +70,7 @@ export function setupZoteroHandlers() {
   ipcMain.handle('zotero:list-collections', async (_event, options: unknown) => {
     console.log('📞 IPC Call: zotero:list-collections');
     try {
-      const validatedData = validate(ZoteroListCollectionsSchema, options);
+      const validatedData = withResolvedZoteroApiKey(validate(ZoteroListCollectionsSchema, options));
       const result = await zoteroService.listCollections(validatedData);
       console.log('📤 IPC Response: zotero:list-collections', {
         success: result.success,
@@ -67,7 +86,7 @@ export function setupZoteroHandlers() {
   ipcMain.handle('zotero:sync', async (_event, options: unknown) => {
     console.log('📞 IPC Call: zotero:sync');
     try {
-      const validatedData = validate(ZoteroSyncSchema, options);
+      const validatedData = withResolvedZoteroApiKey(validate(ZoteroSyncSchema, options));
       const result = await zoteroService.sync(validatedData);
 
       // Save collections to VectorStore if sync was successful
@@ -128,7 +147,7 @@ export function setupZoteroHandlers() {
   });
 
   ipcMain.handle('zotero:download-pdf', async (_event, rawOptions: unknown) => {
-    const options = validate(ZoteroDownloadPDFSchema, rawOptions);
+    const options = withResolvedZoteroApiKey(validate(ZoteroDownloadPDFSchema, rawOptions));
     console.log('📞 IPC Call: zotero:download-pdf', {
       mode: options.mode,
       attachmentKey: options.attachmentKey,
@@ -147,7 +166,7 @@ export function setupZoteroHandlers() {
   });
 
   ipcMain.handle('zotero:enrich-citations', async (_event, rawOptions: unknown) => {
-    const options = validate(ZoteroEnrichCitationsSchema, rawOptions);
+    const options = withResolvedZoteroApiKey(validate(ZoteroEnrichCitationsSchema, rawOptions));
     console.log('📞 IPC Call: zotero:enrich-citations', {
       mode: options.mode,
       citationCount: options.citations?.length,
@@ -167,7 +186,7 @@ export function setupZoteroHandlers() {
   });
 
   ipcMain.handle('zotero:check-updates', async (_event, rawOptions: unknown) => {
-    const options = validate(ZoteroCheckUpdatesSchema, rawOptions);
+    const options = withResolvedZoteroApiKey(validate(ZoteroCheckUpdatesSchema, rawOptions));
     console.log('📞 IPC Call: zotero:check-updates', {
       mode: options.mode,
       citationCount: options.localCitations?.length,
@@ -188,7 +207,7 @@ export function setupZoteroHandlers() {
   });
 
   ipcMain.handle('zotero:apply-updates', async (_event, rawOptions: unknown) => {
-    const options = validate(ZoteroApplyUpdatesSchema, rawOptions);
+    const options = withResolvedZoteroApiKey(validate(ZoteroApplyUpdatesSchema, rawOptions));
     console.log('📞 IPC Call: zotero:apply-updates', {
       mode: options.mode,
       strategy: options.strategy,

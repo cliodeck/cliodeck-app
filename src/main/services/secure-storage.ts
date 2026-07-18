@@ -30,6 +30,17 @@ export function isSensitiveKey(keyPath: string): keyPath is SensitiveKeyName {
   return (SENSITIVE_KEYS as readonly string[]).includes(keyPath);
 }
 
+/**
+ * Mask an API key for display in the renderer (show first 4 and last 4 chars).
+ * The renderer only ever receives masked values; a value equal to the mask of
+ * the stored key means "unchanged" on save.
+ */
+export function maskAPIKey(key: string | undefined): string {
+  if (!key) return '';
+  if (key.length <= 12) return '****';
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
 // Minimal interface for the electron-store instance used for secrets
 interface SecretStoreInstance {
   get(key: string): string | undefined;

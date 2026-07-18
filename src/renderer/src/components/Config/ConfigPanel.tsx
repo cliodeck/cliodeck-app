@@ -84,6 +84,8 @@ export interface LLMConfig {
   ollamaURL: string;
   ollamaEmbeddingModel: string;
   ollamaChatModel: string;
+  /** Override Ollama's num_ctx for embeddings; only honoured by long-context models. */
+  ollamaEmbeddingNumCtx?: number;
   embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';
   // Cloud providers — keys persisted via secureStorage by config-manager.
   claudeAPIKey?: string;

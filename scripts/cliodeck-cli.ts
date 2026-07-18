@@ -27,6 +27,8 @@ import { cmdSearch } from './cli/search.js';
 import { cmdHintsShow, cmdHintsSet } from './cli/hints.js';
 import { cmdImportCliobrain } from './cli/migrate.js';
 import { cmdRagBenchmark } from './cli/rag-benchmark.js';
+import { initHeadlessJournal } from '../backend/core/usage-journal/headless.js';
+import { runWithJournalContext } from '../backend/core/usage-journal/context.js';
 
 const USAGE = `cliodeck — headless operations on a workspace
 
@@ -40,6 +42,29 @@ Usage:
   cliodeck rag-benchmark   --corpus <docs.json> --queries <queries.json>
                             [--retriever bm25] [--topK 10]
 `;
+
+/**
+ * Journal d'usage IA : les commandes qui font de l'inférence (recipe run,
+ * search) s'exécutent dans un scope `mode: 'cli'` avec le sink headless posé —
+ * le décorateur providers, déjà traversé par le CLI, capture alors les
+ * événements. Le runner de recipes écrase le mode avec `recipe` + recipeId par
+ * step, c'est voulu (une recipe reste une recipe, quel que soit son lanceur).
+ */
+async function withCliJournal(
+  workspace: string | undefined,
+  fn: () => Promise<number>
+): Promise<number> {
+  if (!workspace) return fn();
+  const journal = initHeadlessJournal(workspace);
+  try {
+    return await runWithJournalContext(
+      { mode: 'cli', workspaceRoot: workspace },
+      fn
+    );
+  } finally {
+    journal?.close();
+  }
+}
 
 export async function runCli(argv: string[]): Promise<number> {
   if (!argv.length || argv[0] === '--help' || argv[0] === '-h') {
@@ -62,11 +87,17 @@ export async function runCli(argv: string[]): Promise<number> {
     const sub = argv[1];
     const maybeKey = sub ? `${cmd} ${sub}` : cmd;
     if (twoLevel[maybeKey]) {
-      return await twoLevel[maybeKey](parseArgs(argv.slice(2)));
+      const parsed = parseArgs(argv.slice(2));
+      const handler = twoLevel[maybeKey];
+      if (maybeKey === 'recipe run') {
+        return await withCliJournal(parsed.flags.workspace, () => handler(parsed));
+      }
+      return await handler(parsed);
     }
 
     if (cmd === 'search') {
-      return await cmdSearch(parseArgs(argv.slice(1)));
+      const parsed = parseArgs(argv.slice(1));
+      return await withCliJournal(parsed.flags.workspace, () => cmdSearch(parsed));
     }
     if (cmd === 'import-cliobrain') {
       return await cmdImportCliobrain(parseArgs(argv.slice(1)));

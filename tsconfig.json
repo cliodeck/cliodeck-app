@@ -23,12 +23,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path aliases */
-    "baseUrl": ".",
+    /* Path aliases (resolved relative to this file; no baseUrl needed) */
     "paths": {
-      "@/*": ["src/*"],
-      "@backend/*": ["backend/*"],
-      "@shared/*": ["src/shared/*"]
+      "@/*": ["./src/*"],
+      "@backend/*": ["./backend/*"],
+      "@shared/*": ["./src/shared/*"]
     }
   },
   "include": ["src", "backend"],

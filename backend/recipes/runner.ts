@@ -21,6 +21,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { ProviderRegistry } from '../core/llm/providers/registry.js';
 import { workspaceFiles, ensureWorkspaceDirectories } from '../core/workspace/layout.js';
+import { runWithJournalContext } from '../core/usage-journal/context.js';
 import { validateInputs, type Recipe, type StepKind } from './schema.js';
 
 export type RunEvent =
@@ -239,14 +240,20 @@ export class RecipeRunner {
       emit({ kind: 'step_start', at: now(), stepId: step.id, stepKind: step.kind });
       const handler = this.handlers[step.kind];
       try {
-        const { output, stub } = await handler(step, {
-          recipe,
-          inputs,
-          priorOutputs,
-          registry: this.registry,
-          workspaceRoot: this.workspaceRoot,
-          signal,
-        });
+        // Tag les appels d'inférence de ce step avec le mode `recipe` et l'id de
+        // recipe pour le journal d'usage IA.
+        const { output, stub } = await runWithJournalContext(
+          { mode: 'recipe', recipeId: recipe.name, workspaceRoot: this.workspaceRoot },
+          () =>
+            handler(step, {
+              recipe,
+              inputs,
+              priorOutputs,
+              registry: this.registry,
+              workspaceRoot: this.workspaceRoot,
+              signal,
+            })
+        );
         priorOutputs[step.id] = output;
         emit({
           kind: 'step_ok',

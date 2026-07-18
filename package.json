@@ -5,7 +5,9 @@
   "description": "Assistant d'écriture pour historiens avec RAG et intégration Zotero/Tropy",
   "main": "dist/src/main/index.js",
   "bin": {
-    "cliodeck-mcp": "bin/cliodeck-mcp"
+    "cliodeck": "bin/cliodeck",
+    "cliodeck-mcp": "bin/cliodeck-mcp",
+    "cliodeck-journal": "bin/cliodeck-journal"
   },
   "author": {
     "name": "Frédéric Clavert",
@@ -41,7 +43,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:provider-parity": "vitest run backend/core/llm/providers/__tests__/parity.test.ts",
-    "cliodeck": "node --experimental-strip-types scripts/cliodeck-cli.ts",
+    "cliodeck": "sh bin/cliodeck",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",

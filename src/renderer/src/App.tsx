@@ -16,6 +16,7 @@ import { AlertDialog } from './components/common/AlertDialog';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
 import { ErrorFallback } from './components/ErrorFallback';
 import { useMenuShortcuts } from './hooks/useMenuShortcuts';
+import { useUsageModeMirror } from './hooks/useUsageModeMirror';
 import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
 import { useEditorStore } from './stores/editorStore';
@@ -29,6 +30,9 @@ function App() {
 
   // Initialize theme from localStorage at startup
   useTheme();
+
+  // Mirror the active workspace mode into the main-process usage journal
+  useUsageModeMirror();
 
   // Initialiser la langue
   const initializeLanguage = useLanguageStore((state) => state.initializeLanguage);

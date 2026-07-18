@@ -94,6 +94,8 @@
   },
   "settings": {
     "title": "Einstellungen",
+    "modeSimple": "Einfach",
+    "modeExpert": "Experte",
     "save": "Speichern",
     "saved": "Konfiguration gespeichert",
     "saveError": "Fehler beim Speichern",
@@ -114,19 +116,19 @@
   "editor": {
     "title": "Editor",
     "fontSize": "Schriftgröße",
-    "wordWrap": "Automatischer Zeilenumbruch",
-    "minimap": "Minimap anzeigen",
-    "fontFamily": "Schriftart",
-    "noCitations": "Keine Zitate",
-    "importBibliography": "Ihre Bibliographie importieren...",
     "fontSizeHelp": "Textgröße im Markdown-Editor (Monaco Editor)",
     "currentSize": "Aktuelle Größe: {{size}}px",
     "appliesToEditor": "Gilt nur für den Haupttexteditor",
+    "wordWrap": "Automatischer Zeilenumbruch",
     "wordWrapHelp": "Lange Zeilen werden automatisch umgebrochen",
+    "minimap": "Minimap anzeigen",
     "minimapHelp": "Scrollleiste mit Miniaturvorschau des Dokuments (wie in VS Code)",
+    "fontFamily": "Schriftart",
     "fontFamilyHelp": "Wählen Sie die Schriftart für den Code-Editor",
     "fontSystem": "Systemschriftarten (SF Mono, Monaco, Consolas)",
     "fontNote": "Systemschriftarten sind immer verfügbar. Andere müssen auf Ihrem System installiert sein.",
+    "noCitations": "Keine Zitate",
+    "importBibliography": "Ihre Bibliographie importieren...",
     "autoSave": "Automatisches Speichern",
     "autoSaveHelp": "Speichert das Dokument automatisch nach einer Inaktivitätsperiode",
     "autoSaveDelay": "Verzögerung beim automatischen Speichern",
@@ -139,12 +141,24 @@
   },
   "ui": {
     "title": "Benutzeroberfläche",
-    "density": "Oberflächendichte",
-    "comfortable": "Komfortabel (Standard)",
-    "compact": "Kompakt (mehr sichtbare Elemente)",
-    "densityHelp": "Steuert Abstände und Elementgröße",
-    "comfortableDesc": "Großzügiger Abstand, leichter zu lesen",
-    "compactDesc": "Reduzierter Abstand, mehr Informationen angezeigt"
+    "theme": {
+      "title": "Design",
+      "description": "Wählen Sie das Erscheinungsbild der Anwendung",
+      "light": "Hell",
+      "dark": "Dunkel",
+      "auto": "Auto (nach Uhrzeit)",
+      "currentTheme": "Aktuelles Design",
+      "enabled": "Aktiviert",
+      "disabled": "Deaktiviert",
+      "autoSwitch": {
+        "title": "Automatischer Wechsel",
+        "description": "Automatisch je nach Uhrzeit zwischen hellem und dunklem Modus wechseln"
+      },
+      "lightModeStart": "Heller Modus beginnt um",
+      "lightModeStartDescription": "Uhrzeit, zu der der helle Modus beginnt (Standard: 06:00)",
+      "darkModeStart": "Dunkler Modus beginnt um",
+      "darkModeStartDescription": "Uhrzeit, zu der der dunkle Modus beginnt (Standard: 20:00)"
+    }
   },
   "bibliography": {
     "title": "Bibliographie",
@@ -180,7 +194,59 @@
     "noPDFsToIndex": "Keine PDFs zum Indexieren in der Bibliographie",
     "confirmIndexAll": "{{count}} PDFs aus der Bibliographie indexieren?",
     "indexAllComplete": "Indexierung abgeschlossen: {{indexed}} indexiert, {{skipped}} übersprungen, {{errors}} Fehler",
-    "indexingProgress": "Indexierung {{current}}/{{total}}"
+    "indexingProgress": "Indexierung {{current}}/{{total}}",
+    "availableInZotero": "in Zotero verfügbar",
+    "selectPDF": "Wählen Sie das herunterzuladende PDF",
+    "modified": "Geändert",
+    "zoteroNotConfigured": "Zotero ist nicht konfiguriert. Bitte konfigurieren Sie es in den Einstellungen.",
+    "pdfDownloadedAndIndexed": "PDF heruntergeladen und indexiert",
+    "downloadError": "Fehler beim Herunterladen:",
+    "noProjectOpen": "Derzeit ist kein Projekt geöffnet",
+    "downloadAllMissing": "Alle fehlenden PDFs aus Zotero herunterladen",
+    "noMissingPDFs": "Keine fehlenden PDFs zum Herunterladen. Alle Zitate mit Zotero-PDFs haben bereits lokale Kopien.",
+    "confirmDownloadAll": "{{count}} PDFs aus Zotero herunterladen und indexieren?",
+    "downloadAllComplete": "Download abgeschlossen: {{downloaded}} heruntergeladen und indexiert, {{skipped}} übersprungen, {{errors}} Fehler",
+    "viewStatistics": "Statistiken der Bibliographie anzeigen",
+    "statistics": "Statistiken",
+    "editMetadata": "Metadaten bearbeiten",
+    "exportBibTeX": "Bibliographie als BibTeX exportieren",
+    "noCitationsToExport": "Keine Zitate zum Exportieren",
+    "exportSuccess": "{{count}} Zitat(e) erfolgreich exportiert",
+    "exportError": "Fehler beim Exportieren der Bibliographie",
+    "modifiedPDFsDetected": "{{count}} geänderte(s) PDF(s) erkannt",
+    "modifiedPDFsMessage": "PDFs wurden seit der letzten Indexierung geändert. Indexieren Sie sie neu, um den Suchindex zu aktualisieren.",
+    "reindexAll": "Alle neu indexieren",
+    "noPDFsToReindex": "Keine PDFs zum Neuindexieren",
+    "confirmReindexModified": "{{count}} geänderte(s) PDF(s) neu indexieren?",
+    "reindexComplete": "{{count}} PDF(s) erfolgreich neu indexiert",
+    "reindexError": "Fehler beim Neuindexieren der PDFs",
+    "cleanupOrphanPDFs": "Verwaiste PDFs bereinigen",
+    "orphanPDFCleanup": "Bereinigung verwaister PDFs",
+    "scannedFiles": "Gescannte Dateien",
+    "linkedFiles": "Verknüpfte Dateien",
+    "orphanFiles": "Verwaiste Dateien",
+    "totalSize": "Gesamtgröße",
+    "scanningForOrphans": "Suche nach verwaisten PDFs...",
+    "noOrphansFound": "Keine verwaisten PDFs gefunden",
+    "noOrphansFoundDesc": "Alle PDF-Dateien in Ihrem Projekt sind mit Zitaten verknüpft.",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Auswahl aufheben",
+    "selectedOrphans": "{{count}} ausgewählt",
+    "rescan": "Erneut scannen",
+    "archiveSelected": "Auswahl archivieren",
+    "deleteSelected": "Auswahl löschen",
+    "archiving": "Archivierung läuft...",
+    "deleting": "Wird gelöscht...",
+    "noOrphansSelected": "Bitte wählen Sie mindestens eine Datei zum Löschen oder Archivieren aus.",
+    "confirmDeleteOrphans": "{{count}} verwaiste(s) PDF(s) löschen? Diese Aktion ist unwiderruflich.",
+    "confirmArchiveOrphans": "{{count}} verwaiste(s) PDF(s) archivieren? Die Dateien werden in den Ordner 'orphan_pdfs' verschoben.",
+    "orphanPDFsDeleted": "{{deleted}} Datei(en) erfolgreich gelöscht. {{failed}} fehlgeschlagen.",
+    "orphanPDFsArchived": "{{archived}} Datei(en) nach {{path}} archiviert. {{failed}} fehlgeschlagen.",
+    "orphanPDFScanError": "Fehler beim Suchen nach verwaisten PDFs",
+    "orphanPDFDeleteError": "Fehler beim Löschen der verwaisten PDFs",
+    "orphanPDFArchiveError": "Fehler beim Archivieren der verwaisten PDFs",
+    "orphanWarningTitle": "Achtung",
+    "orphanWarningMessage": "Verwaiste PDFs sind Dateien, die mit keinem Zitat verknüpft sind. Stellen Sie sicher, dass diese Dateien nicht mehr benötigt werden, bevor Sie sie löschen. Archivieren ist die sicherere Option."
   },
   "project": {
     "title": "Projekt",
@@ -275,7 +341,13 @@
       "error": "Exportfehler"
     },
     "exportToPDF": "Als PDF exportieren",
-    "exportToWord": "Als Word exportieren"
+    "exportToWord": "Als Word exportieren",
+    "citation": {
+      "toggle": "Zitate mit CSL formatieren (Chicago, MLA…)",
+      "style": "Stil",
+      "locale": "Gebietsschema",
+      "help": "[@key]-Marker werden zu nummerierten Fußnoten, und am Ende wird eine Bibliographie angefügt."
+    }
   },
   "rag": {
     "title": "RAG-Konfiguration",
@@ -311,6 +383,10 @@
     "ollamaURLHelp": "Ollama-Serveradresse",
     "embeddingModel": "Embedding-Modell",
     "embeddingModelHelp": "Modell für Vektor-Embeddings",
+    "embeddingNumCtx": "Embedding-Kontextfenster (num_ctx)",
+    "embeddingNumCtxHelp": "Ollama-Kontextgröße für Embedding-Anfragen. Leer lassen, um den Modellstandard zu verwenden.",
+    "embeddingNumCtxPlaceholder": "Modellstandard",
+    "embeddingNumCtxDetails": "Erweitert. Die meisten Embedding-Modelle begrenzen ihren Kontext fest (nomic-embed-text = 2048 Tokens) und ignorieren diesen Wert; er ist nur für Modelle mit großem Kontextfenster nützlich (bge-m3, nomic-embed-text-v2). Zu lange Eingaben werden serverseitig automatisch gekürzt, nie abgelehnt — Sie müssen diesen Wert nicht setzen, um den Fehler „input length exceeds the context length“ zu beheben.",
     "chatModel": "Chat-Modell",
     "chatModelHelp": "Modell für Textgenerierung",
     "embeddingStrategy": "Embedding-Strategie",
@@ -329,6 +405,8 @@
       "custom": "Verwendet das obige benutzerdefinierte Modell, kein Fallback (für fortgeschrittene Benutzer)"
     },
     "availableModels": "Verfügbare Modelle",
+    "modelsAvailable": "Modelle verfügbar",
+    "noModelsLoaded": "Klicken Sie auf 🔄, um Modelle von Ollama zu laden",
     "refreshModels": "Modelle aktualisieren",
     "testConnection": "Verbindung testen",
     "connectionSuccess": "Verbindung erfolgreich!",
@@ -369,10 +447,18 @@
     "userIdHelp": "Ihre Zotero-Benutzer-ID",
     "apiKey": "API-Schluessel",
     "apiKeyHelp": "Ihr Zotero-API-Schluessel",
+    "apiKeyPlaceholder": "Ihr Zotero-API-Schlüssel",
     "autoSync": "Auto-Sync",
     "testConnection": "Verbindung testen",
+    "testing": "Test läuft...",
+    "connectionOk": "Verbindung OK",
+    "connectionFailed": "Verbindung fehlgeschlagen",
     "connectionSuccess": "Zotero-Verbindung erfolgreich!",
     "connectionError": "Verbindung zu Zotero nicht moeglich",
+    "enterCredentials": "Bitte geben Sie Ihre Benutzer-ID und Ihren API-Schlüssel ein",
+    "getApiKey": "API-Schlüssel anfordern",
+    "configDescription": "Verbinden Sie Zotero, um Ihre bibliographischen Referenzen zu importieren.",
+    "projectNote": "Zotero-Gruppe und -Sammlung werden in den Einstellungen jedes Projekts konfiguriert.",
     "import": {
       "title": "Import aus Zotero",
       "notConfigured": "Zotero ist nicht konfiguriert",
@@ -425,6 +511,9 @@
   },
   "chat": {
     "title": "Chat",
+    "settings": {
+      "toggle": "Chat-Einstellungen"
+    },
     "askQuestion": "Stellen Sie eine Frage",
     "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten...",
     "send": "Senden (Enter)",
@@ -436,7 +525,22 @@
     "you": "Sie",
     "assistant": "Assistent",
     "noContextWarning": "Diese Antwort basiert nicht auf Ihren Dokumenten. Es wurden keine relevanten Passagen in Ihrem Korpus gefunden.",
-    "sources": "Quellen",
+    "sources": {
+      "open": "Quelle öffnen",
+      "opening": "Wird geöffnet…",
+      "close": "Schließen",
+      "openFailed": "Öffnen fehlgeschlagen.",
+      "openUnavailable": "Öffnen von Quellen nicht verfügbar (Preload fehlt).",
+      "untrackablePdf": "PDF-Dokument nicht rückverfolgbar (documentId fehlt).",
+      "untrackableTropy": "Tropy-Quelle nicht rückverfolgbar (itemId fehlt).",
+      "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt).",
+      "position": {
+        "pageWithOffset": "Seite {{page}} · Offset {{offset}}",
+        "page": "Seite {{page}}",
+        "noteWithLine": "{{path}} · Z{{line}}",
+        "item": "Objekt #{{id}}"
+      }
+    },
     "source": "Quelle",
     "excerpt": "Auszug:",
     "page": "Seite",
@@ -451,7 +555,76 @@
     "readyState": {
       "title": "Bereit zu helfen",
       "message": "{{count}} indexierte(s) Dokument(e) verfügbar.\n\nStellen Sie eine Frage, um zu beginnen."
-    }
+    },
+    "explanation": {
+      "searchHeading": "🔎 Suche",
+      "resultsFound": "Gefundene Ergebnisse:",
+      "duration": "Dauer:",
+      "cacheHitSuffix": "(Cache)",
+      "sourceTypeLabel": "Quellentyp:",
+      "sourceTypePrimary": "Archive (Tropy)",
+      "sourceTypeSecondary": "Bibliographie (PDFs)",
+      "sourceTypeAll": "Alle",
+      "documentsConsulted": "Konsultierte Dokumente",
+      "chunks": "Chunks",
+      "score": "Score",
+      "compressionHeading": "🗜️ Kompression",
+      "state": "Status:",
+      "enabled": "Aktiviert",
+      "disabled": "Deaktiviert",
+      "chunksLabel": "Chunks:",
+      "size": "Größe:",
+      "chars": "Zeichen",
+      "reduction": "Reduktion:",
+      "strategy": "Strategie:",
+      "graphHeading": "🔗 Wissensgraph",
+      "relatedDocs": "Verwandte Dokumente:",
+      "titles": "Titel:",
+      "generationHeading": "🤖 Generierung",
+      "provider": "Anbieter:",
+      "model": "Modell:",
+      "contextWindow": "Kontextfenster:",
+      "temperature": "Temperatur:",
+      "promptSize": "Prompt-Größe:",
+      "timingHeading": "⏱️ Ausführungszeit",
+      "searchTime": "Suche:",
+      "compressionTime": "Kompression:",
+      "generationTime": "Generierung:",
+      "totalTime": "Gesamt:"
+    },
+    "brainstorm": {
+      "emptyState": "Beginnen Sie eine freie Exploration. Ihre .cliohints und indexierten Quellen werden automatisch eingefügt.",
+      "placeholder": "Frage, Hypothese, zu erkundende Spur… (Cmd/Strg + Enter zum Senden)",
+      "citationBadge": "Zitat",
+      "sendToWrite": "An Write senden",
+      "sentToWrite": "Gesendet",
+      "sendToWriteTitle": "Fügt diesen Gesprächsbeitrag als Entwurf in Write ein",
+      "nerToggle": "Entitäten",
+      "contextGraph": "Beziehungen zwischen Quellen",
+      "graphCitation": "Zitat",
+      "graphSimilarity": "Ähnlichkeit",
+      "sourcesLabel": "Quellen",
+      "openProjectNotice": "Öffnen Sie ein Projekt, um mit dem Brainstorming zu beginnen.",
+      "projectContext": "Projektkontext",
+      "recipesCount": "{{count}} Rezepte",
+      "workspaceHints": "Projekt-Hints",
+      "noHints": "Keine .cliohints-Datei vorhanden. Fügen Sie eine unter {{path}} hinzu, um dauerhaften Kontext in jeden Prompt einzufügen.",
+      "obsidianVault": "Obsidian-Vault",
+      "vaultReady": "Index bereit unter {{path}}",
+      "vaultNotIndexed": "Noch nicht indiziert — verknüpfen Sie einen Vault in den Einstellungen.",
+      "vaultChecking": "Prüfung läuft…",
+      "recipesHeading": "Rezepte ({{count}})",
+      "noRecipes": "Keine Rezepte verfügbar.",
+      "fusionApiMissing": "Fusion-API nicht durch das Preload-Skript exponiert — erstellen Sie das Preload-Bundle neu.",
+      "stepsSuffix": "Schritte",
+      "starter1": "Was sind die wichtigsten Thesen in meiner Bibliographie zu diesem Thema?",
+      "starter2": "Fasse die in meinen Archiven verfügbaren Primärquellen zusammen.",
+      "starter3": "Welche Forschungsansätze ergeben sich aus dem Abgleich meiner Quellen?"
+    },
+    "notConfigured": "Das Modell antwortet nicht. Prüfen Sie, ob Ollama läuft, oder wählen Sie in den Einstellungen einen anderen Anbieter.",
+    "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
+    "openSettings": "Einstellungen öffnen",
+    "sourcesLabel": "Quellen"
   },
   "corpus": {
     "title": "Korpus",
@@ -497,6 +670,9 @@
     "nbTopics": "Anz. Themen:",
     "reanalyze": "Neu analysieren",
     "topicTimeline": "Zeitliche Entwicklung der Themen",
+    "noTimelineData": "Keine Zeitachsendaten verfügbar. Dokumente müssen Jahres-Metadaten haben.",
+    "timelineYear": "Jahr",
+    "timelineDocCount": "Dok.",
     "topicDocuments": "Dokumente",
     "hideDocuments": "Dokumente ausblenden",
     "showDocuments": "{{count}} Dokumente anzeigen",
@@ -575,7 +751,16 @@
     "providerAutoDesc": "Versucht zuerst Ollama, verwendet das eingebettete Modell, wenn Ollama nicht verfügbar ist",
     "providerOllamaDesc": "Verwendet ausschließlich Ollama für die Generierung (erfordert laufendes Ollama)",
     "providerEmbeddedDesc": "Verwendet das eingebettete Qwen-Modell (erfordert Download in den Einstellungen)",
-    "notDownloaded": "nicht heruntergeladen"
+    "notDownloaded": "nicht heruntergeladen",
+    "sources": "Quellen",
+    "includeBibliography": "Bibliographie",
+    "includeBibliographyHint": "Zotero-PDFs und -Referenzen",
+    "includePrimary": "Primärquellen",
+    "includePrimaryHint": "Tropy-Archive",
+    "includeNotes": "Notizen",
+    "includeNotesHint": "Obsidian-Notizen",
+    "searchIn": "Suche in: {{list}}",
+    "noSourceWarning": "Wählen Sie mindestens eine Quelle aus."
   },
   "beamer": {
     "title": "Beamer-Konfiguration",
@@ -902,7 +1087,34 @@
     "noProject": "Kein Tropy-Projekt",
     "openPrompt": "Klicken Sie auf das Ordnersymbol, um ein Tropy-Projekt (.tropy oder .tpy) zu öffnen",
     "noSources": "Keine Quellen",
-    "syncPrompt": "Klicken Sie auf Synchronisieren, um Quellen aus Tropy zu importieren"
+    "syncPrompt": "Klicken Sie auf Synchronisieren, um Quellen aus Tropy zu importieren",
+    "ocrReport": "OCR-Bericht",
+    "ocrQuality": "OCR-Qualität",
+    "ocrConfidence": "OCR-Konfidenz",
+    "chunkQuality": "Chunk-Qualität",
+    "avgQuality": "Durchschn. Score",
+    "minQuality": "Min. Score",
+    "maxQuality": "Max. Score",
+    "chunks": "Chunks",
+    "transcriptionSource": "Transkriptionsquelle",
+    "transcriptionLength": "Länge",
+    "characters": "Zeichen",
+    "noOCRData": "Keine OCR-Daten für dieses Dokument verfügbar.",
+    "corpusReport": "Korpus-Bericht",
+    "corpusOCRTitle": "OCR-Qualität des Korpus",
+    "sourcesWithOCR": "Quellen mit OCR",
+    "sourcesTranscribed": "Transkribierte Quellen",
+    "avgCorpusConfidence": "Durchschnittliche Konfidenz",
+    "confidenceDistribution": "Konfidenzverteilung",
+    "worstSources": "Am wenigsten zuverlässige Quellen",
+    "bestSources": "Zuverlässigste Quellen",
+    "byTranscriptionSource": "Nach Transkriptionsquelle",
+    "tesseract": "Tesseract (OCR)",
+    "tropy-notes": "Tropy-Notizen",
+    "transkribus": "Transkribus",
+    "manual": "Manuell",
+    "noCorpusData": "Keine OCR-Daten. Führen Sie bei der Synchronisierung eine OCR durch.",
+    "closeReport": "Schließen"
   },
   "modes": {
     "selector": {
@@ -950,6 +1162,12 @@
     "submit": "Auf GitHub öffnen",
     "submitted": "Das Formular wurde in Ihrem Browser geöffnet. Klicken Sie auf 'Submit new issue' auf GitHub, um zu bestätigen.",
     "systemInfo": "Systeminformationen"
+  },
+  "workspaceMode": {
+    "explore": "Erkunden",
+    "brainstorm": "Brainstormen",
+    "write": "Schreiben",
+    "export": "Exportieren"
   },
   "vault": {
     "title": "Obsidian-Vault",
@@ -1024,6 +1242,8 @@
     "buttons": {
       "run": "Ausführen",
       "runTitle": "Dieses Rezept ausführen",
+      "edit": "Bearbeiten",
+      "editTitle": "Dieses Rezept bearbeiten",
       "refresh": "Aktualisieren",
       "refreshTitle": "Liste neu laden"
     },
@@ -1031,6 +1251,27 @@
       "stepsCount_one": "{{count}} Schritt",
       "stepsCount_other": "{{count}} Schritte"
     }
+  },
+  "recipeEditor": {
+    "readOnly": "schreibgeschützt",
+    "unsaved": "nicht gespeichert",
+    "modeForm": "Formular",
+    "modeYaml": "YAML",
+    "save": "Speichern",
+    "sections": {
+      "metadata": "Metadaten",
+      "inputs": "Parameter",
+      "steps": "Schritte"
+    },
+    "fields": {
+      "name": "Name",
+      "version": "Version",
+      "description": "Beschreibung"
+    },
+    "addInput": "Hinzufügen",
+    "addStep": "Hinzufügen",
+    "noInputs": "Keine Parameter definiert.",
+    "noSteps": "Keine Schritte."
   },
   "mcp": {
     "title": "MCP-Clients",
@@ -1065,6 +1306,69 @@
     "tools": {
       "summary_one": "Verfügbares Tool ({{count}})",
       "summary_other": "Verfügbare Tools ({{count}})"
+    }
+  },
+  "archives": {
+    "title": "Archiv-Konnektoren",
+    "hint": "Aktivieren Sie externe Konnektoren (Europeana, später Transkribus, FranceArchives), indem Sie deren API-Schlüssel speichern. Die Schlüssel werden vom Betriebssystem verschlüsselt (Electron safeStorage); sie werden weder in config.json geschrieben noch mit einem Projekt weitergegeben.",
+    "errors": {
+      "noFusionApi": "Archiv-API nicht durch das Preload-Skript exponiert.",
+      "saveFailed": "Der Schlüssel konnte nicht gespeichert werden.",
+      "deleteFailed": "Löschen fehlgeschlagen."
+    },
+    "status": {
+      "configured": "konfiguriert",
+      "notConfigured": "nicht konfiguriert"
+    },
+    "buttons": {
+      "save": "Speichern",
+      "delete": "Löschen",
+      "hideKey": "Ausblenden",
+      "showKey": "Anzeigen",
+      "hideKeyAria": "Schlüssel ausblenden",
+      "showKeyAria": "Schlüssel anzeigen"
+    },
+    "input": {
+      "replacePlaceholder": "Neuen Schlüssel zum Ersetzen einfügen"
+    },
+    "notice": {
+      "saved": "{{name}}-Schlüssel gespeichert (vom Betriebssystem verschlüsselt).",
+      "deleted": "{{name}}-Schlüssel gelöscht."
+    },
+    "europeana": {
+      "name": "Europeana",
+      "description": "~50 Mio. europäische GLAM-Objekte (Museen, Archive, Bibliotheken)",
+      "keyPlaceholder": "Europeana-wskey (kostenlos auf pro.europeana.eu)",
+      "mcpHint": "Um `search_europeana` von einem MCP-Client eines Drittanbieters (Claude Desktop) zu verwenden, setzen Sie zusätzlich `EUROPEANA_API_KEY` in der Client-Konfiguration — der hier gespeicherte Schlüssel wird nur vom integrierten MCP-Server verwendet, den ClioDeck selbst startet."
+    }
+  },
+  "mcpServer": {
+    "title": "Dieses Projekt als MCP-Server bereitstellen",
+    "hint": "Ermöglicht externen Clients (Claude Desktop, Claude Code, jedem MCP-kompatiblen Tool), das Korpus dieses Projekts über stdio zu lesen. Opt-in pro Projekt: Solange der Schalter unten deaktiviert ist, läuft kein Server.",
+    "errors": {
+      "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert."
+    },
+    "toggle": "MCP-Server für dieses Projekt aktivieren",
+    "serverName": "Servername",
+    "serverNamePlaceholder": "mein-projekt",
+    "serverNameHint": "Anzeigename für verbundene Clients. Standardmäßig der Name des Projektordners.",
+    "binary": "Wrapper-Binärdatei",
+    "binaryMissing": "Binärdatei nicht gefunden — führen Sie zuerst `npm run build` im cliodeck-app-Repository aus.",
+    "disabledNote": "Der Server verweigert den Start, solange dieser Schalter deaktiviert ist, selbst wenn ein Client versucht, ihn zu starten.",
+    "tools": {
+      "title": "Für verbundene Clients bereitgestellte Tools",
+      "limits": "Jedes Tool akzeptiert topK bis 200 (Standard 10) und liefert Chunks, die auf 4 000 Zeichen gekürzt werden (2 000 für Gallica/HAL-Snippets)."
+    },
+    "snippets": {
+      "title": "Konfigurieren Sie Ihren Client",
+      "claudeDesktop": "Claude Desktop",
+      "claudeDesktopHint": "Fügen Sie diesen Block dem `mcpServers`-Objekt in `claude_desktop_config.json` hinzu (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\\Claude\\`).",
+      "claudeCode": "Claude Code CLI",
+      "claudeCodeHint": "Führen Sie diesen Befehl einmal in Ihrem Terminal aus, um den Server in der `claude`-CLI zu registrieren.",
+      "generic": "Generisches MCP (stdio)",
+      "genericHint": "Für jeden MCP-kompatiblen Client: Rufen Sie diesen Befehl direkt auf. Er spricht das MCP-Protokoll über stdin/stdout.",
+      "copy": "Kopieren",
+      "copied": "Kopiert"
     }
   },
   "a11y": {
@@ -1112,8 +1416,147 @@
       "path": "/absolute/path/…"
     }
   },
+  "explore": {
+    "title": "Erkunden",
+    "subtitle": "Erkunden Sie Ihr Korpus, messen Sie Ähnlichkeiten und lassen Sie Themen sichtbar werden.",
+    "tabs": {
+      "corpus": "Korpus-Explorer",
+      "similarity": "Ähnlichkeit",
+      "textometrics": "Textometrie"
+    },
+    "placeholder": {
+      "title": "Demnächst verfügbar",
+      "body": "Diese Analyseansicht ist noch nicht angebunden — siehe TODO in MainLayout."
+    }
+  },
+  "ideas": {
+    "tabChat": "Chat",
+    "tabIdeas": "Ideen",
+    "tabCanvas": "Board",
+    "tabGraph": "Graph",
+    "canvasEmpty": "Leeres Board. Klicken Sie auf +, um eine Idee hinzuzufügen.",
+    "newIdeaTitle": "Neue Idee",
+    "searchPlaceholder": "Suchen…",
+    "create": "Neue Idee",
+    "emptyState": "Noch keine Ideen. Klicken Sie auf +, um eine zu erstellen.",
+    "noResults": "Keine Ergebnisse.",
+    "selectOrCreate": "Wählen Sie eine Idee aus oder erstellen Sie eine neue.",
+    "titlePlaceholder": "Titel der Idee",
+    "contentPlaceholder": "Notizen, Überlegungen, Hypothesen…",
+    "tags": "Tags",
+    "addTag": "Tag hinzufügen…",
+    "links": "Verknüpfungen",
+    "addLink": "Ziel-ID…",
+    "origin": "Ursprung",
+    "created": "Erstellt am",
+    "delete": "Löschen",
+    "importObsidian": "Aus Obsidian-Vault importieren",
+    "relatedIdeas": "Verwandte Ideen"
+  },
+  "exportHub": {
+    "title": "Exportieren",
+    "subtitle": "Wählen Sie ein Ausgabeformat für das aktuelle Dokument.",
+    "pdf": {
+      "title": "PDF",
+      "description": "Gesetztes PDF über Pandoc + XeLaTeX."
+    },
+    "word": {
+      "title": "Word (.docx)",
+      "description": "Bearbeitbares DOCX mit Vorlagenunterstützung."
+    },
+    "presentation": {
+      "title": "Präsentation",
+      "description": "Folien (online, offline oder PDF)."
+    },
+    "action": "Exporter öffnen"
+  },
   "statusBar": {
     "mcpTooltip": "MCP: {{ready}}/{{total}} bereit",
-    "vaultTooltip": "Vault: {{count}} Notizen"
+    "vaultTooltip": "Vault: {{count}} Notizen",
+    "indexing": "Indexierung",
+    "indexingTooltip": "Indexierung: {{current}}/{{total}} Dokumente",
+    "syncing": "Sync",
+    "syncTooltip": "Synchronisierung: {{phase}} {{current}}/{{total}}",
+    "usageJournalBadge_one": "{{count}} Sitzung zu annotieren",
+    "usageJournalBadge_other": "{{count}} Sitzungen zu annotieren",
+    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)"
+  },
+  "security": {
+    "revokeTitle": "Schlüssel widerrufen",
+    "revokeDescription": "Löscht alle gespeicherten API-Schlüssel (LLM, Zotero, MCP). Sie müssen sie anschließend neu konfigurieren.",
+    "revokeButton": "Alle Schlüssel widerrufen",
+    "revokeConfirm": "Dies löscht alle Ihre gespeicherten API-Schlüssel. Sie müssen sie in den Einstellungen neu konfigurieren. Fortfahren?",
+    "revokeSuccess": "{{count}} Schlüssel widerrufen. Konfigurieren Sie Ihre API-Schlüssel in den Einstellungen neu.",
+    "revokeError": "Fehler beim Widerruf",
+    "revoking": "Widerruf läuft..."
+  },
+  "cloudConsent": {
+    "title": "Datenübermittlung an einen externen Dienst",
+    "body": "Sie verwenden {{provider}}. Ihre Forschungsdaten (Korpusauszüge, Chat-Inhalte) werden an diesen Cloud-Dienst gesendet.",
+    "item1": "Aus Ihrem Korpus extrahierte RAG-Chunks werden übertragen",
+    "item2": "Der Inhalt Ihrer Konversation wird an den Anbieter gesendet",
+    "item3": "Sie sind für den Schutz Ihrer Daten verantwortlich",
+    "hint": "Um lokal zu bleiben, konfigurieren Sie in den Einstellungen ein Ollama auf localhost.",
+    "accept": "Ich akzeptiere für diese Sitzung",
+    "cancel": "Abbrechen"
+  },
+  "onboarding": {
+    "skip": "Überspringen",
+    "skipSetup": "Ersteinrichtung überspringen",
+    "next": "Weiter",
+    "finish": "Fertigstellen",
+    "startWorking": "Mit der Arbeit beginnen",
+    "topicQuestion": "Willkommen im Projekt \"{{name}}\"! An welchem Forschungsthema arbeiten Sie?",
+    "topicPlaceholder": "z. B. Der Erste Weltkrieg in der luxemburgischen Presse",
+    "periodQuestion": "Welchen Zeitraum umfasst Ihre Forschung?",
+    "periodPlaceholder": "z. B. 1914-1918 oder 19. Jahrhundert",
+    "sourcesQuestion": "Welche Arten von Quellen werden Sie verwenden?",
+    "source": {
+      "pdfs": "PDF-Artikel",
+      "zotero": "Zotero-Bibliothek",
+      "tropy": "Tropy-Archiv",
+      "obsidian": "Obsidian-Notizen"
+    },
+    "languageQuestion": "In welcher Sprache soll der Assistent antworten?",
+    "lang": {
+      "fr": "Französisch",
+      "en": "Englisch",
+      "de": "Deutsch"
+    },
+    "doneMessage": "Fertig! Ihr Arbeitsbereich ist konfiguriert. Der Assistent kennt jetzt Ihr Thema und Ihre Quellen. Sie können diese Angaben jederzeit in den Projekteinstellungen ändern (Datei .cliohints)."
+  },
+  "usageJournal": {
+    "title": "KI-Nutzungsjournal",
+    "close": "Schließen",
+    "intro": "Ein reflexives Protokoll Ihrer Inferenz-Nutzung (Volumen und Entscheidungen), getrennt vom Forschungsjournal. Prompts werden hier nie gespeichert.",
+    "loading": "Wird geladen…",
+    "noProject": "Öffnen oder erstellen Sie ein Projekt, um Ihr Nutzungsjournal einzusehen.",
+    "saveFailed": "Die Entscheidung konnte nicht gespeichert werden.",
+    "calls": "Aufrufe",
+    "tokens": "Tokens",
+    "tokensBreakdown": "Tokens (lokal {{local}} / Cloud {{cloud}})",
+    "badge_one": "{{count}} Sitzung zu annotieren",
+    "badge_other": "{{count}} Sitzungen zu annotieren",
+    "task": "Aufgabe",
+    "taskPlaceholder": "z. B. Neuindexierung des Lester-Korpus nach +40 Dokumenten",
+    "alternative": "Nicht-KI-Alternative",
+    "alternativePlaceholder": "leer = „keine sinnvolle“",
+    "noAlternative": "keine sinnvolle",
+    "justification": "Warum die Alternative verworfen wurde",
+    "verdict": "Urteil",
+    "verdictNote": "Anmerkung zum Urteil (optional)",
+    "verdicts": {
+      "worth_it": "Hat sich gelohnt",
+      "not_worth_it": "Hat sich nicht gelohnt",
+      "unsure": "Unsicher",
+      "pending": "Ausstehend"
+    },
+    "attachSessions": "Sitzungen des Tages zuordnen",
+    "covered": "bereits zugeordnet",
+    "uncovered": "nicht annotiert",
+    "saving": "Wird gespeichert…",
+    "save": "Entscheidung speichern",
+    "saved": "✓ Gespeichert",
+    "todayDecisions": "Entscheidungen des Tages"
   }
 }

@@ -7,7 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Highlighter, Loader2, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, Check, Highlighter, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
@@ -149,6 +149,19 @@ export const BrainstormChat: React.FC = () => {
     return (
       <>
         {orig.error && <div className="brainstorm-chat__error">{orig.error}</div>}
+        {m.role === 'assistant' && orig.error && (
+          <div className="brainstorm-chat__msg-actions">
+            <button
+              type="button"
+              className="chat-surface__inline-btn"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent('show-settings-modal'))
+              }
+            >
+              <Settings size={12} /> {t('chat.openSettings')}
+            </button>
+          </div>
+        )}
         {m.role === 'assistant' && sources.length > 0 && (
           <details className="brainstorm-chat__sources">
             <summary>
@@ -256,7 +269,7 @@ export const BrainstormChat: React.FC = () => {
         )}
       </>
     );
-  }, [sendToWrite, sentToWriteId, activeSource]);
+  }, [sendToWrite, sentToWriteId, activeSource, t]);
 
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 

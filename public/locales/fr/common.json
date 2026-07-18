@@ -383,6 +383,10 @@
     "ollamaURLHelp": "Adresse du serveur Ollama",
     "embeddingModel": "Modèle d'embedding",
     "embeddingModelHelp": "Modèle pour les embeddings vectoriels",
+    "embeddingNumCtx": "Fenêtre de contexte des embeddings (num_ctx)",
+    "embeddingNumCtxHelp": "Taille de contexte Ollama pour la vectorisation. Laisser vide pour le défaut du modèle.",
+    "embeddingNumCtxPlaceholder": "défaut du modèle",
+    "embeddingNumCtxDetails": "Avancé. La plupart des modèles d'embedding plafonnent leur contexte en dur (nomic-embed-text = 2048 tokens) et ignorent cette valeur. Elle n'est utile que pour les modèles à grande fenêtre (bge-m3, nomic-embed-text-v2). Les textes trop longs sont tronqués automatiquement côté serveur, jamais rejetés — vous n'avez pas besoin d'y toucher pour corriger l'erreur « input length exceeds the context length ».",
     "chatModel": "Modèle de chat",
     "chatModelHelp": "Modèle pour la génération de texte",
     "embeddingStrategy": "Stratégie d'embeddings",
@@ -616,7 +620,11 @@
       "starter1": "Quelles sont les principales thèses dans ma bibliographie sur ce sujet ?",
       "starter2": "Résume les sources primaires disponibles dans mes archives.",
       "starter3": "Quelles pistes de recherche émergent des recoupements entre mes sources ?"
-    }
+    },
+    "notConfigured": "Le modèle ne répond pas. Vérifiez qu'Ollama est lancé, ou choisissez un autre fournisseur dans les Paramètres.",
+    "startFailed": "Le modèle ne répond pas : {{error}}. Vérifiez votre configuration dans les Paramètres.",
+    "openSettings": "Ouvrir les paramètres",
+    "sourcesLabel": "Sources"
   },
   "corpus": {
     "title": "Corpus",
@@ -1468,7 +1476,10 @@
     "indexing": "Indexation",
     "indexingTooltip": "Indexation : {{current}}/{{total}} documents",
     "syncing": "Sync",
-    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}"
+    "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}",
+    "usageJournalBadge_one": "{{count}} session à annoter",
+    "usageJournalBadge_other": "{{count}} sessions à annoter",
+    "usageJournalTooltip": "Sessions d'usage IA substantielles sans décision — cliquer pour ouvrir le journal (Cmd/Ctrl+J)"
   },
   "security": {
     "revokeTitle": "Revocation des cles",
@@ -1513,5 +1524,39 @@
       "de": "Allemand"
     },
     "doneMessage": "Parfait ! Votre espace de travail est configure. L'assistant connait maintenant votre sujet et vos sources. Vous pouvez modifier ces informations a tout moment dans les parametres du projet (fichier .cliohints)."
+  },
+  "usageJournal": {
+    "title": "Journal d'usage IA",
+    "close": "Fermer",
+    "intro": "Instrument réflexif sur vos usages d'inférence (volumes et décisions), distinct du journal de recherche. Aucun prompt n'est enregistré ici.",
+    "loading": "Chargement…",
+    "noProject": "Ouvrez ou créez un projet pour consulter votre journal d'usage.",
+    "saveFailed": "Échec de l'enregistrement de la décision.",
+    "calls": "appels",
+    "tokens": "tokens",
+    "tokensBreakdown": "tokens (local {{local}} / cloud {{cloud}})",
+    "badge_one": "{{count}} session à annoter",
+    "badge_other": "{{count}} sessions à annoter",
+    "task": "Tâche",
+    "taskPlaceholder": "ex. ré-indexation corpus Lester après +40 documents",
+    "alternative": "Alternative non-IA",
+    "alternativePlaceholder": "vide = « aucune raisonnable »",
+    "noAlternative": "aucune raisonnable",
+    "justification": "Pourquoi l'alternative a été écartée",
+    "verdict": "Verdict",
+    "verdictNote": "Note de verdict (optionnel)",
+    "verdicts": {
+      "worth_it": "Valait le coup",
+      "not_worth_it": "Ne valait pas le coup",
+      "unsure": "Incertain",
+      "pending": "En attente"
+    },
+    "attachSessions": "Rattacher des sessions du jour",
+    "covered": "déjà rattachée",
+    "uncovered": "non annotée",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer la décision",
+    "saved": "✓ Enregistré",
+    "todayDecisions": "Décisions du jour"
   }
 }

@@ -4,7 +4,7 @@
 import { ipcMain } from 'electron';
 import { configManager } from '../../services/config-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
-import { isSensitiveKey } from '../../services/secure-storage.js';
+import { isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -13,42 +13,79 @@ import {
 } from '../utils/validation.js';
 import type { AppConfig, LLMConfig, ZoteroConfig } from '../../../../backend/types/config.js';
 
-/** Mask an API key for display in the renderer (show first 4 and last 4 chars). */
-function maskAPIKey(key: string | undefined): string {
-  if (!key) return '';
-  if (key.length <= 12) return '****';
-  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+/**
+ * Return a copy of AppConfig with all sensitive API key values redacted.
+ * Iterates SENSITIVE_KEYS so every registered secret (incl. Mistral, Gemini,
+ * Europeana) is masked — the renderer never receives a key in clear.
+ */
+function redactConfig(config: AppConfig): AppConfig {
+  const redacted: Record<string, unknown> = { ...config };
+
+  for (const keyPath of SENSITIVE_KEYS) {
+    const value = configManager.getAPIKey(keyPath);
+    if (!value) continue;
+    const segments = keyPath.split('.');
+    const field = segments.pop() as string;
+    // Clone each object along the path so the manager's copy is never mutated.
+    let cursor = redacted;
+    let sectionMissing = false;
+    for (const seg of segments) {
+      const next = cursor[seg];
+      if (!next || typeof next !== 'object') {
+        sectionMissing = true;
+        break;
+      }
+      const clone = { ...(next as Record<string, unknown>) };
+      cursor[seg] = clone;
+      cursor = clone;
+    }
+    if (sectionMissing) continue;
+    cursor[field] = maskAPIKey(value);
+  }
+
+  return redacted as unknown as AppConfig;
 }
 
 /**
- * Return a copy of AppConfig with all sensitive API key values redacted.
- * The renderer should display the masked values and only send full values
- * when the user explicitly edits and saves a key.
+ * Mask the sensitive fields of a single top-level config section ('llm',
+ * 'zotero') that config-manager enriches with keys in clear.
  */
-function redactConfig(config: AppConfig): AppConfig {
-  const redacted = { ...config };
-
-  // Redact LLM API keys
-  if (redacted.llm) {
-    const claudeAPIKey = configManager.getAPIKey('llm.claudeAPIKey');
-    const openaiAPIKey = configManager.getAPIKey('llm.openaiAPIKey');
-    redacted.llm = {
-      ...redacted.llm,
-      ...(claudeAPIKey ? { claudeAPIKey: maskAPIKey(claudeAPIKey) } : {}),
-      ...(openaiAPIKey ? { openaiAPIKey: maskAPIKey(openaiAPIKey) } : {}),
-    };
+function maskSectionKeys<T extends object>(sectionKey: string, section: T): T {
+  const masked = { ...(section as Record<string, unknown>) };
+  for (const keyPath of SENSITIVE_KEYS) {
+    if (!keyPath.startsWith(`${sectionKey}.`)) continue;
+    const field = keyPath.slice(sectionKey.length + 1);
+    if (field.includes('.')) continue; // nested paths are handled by redactConfig
+    const value = masked[field];
+    if (typeof value === 'string' && value) {
+      masked[field] = maskAPIKey(value);
+    }
   }
+  return masked as T;
+}
 
-  // Redact Zotero API key
-  if (redacted.zotero) {
-    const zoteroApiKey = configManager.getAPIKey('zotero.apiKey');
-    redacted.zotero = {
-      ...redacted.zotero,
-      ...(zoteroApiKey ? { apiKey: maskAPIKey(zoteroApiKey) } : {}),
-    };
+/**
+ * Drop sensitive fields whose value is the mask of the currently stored key:
+ * the renderer round-trips masked configs on save, and an unchanged mask must
+ * not overwrite the real key. An empty string still means "delete the key".
+ */
+function stripUnchangedMaskedKeys(
+  sectionKey: string,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const cleaned = { ...value };
+  for (const keyPath of SENSITIVE_KEYS) {
+    if (!keyPath.startsWith(`${sectionKey}.`)) continue;
+    const field = keyPath.slice(sectionKey.length + 1);
+    if (field.includes('.')) continue;
+    const candidate = cleaned[field];
+    if (typeof candidate !== 'string' || candidate === '') continue;
+    const stored = configManager.getAPIKey(keyPath);
+    if (stored && candidate === maskAPIKey(stored)) {
+      delete cleaned[field];
+    }
   }
-
-  return redacted;
+  return cleaned;
 }
 
 export function setupConfigHandlers() {
@@ -57,21 +94,23 @@ export function setupConfigHandlers() {
     const key = validate(StringIdSchema, rawKey);
     console.log('IPC Call: config:get', { key });
 
-    // If requesting a sensitive key directly, route through secure storage
+    // Sensitive keys never cross the IPC boundary in clear: the renderer
+    // only needs to know whether a key exists, the mask carries that signal.
     if (isSensitiveKey(key)) {
       const value = configManager.getAPIKey(key);
-      console.log('IPC Response: config:get (secure)', { key, hasValue: !!value });
-      return value;
+      console.log('IPC Response: config:get (secure, masked)', { key, hasValue: !!value });
+      return maskAPIKey(value);
     }
 
-    // For top-level section keys that contain API keys, inject them
+    // For top-level section keys that contain API keys, inject them masked
     if (key === 'llm') {
-      const result = configManager.getLLMConfig();
+      const result = maskSectionKeys('llm', configManager.getLLMConfig());
       console.log('IPC Response: config:get', { key });
       return result;
     }
     if (key === 'zotero') {
-      const result = configManager.getZoteroConfig();
+      const zotero = configManager.getZoteroConfig();
+      const result = zotero ? maskSectionKeys('zotero', zotero) : zotero;
       console.log('IPC Response: config:get', { key });
       return result;
     }
@@ -85,18 +124,27 @@ export function setupConfigHandlers() {
     const { key, value } = validate(ConfigSetSchema, { key: rawKey, value: rawValue });
     console.log('IPC Call: config:set', { key });
     try {
-      // If setting a sensitive key directly, route through secure storage
+      // If setting a sensitive key directly, route through secure storage.
+      // A value equal to the current mask means "unchanged" — skip the write
+      // so a round-tripped mask never replaces the real key.
       if (isSensitiveKey(key)) {
-        configManager.setAPIKey(key, value as string);
+        const stored = configManager.getAPIKey(key);
+        if (!(stored && value === maskAPIKey(stored))) {
+          configManager.setAPIKey(key, value as string);
+        }
         console.log('IPC Response: config:set (secure) - success');
         return successResponse();
       }
 
       // For top-level section keys that contain API keys, use dedicated setters
       if (key === 'llm') {
-        configManager.setLLMConfig(value as Partial<LLMConfig>);
+        configManager.setLLMConfig(
+          stripUnchangedMaskedKeys('llm', value as Record<string, unknown>) as Partial<LLMConfig>,
+        );
       } else if (key === 'zotero') {
-        configManager.setZoteroConfig(value as ZoteroConfig);
+        configManager.setZoteroConfig(
+          stripUnchangedMaskedKeys('zotero', value as Record<string, unknown>) as ZoteroConfig,
+        );
       } else {
         configManager.set(key as keyof AppConfig, value);
       }

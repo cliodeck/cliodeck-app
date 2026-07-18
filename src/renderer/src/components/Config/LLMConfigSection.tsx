@@ -344,6 +344,35 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             </div>
           </div>
 
+          {/* Embedding context window (num_ctx) */}
+          <div className="config-field">
+            <label className="config-label">
+              {t('llm.embeddingNumCtx')}
+              <span className="config-help">
+                {t('llm.embeddingNumCtxHelp')}
+              </span>
+            </label>
+            <input
+              type="number"
+              min={512}
+              step={512}
+              value={config.ollamaEmbeddingNumCtx ?? ''}
+              onChange={(e) =>
+                handleFieldChange(
+                  'ollamaEmbeddingNumCtx',
+                  e.target.value === '' ? undefined : Number(e.target.value)
+                )
+              }
+              className="config-input"
+              placeholder={t('llm.embeddingNumCtxPlaceholder')}
+            />
+            <div className="config-description">
+              <small>
+                {t('llm.embeddingNumCtxDetails')}
+              </small>
+            </div>
+          </div>
+
           {/* Embedding Strategy */}
           <div className="config-field">
             <label className="config-label">
