@@ -19,9 +19,11 @@ All 10 items completed. Ideas board/canvas, knowledge graph in Brainstorm, NER e
 ### Phase 3 -- Code quality, a11y, polish
 14 of 16 items completed. Inline-styles -> CSS, theme tokens, focus-visible + skip-link, Simple/Expert settings toggle, notification toasts, `ProjectLoadState` discriminated union, `SecondaryRetriever` extracted, user-configurable FR->EN dictionary, sanitizeChat on citeproc, audit-log rotation + gzip, "Workspace hints" i18n, first `any` sweep, console.* DCE in prod.
 
-Remaining Phase 3:
-- **3.6** -- Deduplicate CorpusExplorer (panel right + mode Analyze coexist)
-- **3.16** -- Split `CorpusExplorerPanel.tsx` (1072 lines) into sub-components
+Remaining Phase 3: none — **3.6** was resolved during the RC cycle ('analyze'
+mode renamed to 'explore' (A10), 'corpus' right view removed (A19):
+`CorpusExplorerPanel` now lives only in `ExplorePanel` tabs) and **3.16** too
+(panel split into `CorpusGraphSection` / `CorpusTopicsSection` /
+`TextometricsPanel` / `TopicTimeline`; the panel itself is 258 LOC).
 
 ### Phase 4 -- Release readiness
 Partially done:
@@ -63,8 +65,6 @@ Partially done:
 
 | # | Type | Description | User action? |
 |---|---|---|---|
-| 3.6 | Design | Deduplicate CorpusExplorer: panel right OR Analyze mode, not both | Yes -- architecture choice |
-| 3.16 | Frontend | Split `CorpusExplorerPanel.tsx` (1072 LOC) into sub-components | No |
 | -- | Frontend | Remaining ~79 `any` in renderer (CorpusExplorerPanel, ProjectPanel, primarySourcesStore, ZoteroImport...) | No |
 | -- | Frontend | Remaining ~30 hardcoded colors (TopicTimeline chart palette, CorpusExplorerPanel) | No |
 | -- | Backend | ~~Recipe `export` step ignores `document_id`~~ **Done 2026-07-18**: runner interpolates `{{ }}` in step `with` params (except `prompt`), handler accepts `document_id`/`document`, builtin recipe aligned | No |
@@ -89,7 +89,6 @@ Partially done:
 - **Electron 40.9.2** is current but will need periodic bumps
 - **React component tests**: the 6 Brainstorm failures are fixed (missing `window.electron.config` mock, 2026-07-18); remaining red suites are the mcp-server sqlite-ABI ones
 - **`pdf-service.ts`** remains a 1084-line delegating facade (search pipeline)
-- **`CorpusExplorerPanel.tsx`** at 1072 lines is the largest React component
 - **Path B (parallel stores)** continues to ship; Path A unification is gated on benchmark
 
 ---
