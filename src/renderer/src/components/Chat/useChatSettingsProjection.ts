@@ -6,7 +6,7 @@
  * `fusion:chat:start` (triggered from either Write or Brainstorm)
  * picks up the current filters / mode / custom prompt.
  *
- * Extracted from ChatInterface so Brainstorm can reuse the exact same
+ * Extracted during the fusion so every AssistantChat variant shares the same
  * wiring without duplicating the effect.
  */
 import { useEffect } from 'react';

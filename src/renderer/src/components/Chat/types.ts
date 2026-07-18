@@ -1,5 +1,5 @@
 /**
- * Unified chat message type shared by the RAG ChatInterface and the
+ * Unified chat message type shared by the AssistantChat variants and the
  * Brainstorm surface. Stores keep their richer domain types; they adapt
  * down to UnifiedMessage at the render boundary.
  */

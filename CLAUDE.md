@@ -18,8 +18,8 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 - `pdf-service.ts` — vector store, indexing (~1084 lines, contains a **delegating facade for search**)
 - `retrieval-service.ts` — multi-source RAG: **PDFs (secondary) + Tropy archives (primary) + optional Obsidian vault**
 - `mcp-clients-service.ts` — lifecycle of external MCP servers (stdio + SSE)
-- `fusion-chat-service.ts` — Brainstorm chat: retrieval injection + **agent loop for tool-use**
-- `chat-engine.ts` — legacy RAG chat engine (still active)
+- `fusion-chat-service.ts` — unified chat transport (IPC `fusion:chat:*`): retrieval injection wiring, MCP tools, journals
+- `chat-engine.ts` — the shared chat core extracted from fusion-chat-service (agent loop, compaction, retrieval hook) — NOT legacy; single UI shell: `AssistantChat` (variants `full`/`panel`, fusion step 5 done)
 - `usage-journal-service.ts` — AI usage journal sink (`.cliodeck/journal.db`, never logs prompts)
 - `tropy-service.ts`, `history-service.ts`, `mode-service.ts`, `pdf-export.ts`, etc.
 

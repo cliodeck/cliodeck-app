@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * BrainstormChat (fusion step 6) — round-trip + tool-call + explanation.
+ * AssistantChat variant="full" (ex-BrainstormChat, étape 5 de la fusion) —
+ * round-trip + tool-call + explanation.
  *
  * Drives the unified `fusion:chat:*` IPC through a single user→assistant
  * turn and asserts:
@@ -12,13 +13,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 
 // Heavy siblings — silence for the round-trip under test.
-vi.mock('../../Chat/RAGSettingsPanel', () => ({ RAGSettingsPanel: () => null }));
-vi.mock('../../Chat/ModeSelector', () => ({ ModeSelector: () => null }));
-vi.mock('../../Chat/useChatSettingsProjection', () => ({
+vi.mock('../RAGSettingsPanel', () => ({ RAGSettingsPanel: () => null }));
+vi.mock('../ModeSelector', () => ({ ModeSelector: () => null }));
+vi.mock('../useChatSettingsProjection', () => ({
   useChatSettingsProjection: () => undefined,
 }));
 
-import { BrainstormChat } from '../BrainstormChat';
+import { AssistantChat } from '../AssistantChat';
 import { useChatStore } from '../../../stores/chatStore';
 
 type ChunkCb = (env: { sessionId: string; chunk: { delta: string; done?: boolean; finishReason?: string } }) => void;
@@ -71,8 +72,8 @@ function installFusionMock(): MockApi {
   };
   (window as unknown as { electron: { fusion: { chat: unknown } } }).electron = {
     fusion: { chat: api },
-    // BrainstormChat lit la config LLM au montage (cloud check + modèle
-    // actif pour les propositions) — sans ce mock, l'effet crashe.
+    // AssistantChat lit la config LLM au montage (garde de consentement +
+    // modèle actif pour les propositions) — sans ce mock, l'effet crashe.
     config: { get: vi.fn(async () => null) },
   } as never;
   Object.defineProperty(api, '_emitChunk', { get: () => chunkCb });
@@ -81,7 +82,7 @@ function installFusionMock(): MockApi {
   return api as unknown as MockApi;
 }
 
-describe('BrainstormChat (fusion step 6)', () => {
+describe('AssistantChat full (fusion step 6)', () => {
   beforeEach(() => {
     useChatStore.getState().reset();
   });
@@ -91,7 +92,7 @@ describe('BrainstormChat (fusion step 6)', () => {
 
   it('send → start → stream → done renders the assistant reply', async () => {
     const api = installFusionMock();
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'hello' } });
@@ -117,7 +118,7 @@ describe('BrainstormChat (fusion step 6)', () => {
 
   it('renders a tool-call badge when onToolCall fires with status=done', async () => {
     const api = installFusionMock();
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'q' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
@@ -155,7 +156,7 @@ describe('BrainstormChat (fusion step 6)', () => {
 
   it('renders the ExplanationPanel when onExplanation fires', async () => {
     const api = installFusionMock();
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'q' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });

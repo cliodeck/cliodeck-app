@@ -156,58 +156,11 @@ function nextId(prefix: string): string {
   return `${prefix}-${counter}`;
 }
 
-// MARK: - Soft localStorage migration (legacy key → new key)
-//
-// Legacy Write mode persisted nothing by default, but we defensively
-// check a handful of plausible keys and migrate the shape if found.
-// Failures are swallowed — UX must never break because of a stale key.
-
-const LEGACY_KEYS = ['cliodeck-chat', 'clio-chat', 'chat-store'];
-const NEW_KEY = 'cliodeck-chat-v2';
-
-function runLegacyLocalStorageMigration(): void {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    if (window.localStorage.getItem(NEW_KEY)) return;
-    for (const key of LEGACY_KEYS) {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw) as { messages?: unknown };
-        const legacyMsgs = Array.isArray(parsed?.messages) ? parsed.messages : [];
-        const migrated: BrainstormMessage[] = legacyMsgs.map((m, i) => {
-          const src = m as Partial<BrainstormMessage> & { timestamp?: string | Date };
-          const ts = src.timestamp
-            ? typeof src.timestamp === 'string'
-              ? new Date(src.timestamp)
-              : src.timestamp
-            : undefined;
-          return {
-            id: src.id ?? `migrated-${i}`,
-            role: (src.role as BrainstormMessage['role']) ?? 'user',
-            content: src.content ?? '',
-            ragUsed: src.ragUsed,
-            explanation: src.explanation,
-            modeId: src.modeId,
-            isError: src.isError,
-            timestamp: ts,
-          };
-        });
-        window.localStorage.setItem(
-          NEW_KEY,
-          JSON.stringify({ messages: migrated })
-        );
-        window.localStorage.removeItem(key);
-      } catch {
-        // swallow per-key parse errors; try next
-      }
-    }
-  } catch {
-    // Best-effort: never throw from module initialization.
-  }
-}
-
-runLegacyLocalStorageMigration();
+// NOTE : l'ancienne « migration localStorage » (clé cliodeck-chat-v2) a été
+// supprimée à l'étape 5 de la fusion — elle écrivait une clé que rien ne
+// relisait (docs/chat-unification-etat-des-lieux.md §2.2). Les messages de
+// chat ne sont pas persistés côté UI ; le journal de recherche (brain.db)
+// est la seule persistance des conversations.
 
 export const useChatStore = create<State>((set) => ({
   messages: [],

@@ -19,11 +19,7 @@ import { projectManager } from './project-manager.js';
 import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
-import {
-  brainstormSourceToUnified,
-  type UnifiedSource,
-  type RAGExplanation,
-} from '../../../backend/types/chat-source.js';
+import { type RAGExplanation } from '../../../backend/types/chat-source.js';
 import {
   runChatTurn,
   type ChatEngineRetriever,
@@ -58,17 +54,6 @@ export interface BrainstormSource {
  * for the citation click-through flow (`sources:open-pdf`,
  * `sources:reveal-tropy`, `sources:open-note`).
  */
-/**
- * Fusion step 1: unified-typed companion to `hitsToSources`. Returns the
- * same hits in the shared `UnifiedSource` shape so downstream consumers
- * (future merged chat renderer) can ignore the per-surface legacy type.
- * Implemented in terms of `hitsToSources` + `brainstormSourceToUnified`
- * to keep a single place defining the traceability-field mapping.
- */
-export function hitsToUnifiedSources(hits: MultiSourceSearchResult[]): UnifiedSource[] {
-  return hitsToSources(hits).map(brainstormSourceToUnified);
-}
-
 export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
   return hits.map((h) => {
     const kind: BrainstormSource['kind'] =
@@ -549,10 +534,11 @@ class FusionChatService {
         sources: recordedSources,
         durationMs: Date.now() - turnStartedAt,
         modeId: args.systemPrompt?.modeId,
-        // Combine the provider display name and the resolved model — the
-        // journal audit needs both ("which provider, which model"); a bare
-        // `id` like 'ollama' drops the model the user actually ran.
-        providerName: llm ? `${llm.name} (${llm.model})` : 'unknown',
+        // Provider et modèle séparés — le champ composite "name (model)"
+        // rendait `queryParams.model` ambigu dans le journal de recherche
+        // (docs/chat-unification-etat-des-lieux.md §2.4).
+        providerName: llm?.name ?? 'unknown',
+        modelName: llm?.model ?? 'unknown',
         retrievalOptions: args.retrievalOptions,
       });
     }
@@ -570,6 +556,7 @@ class FusionChatService {
     durationMs: number;
     modeId?: string;
     providerName: string;
+    modelName: string;
     retrievalOptions?: ChatEngineRetrievalOptions;
   }): void {
     try {
@@ -582,7 +569,8 @@ class FusionChatService {
       if (!userText && !entry.assistantText) return;
 
       const queryParams = {
-        model: entry.providerName,
+        model: entry.modelName,
+        provider: entry.providerName,
         topK: entry.retrievalOptions?.topK,
         sourceType: entry.retrievalOptions?.sourceType,
         includeVault: entry.retrievalOptions?.includeVault,
@@ -628,7 +616,7 @@ class FusionChatService {
             sourceType: entry.retrievalOptions?.sourceType,
             sourcesFound: entry.sources.length,
           },
-          modelName: entry.providerName,
+          modelName: entry.modelName,
           modelParameters: { provider: entry.providerName },
           outputText: entry.assistantText,
           outputMetadata: {

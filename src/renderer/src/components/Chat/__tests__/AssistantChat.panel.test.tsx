@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * ChatInterface (Write mode) post-fusion (step 4b) roundtrip.
+ * AssistantChat variant="panel" (ex-ChatInterface, étape 5 de la fusion).
  *
  * Drives the fusion:chat:* mock IPC through a single user→assistant
  * exchange and asserts the rendered bubbles match the synthesized
- * stream, proving the Write UI now runs on the unified pipeline.
+ * stream, proving the right-panel UI runs on the unified pipeline.
+ * Also locks the shared cloud-consent guard (ADR 0005).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
@@ -26,7 +27,7 @@ vi.mock('../../Methodology/HelperTooltip', () => ({
   HelperTooltip: () => null,
 }));
 
-import { ChatInterface } from '../ChatInterface';
+import { AssistantChat } from '../AssistantChat';
 import { useChatStore } from '../../../stores/chatStore';
 import { useCloudConsentStore } from '../../../stores/cloudConsentStore';
 
@@ -84,7 +85,7 @@ function installFusionMock(
   return api as unknown as MockApi;
 }
 
-describe('ChatInterface (fusion step 4b)', () => {
+describe('AssistantChat panel (fusion step 5)', () => {
   beforeEach(() => {
     useChatStore.getState().reset();
   });
@@ -94,7 +95,7 @@ describe('ChatInterface (fusion step 4b)', () => {
 
   it('send → start → stream → done renders the assistant reply', async () => {
     const api = installFusionMock();
-    render(<ChatInterface />);
+    render(<AssistantChat variant="panel" />);
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'bonjour' } });
@@ -126,7 +127,7 @@ describe('ChatInterface (fusion step 4b)', () => {
 
   it('renders a polite status banner while fusion:chat:status streams retrieving/generating', async () => {
     const api = installFusionMock();
-    render(<ChatInterface />);
+    render(<AssistantChat variant="panel" />);
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'question' } });
@@ -169,7 +170,7 @@ describe('ChatInterface (fusion step 4b)', () => {
         includeVault: true,
       },
     });
-    render(<ChatInterface />);
+    render(<AssistantChat variant="panel" />);
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'ping' } });
@@ -193,7 +194,7 @@ describe('ChatInterface (fusion step 4b)', () => {
   it('cloud provider → consent dialog gates the send until confirmed', async () => {
     useCloudConsentStore.setState({ consented: false, consentedProvider: null });
     const api = installFusionMock({ backend: 'claude' });
-    render(<ChatInterface />);
+    render(<AssistantChat variant="panel" />);
 
     // Laisse le hook lire la config LLM mockée.
     await waitFor(() =>

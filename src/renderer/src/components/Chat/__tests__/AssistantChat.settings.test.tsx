@@ -1,20 +1,21 @@
 // @vitest-environment jsdom
 /**
- * BrainstormChat: settings toggle reveals ModeSelector + RAGSettingsPanel
- * and writes to the shared chatStore.chatSettings via the projection hook.
+ * AssistantChat (ex-BrainstormChat) : settings toggle reveals ModeSelector
+ * + RAGSettingsPanel and writes to the shared chatStore.chatSettings via
+ * the projection hook.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 
 // Mock heavy inner panels — we only care about mount + store projection.
-vi.mock('../../Chat/ModeSelector', () => ({
+vi.mock('../ModeSelector', () => ({
   ModeSelector: () => <div data-testid="mode-selector-stub" />,
 }));
-vi.mock('../../Chat/RAGSettingsPanel', () => ({
+vi.mock('../RAGSettingsPanel', () => ({
   RAGSettingsPanel: () => <div data-testid="rag-settings-stub" />,
 }));
 // Avoid stray IPC from useBrainstormChat.
-vi.mock('../useBrainstormChat', () => ({
+vi.mock('../../Brainstorm/useBrainstormChat', () => ({
   useBrainstormChat: () => ({
     send: vi.fn(),
     cancel: vi.fn(),
@@ -24,15 +25,15 @@ vi.mock('../useBrainstormChat', () => ({
   }),
 }));
 
-import { BrainstormChat } from '../BrainstormChat';
+import { AssistantChat } from '../AssistantChat';
 import { useChatStore } from '../../../stores/chatStore';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 
-describe('BrainstormChat settings panel', () => {
+describe('AssistantChat settings panel', () => {
   beforeEach(() => {
     useChatStore.getState().reset();
-    // BrainstormChat lit window.electron.config.get('llm') au montage
-    // (cloud check + modèle actif) — le mock minimal évite le crash.
+    // AssistantChat lit window.electron.config.get('llm') au montage
+    // (garde de consentement + modèle actif) — le mock minimal évite le crash.
     (window as unknown as { electron: unknown }).electron = {
       config: { get: vi.fn(async () => null) },
     };
@@ -42,7 +43,7 @@ describe('BrainstormChat settings panel', () => {
   });
 
   it('toggle reveals ModeSelector + RAGSettingsPanel', () => {
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
     expect(screen.queryByTestId('rag-settings-stub')).toBeNull();
     const btn = screen.getByTestId('brainstorm-settings-toggle');
     fireEvent.click(btn);
@@ -51,7 +52,7 @@ describe('BrainstormChat settings panel', () => {
   });
 
   it('projection hook syncs ragQueryStore.params into chatStore.chatSettings', () => {
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
     // Primary-only: bibliography + notes off, primary on — resolver should
     // project `sourceType: 'primary'` with vault disabled.
     act(() => {
@@ -69,7 +70,7 @@ describe('BrainstormChat settings panel', () => {
   });
 
   it('projection maps bibliography+notes → secondary + includeVault', () => {
-    render(<BrainstormChat />);
+    render(<AssistantChat variant="full" />);
     act(() => {
       useRAGQueryStore.getState().setParams({
         includeBibliography: true,
