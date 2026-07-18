@@ -180,7 +180,7 @@ const markdownHighlight = HighlightStyle.define([
   { tag: tags.labelName, color: 'var(--color-accent)' },
 ]);
 
-// Parité avec les raccourcis Monaco existants (MarkdownEditor). Placé avant
+// Raccourcis de formatage historiques de ClioDeck. Placé avant
 // defaultKeymap pour prendre la priorité.
 const formattingKeymap = keymap.of(
   (

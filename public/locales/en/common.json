@@ -134,10 +134,6 @@
     "autoSaveDelay": "Auto-save delay",
     "autoSaveDelayHelp": "Time in seconds before auto-saving after the last edit",
     "autoSaveDelaySeconds": "{{seconds}} seconds",
-    "defaultEditorMode": "Default editor",
-    "defaultEditorModeHelp": "Choose the editor displayed when opening a document",
-    "modeWysiwyg": "Visual (Milkdown)",
-    "modeSource": "Source (Monaco)",
     "citationNotFound": "Key not found in bibliography",
     "footnoteNoDefinition": "Missing definition — Cmd/Ctrl+click to create it",
     "frontmatterFolded": "Frontmatter folded — click to expand",
@@ -316,12 +312,7 @@
     "zoteroCollectionKey": "Collection Key",
     "zoteroCollectionKeyPlaceholder": "Enter collection key (optional)",
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
-    "loading": "Opening project...",
-    "defaultEditor": "Default editor",
-    "defaultEditorHelp": "Choose the editor used when opening document.md",
-    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
-    "defaultEditorSource": "Monaco (raw Markdown)",
-    "defaultEditorSaveError": "Error saving default editor"
+    "loading": "Opening project..."
   },
   "export": {
     "pdf": {
@@ -749,8 +740,6 @@
     "markdown": "Markdown",
     "openError": "Error opening file",
     "saveError": "Error saving file",
-    "wysiwygMode": "Visual mode (WYSIWYG)",
-    "sourceMode": "Source mode (Markdown)",
     "renumberFootnotes": "Renumber footnotes"
   },
   "ragSettings": {

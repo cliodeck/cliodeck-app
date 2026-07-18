@@ -9,7 +9,6 @@ export interface Project {
   type: 'article' | 'book' | 'presentation';
   createdAt: Date;
   lastOpenedAt: Date;
-  defaultEditor?: 'wysiwyg' | 'source';
   cslPath?: string;
   // Resolved absolute path to the bibliography file, derived from
   // `bibliographySource` by `project-manager.ts` at load time. Optional
@@ -164,13 +163,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // Load file FIRST so content is ready in the store
         await useEditorStore.getState().loadFile(documentPath);
         console.log('📝 Document loaded into editor with path tracking');
-
-        // Apply project default editor mode AFTER content is loaded,
-        // so the editor mounts with the correct content already in the store
-        if (project.defaultEditor) {
-          useEditorStore.getState().setEditorMode(project.defaultEditor);
-          console.log('📝 Editor mode set from project default:', project.defaultEditor);
-        }
       } catch (error) {
         console.error('Failed to load document into editor:', error);
 

@@ -38,13 +38,12 @@ function App() {
   const initializeLanguage = useLanguageStore((state) => state.initializeLanguage);
   const loadProject = useProjectStore((state) => state.loadProject);
   const updateEditorSettings = useEditorStore((state) => state.updateSettings);
-  const initializeEditorMode = useEditorStore((state) => state.initializeEditorMode);
   const currentProjectType = useProjectStore((state) => state.currentProject?.type);
 
   useEffect(() => {
     initializeLanguage();
 
-    // Issue #12: Charger les settings éditeur et initialiser le mode par défaut
+    // Charger les settings éditeur
     const initEditorSettings = async () => {
       try {
         const editorConfig = await window.electron.config.get('editor');
@@ -54,12 +53,7 @@ function App() {
             wordWrap: editorConfig.wordWrap,
             showMinimap: editorConfig.showMinimap,
             fontFamily: editorConfig.fontFamily,
-            defaultEditorMode: editorConfig.defaultEditorMode || 'wysiwyg',
-            // Flag de transition CM6 (plan CM6, Phase 1) — opt-in via
-            // config.json : "editor": { "engine": "cm6" }.
-            engine: editorConfig.engine === 'cm6' ? 'cm6' : 'milkdown',
           });
-          initializeEditorMode();
         }
       } catch (error) {
         console.error('Failed to load editor settings:', error);
@@ -87,7 +81,7 @@ function App() {
 
     loadLastProject();
     */
-  }, [initializeLanguage, loadProject, updateEditorSettings, initializeEditorMode]);
+  }, [initializeLanguage, loadProject, updateEditorSettings]);
 
   return (
     <ErrorBoundary

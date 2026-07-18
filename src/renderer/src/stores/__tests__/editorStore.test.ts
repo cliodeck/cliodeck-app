@@ -1,30 +1,67 @@
 /**
- * Tests for editorStore.insertDraftAtCursor (fusion 2.6).
+ * Tests for editorStore.insertDraftAtCursor (fusion 2.6, migration CM6).
  *
- * The Monaco/Milkdown branches need a live editor to exercise; both
- * are too heavy to mock under vitest. This suite covers the fallback
- * path (no editor mounted) and the cursor-mode return value via a
- * hand-rolled Monaco stub. The Milkdown branch is exercised only at
- * the level of "cursor mode is reported, content is updated" — the
- * underlying ProseMirror cursor-offset mapping is too coupled to the
- * Milkdown internals to test in isolation.
+ * L'éditeur réel exige une EditorView ; la façade est stubée avec les
+ * seules méthodes que l'action lit. Trois chemins : proposition (Phase 4,
+ * façade avec propose), insertion directe (façade sans propose), et
+ * fallback append (aucun éditeur monté).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useEditorStore } from '../editorStore';
+import type { EditorFacade } from '@/editor/facade';
+import type { Proposal } from '@/editor/proposals';
 
 beforeEach(() => {
-  // Reset to clean state — no editors, empty content.
   useEditorStore.setState({
     content: '',
     isDirty: false,
-    milkdownEditor: null,
-    monacoEditor: null,
-    editorMode: 'wysiwyg',
+    editorFacade: null,
   });
 });
 
+function fakeFacade(
+  content: string,
+  cursor: number,
+  withPropose: boolean
+): {
+  facade: EditorFacade;
+  calls: { setValue: Array<{ text: string; cursor?: number }>; proposals: Array<Partial<Proposal>> };
+} {
+  const calls = {
+    setValue: [] as Array<{ text: string; cursor?: number }>,
+    proposals: [] as Array<Partial<Proposal>>,
+  };
+  let current = content;
+  const facade: EditorFacade = {
+    engine: 'cm6',
+    getValue: () => current,
+    getCursorOffset: () => cursor,
+    getSelectionText: () => null,
+    replaceSelection: () => undefined,
+    setValue: (text, cursorOffset) => {
+      current = text;
+      calls.setValue.push({ text, cursor: cursorOffset });
+    },
+    appendText: (text) => {
+      current += text;
+    },
+    revealLine: () => undefined,
+    focus: () => undefined,
+    onContentChange: () => () => undefined,
+    ...(withPropose
+      ? {
+          propose: (p: Partial<Proposal>) => {
+            calls.proposals.push(p);
+            return true;
+          },
+        }
+      : {}),
+  };
+  return { facade, calls };
+}
+
 describe('insertDraftAtCursor — fallback path (no editor)', () => {
-  it('appends the draft when neither editor is mounted', () => {
+  it('appends the draft when no editor is mounted', () => {
     useEditorStore.setState({ content: 'existing' });
     const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
     expect(mode).toBe('append');
@@ -37,102 +74,39 @@ describe('insertDraftAtCursor — fallback path (no editor)', () => {
     expect(mode).toBe('append');
     expect(useEditorStore.getState().content).toBe('NEW');
   });
-
-  it('also falls back when editorMode is wysiwyg but no Milkdown ref is set', () => {
-    useEditorStore.setState({
-      content: 'AB',
-      editorMode: 'wysiwyg',
-      milkdownEditor: null,
-    });
-    const { mode } = useEditorStore.getState().insertDraftAtCursor('X');
-    expect(mode).toBe('append');
-    expect(useEditorStore.getState().content).toBe('AB\n\nX\n');
-  });
-
-  it('also falls back when editorMode is source but no Monaco ref is set', () => {
-    useEditorStore.setState({
-      content: 'AB',
-      editorMode: 'source',
-      monacoEditor: null,
-    });
-    const { mode } = useEditorStore.getState().insertDraftAtCursor('X');
-    expect(mode).toBe('append');
-    expect(useEditorStore.getState().content).toBe('AB\n\nX\n');
-  });
 });
 
-describe('insertDraftAtCursor — cursor path (Monaco stub)', () => {
-  // Hand-rolled Monaco stub matching the bits the action reads:
-  // getModel().getOffsetAt(getPosition()) and the round-trip
-  // setPosition / focus. Avoids pulling monaco-editor (multi-MB) into
-  // the test bundle.
-  function fakeMonacoAt(offset: number): {
-    getModel: () => {
-      getOffsetAt: () => number;
-      getPositionAt: (n: number) => unknown;
-    } | null;
-    getPosition: () => unknown;
-    setPosition: (p: unknown) => void;
-    focus: () => void;
-    moves: number[];
-  } {
-    let lastOffset = offset;
-    const moves: number[] = [];
-    return {
-      getModel: () => ({
-        getOffsetAt: () => lastOffset,
-        getPositionAt: (n: number) => {
-          lastOffset = n;
-          moves.push(n);
-          return { lineNumber: 1, column: n + 1 };
-        },
-      }),
-      getPosition: () => ({ lineNumber: 1, column: lastOffset + 1 }),
-      setPosition: () => undefined,
-      focus: () => undefined,
-      moves,
-    };
-  }
-
-  it('inserts at the Monaco cursor offset and reports cursor mode', () => {
-    // Content "ABCDE", cursor at offset 3 (between C and D).
-    const stub = fakeMonacoAt(3);
-    useEditorStore.setState({
-      content: 'ABCDE',
-      editorMode: 'source',
-      // The store types insist on a Monaco editor instance; the stub
-      // satisfies the bits the action actually touches.
-      monacoEditor: stub as unknown as ReturnType<
-        typeof useEditorStore.getState
-      >['monacoEditor'],
-    });
+describe('insertDraftAtCursor — contrat propositionnel (Phase 4)', () => {
+  it('soumet une proposition d’insertion au curseur, sans toucher au document', () => {
+    const { facade, calls } = fakeFacade('ABCDE', 3, true);
+    useEditorStore.setState({ content: 'ABCDE', editorFacade: facade });
 
     const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
     expect(mode).toBe('cursor');
+    expect(calls.proposals).toHaveLength(1);
+    const p = calls.proposals[0];
+    expect(p.category).toBe('brainstorm-draft');
+    expect(p.original).toBe('');
+    expect(p.range?.from).toBe(p.range?.to);
+    // Le segment proposé contient le draft avec son padding de bloc.
+    expect(p.proposed).toContain('NEW');
+    // Aucune écriture directe : le document ne change qu'à l'acceptation.
+    expect(calls.setValue).toHaveLength(0);
+    expect(facade.getValue()).toBe('ABCDE');
+  });
+});
+
+describe('insertDraftAtCursor — façade sans propositions (défensif)', () => {
+  it('insère directement au curseur et synchronise le store', () => {
+    const { facade, calls } = fakeFacade('ABCDE', 3, false);
+    useEditorStore.setState({ content: 'ABCDE', editorFacade: facade });
+
+    const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
+    expect(mode).toBe('cursor');
+    expect(calls.setValue).toHaveLength(1);
     // Padding-aware splice: ABC + \n\n + NEW + \n\n + DE
+    expect(calls.setValue[0].text).toBe('ABC\n\nNEW\n\nDE');
     expect(useEditorStore.getState().content).toBe('ABC\n\nNEW\n\nDE');
     expect(useEditorStore.getState().isDirty).toBe(true);
-    // The cursor was moved to immediately after the inserted draft.
-    expect(stub.moves[stub.moves.length - 1]).toBe(
-      'ABC\n\nNEW\n\nDE'.indexOf('NEW') + 'NEW'.length + 2 // padAfter "\n\n"
-    );
-  });
-
-  it('falls back to append when editorMode is wysiwyg even if monacoEditor exists', () => {
-    // Source mode is required to use the Monaco branch. WYSIWYG with
-    // a stale Monaco ref must NOT reach Monaco; the absence of a real
-    // Milkdown editor then sends us to the append fallback.
-    const stub = fakeMonacoAt(2);
-    useEditorStore.setState({
-      content: 'AB',
-      editorMode: 'wysiwyg',
-      milkdownEditor: null,
-      monacoEditor: stub as unknown as ReturnType<
-        typeof useEditorStore.getState
-      >['monacoEditor'],
-    });
-    const { mode } = useEditorStore.getState().insertDraftAtCursor('X');
-    expect(mode).toBe('append');
-    expect(useEditorStore.getState().content).toBe('AB\n\nX\n');
   });
 });

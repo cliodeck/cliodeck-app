@@ -39,16 +39,16 @@
 
 À couverture égale ou supérieure en fin de chantier :
 
-- [ ] Autocomplete citations sur `[@` (composant partagé `CitationAutocomplete.tsx`, données `useBibliographyStore().citations`)
-- [ ] Insertion de citation depuis la bibliographie (`CitationCard` → IPC `editor:insert-text`)
-- [ ] Insertion/streaming de drafts Brainstorm (`insertDraftAtCursor`)
-- [ ] Insertion de footnote + navigation bidirectionnelle appel↔définition (avec flash)
-- [ ] Raccourcis de formatage (Cmd+B/I/L, Cmd+', Cmd+Shift+T/F/Q)
-- [ ] « Vérifier les citations » (clés manquantes/dupliquées vs bibliographie)
-- [ ] Stats document (`DocumentStats`)
-- [ ] Autosave
-- [ ] Les quatre panneaux Slides (via la façade)
-- [ ] Thème clair/sombre (tokens `index.css`)
+- [x] Autocomplete citations sur `[@` (composant partagé `CitationAutocomplete.tsx`, données `useBibliographyStore().citations`)
+- [x] Insertion de citation depuis la bibliographie (`CitationCard` → IPC `editor:insert-text`)
+- [x] Insertion/streaming de drafts Brainstorm (`insertDraftAtCursor`)
+- [x] Insertion de footnote + navigation bidirectionnelle appel↔définition (avec flash)
+- [x] Raccourcis de formatage (Cmd+B/I/L, Cmd+', Cmd+Shift+T/F/Q)
+- [x] « Vérifier les citations » (clés manquantes/dupliquées vs bibliographie)
+- [x] Stats document (`DocumentStats`)
+- [x] Autosave
+- [x] Les quatre panneaux Slides (via la façade)
+- [x] Thème clair/sombre (tokens `index.css`)
 
 ### 1.5 Pourquoi Milkdown ne peut pas passer le test de fidélité
 
@@ -77,7 +77,7 @@ Le contrat CM6 (« l'éditeur ne sérialise jamais ») rend le test trivial par 
 | 3a — Extensions Lezer (‖ P2) | **faite** (`4a75974`) — `src/editor/lezer-extensions/` (Footnotes + PandocCitations, MarkdownConfig, 0 import ClioDeck, 34 tests parsing). Non câblées dans l'éditeur : c'est la première étape de la 3b. Limites v1 documentées en tête de module (locator = suffixe, pas de nœud dédié) | branche `feat/editor-cm6` |
 | 3b — Notes + citations | **faite** (`ba2dfeb`) — exposants + infobulles + popup Zettlr + navigation, pastilles de citations + autocomplete `@` (bibliographyStore), frontmatter replié, renumérotation manuelle, fix numérotation (Lezer). Reste : test manuel avec bibliographie Zotero réelle | branche `feat/editor-cm6` |
 | 4 — Contrat propositionnel + journaux | **faite** — annotation `changeOrigin` + garde dev, API `src/editor/proposals/` (diff inline, Tab/Échap, remapping, invalidation, expired, échantillonnage 1/5), drafts Brainstorm → propositions en cm6, IPC `proposals:adjudication`, `journal.db` v2 (`proposal_adjudications` + `decision_drafts`, sans contenu par typage), `brain.db` v3 (`history_proposal_events`, contenus complets), fin des marqueurs `cliodeck-gen` côté main, INSTRUCTIONS amendées. Contrat : `docs/editor-proposals.md`. Vérifiée bout-en-bout (projet jetable : adjudications → bonnes lignes dans les deux bases). Reste : lecture des adjudications dans la modale Cmd+J (lot ultérieur) | branche `feat/editor-cm6` |
-| 5 — Retrait Milkdown/Monaco | à faire | |
+| 5 — Retrait Milkdown/Monaco | **faite** — @milkdown/* et @monaco-editor/react désinstallés, MilkdownEditor/MarkdownEditor/CitationAutocomplete supprimés, flag `editor.engine` et bascule wysiwyg/source retirés, `project.defaultEditor` retiré, RecipeEditor → CM6 + lang-yaml (`common/YamlEditor.tsx`), hack `unescapeCitations` supprimé, AboutModal/i18n/vite.config nettoyés. Bundle renderer : editor-vendor 2 698→1 704 kB, index 4 246→488 kB (~−4,7 Mo minifié). Architecture cible : `docs/editor-architecture.md` | branche `feat/editor-cm6` |
 
 ## 4. Phase 1 — ce qui est en place
 

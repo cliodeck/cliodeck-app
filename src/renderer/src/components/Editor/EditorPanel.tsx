@@ -1,9 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Eye, Code2, Search, ListOrdered } from 'lucide-react';
+import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search, ListOrdered } from 'lucide-react';
 import { renumberFootnotes } from '@/editor/footnote-tools';
-import { MilkdownEditor } from './MilkdownEditor';
-import { MarkdownEditor } from './MarkdownEditor';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { DocumentStats } from './DocumentStats';
 
@@ -22,10 +20,7 @@ import './EditorPanel.css';
 
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const { loadFile, saveFile, setContent, content, insertFormatting, editorMode, toggleEditorMode, settings } = useEditorStore();
-  // Flag de transition CM6 (plan CM6, Phase 1) : en mode cm6, un seul
-  // éditeur remplace la paire wysiwyg/source et la bascule disparaît.
-  const useCM6 = settings.engine === 'cm6';
+  const { loadFile, saveFile, setContent, content, insertFormatting } = useEditorStore();
   const { citations } = useBibliographyStore();
   const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
 
@@ -170,15 +165,13 @@ export const EditorPanel: React.FC = () => {
           <button className="toolbar-btn" onClick={handleFootnote} title={t('toolbar.footnote')}>
             <Superscript size={18} strokeWidth={1.5} />
           </button>
-          {useCM6 && (
-            <button
-              className="toolbar-btn"
-              onClick={handleRenumberFootnotes}
-              title={t('toolbar.renumberFootnotes')}
-            >
-              <ListOrdered size={18} strokeWidth={1.5} />
-            </button>
-          )}
+          <button
+            className="toolbar-btn"
+            onClick={handleRenumberFootnotes}
+            title={t('toolbar.renumberFootnotes')}
+          >
+            <ListOrdered size={18} strokeWidth={1.5} />
+          </button>
         </div>
 
         {/* Validation and Similarity */}
@@ -195,38 +188,12 @@ export const EditorPanel: React.FC = () => {
           </button>
         </div>
 
-        {/* Editor mode toggle — sans objet avec le moteur CM6 unique */}
-        {!useCM6 && (
-          <div className="toolbar-section toolbar-section-right">
-            <button
-              className={`toolbar-btn ${editorMode === 'wysiwyg' ? 'active' : ''}`}
-              onClick={() => editorMode !== 'wysiwyg' && toggleEditorMode()}
-              title={t('toolbar.wysiwygMode')}
-            >
-              <Eye size={18} strokeWidth={1.5} />
-            </button>
-            <button
-              className={`toolbar-btn ${editorMode === 'source' ? 'active' : ''}`}
-              onClick={() => editorMode !== 'source' && toggleEditorMode()}
-              title={t('toolbar.sourceMode')}
-            >
-              <Code2 size={18} strokeWidth={1.5} />
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Editor content — en mode cm6, colonne flex : l'éditeur prend
-          l'espace restant et la barre de stats garde ses 28 px visibles
-          (les modes hérités conservent leur layout, Milkdown est gelé). */}
-      <div className={`editor-content${useCM6 ? ' editor-content-cm6' : ''}`}>
-        {useCM6 ? (
-          <CodeMirrorEditor />
-        ) : editorMode === 'wysiwyg' ? (
-          <MilkdownEditor />
-        ) : (
-          <MarkdownEditor />
-        )}
+      {/* Editor content — colonne flex : l'éditeur prend l'espace restant,
+          la barre de stats garde ses 28 px visibles. */}
+      <div className="editor-content">
+        <CodeMirrorEditor />
         <DocumentStats />
       </div>
 

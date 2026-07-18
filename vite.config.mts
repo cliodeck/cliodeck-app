@@ -36,8 +36,6 @@ export default defineConfig({
           }
 
           if (
-            id.includes('node_modules/@milkdown/') ||
-            id.includes('node_modules/@monaco-editor/') ||
             id.includes('node_modules/@codemirror/') ||
             id.includes('node_modules/@lezer/') ||
             id.includes('node_modules/marked/') ||

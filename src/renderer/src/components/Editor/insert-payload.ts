@@ -1,10 +1,8 @@
 /**
- * Canal IPC 'editor:insert-text-command' (Phase 4a) : le main émet désormais
- * `{ text, metadata? }` SANS enrober le texte de marqueurs de provenance.
- * Les listeners renderer acceptent les deux formes (chaîne héritée d'une
- * version antérieure du main, ou objet) ; les éditeurs hérités
- * (Monaco/Milkdown) reconstruisent localement l'enveloppe cliodeck-gen à
- * l'identique, l'éditeur CM6 transforme le texte balisé en proposition.
+ * Canal IPC `editor:insert-text-command` : le main émet `{ text, metadata? }`
+ * (Phase 4 — plus de marqueurs de provenance côté main). `normalizeInsertPayload`
+ * accepte aussi l'ancienne forme chaîne par tolérance. Le contenu balisé IA
+ * (`metadata.modeId`) devient une proposition adjudicable dans l'éditeur.
  */
 
 export interface InsertTextPayload {
@@ -34,17 +32,4 @@ export function normalizeInsertPayload(raw: unknown): InsertTextPayload {
     }
   }
   return { text: '' };
-}
-
-/**
- * Enveloppe de provenance héritée — format exact de l'ancien
- * editor-handlers.ts, préservé pour les éditeurs Milkdown/Monaco (gelés
- * jusqu'à la Phase 5). CM6 ne produit plus ces marqueurs : l'annotation
- * changeOrigin et le contrat propositionnel les remplacent.
- */
-export function wrapLegacyProvenance(payload: InsertTextPayload): string {
-  const { text, metadata } = payload;
-  if (!metadata?.modeId) return text;
-  const date = new Date().toISOString();
-  return `<!-- cliodeck-gen mode="${metadata.modeId}" model="${metadata.model || 'unknown'}" date="${date}" -->\n${text}\n<!-- /cliodeck-gen -->`;
 }

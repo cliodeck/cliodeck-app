@@ -2,9 +2,9 @@
  * Façade éditeur-agnostique (plan CM6, Phase 1).
  *
  * Point de contact unique entre l'application (Slides, store, IPC) et
- * l'éditeur actif : elle remplace les accès directs à l'API Monaco
- * (`editorStore.monacoEditor`) et permet à CM6 et Monaco de coexister
- * derrière le flag `editor.engine` pendant la transition.
+ * l'éditeur CM6 : point de contact unique des Slides, de l'IPC et des
+ * insertions du store (introduite en Phase 1 pour découpler l'app des
+ * moteurs d'éditeur ; seul CM6 subsiste depuis la Phase 5).
  *
  * Contrat : positions en offsets de caractères dans le document, lignes
  * numérotées à partir de 1. Aucune méthode ne passe par l'état React —
@@ -15,7 +15,7 @@ import type { Proposal } from './proposals';
 
 export interface EditorFacade {
   /** Le moteur qui implémente cette façade. */
-  readonly engine: 'cm6' | 'monaco';
+  readonly engine: 'cm6';
 
   /** Contenu réel de l'éditeur (source de vérité pour la sauvegarde). */
   getValue(): string;
@@ -29,7 +29,7 @@ export interface EditorFacade {
   /**
    * Remplace la sélection courante (ou insère au curseur) et focus.
    * `origin` : annotation changeOrigin de la transaction (Phase 4a),
-   * défaut `programmatic` — CM6 seulement, Monaco l'ignore.
+   * défaut `programmatic`.
    */
   replaceSelection(text: string, origin?: ChangeOrigin): void;
 
@@ -44,9 +44,9 @@ export interface EditorFacade {
 
   /**
    * Soumet le texte comme proposition adjudicable (contrat propositionnel,
-   * Phase 4b) plutôt que de l'insérer. Retourne false si le moteur ne
-   * supporte pas les propositions (Monaco/Milkdown) — l'appelant retombe
-   * alors sur son comportement historique.
+   * Phase 4b) plutôt que de l'insérer. Retourne false si l'extension de
+   * propositions n'est pas active — l'appelant retombe alors sur une
+   * insertion directe.
    */
   propose?(proposal: Partial<Proposal>): boolean;
 

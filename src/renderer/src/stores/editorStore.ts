@@ -1,7 +1,4 @@
 import { create } from 'zustand';
-import type { Editor } from '@milkdown/kit/core';
-import { editorViewCtx } from '@milkdown/kit/core';
-import type { editor } from 'monaco-editor';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
@@ -22,13 +19,6 @@ export interface EditorSettings {
   fontFamily: string;
   autoSave: boolean;
   autoSaveDelay: number; // in milliseconds
-  defaultEditorMode: 'wysiwyg' | 'source'; // Issue #12: éditeur par défaut
-  /**
-   * Moteur d'éditeur de prose (migration CM6, Phase 1). `milkdown` conserve
-   * la paire actuelle Milkdown/Monaco ; `cm6` remplace les deux modes par
-   * l'éditeur CodeMirror unique. Le flag disparaît en Phase 5.
-   */
-  engine: 'milkdown' | 'cm6';
 }
 
 interface EditorState {
@@ -43,22 +33,9 @@ interface EditorState {
   // Preview
   showPreview: boolean;
 
-  // Editor mode
-  editorMode: 'wysiwyg' | 'source';
-
-  // Pending footnote scroll position (to scroll to definition after insertion)
-  pendingFootnoteScroll: number | null;
-
-  // Milkdown editor reference
-  milkdownEditor: Editor | null;
-
-  // Monaco editor reference
-  monacoEditor: editor.IStandaloneCodeEditor | null;
-
   /**
-   * Façade éditeur-agnostique posée par l'éditeur actif (CM6 ou Monaco).
-   * Point de contact unique pour les Slides, l'IPC et les insertions —
-   * quand elle est présente, elle prime sur les références directes.
+   * Façade éditeur-agnostique posée par l'éditeur CM6 au montage.
+   * Point de contact unique pour les Slides, l'IPC et les insertions.
    */
   editorFacade: EditorFacade | null;
 
@@ -80,10 +57,6 @@ interface EditorState {
   updateSettings: (settings: Partial<EditorSettings>) => void;
   togglePreview: () => void;
   toggleStats: () => void;
-  toggleEditorMode: () => void;
-  setEditorMode: (mode: 'wysiwyg' | 'source') => void;
-  initializeEditorMode: () => void; // Issue #12: initialise le mode depuis settings
-  setMonacoEditor: (editor: editor.IStandaloneCodeEditor | null) => void;
   setEditorFacade: (facade: EditorFacade | null) => void;
   /** Contenu réel : l'éditeur vivant s'il est monté, sinon le miroir du store. */
   getLiveContent: () => string;
@@ -95,16 +68,14 @@ interface EditorState {
 
   /**
    * Splice a multi-line draft into the document at the user's current
-   * cursor (fusion 2.6, A13 option a). When neither editor is mounted
-   * the call falls back to appending. Returns the mode actually used so
-   * the caller can adapt the UX confirmation ("inserted at cursor" vs
-   * "appended").
+   * cursor (fusion 2.6, A13 option a). When no editor is mounted the call
+   * falls back to appending. Returns the mode actually used so the caller
+   * can adapt the UX confirmation ("inserted at cursor" vs "appended").
    */
   insertDraftAtCursor: (draft: string) => { mode: 'cursor' | 'append' };
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => { definitionPosition: number; footnoteNumber: number } | null;
-  clearPendingFootnoteScroll: () => void;
 }
 
 // MARK: - Default settings
@@ -119,8 +90,6 @@ const DEFAULT_SETTINGS: EditorSettings = {
   fontFamily: 'system',
   autoSave: true,
   autoSaveDelay: 3000, // 3 seconds
-  defaultEditorMode: 'wysiwyg', // Issue #12: WYSIWYG par défaut
-  engine: 'milkdown', // CM6 opt-in pendant la transition (plan CM6, Phase 1)
 };
 
 // MARK: - Store
@@ -131,10 +100,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   isDirty: false,
   settings: DEFAULT_SETTINGS,
   showPreview: false,
-  editorMode: 'wysiwyg',
-  pendingFootnoteScroll: null,
-  milkdownEditor: null,
-  monacoEditor: null,
   editorFacade: null,
   documentVersion: 0,
 
@@ -238,32 +203,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   toggleStats: () => {
-    // Stats are always visible in the new editor, this is a no-op for compatibility
+    // Stats are always visible in the editor, this is a no-op for compatibility
     logger.store('Editor', 'toggleStats called (no-op)');
-  },
-
-  toggleEditorMode: () => {
-    set((state) => {
-      const newMode = state.editorMode === 'wysiwyg' ? 'source' : 'wysiwyg';
-      logger.store('Editor', 'toggleEditorMode', { from: state.editorMode, to: newMode });
-      return { editorMode: newMode };
-    });
-  },
-
-  setEditorMode: (mode: 'wysiwyg' | 'source') => {
-    logger.store('Editor', 'setEditorMode', { mode });
-    set({ editorMode: mode });
-  },
-
-  initializeEditorMode: () => {
-    const { settings } = get();
-    const mode = settings.defaultEditorMode || 'wysiwyg';
-    logger.store('Editor', 'initializeEditorMode', { mode });
-    set({ editorMode: mode });
-  },
-
-  setMonacoEditor: (editor: editor.IStandaloneCodeEditor | null) => {
-    set({ monacoEditor: editor });
   },
 
   setEditorFacade: (facade: EditorFacade | null) => {
@@ -305,119 +246,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => {
     logger.store('Editor', 'insertFormatting called', { type });
     const { content, editorFacade } = get();
-    const editor = get().milkdownEditor;
 
-    // Footnotes: get cursor position and insert directly
+    // Footnote : offset exact du curseur via la façade.
     if (type === 'footnote') {
-      // Via la façade (CM6 ou Monaco), l'offset du curseur est exact :
-      // aucun mapping heuristique nécessaire.
       if (editorFacade) {
         get().insertFootnoteAtPosition(editorFacade.getCursorOffset());
-        return;
-      }
-      if (!editor) {
+      } else {
         logger.error('Editor', 'No editor available for footnote insertion');
-        return;
-      }
-
-      try {
-        editor.action((ctx) => {
-          const view = ctx.get(editorViewCtx);
-          const { state } = view;
-          const { selection } = state;
-
-          // Get the plain text before cursor position
-          const textBeforeCursor = state.doc.textBetween(0, selection.from, '\n');
-          const plainTextLength = textBeforeCursor.length;
-
-          // Map plain text position to markdown position
-          const markdown = content;
-          let markdownPos = 0;
-          let visibleCount = 0;
-          let i = 0;
-
-          while (i < markdown.length && visibleCount < plainTextLength) {
-            const char = markdown[i];
-            const remaining = markdown.slice(i);
-
-            // Skip headers: # at start of line
-            if ((i === 0 || markdown[i - 1] === '\n') && char === '#') {
-              while (i < markdown.length && markdown[i] === '#') i++;
-              if (markdown[i] === ' ') i++;
-              continue;
-            }
-
-            // Skip bold/italic markers: ** or * or __ or _
-            if ((char === '*' || char === '_') && remaining.length > 1) {
-              if (remaining[1] === char) {
-                i += 2;
-                continue;
-              } else {
-                i++;
-                continue;
-              }
-            }
-
-            // Skip link URLs: [text](url) - skip the url part
-            if (char === ']' && remaining.length > 1 && remaining[1] === '(') {
-              i += 2;
-              while (i < markdown.length && markdown[i] !== ')') i++;
-              if (i < markdown.length) i++;
-              continue;
-            }
-
-            // Skip code blocks: ```...```
-            if (char === '`' && remaining.startsWith('```')) {
-              i += 3;
-              const closeIdx = markdown.indexOf('```', i);
-              if (closeIdx !== -1) {
-                i = closeIdx + 3;
-              }
-              continue;
-            }
-
-            // Skip inline code markers: `
-            if (char === '`') {
-              i++;
-              continue;
-            }
-
-            // Handle newlines: markdown uses \n\n for paragraph breaks
-            // but ProseMirror's textBetween uses single \n
-            // So we count consecutive newlines as a single visible newline
-            if (char === '\n') {
-              visibleCount++;
-              i++;
-              // Skip any additional consecutive newlines
-              while (i < markdown.length && markdown[i] === '\n') {
-                i++;
-              }
-              markdownPos = i;
-              continue;
-            }
-
-            // Regular character - count it
-            visibleCount++;
-            i++;
-            markdownPos = i;
-          }
-
-          logger.store('Editor', 'Footnote insertion', {
-            cursorPos: selection.from,
-            plainTextLength,
-            markdownPos,
-          });
-
-          // Insert footnote at this position
-          get().insertFootnoteAtPosition(markdownPos);
-        });
-      } catch (error) {
-        logger.error('Editor', 'Failed to insert footnote');
       }
       return;
     }
 
-    // Regular formatting
     let textToInsert = '';
     switch (type) {
       case 'bold':
@@ -440,40 +279,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         break;
     }
 
-    // Via la façade (CM6 ou Monaco) : insertion à la sélection courante.
     if (editorFacade) {
       editorFacade.replaceSelection(textToInsert);
       set({ isDirty: true });
       return;
     }
 
-    // Try to insert at cursor position using Milkdown editor
-    if (editor) {
-      try {
-        editor.action((ctx) => {
-          const view = ctx.get(editorViewCtx);
-          const { state } = view;
-          const { tr, selection } = state;
-          tr.insertText(textToInsert, selection.from, selection.to);
-          view.dispatch(tr);
-          view.focus();
-        });
-        set({ isDirty: true });
-      } catch (error) {
-        // Fallback: append to content
-        logger.error('Editor', 'Failed to insert at cursor, appending to content');
-        set({
-          content: content + textToInsert,
-          isDirty: true,
-        });
-      }
-    } else {
-      // No Milkdown editor, append to content
-      set({
-        content: content + textToInsert,
-        isDirty: true,
-      });
-    }
+    // Aucun éditeur monté : append au contenu.
+    set({
+      content: content + textToInsert,
+      isDirty: true,
+    });
   },
 
   insertTextAtCursor: (text: string) => {
@@ -482,35 +298,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (editorFacade) {
       editorFacade.replaceSelection(text);
       set({ isDirty: true });
-      return;
-    }
-    const editor = get().milkdownEditor;
-    if (editor) {
-      try {
-        editor.action((ctx) => {
-          const view = ctx.get(editorViewCtx);
-          const { state } = view;
-          const { tr, selection } = state;
-          tr.insertText(text, selection.from, selection.to);
-          view.dispatch(tr);
-          view.focus();
-        });
-        set({ isDirty: true });
-      } catch (error) {
-        logger.error('Editor', 'Failed to insert text at cursor');
-      }
     }
   },
 
   insertDraftAtCursor: (draft: string): { mode: 'cursor' | 'append' } => {
-    const { content, milkdownEditor, monacoEditor, editorMode, editorFacade } = get();
+    const { content, editorFacade } = get();
 
-    // CM6 : le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
+    // Le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
     // proposition d'insertion adjudicable au curseur, jamais d'écriture
     // directe (« aucune fonctionnalité IA d'écriture ne contourne cette
     // API », docs/editor-proposals.md). Le document ne change qu'à
     // l'acceptation.
-    if (editorFacade && editorFacade.engine === 'cm6' && editorFacade.propose) {
+    if (editorFacade?.propose) {
       const current = editorFacade.getValue();
       const offset = editorFacade.getCursorOffset();
       const newContent = insertDraftAtOffset(current, offset, draft);
@@ -533,8 +332,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { mode: 'cursor' };
     }
 
-    // CM6 sans support des propositions (défensif) — comportement Phase 1.
-    if (editorFacade && editorFacade.engine === 'cm6') {
+    // Façade sans support des propositions (défensif) — insertion directe.
+    if (editorFacade) {
       const current = editorFacade.getValue();
       const offset = editorFacade.getCursorOffset();
       const newContent = insertDraftAtOffset(current, offset, draft);
@@ -544,56 +343,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { mode: 'cursor' };
     }
 
-    // Source mode (Monaco) — clean offset → markdown position mapping.
-    if (editorMode === 'source' && monacoEditor) {
-      const model = monacoEditor.getModel();
-      const pos = monacoEditor.getPosition();
-      if (model && pos) {
-        const offset = model.getOffsetAt(pos);
-        const newContent = insertDraftAtOffset(content, offset, draft);
-        set({ content: newContent, isDirty: true });
-        // Keep the cursor just after the inserted draft so the user
-        // continues writing where they left off.
-        try {
-          const newPos = model.getPositionAt(
-            offset + (newContent.length - content.length)
-          );
-          monacoEditor.setPosition(newPos);
-          monacoEditor.focus();
-        } catch {
-          /* ignore positioning failure — content is already in place */
-        }
-        return { mode: 'cursor' };
-      }
-    }
-
-    // WYSIWYG mode (Milkdown) — approximate cursor → plain-text offset.
-    // Doc.textBetween yields the rendered text length, which is a close
-    // enough proxy for the markdown source position when the document
-    // doesn't have heavy inline formatting. The padding logic in
-    // `insertDraftAtOffset` keeps the result on a block boundary.
-    if (editorMode === 'wysiwyg' && milkdownEditor) {
-      let offset = content.length;
-      try {
-        milkdownEditor.action((ctx) => {
-          const view = ctx.get(editorViewCtx);
-          const { state } = view;
-          const textBeforeCursor = state.doc.textBetween(
-            0,
-            state.selection.from,
-            '\n'
-          );
-          offset = Math.min(textBeforeCursor.length, content.length);
-        });
-      } catch {
-        /* fall through with offset = end-of-content */
-      }
-      const newContent = insertDraftAtOffset(content, offset, draft);
-      set({ content: newContent, isDirty: true });
-      return { mode: 'cursor' };
-    }
-
-    // No editor mounted (or mode/editor mismatch) — fall back to append.
+    // No editor mounted — fall back to append.
     set({
       content: appendDraftToContent(content, draft),
       isDirty: true,
@@ -647,23 +397,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const { editorFacade } = get();
     if (editorFacade) {
-      // L'éditeur reçoit l'édition directement, curseur dans la définition ;
-      // pendingFootnoteScroll reste le canal du chemin Milkdown.
+      // L'éditeur reçoit l'édition directement, curseur dans la définition.
       editorFacade.setValue(newContent, definitionPosition);
       editorFacade.focus();
       set({ content: newContent, isDirty: true });
     } else {
-      set({
-        content: newContent,
-        isDirty: true,
-        pendingFootnoteScroll: definitionPosition,
-      });
+      set({ content: newContent, isDirty: true });
     }
 
     return { definitionPosition, footnoteNumber };
-  },
-
-  clearPendingFootnoteScroll: () => {
-    set({ pendingFootnoteScroll: null });
   },
 }));

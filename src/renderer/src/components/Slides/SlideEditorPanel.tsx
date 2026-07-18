@@ -2,7 +2,7 @@ import React, { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, Plus, Columns, MessageSquare, BookOpen, FileDown, Sparkles, Eye } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { MarkdownEditor } from '../Editor/MarkdownEditor';
+import { CodeMirrorEditor } from '../Editor/CodeMirrorEditor';
 import { SlideNavigator } from './SlideNavigator';
 import { SlideGenerationPanel } from './SlideGenerationPanel';
 import { SlidePreviewPanel } from './SlidePreviewPanel';
@@ -120,7 +120,7 @@ export const SlideEditorPanel: React.FC = () => {
           </Panel>
           <PanelResizeHandle className="resize-handle" />
           <Panel defaultSize={isPanelOpen ? 53 : 78} minSize={40}>
-            <MarkdownEditor />
+            <CodeMirrorEditor />
           </Panel>
           {isPreviewOpen && (
             <>

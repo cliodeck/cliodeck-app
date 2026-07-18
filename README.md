@@ -22,7 +22,7 @@ v2.0 (fusion) release builds land when the branch merges to main. Until then bui
 ClioDeck v2 organises work into four top-level modes that share the same project / sources / index:
 
 - **Brainstorm** — chat-driven exploration of your corpus, with durable workspace [`.cliohints`](#cliohints) injected into every prompt and a one-click *Send to Write* button that lands a formatted draft block in the editor.
-- **Write** — WYSIWYG Markdown editor with citation autocomplete (`@`), footnotes, and Milkdown rich-text editing.
+- **Write** — CodeMirror 6 live-render Markdown editor (Obsidian-style) with Pandoc citations (`[@key]`, autocomplete from Zotero), footnotes with in-place editing, and byte-perfect file fidelity.
 - **Analyze** — knowledge graph, textometrics, topic modeling, similarity finder.
 - **Export** — PDF (Pandoc / LaTeX), Word, RevealJS slides.
 
@@ -120,7 +120,7 @@ Full documentation is available in the **[ClioDeck Wiki](https://github.com/inac
 
 | Layer | Technologies |
 |-------|--------------|
-| **Frontend** | Electron 28, React 18, TypeScript, Milkdown, Zustand, Vite |
+| **Frontend** | Electron 28, React 18, TypeScript, CodeMirror 6, Zustand, Vite |
 | **Backend** | Node.js, better-sqlite3, hnswlib-node, pdfjs-dist, chokidar |
 | **LLM layer** | Ollama, OpenAI-compatible, Anthropic, Mistral, Gemini (typed provider registry) |
 | **Embeddings** | nomic-embed-text, mxbai-embed-large, OpenAI / Mistral embeddings |

@@ -128,7 +128,7 @@ const api = {
       ipcRenderer.invoke('editor:insert-text', text, metadata),
     // Phase 4 : le main n'enveloppe plus le texte de marqueurs cliodeck-gen ;
     // il transmet { text, metadata } et le renderer décide (proposition IA en
-    // CM6, enveloppe héritée pour Milkdown/Monaco).
+    // CM6).
     onInsertText: (
       callback: (payload: {
         text: string;

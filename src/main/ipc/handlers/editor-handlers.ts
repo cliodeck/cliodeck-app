@@ -87,7 +87,7 @@ export function setupEditorHandlers() {
     // <!-- cliodeck-gen --> — la provenance est portée par l'annotation
     // changeOrigin des transactions CM6. Le renderer reçoit { text, metadata }
     // et décide : proposition IA (CM6, si metadata.modeId), enveloppe héritée
-    // (Milkdown/Monaco, comportement inchangé), insertion simple sinon.
+    // insertion simple sinon.
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window) {
       window.webContents.send('editor:insert-text-command', { text, metadata });
