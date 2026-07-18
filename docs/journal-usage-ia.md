@@ -196,4 +196,4 @@ fournis pour re-traitement.
 ## 10. Références
 
 - ADR [`docs/adr/0007-usage-journal-separate-db-and-provider-hook.md`](adr/0007-usage-journal-separate-db-and-provider-hook.md)
-- Repérage des points d'insertion : [`docs/journal-usage-ia-reperage.md`](journal-usage-ia-reperage.md)
+- Repérage des points d'insertion : [`docs/archive/journal-usage-ia-reperage.md`](archive/journal-usage-ia-reperage.md)

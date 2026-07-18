@@ -65,7 +65,7 @@ Cas particuliers :
 ### 3.2 bis Adjudications de propositions IA (amendement Phase 4 du plan CM6, 2026-07-17)
 
 > Amendement au périmètre v1 ci-dessus, requis par le contrat propositionnel de
-> l'éditeur (plan `PLAN_migration-editeur-cm6.md`, Phase 4 ; spec côté éditeur :
+> l'éditeur (plan `archive/PLAN_migration-editeur-cm6.md`, Phase 4 ; spec côté éditeur :
 > `docs/editor-proposals.md`). La liste des événements v1 (completion/embedding)
 > reste inchangée par ailleurs.
 
@@ -138,7 +138,7 @@ Option `--anonymize` : remplace les noms de corpus/workspaces par des alias stab
 
 ## 6. Ordre d'implémentation suggéré
 
-1. Exploration du code : localiser le registre de providers, le pipeline d'embeddings, le log MCP existant, l'infrastructure CLI. Produire un court compte rendu (fichier `docs/journal-usage-ia-reperage.md`) **avant** de coder, listant les points d'insertion retenus.
+1. Exploration du code : localiser le registre de providers, le pipeline d'embeddings, le log MCP existant, l'infrastructure CLI. Produire un court compte rendu (fichier `docs/archive/journal-usage-ia-reperage.md`) **avant** de coder, listant les points d'insertion retenus.
 2. Schéma SQLite + module de journalisation (main process) + hook providers.
 3. Agrégation de sessions + `cliodeck journal today`.
 4. Annotation interactive CLI.

@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 La paire Milkdown (WYSIWYG) / Monaco (source) est remplacée par un
 éditeur CodeMirror 6 unique en rendu live, façon Obsidian/Zettlr. Plan
-et journal du chantier : `docs/PLAN_migration-editeur-cm6.md` et
-`docs/migration-cm6.md` ; architecture : `docs/editor-architecture.md`.
+et journal du chantier : `docs/archive/PLAN_migration-editeur-cm6.md` et
+`docs/archive/migration-cm6.md` ; architecture : `docs/editor-architecture.md`.
 
 Les raisons de la migration :
 

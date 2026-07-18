@@ -1,6 +1,6 @@
 # Contrat propositionnel de l'éditeur
 
-> Phase 4 du plan CM6 ([`PLAN_migration-editeur-cm6.md`](PLAN_migration-editeur-cm6.md)).
+> Phase 4 du plan CM6 ([`PLAN_migration-editeur-cm6.md`](archive/PLAN_migration-editeur-cm6.md)).
 > Code : `src/editor/proposals/` (contrat + UI), `src/editor/cm/change-origin.ts` (traçage d'origine).
 
 **AUCUNE FONCTIONNALITÉ IA D'ÉCRITURE NE CONTOURNE CETTE API.** Toute

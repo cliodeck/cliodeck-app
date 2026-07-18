@@ -71,6 +71,6 @@ journal ne doit jamais faire échouer un appel LLM.
 ## Références
 
 - `docs/journal-usage-ia.md` — modèle deux-couches, schéma, philosophie.
-- `docs/journal-usage-ia-reperage.md` — repérage des points d'insertion.
+- `docs/archive/journal-usage-ia-reperage.md` — repérage des points d'insertion.
 - ADR 0001 — consolidation `brain.db` (dont le journal se démarque volontairement).
 - ADR 0004 — abstraction providers (contrat que le décorateur enveloppe sans modifier).

@@ -1,8 +1,8 @@
 # Architecture de l'éditeur (CodeMirror 6)
 
 > État post-migration (Phase 5, 2026-07). Genèse et décisions :
-> [`PLAN_migration-editeur-cm6.md`](PLAN_migration-editeur-cm6.md) ;
-> journal du chantier : [`migration-cm6.md`](migration-cm6.md) ;
+> [`PLAN_migration-editeur-cm6.md`](archive/PLAN_migration-editeur-cm6.md) ;
+> journal du chantier : [`migration-cm6.md`](archive/migration-cm6.md) ;
 > contrat propositionnel : [`editor-proposals.md`](editor-proposals.md).
 
 ## Principes
