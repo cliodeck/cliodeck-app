@@ -21,7 +21,7 @@ import {
   Network,
   LayoutGrid,
 } from 'lucide-react';
-import { BrainstormChat } from './BrainstormChat';
+import { AssistantChat } from '../Chat/AssistantChat';
 import { IdeasPanel } from './IdeasPanel';
 import { IdeasGraph } from './IdeasGraph';
 import { IdeasCanvas } from './IdeasCanvas';
@@ -192,7 +192,7 @@ export const BrainstormPanel: React.FC = () => {
       {/* Tab content */}
       {activeTab === 'chat' && (
         <section className="brainstorm-panel__chat">
-          <BrainstormChat />
+          <AssistantChat variant="full" />
         </section>
       )}
       {activeTab === 'ideas' && (

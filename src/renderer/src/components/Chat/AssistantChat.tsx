@@ -1,91 +1,153 @@
 /**
- * BrainstormChat (fusion phase 3.2, unified UI pass).
+ * AssistantChat — LA coquille de chat unifiée (étape 5 de la fusion,
+ * docs/chat-unification-etat-des-lieux.md).
  *
- * Thin adapter over the shared ChatSurface: maps BrainstormMessage into
- * UnifiedMessage and provides the "send to write" action as message extras.
+ * Remplace la paire ChatInterface (panneau droit) / BrainstormChat (centre
+ * du mode brainstorm) : mêmes moteur, store et réglages, une seule UI.
+ *
+ * - `variant="full"` — centre du mode brainstorm : starters, ContextGraph.
+ * - `variant="panel"` — panneau droit (explore/write/export) : compact,
+ *   titre « AI Assistant », état vide indexation ; tout le reste identique
+ *   (SourcePopover, badges d'outils, ExplanationPanel, consentement cloud,
+ *   envoi vers l'éditeur en proposition).
+ *
+ * Les deux montages sont mutuellement exclusifs (le panneau droit est
+ * masqué en mode brainstorm — MainLayout `!isBrainstorm`). Un double
+ * montage accidentel resterait sans double-dispatch : dans
+ * useBrainstormChat, seule l'instance qui a émis `send` connaît le mapping
+ * session→assistant (refs locales), l'autre ignore les événements.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Highlighter, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
-import { useBrainstormChat } from './useBrainstormChat';
-import { SourcePopover } from './SourcePopover';
+import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
+import { SourcePopover } from '../Brainstorm/SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
-import { useCloudConsentStore, isCloudProvider } from '../../stores/cloudConsentStore';
-import { messageToDraft } from './messageToDraft';
-import { ChatSurface } from '../Chat/ChatSurface';
-import { ModeSelector } from '../Chat/ModeSelector';
-import { RAGSettingsPanel } from '../Chat/RAGSettingsPanel';
-import { CloudConsentDialog } from '../Chat/CloudConsentDialog';
-import { useChatSettingsProjection } from '../Chat/useChatSettingsProjection';
-import { UnifiedMessage } from '../Chat/types';
-import { ExplanationPanel } from '../Chat/ExplanationPanel';
-import { McpToolsBanner } from './McpToolsBanner';
-import { ContextGraph } from './ContextGraph';
-import { useMcpToolsList } from './useMcpToolsList';
-import './BrainstormChat.css';
+import { useBibliographyStore } from '../../stores/bibliographyStore';
+import { useDialogStore } from '../../stores/dialogStore';
+import { useModeStore } from '../../stores/modeStore';
+import { useCloudConsentGuard } from './useCloudConsentGuard';
+import { messageToDraft } from '../Brainstorm/messageToDraft';
+import { ChatSurface } from './ChatSurface';
+import { ModeSelector } from './ModeSelector';
+import { RAGSettingsPanel } from './RAGSettingsPanel';
+import { CloudConsentDialog } from './CloudConsentDialog';
+import { useChatSettingsProjection } from './useChatSettingsProjection';
+import { UnifiedMessage } from './types';
+import { ExplanationPanel } from './ExplanationPanel';
+import { McpToolsBanner } from '../Brainstorm/McpToolsBanner';
+import { ContextGraph } from '../Brainstorm/ContextGraph';
+import { useMcpToolsList } from '../Brainstorm/useMcpToolsList';
+import { HelperTooltip } from '../Methodology/HelperTooltip';
+import './AssistantChat.css';
 // RAGExplanation type alias lives in chatStore.
 import type { RAGExplanation } from '../../stores/chatStore';
 
-interface BrainstormUnifiedMessage extends UnifiedMessage {
+interface AssistantUnifiedMessage extends UnifiedMessage {
   original: BrainstormMessage;
 }
 
-export const BrainstormChat: React.FC = () => {
-  const { t } = useTranslation('common');
+export interface AssistantChatProps {
+  variant: 'full' | 'panel';
+}
+
+export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
+  const { t, i18n } = useTranslation('common');
+  const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
+  const isPanel = variant === 'panel';
   const messages = useChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
+  const { modes } = useModeStore();
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nerEnabled, setNerEnabled] = useState(false);
+  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(null);
   const mcpTools = useMcpToolsList();
 
-  // Cloud consent (ADR 0005, Phase 4.3)
-  const cloudConsented = useCloudConsentStore((s) => s.consented);
-  const grantConsent = useCloudConsentStore((s) => s.grant);
-  const [cloudCheck, setCloudCheck] = useState<{ isCloud: boolean; providerName: string }>({ isCloud: false, providerName: '' });
-  const [showConsentDialog, setShowConsentDialog] = useState(false);
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  // État vide de la variante panel : nombre de PDFs indexés (repris de
+  // l'ancien ChatInterface — utile pour comprendre ce que le RAG voit).
+  const { indexedFilePaths, refreshIndexedPDFs } = useBibliographyStore();
+  useEffect(() => {
+    if (isPanel) refreshIndexedPDFs();
+  }, [isPanel, refreshIndexedPDFs]);
+  const indexedCount = indexedFilePaths.size;
 
   // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
-  // transmis aux propositions « draft Brainstorm » (source.model, Phase 4b).
+  // transmis aux propositions « draft » (source.model, Phase 4b).
   const activeModelRef = useRef<string>('unknown');
 
   useEffect(() => {
-    window.electron.config
-      .get('llm')
-      .then(
-        (llm: {
+    let cancelled = false;
+    (async () => {
+      try {
+        const llm: {
           backend: string;
-          ollamaURL?: string;
           ollamaChatModel?: string;
           claudeModel?: string;
           openaiModel?: string;
           mistralModel?: string;
           geminiModel?: string;
-        } | null) => {
-          if (!llm) return;
-          setCloudCheck(isCloudProvider(llm));
-          const byBackend: Record<string, string | undefined> = {
-            ollama: llm.ollamaChatModel,
-            claude: llm.claudeModel,
-            openai: llm.openaiModel,
-            mistral: llm.mistralModel,
-            gemini: llm.geminiModel,
-          };
-          activeModelRef.current = byBackend[llm.backend] ?? 'unknown';
-        }
-      )
-      .catch(() => {});
+        } | null = await window.electron.config.get('llm');
+        if (cancelled || !llm) return;
+        const byBackend: Record<string, string | undefined> = {
+          ollama: llm.ollamaChatModel,
+          claude: llm.claudeModel,
+          openai: llm.openaiModel,
+          mistral: llm.mistralModel,
+          gemini: llm.geminiModel,
+        };
+        activeModelRef.current = byBackend[llm.backend] ?? 'unknown';
+      } catch {
+        // Config inaccessible (préload partiel, tests) : 'unknown' reste.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
-  // `fusion.chat.start` from Brainstorm picks up current filters.
+  // `fusion.chat.start` picks up current filters.
   useChatSettingsProjection();
+
+  // Bandeau de statut RAG (indexation, retrieval…) — flux fusion:chat:status.
+  useEffect(() => {
+    const w = window as unknown as {
+      electron?: {
+        fusion?: {
+          chat?: {
+            onStatus?: (
+              cb: (env: {
+                sessionId: string;
+                status: { phase: string; label?: string };
+              }) => void
+            ) => () => void;
+          };
+        };
+      };
+    };
+    const onStatus = w.electron?.fusion?.chat?.onStatus;
+    if (!onStatus) return;
+    const unsub = onStatus((env) => {
+      const phase = env.status.phase;
+      const label = env.status.label ?? phase;
+      setRagStatus({ message: label, isError: phase === 'error' });
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!isStreaming && ragStatus) {
+      const delay = ragStatus.isError ? 5000 : 0;
+      const timer = setTimeout(() => setRagStatus(null), delay);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, ragStatus]);
 
   const sendToWrite = useCallback(
     (m: BrainstormMessage): void => {
@@ -93,59 +155,60 @@ export const BrainstormChat: React.FC = () => {
       const block = messageToDraft(m);
       // Insert at the user's current cursor when an editor is mounted;
       // fall back to append when neither editor exists yet (fusion 2.6,
-      // A13 option a). The undo path is the editor's own native history
-      // — a single Cmd/Ctrl-Z reverts the splice. In CM6 the draft becomes
-      // an adjudicable proposal carrying the active model + mode.
+      // A13 option a). In CM6 the draft becomes an adjudicable proposal
+      // carrying the active model + mode.
       editor.insertDraftAtCursor(block, {
         model: activeModelRef.current,
         task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
       });
       setSentToWriteId(m.id);
-      setWorkspaceMode('write');
+      // Depuis le panneau droit du mode write, on est déjà au bon endroit :
+      // ne pas rebasculer (la proposition apparaît sous les yeux).
+      if (useWorkspaceModeStore.getState().active !== 'write') {
+        setWorkspaceMode('write');
+      }
     },
     [setWorkspaceMode]
   );
 
-  const unifiedMessages = useMemo<BrainstormUnifiedMessage[]>(
+  const unifiedMessages = useMemo<AssistantUnifiedMessage[]>(
     () =>
-      messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        pending: m.pending,
-        isError: !!m.error,
-        badge: m.ragCitation ? t('chat.brainstorm.citationBadge') : undefined,
-        original: m,
-      })),
-    [messages]
+      messages.map((m) => {
+        // Badge : la citation RAG prime (information de retrieval), sinon
+        // le mode IA qui a répondu (comportement hérité du panneau).
+        const mode =
+          m.modeId && m.modeId !== 'default-assistant'
+            ? modes.find((x) => x.metadata.id === m.modeId)
+            : undefined;
+        const modeBadge = mode ? mode.metadata.name[lang] || m.modeId : undefined;
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          pending: m.pending,
+          isError: !!m.error || !!m.isError,
+          badge: m.ragCitation ? t('chat.brainstorm.citationBadge') : modeBadge,
+          original: m,
+        };
+      }),
+    [messages, modes, lang, t]
   );
 
-  const handleSend = useCallback(
-    async (text: string) => {
-      // If cloud provider and not yet consented this session, show dialog
-      if (cloudCheck.isCloud && !cloudConsented) {
-        setPendingMessage(text);
-        setShowConsentDialog(true);
-        return;
-      }
-      await send(text);
-    },
-    [send, cloudCheck.isCloud, cloudConsented]
-  );
+  // Consentement cloud (ADR 0005) via le garde PARTAGÉ.
+  const consentGuard = useCloudConsentGuard(send);
+  const handleSend = consentGuard.guardedSend;
 
-  const handleConsentGranted = useCallback(() => {
-    grantConsent(cloudCheck.providerName);
-    setShowConsentDialog(false);
-    if (pendingMessage) {
-      const msg = pendingMessage;
-      setPendingMessage(null);
-      void send(msg);
+  const handleClear = useCallback(async () => {
+    if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'))) {
+      reset();
     }
-  }, [grantConsent, cloudCheck.providerName, pendingMessage, send]);
+  }, [reset, t]);
 
-  const handleConsentCancelled = useCallback(() => {
-    setShowConsentDialog(false);
-    setPendingMessage(null);
+  const handleLearnMore = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('show-methodology-modal', { detail: { feature: 'chat' } })
+    );
   }, []);
 
   const starterPrompts = [
@@ -154,7 +217,21 @@ export const BrainstormChat: React.FC = () => {
     t('chat.brainstorm.starter3'),
   ];
 
-  const emptyState = (
+  const emptyState = isPanel ? (
+    <>
+      {indexedCount > 0 ? (
+        <>
+          <h4>{t('chat.readyState.title')}</h4>
+          <p>{t('chat.readyState.message', { count: indexedCount })}</p>
+        </>
+      ) : (
+        <>
+          <h4>{t('chat.emptyState.title')}</h4>
+          <p>{t('chat.emptyState.message')}</p>
+        </>
+      )}
+    </>
+  ) : (
     <div style={{ maxWidth: 420 }}>
       <p>{t('chat.brainstorm.emptyState')}</p>
       <div className="brainstorm-chat__starters">
@@ -172,7 +249,7 @@ export const BrainstormChat: React.FC = () => {
     </div>
   );
 
-  const renderExtras = useCallback((m: BrainstormUnifiedMessage): React.ReactNode => {
+  const renderExtras = useCallback((m: AssistantUnifiedMessage): React.ReactNode => {
     const orig = m.original;
     const sources = orig.sources ?? [];
     const toolCalls = orig.toolCalls ?? [];
@@ -303,8 +380,22 @@ export const BrainstormChat: React.FC = () => {
 
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 
+  const statusBanner =
+    ragStatus && (isStreaming || ragStatus.isError) ? (
+      <div
+        className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`}
+        role="status"
+        aria-live="polite"
+      >
+        {ragStatus.message}
+      </div>
+    ) : undefined;
+
+  const banner =
+    error && !isStreaming ? error : statusBanner;
+
   return (
-    <div className="brainstorm-chat__root">
+    <div className={`brainstorm-chat__root ${isPanel ? 'brainstorm-chat__root--panel' : ''}`}>
       <div className="brainstorm-chat__settings-bar">
         <button
           type="button"
@@ -339,26 +430,32 @@ export const BrainstormChat: React.FC = () => {
         </div>
       )}
       <McpToolsBanner tools={mcpTools} />
-      <ContextGraph />
+      {!isPanel && <ContextGraph />}
       <div className="brainstorm-chat__surface-wrap">
         <ChatSurface
+          title={isPanel ? t('chat.aiAssistant') : undefined}
+          headerExtras={
+            isPanel ? (
+              <HelperTooltip content={t('chat.helpText')} onLearnMore={handleLearnMore} />
+            ) : undefined
+          }
           messages={unifiedMessages}
           isProcessing={isStreaming}
           onSend={handleSend}
           onCancel={() => void cancel()}
-          onClear={messages.length > 0 ? reset : undefined}
+          onClear={messages.length > 0 ? handleClear : undefined}
           emptyState={emptyState}
-          banner={error && !isStreaming ? error : undefined}
+          banner={banner}
           placeholder={t('chat.brainstorm.placeholder')}
           renderMessageExtras={renderExtras}
           enableNER={nerEnabled}
         />
       </div>
-      {showConsentDialog && (
+      {consentGuard.dialog.isOpen && (
         <CloudConsentDialog
-          providerName={cloudCheck.providerName}
-          onConsent={handleConsentGranted}
-          onCancel={handleConsentCancelled}
+          providerName={consentGuard.dialog.providerName}
+          onConsent={consentGuard.dialog.onConsent}
+          onCancel={consentGuard.dialog.onCancel}
         />
       )}
     </div>

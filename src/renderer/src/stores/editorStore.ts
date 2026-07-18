@@ -332,7 +332,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         original: '',
         proposed: inserted,
         category: 'brainstorm-draft',
-        // L'appelant (BrainstormChat) transmet le modèle actif quand il le
+        // L'appelant (AssistantChat) transmet le modèle actif quand il le
         // connaît — le store éditeur ne se couple pas au store chat.
         source: {
           model: source?.model ?? 'unknown',

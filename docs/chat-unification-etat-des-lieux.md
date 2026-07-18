@@ -91,7 +91,18 @@ vers la nouvelle coquille (migration du store persisté
 quitter les modes explore/write/export** — poser une question RAG à côté de
 l'éditeur est un usage central.
 
-## 4. Options de décision
+## 4. Décision et exécution (2026-07-18)
+
+**Option A retenue et exécutée** le jour même : coquille unique
+`AssistantChat` (`variant: 'full' | 'panel'`), consentement corrigé en
+commit isolé préalable (`c703472`). ChatInterface/RAGMessageExtras/
+SourceCard supprimés, couverture de tests portée 1:1 (9 tests dont le
+garde ADR 0005), nettoyages §2.2/2.4/2.6 inclus, `hitsToUnifiedSources`
+supprimé (le renderer unifié a tranché pour BrainstormSource). Vérifié en
+app réelle, échange streamé compris. Les options ci-dessous sont
+conservées pour mémoire.
+
+## 4bis. Options de décision (historique)
 
 **A. Coquille unique (recommandée)** — finir l'étape 5 de la fusion :
 `BrainstormChat` (renommé en composant neutre, ex. `AssistantChat`) devient

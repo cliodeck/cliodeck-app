@@ -514,7 +514,6 @@
     "settings": {
       "toggle": "Paramètres du chat"
     },
-    "askQuestion": "Posez une question",
     "placeholder": "Posez une question sur vos documents...",
     "send": "Envoyer (Enter)",
     "cancel": "Annuler",
@@ -524,7 +523,6 @@
     "newLineHint": "Cmd/Ctrl + Enter pour envoyer",
     "you": "Vous",
     "assistant": "Assistant",
-    "noContextWarning": "Cette réponse n'est pas basée sur vos documents. Aucun passage pertinent n'a été trouvé dans votre corpus.",
     "sources": {
       "open": "Ouvrir la source",
       "opening": "Ouverture…",
@@ -533,19 +531,11 @@
       "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
       "untrackablePdf": "Document PDF non traçable (documentId manquant).",
       "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
-      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
-      "position": {
-        "pageWithOffset": "page {{page}} · offset {{offset}}",
-        "page": "page {{page}}",
-        "noteWithLine": "{{path}} · L{{line}}",
-        "item": "item #{{id}}"
-      }
+      "untrackableNote": "Note Obsidian non traçable (chemin manquant)."
     },
     "source": "Source",
-    "excerpt": "Extrait:",
     "page": "Page",
     "similarity": "Similarité",
-    "openPDF": "Ouvrir le PDF",
     "aiAssistant": "Assistant IA",
     "helpText": "L'assistant utilise RAG (Retrieval-Augmented Generation) pour répondre à vos questions en se basant sur les documents PDF indexés.",
     "emptyState": {

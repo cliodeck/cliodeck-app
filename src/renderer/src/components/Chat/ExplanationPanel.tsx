@@ -5,7 +5,7 @@ import type { RAGExplanation } from '../../stores/chatStore';
 /**
  * Shared Explainable-AI panel.
  *
- * Extracted from `RAGMessageExtras.tsx` so both the legacy RAG chat and
+ * Extracted early in the fusion so both chat shells (now unified in AssistantChat) and
  * the Brainstorm chat can render the same collapsible "how was this
  * answer produced" block. The `RAGExplanation` shape is structurally
  * identical on both surfaces (mirrored in `backend/types/chat-source.ts`).

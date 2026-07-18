@@ -514,7 +514,6 @@
     "settings": {
       "toggle": "Chat-Einstellungen"
     },
-    "askQuestion": "Stellen Sie eine Frage",
     "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten...",
     "send": "Senden (Enter)",
     "cancel": "Abbrechen",
@@ -524,7 +523,6 @@
     "newLineHint": "Shift + Enter für neue Zeile",
     "you": "Sie",
     "assistant": "Assistent",
-    "noContextWarning": "Diese Antwort basiert nicht auf Ihren Dokumenten. Es wurden keine relevanten Passagen in Ihrem Korpus gefunden.",
     "sources": {
       "open": "Quelle öffnen",
       "opening": "Wird geöffnet…",
@@ -533,19 +531,11 @@
       "openUnavailable": "Öffnen von Quellen nicht verfügbar (Preload fehlt).",
       "untrackablePdf": "PDF-Dokument nicht rückverfolgbar (documentId fehlt).",
       "untrackableTropy": "Tropy-Quelle nicht rückverfolgbar (itemId fehlt).",
-      "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt).",
-      "position": {
-        "pageWithOffset": "Seite {{page}} · Offset {{offset}}",
-        "page": "Seite {{page}}",
-        "noteWithLine": "{{path}} · Z{{line}}",
-        "item": "Objekt #{{id}}"
-      }
+      "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt)."
     },
     "source": "Quelle",
-    "excerpt": "Auszug:",
     "page": "Seite",
     "similarity": "Ähnlichkeit",
-    "openPDF": "PDF öffnen",
     "aiAssistant": "KI-Assistent",
     "helpText": "Der Assistent verwendet RAG (Retrieval-Augmented Generation), um Ihre Fragen basierend auf indexierten PDF-Dokumenten zu beantworten.",
     "emptyState": {

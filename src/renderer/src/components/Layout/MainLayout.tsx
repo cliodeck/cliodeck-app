@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { MessageCircle, Folder, BookOpen, BookMarked, HelpCircle, Archive } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { BibliographyPanel } from '../Bibliography/BibliographyPanel';
-import { ChatInterface } from '../Chat/ChatInterface';
+import { AssistantChat } from '../Chat/AssistantChat';
 import { ProjectPanel } from '../Project/ProjectPanel';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { WorkspaceModeBar } from './WorkspaceModeBar';
@@ -301,7 +301,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 id={`right-tabpanel-${rightView}`}
                 aria-labelledby={`right-tab-${rightView}`}
               >
-                {rightView === 'chat' && !isBrainstorm && <ChatInterface />}
+                {rightView === 'chat' && !isBrainstorm && (
+                  <AssistantChat variant="panel" />
+                )}
                 {rightView === 'journal' && (
                   <Suspense fallback={<PanelLoadingFallback />}>
                     <JournalPanel />

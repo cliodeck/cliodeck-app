@@ -147,3 +147,13 @@
   border-color: var(--color-accent);
   color: var(--text-primary);
 }
+
+/* Variante panel (panneau droit) : densité réduite pour la colonne étroite. */
+.brainstorm-chat__root--panel .brainstorm-chat__settings-bar {
+  padding: 4px 8px;
+  gap: 6px;
+}
+
+.brainstorm-chat__root--panel .brainstorm-chat__source-snippet {
+  -webkit-line-clamp: 2;
+}
