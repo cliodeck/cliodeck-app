@@ -19,9 +19,11 @@ All 10 items completed. Ideas board/canvas, knowledge graph in Brainstorm, NER e
 ### Phase 3 -- Code quality, a11y, polish
 14 of 16 items completed. Inline-styles -> CSS, theme tokens, focus-visible + skip-link, Simple/Expert settings toggle, notification toasts, `ProjectLoadState` discriminated union, `SecondaryRetriever` extracted, user-configurable FR->EN dictionary, sanitizeChat on citeproc, audit-log rotation + gzip, "Workspace hints" i18n, first `any` sweep, console.* DCE in prod.
 
-Remaining Phase 3:
-- **3.6** -- Deduplicate CorpusExplorer (panel right + mode Analyze coexist)
-- **3.16** -- Split `CorpusExplorerPanel.tsx` (1072 lines) into sub-components
+Remaining Phase 3: none — **3.6** was resolved during the RC cycle ('analyze'
+mode renamed to 'explore' (A10), 'corpus' right view removed (A19):
+`CorpusExplorerPanel` now lives only in `ExplorePanel` tabs) and **3.16** too
+(panel split into `CorpusGraphSection` / `CorpusTopicsSection` /
+`TextometricsPanel` / `TopicTimeline`; the panel itself is 258 LOC).
 
 ### Phase 4 -- Release readiness
 Partially done:
@@ -55,19 +57,17 @@ Partially done:
 |---|---|---|---|
 | 4.2 | Security | Code signing (macOS notarization, Windows Authenticode) | Yes -- Apple Developer account + budget |
 | 4.4 | Backend | Path A benchmark: build a gold-standard corpus (>=30 queries with relevance judgments) to gate the unified vector store migration | Yes -- historian judgment needed |
-| 4.5 | Backend | Isolate 21 broken tests (better-sqlite3 + Ollama live) behind `integration` tag so CI is green | No |
-| -- | Backend | Query expansion for primary sources: FR->EN expansion currently only in SecondaryRetriever, not TropyService | No |
+| 4.5 | Backend | ~~Isolate broken tests so CI is green~~ **Done 2026-07-18**: environmental suites guarded by `skipIf` (`backend/__tests__/helpers/native-guards.ts`); remaining reds = 6 Brainstorm jsdom tests (renderer batch) | No |
+| -- | Backend | ~~Query expansion for primary sources~~ **Done 2026-07-18**: TropyService now reuses `expandQueryToText` (built-in dict + `rag.queryExpansionDictionary`), identity when no term matches | No |
 | -- | Backend | 144 chunks with missing embeddings (5880 indexed, 5736 with embeddings) -- investigate and repair | No |
 
 ### Medium priority (quality + completeness)
 
 | # | Type | Description | User action? |
 |---|---|---|---|
-| 3.6 | Design | Deduplicate CorpusExplorer: panel right OR Analyze mode, not both | Yes -- architecture choice |
-| 3.16 | Frontend | Split `CorpusExplorerPanel.tsx` (1072 LOC) into sub-components | No |
 | -- | Frontend | Remaining ~79 `any` in renderer (CorpusExplorerPanel, ProjectPanel, primarySourcesStore, ZoteroImport...) | No |
 | -- | Frontend | Remaining ~30 hardcoded colors (TopicTimeline chart palette, CorpusExplorerPanel) | No |
-| -- | Backend | Recipe `export` step ignores `document_id` input -- hardcoded to `<project>/document.md` | No |
+| -- | Backend | ~~Recipe `export` step ignores `document_id`~~ **Done 2026-07-18**: runner interpolates `{{ }}` in step `with` params (except `prompt`), handler accepts `document_id`/`document`, builtin recipe aligned | No |
 | -- | Backend | Recipe kind `brainstorm` not yet implemented in runner | No |
 
 ### Low priority (nice-to-have for v2.0, can be v2.1)
@@ -76,9 +76,7 @@ Partially done:
 |---|---|
 | Design | Installer strategy (`docs/installer-strategy.md`): embedded Ollama, first-run wizard, bundled Pandoc/tectonic |
 | Backend | Publish the Lezer extensions (`src/editor/lezer-extensions/`) as separate npm packages, MIT (CM6 plan arbitration 4 — unlocked since Phase 3; no Lezer pandoc-citation extension exists in the ecosystem) |
-| Frontend | Surface adjudication acceptance rates in the usage-journal modal (aggregates already computed — `summarizeAdjudications`) |
-| Frontend | Stats bar debts: i18n of labels + Lezer-based counts (`docs/TODO_barre-stats-document.md`) |
-| Frontend | Brainstorm drafts propose with `model: 'unknown'` — expose the active chat model to the proposal source |
+
 | Backend | `searchEuropeana` tool: scaffolded but not registered (needs API key) |
 | Frontend | Brainstorm flagged-sources badge (follow-up from security events panel) |
 | Frontend | "Drafts" panel for Brainstorm->Write flow |
@@ -89,9 +87,8 @@ Partially done:
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps
-- **React component tests exist but 6 Brainstorm tests fail** (missing `window.electron.config` mock) — part of the 41 pre-existing failures with the mcp-server sqlite-ABI suites
+- **React component tests**: the 6 Brainstorm failures are fixed (missing `window.electron.config` mock, 2026-07-18); remaining red suites are the mcp-server sqlite-ABI ones
 - **`pdf-service.ts`** remains a 1084-line delegating facade (search pipeline)
-- **`CorpusExplorerPanel.tsx`** at 1072 lines is the largest React component
 - **Path B (parallel stores)** continues to ship; Path A unification is gated on benchmark
 
 ---

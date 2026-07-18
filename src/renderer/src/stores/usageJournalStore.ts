@@ -78,9 +78,35 @@ export interface SaveDecisionInput {
   sessionIds: string[];
 }
 
+/** Miroir de AdjudicationBreakdown (backend/core/usage-journal/aggregate.ts). */
+export interface AdjudicationBreakdown {
+  key: string;
+  accepted: number;
+  rejected: number;
+  modified: number;
+  invalidated: number;
+  expired: number;
+  acceptanceRate: number | null;
+}
+
+export interface AdjudicationSummary {
+  from: string;
+  to: string;
+  total: number;
+  byCategory: AdjudicationBreakdown[];
+  byModel: AdjudicationBreakdown[];
+  overall: AdjudicationBreakdown;
+}
+
+export interface AdjudicationsView {
+  summary: AdjudicationSummary;
+  draftCount: number;
+}
+
 interface IpcResult {
   success: boolean;
   today?: TodayView | null;
+  adjudications?: AdjudicationsView | null;
   error?: string;
   /** Code d'erreur stable (ex. 'NO_PROJECT') pour un affichage i18n côté UI. */
   code?: string;
@@ -92,6 +118,8 @@ function errMsg(e: unknown): string {
 
 interface UsageJournalState {
   today: TodayView | null;
+  /** Taux d'adjudication des propositions IA du jour (null tant que non chargé). */
+  adjudications: AdjudicationsView | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -102,12 +130,14 @@ interface UsageJournalState {
   uncoveredCount: () => number;
 
   loadToday: () => Promise<void>;
+  loadAdjudications: () => Promise<void>;
   saveDecision: (input: SaveDecisionInput) => Promise<boolean>;
   setMode: (mode: string) => Promise<void>;
 }
 
 export const useUsageJournalStore = create<UsageJournalState>((set, get) => ({
   today: null,
+  adjudications: null,
   loading: false,
   saving: false,
   error: null,
@@ -131,6 +161,17 @@ export const useUsageJournalStore = create<UsageJournalState>((set, get) => ({
       set({ today: res.today, loading: false });
     } catch (e) {
       set({ loading: false, error: errMsg(e) });
+    }
+  },
+
+  loadAdjudications: async () => {
+    // Chargement silencieux : la section « propositions » est secondaire dans
+    // la modale — pas d'état d'erreur dédié, absence = null.
+    try {
+      const res = (await window.electron.usage.getAdjudications()) as IpcResult;
+      set({ adjudications: res.success ? (res.adjudications ?? null) : null });
+    } catch {
+      set({ adjudications: null });
     }
   },
 

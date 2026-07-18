@@ -1556,6 +1556,23 @@
     "saving": "Saving…",
     "save": "Save decision",
     "saved": "✓ Saved",
-    "todayDecisions": "Today's decisions"
+    "todayDecisions": "Today's decisions",
+    "adjudications": {
+      "title": "AI proposals",
+      "empty": "No proposals adjudicated today.",
+      "summaryLine": "{{accepted}} accepted · {{modified}} modified · {{rejected}} rejected",
+      "otherLine": "{{invalidated}} invalidated, {{expired}} expired",
+      "draftsPending_one": "{{count}} pending rejection draft",
+      "draftsPending_other": "{{count}} pending rejection drafts",
+      "rateLabel": "acceptance"
+    }
+  },
+  "stats": {
+    "words": "words",
+    "chars": "chars",
+    "charsWithSpaces": "chars sp.",
+    "paragraphs": "par.",
+    "citations": "cit.",
+    "footnotes": "notes"
   }
 }

@@ -72,7 +72,10 @@ interface EditorState {
    * falls back to appending. Returns the mode actually used so the caller
    * can adapt the UX confirmation ("inserted at cursor" vs "appended").
    */
-  insertDraftAtCursor: (draft: string) => { mode: 'cursor' | 'append' };
+  insertDraftAtCursor: (
+    draft: string,
+    source?: { model?: string; task?: string }
+  ) => { mode: 'cursor' | 'append' };
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => { definitionPosition: number; footnoteNumber: number } | null;
@@ -301,7 +304,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  insertDraftAtCursor: (draft: string): { mode: 'cursor' | 'append' } => {
+  insertDraftAtCursor: (
+    draft: string,
+    source?: { model?: string; task?: string }
+  ): { mode: 'cursor' | 'append' } => {
     const { content, editorFacade } = get();
 
     // Le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
@@ -326,7 +332,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         original: '',
         proposed: inserted,
         category: 'brainstorm-draft',
-        source: { model: 'unknown', task: 'brainstorm' },
+        // L'appelant (BrainstormChat) transmet le modèle actif quand il le
+        // connaît — le store éditeur ne se couple pas au store chat.
+        source: {
+          model: source?.model ?? 'unknown',
+          task: source?.task ?? 'brainstorm',
+        },
       });
       editorFacade.focus();
       return { mode: 'cursor' };

@@ -1,5 +1,13 @@
 # Barre de statistiques du document — dettes connues
 
+> **Soldé le 2026-07-18** (branche `feat/finitions-post-cm6`) : les deux dettes
+> ci-dessous sont réglées — libellés i18n (`stats.*`, fr/en/de) et comptages
+> par arbre Lezer (`src/editor/document-stats.ts` + tests). Sémantique
+> retenue : citations = clés (`[@a; @b]` compte 2), notes = paires
+> appel/définition distinctes (identifiants libres compris), code exclu.
+> Limite assumée : le frontmatter YAML compte dans les mots (parité avec
+> l'ancien comportement). Le document reste pour les notes de layout (§3).
+
 > Référence pour un futur lot de finition. Contexte : la barre (28 px sous
 > l'éditeur, composant `src/renderer/src/components/Editor/DocumentStats.tsx`)
 > a été réparée le 2026-07-17 (commit `80eb6dd`) — layout flex en mode CM6 et

@@ -64,3 +64,6 @@ build/Release/
 test-results/
 playwright-report/
 e2e/.auth/
+
+# Paquets npm publiables (build à la publication via prepublishOnly)
+packages/*/dist/

@@ -7,6 +7,7 @@
  * soft on missing tables, and applies the topK budget across the union.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 import { registerEntityContext } from '../tools/entityContext.js';
 import {
   addEntityTables,
@@ -29,7 +30,9 @@ afterEach(() => {
   rmrf(workspaceRoot);
 });
 
-describe('entity_context', () => {
+// Suite SQLite : gardée par sqliteAvailable (ABI better-sqlite3 vs node de
+// vitest — cf. backend/__tests__/helpers/native-guards.ts).
+describe.skipIf(!sqliteAvailable)('entity_context', () => {
   it('returns the "no NER tables" hint when neither database has them', async () => {
     // Both dbs exist but entities/entity_mentions aren't created. Tool
     // must fail soft.

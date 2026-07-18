@@ -8,6 +8,7 @@
  * the chunk truncation — actually executes.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 import { registerSearchObsidian } from '../tools/searchObsidian.js';
 import {
   createCapturingServer,
@@ -56,7 +57,9 @@ function seedNote(
   }
 }
 
-describe('search_obsidian', () => {
+// Suite SQLite : gardée par sqliteAvailable (ABI better-sqlite3 vs node de
+// vitest — cf. backend/__tests__/helpers/native-guards.ts).
+describe.skipIf(!sqliteAvailable)('search_obsidian', () => {
   it('returns FTS hits, ranks by BM25, includes path/title/section', async () => {
     const db = createTempObsidianDb(workspaceRoot);
     seedNote(db, {

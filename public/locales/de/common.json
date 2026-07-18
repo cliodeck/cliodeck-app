@@ -1556,6 +1556,23 @@
     "saving": "Wird gespeichert…",
     "save": "Entscheidung speichern",
     "saved": "✓ Gespeichert",
-    "todayDecisions": "Entscheidungen des Tages"
+    "todayDecisions": "Entscheidungen des Tages",
+    "adjudications": {
+      "title": "KI-Vorschläge",
+      "empty": "Heute keine Vorschläge entschieden.",
+      "summaryLine": "{{accepted}} angenommen · {{modified}} geändert · {{rejected}} abgelehnt",
+      "otherLine": "{{invalidated}} ungültig, {{expired}} abgelaufen",
+      "draftsPending_one": "{{count}} offener Ablehnungsentwurf",
+      "draftsPending_other": "{{count}} offene Ablehnungsentwürfe",
+      "rateLabel": "Akzeptanz"
+    }
+  },
+  "stats": {
+    "words": "Wörter",
+    "chars": "Zeichen",
+    "charsWithSpaces": "Zeichen m. LZ",
+    "paragraphs": "Abs.",
+    "citations": "Zit.",
+    "footnotes": "Noten"
   }
 }

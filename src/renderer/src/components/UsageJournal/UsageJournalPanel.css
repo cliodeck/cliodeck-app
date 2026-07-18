@@ -161,3 +161,16 @@
   padding-left: 18px;
   font-size: 0.85rem;
 }
+
+/* Propositions IA (taux d'adjudication du jour, Phase 4c) */
+.usage-journal__adjudications {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.usage-journal__adjudications h4 {
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}

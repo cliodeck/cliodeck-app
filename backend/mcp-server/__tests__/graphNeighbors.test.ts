@@ -10,6 +10,8 @@
  *     `document_similarities` (only when that table exists).
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
+// Tests SQLite gardés individuellement : les tests « no db » tournent toujours.
 import { registerGraphNeighbors } from '../tools/graphNeighbors.js';
 import {
   addSimilaritiesTable,
@@ -47,7 +49,7 @@ describe('graph_neighbors', () => {
     expect(payload.note).toMatch(/Index the corpus first/i);
   });
 
-  it('returns outbound + inbound citations decorated with target/source title', async () => {
+  it.skipIf(!sqliteAvailable)('returns outbound + inbound citations decorated with target/source title', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, year)
@@ -83,7 +85,7 @@ describe('graph_neighbors', () => {
     expect(payload.inbound[0]).toMatchObject({ id: 'C', title: 'Citer C' });
   });
 
-  it('returns similar docs ranked by similarity DESC when the table exists', async () => {
+  it.skipIf(!sqliteAvailable)('returns similar docs ranked by similarity DESC when the table exists', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     addSimilaritiesTable(db);
     db.prepare(
@@ -123,7 +125,7 @@ describe('graph_neighbors', () => {
     expect(payload.similar[0].title).toBe('c');
   });
 
-  it('returns an empty `similar` slice (not undefined) when the table is missing', async () => {
+  it.skipIf(!sqliteAvailable)('returns an empty `similar` slice (not undefined) when the table is missing', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, year) VALUES ('A', 'x', '2000')`

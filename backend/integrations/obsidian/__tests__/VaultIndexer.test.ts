@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
@@ -54,7 +55,9 @@ afterEach(async () => {
   await fsp.rm(vault, { recursive: true, force: true });
 });
 
-describe('ObsidianVaultIndexer (2.4b)', () => {
+// Suite SQLite : gardée par sqliteAvailable (ABI better-sqlite3 vs node de
+// vitest — cf. backend/__tests__/helpers/native-guards.ts).
+describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer (2.4b)', () => {
   it('indexes a small vault and produces a VaultScanReport', async () => {
     writeNote(
       'History/DeGaulle.md',

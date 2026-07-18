@@ -535,6 +535,7 @@ const api = {
   // Journal d'usage IA (distinct du journal de recherche `history`)
   usage: {
     getToday: () => ipcRenderer.invoke('usage:get-today'),
+    getAdjudications: () => ipcRenderer.invoke('usage:get-adjudications'),
     saveDecision: (input: {
       id?: string;
       task: string;

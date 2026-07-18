@@ -72,10 +72,9 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 
 ## 6. Known issues (current branch state)
 
-- **21 preexisting test failures**: `better-sqlite3` native bindings issues under Vitest + Ollama live-backend tests that timeout when no Ollama is running.
+- **`npx vitest run` is green locally**: suites needing the better-sqlite3 native binding (compiled for Electron's ABI by the postinstall) are guarded by `describe.skipIf(!sqliteAvailable)` / per-test `it.skipIf` via `backend/__tests__/helpers/native-guards.ts` (which also provides `ollamaAvailable()`); they show as readable skips under vitest's node and run in CI or after `npm rebuild better-sqlite3`. The only genuinely failing tests are the 6 Brainstorm jsdom tests (missing `window.electron.config` mock).
 - **No React component tests** — jsdom + `@testing-library/react` setup pending.
 - **`feat/fusion-cliobrain`** was the fusion release branch — merged into `main` at the `v1.0.0-rc.2` tag; new work happens on per-feature branches off `main`.
-- **Recipe `export` step ignores `document_id` input** — hardcoded to `<project>/document.md`.
 - **Ollama provider exposes `capabilities.tools` per-model** via a whitelist (`ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo`); other models (notably the Llama 3.x and 4.x families) get `tools: false`. See `OLLAMA_TOOL_CAPABLE_PATTERNS` in `backend/core/llm/providers/ollama.ts` and `docs/archive/research-ollama-tools-1.8.md` for the source-cited rationale. The 4 cloud providers (OpenAI-compatible, Anthropic, Mistral, Gemini) advertise tool-use unconditionally.
 
 ## 7. Glossary

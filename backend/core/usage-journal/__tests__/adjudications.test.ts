@@ -7,23 +7,13 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// Garde partagée : cf. backend/__tests__/helpers/native-guards.ts.
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 
 import { UsageJournalStore } from '../UsageJournalStore.js';
 import { summarizeAdjudications } from '../aggregate.js';
 import type { ProposalAdjudication } from '../types.js';
 
-// ABI connue (CLAUDE.md §6) : better-sqlite3 est recompilé pour Electron par
-// le postinstall ; sous le node de vitest le binding peut être incompatible.
-// On saute alors les tests SQLite (ils tournent en CI / après npm rebuild),
-// les tests purs (agrégats) tournent toujours.
-const sqliteAvailable = (() => {
-  try {
-    new Database(':memory:').close();
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 let dir: string;
 let dbPath: string;

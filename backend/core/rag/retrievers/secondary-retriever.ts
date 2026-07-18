@@ -79,6 +79,22 @@ export function createExpandQueryFrEn(
   return (query: string) => expandQueryWithDict(query, merged);
 }
 
+/**
+ * Single-string variant for retrievers that embed ONE query text (Tropy
+ * primary sources: one embedding + one BM25 pass). Joins the expanded
+ * variants after the original query; returns the query verbatim when no
+ * dictionary term matches — callers keep their exact previous behaviour in
+ * that case.
+ */
+export function expandQueryToText(
+  query: string,
+  userDictionary?: Record<string, string[]>
+): string {
+  const variants = createExpandQueryFrEn(userDictionary)(query);
+  const unique = Array.from(new Set(variants));
+  return unique.length > 1 ? unique.join(' ') : query;
+}
+
 function expandQueryWithDict(query: string, dict: Record<string, string[]>): string[] {
   const queries = [query];
   const lower = query.toLowerCase();

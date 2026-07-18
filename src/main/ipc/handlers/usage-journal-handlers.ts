@@ -45,6 +45,21 @@ export function setupUsageJournalHandlers() {
     }
   });
 
+  // Taux d'adjudication des propositions IA du jour (Phase 4c, lecture seule).
+  // Aucune entrée à valider : même contrat NO_PROJECT que usage:get-today.
+  ipcMain.handle('usage:get-adjudications', async () => {
+    try {
+      const adjudications = usageJournalService.getAdjudicationsToday();
+      if (!adjudications) {
+        return { ...errorResponse('No project open'), code: 'NO_PROJECT', adjudications: null };
+      }
+      return successResponse({ adjudications });
+    } catch (error: any) {
+      console.error('❌ usage:get-adjudications error:', error);
+      return { ...errorResponse(error), adjudications: null };
+    }
+  });
+
   // Miroir du mode applicatif (poussé par le renderer sur changement de workspace-mode).
   ipcMain.handle('usage:set-mode', async (_event, rawMode: unknown) => {
     const mode = validate(UsageSetModeSchema, rawMode);
@@ -57,5 +72,5 @@ export function setupUsageJournalHandlers() {
     }
   });
 
-  console.log('✅ Usage journal handlers registered (3 handlers)');
+  console.log('✅ Usage journal handlers registered (4 handlers)');
 }

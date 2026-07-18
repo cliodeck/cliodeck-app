@@ -7,6 +7,8 @@
  * truncation.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
+// Tests SQLite gardés individuellement : les tests « no db » tournent toujours.
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -46,7 +48,7 @@ describe('search_documents', () => {
     expect(payload.note).toMatch(/No brain\.db found/);
   });
 
-  it('emits a "no pdf_chunks table" note when the schema is incomplete', async () => {
+  it.skipIf(!sqliteAvailable)('emits a "no pdf_chunks table" note when the schema is incomplete', async () => {
     const dir = path.join(workspaceRoot, '.cliodeck');
     fs.mkdirSync(dir, { recursive: true });
     new Database(path.join(dir, 'brain.db')).close();
@@ -65,7 +67,7 @@ describe('search_documents', () => {
     expect(payload.note).toMatch(/no `pdf_chunks` table/i);
   });
 
-  it('returns chunks matching the query, decorated with parent doc metadata', async () => {
+  it.skipIf(!sqliteAvailable)('returns chunks matching the query, decorated with parent doc metadata', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, file_path)
@@ -99,7 +101,7 @@ describe('search_documents', () => {
     expect(payload.hits[0].pageNumber).toBe(1);
   });
 
-  it('ranks chunks with more occurrences ahead of chunks with fewer', async () => {
+  it.skipIf(!sqliteAvailable)('ranks chunks with more occurrences ahead of chunks with fewer', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, year) VALUES ('d1', 'doc', '2000')`
@@ -129,7 +131,7 @@ describe('search_documents', () => {
     expect(payload.hits[1].chunkId).toBe('c-rare');
   });
 
-  it('applies year + author filters with case-insensitive matching', async () => {
+  it.skipIf(!sqliteAvailable)('applies year + author filters with case-insensitive matching', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, author, year)

@@ -26,7 +26,7 @@ steps:
   - id: render
     kind: export
     with:
-      document: "{{ inputs.document_id }}"
+      document_id: "{{ inputs.document_id }}"
       format: pdf
       engine: pandoc
       style: chicago-author-date

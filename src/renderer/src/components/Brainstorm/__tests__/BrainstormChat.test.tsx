@@ -71,6 +71,9 @@ function installFusionMock(): MockApi {
   };
   (window as unknown as { electron: { fusion: { chat: unknown } } }).electron = {
     fusion: { chat: api },
+    // BrainstormChat lit la config LLM au montage (cloud check + modèle
+    // actif pour les propositions) — sans ce mock, l'effet crashe.
+    config: { get: vi.fn(async () => null) },
   } as never;
   Object.defineProperty(api, '_emitChunk', { get: () => chunkCb });
   Object.defineProperty(api, '_emitTool', { get: () => toolCb });

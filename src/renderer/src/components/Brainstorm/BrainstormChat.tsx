@@ -5,7 +5,7 @@
  * UnifiedMessage and provides the "send to write" action as message extras.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Highlighter, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
@@ -51,10 +51,36 @@ export const BrainstormChat: React.FC = () => {
   const [showConsentDialog, setShowConsentDialog] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
+  // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
+  // transmis aux propositions « draft Brainstorm » (source.model, Phase 4b).
+  const activeModelRef = useRef<string>('unknown');
+
   useEffect(() => {
-    window.electron.config.get('llm').then((llm: { backend: string; ollamaURL?: string } | null) => {
-      if (llm) setCloudCheck(isCloudProvider(llm));
-    }).catch(() => {});
+    window.electron.config
+      .get('llm')
+      .then(
+        (llm: {
+          backend: string;
+          ollamaURL?: string;
+          ollamaChatModel?: string;
+          claudeModel?: string;
+          openaiModel?: string;
+          mistralModel?: string;
+          geminiModel?: string;
+        } | null) => {
+          if (!llm) return;
+          setCloudCheck(isCloudProvider(llm));
+          const byBackend: Record<string, string | undefined> = {
+            ollama: llm.ollamaChatModel,
+            claude: llm.claudeModel,
+            openai: llm.openaiModel,
+            mistral: llm.mistralModel,
+            gemini: llm.geminiModel,
+          };
+          activeModelRef.current = byBackend[llm.backend] ?? 'unknown';
+        }
+      )
+      .catch(() => {});
   }, []);
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
@@ -68,8 +94,12 @@ export const BrainstormChat: React.FC = () => {
       // Insert at the user's current cursor when an editor is mounted;
       // fall back to append when neither editor exists yet (fusion 2.6,
       // A13 option a). The undo path is the editor's own native history
-      // — a single Cmd/Ctrl-Z reverts the splice.
-      editor.insertDraftAtCursor(block);
+      // — a single Cmd/Ctrl-Z reverts the splice. In CM6 the draft becomes
+      // an adjudicable proposal carrying the active model + mode.
+      editor.insertDraftAtCursor(block, {
+        model: activeModelRef.current,
+        task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
+      });
       setSentToWriteId(m.id);
       setWorkspaceMode('write');
     },
