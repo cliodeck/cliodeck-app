@@ -1,0 +1,51 @@
+{
+  "name": "@cliodeck/lezer-footnotes",
+  "version": "0.1.0",
+  "description": "Footnote extension for the Lezer Markdown parser ([^ref] references and [^ref]: block definitions), for CodeMirror 6 and any @lezer/markdown consumer",
+  "keywords": [
+    "lezer",
+    "lezer-markdown",
+    "codemirror",
+    "codemirror6",
+    "markdown",
+    "footnotes",
+    "pandoc"
+  ],
+  "license": "MIT",
+  "author": "Frédéric Clavert",
+  "homepage": "https://github.com/cliodeck/cliodeck-app/tree/main/packages/lezer-footnotes",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cliodeck/cliodeck-app.git",
+    "directory": "packages/lezer-footnotes"
+  },
+  "bugs": "https://github.com/cliodeck/cliodeck-app/issues",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "npx tsup",
+    "prepublishOnly": "npx tsup"
+  },
+  "peerDependencies": {
+    "@lezer/highlight": "^1.0.0",
+    "@lezer/markdown": "^1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
