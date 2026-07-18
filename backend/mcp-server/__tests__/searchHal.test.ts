@@ -61,7 +61,7 @@ describe('parseHalResponse', () => {
             'From History to Fiction',
           ],
           authFullName_s: ['Alice Dupont', 'Bob Martin'],
-          abstract_s: ['Un long résumé qui dépasse les 400 caractères. '.repeat(20)],
+          abstract_s: ['Un long résumé qui dépasse les 2000 caractères du snippet. '.repeat(40)],
           uri_s: 'https://hal.science/hal-12345v1',
           docType_s: 'THESE',
           producedDateY_i: 2012,
@@ -97,7 +97,7 @@ describe('parseHalResponse', () => {
     expect(h0.language).toBe('fr');
     expect(h0.url).toBe('https://hal.science/hal-12345v1');
     expect(h0.snippet.endsWith('…')).toBe(true);
-    expect(h0.snippet.length).toBeLessThanOrEqual(401);
+    expect(h0.snippet.length).toBeLessThanOrEqual(2001);
   });
 
   it('handles missing optional fields without throwing', () => {

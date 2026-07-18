@@ -5,6 +5,8 @@
  * LIKE search, the optional year filter, and content truncation.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
+// Tests SQLite gardés individuellement : les tests « no db » tournent toujours.
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -44,7 +46,7 @@ describe('search_zotero', () => {
     expect(payload.note).toMatch(/Index a Zotero library first/i);
   });
 
-  it('returns a clear note when the pdf_documents table is missing', async () => {
+  it.skipIf(!sqliteAvailable)('returns a clear note when the pdf_documents table is missing', async () => {
     const dir = path.join(workspaceRoot, '.cliodeck');
     fs.mkdirSync(dir, { recursive: true });
     // Empty db with no tables. The tool should detect that and bail out
@@ -67,7 +69,7 @@ describe('search_zotero', () => {
     expect(payload.note).toMatch(/no `pdf_documents` table/i);
   });
 
-  it('matches across title / author / bibtex_key, applies the year filter', async () => {
+  it.skipIf(!sqliteAvailable)('matches across title / author / bibtex_key, applies the year filter', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     const insert = db.prepare(
       `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, file_path, summary)
@@ -95,7 +97,7 @@ describe('search_zotero', () => {
     expect(payload.hits.map((h: { id: string }) => h.id)).toEqual(['d3']);
   });
 
-  it('truncates oversize summary content with an ellipsis', async () => {
+  it.skipIf(!sqliteAvailable)('truncates oversize summary content with an ellipsis', async () => {
     const db = createTempVectorsDb(workspaceRoot);
     const long = 'L'.repeat(2000);
     db.prepare(

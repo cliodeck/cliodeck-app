@@ -6,6 +6,8 @@
  * truncates chunk content to 800 chars. We verify each of those.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
+// Tests SQLite gardés individuellement : les tests « no db » tournent toujours.
 import { registerSearchTropy } from '../tools/searchTropy.js';
 import {
   createCapturingServer,
@@ -45,7 +47,7 @@ describe('search_tropy', () => {
     expect(events[0].output).toEqual({ itemCount: 0 });
   });
 
-  it('matches by chunk content, source title, AND transcription', async () => {
+  it.skipIf(!sqliteAvailable)('matches by chunk content, source title, AND transcription', async () => {
     const db = createTempPrimarySourcesDb(workspaceRoot);
     db.prepare(
       `INSERT INTO tropy_sources (id, title, transcription, date, creator, archive, collection)
@@ -83,7 +85,7 @@ describe('search_tropy', () => {
     expect(payload.hits[0].archive).toBe('UN');
   });
 
-  it('orders by date DESC and truncates oversize content', async () => {
+  it.skipIf(!sqliteAvailable)('orders by date DESC and truncates oversize content', async () => {
     const db = createTempPrimarySourcesDb(workspaceRoot);
     const long = 'spam '.repeat(300);
     db.prepare(

@@ -239,13 +239,27 @@ export class RecipeRunner {
     for (const step of recipe.steps) {
       emit({ kind: 'step_start', at: now(), stepId: step.id, stepKind: step.kind });
       const handler = this.handlers[step.kind];
+      // Les gabarits `{{ inputs.x }}` / `{{ stepId.champ }}` des paramètres
+      // `with` sont résolus AVANT le handler — sans quoi seuls les prompts
+      // LLM les voyaient et `export.with.document_id: "{{ inputs.document_id }}"`
+      // arrivait littéral. `prompt` reste exclu : llmHandler l'interpole
+      // lui-même, et une double passe substituerait des `{{ }}` présents
+      // dans la sortie d'un step précédent.
+      const resolvedWith: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(step.with)) {
+        resolvedWith[key] =
+          key !== 'prompt' && typeof value === 'string'
+            ? interpolate(value, { priorOutputs, inputs })
+            : value;
+      }
+      const resolvedStep = { ...step, with: resolvedWith };
       try {
         // Tag les appels d'inférence de ce step avec le mode `recipe` et l'id de
         // recipe pour le journal d'usage IA.
         const { output, stub } = await runWithJournalContext(
           { mode: 'recipe', recipeId: recipe.name, workspaceRoot: this.workspaceRoot },
           () =>
-            handler(step, {
+            handler(resolvedStep, {
               recipe,
               inputs,
               priorOutputs,

@@ -17,6 +17,7 @@ import { ChunkDeduplicator } from '../../../backend/core/chunking/ChunkDeduplica
 // Typed provider registry (fusion 1.2c) — replaces the dual
 // `pdfService.getOllamaClient() / getLLMProviderManager()` pattern.
 import { configManager } from './config-manager.js';
+import { expandQueryToText } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { runBatch } from '../../../backend/core/usage-journal/context.js';
 import type {
@@ -760,19 +761,15 @@ class TropyService {
   }
 
   /**
-   * Expand query with multilingual terms (FR/EN)
-   * This helps find relevant results across languages
+   * Expand query with multilingual terms (FR/EN).
+   * Même mécanisme que SecondaryRetriever (dictionnaire built-in +
+   * `rag.queryExpansionDictionary` de la config), réutilisé via
+   * `expandQueryToText` : requête inchangée quand aucun terme ne matche.
+   * Comblait le trou documenté « expansion seulement côté secondaire ».
    */
   private async expandQueryMultilingual(query: string): Promise<string> {
-    // Simple heuristic: if query is short, keep it as is
-    if (query.length < 20) {
-      return query;
-    }
-
-    // For longer queries, we could use LLM to translate key terms
-    // For now, just return the original query
-    // TODO: Add LLM-based term expansion for better cross-lingual search
-    return query;
+    const userDict = configManager.getRAGConfig().queryExpansionDictionary;
+    return expandQueryToText(query, userDict);
   }
 
   /**

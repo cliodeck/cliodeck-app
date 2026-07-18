@@ -239,3 +239,70 @@ steps:
     expect(res.outputs.second).toBe('FINAL');
   });
 });
+
+describe('interpolation des paramètres `with` (finitions post-CM6)', () => {
+  it('résout {{ inputs.x }} dans les with des steps non-LLM avant le handler', async () => {
+    const recipe = parseRecipe(`
+name: export-doc
+version: 0.1.0
+inputs:
+  document_id:
+    type: string
+    required: true
+steps:
+  - id: render
+    kind: export
+    with:
+      document_id: "{{ inputs.document_id }}"
+      format: pdf
+`);
+    let received: Record<string, unknown> | null = null;
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('unused'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        export: async (step) => {
+          received = step.with;
+          return { output: { ok: true } };
+        },
+      },
+    });
+    const res = await runner.run(recipe, { document_id: 'chapitres/ch-03.md' });
+    expect(res.ok).toBe(true);
+    expect(received).not.toBeNull();
+    expect(received!.document_id).toBe('chapitres/ch-03.md');
+    expect(received!.format).toBe('pdf'); // les valeurs sans gabarit passent telles quelles
+  });
+
+  it("n'interpole PAS with.prompt dans le runner (llmHandler s'en charge, une seule passe)", async () => {
+    const recipe = parseRecipe(`
+name: prompt-passthrough
+version: 0.1.0
+inputs:
+  sujet:
+    type: string
+    required: true
+steps:
+  - id: think
+    kind: brainstorm
+    with:
+      prompt: "parle de {{ inputs.sujet }}"
+`);
+    let seenPrompt = '';
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('ok'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        brainstorm: async (step) => {
+          seenPrompt = String(step.with.prompt);
+          return { output: 'ok' };
+        },
+      },
+    });
+    const res = await runner.run(recipe, { sujet: 'Danzig' });
+    expect(res.ok).toBe(true);
+    // Le gabarit arrive intact au handler : c'est llmHandler qui interpole,
+    // et une double passe substituerait des {{ }} venus d'une sortie de step.
+    expect(seenPrompt).toBe('parle de {{ inputs.sujet }}');
+  });
+});

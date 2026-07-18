@@ -26,7 +26,7 @@
     "scripts/cli/**/*"
   ],
   "exclude": [
-    "backend/__tests__/**/*",
+    "backend/**/__tests__/**/*",
     "src/main/**/__tests__/**/*",
     "scripts/__tests__/**/*"
   ]

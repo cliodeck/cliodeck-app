@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 import { VectorStore } from '../core/vector-store/VectorStore';
 import type { PDFDocument, DocumentChunk } from '../types/pdf-document';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-describe('VectorStore', () => {
+// Suite SQLite : gardée par sqliteAvailable (ABI better-sqlite3 vs node de
+// vitest — cf. backend/__tests__/helpers/native-guards.ts).
+describe.skipIf(!sqliteAvailable)('VectorStore', () => {
   let vectorStore: VectorStore;
   let testProjectDir: string;
 

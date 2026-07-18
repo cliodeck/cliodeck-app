@@ -175,7 +175,12 @@ const exportHandler: StepHandler = async (
   // for backward compatibility. We reject paths that escape the workspace
   // (simple string check via path.relative — good enough for trusted local
   // recipes, and cheaper than resolving symlinks).
-  const documentRelPath = asString(step.with.document_id).trim() || 'document.md';
+  // `document_id` est la clé canonique (nom de l'input déclaré) ; `document`
+  // reste accepté — la recette builtin export-chapitre-chicago l'utilisait.
+  const documentRelPath =
+    asString(step.with.document_id).trim() ||
+    asString(step.with.document).trim() ||
+    'document.md';
   const docPath = path.join(ctx.workspaceRoot, documentRelPath);
   const rel = path.relative(ctx.workspaceRoot, docPath);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
