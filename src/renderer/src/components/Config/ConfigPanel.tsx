@@ -158,7 +158,6 @@ export const ConfigPanel: React.FC = () => {
     wordWrap: true,
     showMinimap: true,
     fontFamily: 'system',
-    defaultEditorMode: 'wysiwyg',
   });
 
   const [zoteroConfig, setZoteroConfig] = useState<ZoteroConfig>({
@@ -199,7 +198,6 @@ export const ConfigPanel: React.FC = () => {
       wordWrap: editorSettings.wordWrap,
       showMinimap: editorSettings.showMinimap,
       fontFamily: editorSettings.fontFamily,
-      defaultEditorMode: editorSettings.defaultEditorMode || 'wysiwyg',
     });
   }, [editorSettings]);
 
@@ -260,7 +258,6 @@ export const ConfigPanel: React.FC = () => {
         wordWrap: editorConfig.wordWrap,
         showMinimap: editorConfig.showMinimap,
         fontFamily: editorConfig.fontFamily,
-        defaultEditorMode: editorConfig.defaultEditorMode,
       });
 
       setSaveMessageType('success');
@@ -306,7 +303,6 @@ export const ConfigPanel: React.FC = () => {
         wordWrap: true,
         showMinimap: true,
         fontFamily: 'system',
-        defaultEditorMode: 'wysiwyg',
       });
 
       await handleSaveConfig();

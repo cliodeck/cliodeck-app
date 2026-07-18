@@ -5,6 +5,49 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — branche `feat/editor-cm6`
+
+### Changed — l'éditeur d'écriture migre vers CodeMirror 6
+
+La paire Milkdown (WYSIWYG) / Monaco (source) est remplacée par un
+éditeur CodeMirror 6 unique en rendu live, façon Obsidian/Zettlr. Plan
+et journal du chantier : `docs/archive/PLAN_migration-editeur-cm6.md` et
+`docs/archive/migration-cm6.md` ; architecture : `docs/editor-architecture.md`.
+
+Les raisons de la migration :
+
+- **Intégrité du document.** Le texte markdown est la source de vérité :
+  l'éditeur ne sérialise jamais — ouvrir puis sauvegarder sans modifier
+  produit un fichier identique **octet par octet** (fins de ligne CRLF ou
+  mixtes comprises ; corpus de non-régression `test-fixtures/editor/`).
+  Milkdown resérialisait via ProseMirror : échappements parasites
+  (`\[@clef\]`), notes réécrites, blancs normalisés.
+- **L'appareil savant en natif.** Notes de bas de page (exposants,
+  infobulle, popup d'édition en place, renumérotation manuelle) et
+  citations Pandoc (pastilles, clusters `[@a; @b]`, locators,
+  autocomplétion `@` depuis Zotero, clés non résolues signalées) sont
+  parsées par deux extensions Lezer maison (`src/editor/lezer-extensions/`,
+  destinées à une publication MIT séparée).
+- **Traçabilité de l'écriture IA.** Toute transaction porte une origine
+  (`changeOrigin`) et toute intervention IA passe par le contrat
+  propositionnel (`docs/editor-proposals.md`) : propositions atomiques
+  acceptées/rejetées/modifiées, adjudications journalisées dans les deux
+  journaux (recherche : contenus complets ; usage IA : agrégats sans
+  contenu).
+
+### Removed
+
+- Milkdown (`@milkdown/crepe`, `@milkdown/kit`), Monaco
+  (`@monaco-editor/react`) et la bascule WYSIWYG/source — y compris le
+  réglage « éditeur par défaut » des projets et des Réglages.
+- L'éditeur YAML des recettes passe aussi à CodeMirror (`lang-yaml`).
+- Le correctif d'export `unescapeCitations` (PDF et Word) : il réparait
+  les échappements produits par Milkdown. Les anciens documents
+  contenant encore des `\[@clef\]` ne sont **pas** réécrits
+  automatiquement — un chercher-remplacer manuel (`\[@` → `[@`,
+  `\]` → `]` dans les citations) suffit, l'éditeur préserve désormais
+  le fichier tel quel.
+
 ## [2.0.0] — Unreleased (fusion branch `feat/fusion-cliobrain`)
 
 Absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into

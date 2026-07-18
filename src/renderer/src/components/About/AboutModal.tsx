@@ -15,9 +15,8 @@ interface Dependency {
 }
 
 const dependencies: Dependency[] = [
-  { name: '@milkdown/crepe', license: 'MIT', url: 'https://github.com/Milkdown/milkdown' },
-  { name: '@milkdown/kit', license: 'MIT', url: 'https://github.com/Milkdown/milkdown' },
-  { name: '@monaco-editor/react', license: 'MIT', url: 'https://github.com/suren-atoyan/monaco-react' },
+  { name: 'CodeMirror 6', license: 'MIT', url: 'https://codemirror.net' },
+  { name: '@lezer/markdown', license: 'MIT', url: 'https://github.com/lezer-parser/markdown' },
   { name: 'better-sqlite3', license: 'MIT', url: 'https://github.com/WiseLibs/better-sqlite3' },
   { name: 'docx', license: 'MIT', url: 'https://docx.js.org' },
   { name: 'docxtemplater', license: 'MIT', url: 'https://github.com/open-xml-templating/docxtemplater' },

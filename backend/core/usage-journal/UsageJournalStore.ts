@@ -16,9 +16,12 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, chmodSync } from 'fs';
 import path from 'path';
 import type {
+  AdjudicationDecision,
+  DecisionDraft,
   InferenceEvent,
   InferenceKind,
   InferenceStatus,
+  ProposalAdjudication,
   SessionDecisionLink,
   UsageDecision,
   UsageMode,
@@ -83,6 +86,50 @@ function rowToEvent(r: EventRow): InferenceEvent {
   };
 }
 
+interface AdjudicationRow {
+  id: string;
+  at: string;
+  decision: string;
+  category: string;
+  model: string;
+  task: string;
+  workspace: string | null;
+}
+
+interface DraftRow {
+  id: string;
+  at: string;
+  category: string;
+  model: string;
+  task: string;
+  note: string;
+  status: string;
+}
+
+function rowToAdjudication(r: AdjudicationRow): ProposalAdjudication {
+  return {
+    id: r.id,
+    at: r.at,
+    decision: r.decision as AdjudicationDecision,
+    category: r.category,
+    model: r.model,
+    task: r.task,
+    workspace: r.workspace ?? undefined,
+  };
+}
+
+function rowToDraft(r: DraftRow): DecisionDraft {
+  return {
+    id: r.id,
+    at: r.at,
+    category: r.category,
+    model: r.model,
+    task: r.task,
+    note: r.note,
+    status: r.status as DecisionDraft['status'],
+  };
+}
+
 function rowToDecision(r: DecisionRow): UsageDecision {
   return {
     id: r.id,
@@ -96,7 +143,7 @@ function rowToDecision(r: DecisionRow): UsageDecision {
   };
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export class UsageJournalStore {
   private db: Database.Database;
@@ -167,6 +214,34 @@ export class UsageJournalStore {
         PRIMARY KEY (session_id, decision_id)
       );
 
+      -- v2 (plan CM6, Phase 4) : adjudications de propositions IA de l'éditeur.
+      -- Table dédiée, PAS un nouveau kind d'inference_events : ce n'est pas un
+      -- appel d'inférence (aucune colonne provider/tokens n'aurait de sens) et
+      -- l'union InferenceKind reste fermé. Aucune colonne de contenu — les
+      -- textes vivent dans le journal de recherche (brain.db), jamais ici.
+      CREATE TABLE IF NOT EXISTS proposal_adjudications (
+        id TEXT PRIMARY KEY,
+        at TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        category TEXT NOT NULL,
+        model TEXT NOT NULL,
+        task TEXT NOT NULL,
+        workspace TEXT
+      );
+
+      -- v2 : brouillons de la couche décisionnelle issus des annotations de
+      -- rejet échantillonnées. Distincts de usage_decisions (jamais promus
+      -- automatiquement — décision de design, voir INSTRUCTIONS §7).
+      CREATE TABLE IF NOT EXISTS decision_drafts (
+        id TEXT PRIMARY KEY,
+        at TEXT NOT NULL,
+        category TEXT NOT NULL,
+        model TEXT NOT NULL,
+        task TEXT NOT NULL,
+        note TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft'
+      );
+
       CREATE TABLE IF NOT EXISTS journal_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -179,6 +254,9 @@ export class UsageJournalStore {
       CREATE INDEX IF NOT EXISTS idx_events_workspace ON inference_events(workspace);
       CREATE INDEX IF NOT EXISTS idx_decisions_date ON usage_decisions(date);
       CREATE INDEX IF NOT EXISTS idx_session_decision_decision ON session_decision(decision_id);
+      CREATE INDEX IF NOT EXISTS idx_adjudications_at ON proposal_adjudications(at);
+      CREATE INDEX IF NOT EXISTS idx_adjudications_category ON proposal_adjudications(category);
+      CREATE INDEX IF NOT EXISTS idx_drafts_status ON decision_drafts(status);
     `);
   }
 
@@ -189,9 +267,21 @@ export class UsageJournalStore {
     const current = row ? parseInt(row.value, 10) : 0;
 
     if (current === 0) {
+      // Base neuve : createTables vient de créer le schéma courant.
       this.db
         .prepare('INSERT OR REPLACE INTO journal_meta (key, value) VALUES (?, ?)')
         .run('schema_version', String(SCHEMA_VERSION));
+      return;
+    }
+
+    // v1 → v2 (plan CM6, Phase 4) : ajout des tables proposal_adjudications
+    // et decision_drafts. Purement additif — les CREATE TABLE IF NOT EXISTS de
+    // createTables() ont déjà posé les tables sur la base v1 ; il ne reste
+    // qu'à acter la version. Les données v1 ne sont pas touchées.
+    if (current < 2) {
+      this.db
+        .prepare('INSERT OR REPLACE INTO journal_meta (key, value) VALUES (?, ?)')
+        .run('schema_version', '2');
     }
     // Futures migrations : `if (current < N) { …ALTER…; bump; }`.
   }
@@ -268,6 +358,56 @@ export class UsageJournalStore {
         verdict: d.verdict,
         verdictNote: d.verdictNote ?? null,
       });
+  }
+
+  /** Insère une adjudication de proposition (couche factuelle v2, sans contenu). */
+  insertAdjudication(a: ProposalAdjudication): void {
+    this.db
+      .prepare(`
+        INSERT INTO proposal_adjudications (id, at, decision, category, model, task, workspace)
+        VALUES (@id, @at, @decision, @category, @model, @task, @workspace)
+      `)
+      .run({
+        id: a.id,
+        at: a.at,
+        decision: a.decision,
+        category: a.category,
+        model: a.model,
+        task: a.task,
+        workspace: a.workspace ?? null,
+      });
+  }
+
+  /** Adjudications dont l'horodatage est dans [fromISO, toISO), triées par date. */
+  getAdjudicationsBetween(fromISO: string, toISO: string): ProposalAdjudication[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM proposal_adjudications WHERE at >= ? AND at < ? ORDER BY at ASC'
+      )
+      .all(fromISO, toISO) as AdjudicationRow[];
+    return rows.map(rowToAdjudication);
+  }
+
+  /** Insère un brouillon décisionnel (annotation de rejet échantillonnée). */
+  insertDecisionDraft(d: DecisionDraft): void {
+    this.db
+      .prepare(`
+        INSERT INTO decision_drafts (id, at, category, model, task, note, status)
+        VALUES (@id, @at, @category, @model, @task, @note, @status)
+      `)
+      .run({ ...d });
+  }
+
+  /** Brouillons décisionnels, filtrés par statut si fourni, triés par date. */
+  getDecisionDrafts(status?: DecisionDraft['status']): DecisionDraft[] {
+    const rows = (
+      status
+        ? this.db
+            .prepare('SELECT * FROM decision_drafts WHERE status = ? ORDER BY at ASC')
+            .all(status)
+        : this.db.prepare('SELECT * FROM decision_drafts ORDER BY at ASC').all()
+    ) as DraftRow[];
+    return rows.map(rowToDraft);
   }
 
   /** Événements dont l'horodatage est dans [fromISO, toISO), triés par date. */

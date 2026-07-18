@@ -430,27 +430,6 @@ $body$
   }
 };
 
-/**
- * Unescape citation keys that were escaped by Milkdown editor
- * Transforms \[@citation\_key] back to [@citation_key]
- */
-const unescapeCitations = (content: string): string => {
-  // Pattern to match escaped citations: \[@key\_with\_underscores]
-  // This handles the backslash before @ and underscores within citation keys
-  return content
-    // First, unescape the opening bracket: \[@ -> [@
-    .replace(/\\(\[@)/g, '$1')
-    // Then, unescape underscores within citation brackets [@...\_...] -> [@..._...]
-    .replace(/(\[@[^\]]*)\\_([^\]]*\])/g, (_match, before, after) => {
-      // Recursively unescape all underscores in the citation
-      let result = before + '_' + after;
-      while (result.includes('\\_')) {
-        result = result.replace('\\_', '_');
-      }
-      return result;
-    });
-};
-
 // MARK: - Service
 
 export class PDFExportService {
@@ -539,9 +518,12 @@ export class PDFExportService {
         }
       }
 
-      // Write markdown content (unescape citations that were escaped by Milkdown)
+      // Write markdown content. L'éditeur CM6 n'échappe jamais le
+      // markdown : le hack unescapeCitations de l'ère Milkdown a été
+      // retiré en Phase 5 (les \[@clef\] résiduels de vieux documents se
+      // nettoient à la main, cf. CHANGELOG).
       const mdPath = join(tempDir, 'input.md');
-      let cleanedContent = unescapeCitations(options.content);
+      let cleanedContent = options.content;
 
       // In-process CitationEngine pipeline (opt-in). Runs BEFORE pandoc —
       // resolves [@key] markers into Pandoc [^N] footnotes and appends a

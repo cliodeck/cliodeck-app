@@ -3,7 +3,7 @@
  *
  * Two views:
  *   1. Form mode: structured fields for name, version, description, inputs, steps
- *   2. YAML mode: Monaco editor for power users who prefer raw YAML
+ *   2. YAML mode: CodeMirror editor for power users who prefer raw YAML
  *
  * Changes validate on save. Only user-scope recipes can be saved;
  * builtin recipes open in read-only mode.
@@ -21,7 +21,7 @@ import {
   GripVertical,
   AlertCircle,
 } from 'lucide-react';
-import Editor from '@monaco-editor/react';
+import { YamlEditor } from '../common/YamlEditor';
 import yaml from 'js-yaml';
 
 interface RecipeInputDef {
@@ -304,21 +304,11 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
           )}
 
           {mode === 'yaml' && (
-            <Editor
+            <YamlEditor
               height="100%"
-              language="yaml"
-              theme="vs-dark"
               value={rawYaml}
               onChange={handleYamlChange}
-              options={{
-                readOnly,
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                tabSize: 2,
-              }}
+              readOnly={readOnly}
             />
           )}
 

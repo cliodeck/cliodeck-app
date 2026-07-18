@@ -9,7 +9,7 @@ type SourceType = 'document' | 'selection';
 
 export const SlideGenerationPanel: React.FC = () => {
   const { t, i18n } = useTranslation('common');
-  const { monacoEditor } = useEditorStore();
+  const { editorFacade } = useEditorStore();
   const { closePanel } = useSlidesStore();
   const { citations } = useBibliographyStore();
 
@@ -24,15 +24,14 @@ export const SlideGenerationPanel: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void)[]>([]);
 
-  // Check if Monaco has a non-empty selection
+  // Check if the editor has a non-empty selection
   useEffect(() => {
-    if (!monacoEditor) return;
-    const selection = monacoEditor.getSelection();
-    if (selection && !selection.isEmpty()) {
+    if (!editorFacade) return;
+    if (editorFacade.getSelectionText() !== null) {
       setHasSelection(true);
       setSourceType('selection');
     }
-  }, [monacoEditor]);
+  }, [editorFacade]);
 
   // Auto-scroll the textarea as content streams in
   useEffect(() => {
@@ -49,14 +48,12 @@ export const SlideGenerationPanel: React.FC = () => {
   }, []);
 
   const getSourceText = (): string | null => {
-    if (!monacoEditor) return null;
+    if (!editorFacade) return null;
     if (sourceType === 'selection') {
-      const selection = monacoEditor.getSelection();
-      if (selection && !selection.isEmpty()) {
-        return monacoEditor.getModel()?.getValueInRange(selection) ?? null;
-      }
+      const selected = editorFacade.getSelectionText();
+      if (selected !== null) return selected;
     }
-    return monacoEditor.getValue() ?? null;
+    return editorFacade.getValue();
   };
 
   const handleGenerate = async () => {
@@ -114,26 +111,16 @@ export const SlideGenerationPanel: React.FC = () => {
   };
 
   const handleReplace = () => {
-    if (!monacoEditor || !streamedContent) return;
-    const model = monacoEditor.getModel();
-    if (!model) return;
-    const fullRange = model.getFullModelRange();
-    monacoEditor.executeEdits('ai-replace', [{ range: fullRange, text: streamedContent }]);
-    monacoEditor.focus();
+    if (!editorFacade || !streamedContent) return;
+    editorFacade.setValue(streamedContent);
+    editorFacade.focus();
     closePanel();
   };
 
   const handleAppend = () => {
-    if (!monacoEditor || !streamedContent) return;
-    const model = monacoEditor.getModel();
-    if (!model) return;
-    const lastLine = model.getLineCount();
-    const lastCol = model.getLineMaxColumn(lastLine);
-    monacoEditor.executeEdits('ai-append', [{
-      range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
-      text: '\n\n' + streamedContent,
-    }]);
-    monacoEditor.focus();
+    if (!editorFacade || !streamedContent) return;
+    editorFacade.appendText('\n\n' + streamedContent);
+    editorFacade.focus();
     closePanel();
   };
 

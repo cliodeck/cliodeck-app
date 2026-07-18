@@ -134,10 +134,15 @@
     "autoSaveDelay": "Verzögerung beim automatischen Speichern",
     "autoSaveDelayHelp": "Zeit in Sekunden vor dem automatischen Speichern nach der letzten Bearbeitung",
     "autoSaveDelaySeconds": "{{seconds}} Sekunden",
-    "defaultEditorMode": "Standard-Editor",
-    "defaultEditorModeHelp": "Wählen Sie den Editor, der beim Öffnen eines Dokuments angezeigt wird",
-    "modeWysiwyg": "Visuell (Milkdown)",
-    "modeSource": "Quellcode (Monaco)"
+    "citationNotFound": "Schlüssel nicht in der Bibliografie gefunden",
+    "footnoteNoDefinition": "Fehlende Definition — Cmd/Strg+Klick zum Erstellen",
+    "frontmatterFolded": "Frontmatter eingeklappt — zum Aufklappen klicken",
+    "frontmatterFold": "Frontmatter einklappen",
+    "proposalAccept": "Vorschlag annehmen (Tab)",
+    "proposalReject": "Vorschlag ablehnen (Esc)",
+    "proposalModify": "Vorschlag bearbeiten",
+    "proposalWhy": "Warum? (optional, Eingabe zum Senden)",
+    "proposalApply": "Übernehmen"
   },
   "ui": {
     "title": "Benutzeroberfläche",
@@ -307,12 +312,7 @@
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
-    "loading": "Projekt wird geöffnet...",
-    "defaultEditor": "Standard-Editor",
-    "defaultEditorHelp": "Wählen Sie den Editor, der beim Öffnen von document.md verwendet wird",
-    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
-    "defaultEditorSource": "Monaco (reines Markdown)",
-    "defaultEditorSaveError": "Fehler beim Speichern des Standard-Editors"
+    "loading": "Projekt wird geöffnet..."
   },
   "export": {
     "pdf": {
@@ -740,8 +740,7 @@
     "markdown": "Markdown",
     "openError": "Fehler beim Öffnen der Datei",
     "saveError": "Fehler beim Speichern der Datei",
-    "wysiwygMode": "Visueller Modus (WYSIWYG)",
-    "sourceMode": "Quellmodus (Markdown)"
+    "renumberFootnotes": "Fußnoten neu nummerieren"
   },
   "ragSettings": {
     "provider": "LLM-Anbieter",

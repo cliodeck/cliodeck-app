@@ -134,10 +134,15 @@
     "autoSaveDelay": "Délai de sauvegarde automatique",
     "autoSaveDelayHelp": "Temps en secondes avant la sauvegarde automatique après la dernière modification",
     "autoSaveDelaySeconds": "{{seconds}} secondes",
-    "defaultEditorMode": "Éditeur par défaut",
-    "defaultEditorModeHelp": "Choisissez l'éditeur affiché à l'ouverture d'un document",
-    "modeWysiwyg": "Visuel (Milkdown)",
-    "modeSource": "Source (Monaco)"
+    "citationNotFound": "Clé introuvable dans la bibliographie",
+    "footnoteNoDefinition": "Définition manquante — Cmd/Ctrl+clic pour la créer",
+    "frontmatterFolded": "Frontmatter replié — cliquer pour déplier",
+    "frontmatterFold": "Replier le frontmatter",
+    "proposalAccept": "Accepter la proposition (Tab)",
+    "proposalReject": "Rejeter la proposition (Échap)",
+    "proposalModify": "Modifier la proposition",
+    "proposalWhy": "Pourquoi ? (optionnel, Entrée pour envoyer)",
+    "proposalApply": "Appliquer"
   },
   "ui": {
     "title": "Apparence",
@@ -307,12 +312,7 @@
     "zoteroCollectionKey": "Cle de collection",
     "zoteroCollectionKeyPlaceholder": "Entrez la cle de collection (optionnel)",
     "zoteroCollectionKeyHelp": "La cle d'une collection specifique (optionnel)",
-    "loading": "Ouverture du projet...",
-    "defaultEditor": "Éditeur par défaut",
-    "defaultEditorHelp": "Choisissez l'éditeur utilisé à l'ouverture de document.md",
-    "defaultEditorWysiwyg": "Milkdown (WYSIWYG)",
-    "defaultEditorSource": "Monaco (Markdown brut)",
-    "defaultEditorSaveError": "Erreur lors de la sauvegarde de l'éditeur par défaut"
+    "loading": "Ouverture du projet..."
   },
   "export": {
     "pdf": {
@@ -740,8 +740,7 @@
     "markdown": "Markdown",
     "openError": "Erreur lors de l'ouverture du fichier",
     "saveError": "Erreur lors de la sauvegarde du fichier",
-    "wysiwygMode": "Mode visuel (WYSIWYG)",
-    "sourceMode": "Mode source (Markdown)"
+    "renumberFootnotes": "Renuméroter les notes"
   },
   "ragSettings": {
     "provider": "Provider LLM",

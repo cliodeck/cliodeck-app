@@ -13,8 +13,13 @@
   line-height: 1.2;
 }
 
-.stat-item {
+/* Règles scopées sous .document-stats : d'autres panneaux (PDFIndexPanel,
+   PrimarySourceStats…) définissent un .stat-item global en colonne qui
+   écraserait ces règles à spécificité égale — c'était la cause de la barre
+   illisible (items sur deux lignes rognés dans 28 px). */
+.document-stats .stat-item {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 0.35rem;
   white-space: nowrap;
@@ -23,7 +28,7 @@
   border-radius: 4px;
 }
 
-.stat-label {
+.document-stats .stat-label {
   color: var(--text-muted);
   font-weight: 500;
   font-size: 10px;
@@ -31,7 +36,7 @@
   letter-spacing: 0.3px;
 }
 
-.stat-value {
+.document-stats .stat-value {
   color: var(--text-primary);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -46,7 +51,7 @@
     padding: 0.3rem 0.6rem;
   }
 
-  .stat-item {
+  .document-stats .stat-item {
     padding: 0.1rem 0.35rem;
   }
 }

@@ -255,7 +255,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
                 </Suspense>
               ) : (
                 centerPanel || (
-                  <div className="panel-placeholder">Éditeur Markdown (Monaco Editor)</div>
+                  <div className="panel-placeholder">Éditeur Markdown</div>
                 )
               )}
             </div>

@@ -56,11 +56,20 @@
   font-weight: normal;
 }
 
-/* Editor Content */
+/* Editor Content — colonne flex : l'éditeur prend l'espace restant, la
+   barre de stats (28 px) reste entièrement visible sous lui. */
 .editor-content {
   flex: 1;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-content .codemirror-editor {
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }
 
 /* Resize Handle */

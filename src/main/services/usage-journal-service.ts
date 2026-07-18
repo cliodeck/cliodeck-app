@@ -29,7 +29,9 @@ import {
 import { summarize, type UsageSummary } from '../../../backend/core/usage-journal/aggregate.js';
 import { localDateKey } from '../../../backend/core/usage-journal/annotate.js';
 import type {
+  DecisionDraft,
   InferenceEvent,
+  RecordAdjudicationInput,
   RecordInferenceInput,
   UsageDecision,
   UsageMode,
@@ -180,6 +182,50 @@ class UsageJournalService {
       this.scheduleFlush();
     } catch (err) {
       console.warn('🧾 Usage journal record error (ignored):', err);
+    }
+  }
+
+  /**
+   * Enregistre une adjudication de proposition IA (plan CM6, Phase 4).
+   * Fire-and-forget, même philosophie que `record()` : jamais d'erreur remontée.
+   * Les adjudications sont des actions humaines (rares) — écriture directe,
+   * pas de buffer. Le type d'entrée ne PEUT pas transporter de contenu.
+   */
+  recordAdjudication(input: RecordAdjudicationInput): void {
+    if (!this.store) return;
+    try {
+      this.store.insertAdjudication({
+        id: randomUUID(),
+        at: input.at,
+        decision: input.decision,
+        category: input.category,
+        model: input.model,
+        task: input.task,
+        workspace: input.workspace ?? this.workspaceRoot ?? undefined,
+      });
+    } catch (err) {
+      console.warn('🧾 Usage journal adjudication error (ignored):', err);
+    }
+  }
+
+  /**
+   * Enregistre une annotation de rejet échantillonnée comme **brouillon** de la
+   * couche décisionnelle (jamais promue automatiquement en décision).
+   */
+  recordDecisionDraft(input: Omit<DecisionDraft, 'id' | 'status'>): void {
+    if (!this.store) return;
+    try {
+      this.store.insertDecisionDraft({
+        id: randomUUID(),
+        at: input.at,
+        category: input.category,
+        model: input.model,
+        task: input.task,
+        note: input.note,
+        status: 'draft',
+      });
+    } catch (err) {
+      console.warn('🧾 Usage journal draft error (ignored):', err);
     }
   }
 

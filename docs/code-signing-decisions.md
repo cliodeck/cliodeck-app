@@ -31,5 +31,5 @@ Options:
 - Or manual signing on local machine before each release?
 
 ## Related
-- ADR 0007 (to be written once decisions are made)
+- A future ADR (to be written once decisions are made — note: ADR 0007 is now taken by the usage journal)
 - `docs/installer-strategy.md`

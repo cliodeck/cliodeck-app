@@ -7,7 +7,6 @@ export interface EditorConfig {
   wordWrap: boolean;
   showMinimap: boolean;
   fontFamily: string;
-  defaultEditorMode: 'wysiwyg' | 'source';
 }
 
 interface EditorConfigSectionProps {
@@ -31,7 +30,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             <label className="config-label">
               {t('editor.fontSize')}
               <span className="config-help">
-                Taille du texte dans l'éditeur Markdown (Monaco Editor)
+                Taille du texte dans l'éditeur Markdown
               </span>
             </label>
             <div className="config-input-group">
@@ -117,23 +116,6 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             </div>
           </div>
 
-          {/* Default Editor Mode */}
-          <div className="config-field">
-            <label className="config-label">
-              {t('editor.defaultEditorMode')}
-              <span className="config-help">
-                {t('editor.defaultEditorModeHelp')}
-              </span>
-            </label>
-            <select
-              value={config.defaultEditorMode || 'wysiwyg'}
-              onChange={(e) => handleFieldChange('defaultEditorMode', e.target.value as 'wysiwyg' | 'source')}
-              className="config-select"
-            >
-              <option value="wysiwyg">{t('editor.modeWysiwyg')}</option>
-              <option value="source">{t('editor.modeSource')}</option>
-            </select>
-          </div>
         </div>
       </div>
     </CollapsibleSection>

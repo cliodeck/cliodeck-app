@@ -305,38 +305,6 @@ export const ProjectPanel: React.FC = () => {
                     loadProject(projectJsonPath);
                   }}
                 />
-                <div style={{ marginTop: '1rem' }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                    {t('project.defaultEditor')}
-                  </label>
-                  <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                    {t('project.defaultEditorHelp')}
-                  </p>
-                  <select
-                    value={currentProject.defaultEditor || 'wysiwyg'}
-                    onChange={async (e) => {
-                      const newMode = e.target.value as 'wysiwyg' | 'source';
-                      const projectJsonPath = `${currentProject.path}/project.json`;
-                      try {
-                        await window.electron.project.updateConfig(projectJsonPath, { defaultEditor: newMode });
-                        // Update store directly — no full project reload needed
-                        useProjectStore.setState((state) => ({
-                          currentProject: state.currentProject
-                            ? { ...state.currentProject, defaultEditor: newMode }
-                            : null,
-                        }));
-                        useEditorStore.getState().setEditorMode(newMode);
-                      } catch (err: unknown) {
-                        console.error('Failed to update default editor:', err);
-                        await useDialogStore.getState().showAlert(t('project.defaultEditorSaveError') + ': ' + (err instanceof Error ? err.message : String(err)));
-                      }
-                    }}
-                    style={{ width: '100%', padding: '0.4rem 0.5rem', borderRadius: '4px' }}
-                  >
-                    <option value="wysiwyg">{t('project.defaultEditorWysiwyg')}</option>
-                    <option value="source">{t('project.defaultEditorSource')}</option>
-                  </select>
-                </div>
               </CollapsibleSection>
             )}
 

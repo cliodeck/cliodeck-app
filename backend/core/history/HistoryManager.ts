@@ -79,6 +79,28 @@ export interface ChatMessage {
   modeId?: string;
 }
 
+/**
+ * Adjudication d'une proposition IA de l'éditeur (plan CM6, Phase 4), avec
+ * contenus complets — c'est le journal de recherche : les textes y ont leur
+ * place, contrairement au journal d'usage IA (journal.db) qui n'en reçoit
+ * jamais. Schéma v3, table `history_proposal_events`.
+ */
+export interface ProposalEvent {
+  id: string;
+  sessionId: string;
+  at: string;
+  proposalId: string;
+  decision: 'accepted' | 'rejected' | 'modified' | 'invalidated' | 'expired';
+  category: string;
+  model: string;
+  task: string;
+  latencyMs: number;
+  originalText?: string;
+  proposedText?: string;
+  finalText?: string;
+  rejectionNote?: string;
+}
+
 export interface HistoryStatistics {
   totalSessions: number;
   totalEvents: number;
@@ -247,6 +269,27 @@ export class HistoryManager {
       );
     `);
 
+    // Proposal adjudication events (schema v3 — plan CM6, Phase 4).
+    // Contenus complets : c'est le journal de recherche.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS history_proposal_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        at TEXT NOT NULL,
+        proposal_id TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        category TEXT NOT NULL,
+        model TEXT NOT NULL,
+        task TEXT NOT NULL,
+        latency_ms INTEGER NOT NULL,
+        original_text TEXT,
+        proposed_text TEXT,
+        final_text TEXT,
+        rejection_note TEXT,
+        FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
+      );
+    `);
+
     // Metadata table for schema versioning
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS history_metadata (
@@ -275,6 +318,8 @@ export class HistoryManager {
       CREATE INDEX IF NOT EXISTS idx_history_doc_ops_timestamp ON history_document_operations(timestamp);
       CREATE INDEX IF NOT EXISTS idx_history_pdf_ops_session ON history_pdf_operations(session_id);
       CREATE INDEX IF NOT EXISTS idx_history_pdf_ops_timestamp ON history_pdf_operations(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_history_proposal_session ON history_proposal_events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_proposal_at ON history_proposal_events(at);
     `);
   }
 
@@ -318,6 +363,20 @@ export class HistoryManager {
         console.log('📝 History database migrated to schema version 2');
       } catch (error) {
         console.error('❌ Migration v2 error:', error);
+      }
+    }
+
+    // Migration v3 (plan CM6, Phase 4) : table history_proposal_events.
+    // Purement additif — createTables() vient de la créer via CREATE TABLE IF
+    // NOT EXISTS sur les bases v2 ; il ne reste qu'à acter la version.
+    if (currentVersion < 3) {
+      try {
+        this.db
+          .prepare('INSERT OR REPLACE INTO history_metadata (key, value) VALUES (?, ?)')
+          .run('schema_version', '3');
+        console.log('📝 History database migrated to schema version 3');
+      } catch (error) {
+        console.error('❌ Migration v3 error:', error);
       }
     }
   }
@@ -489,6 +548,86 @@ export class HistoryManager {
       id: opId,
     });
     return opId;
+  }
+
+  // ==========================================================================
+  // Proposal Adjudications (plan CM6, Phase 4 — schema v3)
+  // ==========================================================================
+
+  logProposalAdjudication(
+    event: Omit<ProposalEvent, 'id' | 'sessionId'>
+  ): string {
+    if (!this.currentSessionId) return '';
+
+    const eventId = randomUUID();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO history_proposal_events (
+        id, session_id, at, proposal_id, decision, category, model, task,
+        latency_ms, original_text, proposed_text, final_text, rejection_note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      eventId,
+      this.currentSessionId,
+      event.at,
+      event.proposalId,
+      event.decision,
+      event.category,
+      event.model,
+      event.task,
+      event.latencyMs,
+      event.originalText ?? null,
+      event.proposedText ?? null,
+      event.finalText ?? null,
+      event.rejectionNote ?? null
+    );
+
+    this.logEvent('proposal_adjudication', {
+      decision: event.decision,
+      category: event.category,
+      id: eventId,
+    });
+    return eventId;
+  }
+
+  getProposalEventsForSession(sessionId: string): ProposalEvent[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM history_proposal_events WHERE session_id = ? ORDER BY at ASC'
+      )
+      .all(sessionId) as Array<{
+      id: string;
+      session_id: string;
+      at: string;
+      proposal_id: string;
+      decision: string;
+      category: string;
+      model: string;
+      task: string;
+      latency_ms: number;
+      original_text: string | null;
+      proposed_text: string | null;
+      final_text: string | null;
+      rejection_note: string | null;
+    }>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      at: r.at,
+      proposalId: r.proposal_id,
+      decision: r.decision as ProposalEvent['decision'],
+      category: r.category,
+      model: r.model,
+      task: r.task,
+      latencyMs: r.latency_ms,
+      originalText: r.original_text ?? undefined,
+      proposedText: r.proposed_text ?? undefined,
+      finalText: r.final_text ?? undefined,
+      rejectionNote: r.rejection_note ?? undefined,
+    }));
   }
 
   // ==========================================================================

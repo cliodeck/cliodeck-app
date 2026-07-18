@@ -43,7 +43,6 @@ interface Project {
   };
   cslPath?: string; // Path to CSL file (relative to project or absolute)
   chapters?: Chapter[];
-  defaultEditor?: 'wysiwyg' | 'source'; // Default editor mode for document.md
 }
 
 interface Chapter {

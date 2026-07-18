@@ -126,11 +126,40 @@ const api = {
       ipcRenderer.invoke('editor:save-file', filePath, content),
     insertText: (text: string, metadata?: { modeId?: string; model?: string }) =>
       ipcRenderer.invoke('editor:insert-text', text, metadata),
-    onInsertText: (callback: (text: string) => void) => {
-      const listener = (_event: any, text: string) => callback(text);
+    // Phase 4 : le main n'enveloppe plus le texte de marqueurs cliodeck-gen ;
+    // il transmet { text, metadata } et le renderer décide (proposition IA en
+    // CM6).
+    onInsertText: (
+      callback: (payload: {
+        text: string;
+        metadata?: { modeId?: string; model?: string };
+      }) => void
+    ) => {
+      const listener = (
+        _event: any,
+        payload: { text: string; metadata?: { modeId?: string; model?: string } }
+      ) => callback(payload);
       ipcRenderer.on('editor:insert-text-command', listener);
       return () => ipcRenderer.removeListener('editor:insert-text-command', listener);
     },
+  },
+
+  // Propositions IA de l'éditeur (plan CM6, Phase 4) — adjudications routées
+  // vers les deux journaux côté main, granularités distinctes.
+  proposals: {
+    recordAdjudication: (event: {
+      proposalId: string;
+      decision: 'accepted' | 'rejected' | 'modified' | 'invalidated' | 'expired';
+      category: string;
+      model: string;
+      task: string;
+      latencyMs: number;
+      at: string;
+      original?: string;
+      proposed?: string;
+      final?: string;
+      rejectionNote?: string;
+    }) => ipcRenderer.invoke('proposals:adjudication', event),
   },
 
   // Configuration

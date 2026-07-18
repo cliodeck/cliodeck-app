@@ -1,8 +1,8 @@
 import React, { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Eye, Code2, Search } from 'lucide-react';
-import { MilkdownEditor } from './MilkdownEditor';
-import { MarkdownEditor } from './MarkdownEditor';
+import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search, ListOrdered } from 'lucide-react';
+import { renumberFootnotes } from '@/editor/footnote-tools';
+import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { DocumentStats } from './DocumentStats';
 
 // SimilarityPanel self-hides via `isPanelOpen` — lazy-loading keeps its heavy
@@ -20,7 +20,7 @@ import './EditorPanel.css';
 
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const { loadFile, saveFile, setContent, content, insertFormatting, editorMode, toggleEditorMode } = useEditorStore();
+  const { loadFile, saveFile, setContent, content, insertFormatting } = useEditorStore();
   const { citations } = useBibliographyStore();
   const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
 
@@ -30,6 +30,8 @@ export const EditorPanel: React.FC = () => {
   const handleNewFile = async () => {
     logger.component('EditorPanel', 'handleNewFile clicked');
     if (await useDialogStore.getState().showConfirm(t('toolbar.newFileConfirm'))) {
+      // L'éditeur vivant reçoit l'édition via la façade ; le store suit.
+      useEditorStore.getState().editorFacade?.setValue('');
       setContent('');
       logger.component('EditorPanel', 'New file created');
     }
@@ -97,6 +99,20 @@ export const EditorPanel: React.FC = () => {
     insertFormatting('footnote');
   };
 
+  // Renumérotation manuelle des notes (arbitrage 2 du plan CM6 : commande
+  // explicite, jamais silencieuse). CM6 uniquement.
+  const handleRenumberFootnotes = () => {
+    logger.component('EditorPanel', 'handleRenumberFootnotes clicked');
+    const store = useEditorStore.getState();
+    const result = renumberFootnotes(store.getLiveContent());
+    if (!result.changed) return;
+    if (store.editorFacade) {
+      store.editorFacade.setValue(result.content);
+    } else {
+      setContent(result.content);
+    }
+  };
+
   const handleCheckCitations = async () => {
     logger.component('EditorPanel', 'handleCheckCitations clicked');
     // Extract all citations from content
@@ -149,6 +165,13 @@ export const EditorPanel: React.FC = () => {
           <button className="toolbar-btn" onClick={handleFootnote} title={t('toolbar.footnote')}>
             <Superscript size={18} strokeWidth={1.5} />
           </button>
+          <button
+            className="toolbar-btn"
+            onClick={handleRenumberFootnotes}
+            title={t('toolbar.renumberFootnotes')}
+          >
+            <ListOrdered size={18} strokeWidth={1.5} />
+          </button>
         </div>
 
         {/* Validation and Similarity */}
@@ -165,28 +188,12 @@ export const EditorPanel: React.FC = () => {
           </button>
         </div>
 
-        {/* Editor mode toggle */}
-        <div className="toolbar-section toolbar-section-right">
-          <button
-            className={`toolbar-btn ${editorMode === 'wysiwyg' ? 'active' : ''}`}
-            onClick={() => editorMode !== 'wysiwyg' && toggleEditorMode()}
-            title={t('toolbar.wysiwygMode')}
-          >
-            <Eye size={18} strokeWidth={1.5} />
-          </button>
-          <button
-            className={`toolbar-btn ${editorMode === 'source' ? 'active' : ''}`}
-            onClick={() => editorMode !== 'source' && toggleEditorMode()}
-            title={t('toolbar.sourceMode')}
-          >
-            <Code2 size={18} strokeWidth={1.5} />
-          </button>
-        </div>
       </div>
 
-      {/* Editor content */}
+      {/* Editor content — colonne flex : l'éditeur prend l'espace restant,
+          la barre de stats garde ses 28 px visibles. */}
       <div className="editor-content">
-        {editorMode === 'wysiwyg' ? <MilkdownEditor /> : <MarkdownEditor />}
+        <CodeMirrorEditor />
         <DocumentStats />
       </div>
 

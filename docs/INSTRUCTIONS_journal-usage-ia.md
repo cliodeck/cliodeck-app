@@ -62,10 +62,34 @@ Cas particuliers :
 - **Serveur MCP** : il existe déjà un log JSONL d'accès. Ne pas le dupliquer ; ajouter dans le journal un événement de synthèse par session MCP qui référence le log JSONL existant.
 - **ClioRecipes** : tagger les appels avec l'identifiant de la recipe.
 
+### 3.2 bis Adjudications de propositions IA (amendement Phase 4 du plan CM6, 2026-07-17)
+
+> Amendement au périmètre v1 ci-dessus, requis par le contrat propositionnel de
+> l'éditeur (plan `archive/PLAN_migration-editeur-cm6.md`, Phase 4 ; spec côté éditeur :
+> `docs/editor-proposals.md`). La liste des événements v1 (completion/embedding)
+> reste inchangée par ailleurs.
+
+Quand une proposition IA est adjudiquée dans l'éditeur, la couche factuelle
+capture : `{décision (accepted|rejected|modified|invalidated|expired),
+catégorie, modèle, tâche, horodatage, workspace}` — **sans aucun contenu
+textuel** (ni original, ni proposé, ni final, ni prompt). Les contenus vont au
+journal de recherche, conformément à la distinction impérative du §1.
+
+- Table **dédiée** `proposal_adjudications` (schema v2), PAS un nouveau kind
+  d'`inference_events` : une adjudication n'est pas un appel d'inférence
+  (aucune colonne provider/tokens n'aurait de sens) et l'union `InferenceKind`
+  reste fermé.
+- La granularité est imposée par le **typage** (le type d'entrée du store n'a
+  pas de champ de contenu), pas seulement par l'omission à l'écriture.
+- Les agrégats (taux d'acceptation par catégorie/modèle/période) sont calculés
+  côté journal (`summarizeAdjudications`), jamais côté éditeur. Les
+  `invalidated`/`expired` (fins de vie sans jugement) sont exclus du
+  dénominateur du taux d'acceptation.
+
 ### 3.3 Stockage
 
 - Base **SQLite séparée** : `.cliodeck/journal.db` (via better-sqlite3, comme le reste). Séparée de `brain.db` volontairement : le journal doit pouvoir être copié, archivé et publié indépendamment de l'outil qu'il documente.
-- Deux tables principales : `inference_events` (couche factuelle) et `usage_decisions` (couche décisionnelle), plus une table de liaison `session_decision` (le rattachement est manuel, voir §7, mais son résultat doit être persisté).
+- Deux tables principales : `inference_events` (couche factuelle) et `usage_decisions` (couche décisionnelle), plus une table de liaison `session_decision` (le rattachement est manuel, voir §7, mais son résultat doit être persisté). Depuis le schema v2 (Phase 4 CM6) : `proposal_adjudications` (couche factuelle, §3.2 bis) et `decision_drafts` (brouillons de la couche décisionnelle, §7).
 - Écritures asynchrones et non bloquantes ; **une panne du journal ne doit jamais faire échouer un appel LLM** (try/catch autour de la journalisation, log d'erreur silencieux).
 - Prévoir la migration de schéma dès la v1 (table `journal_meta` avec version).
 
@@ -114,7 +138,7 @@ Option `--anonymize` : remplace les noms de corpus/workspaces par des alias stab
 
 ## 6. Ordre d'implémentation suggéré
 
-1. Exploration du code : localiser le registre de providers, le pipeline d'embeddings, le log MCP existant, l'infrastructure CLI. Produire un court compte rendu (fichier `docs/journal-usage-ia-reperage.md`) **avant** de coder, listant les points d'insertion retenus.
+1. Exploration du code : localiser le registre de providers, le pipeline d'embeddings, le log MCP existant, l'infrastructure CLI. Produire un court compte rendu (fichier `docs/archive/journal-usage-ia-reperage.md`) **avant** de coder, listant les points d'insertion retenus.
 2. Schéma SQLite + module de journalisation (main process) + hook providers.
 3. Agrégation de sessions + `cliodeck journal today`.
 4. Annotation interactive CLI.
@@ -128,3 +152,4 @@ Chaque étape = commits séparés référencés au plan, dans l'esprit du workfl
 
 - **Découpage en sessions** : heuristique simple en v1 — fenêtre d'inactivité de 30 minutes **ou** changement de workspace ferme la session ; les changements de mode ne découpent pas. Ce découpage est purement cosmétique (lisibilité du résumé quotidien), non contraignant, et sera ajusté empiriquement après quelques semaines d'usage. Rendre la fenêtre d'inactivité configurable (paramètre, défaut 30 min), sans UI dédiée en v1.
 - **Rattachement sessions→décisions : entièrement manuel.** Aucune heuristique de rattachement automatique. L'utilisateur associe lui-même, lors de l'annotation, les sessions du jour à ses décisions d'usage (sélection dans une liste). Une session non rattachée reste visible comme telle — c'est la matière de la section « violations » de l'export.
+- **Brouillons de rejet (amendement Phase 4 CM6) : jamais promus automatiquement.** Les annotations de rejet échantillonnées dans l'éditeur (« pourquoi ? », 1 rejet sur 5, jamais deux fois de suite — arbitrage 1 du plan CM6) sont stockées dans `decision_drafts` comme brouillons. La sémantique de `usage_decisions` (tâche/alternative/justification/verdict) reste intacte ; la promotion d'un brouillon en décision est un geste explicite de l'utilisateur (UI hors périmètre Phase 4).
