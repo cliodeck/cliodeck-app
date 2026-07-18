@@ -28,6 +28,7 @@ vi.mock('../../Methodology/HelperTooltip', () => ({
 
 import { ChatInterface } from '../ChatInterface';
 import { useChatStore } from '../../../stores/chatStore';
+import { useCloudConsentStore } from '../../../stores/cloudConsentStore';
 
 type ChunkCb = (env: { sessionId: string; chunk: { delta: string; done?: boolean; finishReason?: string } }) => void;
 
@@ -44,7 +45,12 @@ interface MockApi {
   _emitStatus: (env: { sessionId: string; status: { phase: string; label?: string } }) => void;
 }
 
-function installFusionMock(): MockApi {
+function installFusionMock(
+  llmConfig: { backend: string; ollamaURL?: string } = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:11434',
+  }
+): MockApi {
   let chunkCb: ChunkCb = () => {};
   let statusCb: (env: { sessionId: string; status: { phase: string; label?: string } }) => void =
     () => {};
@@ -63,8 +69,11 @@ function installFusionMock(): MockApi {
       return () => undefined;
     }),
   };
-  (window as unknown as { electron: { fusion: { chat: unknown } } }).electron = {
+  (window as unknown as { electron: unknown }).electron = {
     fusion: { chat: api },
+    // Le garde de consentement cloud (useCloudConsentGuard) lit la config
+    // LLM au montage — défaut local pour ne pas déclencher le dialogue.
+    config: { get: vi.fn(async () => llmConfig) },
   } as never;
   Object.defineProperty(api, '_emitChunk', {
     get: () => chunkCb,
@@ -176,5 +185,42 @@ describe('ChatInterface (fusion step 4b)', () => {
       includeVault: true,
       topK: 5,
     });
+  });
+
+  // ADR 0005 : ce panneau envoyait au cloud SANS dialogue de consentement
+  // (docs/chat-unification-etat-des-lieux.md §2.1). Ce test verrouille le
+  // garde partagé useCloudConsentGuard.
+  it('cloud provider → consent dialog gates the send until confirmed', async () => {
+    useCloudConsentStore.setState({ consented: false, consentedProvider: null });
+    const api = installFusionMock({ backend: 'claude' });
+    render(<ChatInterface />);
+
+    // Laisse le hook lire la config LLM mockée.
+    await waitFor(() =>
+      expect(
+        (window as unknown as { electron: { config: { get: ReturnType<typeof vi.fn> } } })
+          .electron.config.get
+      ).toHaveBeenCalled()
+    );
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'question sensible' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    // Le dialogue apparaît, rien ne part vers le provider.
+    await waitFor(() =>
+      expect(document.querySelector('.cloud-consent-dialog')).not.toBeNull()
+    );
+    expect(api.start).not.toHaveBeenCalled();
+
+    // Confirmation → l'envoi différé part, une seule fois.
+    const confirmBtn = document.querySelector(
+      '.cloud-consent-dialog__btn:not(.cloud-consent-dialog__btn--cancel)'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(confirmBtn);
+    });
+    await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1));
+    expect(useCloudConsentStore.getState().consented).toBe(true);
   });
 });

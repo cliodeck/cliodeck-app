@@ -13,7 +13,7 @@ import { useBrainstormChat } from './useBrainstormChat';
 import { SourcePopover } from './SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
-import { useCloudConsentStore, isCloudProvider } from '../../stores/cloudConsentStore';
+import { useCloudConsentGuard } from '../Chat/useCloudConsentGuard';
 import { messageToDraft } from './messageToDraft';
 import { ChatSurface } from '../Chat/ChatSurface';
 import { ModeSelector } from '../Chat/ModeSelector';
@@ -44,13 +44,6 @@ export const BrainstormChat: React.FC = () => {
   const [nerEnabled, setNerEnabled] = useState(false);
   const mcpTools = useMcpToolsList();
 
-  // Cloud consent (ADR 0005, Phase 4.3)
-  const cloudConsented = useCloudConsentStore((s) => s.consented);
-  const grantConsent = useCloudConsentStore((s) => s.grant);
-  const [cloudCheck, setCloudCheck] = useState<{ isCloud: boolean; providerName: string }>({ isCloud: false, providerName: '' });
-  const [showConsentDialog, setShowConsentDialog] = useState(false);
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-
   // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
   // transmis aux propositions « draft Brainstorm » (source.model, Phase 4b).
   const activeModelRef = useRef<string>('unknown');
@@ -61,7 +54,6 @@ export const BrainstormChat: React.FC = () => {
       .then(
         (llm: {
           backend: string;
-          ollamaURL?: string;
           ollamaChatModel?: string;
           claudeModel?: string;
           openaiModel?: string;
@@ -69,7 +61,6 @@ export const BrainstormChat: React.FC = () => {
           geminiModel?: string;
         } | null) => {
           if (!llm) return;
-          setCloudCheck(isCloudProvider(llm));
           const byBackend: Record<string, string | undefined> = {
             ollama: llm.ollamaChatModel,
             claude: llm.claudeModel,
@@ -120,33 +111,10 @@ export const BrainstormChat: React.FC = () => {
     [messages]
   );
 
-  const handleSend = useCallback(
-    async (text: string) => {
-      // If cloud provider and not yet consented this session, show dialog
-      if (cloudCheck.isCloud && !cloudConsented) {
-        setPendingMessage(text);
-        setShowConsentDialog(true);
-        return;
-      }
-      await send(text);
-    },
-    [send, cloudCheck.isCloud, cloudConsented]
-  );
-
-  const handleConsentGranted = useCallback(() => {
-    grantConsent(cloudCheck.providerName);
-    setShowConsentDialog(false);
-    if (pendingMessage) {
-      const msg = pendingMessage;
-      setPendingMessage(null);
-      void send(msg);
-    }
-  }, [grantConsent, cloudCheck.providerName, pendingMessage, send]);
-
-  const handleConsentCancelled = useCallback(() => {
-    setShowConsentDialog(false);
-    setPendingMessage(null);
-  }, []);
+  // Consentement cloud (ADR 0005) via le garde PARTAGÉ — même chemin que
+  // ChatInterface, cf. docs/chat-unification-etat-des-lieux.md §2.1.
+  const consentGuard = useCloudConsentGuard(send);
+  const handleSend = consentGuard.guardedSend;
 
   const starterPrompts = [
     t('chat.brainstorm.starter1'),
@@ -354,11 +322,11 @@ export const BrainstormChat: React.FC = () => {
           enableNER={nerEnabled}
         />
       </div>
-      {showConsentDialog && (
+      {consentGuard.dialog.isOpen && (
         <CloudConsentDialog
-          providerName={cloudCheck.providerName}
-          onConsent={handleConsentGranted}
-          onCancel={handleConsentCancelled}
+          providerName={consentGuard.dialog.providerName}
+          onConsent={consentGuard.dialog.onConsent}
+          onCancel={consentGuard.dialog.onCancel}
         />
       )}
     </div>

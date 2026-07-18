@@ -9,6 +9,8 @@ import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
 import { ChatSurface } from './ChatSurface';
+import { CloudConsentDialog } from './CloudConsentDialog';
+import { useCloudConsentGuard } from './useCloudConsentGuard';
 import { RAGMessageExtras } from './RAGMessageExtras';
 import { ModeSelector } from './ModeSelector';
 import { RAGSettingsPanel } from './RAGSettingsPanel';
@@ -109,16 +111,20 @@ export const ChatInterface: React.FC = () => {
     [messages, modes, lang]
   );
 
+  // Envoi via le garde de consentement cloud (ADR 0005) — ce panneau
+  // envoyait au cloud sans dialogue avant l'extraction du hook partagé.
+  const consentGuard = useCloudConsentGuard(send);
+
   const handleSend = useCallback(
     async (text: string) => {
       try {
         logger.component('ChatInterface', 'sendMessage', { query: text });
-        await send(text);
+        await consentGuard.guardedSend(text);
       } catch (error) {
         logger.error('ChatInterface', error);
       }
     },
-    [send]
+    [consentGuard]
   );
 
   const handleCancel = useCallback(async () => {
@@ -195,6 +201,13 @@ export const ChatInterface: React.FC = () => {
         renderMessageExtras={renderRAGExtras}
       />
       <RAGSettingsPanel />
+      {consentGuard.dialog.isOpen && (
+        <CloudConsentDialog
+          providerName={consentGuard.dialog.providerName}
+          onConsent={consentGuard.dialog.onConsent}
+          onCancel={consentGuard.dialog.onCancel}
+        />
+      )}
     </>
   );
 };
