@@ -17,9 +17,11 @@ import {
   ProjectSaveSchema,
   BibliographySourceSchema,
   StringPathSchema,
-  StringIdSchema,
   ProjectSetCSLPathSchema,
   ProjectUpdateConfigSchema,
+  ProjectSaveChaptersSchema,
+  ProjectCreateChapterSchema,
+  ProjectBookSettingsSchema,
 } from '../utils/validation.js';
 
 export function setupProjectHandlers() {
@@ -173,16 +175,61 @@ export function setupProjectHandlers() {
     }
   });
 
-  ipcMain.handle('project:get-chapters', async (_event, rawProjectId: unknown) => {
-    const projectId = validate(StringIdSchema, rawProjectId);
-    console.log('📞 IPC Call: project:get-chapters', { projectId });
+  // Le paramètre est le CHEMIN du projet (dossier ou project.json), pas un
+  // `id` : bien des project.json n'en ont pas, et s'appuyer dessus rendait
+  // le projet inouvrable.
+  ipcMain.handle('project:get-chapters', async (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
+    console.log('📞 IPC Call: project:get-chapters', { projectPath });
     try {
-      const result = await projectManager.getChapters(projectId);
-      console.log('📤 IPC Response: project:get-chapters', result);
+      const result = await projectManager.getChapters(projectPath);
+      console.log('📤 IPC Response: project:get-chapters', {
+        chapters: result.chapters.length,
+        unattached: result.unattached.length,
+      });
       return result;
     } catch (error: any) {
       console.error('❌ project:get-chapters error:', error);
-      return { success: false, chapters: [], error: error.message };
+      return { success: false, chapters: [], unattached: [], error: error.message };
+    }
+  });
+
+  ipcMain.handle('project:save-chapters', async (_event, rawData: unknown) => {
+    console.log('📞 IPC Call: project:save-chapters');
+    try {
+      const data = validate(ProjectSaveChaptersSchema, rawData);
+      const result = await projectManager.saveChapters(data);
+      console.log('📤 IPC Response: project:save-chapters', result.success);
+      return result;
+    } catch (error: any) {
+      console.error('❌ project:save-chapters error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  ipcMain.handle('project:create-chapter', async (_event, rawData: unknown) => {
+    console.log('📞 IPC Call: project:create-chapter');
+    try {
+      const data = validate(ProjectCreateChapterSchema, rawData);
+      const result = await projectManager.createChapter(data);
+      console.log('📤 IPC Response: project:create-chapter', result.success);
+      return result;
+    } catch (error: any) {
+      console.error('❌ project:create-chapter error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  ipcMain.handle('project:save-book-settings', async (_event, rawData: unknown) => {
+    console.log('📞 IPC Call: project:save-book-settings');
+    try {
+      const data = validate(ProjectBookSettingsSchema, rawData);
+      const result = await projectManager.saveBookSettings(data);
+      console.log('📤 IPC Response: project:save-book-settings', result.success);
+      return result;
+    } catch (error: any) {
+      console.error('❌ project:save-book-settings error:', error);
+      return errorResponse(error);
     }
   });
 

@@ -461,6 +461,37 @@ export const ProjectUpdateConfigSchema = z.object({
   updates: z.record(z.string(), z.unknown()),
 });
 
+// Book chapters (manifeste du manuscrit)
+const ChapterSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  filePath: z.string().min(1),
+  order: z.number().int().min(0),
+  kind: z.enum(['chapter', 'front', 'back']).optional(),
+});
+
+export const ProjectSaveChaptersSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  chapters: z.array(ChapterSchema),
+});
+
+export const ProjectCreateChapterSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  title: z.string().min(1, 'Chapter title is required'),
+  kind: z.enum(['chapter', 'front', 'back']).optional(),
+});
+
+export const ProjectBookSettingsSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  settings: z.object({
+    noteStyle: z.enum(['footnote', 'endnote-chapter', 'endnote-book']).optional(),
+    noteNumbering: z.enum(['continuous', 'per-chapter']).optional(),
+    bibliography: z.enum(['single', 'per-chapter']).optional(),
+    numberChapters: z.boolean().optional(),
+    numberSections: z.boolean().optional(),
+  }),
+});
+
 // Additional PDF schemas (for handlers not yet validated)
 export const PDFExtractMetadataSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),

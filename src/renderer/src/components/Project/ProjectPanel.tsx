@@ -33,6 +33,7 @@ export const ProjectPanel: React.FC = () => {
     createProject,
     closeProject,
     loadRecentProjects,
+    chapters,
   } = useProjectStore();
   const isLoading = loadState.kind === 'loading';
 
@@ -251,12 +252,32 @@ export const ProjectPanel: React.FC = () => {
             {(currentProject.type === 'article' || currentProject.type === 'book') && (
               <CollapsibleSection title={t('project.projectFiles')} defaultExpanded={true}>
                 <div className="project-files-list">
-                  <div
-                    className="project-file-item"
-                    onClick={() => handleFileSelect(`${currentProject.path}/document.md`)}
-                  >
-                    <FileText size={16} strokeWidth={1.5} /> document.md
-                  </div>
+                  {/* Un livre n'a pas de document.md : son texte vit dans les
+                      chapitres du manifeste. La gestion complète (création,
+                      ordre, rattachement) arrive en Phase 2 ; ici on se
+                      contente de lister et d'ouvrir. */}
+                  {currentProject.type === 'book' ? (
+                    chapters
+                      .filter((chapter) => !chapter.missing)
+                      .map((chapter) => (
+                        <div
+                          key={chapter.id}
+                          className="project-file-item"
+                          onClick={() =>
+                            handleFileSelect(`${currentProject.path}/${chapter.filePath}`)
+                          }
+                        >
+                          <FileText size={16} strokeWidth={1.5} /> {chapter.title}
+                        </div>
+                      ))
+                  ) : (
+                    <div
+                      className="project-file-item"
+                      onClick={() => handleFileSelect(`${currentProject.path}/document.md`)}
+                    >
+                      <FileText size={16} strokeWidth={1.5} /> document.md
+                    </div>
+                  )}
                   <div
                     className="project-file-item"
                     onClick={() => handleFileSelect(`${currentProject.path}/abstract.md`)}

@@ -32,7 +32,35 @@ const api = {
     save: (data: any) => ipcRenderer.invoke('project:save', data),
     getRecent: () => ipcRenderer.invoke('project:get-recent'),
     removeRecent: (path: string) => ipcRenderer.invoke('project:remove-recent', path),
-    getChapters: (projectId: string) => ipcRenderer.invoke('project:get-chapters', projectId),
+    // Manifeste du manuscrit. La clé est le CHEMIN du projet (dossier ou
+    // project.json), pas un `id` — voir project-handlers.
+    getChapters: (projectPath: string) =>
+      ipcRenderer.invoke('project:get-chapters', projectPath),
+    saveChapters: (data: {
+      projectPath: string;
+      chapters: Array<{
+        id: string;
+        title: string;
+        filePath: string;
+        order: number;
+        kind?: 'chapter' | 'front' | 'back';
+      }>;
+    }) => ipcRenderer.invoke('project:save-chapters', data),
+    createChapter: (data: {
+      projectPath: string;
+      title: string;
+      kind?: 'chapter' | 'front' | 'back';
+    }) => ipcRenderer.invoke('project:create-chapter', data),
+    saveBookSettings: (data: {
+      projectPath: string;
+      settings: {
+        noteStyle?: 'footnote' | 'endnote-chapter' | 'endnote-book';
+        noteNumbering?: 'continuous' | 'per-chapter';
+        bibliography?: 'single' | 'per-chapter';
+        numberChapters?: boolean;
+        numberSections?: boolean;
+      };
+    }) => ipcRenderer.invoke('project:save-book-settings', data),
     setBibliographySource: (data: {
       projectPath: string;
       type: 'file' | 'zotero';
