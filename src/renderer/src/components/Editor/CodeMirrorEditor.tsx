@@ -21,7 +21,12 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState } from '@/editor/cm/fidelity';
+import { createDocState, readDocText } from '@/editor/cm/fidelity';
+import {
+  EditorStateCache,
+  restoreEditorState,
+  serializeEditorState,
+} from '@/editor/cm/state-cache';
 import {
   liveRender,
   liveRenderRefresh,
@@ -222,7 +227,7 @@ function createFacade(
 ): EditorFacade {
   return {
     engine: 'cm6',
-    getValue: () => view.state.doc.toString(),
+    getValue: () => readDocText(view.state),
     getCursorOffset: () => view.state.selection.main.head,
     getSelectionText: () => {
       const { from, to } = view.state.selection.main;
@@ -282,6 +287,10 @@ export const CodeMirrorEditor: React.FC = () => {
   const viewRef = useRef<EditorView | null>(null);
   const proposalsRef = useRef<ProposalsInstance | null>(null);
   const dynamicCompartment = useRef(new Compartment()).current;
+  // Cache d'état par document (Phase 2 chapitres) : revenir sur un chapitre
+  // restaure son annulation, son curseur et son défilement. Vidé à la
+  // fermeture du projet — voir l'effet plus bas.
+  const stateCache = useRef(new EditorStateCache()).current;
 
   const filePath = useEditorStore((s) => s.filePath);
   const documentVersion = useEditorStore((s) => s.documentVersion);
@@ -291,6 +300,7 @@ export const CodeMirrorEditor: React.FC = () => {
   const isPresentation = useProjectStore(
     (s) => s.currentProject?.type === 'presentation'
   );
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   const { currentTheme } = useTheme();
   const { t } = useTranslation('common');
 
@@ -315,7 +325,7 @@ export const CodeMirrorEditor: React.FC = () => {
       // Même garde qu'au démontage : ne rien pousser si le document
       // courant n'est plus le nôtre.
       if (useEditorStore.getState().filePath !== ownFilePath) return;
-      const content = view.state.doc.toString();
+      const content = readDocText(view.state);
       useEditorStore.setState({ content, isDirty: true });
       for (const listener of changeListeners) listener(content);
     };
@@ -335,8 +345,7 @@ export const CodeMirrorEditor: React.FC = () => {
     });
     proposalsRef.current = proposalsInstance;
 
-    const view: EditorView = new EditorView({
-      state: createDocState(store.content, [
+    const documentExtensions: Extension[] = [
         history(),
         formattingKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -391,9 +400,27 @@ export const CodeMirrorEditor: React.FC = () => {
           if (syncTimer) clearTimeout(syncTimer);
           syncTimer = setTimeout(() => syncToStore(update.view), SYNC_DEBOUNCE_MS);
         }),
-      ]),
+    ];
+
+    // Retour sur un document déjà ouvert : son état est restauré (annulation,
+    // curseur) SI son texte correspond encore à ce que le store vient de
+    // charger. Le disque fait foi — un fichier modifié dehors, ou un
+    // remplacement de contenu, repart d'un état neuf.
+    const cached = ownFilePath ? stateCache.get(ownFilePath) : undefined;
+    const restored = restoreEditorState(cached, store.content, documentExtensions);
+
+    const view: EditorView = new EditorView({
+      state: restored ?? createDocState(store.content, documentExtensions),
       parent: container,
     });
+
+    if (restored && cached) {
+      // Le défilement n'appartient pas à l'état : il se repose après le
+      // premier rendu.
+      requestAnimationFrame(() => {
+        if (viewRef.current === view) view.scrollDOM.scrollTop = cached.scrollTop;
+      });
+    }
 
     viewRef.current = view;
     useEditorStore
@@ -436,9 +463,19 @@ export const CodeMirrorEditor: React.FC = () => {
       // sortant sous le nom du fichier entrant (écrasement silencieux).
       if (pendingSync && useEditorStore.getState().filePath === ownFilePath) {
         useEditorStore.setState({
-          content: view.state.doc.toString(),
+          content: readDocText(view.state),
           isDirty: true,
         });
+      }
+      // Mémorisation pour un retour ultérieur sur ce document. `loadFile` a
+      // sauvegardé le fichier sortant AVANT de basculer (verrou Phase 0) :
+      // le texte de la vue correspond donc à celui du disque, et la règle de
+      // fraîcheur du cache le revérifiera au retour de toute façon.
+      if (ownFilePath) {
+        stateCache.set(
+          ownFilePath,
+          serializeEditorState(view.state, view.scrollDOM.scrollTop)
+        );
       }
       changeListeners.clear();
       selectionListeners.clear();
@@ -449,6 +486,15 @@ export const CodeMirrorEditor: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, documentVersion, isPresentation]);
+
+  // Changement (ou fermeture) de projet : les états mémorisés appartiennent
+  // au manuscrit qu'on quitte — les garder ferait grossir la mémoire et
+  // risquerait de restaurer un homonyme.
+  useEffect(() => {
+    return () => {
+      stateCache.clear();
+    };
+  }, [projectPath, stateCache]);
 
   // Réglages et thème : reconfiguration à chaud, sans recréer la vue.
   useEffect(() => {

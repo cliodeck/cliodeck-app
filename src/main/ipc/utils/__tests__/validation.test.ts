@@ -14,6 +14,9 @@ import {
   HistoryExportReportSchema,
   HistorySearchEventsSchema,
   ProposalAdjudicationSchema,
+  ProjectSaveChaptersSchema,
+  ProjectCreateChapterSchema,
+  ProjectBookSettingsSchema,
 } from '../validation';
 
 describe('validate() helper', () => {
@@ -354,5 +357,83 @@ describe('ProposalAdjudicationSchema', () => {
     expect(() =>
       ProposalAdjudicationSchema.parse({ ...valid, latencyMs: 'fast' })
     ).toThrow();
+  });
+});
+
+describe('Schémas du manuscrit (chapitres de livre)', () => {
+  const chapter = {
+    id: 'c1',
+    title: 'Introduction',
+    filePath: 'chapters/01-introduction.md',
+    order: 0,
+  };
+
+  it('accepte un manifeste valide, avec ou sans `kind`', () => {
+    const result = validate(ProjectSaveChaptersSchema, {
+      projectPath: '/p/Livre',
+      chapters: [chapter, { ...chapter, id: 'c2', order: 1, kind: 'back' }],
+    });
+    expect(result.chapters).toHaveLength(2);
+    expect(result.chapters[1].kind).toBe('back');
+  });
+
+  it('accepte un manifeste vide (tous les chapitres détachés)', () => {
+    expect(
+      validate(ProjectSaveChaptersSchema, { projectPath: '/p', chapters: [] }).chapters
+    ).toEqual([]);
+  });
+
+  it('rejette un ordre négatif ou non entier', () => {
+    expect(() =>
+      validate(ProjectSaveChaptersSchema, {
+        projectPath: '/p',
+        chapters: [{ ...chapter, order: -1 }],
+      })
+    ).toThrow('Validation failed');
+    expect(() =>
+      validate(ProjectSaveChaptersSchema, {
+        projectPath: '/p',
+        chapters: [{ ...chapter, order: 1.5 }],
+      })
+    ).toThrow('Validation failed');
+  });
+
+  it('rejette un `kind` inconnu et un chemin vide', () => {
+    expect(() =>
+      validate(ProjectSaveChaptersSchema, {
+        projectPath: '/p',
+        chapters: [{ ...chapter, kind: 'annexe' }],
+      })
+    ).toThrow('Validation failed');
+    expect(() =>
+      validate(ProjectSaveChaptersSchema, {
+        projectPath: '/p',
+        chapters: [{ ...chapter, filePath: '' }],
+      })
+    ).toThrow('Validation failed');
+  });
+
+  it('exige un titre pour créer un chapitre', () => {
+    expect(
+      validate(ProjectCreateChapterSchema, { projectPath: '/p', title: 'Danzig' }).title
+    ).toBe('Danzig');
+    expect(() =>
+      validate(ProjectCreateChapterSchema, { projectPath: '/p', title: '' })
+    ).toThrow('Validation failed');
+  });
+
+  it('n’accepte que les valeurs arbitrées pour les réglages d’ouvrage', () => {
+    const ok = validate(ProjectBookSettingsSchema, {
+      projectPath: '/p',
+      settings: { noteStyle: 'endnote-chapter', numberSections: true },
+    });
+    expect(ok.settings.noteStyle).toBe('endnote-chapter');
+
+    expect(() =>
+      validate(ProjectBookSettingsSchema, {
+        projectPath: '/p',
+        settings: { bibliography: 'par-chapitre' },
+      })
+    ).toThrow('Validation failed');
   });
 });

@@ -55,3 +55,9 @@
     padding: 0.1rem 0.35rem;
   }
 }
+
+/* Total d'ouvrage (livre à plusieurs chapitres) — distingué du chapitre. */
+.document-stats .stat-item--book {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+}

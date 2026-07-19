@@ -3,7 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { detectLineSeparator, roundTrip as cm6RoundTrip } from '../cm/fidelity';
+import {
+  createDocState,
+  detectLineSeparator,
+  readDocText,
+  roundTrip as cm6RoundTrip,
+} from '../cm/fidelity';
 
 /**
  * Test de fidélité de l'éditeur — Phase 0 du plan de migration CM6
@@ -96,6 +101,26 @@ describe('corpus de fidélité (intégrité des fixtures)', () => {
     for (const s of ['Straße', 'Gdańsk', 'œuvre', '«', '„']) {
       expect(doc).toContain(s);
     }
+  });
+});
+
+/**
+ * Régression (2026-07-19, chantier chapitres) : le corpus ne contient aucun
+ * fichier UNIFORMÉMENT CRLF — le cas passait donc entre les mailles alors
+ * que `doc.toString()` normalise les fins de ligne. Toute lecture destinée
+ * au disque passe désormais par `readDocText` (= `sliceDoc`).
+ */
+describe('fidélité des fins de ligne CRLF', () => {
+  const CRLF = '# Titre\r\n\r\nUn paragraphe.\r\nUne autre ligne.\r\n';
+
+  it('restitue un document CRLF sans le convertir en LF', () => {
+    expect(cm6RoundTrip(CRLF)).toBe(CRLF);
+  });
+
+  it('`doc.toString()` normalise — c’est pourquoi il est proscrit', () => {
+    // Documente le piège : la lecture naïve perdrait les CR à la sauvegarde.
+    expect(createDocState(CRLF).doc.toString()).not.toBe(CRLF);
+    expect(readDocText(createDocState(CRLF))).toBe(CRLF);
   });
 });
 

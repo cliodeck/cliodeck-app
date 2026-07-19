@@ -1,10 +1,21 @@
-import { writeFile, readFile, mkdir, copyFile } from 'fs/promises';
+import { writeFile, readFile, mkdir, copyFile, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
+import {
+  CHAPTERS_DIR,
+  DEFAULT_BOOK_SETTINGS,
+  NON_CHAPTER_FILES,
+  chapterFileName,
+  normalizeBookSettings,
+  type BookSettings,
+  type Chapter,
+  type ResolvedChapter,
+  type UnattachedFile,
+} from '../../../backend/types/book.js';
 
 async function autoMigrateWorkspace(projectDir: string): Promise<void> {
   // Best-effort: a failed migration must not block project load. The next
@@ -42,14 +53,10 @@ interface Project {
     zoteroCollection?: string; // Zotero collection key
   };
   cslPath?: string; // Path to CSL file (relative to project or absolute)
+  /** Manifeste du manuscrit (projets « livre »). Ordre et titres. */
   chapters?: Chapter[];
-}
-
-interface Chapter {
-  id: string;
-  title: string;
-  order: number;
-  filePath: string;
+  /** Réglages d'appareil savant (projets « livre »). */
+  book?: BookSettings;
 }
 
 export class ProjectManager {
@@ -132,14 +139,44 @@ export class ProjectManager {
       lastOpenedAt: new Date().toISOString(),
     };
 
+    // Livre : squelette multi-fichiers + manifeste + réglages d'ouvrage.
+    // Le `#` du fichier EST le titre du chapitre (plan, arbitrage 1) : le
+    // manifeste et le fichier disent donc la même chose, et l'auteur peut
+    // renommer depuis l'un ou l'autre.
+    if (projectType === 'book') {
+      const chaptersPath = path.join(projectPath, CHAPTERS_DIR);
+      await mkdir(chaptersPath, { recursive: true });
+
+      const firstTitle = 'Introduction';
+      const firstFile = chapterFileName(0, firstTitle);
+      await writeFile(
+        path.join(chaptersPath, firstFile),
+        `# ${firstTitle}\n\n`
+      );
+
+      project.chapters = [
+        {
+          id: crypto.randomUUID(),
+          title: firstTitle,
+          filePath: `${CHAPTERS_DIR}/${firstFile}`,
+          order: 0,
+          kind: 'chapter',
+        },
+      ];
+      project.book = { ...DEFAULT_BOOK_SETTINGS };
+    }
+
     // Create project.json (without path field - it's computed from file location)
     const projectFile = path.join(projectPath, 'project.json');
     const { path: _excludedPath, ...projectForSave } = project;
     await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
 
-    // Create markdown file
-    const mdFile = path.join(projectPath, 'document.md');
-    await writeFile(mdFile, data.content || '# ' + data.name);
+    // Article et présentation gardent leur document monolithique ; le livre
+    // n'a PAS de document.md (son texte vit dans chapters/).
+    if (projectType !== 'book') {
+      const mdFile = path.join(projectPath, 'document.md');
+      await writeFile(mdFile, data.content || '# ' + data.name);
+    }
 
     // For articles and books, create abstract.md and context.md
     if (projectType === 'article' || projectType === 'book') {
@@ -249,6 +286,24 @@ Note: N'oubliez pas de mentionner les perspectives futures.
         needsSave = true;
       }
 
+      // Livre : les réglages d'ouvrage sont normalisés (défauts pour les
+      // champs absents, valeurs inconnues ignorées) afin que la suite de la
+      // chaîne — assemblage, template — n'ait jamais à se défendre contre un
+      // `project.json` édité à la main.
+      if (project.type === 'book') {
+        const normalized = normalizeBookSettings(project.book);
+        if (JSON.stringify(normalized) !== JSON.stringify(project.book)) {
+          project.book = normalized;
+          needsSave = true;
+        }
+        if (!Array.isArray(project.chapters)) {
+          // Pas de migration (arbitrage 10) : un manifeste vide suffit, la
+          // réconciliation disque proposera de rattacher ce qu'elle trouve.
+          project.chapters = [];
+          needsSave = true;
+        }
+      }
+
       // Update lastOpenedAt
       project.lastOpenedAt = new Date().toISOString();
       needsSave = true;
@@ -328,9 +383,11 @@ Note: N'oubliez pas de mentionner les perspectives futures.
       const { path: _excludedPath, ...projectForSave } = project;
       await writeFile(data.path, JSON.stringify(projectForSave, null, 2));
 
-      // Sauvegarder le markdown
-      const mdFile = path.join(path.dirname(data.path), 'document.md');
-      await writeFile(mdFile, data.content);
+      // NE PLUS écrire document.md ici. Ce chemin écrivait le contenu reçu
+      // dans un `document.md` codé en dur à côté du project.json — dans un
+      // livre à chapitres, il aurait écrasé un fichier qui n'est plus le
+      // manuscrit. La sauvegarde du texte passe par `editor:save-file`, qui
+      // connaît le vrai chemin du fichier ouvert.
 
       console.log('✅ Project saved:', data.path);
       return { success: true };
@@ -341,24 +398,315 @@ Note: N'oubliez pas de mentionner les perspectives futures.
     }
   }
 
-  async getChapters(_projectId: string) {
-    try {
-      // Pour l'instant, retourner un chapitre par défaut basé sur document.md
-      // Dans une version future, on pourra gérer plusieurs chapitres
-      const chapters: Chapter[] = [
-        {
-          id: 'main',
-          title: 'Document principal',
-          order: 0,
-          filePath: 'document.md',
-        },
-      ];
+  /**
+   * Résout un chemin de projet — dossier OU `project.json` — vers le
+   * couple (dossier, fichier manifeste). Les appelants historiques
+   * passaient tantôt l'un tantôt l'autre ; on accepte les deux plutôt que
+   * de faire échouer l'ouverture sur un détail de forme.
+   */
+  private resolveProjectPaths(projectPathOrFile: string): {
+    projectDir: string;
+    projectFile: string;
+  } {
+    const isJson = projectPathOrFile.endsWith('.json');
+    const projectDir = isJson ? path.dirname(projectPathOrFile) : projectPathOrFile;
+    return { projectDir, projectFile: path.join(projectDir, 'project.json') };
+  }
 
-      return { success: true, chapters };
+  /** Refuse tout chemin de manifeste qui sort du dossier du projet. */
+  private isInsideProject(projectDir: string, relPath: string): boolean {
+    if (path.isAbsolute(relPath)) return false;
+    const resolved = path.resolve(projectDir, relPath);
+    const rel = path.relative(projectDir, resolved);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  }
+
+  /** Titre suggéré pour un fichier non rattaché : son premier `#`. */
+  private async suggestTitle(absPath: string): Promise<string | undefined> {
+    try {
+      const content = await readFile(absPath, 'utf-8');
+      const match = content.match(/^\s*#\s+(.+?)\s*$/m);
+      return match ? match[1] : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Manifeste du manuscrit, réconcilié avec le disque.
+   *
+   * Le paramètre est le **chemin du projet** (dossier ou `project.json`),
+   * pas un identifiant : bien des `project.json` n'ont pas de champ `id`,
+   * et s'appuyer dessus a déjà rendu des projets inouvrables.
+   *
+   * Réconciliation (décision cadre n°2 — on ne perd jamais de texte) :
+   * - une entrée dont le fichier a disparu est conservée et marquée
+   *   `missing`, jamais supprimée en silence ;
+   * - un `.md` présent dans le projet ou dans `chapters/` mais absent du
+   *   manifeste est retourné comme « non rattaché », avec un titre suggéré.
+   */
+  async getChapters(projectPathOrFile: string): Promise<{
+    success: boolean;
+    chapters: ResolvedChapter[];
+    unattached: UnattachedFile[];
+    error?: string;
+  }> {
+    try {
+      const { projectDir, projectFile } = this.resolveProjectPaths(projectPathOrFile);
+
+      let manifest: Chapter[] = [];
+      if (existsSync(projectFile)) {
+        const raw = await readFile(projectFile, 'utf-8');
+        const project: Project = JSON.parse(raw);
+        manifest = Array.isArray(project.chapters) ? project.chapters : [];
+      }
+
+      // Entrées du manifeste : garde anti-évasion, puis existence.
+      const chapters: ResolvedChapter[] = [];
+      for (const entry of manifest) {
+        if (!entry?.filePath || !this.isInsideProject(projectDir, entry.filePath)) {
+          console.warn(
+            '⚠️ Chapitre ignoré (chemin hors du projet):',
+            entry?.filePath
+          );
+          continue;
+        }
+        const abs = path.resolve(projectDir, entry.filePath);
+        chapters.push({
+          ...entry,
+          kind: entry.kind ?? 'chapter',
+          ...(existsSync(abs) ? {} : { missing: true }),
+        });
+      }
+      chapters.sort((a, b) => a.order - b.order);
+
+      // Fichiers du disque absents du manifeste.
+      const claimed = new Set(
+        chapters.map((c) => path.normalize(c.filePath).replace(/\\/g, '/'))
+      );
+      const unattached: UnattachedFile[] = [];
+
+      const scan = async (dirRel: string): Promise<void> => {
+        const dirAbs = dirRel ? path.join(projectDir, dirRel) : projectDir;
+        if (!existsSync(dirAbs)) return;
+        let entries: string[];
+        try {
+          entries = await readdir(dirAbs);
+        } catch {
+          return;
+        }
+        for (const name of entries) {
+          if (!name.endsWith('.md')) continue;
+          if (!dirRel && (NON_CHAPTER_FILES as readonly string[]).includes(name)) {
+            continue; // pièces connues du projet, pas des chapitres
+          }
+          const rel = dirRel ? `${dirRel}/${name}` : name;
+          if (claimed.has(rel)) continue;
+          unattached.push({
+            filePath: rel,
+            suggestedTitle: await this.suggestTitle(path.join(dirAbs, name)),
+          });
+        }
+      };
+
+      await scan('');
+      await scan(CHAPTERS_DIR);
+
+      return { success: true, chapters, unattached };
     } catch (error: unknown) {
       console.error('❌ Failed to get chapters:', error);
       const message = error instanceof Error ? error.message : String(error);
-      return { success: false, chapters: [], error: message };
+      return { success: false, chapters: [], unattached: [], error: message };
+    }
+  }
+
+  /**
+   * Écrit le manifeste. Les chemins sont re-vérifiés côté main : le
+   * renderer n'est pas une frontière de confiance suffisante pour laisser
+   * entrer un `../..` dans un fichier de projet.
+   */
+  async saveChapters(data: { projectPath: string; chapters: Chapter[] }) {
+    try {
+      const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
+      if (!existsSync(projectFile)) {
+        throw new Error(`Project file not found: ${projectFile}`);
+      }
+
+      for (const chapter of data.chapters) {
+        if (!this.isInsideProject(projectDir, chapter.filePath)) {
+          throw new Error(
+            `Chapter path "${chapter.filePath}" escapes the project directory`
+          );
+        }
+      }
+
+      const raw = await readFile(projectFile, 'utf-8');
+      const project: Project = JSON.parse(raw);
+
+      // L'ordre stocké est renormalisé sur l'ordre du tableau reçu : le
+      // manifeste fait foi (arbitrage 7), pas les valeurs envoyées.
+      project.chapters = data.chapters.map((c, index) => ({
+        ...c,
+        order: index,
+        kind: c.kind ?? 'chapter',
+      }));
+      project.updatedAt = new Date().toISOString();
+
+      const { path: _excludedPath, ...projectForSave } = project;
+      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
+
+      if (this.currentProject && this.currentProjectPath === projectDir) {
+        this.currentProject.chapters = project.chapters;
+      }
+
+      console.log('✅ Chapters saved:', project.chapters.length);
+      return { success: true, chapters: project.chapters };
+    } catch (error: unknown) {
+      console.error('❌ Failed to save chapters:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
+   * Lecture groupée de chapitres (plan chapitres, Phase 3).
+   *
+   * Les fonctions transverses — renumérotation de l'ouvrage, vérification
+   * des citations, statistiques — ont besoin du texte des chapitres qui ne
+   * sont PAS ouverts dans l'éditeur. Même garde anti-évasion que le reste :
+   * un chemin qui sort du projet est refusé, pas lu.
+   *
+   * Un fichier illisible (disparu entre-temps) est retourné avec son
+   * erreur plutôt que de faire échouer toute la lecture : l'appelant décide
+   * s'il peut travailler sans lui.
+   */
+  async readChapters(data: { projectPath: string; filePaths: string[] }): Promise<{
+    success: boolean;
+    files: Array<{ filePath: string; content?: string; error?: string }>;
+    error?: string;
+  }> {
+    try {
+      const { projectDir } = this.resolveProjectPaths(data.projectPath);
+      const files: Array<{ filePath: string; content?: string; error?: string }> = [];
+
+      for (const relPath of data.filePaths) {
+        if (!this.isInsideProject(projectDir, relPath)) {
+          files.push({
+            filePath: relPath,
+            error: `Path "${relPath}" escapes the project directory`,
+          });
+          continue;
+        }
+        try {
+          const content = await readFile(path.resolve(projectDir, relPath), 'utf-8');
+          files.push({ filePath: relPath, content });
+        } catch (error: unknown) {
+          files.push({
+            filePath: relPath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return { success: true, files };
+    } catch (error: unknown) {
+      console.error('❌ Failed to read chapters:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, files: [], error: message };
+    }
+  }
+
+  /** Écrit les réglages d'ouvrage (normalisés) dans `project.json`. */
+  async saveBookSettings(data: {
+    projectPath: string;
+    settings: Partial<BookSettings>;
+  }) {
+    try {
+      const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
+      if (!existsSync(projectFile)) {
+        throw new Error(`Project file not found: ${projectFile}`);
+      }
+
+      const raw = await readFile(projectFile, 'utf-8');
+      const project: Project = JSON.parse(raw);
+
+      const settings = normalizeBookSettings({ ...project.book, ...data.settings });
+      project.book = settings;
+      project.updatedAt = new Date().toISOString();
+
+      const { path: _excludedPath, ...projectForSave } = project;
+      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
+
+      if (this.currentProject && this.currentProjectPath === projectDir) {
+        this.currentProject.book = settings;
+      }
+
+      console.log('✅ Book settings saved');
+      return { success: true, settings };
+    } catch (error: unknown) {
+      console.error('❌ Failed to save book settings:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
+   * Crée le fichier d'un nouveau chapitre et l'ajoute au manifeste.
+   * Le fichier reçoit son `#` (le titre du chapitre EST son premier titre).
+   */
+  async createChapter(data: {
+    projectPath: string;
+    title: string;
+    kind?: Chapter['kind'];
+  }) {
+    try {
+      const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
+      if (!existsSync(projectFile)) {
+        throw new Error(`Project file not found: ${projectFile}`);
+      }
+
+      const raw = await readFile(projectFile, 'utf-8');
+      const project: Project = JSON.parse(raw);
+      const chapters: Chapter[] = Array.isArray(project.chapters) ? project.chapters : [];
+
+      const order = chapters.length;
+      const chaptersDir = path.join(projectDir, CHAPTERS_DIR);
+      await mkdir(chaptersDir, { recursive: true });
+
+      // Nom libre s'il est déjà pris : le préfixe n'a pas valeur d'autorité,
+      // mais deux fichiers ne peuvent pas partager un nom.
+      let fileName = chapterFileName(order, data.title);
+      let attempt = 2;
+      while (existsSync(path.join(chaptersDir, fileName))) {
+        fileName = chapterFileName(order, `${data.title}-${attempt}`);
+        attempt += 1;
+      }
+
+      await writeFile(path.join(chaptersDir, fileName), `# ${data.title}\n\n`);
+
+      const chapter: Chapter = {
+        id: crypto.randomUUID(),
+        title: data.title,
+        filePath: `${CHAPTERS_DIR}/${fileName}`,
+        order,
+        kind: data.kind ?? 'chapter',
+      };
+
+      project.chapters = [...chapters, chapter];
+      project.updatedAt = new Date().toISOString();
+      const { path: _excludedPath, ...projectForSave } = project;
+      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
+
+      if (this.currentProject && this.currentProjectPath === projectDir) {
+        this.currentProject.chapters = project.chapters;
+      }
+
+      console.log('✅ Chapter created:', chapter.filePath);
+      return { success: true, chapter };
+    } catch (error: unknown) {
+      console.error('❌ Failed to create chapter:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
     }
   }
 

@@ -68,3 +68,54 @@ describe('processMarkdownCitations', () => {
     expect(res.bibliography.length).toBe(2);
   });
 });
+
+/**
+ * Régression : les notes générées écrasaient les notes manuelles.
+ *
+ * La numérotation partait de 1 sans regarder le document. Un `[^1]` écrit
+ * par l'auteur et la première citation portaient donc le même numéro : deux
+ * appels pour une seule définition, et le texte de l'auteur disparaissait du
+ * document exporté (pandoc retient la dernière définition).
+ */
+describe('numérotation des notes générées', () => {
+  const cit = makeCitation({ id: 'alice2020' });
+
+  it('démarre après la dernière note manuelle', async () => {
+    const src =
+      'Note de l’auteur[^1] puis citation [@alice2020].\n\n[^1]: MA NOTE.\n';
+    const res = await processMarkdownCitations(src, {
+      resolve: resolveMap({ alice2020: cit }),
+    });
+    expect(res.footnotes[0].n).toBe(2);
+    expect(res.md).toContain('Note de l’auteur[^1]');
+    expect(res.md).toContain('citation [^2]');
+    // La définition manuelle est intacte et reste seule sur son numéro.
+    expect(res.md).toContain('[^1]: MA NOTE.');
+    expect((res.md.match(/\[\^1\]/g) ?? []).length).toBe(2); // appel + définition
+  });
+
+  it('tient compte du plus grand numéro, pas du nombre de notes', async () => {
+    const src = 'Un[^7] et deux[^3].\n\n[^7]: A.\n[^3]: B.\n\nCitation [@alice2020].';
+    const res = await processMarkdownCitations(src, {
+      resolve: resolveMap({ alice2020: cit }),
+    });
+    expect(res.footnotes[0].n).toBe(8);
+  });
+
+  it('ignore les notes des blocs de code (parse Lezer, pas regex)', async () => {
+    const src = 'Texte [@alice2020].\n\n```md\n[^99]: pas une note\n```\n';
+    const res = await processMarkdownCitations(src, {
+      resolve: resolveMap({ alice2020: cit }),
+    });
+    expect(res.footnotes[0].n).toBe(1);
+  });
+
+  it('numérote plusieurs citations à la suite sans collision', async () => {
+    const bob = makeCitation({ id: 'bob2021', author: 'Bob, B' });
+    const src = 'Note[^1]. Une [@alice2020] et deux [@bob2021].\n\n[^1]: X.\n';
+    const res = await processMarkdownCitations(src, {
+      resolve: resolveMap({ alice2020: cit, bob2021: bob }),
+    });
+    expect(res.footnotes.map((f) => f.n)).toEqual([2, 3]);
+  });
+});

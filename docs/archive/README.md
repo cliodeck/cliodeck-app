@@ -23,7 +23,12 @@ For the current architecture, see the top-level `docs/` folder.
 | `citation-integration.md` | The CSL citation engine scaffold. |
 | `PLAN_migration-editeur-cm6.md` | The CM6 editor migration plan (phases 0-5, arbitrations resolved 2026-07-16). All phases completed 2026-07-18. |
 | `migration-cm6.md` | Working log of the CM6 migration: inventory, fidelity corpus, per-phase tracking, parity checklist (10/10). Superseded by `docs/editor-architecture.md`. |
+| `PLAN_chapitres-livre.md` | The multi-file book chapters plan (phases 0-5, editorial arbitrations settled 2026-07-19). All phases completed. Current architecture: `docs/book-architecture.md`. |
 | `journal-usage-ia-reperage.md` | Pre-implementation scouting for the AI usage journal (insertion points, provider registry decision). Feature shipped. |
+| `chat-unification-etat-des-lieux.md` | State of play before merging the two chat shells (fusion step 5). Chantier done — see the unified `AssistantChat`. |
+| `slides-etat-des-lieux.md` | State of play before folding presentations into the single editor. Chantier done. |
+| `book-etat-des-lieux.md` | State of play before the multi-file chapters chantier: what was hollow, what was broken. Superseded by `docs/book-architecture.md`. |
+| `TODO_barre-stats-document.md` | Document stats bar debts (i18n, regex counting). Both settled during the CM6 follow-ups. |
 
 ## When to consult these vs. the live docs
 

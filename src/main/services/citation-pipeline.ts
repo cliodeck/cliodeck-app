@@ -1,6 +1,7 @@
 import { CitationEngine, type CSLItem } from '../../../backend/core/citation/CitationEngine.js';
 import { citationToCSL } from '../../../backend/core/citation/citationFromZotero.js';
 import type { Citation } from '../../../backend/types/citation.js';
+import { nextFootnoteNumber } from '../../editor/footnote-tools.js';
 
 /**
  * Options for {@link processMarkdownCitations}.
@@ -63,6 +64,13 @@ export async function processMarkdownCitations(
   const bibItems: CSLItem[] = [];
   const bibSeen = new Set<string>();
 
+  // Les notes générées démarrent APRÈS les notes déjà écrites par l'auteur.
+  // Sans cela, un `[^1]` manuel et la première citation portaient le même
+  // numéro : deux appels, une seule définition, et le texte de l'auteur
+  // disparaissait du document exporté. La détection passe par l'arbre
+  // Lezer, donc un `[^99]` dans un bloc de code ne décale rien.
+  const firstNumber = nextFootnoteNumber(markdown);
+
   // First pass — collect all clusters, resolve keys, emit footnotes.
   interface Cluster {
     match: string;
@@ -91,14 +99,14 @@ export async function processMarkdownCitations(
       clusters.push({ match: m[0], keys: rawKeys, items: [], n: 0 });
       continue;
     }
-    clusters.push({ match: m[0], keys: resolvedKeys, items, n: footnotes.length + 1 });
+    clusters.push({ match: m[0], keys: resolvedKeys, items, n: firstNumber + footnotes.length });
     // Render this cluster as a single footnote.
     try {
       const res = engine.formatCitation(items, style, locale);
       // formatCitation produces one footnote per item in the current
       // implementation; join them with '; ' to emulate a cluster.
       const text = res.footnotes.join('; ');
-      footnotes.push({ n: footnotes.length + 1, text, keys: resolvedKeys });
+      footnotes.push({ n: firstNumber + footnotes.length, text, keys: resolvedKeys });
       for (const it of items) {
         const id = String(it.id);
         if (!bibSeen.has(id)) {

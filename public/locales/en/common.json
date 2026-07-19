@@ -1569,6 +1569,43 @@
     "charsWithSpaces": "chars sp.",
     "paragraphs": "par.",
     "citations": "cit.",
-    "footnotes": "notes"
+    "footnotes": "notes",
+    "bookWords": "book",
+    "bookTotalHint": "Total words in the manuscript (all chapters)"
+  },
+  "book": {
+    "chapterCount_one": "{{count}} chapter",
+    "chapterCount_other": "{{count}} chapters",
+    "noChapters": "No chapters yet. Add one to start the manuscript.",
+    "addChapter": "Add a chapter",
+    "addChapterError": "Could not add the chapter",
+    "untitledChapter": "New chapter",
+    "titlePlaceholder": "Chapter title",
+    "rename": "Rename",
+    "renameError": "Could not rename the chapter",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "removeChapter": "Remove from manuscript (the file is kept)",
+    "removeChapterConfirm": "Remove “{{title}}” from the manuscript? The file stays on disk and can be re-attached.",
+    "removeChapterError": "Could not remove the chapter",
+    "reorderError": "Could not reorder chapters",
+    "chapterMissing": "File not found: {{path}}",
+    "unattachedTitle_one": "{{count}} unattached file",
+    "unattachedTitle_other": "{{count}} unattached files",
+    "unattachedHint": "Found in the project but missing from the manuscript.",
+    "attach": "Attach to manuscript",
+    "attachError": "Could not attach the file",
+    "noProject": "No project open",
+    "renameHint": "double-click to rename",
+    "outlineToggle": "Outline ({{count}} headings)",
+    "untitledHeading": "(untitled)",
+    "renumberNoChange": "Footnotes are already numbered in order.",
+    "renumberDone": "Footnotes renumbered across {{count}} chapter(s).",
+    "renumberError": "Renumbering failed: the manuscript is unchanged."
+  },
+  "citations": {
+    "allValid": "All citations are valid ({{count}} keys checked).",
+    "missing": "{{count}} key(s) missing from the bibliography:",
+    "checkError": "Could not check citations."
   }
 }

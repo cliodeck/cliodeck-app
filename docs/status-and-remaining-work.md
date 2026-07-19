@@ -46,6 +46,14 @@ Partially done:
   adjudication journaling), −4.7 MB renderer bundle. See
   `docs/editor-architecture.md`, `docs/editor-proposals.md`,
   `docs/archive/PLAN_migration-editeur-cm6.md`
+- **Book chapters** (`feat/livre-chapitres`, phases 1-5 complete, 2026-07-19):
+  the `book` project type is no longer an empty shell — multi-file chapter
+  manifest with disk reconciliation, chapter panel, per-chapter editor state
+  cache (undo survives switching), manuscript outline, manuscript-wide
+  footnote renumbering / citation check / statistics, per-book settings
+  (note style and numbering, bibliography placement, heading numbering), and
+  assembly-based PDF/Word exports with per-chapter footnote namespacing.
+  See `docs/book-architecture.md`, `docs/archive/PLAN_chapitres-livre.md`
 
 ---
 
@@ -77,12 +85,38 @@ Partially done:
 | Design | Installer strategy (`docs/installer-strategy.md`): embedded Ollama, first-run wizard, bundled Pandoc/tectonic |
 | Backend | Publish the Lezer extensions (`src/editor/lezer-extensions/`) as separate npm packages, MIT (CM6 plan arbitration 4 — unlocked since Phase 3; no Lezer pandoc-citation extension exists in the ecosystem) |
 
+| Frontend | Book: multi-chapter search (deferred from phase 3 — needs its own result panel and refresh model) |
+| Backend | Book: index (`\index{}`) and typed cross-references — same technical family as footnotes/citations (Lezer extension + resolution at assembly) |
+| Backend | Book: Word export ignores `noteStyle`/`noteNumbering` (LaTeX path only) |
+| Backend | Index the manuscript itself in the RAG — nothing currently reads the text being written; a book is where it would matter most |
 | Backend | `searchEuropeana` tool: scaffolded but not registered (needs API key) |
 | Frontend | Brainstorm flagged-sources badge (follow-up from security events panel) |
 | Frontend | "Drafts" panel for Brainstorm->Write flow |
 | Backend | Electron auto-update via `electron-updater` |
 
 ---
+
+
+### Angle mort de la « CI verte » (constaté le 2026-07-19)
+
+Les gardes `skipIf` de `backend/__tests__/helpers/native-guards.ts` sautent
+les suites SQLite quand `better-sqlite3` est compilé pour l'ABI Electron
+(l'état normal d'un poste de dev, posé par le `postinstall`). En
+recompilant pour l'ABI Node (`npm rebuild better-sqlite3`), **8 échecs
+réels apparaissent** — vérifiés présents à l'identique sur `main`, donc
+antérieurs au chantier livre :
+
+| Suite | Échecs |
+|---|---|
+| `backend/core/workspace/__tests__/migrator.test.ts` | 4 |
+| `backend/mcp-server/__tests__/search{Obsidian,Tropy,Zotero}.test.ts` | 3 |
+| `scripts/__tests__/cli-migrate.test.ts` | 1 |
+
+Autrement dit, la suite « verte » l'est parce que ces tests ne tournent
+pas, pas parce qu'ils passent. À traiter comme une dette propre :
+diagnostiquer les 8, puis faire tourner la CI sur l'ABI Node pour que la
+garde ne masque plus que l'indisponibilité réelle du binding.
+Restaurer ensuite l'ABI Electron avec `npm run rebuild:native`.
 
 ## 3. Known technical debt
 
@@ -101,7 +135,7 @@ Partially done:
 | `docs/editor-architecture.md` | CM6 editor architecture (current) |
 | `docs/editor-proposals.md` | AI proposal contract — no AI writing feature bypasses it |
 | `docs/INSTRUCTIONS_journal-usage-ia.md` + `docs/journal-usage-ia.md` | Usage journal spec + user doc |
-| `docs/TODO_barre-stats-document.md` | Document stats bar known debts |
+| `docs/archive/TODO_barre-stats-document.md` | Document stats bar known debts |
 | `docs/code-signing-decisions.md` | Parked code signing questions |
 | `docs/installer-strategy.md` | Distribution plan (mode B slim installer recommended) |
 | `docs/path-a-readiness.md` | RAG benchmark gate for unified vector store |

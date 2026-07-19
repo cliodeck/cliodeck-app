@@ -31,7 +31,12 @@ export function detectLineSeparator(source: string): LineSeparator {
 
 /**
  * Construit l'état CM6 d'un document en garantissant le contrat de fidélité :
- * `createDocState(source).doc.toString() === source` pour toute chaîne.
+ * `readDocText(createDocState(source)) === source` pour toute chaîne.
+ *
+ * ATTENTION : lire le texte via `doc.toString()` NE respecte PAS le
+ * séparateur déclaré — `Text.toString()` joint toujours avec "\n" et
+ * convertirait un fichier CRLF en LF à la sauvegarde. Toute lecture du
+ * document destinée au disque passe par `readDocText`.
  */
 export function createDocState(
   source: string,
@@ -46,7 +51,18 @@ export function createDocState(
   });
 }
 
+/**
+ * Texte exact d'un état, séparateur de ligne déclaré compris.
+ *
+ * `state.sliceDoc()` applique `EditorState.lineSeparator` ; `doc.toString()`
+ * l'ignore. C'est la seule lecture autorisée avant une écriture disque, un
+ * calcul de fidélité ou une comparaison de contenu.
+ */
+export function readDocText(state: EditorState): string {
+  return state.sliceDoc();
+}
+
 /** Charge puis restitue sans édition — la boucle du test de fidélité. */
 export function roundTrip(source: string): string {
-  return createDocState(source).doc.toString();
+  return readDocText(createDocState(source));
 }

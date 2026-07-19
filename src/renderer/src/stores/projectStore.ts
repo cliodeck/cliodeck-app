@@ -1,6 +1,15 @@
 import { create } from 'zustand';
+import {
+  DEFAULT_BOOK_SETTINGS,
+  type BookSettings,
+  type Chapter,
+  type ResolvedChapter,
+  type UnattachedFile,
+} from '@backend/types/book';
 
 // MARK: - Types
+
+export type { Chapter, ResolvedChapter, UnattachedFile, BookSettings };
 
 export interface Project {
   id: string;
@@ -14,13 +23,6 @@ export interface Project {
   // `bibliographySource` by `project-manager.ts` at load time. Optional
   // because older / freshly-created projects may not have one yet.
   bibliography?: string;
-}
-
-export interface Chapter {
-  id: string;
-  title: string;
-  filePath: string;
-  order: number;
 }
 
 /**
@@ -42,8 +44,13 @@ export type ProjectLoadState =
 interface ProjectState {
   // Current project
   currentProject: Project | null;
-  chapters: Chapter[];
+  /** Manifeste réconcilié avec le disque (entrées `missing` conservées). */
+  chapters: ResolvedChapter[];
+  /** Fichiers markdown trouvés hors manifeste — la Phase 2 les rattachera. */
+  unattachedFiles: UnattachedFile[];
   currentChapterId: string | null;
+  /** Réglages d'appareil savant de l'ouvrage courant. */
+  bookSettings: BookSettings;
 
   // Typed load state — see ProjectLoadState above.
   loadState: ProjectLoadState;
@@ -57,9 +64,14 @@ interface ProjectState {
   closeProject: () => void;
 
   setCurrentChapter: (chapterId: string) => void;
-  addChapter: (title: string, filePath: string) => void;
-  deleteChapter: (chapterId: string) => void;
-  reorderChapters: (chapters: Chapter[]) => void;
+  /** Recharge le manifeste depuis le disque (après création/modification). */
+  refreshChapters: () => Promise<void>;
+  /** Crée le fichier du chapitre ET l'entrée de manifeste. */
+  addChapter: (title: string, kind?: Chapter['kind']) => Promise<void>;
+  /** Retire du manifeste — le fichier reste sur le disque. */
+  deleteChapter: (chapterId: string) => Promise<void>;
+  reorderChapters: (chapters: Chapter[]) => Promise<void>;
+  updateBookSettings: (settings: Partial<BookSettings>) => Promise<void>;
 
   loadRecentProjects: () => Promise<void>;
 }
@@ -69,7 +81,9 @@ interface ProjectState {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProject: null,
   chapters: [],
+  unattachedFiles: [],
   currentChapterId: null,
+  bookSettings: { ...DEFAULT_BOOK_SETTINGS },
   loadState: { kind: 'idle' },
   recentProjects: [],
 
@@ -100,15 +114,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
 
       // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
-      // JAMAIS empêcher l'ouverture du projet. Un project.json sans `id`
-      // (créé à la main ou par script) faisait échouer la validation IPC et
-      // condamnait le chargement entier — le manuscrit devenait
-      // inaccessible à cause d'une liste de chapitres accessoire.
-      if (project.type === 'book' && project.id) {
+      // JAMAIS empêcher l'ouverture du projet — un manuscrit ne devient pas
+      // inaccessible à cause d'une liste accessoire.
+      let firstChapterPath: string | null = null;
+      if (project.type === 'book') {
+        set({ bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...(project.book ?? {}) } });
         try {
-          const chaptersResult = await window.electron.project.getChapters(project.id);
+          const chaptersResult = await window.electron.project.getChapters(project.path);
           if (chaptersResult.success) {
-            set({ chapters: chaptersResult.chapters });
+            set({
+              chapters: chaptersResult.chapters,
+              unattachedFiles: chaptersResult.unattached ?? [],
+            });
+            const first = chaptersResult.chapters.find(
+              (c: ResolvedChapter) => !c.missing
+            );
+            if (first) {
+              firstChapterPath = `${project.path}/${first.filePath}`;
+              set({ currentChapterId: first.id });
+            }
           }
         } catch (error) {
           console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
@@ -159,32 +183,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }
 
-      // Load document.md into editor
-      try {
-        const { useEditorStore } = await import('./editorStore');
-
-        // Construct path to document.md (or slides.md for presentations)
-        const documentPath = project.type === 'presentation'
+      // Ouvrir le document principal. Pour un livre, c'est le PREMIER
+      // chapitre du manifeste : un livre n'a pas de `document.md` et
+      // l'ouvrir créerait un fichier fantôme hors manuscrit.
+      const documentPath =
+        project.type === 'presentation'
           ? `${project.path}/slides.md`
-          : `${project.path}/document.md`;
-
-        // Load file FIRST so content is ready in the store
-        await useEditorStore.getState().loadFile(documentPath);
-        console.log('📝 Document loaded into editor with path tracking');
-      } catch (error) {
-        console.error('Failed to load document into editor:', error);
-
-        // If document doesn't exist, create it
-        try {
-          const { useEditorStore } = await import('./editorStore');
-          const documentPath = project.type === 'presentation'
-            ? `${project.path}/slides.md`
+          : project.type === 'book'
+            ? firstChapterPath
             : `${project.path}/document.md`;
-          await window.electron.fs.writeFile(documentPath, `# ${project.name}\n`);
+
+      if (!documentPath) {
+        // Livre au manifeste vide (tous les chapitres manquants, ou projet
+        // créé hors app) : on n'invente pas de fichier — la Phase 2 offrira
+        // de créer un chapitre ou de rattacher un fichier existant.
+        console.warn('ℹ️ Aucun chapitre à ouvrir : manifeste vide');
+      } else {
+        try {
+          // Load file FIRST so content is ready in the store
+          const { useEditorStore } = await import('./editorStore');
           await useEditorStore.getState().loadFile(documentPath);
-          console.log('📝 Created and loaded document');
-        } catch (createError) {
-          console.error('Failed to create document:', createError);
+          console.log('📝 Document loaded into editor with path tracking');
+        } catch (error) {
+          console.error('Failed to load document into editor:', error);
+
+          // If document doesn't exist, create it
+          try {
+            const { useEditorStore } = await import('./editorStore');
+            await window.electron.fs.writeFile(documentPath, `# ${project.name}\n`);
+            await useEditorStore.getState().loadFile(documentPath);
+            console.log('📝 Created and loaded document');
+          } catch (createError) {
+            console.error('Failed to create document:', createError);
+          }
         }
       }
 
@@ -230,7 +261,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
         },
         chapters: [],
+        unattachedFiles: [],
         currentChapterId: null,
+        bookSettings: { ...DEFAULT_BOOK_SETTINGS },
         loadState: {
           kind: 'ready',
           loadedAt: new Date().toISOString(),
@@ -266,7 +299,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       currentProject: null,
       chapters: [],
+      unattachedFiles: [],
       currentChapterId: null,
+      bookSettings: { ...DEFAULT_BOOK_SETTINGS },
       loadState: { kind: 'idle' },
     });
   },
@@ -275,27 +310,87 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ currentChapterId: chapterId });
   },
 
-  addChapter: (title: string, filePath: string) => {
-    const { chapters } = get();
-    const newChapter: Chapter = {
-      id: crypto.randomUUID(),
+  refreshChapters: async () => {
+    const { currentProject } = get();
+    if (!currentProject || currentProject.type !== 'book') return;
+    try {
+      const result = await window.electron.project.getChapters(currentProject.path);
+      if (result.success) {
+        set({
+          chapters: result.chapters,
+          unattachedFiles: result.unattached ?? [],
+        });
+      }
+    } catch (error) {
+      console.warn('⚠️ Rafraîchissement des chapitres impossible:', error);
+    }
+  },
+
+  addChapter: async (title: string, kind?: Chapter['kind']) => {
+    const { currentProject } = get();
+    if (!currentProject) throw new Error('Aucun projet ouvert');
+    // Le fichier ET l'entrée de manifeste sont créés côté main, en une
+    // opération : pas d'entrée sans fichier ni l'inverse.
+    const result = await window.electron.project.createChapter({
+      projectPath: currentProject.path,
       title,
-      filePath,
-      order: chapters.length,
-    };
-    set({ chapters: [...chapters, newChapter] });
-  },
-
-  deleteChapter: (chapterId: string) => {
-    const { chapters } = get();
-    set({
-      chapters: chapters.filter((c) => c.id !== chapterId),
-      currentChapterId: null,
+      kind,
     });
+    if (!result.success) {
+      throw new Error(result.error || 'Création du chapitre impossible');
+    }
+    await get().refreshChapters();
   },
 
-  reorderChapters: (newChapters: Chapter[]) => {
-    set({ chapters: newChapters });
+  deleteChapter: async (chapterId: string) => {
+    const { currentProject, chapters, currentChapterId } = get();
+    if (!currentProject) throw new Error('Aucun projet ouvert');
+    // Le fichier reste sur le disque (décision cadre : on ne perd jamais de
+    // texte) ; il réapparaîtra comme « non rattaché ».
+    const remaining = chapters
+      .filter((c) => c.id !== chapterId)
+      .map(({ missing: _missing, ...chapter }) => chapter);
+    const result = await window.electron.project.saveChapters({
+      projectPath: currentProject.path,
+      chapters: remaining,
+    });
+    if (!result.success) {
+      throw new Error(result.error || 'Suppression du chapitre impossible');
+    }
+    set({ currentChapterId: currentChapterId === chapterId ? null : currentChapterId });
+    await get().refreshChapters();
+  },
+
+  reorderChapters: async (newChapters: Chapter[]) => {
+    const { currentProject } = get();
+    if (!currentProject) throw new Error('Aucun projet ouvert');
+    // Optimiste : l'ordre local suit immédiatement le glisser-déposer, le
+    // disque confirme ensuite (l'ordre stocké est renormalisé côté main).
+    set({ chapters: newChapters.map((c, index) => ({ ...c, order: index })) });
+    const result = await window.electron.project.saveChapters({
+      projectPath: currentProject.path,
+      chapters: newChapters.map(({ ...chapter }) => chapter),
+    });
+    if (!result.success) {
+      await get().refreshChapters(); // rollback depuis la vérité disque
+      throw new Error(result.error || 'Réordonnancement impossible');
+    }
+  },
+
+  updateBookSettings: async (settings: Partial<BookSettings>) => {
+    const { currentProject, bookSettings } = get();
+    if (!currentProject) throw new Error('Aucun projet ouvert');
+    const previous = bookSettings;
+    set({ bookSettings: { ...bookSettings, ...settings } });
+    const result = await window.electron.project.saveBookSettings({
+      projectPath: currentProject.path,
+      settings,
+    });
+    if (!result.success) {
+      set({ bookSettings: previous });
+      throw new Error(result.error || 'Enregistrement des réglages impossible');
+    }
+    if (result.settings) set({ bookSettings: result.settings });
   },
 
   loadRecentProjects: async () => {

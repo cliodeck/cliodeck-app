@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { currentRelativePath } from '../../stores/manuscriptStore';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -15,8 +16,12 @@ interface PDFExportModalProps {
 }
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
-  const { currentProject } = useProjectStore();
+  const { currentProject, chapters, bookSettings } = useProjectStore();
   const { content } = useEditorStore();
+  const isBook = currentProject?.type === 'book';
+  // Tirage de travail : l'auteur peut n'exporter que le chapitre ouvert
+  // (arbitrage 9). Par défaut, le livre entier.
+  const [bookScope, setBookScope] = useState<'book' | 'chapter'>('book');
 
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -130,6 +135,41 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     setSuccess(false);
 
     try {
+      // Un livre n'a pas de document unique : son manuscrit est assemblé
+      // côté main à partir du manifeste (le tampon de l'éditeur ne contient
+      // que le chapitre ouvert). Le texte vivant de ce chapitre est
+      // transmis en `liveOverrides` pour que les frappes non sauvegardées
+      // soient exportées.
+      let manuscript:
+        | {
+            chapters: typeof chapters;
+            liveOverrides?: Record<string, string>;
+            scope?: 'book' | { chapterId: string };
+          }
+        | undefined;
+      if (isBook) {
+        const openRel = currentRelativePath();
+        const liveContent = useEditorStore.getState().getLiveContent();
+        const openChapter = openRel
+          ? chapters.find((c) => c.filePath === openRel)
+          : undefined;
+
+        if (bookScope === 'chapter' && !openChapter) {
+          setError('Aucun chapitre ouvert à exporter.');
+          setIsExporting(false);
+          return;
+        }
+
+        manuscript = {
+          chapters: chapters.filter((c) => !c.missing),
+          liveOverrides: openRel ? { [openRel]: liveContent } : undefined,
+          scope:
+            bookScope === 'chapter' && openChapter
+              ? { chapterId: openChapter.id }
+              : 'book',
+        };
+      }
+
       // For presentations, load slides.md instead of document.md
       let exportContent = content;
       if (currentProject.type === 'presentation') {
@@ -162,7 +202,9 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       const result = await window.electron.pdfExport.export({
         projectPath: currentProject.path,
         projectType: currentProject.type,
-        content: exportContent,
+        content: manuscript ? '' : exportContent,
+        manuscript,
+        bookSettings: isBook ? bookSettings : undefined,
         outputPath: outputPath,
         bibliographyPath: currentProject.bibliography,
         cslPath: currentProject.cslPath,
@@ -239,6 +281,24 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
                 {hasXelatex ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
                 <span>XeLaTeX {hasXelatex ? 'installé' : 'manquant'}</span>
               </div>
+            </div>
+          )}
+
+          {/* Portée de l'export d'un livre : ouvrage entier ou tirage de
+              travail du chapitre ouvert (plan chapitres, arbitrage 9). */}
+          {isBook && (
+            <div className="form-field">
+              <label>Portée</label>
+              <select
+                value={bookScope}
+                onChange={(e) => setBookScope(e.target.value as 'book' | 'chapter')}
+                disabled={isExporting}
+              >
+                <option value="book">
+                  Tout le livre ({chapters.filter((c) => !c.missing).length} pièce(s))
+                </option>
+                <option value="chapter">Ce chapitre seul (tirage de travail)</option>
+              </select>
             </div>
           )}
 

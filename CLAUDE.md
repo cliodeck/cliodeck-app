@@ -34,6 +34,12 @@ ClioDeck is an Electron + React + TypeScript **desktop app for historians** cove
 - The pre-fusion SQLite stores (`vectors.db`, `primary-sources.db`, `history.db`) live alongside at the same flat level — consolidating them into `brain.db` is a Path A concern (ADR 0001).
 - Legacy `.cliodeck/v2/*` (pre-flatten) and pre-fusion v1 layouts are auto-migrated to flat on project load via `migrateWorkspaceToFlat`.
 
+**Project types** — `article` | `book` | `presentation` (`project.json`).
+- **`book`** = manuscrit à N fichiers : **pas de `document.md`**, les chapitres vivent dans `chapters/` et `project.json` porte le manifeste (`chapters[]`) plus les réglages d'ouvrage (`book.noteStyle`, `noteNumbering`, `bibliography`, `numberChapters`, `numberSections`). Types partagés : `backend/types/book.ts`. Architecture : [`docs/book-architecture.md`](docs/book-architecture.md).
+- **Assemblage** — `src/main/services/manuscript-assembler.ts` produit le flux unique pour les exports, en **préfixant les identifiants de notes par chapitre** (sans quoi deux `[^1]` homonymes rendent la même note : mesuré avec pandoc).
+- **Règle transverse** — le **chapitre ouvert vient de l'éditeur vivant** (`getLiveContent`), jamais du disque : sinon les frappes non sauvegardées sont ignorées (renumérotation, statistiques, exports).
+- **`presentation`** édite `slides.md` (découpage partagé : `src/editor/slides.ts`).
+
 **IPC** — handlers in `src/main/ipc/handlers/*-handlers.ts`, bindings in `src/preload/index.ts`, surfaced as `window.electron.*` in the renderer.
 
 ## 3. Conventions
