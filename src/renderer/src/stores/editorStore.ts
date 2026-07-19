@@ -115,6 +115,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   loadFile: async (filePath: string) => {
     logger.store('Editor', 'loadFile called', { filePath });
+
+    // Bascule de fichier : le fichier sortant est sauvegardé AVANT toute
+    // chose. Sans cela, les frappes des dernières secondes étaient perdues
+    // (useAutoSave annule son minuteur quand `filePath` change) et le
+    // contenu sortant finissait écrit dans le fichier entrant. La
+    // sauvegarde lit l'éditeur vivant (`getLiveContent`), donc y compris
+    // ce que la synchronisation debouncée n'a pas encore poussé.
+    const previousPath = get().filePath;
+    if (previousPath && previousPath !== filePath && get().isDirty) {
+      try {
+        await get().saveFile();
+        logger.store('Editor', 'Outgoing file saved before switch', { previousPath });
+      } catch (error) {
+        // Échec de sauvegarde : on n'ouvre pas le fichier suivant, sinon
+        // les modifications non écrites seraient perdues sans un mot.
+        logger.error('Editor', error);
+        throw error;
+      }
+    }
+
     try {
       logger.ipc('editor.loadFile', { filePath });
       const result = await window.electron.editor.loadFile(filePath);

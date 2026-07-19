@@ -301,6 +301,10 @@ export const CodeMirrorEditor: React.FC = () => {
     if (!container) return;
 
     const store = useEditorStore.getState();
+    // Fichier auquel CETTE vue appartient : le démontage ne doit jamais
+    // écrire son texte dans le store si un autre document a pris la place
+    // entre-temps (bascule de chapitre / de fichier).
+    const ownFilePath = store.filePath;
     const changeListeners = new Set<(content: string) => void>();
     const selectionListeners = new Set<(offset: number) => void>();
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -308,6 +312,9 @@ export const CodeMirrorEditor: React.FC = () => {
 
     const syncToStore = (view: EditorView) => {
       pendingSync = false;
+      // Même garde qu'au démontage : ne rien pousser si le document
+      // courant n'est plus le nôtre.
+      if (useEditorStore.getState().filePath !== ownFilePath) return;
       const content = view.state.doc.toString();
       useEditorStore.setState({ content, isDirty: true });
       for (const listener of changeListeners) listener(content);
@@ -423,7 +430,11 @@ export const CodeMirrorEditor: React.FC = () => {
       // propositions en attente — arbitrage 5).
       useEditorStore.getState().setEditorFacade(null);
       if (syncTimer) clearTimeout(syncTimer);
-      if (pendingSync) {
+      // La purge n'a lieu que si le store porte TOUJOURS notre document :
+      // sur une bascule de fichier, `loadFile` a déjà installé le nouveau
+      // contenu et écrire ici ferait afficher — puis sauvegarder — le texte
+      // sortant sous le nom du fichier entrant (écrasement silencieux).
+      if (pendingSync && useEditorStore.getState().filePath === ownFilePath) {
         useEditorStore.setState({
           content: view.state.doc.toString(),
           isDirty: true,
