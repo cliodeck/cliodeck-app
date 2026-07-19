@@ -1569,7 +1569,9 @@
     "charsWithSpaces": "Zeichen m. LZ",
     "paragraphs": "Abs.",
     "citations": "Zit.",
-    "footnotes": "Noten"
+    "footnotes": "Noten",
+    "bookWords": "Buch",
+    "bookTotalHint": "Wörter im gesamten Manuskript (alle Kapitel)"
   },
   "book": {
     "chapterCount_one": "{{count}} Kapitel",
@@ -1594,6 +1596,16 @@
     "attach": "Dem Manuskript zuordnen",
     "attachError": "Datei konnte nicht zugeordnet werden",
     "noProject": "Kein Projekt geöffnet",
-    "renameHint": "zum Umbenennen doppelklicken"
+    "renameHint": "zum Umbenennen doppelklicken",
+    "outlineToggle": "Gliederung ({{count}} Überschriften)",
+    "untitledHeading": "(ohne Titel)",
+    "renumberNoChange": "Die Fußnoten sind bereits der Reihe nach nummeriert.",
+    "renumberDone": "Fußnoten in {{count}} Kapitel(n) neu nummeriert.",
+    "renumberError": "Neunummerierung fehlgeschlagen: Das Manuskript ist unverändert."
+  },
+  "citations": {
+    "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
+    "missing": "{{count}} Schlüssel fehlen in der Bibliografie:",
+    "checkError": "Zitate konnten nicht geprüft werden."
   }
 }

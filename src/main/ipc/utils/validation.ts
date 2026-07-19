@@ -475,6 +475,12 @@ export const ProjectSaveChaptersSchema = z.object({
   chapters: z.array(ChapterSchema),
 });
 
+/** Lecture groupée de chapitres (Phase 3) : bornée pour éviter l'abus. */
+export const ProjectReadChaptersSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  filePaths: z.array(z.string().min(1)).max(500),
+});
+
 export const ProjectCreateChapterSchema = z.object({
   projectPath: z.string().min(1, 'Project path is required'),
   title: z.string().min(1, 'Chapter title is required'),

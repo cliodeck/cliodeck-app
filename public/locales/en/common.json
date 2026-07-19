@@ -1569,7 +1569,9 @@
     "charsWithSpaces": "chars sp.",
     "paragraphs": "par.",
     "citations": "cit.",
-    "footnotes": "notes"
+    "footnotes": "notes",
+    "bookWords": "book",
+    "bookTotalHint": "Total words in the manuscript (all chapters)"
   },
   "book": {
     "chapterCount_one": "{{count}} chapter",
@@ -1594,6 +1596,16 @@
     "attach": "Attach to manuscript",
     "attachError": "Could not attach the file",
     "noProject": "No project open",
-    "renameHint": "double-click to rename"
+    "renameHint": "double-click to rename",
+    "outlineToggle": "Outline ({{count}} headings)",
+    "untitledHeading": "(untitled)",
+    "renumberNoChange": "Footnotes are already numbered in order.",
+    "renumberDone": "Footnotes renumbered across {{count}} chapter(s).",
+    "renumberError": "Renumbering failed: the manuscript is unchanged."
+  },
+  "citations": {
+    "allValid": "All citations are valid ({{count}} keys checked).",
+    "missing": "{{count}} key(s) missing from the bibliography:",
+    "checkError": "Could not check citations."
   }
 }

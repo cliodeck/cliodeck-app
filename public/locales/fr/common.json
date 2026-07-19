@@ -1569,7 +1569,9 @@
     "charsWithSpaces": "car. esp.",
     "paragraphs": "par.",
     "citations": "cit.",
-    "footnotes": "notes"
+    "footnotes": "notes",
+    "bookWords": "livre",
+    "bookTotalHint": "Total de mots du manuscrit (tous chapitres)"
   },
   "book": {
     "chapterCount_one": "{{count}} chapitre",
@@ -1594,6 +1596,16 @@
     "attach": "Rattacher au manuscrit",
     "attachError": "Impossible de rattacher le fichier",
     "noProject": "Aucun projet ouvert",
-    "renameHint": "double-cliquez pour renommer"
+    "renameHint": "double-cliquez pour renommer",
+    "outlineToggle": "Plan ({{count}} titres)",
+    "untitledHeading": "(sans titre)",
+    "renumberNoChange": "Les notes sont déjà numérotées dans l'ordre.",
+    "renumberDone": "Notes renumérotées dans {{count}} chapitre(s).",
+    "renumberError": "La renumérotation a échoué : le manuscrit est inchangé."
+  },
+  "citations": {
+    "allValid": "Toutes les citations sont valides ({{count}} clés vérifiées).",
+    "missing": "{{count}} clé(s) absente(s) de la bibliographie :",
+    "checkError": "Impossible de vérifier les citations."
   }
 }

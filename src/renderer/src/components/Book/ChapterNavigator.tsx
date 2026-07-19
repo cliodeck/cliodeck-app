@@ -1,16 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   FilePlus,
   Link2,
   X,
 } from 'lucide-react';
 import type { Chapter, ResolvedChapter } from '@backend/types/book';
+import { parseOutline, replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
 import './ChapterNavigator.css';
@@ -37,6 +40,13 @@ import './ChapterNavigator.css';
  * un chapitre fermé on ne touche pas au fichier — on ne modifie jamais
  * sous les pieds de l'auteur un texte qu'il n'a pas devant lui ; la
  * divergence éventuelle est signalée par une pastille.
+ *
+ * **Plan (Phase 3)** — chaque chapitre déplie ses titres internes. Celui du
+ * chapitre ouvert est vivant (recalculé sur le texte de l'éditeur) ; les
+ * autres viennent du dérivé mis en cache par `manuscriptStore`. Le
+ * découpage est celui de `parseOutline` (arbre Lezer), qui remplace aussi
+ * l'ancien `replaceLeadingHeading` ligne à ligne : un `#` dans un bloc de
+ * code ne peut plus être pris pour le titre du chapitre.
  */
 
 /** Numéro affiché : seuls les chapitres du corps sont numérotés. */
@@ -50,15 +60,6 @@ function chapterNumbers(chapters: ResolvedChapter[]): Map<string, number> {
     }
   }
   return numbers;
-}
-
-/** Remplace le premier titre de niveau 1, ou l'ajoute si le texte n'en a pas. */
-export function replaceLeadingHeading(content: string, title: string): string {
-  const lines = content.split('\n');
-  const index = lines.findIndex((line) => /^#\s+/.test(line));
-  if (index === -1) return `# ${title}\n\n${content}`;
-  lines[index] = `# ${title}`;
-  return lines.join('\n');
 }
 
 /** Sans manifeste, un fichier vaut par son nom. */
@@ -78,6 +79,11 @@ export const ChapterNavigator: React.FC = () => {
   const reorderChapters = useProjectStore((s) => s.reorderChapters);
   const refreshChapters = useProjectStore((s) => s.refreshChapters);
   const loadFile = useEditorStore((s) => s.loadFile);
+  const editorContent = useEditorStore((s) => s.content);
+  const editorFilePath = useEditorStore((s) => s.filePath);
+  const info = useManuscriptStore((s) => s.info);
+  const refreshAll = useManuscriptStore((s) => s.refreshAll);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [busy, setBusy] = useState(false);
   /** `'new'` = saisie de création ; sinon identifiant du chapitre renommé. */
@@ -88,6 +94,45 @@ export const ChapterNavigator: React.FC = () => {
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
+
+  // Événements rares seulement : liste de chapitres modifiée ou bascule.
+  // Jamais à la frappe — le plan du chapitre ouvert est calculé en direct.
+  useEffect(() => {
+    void refreshAll();
+  }, [chapters, editorFilePath, refreshAll]);
+
+  const openRelPath = currentRelativePath();
+  // Plan du chapitre ouvert : recalculé sur le texte vivant (déjà debouncé
+  // à 300 ms par la synchronisation CM6).
+  const liveOutline = useMemo(
+    () => (openRelPath ? parseOutline(editorContent) : []),
+    [openRelPath, editorContent]
+  );
+
+  const outlineFor = (chapter: ResolvedChapter) =>
+    chapter.filePath === openRelPath
+      ? liveOutline
+      : (info[chapter.filePath]?.outline ?? []);
+
+  const toggleExpanded = (id: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const goToLine = (chapter: ResolvedChapter, line: number): void => {
+    if (chapter.filePath !== openRelPath) {
+      void openChapter(chapter).then(() => {
+        // Le chapitre vient d'être chargé : la façade est reconstruite.
+        useEditorStore.getState().editorFacade?.revealLine(line);
+      });
+      return;
+    }
+    useEditorStore.getState().editorFacade?.revealLine(line);
+  };
 
   const numbers = chapterNumbers(chapters);
 
@@ -262,6 +307,11 @@ export const ChapterNavigator: React.FC = () => {
         {chapters.map((chapter, index) => {
           const kind = chapter.kind ?? 'chapter';
           const number = numbers.get(chapter.id);
+          const outline = outlineFor(chapter);
+          // Le `#` de tête EST le titre du chapitre (arbitrage 1) : le plan
+          // n'affiche que ce qui est SOUS lui.
+          const inner = outline.filter((h) => h.level > 1);
+          const isExpanded = expanded.has(chapter.id);
           return (
             <li
               key={chapter.id}
@@ -298,6 +348,20 @@ export const ChapterNavigator: React.FC = () => {
                     </span>
                     <span className="chapter-title">{chapter.title}</span>
                   </button>
+                  {inner.length > 0 && (
+                    <button
+                      className="chapter-outline-toggle"
+                      onClick={() => toggleExpanded(chapter.id)}
+                      title={t('book.outlineToggle', { count: inner.length })}
+                      aria-expanded={isExpanded}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown size={12} strokeWidth={1.6} />
+                      ) : (
+                        <ChevronRight size={12} strokeWidth={1.6} />
+                      )}
+                    </button>
+                  )}
                   <span className="chapter-item-controls">
                     <button
                       onClick={() => move(index, -1)}
@@ -322,6 +386,21 @@ export const ChapterNavigator: React.FC = () => {
                     </button>
                   </span>
                 </>
+              )}
+              {isExpanded && inner.length > 0 && (
+                <ul className="chapter-outline">
+                  {inner.map((heading, i) => (
+                    <li key={`${heading.from}-${i}`}>
+                      <button
+                        className={`chapter-outline-item level-${Math.min(heading.level, 4)}`}
+                        onClick={() => goToLine(chapter, heading.line)}
+                        title={heading.text}
+                      >
+                        {heading.text || t('book.untitledHeading')}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
           );

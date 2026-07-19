@@ -51,6 +51,9 @@ const api = {
       title: string;
       kind?: 'chapter' | 'front' | 'back';
     }) => ipcRenderer.invoke('project:create-chapter', data),
+    /** Lecture groupée : les fonctions transverses ont besoin des chapitres fermés. */
+    readChapters: (data: { projectPath: string; filePaths: string[] }) =>
+      ipcRenderer.invoke('project:read-chapters', data),
     saveBookSettings: (data: {
       projectPath: string;
       settings: {

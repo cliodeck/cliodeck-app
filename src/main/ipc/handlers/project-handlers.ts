@@ -21,6 +21,7 @@ import {
   ProjectUpdateConfigSchema,
   ProjectSaveChaptersSchema,
   ProjectCreateChapterSchema,
+  ProjectReadChaptersSchema,
   ProjectBookSettingsSchema,
 } from '../utils/validation.js';
 
@@ -203,6 +204,17 @@ export function setupProjectHandlers() {
       return result;
     } catch (error: any) {
       console.error('❌ project:save-chapters error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  ipcMain.handle('project:read-chapters', async (_event, rawData: unknown) => {
+    try {
+      const data = validate(ProjectReadChaptersSchema, rawData);
+      const result = await projectManager.readChapters(data);
+      return result;
+    } catch (error: any) {
+      console.error('❌ project:read-chapters error:', error);
       return errorResponse(error);
     }
   });

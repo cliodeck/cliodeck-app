@@ -63,6 +63,9 @@
 .chapter-item {
   display: flex;
   align-items: center;
+  /* Le plan (Phase 3) est un enfant du même <li> : il doit passer À LA
+     LIGNE sous l'en-tête du chapitre, pas s'y ajouter en colonne. */
+  flex-wrap: wrap;
   gap: var(--spacing-xs);
   padding: 0 var(--spacing-xs) 0 0;
   min-height: 30px;
@@ -254,3 +257,53 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* Plan du chapitre (Phase 3) — titres internes sous chaque chapitre. */
+.chapter-outline-toggle {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chapter-outline-toggle:hover {
+  color: var(--text-primary);
+}
+
+.chapter-outline {
+  list-style: none;
+  margin: 0 0 2px 0;
+  padding: 0;
+  /* Occupe toute la largeur : force le retour à la ligne dans le flex. */
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.chapter-outline-item {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  width: 100%;
+  padding: 2px 8px 2px 26px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 2px solid transparent;
+}
+
+.chapter-outline-item:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-left-color: var(--color-accent);
+}
+
+.chapter-outline-item.level-3 { padding-left: 38px; }
+.chapter-outline-item.level-4 { padding-left: 50px; }

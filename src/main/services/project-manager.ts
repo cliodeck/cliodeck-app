@@ -568,6 +568,54 @@ Note: N'oubliez pas de mentionner les perspectives futures.
     }
   }
 
+  /**
+   * Lecture groupée de chapitres (plan chapitres, Phase 3).
+   *
+   * Les fonctions transverses — renumérotation de l'ouvrage, vérification
+   * des citations, statistiques — ont besoin du texte des chapitres qui ne
+   * sont PAS ouverts dans l'éditeur. Même garde anti-évasion que le reste :
+   * un chemin qui sort du projet est refusé, pas lu.
+   *
+   * Un fichier illisible (disparu entre-temps) est retourné avec son
+   * erreur plutôt que de faire échouer toute la lecture : l'appelant décide
+   * s'il peut travailler sans lui.
+   */
+  async readChapters(data: { projectPath: string; filePaths: string[] }): Promise<{
+    success: boolean;
+    files: Array<{ filePath: string; content?: string; error?: string }>;
+    error?: string;
+  }> {
+    try {
+      const { projectDir } = this.resolveProjectPaths(data.projectPath);
+      const files: Array<{ filePath: string; content?: string; error?: string }> = [];
+
+      for (const relPath of data.filePaths) {
+        if (!this.isInsideProject(projectDir, relPath)) {
+          files.push({
+            filePath: relPath,
+            error: `Path "${relPath}" escapes the project directory`,
+          });
+          continue;
+        }
+        try {
+          const content = await readFile(path.resolve(projectDir, relPath), 'utf-8');
+          files.push({ filePath: relPath, content });
+        } catch (error: unknown) {
+          files.push({
+            filePath: relPath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return { success: true, files };
+    } catch (error: unknown) {
+      console.error('❌ Failed to read chapters:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, files: [], error: message };
+    }
+  }
+
   /** Écrit les réglages d'ouvrage (normalisés) dans `project.json`. */
   async saveBookSettings(data: {
     projectPath: string;

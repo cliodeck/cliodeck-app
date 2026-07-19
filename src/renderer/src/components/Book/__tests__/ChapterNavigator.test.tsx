@@ -10,7 +10,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import type { ResolvedChapter, UnattachedFile } from '@backend/types/book';
 
-import { ChapterNavigator, replaceLeadingHeading } from '../ChapterNavigator';
+import { ChapterNavigator } from '../ChapterNavigator';
+import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
@@ -196,13 +197,11 @@ describe('replaceLeadingHeading', () => {
     expect(replaceLeadingHeading(source, 'T')).toBe(`# T\n\n${source}`);
   });
 
-  it('LIMITE CONNUE : un # dans un bloc de code serait pris pour le titre', () => {
-    // Le renommage travaille sur des lignes, pas sur l'arbre Lezer. Le cas
-    // exige un fichier dont le PREMIER `# ` de début de ligne est dans une
-    // clôture de code — rarissime pour un chapitre, dont le titre ouvre le
-    // fichier. Documenté plutôt que sur-conçu ; à revoir si la Phase 3
-    // apporte un `parseOutline` partagé.
+  it('ne prend pas un # de bloc de code pour le titre (levée en Phase 3)', () => {
+    // La limite documentée en Phase 2 (renommage ligne à ligne) est levée :
+    // `replaceLeadingHeading` s'appuie désormais sur l'arbre Lezer partagé
+    // (`@/editor/outline`). Le bloc de code est intact et le titre est ajouté.
     const source = '```\n# pas un titre\n```\n';
-    expect(replaceLeadingHeading(source, 'T')).toBe('```\n# T\n```\n');
+    expect(replaceLeadingHeading(source, 'T')).toBe('# T\n\n```\n# pas un titre\n```\n');
   });
 });
