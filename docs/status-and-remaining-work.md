@@ -96,6 +96,28 @@ Partially done:
 
 ---
 
+
+### Angle mort de la « CI verte » (constaté le 2026-07-19)
+
+Les gardes `skipIf` de `backend/__tests__/helpers/native-guards.ts` sautent
+les suites SQLite quand `better-sqlite3` est compilé pour l'ABI Electron
+(l'état normal d'un poste de dev, posé par le `postinstall`). En
+recompilant pour l'ABI Node (`npm rebuild better-sqlite3`), **8 échecs
+réels apparaissent** — vérifiés présents à l'identique sur `main`, donc
+antérieurs au chantier livre :
+
+| Suite | Échecs |
+|---|---|
+| `backend/core/workspace/__tests__/migrator.test.ts` | 4 |
+| `backend/mcp-server/__tests__/search{Obsidian,Tropy,Zotero}.test.ts` | 3 |
+| `scripts/__tests__/cli-migrate.test.ts` | 1 |
+
+Autrement dit, la suite « verte » l'est parce que ces tests ne tournent
+pas, pas parce qu'ils passent. À traiter comme une dette propre :
+diagnostiquer les 8, puis faire tourner la CI sur l'ABI Node pour que la
+garde ne masque plus que l'indisponibilité réelle du binding.
+Restaurer ensuite l'ABI Electron avec `npm run rebuild:native`.
+
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps
