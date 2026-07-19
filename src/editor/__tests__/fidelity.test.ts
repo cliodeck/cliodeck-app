@@ -51,6 +51,8 @@ describe('corpus de fidélité (intégrité des fixtures)', () => {
       'links-images.md',
       'milkdown-artifacts.md',
       'non-ascii.md',
+      'slides-deck.md',
+      'slides-sans-frontmatter.md',
       'tables-tasklists.md',
       'whitespace-no-final-newline.md',
     ]);

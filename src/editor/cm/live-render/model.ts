@@ -1,5 +1,6 @@
-import type { EditorState } from '@codemirror/state';
-import type { Tree } from '@lezer/common';
+import type { EditorState, Text } from '@codemirror/state';
+import type { SyntaxNode, Tree } from '@lezer/common';
+import { detectFrontmatterLines, isSeparatorLine } from '../../slides';
 
 /**
  * Rendu live — partie pure (plan CM6, Phase 2).
@@ -21,7 +22,11 @@ export type LiveDeco =
   | { kind: 'line'; at: number; class: string }
   | { kind: 'mark'; from: number; to: number; class: string; url?: string }
   | { kind: 'checkbox'; from: number; to: number; checked: boolean }
-  | { kind: 'hr'; from: number; to: number };
+  | { kind: 'hr'; from: number; to: number }
+  /** Frontière de slide numérotée (mode presentation) : `number` = ordinal
+   *  de la slide qui COMMENCE après ce séparateur (la 1re slide n'a pas de
+   *  frontière). */
+  | { kind: 'slide-boundary'; from: number; to: number; number: number };
 
 /** Référence bibliographique résolue (Phase 3b). */
 export interface ResolvedCitation {
@@ -37,6 +42,20 @@ export interface LiveModelOptions {
    * Absent → aucune vérification (les clés ne sont pas soulignées).
    */
   resolveCitation?: (key: string) => ResolvedCitation | null;
+
+  /**
+   * Mode presentation (chantier « même éditeur ») : les lignes `---`
+   * séparatrices de slides (au sens de src/editor/slides.ts : hors blocs
+   * de code, hors frontmatter) sont rendues comme des frontières
+   * numérotées au lieu de règles horizontales. Les autres HR (`***`, `___`)
+   * gardent leur rendu. Coût : un balayage des lignes du document par
+   * recalcul — réservé aux decks (petits par nature), ne pas activer pour
+   * la prose.
+   */
+  slideSeparators?: boolean;
+
+  /** Libellé de la frontière (i18n, câblé par le wrapper). Défaut `Slide n`. */
+  slideLabel?: (n: number) => string;
 }
 
 export interface ImageSpec {
@@ -59,6 +78,46 @@ function touches(ranges: readonly Span[], from: number, to: number): boolean {
     if (r.from <= to && r.to >= from) return true;
   }
   return false;
+}
+
+/**
+ * Séparateurs de slides du document : offset de début de ligne → ordinal de
+ * la slide qui suit (1-based ; premier séparateur → slide 2). Balayage des
+ * lignes + exclusion des blocs de code via l'arbre et du frontmatter via la
+ * règle partagée. Utilisé seulement quand `slideSeparators` est actif.
+ */
+export function computeSlideSeparators(
+  doc: Text,
+  tree: Tree
+): Map<number, { from: number; to: number; number: number }> {
+  const out = new Map<number, { from: number; to: number; number: number }>();
+
+  const scan = Math.min(doc.lines, 100);
+  const headLines: string[] = [];
+  for (let n = 1; n <= scan; n++) headLines.push(doc.line(n).text);
+  const fm = detectFrontmatterLines(headLines);
+  const firstLine = fm ? fm.closingLine + 2 : 1; // closingLine 0-based → 1-based +1
+
+  const inCode = (pos: number): boolean => {
+    for (
+      let node: SyntaxNode | null = tree.resolveInner(pos, 1);
+      node;
+      node = node.parent
+    ) {
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') return true;
+    }
+    return false;
+  };
+
+  let ordinal = 0;
+  for (let n = firstLine; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    if (isSeparatorLine(line.text) && !inCode(line.from)) {
+      ordinal++;
+      out.set(line.from, { from: line.from, to: line.to, number: ordinal + 1 });
+    }
+  }
+  return out;
 }
 
 const ATX_HEADING = /^ATXHeading(\d)$/;
@@ -101,6 +160,30 @@ export function computeLiveDecorations(
     const line = doc.lineAt(pos);
     return touches(selection, line.from, line.to);
   };
+
+  // Frontières de slides (mode presentation) — émises HORS de l'itération
+  // d'arbre : un `---` collé sous un paragraphe parse en SetextHeading,
+  // pas en HorizontalRule, mais reste un séparateur de deck (sémantique
+  // partagée de src/editor/slides.ts).
+  const separators = options.slideSeparators
+    ? computeSlideSeparators(doc, tree)
+    : null;
+  if (separators) {
+    for (const sep of separators.values()) {
+      if (
+        touches(visible, sep.from, sep.to) &&
+        !lineTouched(sep.from) &&
+        sep.to > sep.from
+      ) {
+        out.push({
+          kind: 'slide-boundary',
+          from: sep.from,
+          to: sep.to,
+          number: sep.number,
+        });
+      }
+    }
+  }
 
   for (const range of visible) {
     tree.iterate({
@@ -306,6 +389,9 @@ export function computeLiveDecorations(
           // Un `---` en tout début de document ouvre un frontmatter YAML
           // (P3b) : ne pas le rendre comme une règle.
           if (node.from === 0) return;
+          // Mode presentation : les séparateurs de slides sont des
+          // frontières numérotées (émises plus haut), pas des HR.
+          if (separators?.has(doc.lineAt(node.from).from)) return;
           if (!lineTouched(node.from)) {
             out.push({ kind: 'hr', from: node.from, to: node.to });
           }

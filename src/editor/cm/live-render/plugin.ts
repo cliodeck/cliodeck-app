@@ -10,7 +10,7 @@ import { syntaxTree } from '@codemirror/language';
 import { computeLiveDecorations, type LiveModelOptions } from './model';
 import { liveRenderRefresh } from './refresh';
 import { changeOrigin } from '../change-origin';
-import { CheckboxWidget, HrWidget } from './widgets';
+import { CheckboxWidget, HrWidget, SlideBoundaryWidget } from './widgets';
 
 /**
  * Rendu live — ViewPlugin (plan CM6, Phase 2).
@@ -68,6 +68,15 @@ function buildDecorations(
       case 'hr':
         ranges.push(
           Decoration.replace({ widget: new HrWidget() }).range(d.from, d.to)
+        );
+        break;
+      case 'slide-boundary':
+        ranges.push(
+          Decoration.replace({
+            widget: new SlideBoundaryWidget(
+              options.slideLabel?.(d.number) ?? `Slide ${d.number}`
+            ),
+          }).range(d.from, d.to)
         );
         break;
     }

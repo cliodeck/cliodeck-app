@@ -1,6 +1,6 @@
 import { parser as markdownParser, GFM } from '@lezer/markdown';
 import type { Tree } from '@lezer/common';
-import { Footnotes, PandocCitations } from './lezer-extensions';
+import { Footnotes, PandocCitations } from './lezer-extensions/index.js';
 
 /**
  * Outils footnotes basés sur le parse Lezer (plan CM6, Phase 3b).

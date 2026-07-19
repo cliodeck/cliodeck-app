@@ -60,4 +60,14 @@ export interface EditorFacade {
    * désabonnement. Le callback reçoit le contenu courant.
    */
   onContentChange(callback: (content: string) => void): () => void;
+
+  /**
+   * S'abonne aux déplacements du curseur (tête de sélection, en offset),
+   * y compris après édition. Retourne le désabonnement.
+   *
+   * Optionnel : un moteur qui ne sait pas observer la sélection l'omet, et
+   * les consommateurs (synchro preview ↔ curseur, slide active du
+   * navigateur) se contentent alors de leur autre source de vérité.
+   */
+  onSelectionChange?(callback: (offset: number) => void): () => void;
 }

@@ -179,3 +179,65 @@ describe('rendu live — échappements et images', () => {
     expect(hides(d)).toHaveLength(2); // `![` et `](a.png)`
   });
 });
+
+describe('rendu live — frontières de slides (mode presentation)', () => {
+  const computeSlides = (doc: string, cursor = 0): LiveDeco[] => {
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ base: markdownLanguage })],
+    });
+    const tree = ensureSyntaxTree(state, doc.length, 10_000);
+    if (!tree) throw new Error('parse timeout');
+    return computeLiveDecorations(
+      state,
+      tree,
+      [{ from: 0, to: doc.length }],
+      [{ from: cursor, to: cursor }],
+      { slideSeparators: true }
+    );
+  };
+
+  const DECK = '# Un\n\n---\n\n# Deux\n';
+
+  it('un séparateur devient une frontière numérotée, pas une hr', () => {
+    const d = computeSlides(DECK, DECK.length);
+    const boundaries = kind(d, 'slide-boundary');
+    expect(boundaries).toHaveLength(1);
+    expect(boundaries[0].number).toBe(2); // la slide qui COMMENCE après
+    expect(kind(d, 'hr')).toHaveLength(0);
+  });
+
+  it('révélée quand le curseur est sur la ligne du séparateur', () => {
+    const d = computeSlides(DECK, DECK.indexOf('---') + 1);
+    expect(kind(d, 'slide-boundary')).toHaveLength(0);
+    expect(kind(d, 'hr')).toHaveLength(0); // pas de repli en hr non plus
+  });
+
+  it('`***` reste une règle horizontale ordinaire', () => {
+    const doc = 'texte\n\n***\n\nsuite\n';
+    const d = computeSlides(doc, doc.length);
+    expect(kind(d, 'hr')).toHaveLength(1);
+    expect(kind(d, 'slide-boundary')).toHaveLength(0);
+  });
+
+  it('un `---` dans un bloc de code : ni frontière ni hr', () => {
+    const doc = '# S\n\n```js\n---\n```\n\nfin\n';
+    const d = computeSlides(doc, doc.length);
+    expect(kind(d, 'slide-boundary')).toHaveLength(0);
+    expect(kind(d, 'hr')).toHaveLength(0);
+  });
+
+  it('la numérotation ignore le frontmatter et ses clôtures', () => {
+    const doc = '---\ntitle: x\n---\n\n# Un\n\n---\n\n# Deux\n';
+    const d = computeSlides(doc, doc.length);
+    const boundaries = kind(d, 'slide-boundary');
+    expect(boundaries).toHaveLength(1);
+    expect(boundaries[0].number).toBe(2);
+  });
+
+  it('option absente : comportement hr historique inchangé', () => {
+    const d = compute(DECK, DECK.length);
+    expect(kind(d, 'hr')).toHaveLength(1);
+    expect(kind(d, 'slide-boundary')).toHaveLength(0);
+  });
+});
