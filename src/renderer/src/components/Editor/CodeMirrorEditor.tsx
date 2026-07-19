@@ -39,6 +39,7 @@ import type { EditorFacade } from '@/editor/facade';
 import { recordAdjudication } from './proposals-ipc';
 import { normalizeInsertPayload } from './insert-payload';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from 'react-i18next';
@@ -216,6 +217,7 @@ function dynamicExtensions(settings: EditorSettings, dark: boolean): Extension {
 function createFacade(
   view: EditorView,
   changeListeners: Set<(content: string) => void>,
+  selectionListeners: Set<(offset: number) => void>,
   proposalsInstance: ProposalsInstance
 ): EditorFacade {
   return {
@@ -268,6 +270,10 @@ function createFacade(
       changeListeners.add(callback);
       return () => changeListeners.delete(callback);
     },
+    onSelectionChange: (callback) => {
+      selectionListeners.add(callback);
+      return () => selectionListeners.delete(callback);
+    },
   };
 }
 
@@ -280,6 +286,11 @@ export const CodeMirrorEditor: React.FC = () => {
   const filePath = useEditorStore((s) => s.filePath);
   const documentVersion = useEditorStore((s) => s.documentVersion);
   const settings = useEditorStore((s) => s.settings);
+  // Projet presentation : le rendu live traite `---` comme frontière de
+  // slide numérotée, pas comme règle horizontale (chantier slides).
+  const isPresentation = useProjectStore(
+    (s) => s.currentProject?.type === 'presentation'
+  );
   const { currentTheme } = useTheme();
   const { t } = useTranslation('common');
 
@@ -291,6 +302,7 @@ export const CodeMirrorEditor: React.FC = () => {
 
     const store = useEditorStore.getState();
     const changeListeners = new Set<(content: string) => void>();
+    const selectionListeners = new Set<(offset: number) => void>();
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingSync = false;
 
@@ -333,7 +345,11 @@ export const CodeMirrorEditor: React.FC = () => {
           extensions: scholarlyMarkdown,
         }),
         syntaxHighlighting(markdownHighlight),
-        liveRender({ resolveImageSrc, resolveCitation }),
+        liveRender({
+          resolveImageSrc,
+          resolveCitation,
+          ...(isPresentation ? { slideSeparators: true } : {}),
+        }),
         scholarly({
           resolveCitation,
           getCitations,
@@ -352,6 +368,13 @@ export const CodeMirrorEditor: React.FC = () => {
         cliodeckTheme,
         dynamicCompartment.of(dynamicExtensions(settings, currentTheme === 'dark')),
         EditorView.updateListener.of((update) => {
+          // Curseur : notification synchrone, sans passer par React — les
+          // consommateurs (navigateur/preview slides) ne mettent à jour leur
+          // état que quand l'index de slide change réellement.
+          if (update.selectionSet || update.docChanged) {
+            const offset = update.state.selection.main.head;
+            for (const listener of selectionListeners) listener(offset);
+          }
           if (!update.docChanged) return;
           // isDirty immédiat (autosave, indicateurs) ; contenu debouncé.
           if (!useEditorStore.getState().isDirty) {
@@ -368,7 +391,9 @@ export const CodeMirrorEditor: React.FC = () => {
     viewRef.current = view;
     useEditorStore
       .getState()
-      .setEditorFacade(createFacade(view, changeListeners, proposalsInstance));
+      .setEditorFacade(
+        createFacade(view, changeListeners, selectionListeners, proposalsInstance)
+      );
 
     // Hook de dev (critère d'acceptation Phase 4) : injection d'une
     // proposition factice sans aucun modèle — utilisé par la vérification
@@ -405,13 +430,14 @@ export const CodeMirrorEditor: React.FC = () => {
         });
       }
       changeListeners.clear();
+      selectionListeners.clear();
       delete devHost.__cliodeckProposals;
       proposalsRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, documentVersion]);
+  }, [filePath, documentVersion, isPresentation]);
 
   // Réglages et thème : reconfiguration à chaud, sans recréer la vue.
   useEffect(() => {

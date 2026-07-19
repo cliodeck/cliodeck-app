@@ -42,6 +42,30 @@ export class HrWidget extends WidgetType {
   }
 }
 
+/**
+ * Frontière de slide numérotée (mode presentation) : ligne de rupture +
+ * étiquette « Slide n ». Le libellé arrive résolu (i18n côté wrapper).
+ */
+export class SlideBoundaryWidget extends WidgetType {
+  constructor(readonly label: string) {
+    super();
+  }
+
+  override eq(other: SlideBoundaryWidget): boolean {
+    return other.label === this.label;
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('span');
+    wrap.className = 'cm-live-slide-boundary';
+    const label = document.createElement('span');
+    label.className = 'cm-live-slide-boundary-label';
+    label.textContent = this.label;
+    wrap.appendChild(label);
+    return wrap;
+  }
+}
+
 export class ImageWidget extends WidgetType {
   constructor(
     readonly src: string,

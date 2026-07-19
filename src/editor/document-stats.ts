@@ -1,5 +1,5 @@
 import { parser as markdownParser, GFM } from '@lezer/markdown';
-import { Footnotes, PandocCitations } from './lezer-extensions';
+import { Footnotes, PandocCitations } from './lezer-extensions/index.js';
 
 /**
  * Statistiques de document par arbre Lezer (solde de

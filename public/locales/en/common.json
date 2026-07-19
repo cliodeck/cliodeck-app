@@ -886,7 +886,6 @@
     "allFiles": "All files",
     "addSlide": "Add slide (---)",
     "addNote": "Add presenter note (Note:)",
-    "insertCitation": "Insert citation [@key]",
     "exportMode": "Export format",
     "mode": {
       "online": "HTML (online)",
@@ -897,7 +896,9 @@
       "online": "Requires an internet connection to load reveal.js from CDN.",
       "offline": "Downloads reveal.js assets and embeds them in the HTML file. Works offline.",
       "pdf": "Exports directly to PDF via the presentation rendering engine."
-    }
+    },
+    "addSection": "Add section (# --- )",
+    "frontmatterPrecedence": "The YAML frontmatter of slides.md (title, author, theme, transition) overrides reveal-config.json; the title and author typed here take precedence."
   },
   "revealjs": {
     "theme": "Theme",
@@ -927,6 +928,11 @@
       "output": "Result",
       "noContent": "No content to transform.",
       "unknownError": "Unknown error during generation."
+    },
+    "navigator": {
+      "count": "{{count}} slide",
+      "count_other": "{{count}} slides",
+      "untitled": "Slide {{index}}"
     }
   },
   "milkdownEditor": {

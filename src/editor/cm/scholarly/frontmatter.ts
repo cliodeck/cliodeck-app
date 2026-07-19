@@ -11,6 +11,7 @@ import {
   EditorView,
   WidgetType,
 } from '@codemirror/view';
+import { detectFrontmatterLines } from '../../slides';
 import type { ScholarlyLabels } from './types';
 
 /**
@@ -33,26 +34,24 @@ interface FrontmatterRange {
   preview: string;
 }
 
-/** Le `---` peut porter un `\r` résiduel (fichiers mixtes, cf. fidelity.ts). */
-function isFence(text: string): boolean {
-  return text === '---' || text === '---\r';
-}
-
 export function detectFrontmatter(doc: Text): FrontmatterRange | null {
-  if (doc.lines < 2 || !isFence(doc.line(1).text)) return null;
+  if (doc.lines < 2) return null;
+  // Règle partagée avec parseSlides (src/editor/slides.ts) : un deck qui
+  // ouvre sur un séparateur `---` (ligne vide ensuite, ou aucun corps
+  // YAML) n'est PAS un frontmatter — le repli aveugle transformait la
+  // première slide en faux frontmatter (état des lieux slides §2).
   const last = Math.min(doc.lines, MAX_SCAN_LINES);
-  for (let n = 2; n <= last; n++) {
-    const line = doc.line(n);
-    if (isFence(line.text)) {
-      const body = doc.sliceString(doc.line(1).to, line.from).trim();
-      return {
-        from: 0,
-        to: line.to,
-        preview: body.length > 200 ? `${body.slice(0, 200)}…` : body,
-      };
-    }
-  }
-  return null;
+  const lines: string[] = [];
+  for (let n = 1; n <= last; n++) lines.push(doc.line(n).text);
+  const fm = detectFrontmatterLines(lines);
+  if (!fm) return null;
+  const closing = doc.line(fm.closingLine + 1); // closingLine est 0-based
+  const body = doc.sliceString(doc.line(1).to, closing.from).trim();
+  return {
+    from: 0,
+    to: closing.to,
+    preview: body.length > 200 ? `${body.slice(0, 200)}…` : body,
+  };
 }
 
 class FoldedFrontmatterWidget extends WidgetType {

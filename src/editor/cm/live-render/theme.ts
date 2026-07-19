@@ -49,6 +49,33 @@ export const liveRenderTheme = EditorView.baseTheme({
     borderTop: '1px solid var(--border-color)',
   },
 
+  // Frontière de slide (mode presentation) : rupture nette + étiquette.
+  '.cm-live-slide-boundary': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.6em',
+    width: '100%',
+    verticalAlign: 'middle',
+  },
+  '.cm-live-slide-boundary::before, .cm-live-slide-boundary::after': {
+    content: "''",
+    flex: '1',
+    borderTop:
+      '2px solid color-mix(in srgb, var(--color-accent) 45%, transparent)',
+  },
+  '.cm-live-slide-boundary-label': {
+    fontSize: '0.72em',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'var(--text-secondary)',
+    background: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)',
+    borderRadius: '999px',
+    padding: '0.05em 0.7em',
+    whiteSpace: 'nowrap',
+  },
+
   '.cm-live-task': {
     accentColor: 'var(--color-accent)',
     marginRight: '0.4em',

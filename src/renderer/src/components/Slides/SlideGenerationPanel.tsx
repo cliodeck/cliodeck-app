@@ -4,6 +4,7 @@ import { Sparkles, X, RefreshCw, CheckCheck, ChevronDown } from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
 import { useSlidesStore } from '../../stores/slidesStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
+import './SlideGenerationPanel.css';
 
 type SourceType = 'document' | 'selection';
 
@@ -20,6 +21,9 @@ export const SlideGenerationPanel: React.FC = () => {
   const [isDone, setIsDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
+  // Modèle réellement utilisé par la génération (remonté par l'IPC) — porté
+  // par la proposition d'application (source.model, contrat Phase 4).
+  const [generatedModel, setGeneratedModel] = useState<string>('unknown');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void)[]>([]);
@@ -98,11 +102,17 @@ export const SlideGenerationPanel: React.FC = () => {
       ? citations.map((c) => ({ id: c.id, author: c.author, title: c.title, year: c.year }))
       : undefined;
 
-    // Fire and forget — streaming comes via events
-    window.electron.slides.generate({ text, language, citations: citationPayload }).catch((err: unknown) => {
-      setIsGenerating(false);
-      setError(err instanceof Error ? err.message : t('slides.generate.unknownError'));
-    });
+    // Fire and forget — streaming comes via events ; la promesse remonte le
+    // modèle utilisé (pour la proposition d'application, contrat Phase 4).
+    window.electron.slides
+      .generate({ text, language, citations: citationPayload })
+      .then((res: { success?: boolean; model?: string } | undefined) => {
+        if (res?.model) setGeneratedModel(res.model);
+      })
+      .catch((err: unknown) => {
+        setIsGenerating(false);
+        setError(err instanceof Error ? err.message : t('slides.generate.unknownError'));
+      });
   };
 
   const handleCancel = async () => {
@@ -110,19 +120,41 @@ export const SlideGenerationPanel: React.FC = () => {
     setIsGenerating(false);
   };
 
-  const handleReplace = () => {
+  /**
+   * Application via le CONTRAT PROPOSITIONNEL (Phase 4) : le contenu généré
+   * devient une proposition adjudicable (accepter/rejeter/modifier,
+   * journalisée) — jamais d'écriture IA directe (docs/editor-proposals.md).
+   * « Remplacer » = proposition de remplacement du document entier ;
+   * « Ajouter » = proposition d'insertion en fin de document. Repli sur
+   * l'écriture directe uniquement si l'extension de propositions est
+   * indisponible (propose absent ou refusé).
+   */
+  const applyGenerated = (mode: 'replace' | 'append') => {
     if (!editorFacade || !streamedContent) return;
-    editorFacade.setValue(streamedContent);
+    const docLength = editorFacade.getValue().length;
+    const range =
+      mode === 'replace' ? { from: 0, to: docLength } : { from: docLength, to: docLength };
+    const proposed = mode === 'replace' ? streamedContent : '\n\n' + streamedContent;
+
+    const proposedOk =
+      editorFacade.propose?.({
+        range,
+        proposed,
+        category: 'slides-generation',
+        source: { model: generatedModel, task: 'slides-generate' },
+      }) ?? false;
+
+    if (!proposedOk) {
+      if (mode === 'replace') editorFacade.setValue(proposed);
+      else editorFacade.appendText(proposed);
+    }
+
     editorFacade.focus();
     closePanel();
   };
 
-  const handleAppend = () => {
-    if (!editorFacade || !streamedContent) return;
-    editorFacade.appendText('\n\n' + streamedContent);
-    editorFacade.focus();
-    closePanel();
-  };
+  const handleReplace = () => applyGenerated('replace');
+  const handleAppend = () => applyGenerated('append');
 
   const handleReset = () => {
     setStreamedContent('');
