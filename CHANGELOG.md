@@ -13,7 +13,7 @@ Le type de projet « livre » n'était qu'une étiquette dans `project.json`
 plus un modèle LaTeX : l'API de chapitres existait dans le code mais
 n'avait jamais reçu d'interface et ne persistait rien. Un manuscrit se
 rédigeait donc dans un unique fichier monolithique. Bilan de départ :
-`docs/book-etat-des-lieux.md` ; plan exécuté :
+`docs/archive/book-etat-des-lieux.md` ; plan exécuté :
 `docs/archive/PLAN_chapitres-livre.md` ; architecture livrée :
 `docs/book-architecture.md`.
 

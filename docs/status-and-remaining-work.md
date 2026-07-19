@@ -135,7 +135,7 @@ Restaurer ensuite l'ABI Electron avec `npm run rebuild:native`.
 | `docs/editor-architecture.md` | CM6 editor architecture (current) |
 | `docs/editor-proposals.md` | AI proposal contract — no AI writing feature bypasses it |
 | `docs/INSTRUCTIONS_journal-usage-ia.md` + `docs/journal-usage-ia.md` | Usage journal spec + user doc |
-| `docs/TODO_barre-stats-document.md` | Document stats bar known debts |
+| `docs/archive/TODO_barre-stats-document.md` | Document stats bar known debts |
 | `docs/code-signing-decisions.md` | Parked code signing questions |
 | `docs/installer-strategy.md` | Distribution plan (mode B slim installer recommended) |
 | `docs/path-a-readiness.md` | RAG benchmark gate for unified vector store |

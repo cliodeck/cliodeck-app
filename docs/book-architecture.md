@@ -3,7 +3,7 @@
 > Document vivant : l'état de l'architecture livrée par le chantier
 > chapitres (phases 1 à 5, juillet 2026). Le plan exécuté est archivé dans
 > [`archive/PLAN_chapitres-livre.md`](archive/PLAN_chapitres-livre.md), le
-> bilan qui l'a motivé dans [`book-etat-des-lieux.md`](book-etat-des-lieux.md).
+> bilan qui l'a motivé dans [`book-etat-des-lieux.md`](archive/book-etat-des-lieux.md).
 
 ## 1. Le modèle : un manifeste, des fichiers
 
