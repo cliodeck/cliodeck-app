@@ -11,6 +11,7 @@ import { DocumentStats } from './DocumentStats';
 import { SlideNavigator } from '../Slides/SlideNavigator';
 import { SlidePreviewPanel } from '../Slides/SlidePreviewPanel';
 import { SlideGenerationPanel } from '../Slides/SlideGenerationPanel';
+import { ChapterNavigator } from '../Book/ChapterNavigator';
 
 // SimilarityPanel self-hides via `isPanelOpen` — lazy-loading keeps its heavy
 // dependency tree off the editor's initial chunk.
@@ -41,6 +42,10 @@ export const EditorPanel: React.FC = () => {
   // la toolbar gagne une section slides et Navigator/Preview/Génération
   // s'ouvrent en tiroirs latéraux autour du même CodeMirrorEditor.
   const isPresentation = useProjectStore((s) => s.currentProject?.type === 'presentation');
+  // Projet livre : le manuscrit est fait de N chapitres — le navigateur
+  // ouvre l'atelier de la même façon que pour les présentations.
+  const isBook = useProjectStore((s) => s.currentProject?.type === 'book');
+  const addChapter = useProjectStore((s) => s.addChapter);
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
 
@@ -53,6 +58,18 @@ export const EditorPanel: React.FC = () => {
 
   const handleNewFile = async () => {
     logger.component('EditorPanel', 'handleNewFile clicked');
+    // Dans un livre, « Nouveau » ajoute un chapitre au manuscrit : vider
+    // l'éditeur sortirait l'auteur du projet (`filePath: null`) et
+    // couperait l'autosave.
+    if (isBook) {
+      try {
+        await addChapter(t('book.untitledChapter'));
+      } catch (error) {
+        logger.error('EditorPanel', error);
+        await useDialogStore.getState().showAlert(t('book.addChapterError'));
+      }
+      return;
+    }
     if (await useDialogStore.getState().showConfirm(t('toolbar.newFileConfirm'))) {
       // L'éditeur vivant reçoit l'édition via la façade ; le store suit.
       useEditorStore.getState().editorFacade?.setValue('');
@@ -297,6 +314,18 @@ export const EditorPanel: React.FC = () => {
                   </Panel>
                 </>
               )}
+            </PanelGroup>
+          </div>
+        ) : isBook ? (
+          <div className="book-workbench">
+            <PanelGroup direction="horizontal">
+              <Panel defaultSize={24} minSize={15} maxSize={40}>
+                <ChapterNavigator />
+              </Panel>
+              <PanelResizeHandle className="resize-handle" />
+              <Panel defaultSize={76} minSize={40}>
+                <CodeMirrorEditor />
+              </Panel>
             </PanelGroup>
           </div>
         ) : (

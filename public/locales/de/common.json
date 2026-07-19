@@ -1570,5 +1570,30 @@
     "paragraphs": "Abs.",
     "citations": "Zit.",
     "footnotes": "Noten"
+  },
+  "book": {
+    "chapterCount_one": "{{count}} Kapitel",
+    "chapterCount_other": "{{count}} Kapitel",
+    "noChapters": "Noch keine Kapitel. Fügen Sie eines hinzu, um das Manuskript zu beginnen.",
+    "addChapter": "Kapitel hinzufügen",
+    "addChapterError": "Kapitel konnte nicht hinzugefügt werden",
+    "untitledChapter": "Neues Kapitel",
+    "titlePlaceholder": "Kapiteltitel",
+    "rename": "Umbenennen",
+    "renameError": "Kapitel konnte nicht umbenannt werden",
+    "moveUp": "Nach oben verschieben",
+    "moveDown": "Nach unten verschieben",
+    "removeChapter": "Aus dem Manuskript entfernen (Datei bleibt erhalten)",
+    "removeChapterConfirm": "„{{title}}“ aus dem Manuskript entfernen? Die Datei bleibt auf der Festplatte und kann erneut zugeordnet werden.",
+    "removeChapterError": "Kapitel konnte nicht entfernt werden",
+    "reorderError": "Kapitel konnten nicht neu geordnet werden",
+    "chapterMissing": "Datei nicht gefunden: {{path}}",
+    "unattachedTitle_one": "{{count}} nicht zugeordnete Datei",
+    "unattachedTitle_other": "{{count}} nicht zugeordnete Dateien",
+    "unattachedHint": "Im Projekt gefunden, aber nicht im Manuskript enthalten.",
+    "attach": "Dem Manuskript zuordnen",
+    "attachError": "Datei konnte nicht zugeordnet werden",
+    "noProject": "Kein Projekt geöffnet",
+    "renameHint": "zum Umbenennen doppelklicken"
   }
 }

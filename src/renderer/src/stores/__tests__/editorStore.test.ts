@@ -188,3 +188,71 @@ describe('loadFile — sauvegarde du fichier sortant', () => {
     expect(useEditorStore.getState().content).toBe('a modifié');
   });
 });
+
+/**
+ * Bascule entre N chapitres (plan chapitres, Phase 2) — extension du
+ * scénario de non-régression de la Phase 0 : chaque chapitre conserve son
+ * texte quel que soit l'ordre des allers-retours.
+ */
+describe('loadFile — bascule entre chapitres d’un livre', () => {
+  function installEditorIpc(files: Record<string, string>) {
+    const saved: Array<{ path: string; content: string }> = [];
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: {
+        loadFile: async (path: string) => ({
+          success: true,
+          content: files[path] ?? '',
+        }),
+        saveFile: async (path: string, content: string) => {
+          saved.push({ path, content });
+          files[path] = content;
+          return { success: true };
+        },
+      },
+    } as never;
+    return { files, saved };
+  }
+
+  it('n’écrit jamais le texte d’un chapitre dans le fichier d’un autre', async () => {
+    const ipc = installEditorIpc({
+      '/livre/chapters/01.md': '# Un\n',
+      '/livre/chapters/02.md': '# Deux\n',
+      '/livre/chapters/03.md': '# Trois\n',
+    });
+    const store = useEditorStore.getState();
+
+    // Ouvrir le chapitre 1 et y écrire.
+    await store.loadFile('/livre/chapters/01.md');
+    useEditorStore.setState({ content: '# Un\nrédigé dans le 1.', isDirty: true });
+
+    // Aller au 2, y écrire, puis au 3, puis revenir au 1.
+    await store.loadFile('/livre/chapters/02.md');
+    expect(useEditorStore.getState().content).toBe('# Deux\n');
+    useEditorStore.setState({ content: '# Deux\nrédigé dans le 2.', isDirty: true });
+
+    await store.loadFile('/livre/chapters/03.md');
+    await store.loadFile('/livre/chapters/01.md');
+
+    // Chaque fichier a exactement son propre texte.
+    expect(ipc.files['/livre/chapters/01.md']).toBe('# Un\nrédigé dans le 1.');
+    expect(ipc.files['/livre/chapters/02.md']).toBe('# Deux\nrédigé dans le 2.');
+    expect(ipc.files['/livre/chapters/03.md']).toBe('# Trois\n');
+    // …et l'éditeur affiche bien celui qu'on vient de rouvrir.
+    expect(useEditorStore.getState().content).toBe('# Un\nrédigé dans le 1.');
+  });
+
+  it('ne réécrit pas un chapitre ouvert puis quitté sans modification', async () => {
+    const ipc = installEditorIpc({
+      '/livre/chapters/01.md': '# Un\n',
+      '/livre/chapters/02.md': '# Deux\n',
+    });
+    const store = useEditorStore.getState();
+
+    await store.loadFile('/livre/chapters/01.md');
+    await store.loadFile('/livre/chapters/02.md');
+
+    expect(ipc.saved).toEqual([]);
+  });
+});

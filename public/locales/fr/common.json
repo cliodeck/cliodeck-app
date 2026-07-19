@@ -1570,5 +1570,30 @@
     "paragraphs": "par.",
     "citations": "cit.",
     "footnotes": "notes"
+  },
+  "book": {
+    "chapterCount_one": "{{count}} chapitre",
+    "chapterCount_other": "{{count}} chapitres",
+    "noChapters": "Aucun chapitre. Ajoutez-en un pour commencer le manuscrit.",
+    "addChapter": "Ajouter un chapitre",
+    "addChapterError": "Impossible d'ajouter le chapitre",
+    "untitledChapter": "Nouveau chapitre",
+    "titlePlaceholder": "Titre du chapitre",
+    "rename": "Renommer",
+    "renameError": "Impossible de renommer le chapitre",
+    "moveUp": "Déplacer vers le haut",
+    "moveDown": "Déplacer vers le bas",
+    "removeChapter": "Retirer du manuscrit (le fichier est conservé)",
+    "removeChapterConfirm": "Retirer « {{title}} » du manuscrit ? Le fichier reste sur le disque et pourra être rattaché à nouveau.",
+    "removeChapterError": "Impossible de retirer le chapitre",
+    "reorderError": "Impossible de réordonner les chapitres",
+    "chapterMissing": "Fichier introuvable : {{path}}",
+    "unattachedTitle_one": "{{count}} fichier non rattaché",
+    "unattachedTitle_other": "{{count}} fichiers non rattachés",
+    "unattachedHint": "Trouvés dans le projet mais absents du manuscrit.",
+    "attach": "Rattacher au manuscrit",
+    "attachError": "Impossible de rattacher le fichier",
+    "noProject": "Aucun projet ouvert",
+    "renameHint": "double-cliquez pour renommer"
   }
 }

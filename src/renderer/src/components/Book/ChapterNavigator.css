@@ -1,0 +1,256 @@
+.chapter-navigator {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--bg-panel);
+  border-right: 1px solid var(--border-color);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.chapter-navigator-header {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.chapter-navigator-count {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--text-muted, var(--text-secondary));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chapter-navigator-action {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+}
+
+.chapter-navigator-action:hover:not(:disabled) {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.chapter-navigator-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chapter-navigator-empty {
+  padding: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  margin: 0;
+}
+
+.chapter-navigator-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--spacing-xs) 0;
+}
+
+.chapter-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0 var(--spacing-xs) 0 0;
+  min-height: 30px;
+  transition: background-color var(--transition-normal);
+}
+
+.chapter-item:hover {
+  background-color: var(--bg-card);
+}
+
+.chapter-item.active {
+  background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.chapter-item-open {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: var(--spacing-xs) var(--spacing-md);
+  color: inherit;
+}
+
+.chapter-item-open:disabled {
+  cursor: default;
+}
+
+.chapter-number {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--text-muted, var(--text-secondary));
+  min-width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.chapter-title {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-item.active .chapter-title,
+.chapter-item.active .chapter-number {
+  color: var(--text-primary);
+}
+
+/* Pièces d'appareil (préface, annexes) : non numérotées, en retrait. */
+.chapter-item--matter .chapter-title {
+  font-style: italic;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+/* Fichier référencé mais introuvable sur le disque. */
+.chapter-item--missing .chapter-title {
+  color: var(--color-danger);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-danger) 50%, transparent);
+}
+
+.chapter-item--missing .chapter-number {
+  color: var(--color-danger);
+}
+
+.chapter-item-controls {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.chapter-item:hover .chapter-item-controls,
+.chapter-item.active .chapter-item-controls {
+  display: flex;
+}
+
+.chapter-item-controls button {
+  background: none;
+  border: none;
+  color: var(--text-tertiary, var(--text-secondary));
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+}
+
+.chapter-item-controls button:hover:not(:disabled) {
+  background-color: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.chapter-item-controls button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.chapter-title-input {
+  flex: 1;
+  min-width: 0;
+  margin: var(--spacing-xs) var(--spacing-sm);
+  padding: 3px var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+}
+
+.chapter-title-input:focus {
+  outline: none;
+}
+
+/* Filet de sécurité de la réconciliation : fichiers hors manifeste. */
+.chapter-unattached {
+  margin-top: auto;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+  background-color: color-mix(in srgb, var(--color-warning, var(--color-accent)) 8%, transparent);
+}
+
+.chapter-unattached-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-xs, 11px);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chapter-unattached-hint {
+  margin: var(--spacing-xs) 0;
+  font-size: var(--font-size-xs, 11px);
+  color: var(--text-tertiary, var(--text-secondary));
+  line-height: 1.4;
+}
+
+.chapter-unattached ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chapter-unattached li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-height: 26px;
+}
+
+.chapter-unattached-path {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-unattached li button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.chapter-unattached li button:hover:not(:disabled) {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.chapter-unattached li button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

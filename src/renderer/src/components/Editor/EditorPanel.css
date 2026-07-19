@@ -88,6 +88,20 @@
   min-height: 0;
 }
 
+/* Atelier livre : navigateur de chapitres + éditeur, même ossature que
+   l'atelier slides (la barre de stats reste sous les deux). */
+.book-workbench {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.book-workbench .codemirror-editor {
+  flex: none;
+  height: 100%;
+  min-height: 0;
+}
+
 /* Resize Handle */
 .editor-resize-handle {
   width: 1px;
