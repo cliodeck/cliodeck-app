@@ -8,7 +8,7 @@ const ALLOWED_RECEIVE_CHANNELS: string[] = [
   'menu:new-project', 'menu:open-project', 'menu:export-pdf',
   'menu:format-bold', 'menu:format-italic', 'menu:insert-link',
   'menu:insert-citation', 'menu:insert-table', 'menu:insert-footnote',
-  'menu:insert-blockquote', 'menu:toggle-stats', 'menu:check-citations',
+  'menu:insert-blockquote', 'menu:check-citations',
   'menu:toggle-preview', 'menu:switch-panel', 'menu:import-bibtex',
   'menu:connect-zotero', 'menu:open-settings',
   'menu:open-usage-journal',
@@ -127,10 +127,6 @@ const api = {
       filePath: string;
       format?: 'modern' | 'legacy';
     }) => ipcRenderer.invoke('bibliography:export', options),
-    exportString: (options: {
-      citations: any[];
-      format?: 'modern' | 'legacy';
-    }) => ipcRenderer.invoke('bibliography:export-string', options),
     detectOrphanPDFs: (options: {
       projectPath: string;
       citations: any[];
@@ -147,7 +143,6 @@ const api = {
       projectPath: string;
       citations: any[];
     }) => ipcRenderer.invoke('bibliography:save-metadata', options),
-    loadMetadata: (projectPath: string) => ipcRenderer.invoke('bibliography:load-metadata', projectPath),
   },
 
   // Editor
@@ -203,7 +198,6 @@ const api = {
   // Ollama
   ollama: {
     listModels: () => ipcRenderer.invoke('ollama:list-models'),
-    checkAvailability: () => ipcRenderer.invoke('ollama:check-availability'),
   },
 
   // Dialogs
@@ -589,7 +583,6 @@ const api = {
   mode: {
     getAll: () => ipcRenderer.invoke('mode:get-all'),
     get: (modeId: string) => ipcRenderer.invoke('mode:get', modeId),
-    getActive: () => ipcRenderer.invoke('mode:get-active'),
     setActive: (modeId: string) => ipcRenderer.invoke('mode:set-active', modeId),
     save: (mode: any, target: 'global' | 'project') =>
       ipcRenderer.invoke('mode:save', mode, target),
@@ -688,8 +681,6 @@ const api = {
     isWatching: () => ipcRenderer.invoke('tropy:is-watching'),
 
     // OCR
-    performOCR: (imagePath: string, language: string) =>
-      ipcRenderer.invoke('tropy:perform-ocr', imagePath, language),
     performBatchOCR: (imagePaths: string[], language: string) =>
       ipcRenderer.invoke('tropy:perform-batch-ocr', imagePaths, language),
     getOCRLanguages: () => ipcRenderer.invoke('tropy:get-ocr-languages'),
@@ -735,11 +726,6 @@ const api = {
       ipcRenderer.on('tropy:sync-progress', listener);
       return () => ipcRenderer.removeListener('tropy:sync-progress', listener);
     },
-    onWatcherError: (callback: (error: string) => void) => {
-      const listener = (_event: any, error: string) => callback(error);
-      ipcRenderer.on('tropy:watcher-error', listener);
-      return () => ipcRenderer.removeListener('tropy:watcher-error', listener);
-    },
   },
 
   // Slides AI Generation + Live Preview
@@ -782,8 +768,6 @@ const api = {
       useContextualEmbedding?: boolean;
     }) => ipcRenderer.invoke('similarity:analyze', text, options),
     cancel: () => ipcRenderer.invoke('similarity:cancel'),
-    getSegmentResults: (segmentId: string) =>
-      ipcRenderer.invoke('similarity:get-segment-results', segmentId),
     getAllResults: () => ipcRenderer.invoke('similarity:get-all-results'),
     clearCache: () => ipcRenderer.invoke('similarity:clear-cache'),
     onProgress: (callback: (progress: {
@@ -841,8 +825,6 @@ const api = {
       }) => ipcRenderer.invoke('fusion:mcp:add', client),
       remove: (name: string) => ipcRenderer.invoke('fusion:mcp:remove', name),
       restart: (name: string) => ipcRenderer.invoke('fusion:mcp:restart', name),
-      callTool: (name: string, tool: string, args: Record<string, unknown>) =>
-        ipcRenderer.invoke('fusion:mcp:call-tool', name, tool, args),
       onEvent: (callback: (event: unknown) => void) => {
         const listener = (_e: unknown, ev: unknown): void => callback(ev);
         ipcRenderer.on('fusion:mcp:event', listener);

@@ -166,13 +166,6 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
         },
         { type: 'separator' as const },
         {
-          label: t('documentStats'),
-          accelerator: 'CmdOrCtrl+Shift+S',
-          click: () => {
-            mainWindow.webContents.send('menu:toggle-stats');
-          },
-        },
-        {
           label: t('checkCitations'),
           accelerator: 'CmdOrCtrl+Shift+C',
           click: () => {

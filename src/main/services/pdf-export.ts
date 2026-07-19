@@ -598,6 +598,11 @@ export class PDFExportService {
     options: ExportOptions,
     onProgress?: (progress: PandocProgress) => void
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    // Déclaré hors du `try` pour que le `finally` puisse nettoyer même en
+    // cas d'échec : un export raté (LaTeX manquant, caractère exotique)
+    // laissait sinon le manuscrit complet en clair dans le répertoire
+    // temporaire, lisible par tout compte de la machine.
+    let tempDir: string | null = null;
     try {
       // Check dependencies
       onProgress?.({ stage: 'preparing', message: 'Vérification des dépendances...', progress: 10 });
@@ -612,7 +617,7 @@ export class PDFExportService {
       }
 
       // Create temporary directory for build
-      const tempDir = join(tmpdir(), `cliodeck-export-${Date.now()}`);
+      tempDir = join(tmpdir(), `cliodeck-export-${Date.now()}`);
       await mkdir(tempDir, { recursive: true });
 
       onProgress?.({ stage: 'preparing', message: 'Préparation des fichiers...', progress: 20 });
@@ -1013,14 +1018,19 @@ export class PDFExportService {
 
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 
-      // Cleanup temp directory
-      await rm(tempDir, { recursive: true, force: true });
-
       console.log('✅ PDF exported successfully:', outputPath);
       return { success: true, outputPath };
     } catch (error: any) {
       console.error('❌ PDF export failed:', error);
       return { success: false, error: error.message };
+    } finally {
+      // Le manuscrit, sa bibliographie et le .tex intermédiaire vivent ici :
+      // ils partent, que l'export ait réussi ou échoué.
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch((err) => {
+          console.warn('⚠️ Failed to clean export temp directory:', err);
+        });
+      }
     }
   }
 }

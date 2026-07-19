@@ -29,6 +29,10 @@ import {
 } from './chat-engine.js';
 import { modeService } from './mode-service.js';
 import { historyService } from './history-service.js';
+import { inspectToolResult } from './mcp-tool-guard.js';
+import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
+import { appendSecurityEvent } from '../../../backend/security/source-inspector.js';
+import type { SecurityEvent } from '../../../backend/security/events.js';
 
 export interface BrainstormSource {
   kind: 'archive' | 'bibliographie' | 'note';
@@ -376,6 +380,22 @@ class FusionChatService {
       }
     }
 
+    // Les serveurs MCP tiers sont « semi-trusted » (ADR 0005) : leurs
+    // résultats sont du contenu non fiable, au même titre qu'un chunk RAG.
+    // Ils passent donc par le SourceInspector et par une borne de taille
+    // avant d'atteindre le contexte du modèle — lequel dispose d'outils
+    // réels et boucle jusqu'à `maxTurns`.
+    const securityLogPath = projectPath
+      ? workspaceFiles(projectPath).securityEventsLog
+      : null;
+    const emitSecurityEvent = securityLogPath
+      ? (e: SecurityEvent) => {
+          void appendSecurityEvent(securityLogPath, e).catch((err) => {
+            console.warn('[fusion-chat] security event log failed:', err);
+          });
+        }
+      : undefined;
+
     const toolHandler: ChatEngineToolHandler = {
       async call(name, toolArgs) {
         const clientName = toolScope.get(name);
@@ -386,7 +406,12 @@ class FusionChatService {
           };
         }
         const bare = name.slice(clientName.length + 2); // strip "clientName__"
-        return mcpClientsService.callTool(clientName, bare, toolArgs);
+        const raw = await mcpClientsService.callTool(clientName, bare, toolArgs);
+        return inspectToolResult(raw, {
+          toolName: name,
+          mode: retrievalService.getInspectorMode(),
+          onEvent: emitSecurityEvent,
+        });
       },
     };
 

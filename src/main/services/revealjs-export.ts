@@ -1,14 +1,10 @@
-import { writeFile, readFile, mkdir, access } from 'fs/promises';
+import { writeFile, readFile, mkdir, access, rm } from 'fs/promises';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
 import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
-
-const execAsync = promisify(exec);
 
 // Rendu markdown des slides de la preview : même famille de grammaire que le
 // plugin markdown de reveal.js (qui embarque marked) — la preview et l'export
@@ -531,22 +527,19 @@ export class RevealJsExportService {
 
       console.log('✅ Reveal.js presentation exported:', outputPath);
 
-      // Open in default browser
+      // Ouverture dans le navigateur par défaut.
+      // `shell.openPath` remplace l'ancienne interpolation dans un shell
+      // (`open "${outputPath}"`) : un chemin contenant un guillemet en
+      // échappait le quoting et permettait d'enchaîner une commande
+      // arbitraire. Electron transmet ici le chemin à l'OS sans shell, et
+      // couvre les trois plateformes d'un seul appel.
       try {
-        const platform = process.platform;
-        let command: string;
-
-        if (platform === 'darwin') {
-          command = `open "${outputPath}"`;
-        } else if (platform === 'win32') {
-          command = `start "" "${outputPath}"`;
+        const failure = await shell.openPath(outputPath);
+        if (failure) {
+          console.warn('⚠️ Failed to open browser automatically:', failure);
         } else {
-          // Linux
-          command = `xdg-open "${outputPath}"`;
+          console.log('✅ Opened presentation in default browser');
         }
-
-        await execAsync(command);
-        console.log('✅ Opened presentation in default browser');
       } catch (error) {
         console.warn('⚠️ Failed to open browser automatically:', error);
         // Don't fail the export if browser opening fails
@@ -690,8 +683,12 @@ export class RevealJsExportService {
       return { success: false, error: error.message };
     } finally {
       win?.close();
-      // Clean up temp file (best-effort)
-      writeFile(tmpHtml, '').catch(() => {});
+      // Le HTML intermédiaire contient toute la présentation : on le
+      // supprime (l'ancienne version se contentait de le vider, sans
+      // attendre la fin de l'écriture).
+      await rm(tmpHtml, { force: true }).catch((err) => {
+        console.warn('⚠️ Failed to clean PDF export temp file:', err);
+      });
     }
   }
 }

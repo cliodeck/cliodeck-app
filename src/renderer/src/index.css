@@ -18,6 +18,44 @@
   border-radius: var(--radius-sm);
 }
 
+/* Rétablissement inconditionnel de l'anneau de focus.
+   39 règles de composants portent `outline: none` sur `:focus` (champs de
+   saisie, boutons, curseurs de réglage). Leur spécificité de classe bat
+   `*:focus-visible`, si bien que des contrôles perdaient tout repère au
+   clavier — l'audit du 2026-07-19 a mesuré 8 boutons sans indicateur dans
+   la barre d'outils. L'accessibilité ne doit pas dépendre de l'ordre de
+   la cascade ni de la vigilance de chaque feuille de style : `!important`
+   est ici délibéré et documenté. Il ne s'applique qu'à `:focus-visible`,
+   donc jamais lors d'un clic à la souris. */
+:is(button, a, input, select, textarea, summary, [tabindex], [role='button'], [role='tab'], [role='menuitem']):focus-visible {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 2px !important;
+  /* Plusieurs composants déclarent `transition: all` : l'anneau se
+     dessinait alors en fondu sur ~200 ms — mesuré à 0 px juste après la
+     tabulation, ce qui l'a fait passer pour absent lors de l'audit. Au
+     clavier, le repère doit être immédiat ; on retire `outline` des
+     propriétés animées sans toucher aux transitions de couleur. */
+  transition-property: background-color, color, border-color, box-shadow !important;
+}
+
+/* Respect de `prefers-reduced-motion`.
+   Le dépôt déclare ~230 transitions et animations ; aucune ne consultait
+   la préférence système (audit du 2026-07-19). Les utilisateurs sensibles
+   au mouvement — vertiges, troubles vestibulaires, migraines — reçoivent
+   désormais une interface immobile. Une durée résiduelle de 0,01 ms plutôt
+   que zéro préserve les événements `transitionend`/`animationend` dont
+   dépend une partie du code. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Skip-to-content link — first focusable element in the document, hidden
    visually until focused. Keyboard users hit Tab once and can jump past
    the workspace-mode bar / left tabs into the editor. */

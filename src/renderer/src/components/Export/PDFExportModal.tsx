@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
@@ -16,6 +17,7 @@ interface PDFExportModalProps {
 }
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { content } = useEditorStore();
   const isBook = currentProject?.type === 'book';
@@ -87,12 +89,17 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       setDependenciesChecked(true);
 
       if (!result.pandoc || !result.xelatex) {
-        setError(
-          `Dépendances manquantes:\n${!result.pandoc ? '- Pandoc (installez avec: brew install pandoc)\n' : ''}${!result.xelatex ? '- XeLaTeX (installez avec: brew install --cask mactex)' : ''}`
-        );
+        const missing = [
+          !result.pandoc ? t('export.pdf.missingPandoc') : null,
+          !result.xelatex ? t('export.pdf.missingXelatex') : null,
+        ].filter(Boolean);
+        setError(`${t('export.pdf.missingDeps')}\n${missing.map((m) => `- ${m}`).join('\n')}`);
       }
     } catch (err: unknown) {
-      setError('Erreur lors de la vérification des dépendances: ' + (err instanceof Error ? err.message : String(err)));
+      // Le détail technique reste en console pour le diagnostic ;
+      // l'utilisateur reçoit une phrase actionnable.
+      console.error('Failed to check export dependencies:', err);
+      setError(t('export.pdf.depsCheckError'));
     }
   };
 
@@ -101,8 +108,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       const result = await window.electron.dialog.saveFile({
         defaultPath: outputPath,
         filters: [
-          { name: 'PDF', extensions: ['pdf'] },
-          { name: 'Tous les fichiers', extensions: ['*'] },
+          { name: t('export.pdf.pdfFiles'), extensions: ['pdf'] },
+          { name: t('export.pdf.allFiles'), extensions: ['*'] },
         ],
       });
 
@@ -116,17 +123,17 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
   const handleExport = async () => {
     if (!currentProject) {
-      setError('Aucun projet ouvert');
+      setError(t('export.pdf.noProject'));
       return;
     }
 
     if (!title) {
-      setError('Veuillez entrer un titre');
+      setError(t('export.pdf.enterTitle'));
       return;
     }
 
     if (!hasPandoc || !hasXelatex) {
-      setError('Dépendances manquantes. Veuillez les installer avant de continuer.');
+      setError(t('export.pdf.depsRequired'));
       return;
     }
 
@@ -151,17 +158,17 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         const openRel = currentRelativePath();
         const liveContent = useEditorStore.getState().getLiveContent();
         const openChapter = openRel
-          ? chapters.find((c) => c.filePath === openRel)
+          ? (chapters ?? []).find((c) => c.filePath === openRel)
           : undefined;
 
         if (bookScope === 'chapter' && !openChapter) {
-          setError('Aucun chapitre ouvert à exporter.');
+          setError(t('export.pdf.noChapterOpen'));
           setIsExporting(false);
           return;
         }
 
         manuscript = {
-          chapters: chapters.filter((c) => !c.missing),
+          chapters: (chapters ?? []).filter((c) => !c.missing),
           liveOverrides: openRel ? { [openRel]: liveContent } : undefined,
           scope:
             bookScope === 'chapter' && openChapter
@@ -177,7 +184,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           const slidesPath = `${currentProject.path}/slides.md`;
           exportContent = await window.electron.fs.readFile(slidesPath);
         } catch (err) {
-          setError('Impossible de lire slides.md. Assurez-vous que le fichier existe.');
+          console.error('Failed to read slides.md:', err);
+          setError(t('export.pdf.slidesUnreadable'));
           setIsExporting(false);
           return;
         }
@@ -232,11 +240,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           setProgress({ stage: '', message: '', progress: 0 });
         }, 2000);
       } else {
-        setError(result.error || 'Erreur inconnue lors de l\'export');
+        console.error('PDF export failed:', result.error);
+        setError(result.error || t('export.pdf.unknownError'));
         setIsExporting(false);
       }
     } catch (err: unknown) {
-      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
+      console.error('PDF export threw:', err);
+      setError(t('export.pdf.error'));
       setIsExporting(false);
     }
   };
@@ -253,6 +263,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
   if (!isOpen) return null;
 
+  // `chapters` est vide hors projet livre ; le garde évite un accès à
+  // undefined si le store n'a pas encore été peuplé.
+  const partCount = (chapters ?? []).filter((c) => !c.missing).length;
+
   return (
     <div className="pdf-export-modal" onClick={handleClose}>
       <div
@@ -263,8 +277,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         onClick={(e) => e.stopPropagation()}
       >
         <div className="pdf-export-header">
-          <h3 id="pdf-export-modal-title">Export PDF</h3>
-          <button className="close-btn" onClick={handleClose} disabled={isExporting}>
+          <h3 id="pdf-export-modal-title">{t('export.pdf.title')}</h3>
+          <button
+            className="close-btn"
+            onClick={handleClose}
+            disabled={isExporting}
+            aria-label={t('export.pdf.cancel')}
+          >
             <X size={20} />
           </button>
         </div>
@@ -275,11 +294,17 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
             <div className="dependency-status">
               <div className={`dependency-item ${hasPandoc ? 'success' : 'error'}`}>
                 {hasPandoc ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                <span>Pandoc {hasPandoc ? 'installé' : 'manquant'}</span>
+                <span>
+                  {t('export.pdf.pandoc')}{' '}
+                  {hasPandoc ? t('export.pdf.installed') : t('export.pdf.missing')}
+                </span>
               </div>
               <div className={`dependency-item ${hasXelatex ? 'success' : 'error'}`}>
                 {hasXelatex ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                <span>XeLaTeX {hasXelatex ? 'installé' : 'manquant'}</span>
+                <span>
+                  {t('export.pdf.xelatex')}{' '}
+                  {hasXelatex ? t('export.pdf.installed') : t('export.pdf.missing')}
+                </span>
               </div>
             </div>
           )}
@@ -288,60 +313,70 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
               travail du chapitre ouvert (plan chapitres, arbitrage 9). */}
           {isBook && (
             <div className="form-field">
-              <label>Portée</label>
+              <label htmlFor="pdf-export-scope">{t('export.scope.label')}</label>
               <select
+                id="pdf-export-scope"
                 value={bookScope}
                 onChange={(e) => setBookScope(e.target.value as 'book' | 'chapter')}
                 disabled={isExporting}
               >
                 <option value="book">
-                  Tout le livre ({chapters.filter((c) => !c.missing).length} pièce(s))
+                  {t('export.scope.wholeBook', { count: partCount })}
                 </option>
-                <option value="chapter">Ce chapitre seul (tirage de travail)</option>
+                <option value="chapter">{t('export.scope.currentChapter')}</option>
               </select>
             </div>
           )}
 
           {/* Form Fields */}
           <div className="form-field">
-            <label>Titre du document</label>
+            <label htmlFor="pdf-export-title">{t('export.pdf.documentTitle')}</label>
             <input
+              id="pdf-export-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Mon document"
+              placeholder={t('export.pdf.titlePlaceholder')}
               disabled={isExporting}
             />
           </div>
 
           <div className="form-field">
-            <label>Auteur (optionnel)</label>
+            <label htmlFor="pdf-export-author">{t('export.pdf.author')}</label>
             <input
+              id="pdf-export-author"
               type="text"
               value={author}
               onChange={(e) => setAuthor(e.target.value)}
-              placeholder="Votre nom"
+              placeholder={t('export.pdf.authorPlaceholder')}
               disabled={isExporting}
             />
           </div>
 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
-              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: 'var(--color-success)' }}>abstract.md</code> de votre projet
+            <div className="export-hint">
+              💡 {t('export.pdf.abstractNote', { file: 'abstract.md' })}
             </div>
           )}
 
           {/* Info about presentations */}
           {currentProject?.type === 'presentation' && (
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
-              🎬 Présentation Beamer : Le contenu sera lu depuis <code style={{ color: 'var(--color-success)' }}>slides.md</code>
-              <br /><br />
-              <strong>Syntaxe :</strong>
+            <div className="export-hint">
+              🎬 {t('export.pdf.beamer', { file: 'slides.md' })}
+              <br />
+              <br />
+              <strong>{t('export.pdf.beamerSyntax')}</strong>
               <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
-                <li><code>#</code> Titre de slide (niveau 1)</li>
-                <li><code>##</code> Sous-titre (niveau 2)</li>
-                <li><code>::: notes</code> ... <code>:::</code> Notes de présentateur</li>
+                <li>
+                  <code>#</code> {t('export.pdf.beamerSlideTitle')}
+                </li>
+                <li>
+                  <code>##</code> {t('export.pdf.beamerSubtitle')}
+                </li>
+                <li>
+                  <code>::: notes</code> … <code>:::</code> {t('export.pdf.beamerNotes')}
+                </li>
               </ul>
             </div>
           )}
@@ -353,17 +388,18 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           />
 
           <div className="form-field">
-            <label>Fichier de sortie</label>
+            <label htmlFor="pdf-export-output">{t('export.pdf.outputFile')}</label>
             <div className="path-selector">
               <input
+                id="pdf-export-output"
                 type="text"
                 value={outputPath}
                 onChange={(e) => setOutputPath(e.target.value)}
-                placeholder="/chemin/vers/fichier.pdf"
+                placeholder={t('export.pdf.outputPlaceholder')}
                 disabled={isExporting}
               />
               <button onClick={handleSelectOutputPath} disabled={isExporting}>
-                Parcourir
+                {t('export.pdf.browse')}
               </button>
             </div>
           </div>
@@ -390,14 +426,14 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           {success && (
             <div className="export-success">
               <CheckCircle size={16} />
-              <span>Export réussi! PDF créé à: {outputPath}</span>
+              <span>{t('export.pdf.success', { path: outputPath })}</span>
             </div>
           )}
         </div>
 
         <div className="pdf-export-footer">
           <button className="btn-cancel" onClick={handleClose} disabled={isExporting}>
-            Annuler
+            {t('export.pdf.cancel')}
           </button>
           <button
             className="btn-export"
@@ -405,7 +441,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
             disabled={isExporting || !hasPandoc || !hasXelatex || !title}
           >
             <FileDown size={16} />
-            {isExporting ? 'Export en cours...' : 'Exporter'}
+            {isExporting ? t('export.pdf.exporting') : t('export.pdf.export')}
           </button>
         </div>
       </div>

@@ -97,26 +97,45 @@ Partially done:
 ---
 
 
-### Angle mort de la « CI verte » (constaté le 2026-07-19)
+### Angle mort de la « CI verte » — 8 échecs corrigés, la CI reste à créer
 
-Les gardes `skipIf` de `backend/__tests__/helpers/native-guards.ts` sautent
-les suites SQLite quand `better-sqlite3` est compilé pour l'ABI Electron
-(l'état normal d'un poste de dev, posé par le `postinstall`). En
-recompilant pour l'ABI Node (`npm rebuild better-sqlite3`), **8 échecs
-réels apparaissent** — vérifiés présents à l'identique sur `main`, donc
-antérieurs au chantier livre :
+**Constat (2026-07-19)** : les gardes `skipIf` de
+`backend/__tests__/helpers/native-guards.ts` sautent les suites SQLite quand
+`better-sqlite3` est compilé pour l'ABI Electron (l'état normal d'un poste de
+dev, posé par le `postinstall`). En recompilant pour l'ABI Node
+(`npm rebuild better-sqlite3`), **8 échecs réels apparaissaient** : la suite
+« verte » l'était parce que ces tests ne tournaient pas.
 
-| Suite | Échecs |
-|---|---|
-| `backend/core/workspace/__tests__/migrator.test.ts` | 4 |
-| `backend/mcp-server/__tests__/search{Obsidian,Tropy,Zotero}.test.ts` | 3 |
-| `scripts/__tests__/cli-migrate.test.ts` | 1 |
+**Corrigé (RC3)** — aucun ne révélait un bug de production, mais deux
+révélaient de vraies faiblesses :
 
-Autrement dit, la suite « verte » l'est parce que ces tests ne tournent
-pas, pas parce qu'ils passent. À traiter comme une dette propre :
-diagnostiquer les 8, puis faire tourner la CI sur l'ABI Node pour que la
-garde ne masque plus que l'indisponibilité réelle du binding.
-Restaurer ensuite l'ABI Electron avec `npm run rebuild:native`.
+| Suite | Cause | Correction |
+|---|---|---|
+| `workspace/migrator.test.ts` (4) + `scripts/cli-migrate.test.ts` (1) | les fixtures écrivaient un fichier **texte** nommé `.db`, que le migrateur ouvrait pour de bon | vraies bases SQLite minimales, marquées et relues après migration ; **et** garde de production durcie (voir ci-dessous) |
+| `mcp-server/search{Obsidian,Tropy,Zotero}.test.ts` (3) | budget de troncature affirmé à 800 alors que la production utilisait 4 000 — même bug que `searchHal`, dont la cause racine était la constante `TRUNCATE` recopiée dans six outils | constante factorisée dans `backend/mcp-server/tools/budget.ts` ; les tests s'y réfèrent au lieu de coder le nombre en dur |
+
+Effet de bord utile : la garde de `migrateWorkspaceToFlat` supposait que
+`new Database()` échoue sur un fichier qui n'est pas une base. better-sqlite3
+ouvre **paresseusement** : l'erreur ne survenait qu'à la première requête, en
+dehors du `try`. Un `brain.db` corrompu ou partiel faisait donc échouer toute
+la migration. Une sonde explicite ferme le trou.
+
+**Reste à faire — la CI elle-même.** Le dépôt n'a **aucun workflow exécutant
+les tests** : `.github/workflows/` ne contient que `claude.yml` et
+`claude-code-review.yml`. Tant que rien ne tourne en intégration continue,
+les gardes continueront de masquer une future régression sur un poste de dev.
+Marche à suivre quand la CI sera créée :
+
+1. job Node (pas Electron) : `actions/setup-node`, `npm ci` ;
+2. **`npm rebuild better-sqlite3`** avant les tests — c'est ce qui compile le
+   binding pour l'ABI Node et désactive les `skipIf` ;
+3. `npx vitest run` : les 8 suites ci-dessus doivent y tourner pour de bon ;
+4. ne pas supprimer les gardes : elles restent utiles en local, où le binding
+   est compilé pour Electron. Elles ne masqueront alors plus que
+   l'indisponibilité authentique du binding.
+
+En local, après avoir recompilé pour Node, **restaurer impérativement l'ABI
+Electron** : `npm run rebuild:native`.
 
 ## 3. Known technical debt
 

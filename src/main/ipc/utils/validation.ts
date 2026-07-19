@@ -201,10 +201,26 @@ export const PDFExportSchema = z.object({
     path: ['content'],
   });
 
+/**
+ * Chemin de sortie d'un export.
+ *
+ * Refuse les caractères qui n'ont rien à faire dans un nom de fichier et
+ * qui servaient à s'échapper d'une commande shell (guillemets, `$`, backtick,
+ * `;`, `|`, `&`, retour à la ligne). L'ouverture passe désormais par
+ * `shell.openPath`, donc sans shell — cette contrainte est une seconde
+ * barrière, pas la seule.
+ */
+export const OutputPathSchema = z
+  .string()
+  .min(1)
+  .refine((p) => !/["'`$;|&\n\r]/.test(p), {
+    message: 'Le chemin de sortie contient des caractères non autorisés.',
+  });
+
 export const RevealJSExportSchema = z.object({
   projectPath: z.string().min(1),
   content: z.string().min(1),
-  outputPath: z.string().optional(),
+  outputPath: OutputPathSchema.optional(),
   metadata: z
     .object({
       title: z.string().optional(),

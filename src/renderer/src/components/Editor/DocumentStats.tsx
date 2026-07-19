@@ -55,7 +55,7 @@ export const DocumentStats: React.FC = () => {
   ];
 
   return (
-    <div className="document-stats">
+    <div className="document-stats" title={t('stats.scrollHint')}>
       {items.map(({ key, value }) => (
         <div className="stat-item" key={key}>
           <span className="stat-label">{t(`stats.${key}`)}</span>

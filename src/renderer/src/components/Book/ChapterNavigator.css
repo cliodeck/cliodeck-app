@@ -146,8 +146,12 @@
   flex-shrink: 0;
 }
 
+/* Les contrôles n'apparaissent qu'au survol ou au focus clavier. Les
+   afficher en permanence sur le chapitre actif tronquait précisément le
+   titre qu'on veut lire — « Introdu… » (audit du 2026-07-19). `:focus-within`
+   garde l'accès au clavier. */
 .chapter-item:hover .chapter-item-controls,
-.chapter-item.active .chapter-item-controls {
+.chapter-item:focus-within .chapter-item-controls {
   display: flex;
 }
 

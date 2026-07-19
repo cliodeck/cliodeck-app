@@ -4,6 +4,7 @@
 import { ipcMain, dialog, shell } from 'electron';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
+import { rememberConsentedPath } from '../utils/user-consented-paths.js';
 import {
   validate,
   FsReadDirectorySchema,
@@ -132,6 +133,14 @@ export function setupFilesystemHandlers() {
     const options = validate(DialogOpenFileSchema, rawOptions);
     console.log('📞 IPC Call: dialog:open-file', options);
     const result = await dialog.showOpenDialog(options as any);
+    // Le choix vient de l'utilisateur, pas du renderer : c'est le
+    // consentement explicite que `path-validator` exige pour autoriser un
+    // accès hors projet (ouvrir un document rangé ailleurs).
+    if (!result.canceled) {
+      for (const p of result.filePaths ?? []) {
+        await rememberConsentedPath(p);
+      }
+    }
     console.log('📤 IPC Response: dialog:open-file', {
       canceled: result.canceled,
       fileCount: result.filePaths?.length,
@@ -143,6 +152,11 @@ export function setupFilesystemHandlers() {
     const options = validate(DialogSaveFileSchema, rawOptions);
     console.log('📞 IPC Call: dialog:save-file', options);
     const result = await dialog.showSaveDialog(options as any);
+    // Même raisonnement qu'à l'ouverture : « Enregistrer sous » hors projet
+    // est légitime dès lors que l'utilisateur a désigné la destination.
+    if (!result.canceled && result.filePath) {
+      await rememberConsentedPath(result.filePath);
+    }
     console.log('📤 IPC Response: dialog:save-file', {
       canceled: result.canceled,
       filePath: result.filePath,

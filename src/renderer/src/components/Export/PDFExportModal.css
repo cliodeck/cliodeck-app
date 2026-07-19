@@ -252,3 +252,23 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Encart d'information (résumé lu depuis abstract.md, syntaxe Beamer,
+   modèle Word détecté). Remplace des styles en ligne dupliqués dans les
+   deux modales — tokens de thème uniquement. */
+.export-hint {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: var(--bg-panel-hover);
+  border-radius: 4px;
+}
+
+.export-hint code {
+  color: var(--color-success);
+}
+
+.export-hint--success {
+  color: var(--color-success);
+}

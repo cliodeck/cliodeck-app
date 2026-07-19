@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { renumberFootnotes, renumberManuscript } from '@/editor/footnote-tools';
-import { collectCitationKeys } from '@/editor/citation-tools';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { DocumentStats } from './DocumentStats';
 import { SlideNavigator } from '../Slides/SlideNavigator';
@@ -24,20 +23,19 @@ const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
 import { useEditorStore } from '../../stores/editorStore';
-import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSlidesStore } from '../../stores/slidesStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useAutoSave } from '../../hooks/useAutoSave';
+import { runCitationCheck } from '../../services/check-citations';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
 
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const { loadFile, saveFile, setContent, insertFormatting } = useEditorStore();
-  const { citations } = useBibliographyStore();
   const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
 
   // Chantier « même éditeur » : un projet presentation garde CE panneau —
@@ -224,54 +222,14 @@ export const EditorPanel: React.FC = () => {
   };
 
   /**
-   * Vérification des citations. Les clés sont relevées sur l'arbre Lezer
-   * (`collectCitationKeys`) : les `[@…]` des blocs de code ne comptent plus,
-   * les citations nues (`@clef`) sont vues, et un cluster `[@a; @b]` compte
-   * deux clés. Dans un livre, la vérification porte sur TOUT le manuscrit et
-   * situe chaque clé manquante dans son chapitre.
+   * Vérification des citations — logique partagée avec l'entrée de menu
+   * (`services/check-citations.ts`) : les deux portes doivent donner le
+   * MÊME résultat. Elles divergeaient, le menu gardant une version regex
+   * qui comptait les `[@…]` des blocs de code et ne voyait qu'un chapitre.
    */
   const handleCheckCitations = async () => {
     logger.component('EditorPanel', 'handleCheckCitations clicked');
-    const availableKeys = new Set(citations.map((c) => c.id));
-
-    try {
-      const sources: Array<{ label: string | null; content: string }> = isBook
-        ? (await useManuscriptStore.getState().readManuscript()).map((d) => ({
-            label: d.chapter.title,
-            content: d.content,
-          }))
-        : [{ label: null, content: useEditorStore.getState().getLiveContent() }];
-
-      // Clé manquante -> chapitres où elle apparaît (ordre du manifeste).
-      const missing = new Map<string, Set<string>>();
-      let total = 0;
-      for (const source of sources) {
-        for (const occurrence of collectCitationKeys(source.content)) {
-          total += 1;
-          if (availableKeys.has(occurrence.key)) continue;
-          const where = missing.get(occurrence.key) ?? new Set<string>();
-          if (source.label) where.add(source.label);
-          missing.set(occurrence.key, where);
-        }
-      }
-
-      if (missing.size === 0) {
-        await useDialogStore
-          .getState()
-          .showAlert(t('citations.allValid', { count: total }));
-        return;
-      }
-
-      const lines = [...missing.entries()].map(([key, where]) =>
-        where.size > 0 ? `[@${key}] — ${[...where].join(', ')}` : `[@${key}]`
-      );
-      await useDialogStore
-        .getState()
-        .showAlert(`${t('citations.missing', { count: missing.size })}\n\n${lines.join('\n')}`);
-    } catch (error) {
-      logger.error('EditorPanel', error);
-      await useDialogStore.getState().showAlert(t('citations.checkError'));
-    }
+    await runCitationCheck(t);
   };
 
   return (

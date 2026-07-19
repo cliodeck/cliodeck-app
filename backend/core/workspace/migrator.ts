@@ -672,14 +672,24 @@ async function renameUnprefixedHistoryTables(
   const flat = workspaceFiles(root);
   if (!(await exists(flat.brainDb))) return;
 
-  let db: Database.Database;
+  let db: Database.Database | undefined;
   try {
     db = new Database(flat.brainDb);
+    // better-sqlite3 ouvre paresseusement : un fichier qui n'est pas une
+    // base ne se signale qu'à la PREMIÈRE requête. Sans cette sonde, le
+    // « file is not a database » remontait plus bas et faisait échouer la
+    // migration entière — le catch ci-dessous ne protégeait rien.
+    db.prepare('SELECT 1 FROM sqlite_master LIMIT 1').get();
   } catch {
-    // brain.db isn't a real SQLite file yet (test fixture, partial migration,
-    // native binding mismatch under Vitest, etc.). The next runtime open
-    // through HistoryManager will produce a proper SQLite db with the new
-    // names, so we silently skip rather than warn.
+    // brain.db isn't a real SQLite file yet (partial migration, corrupted
+    // file, native binding mismatch, etc.). The next runtime open through
+    // HistoryManager will produce a proper SQLite db with the new names, so
+    // we silently skip rather than warn.
+    try {
+      db?.close();
+    } catch {
+      /* rien à fermer */
+    }
     return;
   }
 

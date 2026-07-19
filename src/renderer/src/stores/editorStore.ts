@@ -56,7 +56,6 @@ interface EditorState {
 
   updateSettings: (settings: Partial<EditorSettings>) => void;
   togglePreview: () => void;
-  toggleStats: () => void;
   setEditorFacade: (facade: EditorFacade | null) => void;
   /** Contenu réel : l'éditeur vivant s'il est monté, sinon le miroir du store. */
   getLiveContent: () => string;
@@ -223,11 +222,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => ({
       showPreview: !state.showPreview,
     }));
-  },
-
-  toggleStats: () => {
-    // Stats are always visible in the editor, this is a no-op for compatibility
-    logger.store('Editor', 'toggleStats called (no-op)');
   },
 
   setEditorFacade: (facade: EditorFacade | null) => {

@@ -395,3 +395,12 @@
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }
+
+/* Renvoi vers le navigateur de chapitres : les chapitres d'un livre ne sont
+   plus listés en double ici (audit du 2026-07-19). */
+.project-files-hint {
+  padding: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  font-style: italic;
+}

@@ -5,6 +5,65 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.3] — 2026-07-19
+
+Candidat de version 1, préparé après trois audits (sécurité, interface,
+cohérence du code) menés sur l'ensemble de l'application.
+
+### Security
+
+- Les **résultats d'outils MCP** passent désormais par `SourceInspector` et
+  sont bornés en taille avant d'atteindre le contexte du modèle. Un serveur
+  MCP tiers hostile pouvait jusqu'ici injecter des instructions dans un
+  agent disposant d'outils réels — c'était le vecteur nº 1 du modèle de
+  menace (ADR 0005), décrit mais non défendu.
+- **Chargement et sauvegarde de documents contraints** par le validateur de
+  chemins : un renderer compromis ne peut plus lire `~/.ssh` ni écrire hors
+  du projet. L'ouverture légitime d'un fichier extérieur reste possible via
+  une route consentie — seul le processus principal inscrit au registre les
+  chemins qu'il a lui-même proposés dans un dialogue natif.
+- **Injection de commande supprimée** dans l'export reveal.js : plus aucun
+  shell n'est invoqué.
+- **Répertoires temporaires nettoyés en cas d'échec d'export.** Un export
+  PDF raté laissait le manuscrit assemblé complet et sa bibliographie en
+  clair dans `/tmp` ; trois répertoires de ce type ont été trouvés et
+  supprimés lors du correctif.
+- ADR 0006 complété : le repli en clair des clés d'API quand le trousseau
+  système est indisponible est désormais documenté comme limitation connue.
+
+### Fixed
+
+- **« Vérifier les citations » donnait deux résultats différents** selon
+  qu'on passait par le bouton ou par le menu, ce dernier gardant une version
+  qui comptait les `[@…]` des blocs de code et ne voyait qu'un chapitre. Les
+  deux portes appellent la même logique.
+- **La migration de workspace échouait silencieusement** sur un fichier
+  `.db` corrompu : better-sqlite3 ouvre paresseusement, l'erreur survenait
+  hors du bloc protégé. Faiblesse révélée par des tests qui ne tournaient
+  jamais.
+- **8 tests dormants réparés** et leur cause racine éliminée (une constante
+  de troncature dupliquée six fois dans les outils MCP).
+- Les modales d'export PDF et Word étaient **entièrement en français codé en
+  dur** : un utilisateur anglophone ou germanophone recevait une boîte de
+  dialogue française au moment d'exporter son travail. Un test empêche
+  désormais la récidive — le test de parité des locales ne pouvait pas voir
+  ce défaut, puisqu'il compare des fichiers de traduction entre eux.
+- Anneau de focus immédiat sur les contrôles (il se dessinait en fondu,
+  donc absent au moment où l'œil en a besoin) ; `prefers-reduced-motion`
+  respecté pour la première fois (230 transitions le ignoraient).
+- Messages d'erreur en langage d'usage : le détail technique part en
+  console, l'utilisateur reçoit une phrase actionnable.
+- Mode livre : liste de chapitres en double supprimée du panneau projet,
+  titre du chapitre actif ne se tronque plus, total d'ouvrage qualifié.
+
+### Changed
+
+- L'écran d'accueil invite à créer ou ouvrir un projet au lieu d'afficher
+  « No indexed documents » comme message principal.
+- L'assistant de démarrage peut être rejoué depuis le panneau du projet.
+- Code mort retiré : 8 méthodes du préload sans consommateur, une entrée de
+  menu « Statistiques du document » qui ne faisait rien.
+
 ## [Unreleased] — branche `feat/livre-chapitres`
 
 ### Added — les livres s'écrivent enfin en chapitres

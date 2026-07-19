@@ -22,6 +22,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Highlighter, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
 import { SourcePopover } from '../Brainstorm/SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
@@ -76,6 +77,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     if (isPanel) refreshIndexedPDFs();
   }, [isPanel, refreshIndexedPDFs]);
   const indexedCount = indexedFilePaths.size;
+  const hasProject = useProjectStore((st) => st.currentProject !== null);
 
   // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
   // transmis aux propositions « draft » (source.model, Phase 4b).
@@ -217,9 +219,17 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     t('chat.brainstorm.starter3'),
   ];
 
+  // Sans projet ouvert, l'indexation de PDF n'est pas la première action
+  // utile : l'audit du 2026-07-19 relevait que ce message occupait tout le
+  // panneau à l'accueil, devant l'invitation à créer un projet.
   const emptyState = isPanel ? (
     <>
-      {indexedCount > 0 ? (
+      {!hasProject ? (
+        <>
+          <h4>{t('chat.noProjectState.title')}</h4>
+          <p>{t('chat.noProjectState.message')}</p>
+        </>
+      ) : indexedCount > 0 ? (
         <>
           <h4>{t('chat.readyState.title')}</h4>
           <p>{t('chat.readyState.message', { count: indexedCount })}</p>

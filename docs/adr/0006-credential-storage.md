@@ -18,6 +18,30 @@ All secrets use Electron `safeStorage` (OS keychain: Keychain on macOS,
 libsecret on Linux, DPAPI on Windows), accessed through the existing
 `secureStorage` service.
 
+#### Plaintext fallback — known limitation
+
+`safeStorage.isEncryptionAvailable()` returns false on systems without a
+usable keychain — typically a minimal Linux install with no libsecret /
+gnome-keyring, or a headless session. In that case `secureStorage` **stores
+the value in plaintext** in the app config store rather than refusing to
+save (`secure-storage.ts`, `setSensitive`). The trade-off is deliberate:
+refusing would leave the user unable to configure a provider at all.
+
+Consequences the rest of this ADR must be read against:
+
+- On such a system, the "never written to `config.json`" guarantee above
+  degrades to "written to the app config store, unencrypted". The
+  *workspace* is still clean — the file lives in the Electron userData
+  directory, not in the project folder — so the "secrets never travel with
+  the project folder" property (see *Workspace portability*) still holds.
+- The user is not currently warned. Surfacing this in the Settings
+  security section is tracked in `docs/status-and-remaining-work.md`
+  (audit item 16); until then the only signal is the startup log line
+  `Stored key: … (encrypted: false)`.
+- Linux packaging should recommend installing libsecret so the nominal
+  path applies (see `docs/linux-sandbox.md` for the neighbouring
+  distribution caveats).
+
 ### Scope of protected fields
 
 The following are routed to secureStorage (never written to `config.json`):

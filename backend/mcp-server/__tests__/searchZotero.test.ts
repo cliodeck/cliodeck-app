@@ -20,6 +20,7 @@ import {
   rmrf,
 } from './_helpers.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { TRUNCATE } from '../tools/budget.js';
 
 let workspaceRoot: string;
 beforeEach(() => {
@@ -99,7 +100,7 @@ describe('search_zotero', () => {
 
   it.skipIf(!sqliteAvailable)('truncates oversize summary content with an ellipsis', async () => {
     const db = createTempVectorsDb(workspaceRoot);
-    const long = 'L'.repeat(2000);
+    const long = 'L'.repeat(TRUNCATE + 500);
     db.prepare(
       `INSERT INTO pdf_documents (id, title, author, year, bibtex_key, summary)
        VALUES ('d1', 'long summary', 'A', '2020', 'k', ?)`
@@ -121,6 +122,6 @@ describe('search_zotero', () => {
       ).content[0].text
     );
     expect(payload.hits[0].summary.endsWith('…')).toBe(true);
-    expect(payload.hits[0].summary.length).toBeLessThanOrEqual(801);
+    expect(payload.hits[0].summary.length).toBeLessThanOrEqual(TRUNCATE + 1);
   });
 });

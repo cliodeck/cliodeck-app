@@ -578,19 +578,17 @@ export class WordExportService {
         progress: 100,
       });
 
-      // Cleanup temp directory
-      await rm(tempDir, { recursive: true, force: true });
-
       console.log('✅ Word document exported successfully with pandoc:', outputPath);
       return { success: true, outputPath };
     } catch (error: any) {
-      // Cleanup on error
-      try {
-        await rm(tempDir, { recursive: true, force: true });
-      } catch {}
-
       console.error('❌ Pandoc Word export failed:', error);
       return { success: false, error: error.message };
+    } finally {
+      // Un seul point de nettoyage : le manuscrit intermédiaire ne survit ni
+      // au succès, ni à l'échec, ni à un futur retour anticipé.
+      await rm(tempDir, { recursive: true, force: true }).catch((err) => {
+        console.warn('⚠️ Failed to clean Word export temp directory:', err);
+      });
     }
   }
 

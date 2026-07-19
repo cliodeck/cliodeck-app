@@ -256,8 +256,8 @@
   "project": {
     "title": "Projet",
     "fillAllFields": "Veuillez remplir tous les champs",
-    "createError": "Erreur lors de la création du projet",
-    "openError": "Erreur lors de l'ouverture du projet",
+    "createError": "Le projet n'a pas pu être créé. Vérifiez que le dossier choisi est accessible en écriture.",
+    "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
     "newProject": "Nouveau projet",
     "openProject": "Ouvrir un projet",
     "closeProject": "Fermer le projet",
@@ -299,7 +299,7 @@
     "cslSaveError": "Erreur lors de la sauvegarde du chemin CSL",
     "cslRemoveError": "Erreur lors de la suppression du chemin CSL",
     "openInFinder": "Ouvrir dans le gestionnaire de fichiers",
-    "openFolderError": "Erreur lors de l'ouverture du dossier du projet",
+    "openFolderError": "Le dossier du projet n'a pas pu être ouvert.",
     "zoteroSettings": "Parametres Zotero",
     "zoteroSettingsHelp": "Configurez le groupe et la collection Zotero specifiques a ce projet.",
     "zoteroGroupId": "ID du groupe",
@@ -312,41 +312,88 @@
     "zoteroCollectionKey": "Cle de collection",
     "zoteroCollectionKeyPlaceholder": "Entrez la cle de collection (optionnel)",
     "zoteroCollectionKeyHelp": "La cle d'une collection specifique (optionnel)",
-    "loading": "Ouverture du projet..."
+    "loading": "Ouverture du projet...",
+    "chaptersInNavigator_one": "{{count}} chapitre — voir le navigateur de chapitres",
+    "chaptersInNavigator_other": "{{count}} chapitres — voir le navigateur de chapitres",
+    "reopenOnboarding": "Rejouer l'assistant de démarrage"
   },
   "export": {
     "pdf": {
       "title": "Export PDF",
       "documentTitle": "Titre du document",
       "author": "Auteur (optionnel)",
-      "missingDeps": "Dépendances manquantes:",
+      "missingDeps": "Dépendances manquantes :",
       "pandoc": "Pandoc",
       "xelatex": "XeLaTeX",
-      "abstractNote": "Le résumé sera automatiquement lu depuis...",
-      "beamer": "Présentation Beamer",
+      "abstractNote": "Le résumé sera automatiquement lu depuis le fichier {{file}} de votre projet",
+      "beamer": "Présentation Beamer : le contenu sera lu depuis {{file}}",
       "outputFile": "Fichier de sortie",
-      "exporting": "Export en cours...",
-      "success": "Export réussi! PDF créé à:",
-      "error": "Erreur lors de l'export"
+      "exporting": "Export en cours…",
+      "success": "Export réussi ! PDF créé à : {{path}}",
+      "error": "L'export a échoué.",
+      "titlePlaceholder": "Mon document",
+      "authorPlaceholder": "Votre nom",
+      "missingPandoc": "Pandoc (installez avec : brew install pandoc)",
+      "missingXelatex": "XeLaTeX (installez avec : brew install --cask mactex)",
+      "installed": "installé",
+      "missing": "manquant",
+      "depsCheckError": "Impossible de vérifier les dépendances d'export.",
+      "beamerSyntax": "Syntaxe :",
+      "beamerSlideTitle": "Titre de slide (niveau 1)",
+      "beamerSubtitle": "Sous-titre (niveau 2)",
+      "beamerNotes": "Notes de présentateur",
+      "outputPlaceholder": "/chemin/vers/fichier.pdf",
+      "browse": "Parcourir",
+      "export": "Exporter",
+      "cancel": "Annuler",
+      "unknownError": "L'export a échoué pour une raison inconnue.",
+      "noProject": "Aucun projet ouvert.",
+      "enterTitle": "Veuillez saisir un titre.",
+      "depsRequired": "Pandoc et XeLaTeX sont nécessaires. Installez-les avant de continuer.",
+      "slidesUnreadable": "Impossible de lire slides.md. Vérifiez que le fichier existe dans le projet.",
+      "noChapterOpen": "Aucun chapitre ouvert à exporter.",
+      "pdfFiles": "PDF",
+      "allFiles": "Tous les fichiers"
     },
     "word": {
       "title": "Export Word (.docx)",
       "documentTitle": "Titre du document",
       "author": "Auteur (optionnel)",
-      "templateDetected": "Modèle Word détecté:",
-      "abstractNote": "Le résumé sera automatiquement lu depuis...",
+      "templateDetected": "Modèle Word détecté : {{file}}",
+      "abstractNote": "Le résumé sera automatiquement lu depuis le fichier {{file}} de votre projet",
       "outputFile": "Fichier de sortie",
-      "exporting": "Export en cours...",
-      "success": "Export réussi! Document Word créé à:",
-      "error": "Erreur lors de l'export"
+      "exporting": "Export en cours…",
+      "success": "Export réussi ! Document Word créé à : {{path}}",
+      "error": "L'export a échoué.",
+      "titlePlaceholder": "Mon document",
+      "authorPlaceholder": "Votre nom",
+      "outputPlaceholder": "/chemin/vers/fichier.docx",
+      "browse": "Parcourir",
+      "export": "Exporter",
+      "cancel": "Annuler",
+      "unknownError": "L'export a échoué pour une raison inconnue.",
+      "noProject": "Aucun projet ouvert.",
+      "enterTitle": "Veuillez saisir un titre.",
+      "slidesUnreadable": "Impossible de lire slides.md. Vérifiez que le fichier existe dans le projet.",
+      "wordFiles": "Document Word",
+      "allFiles": "Tous les fichiers"
     },
     "exportToPDF": "Exporter en PDF",
     "exportToWord": "Exporter en Word",
     "citation": {
       "toggle": "Formater les citations avec CSL (Chicago, MLA…)",
       "style": "Style",
-      "locale": "Locale",
-      "help": "Les marqueurs [@key] deviendront des notes de bas de page numérotées et la bibliographie sera ajoutée à la fin."
+      "locale": "Langue",
+      "help": "Les marqueurs [@clef] deviendront des notes de bas de page numérotées et la bibliographie sera ajoutée à la fin.",
+      "toggleAria": "Utiliser le moteur de citations CSL",
+      "styleAria": "Style de citation",
+      "localeAria": "Langue des citations"
+    },
+    "scope": {
+      "label": "Portée",
+      "wholeBook_one": "Tout le livre ({{count}} pièce)",
+      "wholeBook_other": "Tout le livre ({{count}} pièces)",
+      "currentChapter": "Ce chapitre seul (tirage de travail)"
     }
   },
   "rag": {
@@ -614,7 +661,11 @@
     "notConfigured": "Le modèle ne répond pas. Vérifiez qu'Ollama est lancé, ou choisissez un autre fournisseur dans les Paramètres.",
     "startFailed": "Le modèle ne répond pas : {{error}}. Vérifiez votre configuration dans les Paramètres.",
     "openSettings": "Ouvrir les paramètres",
-    "sourcesLabel": "Sources"
+    "sourcesLabel": "Sources",
+    "noProjectState": {
+      "title": "Commencez par un projet",
+      "message": "Créez ou ouvrez un projet pour écrire, explorer vos sources et dialoguer avec l'assistant."
+    }
   },
   "corpus": {
     "title": "Corpus",
@@ -728,7 +779,7 @@
     "checkCitations": "Vérifier les citations",
     "newFileConfirm": "Créer un nouveau fichier ? Les modifications non sauvegardées seront perdues.",
     "markdown": "Markdown",
-    "openError": "Erreur lors de l'ouverture du fichier",
+    "openError": "Ce fichier n'a pas pu être ouvert. Il est peut-être introuvable ou illisible.",
     "saveError": "Erreur lors de la sauvegarde du fichier",
     "renumberFootnotes": "Renuméroter les notes"
   },
@@ -1570,8 +1621,9 @@
     "paragraphs": "par.",
     "citations": "cit.",
     "footnotes": "notes",
-    "bookWords": "livre",
-    "bookTotalHint": "Total de mots du manuscrit (tous chapitres)"
+    "bookWords": "mots (livre)",
+    "bookTotalHint": "Total de mots du manuscrit (tous chapitres)",
+    "scrollHint": "Faites défiler horizontalement pour voir tous les compteurs"
   },
   "book": {
     "chapterCount_one": "{{count}} chapitre",

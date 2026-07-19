@@ -6,6 +6,8 @@ import path from 'path';
 import { projectManager } from '../../services/project-manager.js';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
+import { isConsentedPath } from '../utils/user-consented-paths.js';
 import {
   validate,
   StringPathSchema,
@@ -13,11 +15,36 @@ import {
   EditorInsertTextSchema,
 } from '../utils/validation.js';
 
+/**
+ * Autorise un chemin de document : à l'intérieur du projet courant, ou
+ * explicitement désigné par l'utilisateur dans un dialogue natif.
+ *
+ * Sans cette garde, `editor:load-file` / `editor:save-file` lisaient et
+ * écrivaient n'importe quel chemin absolu — de quoi laisser un renderer
+ * compromis siphonner `~/.ssh/id_rsa` puis l'exfiltrer via le chat
+ * (ADR 0005). Le registre de consentement préserve les usages légitimes
+ * hors projet : ouvrir un document rangé ailleurs, « Enregistrer sous ».
+ */
+async function authorizeDocumentPath(
+  filePath: string,
+  intent: 'read' | 'write'
+): Promise<string> {
+  try {
+    return intent === 'read'
+      ? await validateReadPath(filePath)
+      : await validateWritePath(filePath);
+  } catch (error) {
+    if (await isConsentedPath(filePath)) return path.resolve(filePath);
+    throw error;
+  }
+}
+
 export function setupEditorHandlers() {
   ipcMain.handle('editor:load-file', async (_event, rawFilePath: unknown) => {
-    const filePath = validate(StringPathSchema, rawFilePath);
-    console.log('📞 IPC Call: editor:load-file', { filePath });
+    const rawPath = validate(StringPathSchema, rawFilePath);
+    console.log('📞 IPC Call: editor:load-file', { filePath: rawPath });
     try {
+      const filePath = await authorizeDocumentPath(rawPath, 'read');
       const { readFile } = await import('fs/promises');
       const content = await readFile(filePath, 'utf-8');
       console.log('📤 IPC Response: editor:load-file', { contentLength: content.length });
@@ -31,9 +58,10 @@ export function setupEditorHandlers() {
   ipcMain.handle(
     'editor:save-file',
     async (_event, rawFilePath: unknown, rawContent: unknown, rawPreviousContent?: unknown) => {
-      const { filePath, content, previousContent } = validate(EditorSaveFileSchema, { filePath: rawFilePath, content: rawContent, previousContent: rawPreviousContent });
-      console.log('📞 IPC Call: editor:save-file', { filePath, contentLength: content.length });
+      const { filePath: rawPath, content, previousContent } = validate(EditorSaveFileSchema, { filePath: rawFilePath, content: rawContent, previousContent: rawPreviousContent });
+      console.log('📞 IPC Call: editor:save-file', { filePath: rawPath, contentLength: content.length });
       try {
+        const filePath = await authorizeDocumentPath(rawPath, 'write');
         const { writeFile } = await import('fs/promises');
         await writeFile(filePath, content, 'utf-8');
 

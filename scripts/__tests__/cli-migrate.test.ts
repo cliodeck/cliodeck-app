@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { runCli } from '../cliodeck-cli.js';
+import { sqliteAvailable } from '../../backend/__tests__/helpers/native-guards.js';
 
 let tmp = '';
 let stdoutChunks: string[] = [];
@@ -39,6 +41,35 @@ async function writeFile(rel: string, content = 'x'): Promise<void> {
   await fs.writeFile(p, content, 'utf8');
 }
 
+/**
+ * Vraie base SQLite minimale — un fichier texte nommé `.db` faisait échouer
+ * la migration pour de bon (« file is not a database »), échec masqué par
+ * les gardes ABI.
+ */
+async function writeDb(rel: string, marker: string): Promise<void> {
+  const p = path.join(tmp, rel);
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  const db = new Database(p);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS fixture_marker (tag TEXT)');
+    db.prepare('INSERT INTO fixture_marker (tag) VALUES (?)').run(marker);
+  } finally {
+    db.close();
+  }
+}
+
+function readDbMarker(abs: string): string | null {
+  const db = new Database(abs, { readonly: true });
+  try {
+    const row = db.prepare('SELECT tag FROM fixture_marker LIMIT 1').get() as
+      | { tag: string }
+      | undefined;
+    return row?.tag ?? null;
+  } finally {
+    db.close();
+  }
+}
+
 function stdout(): string {
   return stdoutChunks.join('');
 }
@@ -53,8 +84,9 @@ describe('cliodeck import-cliobrain (5.2)', () => {
     expect(stderr()).toMatch(/import-cliobrain/);
   });
 
-  it('migrates a minimal cliobrain workspace and prints a JSON report', async () => {
-    await writeFile('.cliobrain/brain.db', 'SQLITE');
+  // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
+  it.skipIf(!sqliteAvailable)('migrates a minimal cliobrain workspace and prints a JSON report', async () => {
+    await writeDb('.cliobrain/brain.db', 'SQLITE');
     await writeFile('.cliobrain/hnsw.index', 'VEC');
     await writeFile(
       '.cliobrain/config.json',
@@ -75,7 +107,7 @@ describe('cliodeck import-cliobrain (5.2)', () => {
 
     // The flat layout should now hold the copied files.
     const brainDb = path.join(tmp, '.cliodeck', 'brain.db');
-    expect(await fs.readFile(brainDb, 'utf8')).toBe('SQLITE');
+    expect(readDbMarker(brainDb)).toBe('SQLITE');
     expect(stderr()).toMatch(/migration kind:/);
   });
 

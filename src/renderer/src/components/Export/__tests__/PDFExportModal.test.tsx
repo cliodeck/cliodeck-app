@@ -73,14 +73,14 @@ describe('PDFExportModal citation section', () => {
     await waitFor(() => expect(toggle.checked).toBe(true));
 
     // Dropdowns present while on.
-    expect(screen.getByLabelText('Citation style')).toBeInTheDocument();
-    expect(screen.getByLabelText('Citation locale')).toBeInTheDocument();
+    expect(screen.getByLabelText('export.citation.styleAria')).toBeInTheDocument();
+    expect(screen.getByLabelText('export.citation.localeAria')).toBeInTheDocument();
 
     // Turn off; dropdowns go away.
     fireEvent.click(toggle);
     await waitFor(() => {
-      expect(screen.queryByLabelText('Citation style')).not.toBeInTheDocument();
-      expect(screen.queryByLabelText('Citation locale')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('export.citation.styleAria')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('export.citation.localeAria')).not.toBeInTheDocument();
     });
   });
 
@@ -93,7 +93,7 @@ describe('PDFExportModal citation section', () => {
     await waitFor(() => expect(toggle.checked).toBe(true));
 
     // Click the export button (wait for deps check to enable it).
-    const exportBtn = await screen.findByRole('button', { name: /Exporter/ });
+    const exportBtn = await screen.findByRole('button', { name: /export\.(pdf|word)\.export/ });
     await waitFor(() => expect(exportBtn).not.toBeDisabled());
     fireEvent.click(exportBtn);
 
