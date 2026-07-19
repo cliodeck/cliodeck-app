@@ -1253,21 +1253,22 @@
   },
   "hints": {
     "title": "Persistent context",
-    "hint": "These notes are injected as a system message into every Brainstorm conversation (and the recipes that use it). Useful for reminding the model of project conventions, canonical sources, and exclusions.",
+    "hint": "This text is sent to the assistant at the start of every conversation: research topic and period, corpus, conventions to follow. It lives in context.md at the project root — you can also edit it like any other document and version it with your work.",
     "filePath": "File:",
     "errors": {
       "noFusionApi": "Fusion API not exposed by the preload.",
-      "noProject": "Open a project to edit hints.",
+      "noProject": "Open a project to edit its context.",
       "saveFailed": "Save failed."
     },
     "buttons": {
       "save": "Save",
-      "saveTitle": "Save hints"
+      "saveTitle": "Save project context"
     },
     "status": {
       "saved": "✓ saved"
     },
-    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n"
+    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n",
+    "legacyNotice": "An earlier hints file ({{path}}) is also read and sent to the assistant. Copy its content here if you would rather keep everything in one file."
   },
   "recipes": {
     "title": "Recipes (read-only)",

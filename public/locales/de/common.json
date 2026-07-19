@@ -1253,21 +1253,22 @@
   },
   "hints": {
     "title": "Dauerhafter Kontext",
-    "hint": "Diese Notizen werden als Systemnachricht in jede Brainstorm-Konversation (und die Rezepte, die sie verwenden) eingefügt. Ideal, um das Modell an Projektkonventionen, kanonische Quellen und Ausschlüsse zu erinnern.",
+    "hint": "Dieser Text wird der Assistenz zu Beginn jedes Gesprächs übermittelt: Thema und Zeitraum der Forschung, Korpus, einzuhaltende Konventionen. Er liegt in context.md im Projektstamm — Sie können ihn auch wie jedes andere Dokument bearbeiten und mit Ihrer Arbeit versionieren.",
     "filePath": "Datei:",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
-      "noProject": "Öffnen Sie ein Projekt, um Hints zu bearbeiten.",
+      "noProject": "Öffnen Sie ein Projekt, um seinen Kontext zu bearbeiten.",
       "saveFailed": "Speichern fehlgeschlagen."
     },
     "buttons": {
       "save": "Speichern",
-      "saveTitle": "Hints speichern"
+      "saveTitle": "Projektkontext speichern"
     },
     "status": {
       "saved": "✓ gespeichert"
     },
-    "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n"
+    "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n",
+    "legacyNotice": "Eine ältere Hinweisdatei ({{path}}) wird ebenfalls gelesen und an die Assistenz übermittelt. Kopieren Sie deren Inhalt hierher, wenn Sie alles in einer Datei bündeln möchten."
   },
   "recipes": {
     "title": "Rezepte (schreibgeschützt)",

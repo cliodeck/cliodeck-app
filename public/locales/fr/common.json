@@ -1253,21 +1253,22 @@
   },
   "hints": {
     "title": "Consignes de projet",
-    "hint": "Ces notes sont injectées comme message système dans chaque conversation Brainstorm (et les recettes qui l'utilisent). Idéal pour rappeler au modèle les conventions du projet, les sources canoniques, les exclusions.",
+    "hint": "Ce texte est transmis à l'assistant au début de chaque conversation : sujet et période de la recherche, corpus, conventions à respecter. Il vit dans context.md, à la racine du projet — vous pouvez aussi l'éditer comme n'importe quel document, et le versionner avec votre travail.",
     "filePath": "Fichier :",
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
-      "noProject": "Ouvrez un projet pour éditer les hints.",
+      "noProject": "Ouvrez un projet pour éditer son contexte.",
       "saveFailed": "Échec de la sauvegarde."
     },
     "buttons": {
       "save": "Enregistrer",
-      "saveTitle": "Enregistrer les hints"
+      "saveTitle": "Enregistrer le contexte du projet"
     },
     "status": {
       "saved": "✓ enregistré"
     },
-    "placeholder": "# Contexte\n\n- Corpus : articles en FR sur …\n- Évite de citer Wikipedia\n- Utilise la chronologie stricte\n"
+    "placeholder": "# Contexte\n\n- Corpus : articles en FR sur …\n- Évite de citer Wikipedia\n- Utilise la chronologie stricte\n",
+    "legacyNotice": "Un fichier de consignes antérieur ({{path}}) est également lu et transmis à l'assistant. Recopiez son contenu ici si vous souhaitez tout réunir dans un seul fichier."
   },
   "recipes": {
     "title": "Recettes (lecture seule)",
