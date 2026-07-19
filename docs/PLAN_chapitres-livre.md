@@ -7,8 +7,9 @@ N fichiers, navigable, assemblé correctement à l'export.
 un `document.md` » ; chaîne aval) + vérifications empiriques pandoc 3.8.
 
 Ce document fixe l'architecture et découpe le chantier en phases avec
-critères d'acceptation. Il ne présume pas des arbitrages éditoriaux, listés
-en fin de document et à trancher avant la Phase 2.
+critères d'acceptation. **Les dix arbitrages éditoriaux ont été tranchés
+par l'auteur le 2026-07-19** (§5) ; leurs conséquences techniques sont
+détaillées au §6.
 
 ---
 
@@ -23,10 +24,17 @@ en fin de document et à trancher avant la Phase 2.
    par désynchronisation.
 3. **L'assemblage à l'export est un flux unique préfixé** (stratégie D
    ci-dessous), pas `--file-scope`, pas la concaténation naïve.
-4. **Aucune migration destructive.** Un livre existant garde son
-   `document.md` ; il devient le premier chapitre, en place, par un
-   manifeste inféré — jamais déplacé ni découpé sans demande explicite.
-5. **Le chantier commence par les verrous de sécurité** : tant que la
+4. **`#` est le titre du chapitre** (arbitrage 1) : chaque fichier de
+   chapitre porte son `#`, le corps s'organise en `##`. Côté pandoc,
+   `--top-level-division=chapter`.
+5. **Les choix d'appareil savant sont des réglages d'ouvrage**, pas des
+   constantes de code : style et numérotation des notes, placement de la
+   bibliographie, numérotation des titres. Ils vivent dans `project.json`
+   (section `book`) et pilotent l'assemblage et le template.
+6. **Aucune migration à écrire** (arbitrage 10 : pas de livres existants).
+   La réconciliation manifeste ↔ disque reste néanmoins requise pour ne
+   jamais perdre un fichier créé à la main.
+7. **Le chantier commence par les verrous de sécurité** : tant que la
    bascule de fichier n'est pas sûre, multiplier les fichiers multiplie les
    pertes. (Fait : `fix/file-switch-data-loss`.)
 
@@ -102,15 +110,22 @@ vérifié dans l'app.
 - `getChapters` cesse d'être un stub : lit le manifeste, résout les chemins
   relatifs au projet, ordonne, et **réconcilie avec le disque** (fichiers
   orphelins listés, manifeste réparé). Clé = chemin du projet, pas `id`.
-- **Migration inférentielle** (pattern maison, cf. `autoMigrateWorkspace` et
-  la conversion de chemins de `loadProject`) : un livre sans `chapters` en
-  reçoit un, contenant son `document.md` existant, à l'ouverture ; réécriture
-  du `project.json` ; idempotent, non fatal, jamais destructif.
+- **Réglages d'ouvrage** dans `project.json` : `book.noteStyle`
+  (`footnote | endnote-chapter | endnote-book`), `book.noteNumbering`
+  (`continuous | per-chapter`), `book.bibliography` (`single | per-chapter`),
+  `book.numbering` (chapitres numérotés, sections non — défaut arbitré).
+- Squelette d'un livre neuf : `chapters/01-introduction.md` et les pièces
+  d'appareil choisies (préface, annexes… — arbitrage 6), `abstract.md`
+  conservé comme résumé d'ouvrage.
 - `saveProject` cesse d'écrire `document.md`.
+- **Pas de migration** (arbitrage 10) : un projet sans manifeste reçoit
+  simplement un manifeste vide et la réconciliation disque lui propose de
+  rattacher les fichiers trouvés.
 
-*Acceptation* : ouvrir un livre existant le laisse intact et lui donne un
-manifeste à un chapitre ; créer un livre neuf produit `chapters/01-….md` ;
-tests de migration (avec/sans manifeste, fichier orphelin, projet sans `id`).
+*Acceptation* : créer un livre produit le squelette et un manifeste
+cohérent ; un fichier ajouté à la main apparaît « non rattaché » et peut
+être rattaché ; les réglages survivent à une fermeture/réouverture ; tests
+de réconciliation (manifeste vide, fichier orphelin, fichier manquant).
 
 ### Phase 2 — Écriture multi-chapitres
 
@@ -153,8 +168,16 @@ et ouvrage.
   Lezer), insère les séparateurs de niveau chapitre, ajoute front/back
   matter. Une seule implémentation pour PDF et Word — les deux modales
   cessent de lire le tampon de l'éditeur.
-- **PDF** : `--top-level-division=chapter`, `secnumdepth` revu, `$abstract$`
-  ajouté ; `\frontmatter`/`\backmatter` alimentés.
+- **PDF** : `--top-level-division=chapter`, `secnumdepth` réglé sur
+  « chapitres numérotés, sections non », `$abstract$` ajouté ;
+  `\frontmatter`/`\backmatter` alimentés par les pièces d'appareil.
+- **Notes selon les réglages** : bas de page (natif), fin de chapitre ou
+  fin d'ouvrage (paquet `endnotes` + placement de `\theendnotes`) ;
+  numérotation continue ou remise à zéro par chapitre. Cf. §6.
+- **Bibliographie** : unique (natif, chemin nominal) ou par chapitre
+  (citeproc par chapitre à l'assemblage — spike préalable, cf. §6).
+- **Export d'un chapitre isolé** (arbitrage 9) : même assembleur, périmètre
+  réduit à un chapitre, en classe article ou book selon le besoin.
 - **Word** : une `section` docx par chapitre (saut de page), table des
   matières, styles de titre ; correction du mappage des notes manuelles.
 - **CitationEngine** : numérotation des notes à partir du maximum existant
@@ -203,24 +226,58 @@ avertissement pandoc de note dupliquée**.
 - `getProjectContext()` (`pdf-service.ts:406-424`) lit `context.md` et
   **n'a aucun appelant** : code mort à supprimer ou à brancher.
 
-## 5. Arbitrages éditoriaux (à trancher avant la Phase 2)
+## 5. Arbitrages tranchés (2026-07-19)
 
-1. **Niveau de titre = chapitre** : `#` dans le fichier, ou titre porté par
-   le manifeste et corps en `##` ?
-2. **Numérotation** : chapitres numérotés ? sections numérotées ?
-3. **Notes** : numérotation continue sur l'ouvrage ou repartant à 1 par
-   chapitre ?
-4. **Bibliographie** : unique en fin d'ouvrage (natif) ou par chapitre
-   (`biblatex refsection`) ?
-5. **Renvois entre chapitres** nécessaires ? (Si oui — et le plan le
-   suppose — la stratégie D est obligatoire.)
-6. **Front/back matter** : quelles pièces, dans quel ordre, chacune
-   fichier ?
-7. **Ordre** : porté par le nom de fichier (`01-…`) ou par le manifeste
-   seul ?
-8. **`abstract.md` dans un livre** : quatrième de couverture ou vestige à
-   retirer ?
-9. **Export d'un chapitre isolé** (tirage de travail) en plus du livre
-   entier ?
-10. **Livres existants** : `document.md` laissé tel quel (défaut proposé),
-    ou découpage assisté aux `#` sur demande explicite ?
+| # | Question | Décision |
+|---|---|---|
+| 1 | Niveau de titre = chapitre | **`#` est le titre du chapitre**, corps en `##` |
+| 2 | Numérotation | **Chapitres numérotés, sections non** (réglage d'ouvrage) |
+| 3 | Notes — numérotation | **Réglage** : continue sur l'ouvrage *ou* repartant à 1 par chapitre |
+| 3bis | Notes — placement | **Réglage à trois états** : bas de page, fin de chapitre, fin d'ouvrage |
+| 4 | Bibliographie | **Réglage** : unique en fin d'ouvrage *ou* par chapitre |
+| 5 | Renvois entre chapitres | **Indispensables** → stratégie d'assemblage D verrouillée |
+| 6 | Pièces hors chapitres | Introduction/conclusion, préface/remerciements/dédicace, annexes/sources/index, et `abstract.md` en quatrième de couverture |
+| 7 | Ordre des fichiers | **Le manifeste fait foi** ; préfixe numérique au nom de fichier pour la lisibilité hors app, sans valeur d'autorité (un fichier renommé dehors est signalé « non rattaché », jamais perdu) |
+| 8 | `abstract.md` | Conservé, promu résumé d'ouvrage (corrige le bug du `$abstract$` jeté) |
+| 9 | Export d'un chapitre isolé | **Oui**, tirage de travail en plus du livre entier |
+| 10 | Livres existants | Aucun — pas de migration ni d'import à écrire |
+
+## 6. Conséquences techniques des réglages
+
+Les trois réglages « savants » ont un coût inégal ; il faut le savoir avant
+de les promettre dans l'interface.
+
+**Notes — placement (3 états).** Le bas de page est le comportement natif de
+pandoc. Les notes de fin exigent le paquet LaTeX `endnotes` (ou `enotez`) et
+le placement explicite de `\theendnotes` : après chaque `\chapter` pour des
+notes de fin de chapitre, avant le `\backmatter` pour des notes d'ouvrage.
+Pandoc n'a pas de sortie « endnotes » native : l'assembleur doit injecter ces
+commandes et le template les déclarer. **M**, et à couvrir par des tests de
+sortie LaTeX (pas seulement de compilation).
+
+**Notes — numérotation.** Continue = comportement par défaut. Par chapitre =
+`\setcounter{footnote}{0}` (ou l'équivalent endnote) à chaque ouverture de
+chapitre. **S** — mais rappelons que les identifiants markdown, eux, sont
+préfixés par chapitre à l'assemblage dans tous les cas (stratégie D) : la
+numérotation affichée est affaire de LaTeX, pas de source.
+
+**Bibliographie par chapitre — le point coûteux.** Citeproc (le moteur
+actuel, via pandoc) ne produit **qu'une** bibliographie par document. Deux
+voies :
+- *(a)* passer à `biblatex` avec une `refsection` par chapitre — cohérent en
+  LaTeX, mais la fidélité CSL des autres sorties (Word) en souffrirait et
+  cela touche toute la chaîne de citation ;
+- *(b)* faire tourner citeproc **par chapitre** au moment de l'assemblage,
+  puis recomposer — les styles CSL sont préservés, l'assembleur devient plus
+  riche, et le mode « bibliographie unique » reste le chemin nominal.
+
+La voie *(b)* est cohérente avec le reste du plan (nous contrôlons
+l'assemblage) mais reste **M/L** et mérite une maquette (« spike ») avant
+d'être inscrite au périmètre d'une phase. La bibliographie unique, elle, est
+gratuite.
+
+**Renvois entre chapitres.** Verrouillent la stratégie D et supposent, à
+terme, une syntaxe de renvoi typée (`[voir @chap:danzig]` ou équivalent
+pandoc `\ref`) résolue à l'assemblage — même famille technique que l'index
+et les extensions Lezer existantes. La Phase 4 se contente de **préserver**
+les ancres ; les renvois typés sont un lot ultérieur.
