@@ -99,11 +99,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         },
       });
 
-      // Load chapters for book projects
-      if (project.type === 'book') {
-        const chaptersResult = await window.electron.project.getChapters(project.id);
-        if (chaptersResult.success) {
-          set({ chapters: chaptersResult.chapters });
+      // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
+      // JAMAIS empêcher l'ouverture du projet. Un project.json sans `id`
+      // (créé à la main ou par script) faisait échouer la validation IPC et
+      // condamnait le chargement entier — le manuscrit devenait
+      // inaccessible à cause d'une liste de chapitres accessoire.
+      if (project.type === 'book' && project.id) {
+        try {
+          const chaptersResult = await window.electron.project.getChapters(project.id);
+          if (chaptersResult.success) {
+            set({ chapters: chaptersResult.chapters });
+          }
+        } catch (error) {
+          console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
         }
       }
 

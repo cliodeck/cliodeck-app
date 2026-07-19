@@ -110,3 +110,81 @@ describe('insertDraftAtCursor — façade sans propositions (défensif)', () => 
     expect(useEditorStore.getState().isDirty).toBe(true);
   });
 });
+
+/**
+ * Bascule de fichier — régression de perte de données (2026-07-19).
+ *
+ * Reproduit dans l'app : taper dans document.md puis cliquer context.md
+ * écrasait context.md avec le contenu de document.md, et la frappe de
+ * document.md n'était jamais écrite. `loadFile` sauvegarde désormais le
+ * fichier sortant avant de charger le suivant.
+ */
+describe('loadFile — sauvegarde du fichier sortant', () => {
+  interface FakeIpc {
+    saved: Array<{ path: string; content: string }>;
+    loaded: string[];
+  }
+
+  function installEditorIpc(files: Record<string, string>): FakeIpc {
+    const ipc: FakeIpc = { saved: [], loaded: [] };
+    // Suite en environnement node : pas de `window` global.
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: {
+        loadFile: async (path: string) => {
+          ipc.loaded.push(path);
+          return { success: true, content: files[path] ?? '' };
+        },
+        saveFile: async (path: string, content: string) => {
+          ipc.saved.push({ path, content });
+          files[path] = content;
+          return { success: true };
+        },
+      },
+    } as never;
+    return ipc;
+  }
+
+  it('écrit le fichier sortant modifié avant d’ouvrir le suivant', async () => {
+    const files = { '/p/document.md': 'doc', '/p/context.md': 'ctx' };
+    const ipc = installEditorIpc(files);
+    useEditorStore.setState({
+      filePath: '/p/document.md',
+      content: 'doc + frappe',
+      isDirty: true,
+      editorFacade: null,
+    });
+
+    await useEditorStore.getState().loadFile('/p/context.md');
+
+    expect(ipc.saved).toEqual([{ path: '/p/document.md', content: 'doc + frappe' }]);
+    expect(files['/p/context.md']).toBe('ctx'); // jamais contaminé
+    expect(useEditorStore.getState().content).toBe('ctx');
+    expect(useEditorStore.getState().filePath).toBe('/p/context.md');
+    expect(useEditorStore.getState().isDirty).toBe(false);
+  });
+
+  it('ne sauvegarde rien si le document sortant est intact', async () => {
+    const ipc = installEditorIpc({ '/p/a.md': 'a', '/p/b.md': 'b' });
+    useEditorStore.setState({ filePath: '/p/a.md', content: 'a', isDirty: false });
+
+    await useEditorStore.getState().loadFile('/p/b.md');
+
+    expect(ipc.saved).toEqual([]);
+    expect(useEditorStore.getState().content).toBe('b');
+  });
+
+  it('n’ouvre pas le fichier suivant si la sauvegarde du sortant échoue', async () => {
+    installEditorIpc({ '/p/a.md': 'a', '/p/b.md': 'b' });
+    (globalThis as unknown as {
+      electron: { editor: { saveFile: unknown } };
+    }).electron.editor.saveFile = async () => ({ success: false, error: 'disque plein' });
+    useEditorStore.setState({ filePath: '/p/a.md', content: 'a modifié', isDirty: true });
+
+    await expect(useEditorStore.getState().loadFile('/p/b.md')).rejects.toThrow();
+    // Le document sortant reste en place : rien n'est perdu silencieusement.
+    expect(useEditorStore.getState().filePath).toBe('/p/a.md');
+    expect(useEditorStore.getState().content).toBe('a modifié');
+  });
+});
