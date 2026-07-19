@@ -101,7 +101,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         outputPath: outputPath,
         metadata: {
           title,
-          author: author || 'ClioDesk',
+          // Champ vide → le frontmatter YAML de slides.md peut fournir
+          // l'auteur (résolution côté main, resolveDeckConfig).
+          author: author || undefined,
           date: new Date().toLocaleDateString(),
         },
         config,
@@ -212,6 +214,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
             </div>
             <small style={{ color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
               {t(`presentation.modeDesc.${exportMode}`)}
+            </small>
+            <small style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
+              {t('presentation.frontmatterPrecedence')}
             </small>
           </div>
 

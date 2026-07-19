@@ -24,7 +24,8 @@ export function setupSlidesHandlers() {
       // streams through `llm.chat()` instead of the legacy
       // `LLMProviderManager.generateWithoutSources` path.
       registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
-      slidesGenerationService.setLLMProvider(registry.getLLM());
+      const llm = registry.getLLM();
+      slidesGenerationService.setLLMProvider(llm);
 
       const content = await slidesGenerationService.generateSlides(
         options.text,
@@ -33,7 +34,9 @@ export function setupSlidesHandlers() {
         options.citations
       );
 
-      return successResponse({ content });
+      // Le modèle remonte au renderer : la proposition d'application (contrat
+      // Phase 4) doit porter un `source.model` réel, pas 'unknown'.
+      return successResponse({ content, model: llm.model });
     } catch (error: any) {
       logger.error('ipc', 'slides:generate', { error: error.message });
       return errorResponse(error);
@@ -56,13 +59,17 @@ export function setupSlidesHandlers() {
   });
 
   // Phase 2 — Live preview: returns HTML string for srcdoc rendering
-  ipcMain.handle('slides:get-preview-html', async (_event, options: { content: string; config?: any }) => {
+  ipcMain.handle('slides:get-preview-html', async (_event, options: { content: string; config?: any; activeSlideIndex?: number }) => {
     try {
-      const html = generatePreviewHtml(options.content || '', {
-        projectPath: '',
-        content: options.content || '',
-        config: options.config,
-      });
+      const html = generatePreviewHtml(
+        options.content || '',
+        {
+          projectPath: '',
+          content: options.content || '',
+          config: options.config,
+        },
+        typeof options.activeSlideIndex === 'number' ? options.activeSlideIndex : 0
+      );
       return successResponse({ html });
     } catch (error: any) {
       return errorResponse(error);

@@ -1,19 +1,32 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search, ListOrdered } from 'lucide-react';
+import {
+  FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search,
+  ListOrdered, Columns, Plus, MessageSquare, Eye, Sparkles, FileDown,
+} from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { renumberFootnotes } from '@/editor/footnote-tools';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { DocumentStats } from './DocumentStats';
+import { SlideNavigator } from '../Slides/SlideNavigator';
+import { SlidePreviewPanel } from '../Slides/SlidePreviewPanel';
+import { SlideGenerationPanel } from '../Slides/SlideGenerationPanel';
 
 // SimilarityPanel self-hides via `isPanelOpen` — lazy-loading keeps its heavy
 // dependency tree off the editor's initial chunk.
 const SimilarityPanel = lazy(() =>
   import('../Similarity/SimilarityPanel').then((m) => ({ default: m.SimilarityPanel })),
 );
+// Modal d'export reveal/Beamer — projets presentation uniquement.
+const PresentationExportModal = lazy(() =>
+  import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
+);
 import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { useProjectStore } from '../../stores/projectStore';
+import { useSlidesStore } from '../../stores/slidesStore';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -24,8 +37,19 @@ export const EditorPanel: React.FC = () => {
   const { citations } = useBibliographyStore();
   const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
 
+  // Chantier « même éditeur » : un projet presentation garde CE panneau —
+  // la toolbar gagne une section slides et Navigator/Preview/Génération
+  // s'ouvrent en tiroirs latéraux autour du même CodeMirrorEditor.
+  const isPresentation = useProjectStore((s) => s.currentProject?.type === 'presentation');
+  const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
+  const [showExportModal, setShowExportModal] = useState(false);
+
   // Enable auto-save functionality
   useAutoSave();
+
+  const insertSlideSnippet = (text: string) => {
+    useEditorStore.getState().editorFacade?.replaceSelection(text);
+  };
 
   const handleNewFile = async () => {
     logger.component('EditorPanel', 'handleNewFile clicked');
@@ -188,12 +212,96 @@ export const EditorPanel: React.FC = () => {
           </button>
         </div>
 
+        {/* Slides insertion (presentation projects) */}
+        {isPresentation && (
+          <div className="toolbar-section">
+            <button
+              className="toolbar-btn"
+              onClick={() => insertSlideSnippet('\n\n---\n\n# Nouvelle section\n\n')}
+              title={t('presentation.addSection')}
+            >
+              <Columns size={18} strokeWidth={1.5} />
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => insertSlideSnippet('\n\n---\n\n## Titre de la slide\n\n')}
+              title={t('presentation.addSlide')}
+            >
+              <Plus size={18} strokeWidth={1.5} />
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => insertSlideSnippet('\n\nNote:\nNotes du présentateur ici.\n')}
+              title={t('presentation.addNote')}
+            >
+              <MessageSquare size={18} strokeWidth={1.5} />
+            </button>
+          </div>
+        )}
+
+        {/* Slides drawers + export (presentation projects) */}
+        {isPresentation && (
+          <div className="toolbar-section toolbar-section-right">
+            <button
+              className={`toolbar-btn ${isPreviewOpen ? 'active' : ''}`}
+              onClick={togglePreview}
+              title={t('slides.preview.title')}
+            >
+              <Eye size={18} strokeWidth={1.5} />
+            </button>
+            <button
+              className={`toolbar-btn ${isGenerationOpen ? 'active' : ''}`}
+              onClick={openGeneration}
+              title={t('slides.generate.title')}
+            >
+              <Sparkles size={18} strokeWidth={1.5} />
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => setShowExportModal(true)}
+              title={t('presentation.export')}
+            >
+              <FileDown size={18} strokeWidth={1.5} />
+            </button>
+          </div>
+        )}
+
       </div>
 
-      {/* Editor content — colonne flex : l'éditeur prend l'espace restant,
-          la barre de stats garde ses 28 px visibles. */}
+      {/* Editor content — colonne flex : l'éditeur (ou l'atelier slides)
+          prend l'espace restant, la barre de stats garde ses 28 px. */}
       <div className="editor-content">
-        <CodeMirrorEditor />
+        {isPresentation ? (
+          <div className="slides-workbench">
+            <PanelGroup direction="horizontal">
+              <Panel defaultSize={22} minSize={15} maxSize={35}>
+                <SlideNavigator />
+              </Panel>
+              <PanelResizeHandle className="resize-handle" />
+              <Panel defaultSize={isGenerationOpen ? 53 : 78} minSize={40}>
+                <CodeMirrorEditor />
+              </Panel>
+              {isPreviewOpen && (
+                <>
+                  <PanelResizeHandle className="resize-handle" />
+                  <Panel defaultSize={35} minSize={25} maxSize={55}>
+                    <SlidePreviewPanel />
+                  </Panel>
+                </>
+              )}
+              {isGenerationOpen && (
+                <>
+                  <PanelResizeHandle className="resize-handle" />
+                  <Panel defaultSize={25} minSize={20} maxSize={40}>
+                    <SlideGenerationPanel />
+                  </Panel>
+                </>
+              )}
+            </PanelGroup>
+          </div>
+        ) : (
+          <CodeMirrorEditor />
+        )}
         <DocumentStats />
       </div>
 
@@ -201,6 +309,16 @@ export const EditorPanel: React.FC = () => {
       {isSimilarityPanelOpen && (
         <Suspense fallback={null}>
           <SimilarityPanel />
+        </Suspense>
+      )}
+
+      {/* Export presentation modal */}
+      {showExportModal && (
+        <Suspense fallback={null}>
+          <PresentationExportModal
+            isOpen={showExportModal}
+            onClose={() => setShowExportModal(false)}
+          />
         </Suspense>
       )}
     </div>

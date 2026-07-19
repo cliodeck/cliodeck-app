@@ -21,11 +21,14 @@
   "include": [
     "src/main/**/*",
     "src/shared/**/*",
+    "src/editor/slides.ts",
+    "src/editor/lezer-extensions/**/*",
     "backend/**/*",
     "scripts/cliodeck-cli.ts",
     "scripts/cli/**/*"
   ],
   "exclude": [
+    "src/editor/lezer-extensions/__tests__/**/*",
     "backend/**/__tests__/**/*",
     "src/main/**/__tests__/**/*",
     "scripts/__tests__/**/*"

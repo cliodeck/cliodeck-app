@@ -4,8 +4,16 @@ import { tmpdir } from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { app, BrowserWindow } from 'electron';
+import { load as loadYaml } from 'js-yaml';
+import { marked } from 'marked';
+import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
 
 const execAsync = promisify(exec);
+
+// Rendu markdown des slides de la preview : même famille de grammaire que le
+// plugin markdown de reveal.js (qui embarque marked) — la preview et l'export
+// partagent désormais le découpage (parseDeck) ET la grammaire.
+marked.setOptions({ gfm: true, breaks: false });
 
 // MARK: - CDN Asset definitions for offline export
 
@@ -97,47 +105,121 @@ interface RevealJsProgress {
   progress: number;
 }
 
+// MARK: - Deck frontmatter (source de config reveal)
+
+/**
+ * Métadonnées lues depuis le frontmatter YAML de `slides.md`. Précédence :
+ * frontmatter > `reveal-config.json` pour theme/transition ; pour le titre et
+ * l'auteur, la saisie explicite du modal d'export garde la main, le
+ * frontmatter comble les champs laissés vides. Un deck devient ainsi un
+ * fichier autoportant.
+ */
+export interface DeckFrontmatterMeta {
+  title?: string;
+  author?: string;
+  date?: string;
+  theme?: string;
+  transition?: string;
+}
+
+const VALID_THEMES = new Set([
+  'black', 'white', 'league', 'beige', 'sky', 'night', 'serif', 'simple',
+  'solarized', 'blood', 'moon',
+]);
+const VALID_TRANSITIONS = new Set([
+  'none', 'fade', 'slide', 'convex', 'concave', 'zoom',
+]);
+
+function pickString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+export interface ExtractedDeck {
+  /** Contenu sans le frontmatter (pour les détections type usesMath). */
+  body: string;
+  meta: DeckFrontmatterMeta;
+  /** Découpage partagé (src/editor/slides.ts) — offsets absolus. */
+  deck: DeckInfo;
+}
+
+/**
+ * Extraction unique frontmatter + découpage : la détection (règle
+ * frontmatter vs séparateur en tête de deck, `---` de blocs de code ignorés)
+ * vit dans src/editor/slides.ts — une seule vérité pour l'éditeur, le
+ * navigateur, la preview et l'export.
+ */
+export function extractDeck(content: string): ExtractedDeck {
+  const deck = parseDeck(content);
+  let meta: DeckFrontmatterMeta = {};
+  let body = content;
+  if (deck.frontmatter) {
+    body = content.slice(Math.min(deck.frontmatter.to + 1, content.length));
+    try {
+      const raw = loadYaml(deck.frontmatter.yaml);
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const r = raw as Record<string, unknown>;
+        meta = {
+          title: pickString(r.title),
+          author: pickString(r.author),
+          date: pickString(r.date),
+          theme: pickString(r.theme),
+          transition: pickString(r.transition),
+        };
+        if (meta.theme && !VALID_THEMES.has(meta.theme)) meta.theme = undefined;
+        if (meta.transition && !VALID_TRANSITIONS.has(meta.transition)) {
+          meta.transition = undefined;
+        }
+      }
+    } catch {
+      // YAML invalide : on strippe quand même (ce n'est pas une slide),
+      // mais aucune métadonnée n'est lue.
+    }
+  }
+  return { body, meta, deck };
+}
+
 // MARK: - Slide parsing (shared between export & preview)
 
 /**
- * Parse markdown content into a 2D slide structure.
+ * Structure 2D reveal construite SUR le découpage partagé :
  *
  *  # Title        → new horizontal section (navigate left/right)
  *  ## Sub-title   → new vertical slide within the current section (navigate up/down)
  *  ---            → explicit slide separator (vertical within current section)
  *  Note: …        → speaker notes (everything after "Note:" until end of slide block)
+ *
+ * `aIndex` rattache chaque slide reveal à l'index du découpage partagé
+ * (SlideInfo.index) — c'est la clé de la synchro curseur ↔ preview. Les
+ * sous-découpes `##` d'un segment H1 partagent l'aIndex de leur segment.
  */
-interface ParsedSlide { markdown: string; notes: string }
+interface ParsedSlide { markdown: string; notes: string; aIndex: number }
 type SlideSection = ParsedSlide[];
 
-function parseSlides(content: string): SlideSection[] {
-  const extractNotes = (raw: string): ParsedSlide => {
+function buildSections(content: string, deck: DeckInfo): SlideSection[] {
+  const extractNotes = (raw: string, aIndex: number): ParsedSlide => {
     const m = raw.match(/\n\s*Notes?:\s*([\s\S]*)$/im);
-    if (m) return { markdown: raw.slice(0, m.index!).trim(), notes: m[1].trim() };
-    return { markdown: raw.trim(), notes: '' };
+    if (m) return { markdown: raw.slice(0, m.index!).trim(), notes: m[1].trim(), aIndex };
+    return { markdown: raw.trim(), notes: '', aIndex };
   };
 
   const sections: SlideSection[] = [];
   let cur: ParsedSlide[] = [];
 
-  for (const rawSlide of content.split(/\n---\n/)) {
-    const trimmed = rawSlide.trim();
+  for (const slide of deck.slides) {
+    const trimmed = content.slice(slide.from, slide.to).trim();
     if (!trimmed) continue;
 
     const firstLine = trimmed.split('\n')[0];
     const startsWithH1 = /^#(?!#)\s+/.test(firstLine);
-    const startsWithH2 = /^##(?!#)\s+/.test(firstLine);
 
     if (startsWithH1) {
       if (cur.length) { sections.push(cur); cur = []; }
       for (const part of trimmed.split(/\n(?=##(?!#)\s)/)) {
         const p = part.trim();
-        if (p) cur.push(extractNotes(p));
+        if (p) cur.push(extractNotes(p, slide.index));
       }
-    } else if (startsWithH2) {
-      cur.push(extractNotes(trimmed));
     } else {
-      cur.push(extractNotes(trimmed));
+      cur.push(extractNotes(trimmed, slide.index));
     }
   }
   if (cur.length) sections.push(cur);
@@ -149,35 +231,41 @@ function parseSlides(content: string): SlideSection[] {
 /**
  * Generates a lightweight, self-contained preview HTML.
  * No CDN dependencies — works reliably inside Electron iframe srcDoc.
- * Includes a tiny inline markdown renderer.
+ * Le markdown est rendu côté main par `marked` (même grammaire que le plugin
+ * markdown de reveal, qui l'embarque) sur le découpage partagé — plus de
+ * mini-moteur regex divergent. Le shell reste autonome (sandbox iframe
+ * `allow-scripts` sans `allow-same-origin` inchangé côté renderer).
  */
-export function generatePreviewHtml(content: string, _options: RevealJsExportOptions): string {
-  const sections = parseSlides(content);
-  const theme = _options.config?.theme || 'black';
+export function generatePreviewHtml(
+  content: string,
+  _options: RevealJsExportOptions,
+  activeSlideIndex = 0
+): string {
+  const { meta, deck } = extractDeck(content);
+  const sections = buildSections(content, deck);
+  const theme = meta.theme || _options.config?.theme || 'black';
+
+  const renderMd = (md: string): string =>
+    marked.parse(md, { async: false }) as string;
 
   // Flatten all slides with section/slide indices for the navigation label
-  const flatSlides: { md: string; notes: string; label: string }[] = [];
+  const flatSlides: { html: string; notesHtml: string; label: string; aIndex: number }[] = [];
   sections.forEach((sec, si) => {
     sec.forEach((slide, vi) => {
       const label = sec.length > 1 ? `${si + 1}.${vi + 1}` : `${si + 1}`;
-      flatSlides.push({ md: slide.markdown, notes: slide.notes, label });
+      flatSlides.push({
+        html: renderMd(slide.markdown),
+        notesHtml: slide.notes ? renderMd(slide.notes) : '',
+        label,
+        aIndex: slide.aIndex,
+      });
     });
   });
 
   if (!flatSlides.length) {
-    flatSlides.push({ md: '*Aucun contenu*', notes: '', label: '1' });
+    flatSlides.push({ html: '<p><em>Aucun contenu</em></p>', notesHtml: '', label: '1', aIndex: 0 });
   }
 
-  // Inline slide divs (markdown rendered by a tiny JS function at runtime)
-  const slideDivs = flatSlides.map((s, i) => {
-    const mdEsc = s.md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const notesEsc = s.notes.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<div class="slide${i === 0 ? ' active' : ''}" data-index="${i}">
-      <span class="slide-num">${s.label}</span>
-      <div class="slide-body" data-md="${mdEsc.replace(/"/g, '&quot;')}"></div>
-      ${s.notes ? `<div class="slide-notes" data-md="${notesEsc.replace(/"/g, '&quot;')}"></div>` : ''}
-    </div>`;
-  }).join('\n');
 
   const isDark = !['white', 'beige', 'sky', 'serif', 'simple', 'solarized'].includes(theme);
   const bg = isDark ? '#191919' : '#f5f5f0';
@@ -186,70 +274,15 @@ export function generatePreviewHtml(content: string, _options: RevealJsExportOpt
   const accent = isDark ? '#42affa' : '#2a76dd';
   const noteBg = isDark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.04)';
 
-  // Build the inline <script> as a plain string to avoid template-literal
-  // escaping issues with regex backslashes.
-  const PREVIEW_SCRIPT = [
-    'function md(s){',
-    '  s=s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,\'"\');',
-    '  s=s.replace(/```(\\w*)?\\n([\\s\\S]*?)```/g,function(_,l,c){',
-    '    c=c.replace(/</g,"&lt;").replace(/>/g,"&gt;");',
-    '    return "<pre><code>"+c.trim()+"</code></pre>";',
-    '  });',
-    '  var lines=s.split("\\n"),out=[],inUl=false,inOl=false;',
-    '  for(var i=0;i<lines.length;i++){',
-    '    var L=lines[i];',
-    '    if(/^######\\s/.test(L)){L="<h6>"+L.slice(7)+"</h6>";}',
-    '    else if(/^#####\\s/.test(L)){L="<h5>"+L.slice(6)+"</h5>";}',
-    '    else if(/^####\\s/.test(L)){L="<h4>"+L.slice(5)+"</h4>";}',
-    '    else if(/^###\\s/.test(L)){L="<h3>"+L.slice(4)+"</h3>";}',
-    '    else if(/^##\\s/.test(L)){L="<h2>"+L.slice(3)+"</h2>";}',
-    '    else if(/^#\\s/.test(L)){L="<h1>"+L.slice(2)+"</h1>";}',
-    '    else if(/^>\\s?/.test(L)){L="<blockquote>"+L.replace(/^>\\s?/,"")+"</blockquote>";}',
-    '    else if(/^\\s*[-*+]\\s/.test(L)){',
-    '      if(!inUl){out.push("<ul>");inUl=true;}',
-    '      L="<li>"+L.replace(/^\\s*[-*+]\\s/,"")+"</li>";',
-    '    }',
-    '    else if(/^\\s*\\d+\\.\\s/.test(L)){',
-    '      if(!inOl){out.push("<ol>");inOl=true;}',
-    '      L="<li>"+L.replace(/^\\s*\\d+\\.\\s/,"")+"</li>";',
-    '    }',
-    '    else{',
-    '      if(inUl){out.push("</ul>");inUl=false;}',
-    '      if(inOl){out.push("</ol>");inOl=false;}',
-    '      if(L.trim()===""&&!/</.test(L)){L="";}',
-    '      else if(!/^</.test(L)){L="<p>"+L+"</p>";}',
-    '    }',
-    '    out.push(L);',
-    '  }',
-    '  if(inUl)out.push("</ul>");',
-    '  if(inOl)out.push("</ol>");',
-    '  s=out.join("\\n");',
-    '  s=s.replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g,"<img src=\\"$2\\" alt=\\"$1\\">");',
-    '  s=s.replace(/\\[([^\\]]*)\\]\\(([^)]+)\\)/g,"<a href=\\"$2\\">$1</a>");',
-    '  s=s.replace(/`([^`]+)`/g,"<code>$1</code>");',
-    '  s=s.replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>");',
-    '  s=s.replace(/\\*(.+?)\\*/g,"<em>$1</em>");',
-    '  s=s.replace(/<p><\\/p>/g,"");',
-    '  return s;',
-    '}',
-    'document.querySelectorAll("[data-md]").forEach(function(el){',
-    '  el.innerHTML=md(el.getAttribute("data-md"));',
-    '});',
-    'var slides=document.querySelectorAll(".slide");',
-    'var cur=0,total=slides.length;',
-    'function show(n){',
-    '  if(n<0||n>=total)return;',
-    '  slides[cur].classList.remove("active");',
-    '  cur=n;',
-    '  slides[cur].classList.add("active");',
-    '  slides[cur].scrollIntoView({block:"nearest",behavior:"smooth"});',
-    '  document.getElementById("counter").textContent=(cur+1)+" / "+total;',
-    '}',
-    'function go(d){show(cur+d);}',
-    'document.querySelectorAll(".slide").forEach(function(el){',
-    '  el.addEventListener("click",function(){show(+el.getAttribute("data-index"));});',
-    '});',
-  ].join('\n');
+  // Slide affichée = celle du curseur (synchro faite CÔTÉ MAIN : la CSP de
+  // l'app interdit tout script inline, y compris dans un iframe srcDoc —
+  // la preview est donc entièrement statique et le panneau la régénère à
+  // chaque déplacement de slide active).
+  const activePos = Math.max(
+    0,
+    flatSlides.findIndex((s) => s.aIndex === activeSlideIndex)
+  );
+  const active = flatSlides[activePos];
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
@@ -297,23 +330,46 @@ html,body{height:100%;overflow:hidden;font-family:Source Sans Pro,Helvetica,sans
 .nav span{font-size:12px;color:${fgMuted};min-width:50px;text-align:center}
 </style></head><body>
 <div class="container">
-  <div class="slides" id="scroller">${slideDivs}</div>
+  <div class="slides">
+    <div class="slide active" data-index="${activePos}" data-aslide="${active.aIndex}">
+      <span class="slide-num">${active.label}</span>
+      <div class="slide-body">${active.html}</div>
+      ${active.notesHtml ? `<div class="slide-notes">${active.notesHtml}</div>` : ''}
+    </div>
+  </div>
   <div class="nav">
-    <button onclick="go(-1)">&#9664;</button>
-    <span id="counter">1 / ${flatSlides.length}</span>
-    <button onclick="go(1)">&#9654;</button>
+    <span>${activePos + 1} / ${flatSlides.length}</span>
   </div>
 </div>
-<script>${PREVIEW_SCRIPT}<\/script></body></html>`;
+</body></html>`;
 }
 
 // MARK: - Reveal.js export templates
 
+/**
+ * Résolution de la config effective d'un deck : frontmatter > reveal-config
+ * pour theme/transition ; saisie du modal > frontmatter pour titre/auteur.
+ * Exportée pour l'export offline (choix des assets) et les tests.
+ */
+export function resolveDeckConfig(
+  content: string,
+  options: RevealJsExportOptions
+): { theme: string; transition: string; title: string; author: string } {
+  const { meta } = extractDeck(content);
+  return {
+    theme: meta.theme || options.config?.theme || 'black',
+    transition: meta.transition || options.config?.transition || 'slide',
+    title: options.metadata?.title || meta.title || 'Présentation',
+    author: options.metadata?.author || meta.author || '',
+  };
+}
+
 const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inlinedAssets?: Map<string, string>): string => {
   const config = options.config || {};
-  const metadata = options.metadata || {};
 
-  const sections = parseSlides(content);
+  const { body, deck } = extractDeck(content);
+  const resolved = resolveDeckConfig(content, options);
+  const sections = buildSections(content, deck);
 
   // ── Build slides HTML ─────────────────────────────────────────────────
   // Notes stay inside the <textarea>; the reveal.js markdown plugin
@@ -335,8 +391,8 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
 
   // Build config object
   const revealConfig = {
-    theme: config.theme || 'black',
-    transition: config.transition || 'slide',
+    theme: resolved.theme,
+    transition: resolved.transition,
     controls: config.controls !== false,
     progress: config.progress !== false,
     slideNumber: config.slideNumber || false,
@@ -362,11 +418,12 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
     viewDistance: config.viewDistance || 3,
   };
 
-  // Detect whether content uses math ($ delimiters or \( \[ )
-  const usesMath = !inlinedAssets && /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(content);
+  // Detect whether content uses math ($ delimiters or \( \[ ) — sur le corps,
+  // le frontmatter n'est pas du contenu.
+  const usesMath = !inlinedAssets && /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(body);
 
   // Build CSS tags (for <head>)
-  const theme = config.theme || 'black';
+  const theme = resolved.theme;
   const cssAssets = getCssAssets(theme);
   const cssTags = cssAssets.map((asset) => {
     if (inlinedAssets?.has(asset.url)) {
@@ -406,7 +463,7 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>${metadata.title || 'Présentation'}</title>
+  <title>${resolved.title}</title>
 
 ${cssTags}
 
@@ -538,7 +595,9 @@ export class RevealJsExportService {
       onProgress?.({ stage: 'preparing', message: 'Téléchargement des assets reveal.js...', progress: 10 });
 
       const cacheDir = join(app.getPath('userData'), 'reveal-assets-cache');
-      const theme = options.config?.theme || 'black';
+      // Thème effectif (frontmatter > reveal-config) — les assets inlinés
+      // doivent correspondre au thème réellement rendu.
+      const theme = resolveDeckConfig(options.content, options).theme;
       // Exclude math plugin from offline — KaTeX loads external CDN resources at runtime
       const assets = getAllCdnAssets(theme, { includeMath: false });
 

@@ -1,16 +1,8 @@
-import { Suspense, lazy, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MainLayout } from './components/Layout/MainLayout';
 import { EditorPanel } from './components/Editor/EditorPanel';
-
-// Slide editor is only used for presentation projects — keep it off the main
-// bundle so the default Write mode loads faster.
-const SlideEditorPanel = lazy(() =>
-  import('./components/Slides/SlideEditorPanel').then((m) => ({
-    default: m.SlideEditorPanel,
-  })),
-);
 import { RebuildProgressModal } from './components/Project/RebuildProgressModal';
 import { AlertDialog } from './components/common/AlertDialog';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
@@ -38,7 +30,6 @@ function App() {
   const initializeLanguage = useLanguageStore((state) => state.initializeLanguage);
   const loadProject = useProjectStore((state) => state.loadProject);
   const updateEditorSettings = useEditorStore((state) => state.updateSettings);
-  const currentProjectType = useProjectStore((state) => state.currentProject?.type);
 
   useEffect(() => {
     initializeLanguage();
@@ -102,17 +93,9 @@ function App() {
       <a className="skip-link" href="#main-content">
         {t('a11y.skipToMain', 'Skip to main content')}
       </a>
-      <MainLayout
-        centerPanel={
-          currentProjectType === 'presentation' ? (
-            <Suspense fallback={null}>
-              <SlideEditorPanel />
-            </Suspense>
-          ) : (
-            <EditorPanel />
-          )
-        }
-      />
+      {/* Chantier « même éditeur » : les projets presentation passent par le
+          MÊME EditorPanel (toolbar contextuelle + tiroirs slides). */}
+      <MainLayout centerPanel={<EditorPanel />} />
       <RebuildProgressModal />
       <AlertDialog />
       <ConfirmDialog />

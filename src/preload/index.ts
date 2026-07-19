@@ -678,7 +678,12 @@ const api = {
     generate: (options: { text: string; language: string; citations?: any[] }) =>
       ipcRenderer.invoke('slides:generate', options),
     cancel: () => ipcRenderer.invoke('slides:cancel'),
-    getPreviewHtml: (options: { content: string; config?: any }) =>
+    getPreviewHtml: (options: {
+      content: string;
+      config?: any;
+      /** Slide rendue (index du découpage partagé) — synchro curseur. */
+      activeSlideIndex?: number;
+    }) =>
       ipcRenderer.invoke('slides:get-preview-html', options),
     onStream: (callback: (chunk: string) => void) => {
       const listener = (_event: any, chunk: string) => callback(chunk);

@@ -886,7 +886,6 @@
     "allFiles": "Alle Dateien",
     "addSlide": "Folie hinzufügen (---)",
     "addNote": "Präsentationsnotiz hinzufügen (Note:)",
-    "insertCitation": "Zitat einfügen [@schlüssel]",
     "exportMode": "Exportformat",
     "mode": {
       "online": "HTML (online)",
@@ -897,7 +896,9 @@
       "online": "Erfordert eine Internetverbindung zum Laden von reveal.js über CDN.",
       "offline": "Lädt reveal.js-Assets herunter und bettet sie in die HTML-Datei ein. Funktioniert offline.",
       "pdf": "Exportiert direkt als PDF über die Präsentations-Rendering-Engine."
-    }
+    },
+    "addSection": "Abschnitt hinzufügen (# --- )",
+    "frontmatterPrecedence": "Das YAML-Frontmatter von slides.md (title, author, theme, transition) überschreibt reveal-config.json; hier eingegebener Titel und Autor haben Vorrang."
   },
   "revealjs": {
     "theme": "Thema",
@@ -927,6 +928,11 @@
       "output": "Ergebnis",
       "noContent": "Kein Inhalt zum Umwandeln.",
       "unknownError": "Unbekannter Fehler bei der Generierung."
+    },
+    "navigator": {
+      "count": "{{count}} Folie",
+      "count_other": "{{count}} Folien",
+      "untitled": "Folie {{index}}"
     }
   },
   "milkdownEditor": {

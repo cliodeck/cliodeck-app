@@ -72,6 +72,22 @@
   height: auto;
 }
 
+/* Atelier slides (projets presentation) : tiroirs latéraux autour du même
+   éditeur CM6 — Navigator | éditeur | Preview | Génération IA. La règle
+   descendante `.editor-content .codemirror-editor` (flex:1) ne s'applique
+   pas dans un Panel : hauteur explicite ici (déclarée après, elle gagne). */
+.slides-workbench {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.slides-workbench .codemirror-editor {
+  flex: none;
+  height: 100%;
+  min-height: 0;
+}
+
 /* Resize Handle */
 .editor-resize-handle {
   width: 1px;

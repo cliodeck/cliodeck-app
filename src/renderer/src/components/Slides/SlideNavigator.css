@@ -69,3 +69,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Verticale reveal (slide ouvrant sur ##) : indentée sous sa section */
+.slide-navigator-item--sub {
+  padding-left: calc(var(--spacing-md) + var(--spacing-lg));
+}
