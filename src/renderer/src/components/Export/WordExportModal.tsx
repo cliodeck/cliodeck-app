@@ -15,8 +15,11 @@ interface WordExportModalProps {
 }
 
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
-  const { currentProject } = useProjectStore();
-  const { content } = useEditorStore();
+  const { currentProject, chapters, bookSettings } = useProjectStore();
+  const { content, filePath, getLiveContent } = useEditorStore();
+  const isBook = currentProject?.type === 'book' && chapters.length > 0;
+  // Livre : tout l'ouvrage, ou le chapitre courant seul (tirage de travail).
+  const [bookScope, setBookScope] = useState<'book' | 'chapter'>('book');
 
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -135,10 +138,40 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         }
       }
 
+      // Livre : le manifeste part au main, qui assemble (ordre, isolation
+      // des notes par chapitre). Le chapitre ouvert est transmis depuis
+      // l'éditeur vivant, sinon les frappes non sauvegardées manqueraient.
+      let manuscript:
+        | {
+            chapters: typeof chapters;
+            liveOverrides?: Record<string, string>;
+            scope?: 'book' | { chapterId: string };
+          }
+        | undefined;
+      if (isBook) {
+        const relative = filePath?.startsWith(currentProject.path + '/')
+          ? filePath.slice(currentProject.path.length + 1)
+          : null;
+        const current = relative
+          ? chapters.find((c) => c.filePath === relative)
+          : undefined;
+        manuscript = {
+          chapters,
+          liveOverrides: relative ? { [relative]: getLiveContent() } : undefined,
+          scope:
+            bookScope === 'chapter' && current ? { chapterId: current.id } : 'book',
+        };
+        exportContent = '';
+      }
+
       const result = await window.electron.wordExport.export({
         projectPath: currentProject.path,
         projectType: currentProject.type,
         content: exportContent,
+        bookSettings: isBook
+          ? (bookSettings as unknown as Record<string, unknown>)
+          : undefined,
+        manuscript,
         outputPath: outputPath,
         bibliographyPath: currentProject.bibliography,
         cslPath: currentProject.cslPath,
@@ -203,6 +236,24 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             <div style={{ fontSize: '0.875rem', color: 'var(--color-success)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
               <CheckCircle size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
               Modèle Word détecté: <code style={{ color: 'var(--color-success)' }}>{templatePath.split('/').pop()}</code>
+            </div>
+          )}
+
+          {/* Livre : périmètre de l'export (arbitrage 9 — tirage de travail) */}
+          {isBook && (
+            <div className="form-field">
+              <label>Contenu à exporter</label>
+              <select
+                value={bookScope}
+                onChange={(e) => setBookScope(e.target.value as 'book' | 'chapter')}
+                disabled={isExporting}
+              >
+                <option value="book">
+                  Tout le livre ({chapters.length} chapitre
+                  {chapters.length > 1 ? 's' : ''})
+                </option>
+                <option value="chapter">Ce chapitre seulement</option>
+              </select>
             </div>
           )}
 

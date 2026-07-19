@@ -21,9 +21,14 @@ import {
   Header,
   Footer,
   PageNumber,
+  TableOfContents,
 } from 'docx';
 import { marked } from 'marked';
 import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
+import { extractManualFootnotes } from './word-footnotes.js';
+import { parseOutline } from '../../editor/outline.js';
+import { assembleManuscript } from './manuscript-assembler.js';
+import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // FootnoteReferenceRun is the inline run; document footnotes are declared
 // via `Document.footnotes` keyed by id.
@@ -43,6 +48,19 @@ export interface WordExportOptions {
   bibliographyPath?: string;
   cslPath?: string; // Path to CSL file for citation styling
   templatePath?: string; // Path to .dotx template
+  /** Réglages d'ouvrage (notes, bibliographie, numérotation). */
+  bookSettings?: Partial<BookSettings>;
+  /**
+   * Manuscrit à assembler côté main (livre). Quand il est fourni, `content`
+   * peut être vide : le texte vient des chapitres, dans l'ordre du
+   * manifeste, avec l'isolation des notes par chapitre. Même motif que
+   * l'export PDF.
+   */
+  manuscript?: {
+    chapters: Chapter[];
+    liveOverrides?: Record<string, string>;
+    scope?: 'book' | { chapterId: string };
+  };
   /**
    * Citation rendering options. When `useEngine` is true, `[@key]` markers
    * are pre-processed into Word native footnotes + a bibliography section.
@@ -64,6 +82,31 @@ interface WordExportProgress {
   stage: 'preparing' | 'parsing' | 'generating' | 'template' | 'pandoc' | 'complete';
   message: string;
   progress: number;
+}
+
+/**
+ * Découpe un manuscrit assemblé en chapitres, aux titres de niveau 1.
+ *
+ * Le découpage passe par l'arbre Lezer (`parseOutline`) et non par une
+ * regex : un `#` en tête de ligne dans un bloc de code n'ouvre pas un
+ * chapitre. Ce qui précède le premier titre (liminaires éventuels) forme
+ * un bloc à part, pour ne rien perdre.
+ */
+export function splitIntoChapters(markdown: string): string[] {
+  const starts = parseOutline(markdown)
+    .filter((h) => h.level === 1)
+    .map((h) => h.from);
+  if (starts.length === 0) return [markdown];
+
+  const chunks: string[] = [];
+  const preamble = markdown.slice(0, starts[0]).trim();
+  if (preamble) chunks.push(preamble);
+  for (let i = 0; i < starts.length; i++) {
+    const end = i + 1 < starts.length ? starts[i + 1] : markdown.length;
+    const chunk = markdown.slice(starts[i], end).trim();
+    if (chunk) chunks.push(chunk);
+  }
+  return chunks;
 }
 
 // MARK: - Markdown Parser for Word
@@ -619,6 +662,20 @@ export class WordExportService {
       // clusters into {{FN:N}} placeholders that the inline parser turns
       // into FootnoteReferenceRuns.
       let sourceMarkdown = options.content;
+      // Manuscrit assemblé côté main : le renderer n'a plus à concaténer
+      // (il envoyait jusqu'ici le tampon de l'éditeur, donc le seul
+      // chapitre ouvert).
+      if (options.manuscript?.chapters?.length) {
+        const assembled = await assembleManuscript({
+          projectPath: options.projectPath,
+          chapters: options.manuscript.chapters,
+          settings: normalizeBookSettings(options.bookSettings),
+          liveOverrides: options.manuscript.liveOverrides,
+          scope: options.manuscript.scope,
+        });
+        for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
+        sourceMarkdown = assembled.markdown;
+      }
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       if (useEnginePipeline) {
@@ -633,8 +690,14 @@ export class WordExportService {
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
           }
-          // Swap Pandoc footnote markers for our docx placeholder.
-          sourceMarkdown = processed.md.replace(/\[\^(\d+)\]/g, '{{FN:$1}}');
+          // Seuls les marqueurs PRODUITS par le moteur deviennent des
+          // placeholders : les notes de l'auteur sont traitées plus bas, avec
+          // leurs définitions. Auparavant, un `[^1]` manuel était converti ici
+          // et pointait vers la note d'une citation.
+          const engineNumbers = new Set(processed.footnotes.map((f) => f.n));
+          sourceMarkdown = processed.md.replace(/\[\^(\d+)\]/g, (marker, n: string) =>
+            engineNumbers.has(parseInt(n, 10)) ? `{{FN:${n}}}` : marker
+          );
           engineFootnotes = processed.footnotes;
           engineBibliography = processed.bibliography;
         } catch (err) {
@@ -642,8 +705,28 @@ export class WordExportService {
         }
       }
 
-      // Parse markdown content
-      const contentParagraphs = await this.parser.parse(sourceMarkdown);
+      // Notes manuelles de l'auteur : leurs définitions sortent du corps et
+      // leurs appels deviennent de vraies notes docx. Sans cela, hors
+      // pipeline moteur, `marked` les laissait en texte littéral (`[^1]`).
+      const manual = extractManualFootnotes(
+        sourceMarkdown,
+        engineFootnotes.map((f) => f.n)
+      );
+      sourceMarkdown = manual.markdown;
+
+      // Parse markdown content. Pour un livre, le corps est découpé aux
+      // titres de niveau 1 (un chapitre = une section docx, donc un saut de
+      // page et des en-têtes propres). Le découpage passe par l'arbre
+      // Lezer : un `#` dans un bloc de code n'ouvre pas un chapitre.
+      const isBook = options.projectType === 'book';
+      const chapterChunks: string[] = isBook
+        ? splitIntoChapters(sourceMarkdown)
+        : [sourceMarkdown];
+      const chapterParagraphs: Paragraph[][] = [];
+      for (const chunk of chapterChunks) {
+        chapterParagraphs.push(await this.parser.parse(chunk));
+      }
+      const contentParagraphs = chapterParagraphs.flat();
 
       // Append bibliography section if we have entries.
       if (engineBibliography.length > 0) {
@@ -754,6 +837,51 @@ export class WordExportService {
           );
         }
 
+        if (isBook) {
+          // Ouvrage : liminaires (titre, résumé, table des matières) puis
+          // une section par chapitre.
+          sections.push({
+            properties: {},
+            children: [
+              ...titlePageChildren,
+              new Paragraph({
+                children: [new TextRun({ text: 'Table des matières', bold: true, size: 32 })],
+                spacing: { before: 400, after: 200 },
+                pageBreakBefore: true,
+              }),
+              new TableOfContents('Sommaire', { hyperlink: true, headingStyleRange: '1-3' }),
+            ],
+          });
+          for (const paragraphs of chapterParagraphs) {
+            if (paragraphs.length === 0) continue;
+            sections.push({
+              properties: { page: { pageNumbers: { start: undefined } } },
+              headers: {
+                default: new Header({
+                  children: [
+                    new Paragraph({
+                      children: [
+                        new TextRun({ text: options.metadata?.title || '', italics: true }),
+                      ],
+                      alignment: AlignmentType.RIGHT,
+                    }),
+                  ],
+                }),
+              },
+              footers: {
+                default: new Footer({
+                  children: [
+                    new Paragraph({
+                      children: [new TextRun({ children: ['Page ', PageNumber.CURRENT] })],
+                      alignment: AlignmentType.CENTER,
+                    }),
+                  ],
+                }),
+              },
+              children: paragraphs,
+            });
+          }
+        } else {
         sections.push({
           properties: {},
           headers: {
@@ -787,6 +915,7 @@ export class WordExportService {
           },
           children: [...titlePageChildren, ...contentParagraphs],
         });
+        }
       } else {
         // For notes and presentations, just add content
         sections.push({
@@ -800,6 +929,16 @@ export class WordExportService {
       const docxFootnotes: Record<string, { children: Paragraph[] }> = {};
       for (const fn of engineFootnotes) {
         docxFootnotes[String(fn.n)] = {
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: stripHtml(fn.text) })],
+            }),
+          ],
+        };
+      }
+      // Notes de l'auteur : identifiants disjoints de ceux du moteur.
+      for (const fn of manual.footnotes) {
+        docxFootnotes[String(fn.id)] = {
           children: [
             new Paragraph({
               children: [new TextRun({ text: stripHtml(fn.text) })],

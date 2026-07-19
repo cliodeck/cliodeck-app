@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseOutline, replaceLeadingHeading } from '../outline';
+import { parseOutline, replaceLeadingHeading, stripLeadingHeading } from '../outline';
 
 const CORPUS = fileURLToPath(new URL('../../../test-fixtures/editor/', import.meta.url));
 const fixture = (name: string): string =>
@@ -104,5 +104,27 @@ describe('replaceLeadingHeading', () => {
   it('ne touche qu’au premier titre de niveau 1', () => {
     const source = '# Un\n\n# Deux\n';
     expect(replaceLeadingHeading(source, 'X')).toBe('# X\n\n# Deux\n');
+  });
+});
+
+describe('stripLeadingHeading', () => {
+  it('retire le titre de tête quel qu’il soit', () => {
+    expect(stripLeadingHeading('# Résumé\n\nLe texte.\n')).toBe('Le texte.');
+    expect(stripLeadingHeading('# Abstract\n\nThe text.\n')).toBe('The text.');
+    expect(stripLeadingHeading('# Quatrième de couverture\n\nAlpha.\n')).toBe('Alpha.');
+  });
+
+  it('ne touche pas un document sans titre de tête', () => {
+    expect(stripLeadingHeading('Juste du texte.\n')).toBe('Juste du texte.');
+  });
+
+  it('ne retire pas un titre précédé de texte', () => {
+    const doc = 'Une phrase liminaire.\n\n# Titre\n\nSuite.';
+    expect(stripLeadingHeading(doc)).toBe(doc.trim());
+  });
+
+  it('ignore un # situé dans un bloc de code', () => {
+    const doc = '```md\n# pas un titre\n```\n\nCorps.';
+    expect(stripLeadingHeading(doc)).toBe(doc.trim());
   });
 });

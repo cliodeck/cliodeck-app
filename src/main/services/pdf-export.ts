@@ -5,6 +5,9 @@ import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
+import type { BookSettings, Chapter } from '../../../backend/types/book.js';
+import { assembleManuscript } from './manuscript-assembler.js';
+import { stripLeadingHeading } from '../../editor/outline.js';
 
 // MARK: - Types
 
@@ -12,6 +15,24 @@ export interface ExportOptions {
   projectPath: string;
   projectType: 'article' | 'book' | 'presentation';
   content: string;
+  /**
+   * Réglages d'ouvrage (projets `book`) : numérotation des titres et style
+   * de notes. Le contenu, lui, arrive déjà assemblé par
+   * `manuscript-assembler` — c'est lui qui place les bascules de matière et
+   * les vidages de notes de fin.
+   */
+  bookSettings?: BookSettings;
+  /**
+   * Manuscrit multi-fichiers (projets `book`). Quand il est fourni, le
+   * contenu exporté est ASSEMBLÉ ici — `content` est ignoré. L'assemblage
+   * vit côté main parce que c'est là que sont les fichiers, et qu'une
+   * bibliographie par chapitre exige d'invoquer pandoc par pièce.
+   */
+  manuscript?: {
+    chapters: Chapter[];
+    liveOverrides?: Record<string, string>;
+    scope?: 'book' | { chapterId: string };
+  };
   outputPath?: string;
   bibliographyPath?: string;
   cslPath?: string; // Path to CSL file for citation styling
@@ -139,6 +160,12 @@ const getLatexTemplate = (projectType: string): string => {
 \\providecommand{\\textendash}{-}        % En dash
 \\providecommand{\\textemdash}{--}       % Em dash
 
+% Coloration syntaxique : pandoc emet \\begin{Shaded} des qu'un bloc de code
+% est colore, mais les macros correspondantes ne vivent que dans SON template
+% par defaut. Sans cette variable, tout document contenant un bloc de code
+% echoue a la compilation (« Environment Shaded undefined »).
+$highlighting-macros$
+
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
 \\setlength{\\cslhangindent}{1.5em}
@@ -201,8 +228,26 @@ $body$
 \\usepackage{graphicx}
 \\usepackage{fancyhdr}
 
-% Disable section numbering
-\\setcounter{secnumdepth}{0}
+% Numérotation pilotée par les réglages d'ouvrage (plan chapitres, §5
+% arbitrage 2). En classe book : -1 = rien, 0 = chapitres, 1 = sections.
+\\setcounter{secnumdepth}{$if(secnumdepth)$$secnumdepth$$else$0$endif$}
+
+% La classe book ne definit PAS d'environnement abstract (contrairement a
+% article) : sans cette definition, un livre pourvu d'un abstract.md echoue
+% a la compilation. Le resume tient lieu de quatrieme de couverture
+% (arbitrage 8).
+\\newenvironment{abstract}%
+  {\\small\\begin{center}\\bfseries R\\'esum\\'e\\end{center}\\begin{quotation}}%
+  {\\end{quotation}}
+
+% Notes de fin (reglage noteStyle) : le paquet endnotes accumule les notes
+% jusqu'au prochain \\theendnotes, que l'assembleur place apres chaque
+% chapitre ou en fin d'ouvrage.
+$if(endnotes)$
+\\usepackage{endnotes}
+\\let\\footnote\\endnote
+\\renewcommand{\\notesname}{Notes}
+$endif$
 
 % Fonts - platform-specific system fonts
 \\setmainfont{${mainFont}}[Ligatures=TeX]
@@ -215,6 +260,12 @@ $body$
 \\providecommand{\\textquotesingle}{'}     % Straight single quote
 \\providecommand{\\textendash}{-}        % En dash
 \\providecommand{\\textemdash}{--}       % Em dash
+
+% Coloration syntaxique : pandoc emet \\begin{Shaded} des qu'un bloc de code
+% est colore, mais les macros correspondantes ne vivent que dans SON template
+% par defaut. Sans cette variable, tout document contenant un bloc de code
+% echoue a la compilation (« Environment Shaded undefined »).
+$highlighting-macros$
 
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
@@ -256,13 +307,14 @@ $body$
 
 \\frontmatter
 \\maketitle
+$if(abstract)$
+\\begin{abstract}
+$abstract$
+\\end{abstract}
+$endif$
 \\tableofcontents
 
-\\mainmatter
-
 $body$
-
-\\backmatter
 
 \\end{document}`;
 
@@ -291,6 +343,12 @@ $body$
 \\providecommand{\\textquotesingle}{'}     % Straight single quote
 \\providecommand{\\textendash}{-}        % En dash
 \\providecommand{\\textemdash}{--}       % Em dash
+
+% Coloration syntaxique : pandoc emet \\begin{Shaded} des qu'un bloc de code
+% est colore, mais les macros correspondantes ne vivent que dans SON template
+% par defaut. Sans cette variable, tout document contenant un bloc de code
+% echoue a la compilation (« Environment Shaded undefined »).
+$highlighting-macros$
 
 % ============================================================================
 % Elegant Slides Theme - Adapted for Pandoc
@@ -476,6 +534,64 @@ export class PDFExportService {
   }
 
   /**
+   * Résout les citations d'UN chapitre par un passage de citeproc isolé
+   * (réglage `bibliography: 'per-chapter'`).
+   *
+   * Citeproc ne produit qu'une bibliographie par document : l'obtenir par
+   * chapitre suppose de l'exécuter pièce par pièce, puis de recomposer. Le
+   * round-trip markdown est sémantiquement sûr (vérifié : listes, emphase,
+   * blocs de code et guillemets préservés ; les tables passent en forme
+   * simple, sans perte). Pandoc évite lui-même les collisions avec les
+   * notes de l'auteur ; l'isolation entre chapitres reste assurée par le
+   * préfixage qui suit dans l'assembleur.
+   */
+  private async resolveCitationsInChapter(
+    content: string,
+    opts: { bibliographyPath: string; cslPath?: string; tempDir: string }
+  ): Promise<string> {
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
+    await writeFile(inPath, content, 'utf-8');
+
+    const args = [
+      inPath,
+      '-t', 'markdown',
+      '--wrap=preserve',
+      '--citeproc',
+      '--bibliography', opts.bibliographyPath,
+    ];
+    if (opts.cslPath && existsSync(opts.cslPath)) {
+      args.push('--csl', opts.cslPath);
+    }
+
+    const extendedPath = this.getExtendedPath();
+    return new Promise<string>((resolve) => {
+      const proc = spawn('pandoc', args, {
+        cwd: opts.tempDir,
+        env: { ...process.env, PATH: extendedPath },
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        if (code === 0 && stdout.trim()) {
+          resolve(stdout);
+        } else {
+          // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
+          // plutôt que de faire échouer tout l'export.
+          console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr.slice(0, 200));
+          resolve(content);
+        }
+      });
+      proc.on('error', (err) => {
+        console.warn('⚠️ citeproc par chapitre indisponible:', err.message);
+        resolve(content);
+      });
+    });
+  }
+
+  /**
    * Export markdown to PDF using pandoc and xelatex
    */
   async exportToPDF(
@@ -509,8 +625,10 @@ export class PDFExportService {
         console.log('🔍 Looking for abstract at:', abstractPath);
         if (existsSync(abstractPath)) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
-          // Remove the "# Résumé" heading and trim
-          abstract = abstractContent.replace(/^#\s*Résumé\s*\n*/i, '').trim();
+          // Retire le titre de tête quel qu'il soit (« # Résumé », mais
+          // aussi « # Abstract » ou « # Quatrième de couverture ») : passé
+          // tel quel en métadonnée, il s'imprimerait échappé en `\#`.
+          abstract = stripLeadingHeading(abstractContent);
           console.log('📄 Abstract loaded from file:', abstractPath);
           console.log('📄 Abstract content preview:', abstract.substring(0, 200));
         } else {
@@ -524,6 +642,63 @@ export class PDFExportService {
       // nettoient à la main, cf. CHANGELOG).
       const mdPath = join(tempDir, 'input.md');
       let cleanedContent = options.content;
+
+      // Assemblage du manuscrit (projets « livre »). La bibliographie par
+      // chapitre passe par le hook `transformChapter` : citeproc tourne
+      // pièce par pièce, AVANT le préfixage des notes — ses propres notes
+      // générées doivent être isolées comme celles de l'auteur.
+      if (options.manuscript) {
+        const settings = options.bookSettings ?? {
+          noteStyle: 'footnote',
+          noteNumbering: 'continuous',
+          bibliography: 'single',
+          numberChapters: true,
+          numberSections: false,
+        };
+
+        const perChapterBib =
+          settings.bibliography === 'per-chapter' &&
+          !!options.bibliographyPath &&
+          existsSync(options.bibliographyPath) &&
+          !options.citation?.useEngine;
+
+        if (settings.bibliography === 'per-chapter' && !perChapterBib) {
+          console.warn(
+            '⚠️ Bibliographie par chapitre ignorée (bibliographie absente ou pipeline CitationEngine actif) : repli sur une bibliographie unique.'
+          );
+        }
+
+        const assembled = await assembleManuscript({
+          projectPath: options.projectPath,
+          chapters: options.manuscript.chapters,
+          settings,
+          liveOverrides: options.manuscript.liveOverrides,
+          scope: options.manuscript.scope,
+          transformChapter: perChapterBib
+            ? (content) =>
+                this.resolveCitationsInChapter(content, {
+                  bibliographyPath: options.bibliographyPath!,
+                  cslPath: options.cslPath,
+                  tempDir,
+                })
+            : undefined,
+        });
+
+        for (const warning of assembled.warnings) {
+          console.warn('⚠️ Assemblage :', warning);
+        }
+        console.log(
+          `📚 Manuscrit assemblé : ${assembled.chapterCount} pièce(s), bibliographie ${settings.bibliography}`
+        );
+        cleanedContent = assembled.markdown;
+
+        // Citeproc a déjà tourné pièce par pièce : la passe globale ne doit
+        // pas re-résoudre (elle ne trouverait plus de `[@clef]`, mais elle
+        // ajouterait une bibliographie vide en fin d'ouvrage).
+        if (perChapterBib) {
+          options = { ...options, bibliographyPath: undefined };
+        }
+      }
 
       // In-process CitationEngine pipeline (opt-in). Runs BEFORE pandoc —
       // resolves [@key] markers into Pandoc [^N] footnotes and appends a
@@ -736,6 +911,27 @@ export class PDFExportService {
         // Use custom template for articles/books/notes
         pandocArgs.push('--template', templatePath);
         pandocArgs.push('--toc');
+
+        if (options.projectType === 'book') {
+          // SANS cette option, pandoc rend un `#` en \section : la classe
+          // book n'émet aucun \chapter, la table des matières se réduit aux
+          // sections et les en-têtes recto/verso (nourris par \chaptermark)
+          // restent vides. Vérifié empiriquement (plan §1.2).
+          pandocArgs.push('--top-level-division=chapter');
+
+          const bs = options.bookSettings;
+          // Classe book : -1 = rien, 0 = chapitres, 1 = sections.
+          const secnumdepth = bs?.numberSections
+            ? 1
+            : bs?.numberChapters === false
+              ? -1
+              : 0;
+          pandocArgs.push('-V', `secnumdepth=${secnumdepth}`);
+
+          if (bs?.noteStyle === 'endnote-chapter' || bs?.noteStyle === 'endnote-book') {
+            pandocArgs.push('-V', 'endnotes=true');
+          }
+        }
       }
 
       // Add metadata - escape special LaTeX characters

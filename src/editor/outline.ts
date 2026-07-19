@@ -94,3 +94,23 @@ export function replaceLeadingHeading(content: string, title: string): string {
   while (end > first.from && content[end - 1] === '\r') end--;
   return content.slice(0, first.from) + `# ${title}` + content.slice(end);
 }
+
+/**
+ * Retire le titre de niveau 1 en tête d'un fichier, s'il y en a un.
+ *
+ * Sert aux pièces dont le titre est fourni par ailleurs — le résumé
+ * (`abstract.md`) devient le champ `abstract` du document exporté, où un
+ * « # Résumé » résiduel s'imprimerait littéralement (échappé en `\#`).
+ * L'ancien filtre était une regex sur le mot « Résumé » accentué : un
+ * fichier intitulé « # Abstract » ou « # Quatrième de couverture » passait
+ * au travers. L'arbre ne se laisse pas prendre — y compris par un `#`
+ * situé dans un bloc de code.
+ */
+export function stripLeadingHeading(content: string): string {
+  const first = parseOutline(content).find((h) => h.level === 1);
+  if (!first) return content.trim();
+  // Rien d'autre que des blancs ne doit précéder : sinon le titre appartient
+  // au corps du texte et le retirer trahirait le document.
+  if (content.slice(0, first.from).trim() !== '') return content.trim();
+  return content.slice(first.to).trim();
+}

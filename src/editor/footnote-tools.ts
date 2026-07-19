@@ -150,3 +150,32 @@ export function renumberManuscript(
     return { key: doc.key, content: result.content, changed: result.changed };
   });
 }
+
+/**
+ * Préfixe tous les identifiants de notes d'un document (plan chapitres,
+ * §1.1 stratégie D). `[^1]` devient `[^ch3-1]`, appels ET définitions.
+ *
+ * C'est ce qui rend l'assemblage d'un manuscrit sûr : concaténer deux
+ * chapitres utilisant chacun `[^1]` fait rendre à pandoc LA MÊME note aux
+ * deux endroits — le texte du premier chapitre est silencieusement remplacé
+ * par celui du second (vérifié empiriquement, cf. plan §1.1). Préfixer par
+ * chapitre isole les espaces de noms sans toucher aux ancres de renvois,
+ * contrairement à `--file-scope` qui, lui, casse les liens inter-chapitres.
+ *
+ * Les identifiants sont pris sur l'arbre Lezer : un `[^99]` dans un bloc de
+ * code n'est pas une note et reste intact. Le reste du document est
+ * préservé octet pour octet.
+ */
+export function prefixFootnoteLabels(content: string, prefix: string): string {
+  if (!prefix) return content;
+  const occurrences = collectFootnotes(content);
+  if (occurrences.length === 0) return content;
+
+  // Remplacement de la fin vers le début : les positions restent valides.
+  let out = content;
+  for (let i = occurrences.length - 1; i >= 0; i--) {
+    const occ = occurrences[i];
+    out = out.slice(0, occ.from) + `${prefix}-${occ.label}` + out.slice(occ.to);
+  }
+  return out;
+}

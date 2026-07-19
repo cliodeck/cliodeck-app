@@ -317,6 +317,30 @@ const api = {
       bibliographyPath?: string;
       cslPath?: string;
       beamerConfig?: unknown;
+      /** Réglages d'ouvrage (projets « livre »). */
+      bookSettings?: {
+        noteStyle: 'footnote' | 'endnote-chapter' | 'endnote-book';
+        noteNumbering: 'continuous' | 'per-chapter';
+        bibliography: 'single' | 'per-chapter';
+        numberChapters: boolean;
+        numberSections: boolean;
+      };
+      /**
+       * Manuscrit multi-fichiers : quand il est fourni, le contenu exporté
+       * est assemblé côté main à partir du manifeste (le tampon de
+       * l'éditeur ne contient que le chapitre ouvert).
+       */
+      manuscript?: {
+        chapters: Array<{
+          id: string;
+          title: string;
+          filePath: string;
+          order: number;
+          kind?: 'chapter' | 'front' | 'back';
+        }>;
+        liveOverrides?: Record<string, string>;
+        scope?: 'book' | { chapterId: string };
+      };
       citation?: {
         useEngine?: boolean;
         style?: string;
@@ -340,11 +364,25 @@ const api = {
     export: (options: {
       projectPath: string;
       projectType: 'article' | 'book' | 'presentation';
+      /** Vide autorisé quand `manuscript` est fourni. */
       content: string;
       outputPath?: string;
       bibliographyPath?: string;
       cslPath?: string;
       templatePath?: string;
+      bookSettings?: Record<string, unknown>;
+      /** Livre : le main assemble les chapitres du manifeste. */
+      manuscript?: {
+        chapters: Array<{
+          id: string;
+          title: string;
+          filePath: string;
+          order: number;
+          kind?: 'chapter' | 'front' | 'back';
+        }>;
+        liveOverrides?: Record<string, string>;
+        scope?: 'book' | { chapterId: string };
+      };
       citation?: {
         useEngine?: boolean;
         style?: string;

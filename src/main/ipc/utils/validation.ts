@@ -140,12 +140,41 @@ export const ZoteroSyncSchema = z.discriminatedUnion('mode', [
 ]);
 
 // Export schemas
+// Book chapters (manifeste du manuscrit)
+const ChapterSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  filePath: z.string().min(1),
+  order: z.number().int().min(0),
+  kind: z.enum(['chapter', 'front', 'back']).optional(),
+});
+
+export const BookSettingsSchema = z.object({
+  noteStyle: z.enum(['footnote', 'endnote-chapter', 'endnote-book']),
+  noteNumbering: z.enum(['continuous', 'per-chapter']),
+  bibliography: z.enum(['single', 'per-chapter']),
+  numberChapters: z.boolean(),
+  numberSections: z.boolean(),
+});
+
 export const PDFExportSchema = z.object({
   projectPath: z.string().min(1),
   projectType: z.enum(['article', 'book', 'presentation']),
-  content: z.string().min(1),
+  // Un livre exporte son manuscrit assemblé côté main : `content` peut
+  // alors être vide (cf. `manuscript`).
+  content: z.string(),
   outputPath: z.string().optional(),
   bibliographyPath: z.string().optional(),
+  bookSettings: BookSettingsSchema.optional(),
+  manuscript: z
+    .object({
+      chapters: z.array(ChapterSchema).max(500),
+      liveOverrides: z.record(z.string(), z.string()).optional(),
+      scope: z
+        .union([z.literal('book'), z.object({ chapterId: z.string().min(1) })])
+        .optional(),
+    })
+    .optional(),
   metadata: z
     .object({
       title: z.string().optional(),
@@ -162,7 +191,12 @@ export const PDFExportSchema = z.object({
       locale: z.string().optional(),
     })
     .optional(),
-}).passthrough();
+})
+  .passthrough()
+  .refine((v) => v.content.length > 0 || !!v.manuscript, {
+    message: 'content vide sans manuscrit à assembler',
+    path: ['content'],
+  });
 
 export const RevealJSExportSchema = z.object({
   projectPath: z.string().min(1),
@@ -461,15 +495,6 @@ export const ProjectUpdateConfigSchema = z.object({
   updates: z.record(z.string(), z.unknown()),
 });
 
-// Book chapters (manifeste du manuscrit)
-const ChapterSchema = z.object({
-  id: z.string().min(1),
-  title: z.string(),
-  filePath: z.string().min(1),
-  order: z.number().int().min(0),
-  kind: z.enum(['chapter', 'front', 'back']).optional(),
-});
-
 export const ProjectSaveChaptersSchema = z.object({
   projectPath: z.string().min(1, 'Project path is required'),
   chapters: z.array(ChapterSchema),
@@ -522,10 +547,22 @@ export const PDFCheckModifiedSchema = z.object({
 export const WordExportSchema = z.object({
   projectPath: z.string().min(1),
   projectType: z.enum(['article', 'book', 'presentation']).optional(),
-  content: z.string().min(1),
+  // Vide autorisé quand `manuscript` est fourni : le texte est alors
+  // assemblé côté main depuis le manifeste (même motif que l'export PDF).
+  content: z.string(),
   outputPath: z.string().optional(),
   bibliographyPath: z.string().optional(),
   templatePath: z.string().optional(),
+  bookSettings: BookSettingsSchema.optional(),
+  manuscript: z
+    .object({
+      chapters: z.array(ChapterSchema).max(500),
+      liveOverrides: z.record(z.string(), z.string()).optional(),
+      scope: z
+        .union([z.literal('book'), z.object({ chapterId: z.string().min(1) })])
+        .optional(),
+    })
+    .optional(),
   metadata: z.object({
     title: z.string().optional(),
     author: z.string().optional(),
@@ -539,7 +576,12 @@ export const WordExportSchema = z.object({
       locale: z.string().optional(),
     })
     .optional(),
-}).passthrough();
+})
+  .passthrough()
+  .refine((v) => v.content.length > 0 || !!v.manuscript, {
+    message: 'content vide sans manuscrit à assembler',
+    path: ['content'],
+  });
 
 // History session ID schema (for handlers that take a sessionId)
 export const HistorySessionIdSchema = z.object({

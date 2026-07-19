@@ -19,6 +19,12 @@ import path from 'path';
 import { retrievalService } from './retrieval-service.js';
 import { pdfService } from './pdf-service.js';
 import { pdfExportService } from './pdf-export.js';
+import { assembleManuscript } from './manuscript-assembler.js';
+import {
+  normalizeBookSettings,
+  type BookSettings,
+  type Chapter,
+} from '../../../backend/types/book.js';
 import { KnowledgeGraphBuilder } from '../../../backend/core/analysis/KnowledgeGraphBuilder.js';
 import type { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import type {
@@ -171,6 +177,25 @@ const exportHandler: StepHandler = async (
   }
   // Resolve document content. `document_id` (when provided) is treated as a
   // workspace-relative path — this lets multi-doc projects target a specific
+/**
+ * Lit `project.json` à la racine du workspace. Absent ou illisible : la
+ * recette retombe sur le comportement historique (un fichier, classe
+ * article) — une recette ne doit pas échouer parce qu'un projet n'a pas de
+ * manifeste.
+ */
+async function readProjectManifest(workspaceRoot: string): Promise<{
+  type?: 'article' | 'book' | 'presentation';
+  chapters?: Chapter[];
+  book?: Partial<BookSettings>;
+} | null> {
+  try {
+    const raw = await fs.readFile(path.join(workspaceRoot, 'project.json'), 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
   // Markdown file. When absent/empty we fall back to `<workspace>/document.md`
   // for backward compatibility. We reject paths that escape the workspace
   // (simple string check via path.relative — good enough for trusted local
@@ -188,19 +213,41 @@ const exportHandler: StepHandler = async (
       `export step: document_id "${documentRelPath}" escapes the workspace`
     );
   }
+  // Type et manifeste du projet : une recette lancée dans un livre doit
+  // exporter le LIVRE (assemblage ordonné), pas un fichier isolé, et sous
+  // la bonne classe de document — `projectType` était codé en dur sur
+  // 'article', ce qui privait tout export de recette des chapitres.
+  const project = await readProjectManifest(ctx.workspaceRoot);
+  const projectType = project?.type ?? 'article';
+  const explicitDocument =
+    asString(step.with.document_id).trim() || asString(step.with.document).trim();
+
   let content: string;
-  try {
-    content = await fs.readFile(docPath, 'utf8');
-  } catch (e) {
-    throw new Error(
-      `export step: could not read ${docPath}: ${e instanceof Error ? e.message : String(e)}`
-    );
+  if (!explicitDocument && projectType === 'book' && project?.chapters?.length) {
+    // Livre entier : le manifeste fait foi.
+    const assembled = await assembleManuscript({
+      projectPath: ctx.workspaceRoot,
+      chapters: project.chapters,
+      settings: normalizeBookSettings(project.book),
+    });
+    for (const w of assembled.warnings) {
+      console.warn('⚠️ export step:', w);
+    }
+    content = assembled.markdown;
+  } else {
+    try {
+      content = await fs.readFile(docPath, 'utf8');
+    } catch (e) {
+      throw new Error(
+        `export step: could not read ${docPath}: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
   }
 
   const bibliographyPath = asString(step.with.bibliography);
   const result = await pdfExportService.exportToPDF({
     projectPath: ctx.workspaceRoot,
-    projectType: 'article',
+    projectType,
     content,
     outputPath,
     bibliographyPath: bibliographyPath || undefined,

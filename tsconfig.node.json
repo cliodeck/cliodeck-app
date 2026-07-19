@@ -22,6 +22,8 @@
     "src/main/**/*",
     "src/shared/**/*",
     "src/editor/slides.ts",
+    "src/editor/outline.ts",
+    "src/editor/footnote-tools.ts",
     "src/editor/lezer-extensions/**/*",
     "backend/**/*",
     "scripts/cliodeck-cli.ts",
