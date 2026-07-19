@@ -33,7 +33,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(modelId || DEFAULT_EMBEDDED_MODEL);
       console.log('📤 IPC Response: embedded-llm:is-downloaded', { downloaded });
       return successResponse({ downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:is-downloaded error:', error);
       return errorResponse(error);
     }
@@ -49,7 +49,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(modelId || DEFAULT_EMBEDDED_MODEL);
       console.log('📤 IPC Response: embedded-llm:get-model-path', { path, downloaded });
       return successResponse({ path, downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:get-model-path error:', error);
       return errorResponse(error);
     }
@@ -63,7 +63,7 @@ export function setupEmbeddedLLMHandlers() {
       const models = dl.getAvailableModels();
       console.log('📤 IPC Response: embedded-llm:list-models', { count: models.length });
       return successResponse({ models });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:list-models error:', error);
       return errorResponse(error);
     }
@@ -79,7 +79,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(modelId || DEFAULT_EMBEDDED_MODEL);
       console.log('📤 IPC Response: embedded-llm:get-model-info', { info, downloaded });
       return successResponse({ ...info, downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:get-model-info error:', error);
       return errorResponse(error);
     }
@@ -142,7 +142,7 @@ export function setupEmbeddedLLMHandlers() {
 
       console.log(`📤 IPC Response: embedded-llm:download - success`, { modelPath });
       return successResponse({ modelPath, modelId: targetModelId, loaded: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:download error:', error);
       return errorResponse(error);
     }
@@ -156,7 +156,7 @@ export function setupEmbeddedLLMHandlers() {
       const cancelled = dl.cancelDownload();
       console.log('📤 IPC Response: embedded-llm:cancel-download', { cancelled });
       return successResponse({ cancelled });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:cancel-download error:', error);
       return errorResponse(error);
     }
@@ -186,7 +186,7 @@ export function setupEmbeddedLLMHandlers() {
 
       console.log('📤 IPC Response: embedded-llm:delete-model', { deleted });
       return successResponse({ deleted });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:delete-model error:', error);
       return errorResponse(error);
     }
@@ -200,7 +200,7 @@ export function setupEmbeddedLLMHandlers() {
       const usage = dl.getUsedSpace();
       console.log('📤 IPC Response: embedded-llm:get-used-space', usage);
       return successResponse(usage);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:get-used-space error:', error);
       return errorResponse(error);
     }
@@ -214,7 +214,7 @@ export function setupEmbeddedLLMHandlers() {
       const directory = dl.getModelsDirectory();
       console.log('📤 IPC Response: embedded-llm:get-models-directory', { directory });
       return successResponse({ directory });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:get-models-directory error:', error);
       return errorResponse(error);
     }
@@ -227,7 +227,7 @@ export function setupEmbeddedLLMHandlers() {
       const dl = getDownloader();
       const downloading = dl.isDownloadInProgress();
       return successResponse({ downloading });
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });
@@ -244,7 +244,7 @@ export function setupEmbeddedLLMHandlers() {
       });
       console.log('📤 IPC Response: embedded-llm:set-provider - success');
       return successResponse({ provider });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-llm:set-provider error:', error);
       return errorResponse(error);
     }
@@ -257,7 +257,7 @@ export function setupEmbeddedLLMHandlers() {
       const llmConfig = configManager.get('llm');
       const provider = llmConfig.generationProvider || 'auto';
       return successResponse({ provider });
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });
@@ -275,7 +275,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(modelId || DEFAULT_EMBEDDED_EMBEDDING_MODEL, 'embedding');
       console.log('📤 IPC Response: embedded-embedding:is-downloaded', { downloaded });
       return successResponse({ downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:is-downloaded error:', error);
       return errorResponse(error);
     }
@@ -292,7 +292,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(targetId, 'embedding');
       console.log('📤 IPC Response: embedded-embedding:get-model-path', { path, downloaded });
       return successResponse({ path, downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:get-model-path error:', error);
       return errorResponse(error);
     }
@@ -306,7 +306,7 @@ export function setupEmbeddedLLMHandlers() {
       const models = dl.getAvailableEmbeddingModels();
       console.log('📤 IPC Response: embedded-embedding:list-models', { count: models.length });
       return successResponse({ models });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:list-models error:', error);
       return errorResponse(error);
     }
@@ -323,7 +323,7 @@ export function setupEmbeddedLLMHandlers() {
       const downloaded = dl.isModelDownloaded(targetId, 'embedding');
       console.log('📤 IPC Response: embedded-embedding:get-model-info', { info, downloaded });
       return successResponse({ ...info, downloaded });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:get-model-info error:', error);
       return errorResponse(error);
     }
@@ -383,7 +383,7 @@ export function setupEmbeddedLLMHandlers() {
 
       console.log(`📤 IPC Response: embedded-embedding:download - success`, { modelPath });
       return successResponse({ modelPath, modelId: targetModelId, loaded: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:download error:', error);
       return errorResponse(error);
     }
@@ -413,7 +413,7 @@ export function setupEmbeddedLLMHandlers() {
 
       console.log('📤 IPC Response: embedded-embedding:delete-model', { deleted });
       return successResponse({ deleted });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:delete-model error:', error);
       return errorResponse(error);
     }
@@ -431,7 +431,7 @@ export function setupEmbeddedLLMHandlers() {
       });
       console.log('📤 IPC Response: embedded-embedding:set-provider - success');
       return successResponse({ provider });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ embedded-embedding:set-provider error:', error);
       return errorResponse(error);
     }
@@ -444,7 +444,7 @@ export function setupEmbeddedLLMHandlers() {
       const llmConfig = configManager.get('llm');
       const provider = llmConfig.embeddingProvider || 'auto';
       return successResponse({ provider });
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });

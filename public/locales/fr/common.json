@@ -1526,7 +1526,13 @@
     "syncTooltip": "Synchronisation : {{phase}} {{current}}/{{total}}",
     "usageJournalBadge_one": "{{count}} session à annoter",
     "usageJournalBadge_other": "{{count}} sessions à annoter",
-    "usageJournalTooltip": "Sessions d'usage IA substantielles sans décision — cliquer pour ouvrir le journal (Cmd/Ctrl+J)"
+    "usageJournalTooltip": "Sessions d'usage IA substantielles sans décision — cliquer pour ouvrir le journal (Cmd/Ctrl+J)",
+    "savedAt": "Enregistré à {{time}}",
+    "savedTooltip": "Dernière sauvegarde à {{time}}",
+    "unsaved": "Modifications non enregistrées",
+    "unsavedTooltip": "Le document contient des modifications non écrites sur le disque.",
+    "notSavedYet": "Non enregistré",
+    "notSavedYetTooltip": "Ce document n'a pas encore été enregistré depuis son ouverture."
   },
   "security": {
     "revokeTitle": "Revocation des cles",
@@ -1660,5 +1666,17 @@
     "allValid": "Toutes les citations sont valides ({{count}} clés vérifiées).",
     "missing": "{{count}} clé(s) absente(s) de la bibliographie :",
     "checkError": "Impossible de vérifier les citations."
+  },
+  "search": {
+    "title": "Chercher dans le livre",
+    "placeholder": "Terme à chercher dans tout le manuscrit",
+    "run": "Lancer la recherche",
+    "searching": "Recherche en cours…",
+    "error": "La recherche a échoué. Certains chapitres n'ont peut-être pas pu être lus.",
+    "noResults": "Aucune occurrence de « {{query}} » dans le manuscrit.",
+    "summary_one": "{{count}} occurrence dans {{chapters}} chapitre",
+    "summary_other": "{{count}} occurrences dans {{chapters}} chapitres",
+    "goToLine": "Aller à la ligne {{line}}",
+    "truncated": "Trop d'occurrences dans ce chapitre : seules les premières sont affichées."
   }
 }

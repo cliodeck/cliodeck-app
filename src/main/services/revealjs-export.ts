@@ -546,9 +546,9 @@ export class RevealJsExportService {
       }
 
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Reveal.js export failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -615,9 +615,9 @@ export class RevealJsExportService {
 
       onProgress?.({ stage: 'complete', message: 'Présentation offline créée!', progress: 100 });
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Offline export failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -678,9 +678,9 @@ export class RevealJsExportService {
 
       onProgress?.({ stage: 'complete', message: 'PDF créé!', progress: 100 });
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ PDF export failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     } finally {
       win?.close();
       // Le HTML intermédiaire contient toute la présentation : on le

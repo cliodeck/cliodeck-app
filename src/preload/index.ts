@@ -785,6 +785,18 @@ const api = {
 
   // Fusion (phase 3.0+3.2): hints, recipes, vault status, streamed chat.
   fusion: {
+    /**
+     * Consentement d'envoi vers un fournisseur distant (ADR 0005). L'état
+     * qui fait foi vit dans le main : `grant` sert au dialogue du renderer
+     * pour lui transmettre l'accord de l'utilisateur, faute de quoi le main
+     * poserait sa propre question au premier envoi.
+     */
+    consent: {
+      status: () => ipcRenderer.invoke('fusion:consent:status'),
+      grant: (providerName?: string) =>
+        ipcRenderer.invoke('fusion:consent:grant', providerName),
+      revoke: () => ipcRenderer.invoke('fusion:consent:revoke'),
+    },
     hints: {
       read: () => ipcRenderer.invoke('fusion:hints:read'),
       write: (markdown: string) =>

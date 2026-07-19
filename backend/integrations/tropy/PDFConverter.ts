@@ -237,12 +237,12 @@ export class PDFConverter {
         files: filteredFiles,
         pageCount: files.length,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Clean up on error
       this.cleanupTempFiles(tempDir);
 
       // Check if it's a Poppler not found error
-      if (error.code === 'ENOENT') {
+      if (((error as { code?: string }).code) === 'ENOENT') {
         throw new Error(
           'Poppler utilities not found. Please install Poppler:\n' +
           '  macOS: brew install poppler\n' +
@@ -251,7 +251,7 @@ export class PDFConverter {
         );
       }
 
-      throw new Error(`PDF conversion failed: ${error.message || error}`);
+      throw new Error(`PDF conversion failed: ${(error instanceof Error ? error.message : String(error)) || error}`);
     }
   }
 

@@ -16,7 +16,7 @@ export function setupExportHandlers() {
       const result = await pdfExportService.checkDependencies();
       console.log('📤 IPC Response: pdf-export:check-dependencies', result);
       return { ...successResponse(), ...result };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf-export:check-dependencies error:', error);
       return errorResponse(error);
     }
@@ -41,7 +41,7 @@ export function setupExportHandlers() {
         outputPath: result.outputPath,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf-export:export error:', error);
       return errorResponse(error);
     }
@@ -69,7 +69,7 @@ export function setupExportHandlers() {
         outputPath: result.outputPath,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ word-export:export error:', error);
       return errorResponse(error);
     }
@@ -82,7 +82,7 @@ export function setupExportHandlers() {
       const templatePath = await wordExportService.findTemplate(projectPath);
       console.log('📤 IPC Response: word-export:find-template', { templatePath });
       return { ...successResponse(), templatePath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ word-export:find-template error:', error);
       return errorResponse(error);
     }
@@ -108,7 +108,7 @@ export function setupExportHandlers() {
         outputPath: result.outputPath,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ revealjs-export:export error:', error);
       return errorResponse(error);
     }
@@ -127,7 +127,7 @@ export function setupExportHandlers() {
 
       console.log('📤 IPC Response: revealjs-export:export-offline', { success: result.success });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ revealjs-export:export-offline error:', error);
       return errorResponse(error);
     }
@@ -153,7 +153,7 @@ export function setupExportHandlers() {
 
       console.log('📤 IPC Response: revealjs-export:export-pdf', { success: result.success });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ revealjs-export:export-pdf error:', error);
       return errorResponse(error);
     }

@@ -26,6 +26,7 @@ import { setupSourcesHandlers } from './handlers/sources-handlers.js';
 import { setupCitationHandlers } from './handlers/citation-handlers.js';
 import { setupUsageJournalHandlers } from './handlers/usage-journal-handlers.js';
 import { setupProposalHandlers } from './handlers/proposal-handlers.js';
+import { setupManuscriptHandlers } from './handlers/manuscript-handlers.js';
 
 /**
  * Setup all IPC handlers
@@ -72,6 +73,7 @@ export function setupIPCHandlers() {
   setupCitationHandlers();
   setupUsageJournalHandlers();
   setupProposalHandlers();
+  setupManuscriptHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
 }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search,
   ListOrdered, Columns, Plus, MessageSquare, Eye, Sparkles, FileDown,
+  SearchCode,
 } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { renumberFootnotes, renumberManuscript } from '@/editor/footnote-tools';
@@ -12,6 +13,7 @@ import { SlideNavigator } from '../Slides/SlideNavigator';
 import { SlidePreviewPanel } from '../Slides/SlidePreviewPanel';
 import { SlideGenerationPanel } from '../Slides/SlideGenerationPanel';
 import { ChapterNavigator } from '../Book/ChapterNavigator';
+import { ManuscriptSearch } from '../Book/ManuscriptSearch';
 
 // SimilarityPanel self-hides via `isPanelOpen` — lazy-loading keeps its heavy
 // dependency tree off the editor's initial chunk.
@@ -48,6 +50,9 @@ export const EditorPanel: React.FC = () => {
   const addChapter = useProjectStore((s) => s.addChapter);
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
+  // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
+  // Cmd+F reste la recherche du chapitre ouvert.
+  const [showManuscriptSearch, setShowManuscriptSearch] = useState(false);
 
   // Enable auto-save functionality
   useAutoSave();
@@ -257,20 +262,33 @@ export const EditorPanel: React.FC = () => {
           <button className="toolbar-btn" onClick={handleFootnote} title={t('toolbar.footnote')}>
             <Superscript size={18} strokeWidth={1.5} />
           </button>
-          <button
-            className="toolbar-btn"
-            onClick={() => void handleRenumberFootnotes()}
-            title={t('toolbar.renumberFootnotes')}
-          >
-            <ListOrdered size={18} strokeWidth={1.5} />
-          </button>
+          {!isPresentation && (
+            <button
+              className="toolbar-btn"
+              onClick={() => void handleRenumberFootnotes()}
+              title={t('toolbar.renumberFootnotes')}
+            >
+              <ListOrdered size={18} strokeWidth={1.5} />
+            </button>
+          )}
         </div>
 
         {/* Validation and Similarity */}
         <div className="toolbar-section">
-          <button className="toolbar-btn" onClick={handleCheckCitations} title={t('toolbar.checkCitations')}>
-            <CheckCircle size={18} strokeWidth={1.5} />
-          </button>
+          {!isPresentation && (
+            <button className="toolbar-btn" onClick={handleCheckCitations} title={t('toolbar.checkCitations')}>
+              <CheckCircle size={18} strokeWidth={1.5} />
+            </button>
+          )}
+          {isBook && (
+            <button
+              className={`toolbar-btn ${showManuscriptSearch ? 'active' : ''}`}
+              onClick={() => setShowManuscriptSearch((open) => !open)}
+              title={t('search.title')}
+            >
+              <SearchCode size={18} strokeWidth={1.5} />
+            </button>
+          )}
           <button
             className={`toolbar-btn ${isSimilarityPanelOpen ? 'active' : ''}`}
             onClick={openSimilarityPanel}
@@ -374,9 +392,17 @@ export const EditorPanel: React.FC = () => {
                 <ChapterNavigator />
               </Panel>
               <PanelResizeHandle className="resize-handle" />
-              <Panel defaultSize={76} minSize={40}>
+              <Panel defaultSize={showManuscriptSearch ? 50 : 76} minSize={35}>
                 <CodeMirrorEditor />
               </Panel>
+              {showManuscriptSearch && (
+                <>
+                  <PanelResizeHandle className="resize-handle" />
+                  <Panel defaultSize={26} minSize={20} maxSize={45}>
+                    <ManuscriptSearch onClose={() => setShowManuscriptSearch(false)} />
+                  </Panel>
+                </>
+              )}
             </PanelGroup>
           </div>
         ) : (

@@ -51,7 +51,7 @@ export function setupBibliographyHandlers() {
       const filePath = validate(StringPathSchema, rawFilePath);
       const citations = await bibliographyService.loadFromFile(filePath);
       return successResponse({ citations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:load error:', error);
       return { ...errorResponse(error), citations: [] };
     }
@@ -62,7 +62,7 @@ export function setupBibliographyHandlers() {
       const content = validate(StringContentSchema, rawContent);
       const citations = await bibliographyService.parseContent(content);
       return successResponse({ citations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:parse error:', error);
       return { ...errorResponse(error), citations: [] };
     }
@@ -76,7 +76,7 @@ export function setupBibliographyHandlers() {
       const query = typeof rawQuery === 'string' ? rawQuery : '';
       const citations = bibliographyService.searchCitations(query);
       return successResponse({ citations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:search error:', error);
       return { ...errorResponse(error), citations: [] };
     }
@@ -95,7 +95,7 @@ export function setupBibliographyHandlers() {
         yearRange: statistics.yearRange
       });
       return successResponse({ statistics });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:get-statistics error:', error);
       return errorResponse(error);
     }
@@ -112,26 +112,8 @@ export function setupBibliographyHandlers() {
       await bibliographyService.exportToFile(options.citations as any[], options.filePath);
       console.log('📤 IPC Response: bibliography:export - Success');
       return successResponse({ success: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:export error:', error);
-      return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('bibliography:export-string', async (_event, rawOptions: unknown) => {
-    const options = validate(BibliographyExportStringSchema, rawOptions);
-    console.log('📞 IPC Call: bibliography:export-string', {
-      citationCount: options.citations.length,
-      format: options.format || 'modern'
-    });
-    try {
-      const content = options.format === 'legacy'
-        ? bibliographyService.exportToStringLegacy(options.citations as any[])
-        : bibliographyService.exportToString(options.citations as any[]);
-      console.log('📤 IPC Response: bibliography:export-string - Success');
-      return successResponse({ content });
-    } catch (error: any) {
-      console.error('❌ bibliography:export-string error:', error);
       return errorResponse(error);
     }
   });
@@ -154,7 +136,7 @@ export function setupBibliographyHandlers() {
         scannedFiles: result.scannedFiles
       });
       return successResponse(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:detect-orphan-pdfs error:', error);
       return errorResponse(error);
     }
@@ -175,7 +157,7 @@ export function setupBibliographyHandlers() {
         failed: result.failed.length
       });
       return successResponse(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:delete-orphan-pdfs error:', error);
       return errorResponse(error);
     }
@@ -204,7 +186,7 @@ export function setupBibliographyHandlers() {
         archivePath: result.archivePath
       });
       return successResponse(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:archive-orphan-pdfs error:', error);
       return errorResponse(error);
     }
@@ -221,29 +203,13 @@ export function setupBibliographyHandlers() {
       await BibliographyMetadataService.saveMetadata(options.projectPath, options.citations as any[]);
       console.log('📤 IPC Response: bibliography:save-metadata - Success');
       return successResponse({ success: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:save-metadata error:', error);
       return errorResponse(error);
     }
   });
 
   // Load bibliography metadata
-  ipcMain.handle('bibliography:load-metadata', async (_event, rawProjectPath: unknown) => {
-    const projectPath = validate(StringPathSchema, rawProjectPath);
-    console.log('📞 IPC Call: bibliography:load-metadata', { projectPath });
-    try {
-      const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
-      console.log('📤 IPC Response: bibliography:load-metadata', {
-        hasMetadata: !!metadata,
-        citationCount: metadata ? Object.keys(metadata.citations).length : 0
-      });
-      return successResponse({ metadata });
-    } catch (error: any) {
-      console.error('❌ bibliography:load-metadata error:', error);
-      return errorResponse(error);
-    }
-  });
-
   // Load bibliography with metadata merged
   ipcMain.handle('bibliography:load-with-metadata', async (_event, rawOptions: unknown) => {
     const options = validate(BibliographyLoadWithMetadataSchema, rawOptions);
@@ -265,7 +231,7 @@ export function setupBibliographyHandlers() {
       });
 
       return successResponse({ citations: mergedCitations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ bibliography:load-with-metadata error:', error);
       return { ...errorResponse(error), citations: [] };
     }

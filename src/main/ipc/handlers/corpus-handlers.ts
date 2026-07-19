@@ -23,7 +23,7 @@ export function setupCorpusHandlers() {
         edgeCount: graphData.edges.length,
       });
       return successResponse({ graph: graphData });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:get-graph error:', error);
       return errorResponse(error);
     }
@@ -55,7 +55,7 @@ export function setupCorpusHandlers() {
 
       console.log('📤 IPC Response: corpus:get-statistics', statistics);
       return successResponse({ statistics });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:get-statistics error:', error);
       return errorResponse(error);
     }
@@ -76,7 +76,7 @@ export function setupCorpusHandlers() {
         documentCount: result.topicAssignments ? Object.keys(result.topicAssignments).length : 0,
       });
       return { ...successResponse(), ...result };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:analyze-topics error:', error);
       return errorResponse(error);
     }
@@ -102,7 +102,7 @@ export function setupCorpusHandlers() {
         console.log('📤 IPC Response: corpus:load-topics - no saved analysis');
         return errorResponse('No saved topic analysis found');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:load-topics error:', error);
       return errorResponse(error);
     }
@@ -128,7 +128,7 @@ export function setupCorpusHandlers() {
         console.log('📤 IPC Response: corpus:get-topic-timeline - no timeline data');
         return errorResponse('No topic timeline data found');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:get-topic-timeline error:', error);
       return errorResponse(error);
     }
@@ -151,7 +151,7 @@ export function setupCorpusHandlers() {
         topWordsCount: statistics.topWords?.length || 0,
       });
       return successResponse({ statistics });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:get-text-statistics error:', error);
       return errorResponse(error);
     }
@@ -173,9 +173,9 @@ export function setupCorpusHandlers() {
         collectionCount: collections.length,
       });
       return { success: true, collections };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ corpus:get-collections error:', error);
-      return { success: false, error: error.message, collections: [] };
+      return { ...errorResponse(error), collections: [] };
     }
   });
 

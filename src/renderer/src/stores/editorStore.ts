@@ -26,6 +26,13 @@ interface EditorState {
   content: string;
   filePath: string | null;
   isDirty: boolean;
+  /**
+   * Horodatage (ms) de la dernière sauvegarde réussie du fichier courant,
+   * `null` tant que rien n'a été écrit. Alimente l'indicateur de la barre
+   * d'état : sur un manuscrit long, ne pas savoir si son texte est sur le
+   * disque est anxiogène (audit item 20).
+   */
+  lastSavedAt: number | null;
 
   // Settings
   settings: EditorSettings;
@@ -100,6 +107,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   content: '',
   filePath: null,
   isDirty: false,
+  lastSavedAt: null,
   settings: DEFAULT_SETTINGS,
   showPreview: false,
   editorFacade: null,
@@ -144,6 +152,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           content: result.content,
           filePath,
           isDirty: false,
+          // Nouveau document : l'indicateur ne doit pas dater d'un autre.
+          lastSavedAt: null,
           documentVersion: state.documentVersion + 1,
         }));
         logger.store('Editor', 'File loaded successfully', { contentLength: result.content.length });
@@ -173,7 +183,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.saveFile response', result);
 
       if (result.success) {
-        set({ content, isDirty: false });
+        set({ content, isDirty: false, lastSavedAt: Date.now() });
         logger.store('Editor', 'File saved successfully');
       } else {
         throw new Error(result.error || 'Failed to save file');
@@ -198,6 +208,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           content,
           filePath: newFilePath,
           isDirty: false,
+          lastSavedAt: Date.now(),
         });
         logger.store('Editor', 'File saved successfully as', { newFilePath });
       } else {
@@ -256,6 +267,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       content: '',
       filePath: null,
       isDirty: false,
+      lastSavedAt: null,
       documentVersion: state.documentVersion + 1,
     }));
   },

@@ -29,7 +29,7 @@ export function setupTropyHandlers() {
       const result = await tropyService.openProject(tpyPath);
       console.log('📤 IPC Response: tropy:open-project', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:open-project error:', error);
       return errorResponse(error);
     }
@@ -43,7 +43,7 @@ export function setupTropyHandlers() {
     try {
       const info = tropyService.getProjectInfo();
       return { success: true, info };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:get-project-info error:', error);
       return errorResponse(error);
     }
@@ -71,7 +71,7 @@ export function setupTropyHandlers() {
           errors: result.errors.length,
         });
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ tropy:sync error:', error);
         return errorResponse(error);
       }
@@ -86,7 +86,7 @@ export function setupTropyHandlers() {
     try {
       const needed = tropyService.checkSyncNeeded();
       return { success: true, needed };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:check-sync-needed error:', error);
       return errorResponse(error);
     }
@@ -104,7 +104,7 @@ export function setupTropyHandlers() {
       const result = tropyService.startWatching(tpyPath);
       console.log('📤 IPC Response: tropy:start-watching', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:start-watching error:', error);
       return errorResponse(error);
     }
@@ -118,7 +118,7 @@ export function setupTropyHandlers() {
     try {
       tropyService.stopWatching();
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:stop-watching error:', error);
       return errorResponse(error);
     }
@@ -131,7 +131,7 @@ export function setupTropyHandlers() {
     try {
       const isWatching = tropyService.isWatching();
       return { success: true, isWatching };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });
@@ -141,23 +141,6 @@ export function setupTropyHandlers() {
   /**
    * Effectue l'OCR sur une image
    */
-  ipcMain.handle('tropy:perform-ocr', async (_event, rawImagePath: unknown, rawLanguage: unknown) => {
-    const { imagePath, language } = validate(TropyPerformOcrSchema, { imagePath: rawImagePath, language: rawLanguage });
-    console.log('📞 IPC Call: tropy:perform-ocr', { imagePath, language });
-    try {
-      const result = await tropyService.performOCR(imagePath, language);
-      console.log('📤 IPC Response: tropy:perform-ocr', {
-        success: result.success,
-        textLength: result.text?.length,
-        confidence: result.confidence,
-      });
-      return result;
-    } catch (error: any) {
-      console.error('❌ tropy:perform-ocr error:', error);
-      return errorResponse(error);
-    }
-  });
-
   /**
    * Effectue l'OCR sur plusieurs images
    */
@@ -173,7 +156,7 @@ export function setupTropyHandlers() {
           textLength: result.text?.length,
         });
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ tropy:perform-batch-ocr error:', error);
         return errorResponse(error);
       }
@@ -187,7 +170,7 @@ export function setupTropyHandlers() {
     try {
       const languages = tropyService.getSupportedOCRLanguages();
       return { success: true, languages };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });
@@ -208,7 +191,7 @@ export function setupTropyHandlers() {
         textLength: result.text?.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:import-transcription error:', error);
       return errorResponse(error);
     }
@@ -225,7 +208,7 @@ export function setupTropyHandlers() {
       const sources = tropyService.getAllSources();
       console.log('📤 IPC Response: tropy:get-all-sources', { count: sources.length });
       return { success: true, sources };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:get-all-sources error:', error);
       return errorResponse(error);
     }
@@ -240,7 +223,7 @@ export function setupTropyHandlers() {
     try {
       const source = tropyService.getSource(sourceId);
       return { success: true, source };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:get-source error:', error);
       return errorResponse(error);
     }
@@ -262,7 +245,7 @@ export function setupTropyHandlers() {
       try {
         const result = await tropyService.updateSourceTranscription(sourceId, transcription, source);
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ tropy:update-transcription error:', error);
         return errorResponse(error);
       }
@@ -280,7 +263,7 @@ export function setupTropyHandlers() {
       const stats = tropyService.getStatistics();
       const databasePath = tropyService.getDatabasePath();
       return { success: true, statistics: stats, databasePath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:get-statistics error:', error);
       return errorResponse(error);
     }
@@ -295,7 +278,7 @@ export function setupTropyHandlers() {
       const result = await tropyService.purge();
       console.log('📤 IPC Response: tropy:purge', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ tropy:purge error:', error);
       return errorResponse(error);
     }
@@ -308,7 +291,7 @@ export function setupTropyHandlers() {
     try {
       const tags = tropyService.getAllTags();
       return { success: true, tags };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });

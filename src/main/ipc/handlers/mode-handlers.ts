@@ -21,7 +21,7 @@ export function setupModeHandlers() {
       const modes = await modeService.getModeManager().getAllModes();
       console.log('📤 IPC Response: mode:get-all', { count: modes.length });
       return successResponse({ modes });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:get-all error:', error);
       return errorResponse(error);
     }
@@ -37,25 +37,13 @@ export function setupModeHandlers() {
         return errorResponse(`Mode not found: ${modeId}`);
       }
       return successResponse({ mode });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:get error:', error);
       return errorResponse(error);
     }
   });
 
   // Get the currently active mode
-  ipcMain.handle('mode:get-active', async () => {
-    console.log('📞 IPC Call: mode:get-active');
-    try {
-      const id = modeService.getActiveModeId();
-      const mode = await modeService.getActiveMode();
-      return successResponse({ id, mode });
-    } catch (error: any) {
-      console.error('❌ mode:get-active error:', error);
-      return errorResponse(error);
-    }
-  });
-
   // Set the active mode
   ipcMain.handle('mode:set-active', async (_event, rawModeId: unknown) => {
     const modeId = validate(StringIdSchema, rawModeId);
@@ -63,7 +51,7 @@ export function setupModeHandlers() {
     try {
       modeService.setActiveMode(modeId);
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:set-active error:', error);
       return errorResponse(error);
     }
@@ -76,7 +64,7 @@ export function setupModeHandlers() {
     try {
       const filePath = await modeService.getModeManager().saveMode(mode as any, target);
       return successResponse({ filePath });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:save error:', error);
       return errorResponse(error);
     }
@@ -89,7 +77,7 @@ export function setupModeHandlers() {
     try {
       await modeService.getModeManager().deleteMode(modeId, source);
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:delete error:', error);
       return errorResponse(error);
     }
@@ -102,7 +90,7 @@ export function setupModeHandlers() {
     try {
       const mode = await modeService.getModeManager().importMode(filePath, target);
       return successResponse({ mode });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:import error:', error);
       return errorResponse(error);
     }
@@ -115,7 +103,7 @@ export function setupModeHandlers() {
     try {
       await modeService.getModeManager().exportMode(modeId, outputPath);
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ mode:export error:', error);
       return errorResponse(error);
     }

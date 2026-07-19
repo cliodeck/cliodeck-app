@@ -30,12 +30,9 @@ export function wrapIPCHandler<TArgs extends any[], TResult>(
       const result = await handler(...args);
       console.log(`📤 IPC Response: ${context} - success`);
       return { success: true, ...result } as IPCSuccessResponse<TResult>;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`❌ ${context} error:`, error);
-      return {
-        success: false,
-        error: error.message || 'An unknown error occurred',
-      };
+      return errorResponse(error);
     }
   };
 }
@@ -50,8 +47,16 @@ export function successResponse<T extends Record<string, any>>(data?: T): IPCSuc
 /**
  * Creates a simple error response
  */
-export function errorResponse(error: string | Error): IPCErrorResponse {
-  const message = typeof error === 'string' ? error : error.message;
+export function errorResponse(error: unknown): IPCErrorResponse {
+  // Accepte `unknown` pour que les handlers puissent utiliser
+  // `catch (error: unknown)` — un `catch` typé `any` laissait passer
+  // n'importe quel accès de propriété sur une valeur dont on ne sait rien.
+  const message =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : String(error);
   return { success: false, error: message };
 }
 

@@ -55,7 +55,31 @@ const EXCLUDED_MARKS = new Set([
   'FootnoteLabel',
 ]);
 
-export function computeDocumentStats(content: string): DocumentStatsCounts {
+/**
+ * Texte « prose » d'un document : le markdown moins sa syntaxe.
+ *
+ * Blocs de code, HTML et clusters de citations sont retirés entièrement ;
+ * les marqueurs (`#`, `>`, `*`, `[^1]`, URLs…) disparaissent en laissant
+ * leur contenu. Le corps d'une note de bas de page reste, c'est du texte
+ * que l'auteur a écrit.
+ *
+ * Extrait de `computeDocumentStats` pour être réutilisé par l'indexation
+ * du manuscrit (corpus RAG) : un `[@clef]` ou un `[^1]` ne doit pas
+ * polluer un embedding.
+ */
+export function extractProseText(content: string): string {
+  return collect(content).plain.trim();
+}
+
+interface Collected {
+  plain: string;
+  paragraphs: number;
+  citations: number;
+  refLabels: Set<string>;
+  defLabels: Set<string>;
+}
+
+function collect(content: string): Collected {
   const tree = statsParser.parse(content);
 
   let paragraphs = 0;
@@ -106,6 +130,12 @@ export function computeDocumentStats(content: string): DocumentStatsCounts {
     cursor = Math.max(cursor, to);
   }
   plain += content.slice(cursor);
+  return { plain, paragraphs, citations, refLabels, defLabels };
+}
+
+export function computeDocumentStats(content: string): DocumentStatsCounts {
+  const { plain, paragraphs, citations, refLabels, defLabels } =
+    collect(content);
   const trimmed = plain.trim();
 
   const words = trimmed.length === 0 ? 0 : (trimmed.match(/\S+/g) ?? []).length;

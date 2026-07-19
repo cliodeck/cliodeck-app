@@ -1526,7 +1526,13 @@
     "syncTooltip": "Synchronisierung: {{phase}} {{current}}/{{total}}",
     "usageJournalBadge_one": "{{count}} Sitzung zu annotieren",
     "usageJournalBadge_other": "{{count}} Sitzungen zu annotieren",
-    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)"
+    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)",
+    "savedAt": "Gespeichert um {{time}}",
+    "savedTooltip": "Zuletzt gespeichert um {{time}}",
+    "unsaved": "Nicht gespeicherte Änderungen",
+    "unsavedTooltip": "Das Dokument enthält Änderungen, die nicht auf der Festplatte gespeichert sind.",
+    "notSavedYet": "Nicht gespeichert",
+    "notSavedYetTooltip": "Dieses Dokument wurde seit dem Öffnen nicht gespeichert."
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",
@@ -1660,5 +1666,17 @@
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
     "missing": "{{count}} Schlüssel fehlen in der Bibliografie:",
     "checkError": "Zitate konnten nicht geprüft werden."
+  },
+  "search": {
+    "title": "Im Buch suchen",
+    "placeholder": "Begriff im gesamten Manuskript suchen",
+    "run": "Suche starten",
+    "searching": "Suche läuft…",
+    "error": "Die Suche ist fehlgeschlagen. Einige Kapitel konnten möglicherweise nicht gelesen werden.",
+    "noResults": "Kein Vorkommen von „{{query}}“ im Manuskript.",
+    "summary_one": "{{count}} Vorkommen in {{chapters}} Kapitel",
+    "summary_other": "{{count}} Vorkommen in {{chapters}} Kapiteln",
+    "goToLine": "Zu Zeile {{line}} springen",
+    "truncated": "Zu viele Vorkommen in diesem Kapitel: nur die ersten werden angezeigt."
   }
 }

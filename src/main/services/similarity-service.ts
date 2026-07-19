@@ -215,8 +215,8 @@ class SimilarityService {
           recommendations,
           analyzedAt: Date.now(),
         });
-      } catch (error: any) {
-        console.error(`❌ [SIMILARITY] Error analyzing segment ${i + 1}:`, error.message);
+      } catch (error: unknown) {
+        console.error(`❌ [SIMILARITY] Error analyzing segment ${i + 1}:`, (error instanceof Error ? error.message : String(error)));
         // Continue with other segments
         results.push({
           segmentId: segment.id,
@@ -667,8 +667,8 @@ class SimilarityService {
       try {
         recommendations = await this.rerankWithLLM(segment.content, recommendations);
         console.log('🔄 [SIMILARITY] Reranking applied successfully');
-      } catch (error: any) {
-        console.warn('⚠️  [SIMILARITY] Reranking failed, using original order:', error.message);
+      } catch (error: unknown) {
+        console.warn('⚠️  [SIMILARITY] Reranking failed, using original order:', (error instanceof Error ? error.message : String(error)));
         // Fall back to original order if reranking fails
       }
     }
@@ -824,8 +824,8 @@ Your ranking:`;
       });
 
       return cache;
-    } catch (error: any) {
-      console.warn('⚠️  [SIMILARITY] Failed to load cache:', error.message);
+    } catch (error: unknown) {
+      console.warn('⚠️  [SIMILARITY] Failed to load cache:', (error instanceof Error ? error.message : String(error)));
       return null;
     }
   }
@@ -844,8 +844,8 @@ Your ranking:`;
         path: cachePath,
         segmentCount: Object.keys(cache.segments).length,
       });
-    } catch (error: any) {
-      console.error('❌ [SIMILARITY] Failed to save cache:', error.message);
+    } catch (error: unknown) {
+      console.error('❌ [SIMILARITY] Failed to save cache:', (error instanceof Error ? error.message : String(error)));
     }
   }
 
@@ -861,8 +861,8 @@ Your ranking:`;
         fs.unlinkSync(cachePath);
         console.log('🗑️  [SIMILARITY] Cache cleared');
       }
-    } catch (error: any) {
-      console.error('❌ [SIMILARITY] Failed to clear cache:', error.message);
+    } catch (error: unknown) {
+      console.error('❌ [SIMILARITY] Failed to clear cache:', (error instanceof Error ? error.message : String(error)));
     }
   }
 

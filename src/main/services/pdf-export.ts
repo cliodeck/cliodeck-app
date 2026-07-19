@@ -8,6 +8,13 @@ import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
+import {
+  type BeamerConfig,
+  buildBeamerCustomizations,
+  buildPandocArgs,
+  resolveBibliographyMode,
+  resolveBookSettings,
+} from './pandoc-args.js';
 
 // MARK: - Types
 
@@ -52,41 +59,7 @@ export interface ExportOptions {
     date?: string;
     abstract?: string;
   };
-  beamerConfig?: {
-    // Theme options
-    theme?: string;
-    colortheme?: string;
-    fonttheme?: string;
-    aspectratio?: string;
-    navigation?: boolean;
-    showNotes?: boolean;
-
-    // Title page options
-    institute?: string;
-    logo?: string;
-    titlegraphic?: string;
-
-    // TOC options
-    showToc?: boolean;
-    tocBeforeSection?: boolean;
-
-    // Frame numbering
-    showFrameNumber?: boolean;
-    frameNumberStyle?: 'total' | 'simple' | 'none';
-
-    // Section numbering
-    showSectionNumber?: boolean;
-    sectionNumberInToc?: boolean;
-
-    // Footer customization
-    showAuthorInFooter?: boolean;
-    showTitleInFooter?: boolean;
-    showDateInFooter?: boolean;
-
-    // Advanced options
-    incremental?: boolean;
-    overlays?: boolean;
-  };
+  beamerConfig?: BeamerConfig;
 }
 
 interface PandocProgress {
@@ -653,25 +626,16 @@ export class PDFExportService {
       // pièce par pièce, AVANT le préfixage des notes — ses propres notes
       // générées doivent être isolées comme celles de l'auteur.
       if (options.manuscript) {
-        const settings = options.bookSettings ?? {
-          noteStyle: 'footnote',
-          noteNumbering: 'continuous',
-          bibliography: 'single',
-          numberChapters: true,
-          numberSections: false,
-        };
+        const settings = resolveBookSettings(options.bookSettings);
 
-        const perChapterBib =
-          settings.bibliography === 'per-chapter' &&
-          !!options.bibliographyPath &&
-          existsSync(options.bibliographyPath) &&
-          !options.citation?.useEngine;
-
-        if (settings.bibliography === 'per-chapter' && !perChapterBib) {
-          console.warn(
-            '⚠️ Bibliographie par chapitre ignorée (bibliographie absente ou pipeline CitationEngine actif) : repli sur une bibliographie unique.'
-          );
-        }
+        const bibMode = resolveBibliographyMode({
+          settings,
+          bibliographyAvailable:
+            !!options.bibliographyPath && existsSync(options.bibliographyPath),
+          useEngine: !!options.citation?.useEngine,
+        });
+        const perChapterBib = bibMode.perChapter;
+        if (bibMode.warning) console.warn('⚠️ ' + bibMode.warning);
 
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
@@ -769,213 +733,37 @@ export class PDFExportService {
         console.log('⚠️ No bibliography found at:', options.bibliographyPath);
       }
 
-      // Build pandoc arguments
-      // For presentations, use native Beamer support instead of custom template
-      const pandocArgs = [
-        mdPath,
-        '-o', outputPath,
-        '--pdf-engine=xelatex',
-        '--from=markdown+autolink_bare_uris',
-        '--pdf-engine-opt=-interaction=nonstopmode', // Don't stop on errors
-      ];
-
-      // Use different approach for presentations vs documents
+      // Arguments pandoc — la construction est PURE et testée
+      // (`pandoc-args.ts`, item 24 de l'audit). Ne reste ici que ce qui
+      // touche au monde : écrire le fichier d'en-têtes beamer et résoudre
+      // l'existence du CSL.
+      let headerIncludesPath: string | undefined;
       if (options.projectType === 'presentation') {
-        // Use Pandoc's native Beamer support
-        pandocArgs.push('--to=beamer');
-        pandocArgs.push('--slide-level=1'); // H1 = new slide
-
-        // Beamer-specific options via variables from config or defaults
-        const cfg = options.beamerConfig || {};
-
-        // Theme options
-        const beamerTheme = cfg.theme || 'Madrid';
-        const beamerColorTheme = cfg.colortheme || 'default';
-        const beamerFontTheme = cfg.fonttheme || 'default';
-        const beamerAspectRatio = cfg.aspectratio || '169';
-
-        pandocArgs.push('-V', `theme:${beamerTheme}`);
-        if (beamerColorTheme !== 'default') {
-          pandocArgs.push('-V', `colortheme:${beamerColorTheme}`);
-        }
-        if (beamerFontTheme !== 'default') {
-          pandocArgs.push('-V', `fonttheme:${beamerFontTheme}`);
-        }
-        pandocArgs.push('-V', `aspectratio:${beamerAspectRatio}`);
-
-        // Title page options
-        if (cfg.institute) {
-          pandocArgs.push('-V', `institute:${cfg.institute}`);
-        }
-        if (cfg.logo) {
-          pandocArgs.push('-V', `logo:${cfg.logo}`);
-        }
-        if (cfg.titlegraphic) {
-          pandocArgs.push('-V', `titlegraphic:${cfg.titlegraphic}`);
-        }
-
-        // Section numbering
-        if (cfg.showSectionNumber) {
-          pandocArgs.push('-V', 'section-titles=true');
-          pandocArgs.push('-V', 'numbersections=true');
-        } else {
-          pandocArgs.push('-V', 'numbersections=false');
-        }
-
-        // TOC in TOC
-        if (cfg.sectionNumberInToc) {
-          pandocArgs.push('-V', 'toc-numbering=true');
-        }
-
-        // Navigation symbols
-        if (!cfg.navigation) {
-          pandocArgs.push('-V', 'navigation:empty');
-        }
-
-        // Notes
-        if (cfg.showNotes) {
-          pandocArgs.push('-V', 'classoption=handout');
-          pandocArgs.push('-V', 'notes=show');
-        }
-
-        // Incremental lists
-        if (cfg.incremental) {
-          pandocArgs.push('--incremental');
-        }
-
-        // Table of contents
-        if (cfg.showToc) {
-          pandocArgs.push('--toc');
-          pandocArgs.push('--toc-depth=2');
-        }
-
-        // Advanced Beamer customization via header-includes
-        const beamerCustomizations: string[] = [];
-
-        // Frame numbering customization
-        if (cfg.showFrameNumber) {
-          if (cfg.frameNumberStyle === 'total') {
-            beamerCustomizations.push('\\setbeamertemplate{footline}[frame number]');
-          } else if (cfg.frameNumberStyle === 'simple') {
-            beamerCustomizations.push('\\setbeamertemplate{footline}{\\hfill\\insertframenumber\\hspace{0.5cm}\\vspace{0.3cm}}');
-          }
-        } else {
-          beamerCustomizations.push('\\setbeamertemplate{footline}{}');
-        }
-
-        // Custom footer with author/title/date
-        if (cfg.showAuthorInFooter || cfg.showTitleInFooter || cfg.showDateInFooter) {
-          const footerParts: string[] = [];
-          footerParts.push('\\setbeamertemplate{footline}{');
-          footerParts.push('  \\leavevmode%');
-          footerParts.push('  \\hbox{%');
-
-          if (cfg.showAuthorInFooter) {
-            footerParts.push('    \\begin{beamercolorbox}[wd=.33\\paperwidth,ht=2.25ex,dp=1ex,center]{author in head/foot}%');
-            footerParts.push('      \\usebeamerfont{author in head/foot}\\insertshortauthor%');
-            footerParts.push('    \\end{beamercolorbox}%');
-          }
-          if (cfg.showTitleInFooter) {
-            footerParts.push('    \\begin{beamercolorbox}[wd=.33\\paperwidth,ht=2.25ex,dp=1ex,center]{title in head/foot}%');
-            footerParts.push('      \\usebeamerfont{title in head/foot}\\insertshorttitle%');
-            footerParts.push('    \\end{beamercolorbox}%');
-          }
-          if (cfg.showDateInFooter) {
-            footerParts.push('    \\begin{beamercolorbox}[wd=.34\\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%');
-            footerParts.push('      \\usebeamerfont{date in head/foot}\\insertshortdate{}\\hspace*{2em}');
-            footerParts.push('      \\insertframenumber{} / \\inserttotalframenumber\\hspace*{2ex}%');
-            footerParts.push('    \\end{beamercolorbox}%');
-          }
-
-          footerParts.push('  }%');
-          footerParts.push('  \\vskip0pt%');
-          footerParts.push('}');
-
-          beamerCustomizations.push(...footerParts);
-        }
-
-        // TOC before each section
-        if (cfg.tocBeforeSection && cfg.showToc) {
-          beamerCustomizations.push(
-            '\\AtBeginSection[]{',
-            '  \\begin{frame}<beamer>',
-            '    \\frametitle{Plan}',
-            '    \\tableofcontents[currentsection]',
-            '  \\end{frame}',
-            '}'
-          );
-        }
-
-        // Write header-includes file if we have customizations
-        if (beamerCustomizations.length > 0) {
-          const headerIncludesPath = join(tempDir, 'beamer-custom.tex');
-          await writeFile(headerIncludesPath, beamerCustomizations.join('\n'));
-          pandocArgs.push('--include-in-header', headerIncludesPath);
-        }
-      } else {
-        // Use custom template for articles/books/notes
-        pandocArgs.push('--template', templatePath);
-        pandocArgs.push('--toc');
-
-        if (options.projectType === 'book') {
-          // SANS cette option, pandoc rend un `#` en \section : la classe
-          // book n'émet aucun \chapter, la table des matières se réduit aux
-          // sections et les en-têtes recto/verso (nourris par \chaptermark)
-          // restent vides. Vérifié empiriquement (plan §1.2).
-          pandocArgs.push('--top-level-division=chapter');
-
-          const bs = options.bookSettings;
-          // Classe book : -1 = rien, 0 = chapitres, 1 = sections.
-          const secnumdepth = bs?.numberSections
-            ? 1
-            : bs?.numberChapters === false
-              ? -1
-              : 0;
-          pandocArgs.push('-V', `secnumdepth=${secnumdepth}`);
-
-          if (bs?.noteStyle === 'endnote-chapter' || bs?.noteStyle === 'endnote-book') {
-            pandocArgs.push('-V', 'endnotes=true');
-          }
+        const customizations = buildBeamerCustomizations(options.beamerConfig);
+        if (customizations.length > 0) {
+          headerIncludesPath = join(tempDir, 'beamer-custom.tex');
+          await writeFile(headerIncludesPath, customizations.join('\n'));
         }
       }
 
-      // Add metadata - escape special LaTeX characters
-      const escapeLatex = (str: string): string => {
-        return str
-          .replace(/\\/g, '\\textbackslash{}')
-          .replace(/[&%$#_{}]/g, '\\$&')
-          .replace(/~/g, '\\textasciitilde{}')
-          .replace(/\^/g, '\\textasciicircum{}');
-      };
+      const pandocArgs = buildPandocArgs({
+        mdPath,
+        outputPath,
+        templatePath,
+        projectType: options.projectType,
+        bookSettings: options.bookSettings,
+        beamerConfig: options.beamerConfig,
+        metadata: options.metadata,
+        abstract,
+        bibPath,
+        useEnginePipeline,
+        cslPath: options.cslPath,
+        cslAvailable: !!options.cslPath && existsSync(options.cslPath),
+        headerIncludesPath,
+      });
 
-      if (options.metadata?.title) {
-        pandocArgs.push('-M', `title=${escapeLatex(options.metadata.title)}`);
-      }
-      if (options.metadata?.author) {
-        pandocArgs.push('-M', `author=${escapeLatex(options.metadata.author)}`);
-      }
-      if (options.metadata?.date) {
-        pandocArgs.push('-M', `date=${options.metadata.date}`);
-      }
-      if (abstract) {
-        pandocArgs.push('-M', `abstract=${escapeLatex(abstract)}`);
-      }
-
-      // Add bibliography if available (skip when our engine already
-      // inlined footnotes + bibliography as plain markdown).
-      if (bibPath && !useEnginePipeline) {
-        pandocArgs.push('--bibliography', bibPath);
-        pandocArgs.push('--citeproc');
-
-        // Add CSL style if provided
-        if (options.cslPath && existsSync(options.cslPath)) {
-          pandocArgs.push('--csl', options.cslPath);
-          console.log('📚 Using CSL style:', options.cslPath);
-        } else {
-          // Use default citation style
-          pandocArgs.push('--metadata', 'reference-section-title=Références');
-          pandocArgs.push('--metadata', 'suppress-bibliography=false');
-        }
+      if (bibPath && !useEnginePipeline && options.cslPath && existsSync(options.cslPath)) {
+        console.log('📚 Using CSL style:', options.cslPath);
       }
 
       // Run pandoc
@@ -1020,9 +808,12 @@ export class PDFExportService {
 
       console.log('✅ PDF exported successfully:', outputPath);
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ PDF export failed:', error);
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       // Le manuscrit, sa bibliographie et le .tex intermédiaire vivent ici :
       // ils partent, que l'export ait réussi ou échoué.

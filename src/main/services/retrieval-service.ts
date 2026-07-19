@@ -30,6 +30,11 @@ import type {
 } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import { ObsidianVaultStore } from '../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import { obsidianStorePath } from '../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
+import {
+  ManuscriptStore,
+  manuscriptStorePath,
+} from '../../../backend/core/vector-store/ManuscriptStore.js';
+import { manuscriptIndexService } from './manuscript-index-service.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
 import {
@@ -63,13 +68,15 @@ const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
 const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
 
 /**
- * 'secondary' = bibliography (PDFs), 'primary' = Tropy archives,
- * 'both'      = both bibliography + primary corpora,
- * 'vault'     = Obsidian vault only (skip primary and secondary).
- * Note: non-vault values compose with the separate `includeVault` opt-in
- * to mix notes in alongside primary/secondary.
+ * 'secondary'  = bibliography (PDFs), 'primary' = Tropy archives,
+ * 'both'       = both bibliography + primary corpora,
+ * 'vault'      = Obsidian vault only (skip primary and secondary),
+ * 'manuscript' = the historian's own text only (item 25 des audits).
+ * Note: non-exclusive values compose with the separate `includeVault` and
+ * `includeManuscript` opt-ins to mix notes / own text in alongside
+ * primary/secondary.
  */
-export type SourceType = 'secondary' | 'primary' | 'both' | 'vault';
+export type SourceType = 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript';
 
 export interface SecondarySearchResult extends SearchResult {
   sourceType: 'secondary';
@@ -115,16 +122,58 @@ export interface VaultMappedSearchResult {
   sourceType: 'vault';
 }
 
+/**
+ * Un extrait du manuscrit de l'auteur. `sourceType: 'manuscript'` doit
+ * rester distinguable jusqu'à l'affichage : un historien a le droit de
+ * savoir qu'il se cite lui-même plutôt qu'une source d'archive. C'est une
+ * exigence intellectuelle, pas une finition cosmétique.
+ */
+export interface ManuscriptMappedSearchResult {
+  chunk: {
+    id: string;
+    content: string;
+    documentId: string | undefined;
+    chunkIndex: number;
+  };
+  document: {
+    id: string | undefined;
+    title: string | undefined;
+    author: null;
+    bibtexKey: null;
+  };
+  source: {
+    kind: 'manuscript-chapter';
+    relativePath: string;
+    chapterId: string;
+    sectionTitle?: string;
+    /** Ligne 1-indexée du début de section, pour rouvrir au bon endroit. */
+    line: number;
+  };
+  similarity: number;
+  sourceType: 'manuscript';
+}
+
+/**
+ * Union publique historique : les trois corpus externes. Le manuscrit en
+ * est délibérément absent — `hitsToSources` (fusion-chat-service) mappe
+ * `sourceType` sur un union plus étroit, et l'élargir touche une couche
+ * qui n'appartient pas à ce chantier. Les extraits du manuscrit sortent
+ * donc par `RetrievalSearchResult.manuscriptHits`, en attendant que
+ * `BrainstormSource` gagne son quatrième `kind` (cf. docs/manuscript-corpus.md).
+ */
 export type MultiSourceSearchResult =
   | SecondarySearchResult
   | PrimaryMappedSearchResult
   | VaultMappedSearchResult;
 
+/** Union interne : ce que le pipeline trie et inspecte réellement. */
+type AnySearchResult = MultiSourceSearchResult | ManuscriptMappedSearchResult;
+
 /**
  * Per-corpus outcome (fusion 1.7 — partial-success first-class).
  *
- * Each retrieval call fans out to up to three corpora (secondary PDFs,
- * primary Tropy, Obsidian vault). Any individual corpus may be skipped
+ * Each retrieval call fans out to up to four corpora (secondary PDFs,
+ * primary Tropy, Obsidian vault, the author's own manuscript). Any individual corpus may be skipped
  * (not in scope), succeed with N hits, succeed with 0 hits, or throw.
  * The previous shape collapsed all three into a flat list and logged
  * failures via `console.warn` — callers had no way to tell the
@@ -132,7 +181,7 @@ export type MultiSourceSearchResult =
  * envelope makes the distinction first-class.
  */
 export interface RetrievalSourceOutcome {
-  source: 'secondary' | 'primary' | 'vault';
+  source: 'secondary' | 'primary' | 'vault' | 'manuscript';
   /** True iff the corpus was in the requested `sourceType` scope. */
   attempted: boolean;
   /** True iff the corpus's search ran without throwing. */
@@ -148,7 +197,13 @@ export interface RetrievalSourceOutcome {
 export interface RetrievalSearchResult {
   /** Combined, sort-and-slice'd hit list (the legacy return value). */
   hits: MultiSourceSearchResult[];
-  /** Per-corpus outcomes (always 3 entries: secondary, primary, vault). */
+  /**
+   * Extraits du manuscrit de l'auteur, séparés des trois corpus externes
+   * pour que l'appelant ne puisse pas les confondre avec une source
+   * d'archive ou de bibliographie (item 25 des audits).
+   */
+  manuscriptHits: ManuscriptMappedSearchResult[];
+  /** Per-corpus outcomes (always 4: secondary, primary, vault, manuscript). */
   outcomes: RetrievalSourceOutcome[];
 }
 
@@ -179,6 +234,8 @@ export interface RetrievalSearchStats {
 
 export interface RetrievalSearchWithStatsResult {
   hits: MultiSourceSearchResult[];
+  /** Extraits du manuscrit, séparés (cf. `RetrievalSearchResult`). */
+  manuscriptHits: ManuscriptMappedSearchResult[];
   stats: RetrievalSearchStats;
   /** Per-corpus outcomes (fusion 1.7) — surfaced here so callers that
    *  use `searchWithStats` can render error banners alongside
@@ -199,6 +256,11 @@ export interface RetrievalQuery {
    * behaviour; Brainstorm chat opts in.
    */
   includeVault?: boolean;
+  /**
+   * When true, also search the author's own manuscript (if indexed).
+   * Opt-in like `includeVault`: legacy callers keep PDF+Tropy behaviour.
+   */
+  includeManuscript?: boolean;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -213,12 +275,14 @@ export interface RetrievalQuery {
  * the kind so post-hoc analysis can spot patterns ("most blocks are on
  * vault notes" → vault is the noisy source).
  */
-function toInspectable(r: MultiSourceSearchResult): InspectableChunk {
+function toInspectable(r: AnySearchResult): InspectableChunk {
   let source: string;
   if (r.sourceType === 'primary') {
     source = `tropy:${r.document.id ?? 'unknown'}`;
   } else if (r.sourceType === 'vault') {
     source = `obsidian:${r.source.noteId}`;
+  } else if (r.sourceType === 'manuscript') {
+    source = `manuscript:${r.source.relativePath}`;
   } else {
     source = `pdf:${r.document.id ?? r.document.bibtexKey ?? 'unknown'}`;
   }
@@ -241,6 +305,7 @@ class RetrievalService {
   private registry: ProviderRegistry | null = null;
   private workspaceRoot: string | null = null;
   private vaultStore: ObsidianVaultStore | null = null;
+  private manuscriptStore: ManuscriptStore | null = null;
   private warmupStarted = false;
   /**
    * Cached inspector mode for the current workspace. Refreshed on
@@ -284,6 +349,12 @@ class RetrievalService {
     // changed underneath us.
     this.vaultStore?.close();
     this.vaultStore = null;
+    this.manuscriptStore?.close();
+    this.manuscriptStore = null;
+
+    // Le corpus manuscrit suit le même projet : rattacher ici évite que
+    // l'indexeur garde un handle WAL sur le `brain.db` du projet précédent.
+    manuscriptIndexService.configure(this.workspaceRoot);
 
     // Fire-and-forget warmup: pre-embed frequent FR↔EN translations so the
     // first real query hits a warm cache. Only runs once per process.
@@ -344,6 +415,8 @@ class RetrievalService {
     this.workspaceRoot = null;
     this.vaultStore?.close();
     this.vaultStore = null;
+    this.manuscriptStore?.close();
+    this.manuscriptStore = null;
   }
 
   private getProviderId(): string | undefined {
@@ -408,6 +481,33 @@ class RetrievalService {
     }
   }
 
+  private getManuscriptStore(): ManuscriptStore | null {
+    if (this.manuscriptStore) return this.manuscriptStore;
+    if (!this.workspaceRoot) return null;
+    const dbPath = manuscriptStorePath(this.workspaceRoot);
+    if (!fs.existsSync(dbPath)) return null;
+    try {
+      // Dimension omise : elle n'est vérifiée qu'à l'insertion, et la
+      // recherche n'en a pas besoin.
+      this.manuscriptStore = new ManuscriptStore({ dbPath });
+      return this.manuscriptStore;
+    } catch (e) {
+      console.warn('[retrieval] failed to open manuscript store:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Fournisseur d'embeddings actif, ou `null` s'il n'a pas pu être
+   * construit (Ollama éteint, configuration incomplète). Exposé pour
+   * l'indexation du manuscrit, qui doit embarquer avec le MÊME modèle que
+   * celui qui embarquera les requêtes — sinon les cosinus comparent des
+   * espaces différents.
+   */
+  getEmbeddingProvider(): EmbeddingProvider | null {
+    return this.embedding;
+  }
+
   private ensureReady(): void {
     if (!this.vectorStore || !this.embedding) {
       throw new Error(
@@ -433,7 +533,7 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const { hits, outcomes } = await this.search(q);
+    const { hits, manuscriptHits, outcomes } = await this.search(q);
     const searchMs = Date.now() - t0;
 
     const documentMap = new Map<
@@ -464,6 +564,7 @@ class RetrievalService {
 
     return {
       hits,
+      manuscriptHits,
       outcomes,
       stats: {
         search: {
@@ -494,7 +595,7 @@ class RetrievalService {
       );
     }
 
-    const allSourceResults: MultiSourceSearchResult[] = [];
+    const allSourceResults: AnySearchResult[] = [];
 
     // Each corpus is wrapped to produce a typed outcome the union return
     // can carry. Partial-success first-class (claw-code lesson 6.3): an
@@ -513,6 +614,12 @@ class RetrievalService {
     };
     const outcomeVault: RetrievalSourceOutcome = {
       source: 'vault',
+      attempted: false,
+      ok: false,
+      hitCount: 0,
+    };
+    const outcomeManuscript: RetrievalSourceOutcome = {
+      source: 'manuscript',
       attempted: false,
       ok: false,
       hitCount: 0,
@@ -634,6 +741,34 @@ class RetrievalService {
       }
     }
 
+    // Manuscrit : le texte de l'auteur lui-même (item 25 des audits).
+    // Opt-in, comme le vault — un appelant historique ne le voit jamais.
+    if (q.includeManuscript || sourceType === 'manuscript') {
+      outcomeManuscript.attempted = true;
+      const t0 = Date.now();
+      try {
+        const manuscriptResults = await this.searchManuscript(q.query, { topK });
+        allSourceResults.push(...manuscriptResults);
+        outcomeManuscript.ok = true;
+        outcomeManuscript.hitCount = manuscriptResults.length;
+        if (DEBUG) {
+          console.log(
+            `✍️ [PDF-SERVICE] Manuscrit: ${manuscriptResults.length} results`
+          );
+        }
+      } catch (error: unknown) {
+        outcomeManuscript.ok = false;
+        outcomeManuscript.error =
+          error instanceof Error ? error.message : String(error);
+        console.warn(
+          '⚠️ [PDF-SERVICE] Manuscript search failed (not indexed?):',
+          error
+        );
+      } finally {
+        outcomeManuscript.durationMs = Date.now() - t0;
+      }
+    }
+
     const sortedResults = allSourceResults
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
@@ -652,9 +787,24 @@ class RetrievalService {
       );
     }
 
+    // Séparation au retour : les appelants historiques reçoivent les trois
+    // corpus externes, le manuscrit sort à part.
+    const externalHits = inspectedResults.filter(
+      (r): r is MultiSourceSearchResult => r.sourceType !== 'manuscript'
+    );
+    const manuscriptHits = inspectedResults.filter(
+      (r): r is ManuscriptMappedSearchResult => r.sourceType === 'manuscript'
+    );
+
     return {
-      hits: inspectedResults,
-      outcomes: [outcomeSecondary, outcomePrimary, outcomeVault],
+      hits: externalHits,
+      manuscriptHits,
+      outcomes: [
+        outcomeSecondary,
+        outcomePrimary,
+        outcomeVault,
+        outcomeManuscript,
+      ],
     };
   }
 
@@ -665,9 +815,7 @@ class RetrievalService {
    * input list is returned unchanged; in `audit`/`block` mode chunks
    * flagged as injection attempts are filtered out.
    */
-  private inspectAndFilter(
-    results: MultiSourceSearchResult[]
-  ): MultiSourceSearchResult[] {
+  private inspectAndFilter(results: AnySearchResult[]): AnySearchResult[] {
     if (results.length === 0) return results;
     const logPath = this.workspaceRoot
       ? workspaceFiles(this.workspaceRoot).securityEventsLog
@@ -720,6 +868,41 @@ class RetrievalService {
         },
         similarity: h.score,
         sourceType: 'vault',
+      })
+    );
+  }
+
+  private async searchManuscript(
+    query: string,
+    options: { topK: number }
+  ): Promise<ManuscriptMappedSearchResult[]> {
+    const store = this.getManuscriptStore();
+    if (!store) return [];
+    const embedding = await this.getQueryEmbedding(query);
+    const hits = store.search(embedding, query, options.topK);
+    return hits.map(
+      (h): ManuscriptMappedSearchResult => ({
+        chunk: {
+          id: h.chunk.id,
+          content: h.chunk.content,
+          documentId: h.chunk.chapterId,
+          chunkIndex: h.chunk.chunkIndex,
+        },
+        document: {
+          id: h.chapter.id,
+          title: h.chapter.title || h.chapter.relativePath,
+          author: null,
+          bibtexKey: null,
+        },
+        source: {
+          kind: 'manuscript-chapter',
+          relativePath: h.chapter.relativePath,
+          chapterId: h.chapter.id,
+          sectionTitle: h.chunk.sectionTitle,
+          line: h.chunk.line,
+        },
+        similarity: h.score,
+        sourceType: 'manuscript',
       })
     );
   }

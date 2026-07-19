@@ -71,8 +71,8 @@ export class ModelDownloader {
       }
 
       return { valid: true };
-    } catch (error: any) {
-      return { valid: false, reason: `Error reading file: ${error.message}` };
+    } catch (error: unknown) {
+      return { valid: false, reason: `Error reading file: ${(error instanceof Error ? error.message : String(error))}` };
     }
   }
 
@@ -464,7 +464,7 @@ export class ModelDownloader {
       console.log(`✅ [DOWNLOAD] Complete in ${duration}s: ${destPath}`);
 
       return destPath;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Nettoyage en cas d'erreur ou d'annulation
       if (fs.existsSync(destPath)) {
         try {
@@ -474,7 +474,7 @@ export class ModelDownloader {
         }
       }
 
-      if (error.name === 'AbortError') {
+      if ((error instanceof Error ? error.name : "") === 'AbortError') {
         progressCallback({
           percent: 0,
           downloadedMB: 0,
@@ -494,7 +494,7 @@ export class ModelDownloader {
         speed: '-',
         eta: '-',
         status: 'error',
-        message: `Erreur: ${error.message}`,
+        message: `Erreur: ${(error instanceof Error ? error.message : String(error))}`,
       });
 
       console.error('❌ [DOWNLOAD] Error:', error);

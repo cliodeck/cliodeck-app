@@ -45,7 +45,7 @@ export function setupZoteroHandlers() {
       const result = await zoteroService.testConnection(validatedData);
       console.log('📤 IPC Response: zotero:test-connection', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:test-connection error:', error);
       return errorResponse(error);
     }
@@ -61,7 +61,7 @@ export function setupZoteroHandlers() {
         libraryCount: result.libraries?.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:list-libraries error:', error);
       return errorResponse(error);
     }
@@ -77,7 +77,7 @@ export function setupZoteroHandlers() {
         collectionCount: result.collections?.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:list-collections error:', error);
       return errorResponse(error);
     }
@@ -140,7 +140,7 @@ export function setupZoteroHandlers() {
         collectionCount: result.collections?.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:sync error:', error);
       return errorResponse(error);
     }
@@ -159,7 +159,7 @@ export function setupZoteroHandlers() {
         filePath: result.filePath,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:download-pdf error:', error);
       return errorResponse(error);
     }
@@ -179,7 +179,7 @@ export function setupZoteroHandlers() {
         enrichedCount: result.citations?.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:enrich-citations error:', error);
       return errorResponse(error);
     }
@@ -200,7 +200,7 @@ export function setupZoteroHandlers() {
         summary: result.summary,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:check-updates error:', error);
       return errorResponse(error);
     }
@@ -264,7 +264,7 @@ export function setupZoteroHandlers() {
         deletedCount: result.deletedCount,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ zotero:apply-updates error:', error);
       return errorResponse(error);
     }

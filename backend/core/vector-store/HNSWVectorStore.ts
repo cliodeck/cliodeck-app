@@ -281,8 +281,8 @@ export class HNSWVectorStore {
         if (idx < 3 || idx === chunks.length - 1) {
           console.log(`📥 [HNSW] Point ${idx + 1} added successfully`);
         }
-      } catch (error: any) {
-        console.warn(`⚠️  Failed to add chunk ${chunk.id}: ${error.message}`);
+      } catch (error: unknown) {
+        console.warn(`⚠️  Failed to add chunk ${chunk.id}: ${(error instanceof Error ? error.message : String(error))}`);
         skippedCount++;
       }
     }

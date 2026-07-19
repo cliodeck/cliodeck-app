@@ -72,7 +72,9 @@
   justify-content: center;
   width: 48px;
   height: 48px;
-  background: rgba(var(--primary-rgb), 0.1);
+  /* `rgba(var(--token), .1)` attend un triplet RVB, pas une couleur :
+     la déclaration était invalide et le fond ne s'affichait pas. */
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   border-radius: 8px;
 }
 

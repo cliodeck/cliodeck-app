@@ -26,7 +26,7 @@ export function setupPDFHandlers() {
       const metadata = await pdfService.extractPDFMetadata(filePath);
       logger.info('ipc', 'pdf:extractMetadata:response', { metadata });
       return successResponse({ metadata });
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('ipc', 'pdf:extractMetadata', { error: error instanceof Error ? error.message : String(error) });
       return errorResponse(error);
     }
@@ -83,7 +83,7 @@ export function setupPDFHandlers() {
 
       logger.info('ipc', 'pdf:index:response', { durationMs });
       return successResponse({ document });
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('ipc', 'pdf:index', { error: error instanceof Error ? error.message : String(error) });
       return errorResponse(error);
     }
@@ -101,7 +101,7 @@ export function setupPDFHandlers() {
       const results = await pdfService.search(validatedData.query, validatedData.options);
       logger.info('ipc', 'pdf:search:response', { resultCount: results.length });
       return successResponse({ results });
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('ipc', 'pdf:search', { error: error instanceof Error ? error.message : String(error) });
       return { ...errorResponse(error), results: [] };
     }
@@ -115,7 +115,7 @@ export function setupPDFHandlers() {
 
       await pdfService.deleteDocument(documentId);
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:delete error:', error);
       return errorResponse(error);
     }
@@ -130,7 +130,7 @@ export function setupPDFHandlers() {
       pdfService.purgeAllData();
       console.log('📤 IPC Response: pdf:purge - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:purge error:', error);
       return errorResponse(error);
     }
@@ -145,7 +145,7 @@ export function setupPDFHandlers() {
       pdfService.cleanOrphanedChunks();
       console.log('📤 IPC Response: pdf:clean-orphaned-chunks - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:clean-orphaned-chunks error:', error);
       return errorResponse(error);
     }
@@ -160,7 +160,7 @@ export function setupPDFHandlers() {
       const documents = await pdfService.getAllDocuments();
       console.log(`📤 IPC Response: pdf:get-all { documentCount: ${documents.length} }`);
       return successResponse({ documents });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:get-all error:', error);
       return { ...errorResponse(error), documents: [] };
     }
@@ -179,7 +179,7 @@ export function setupPDFHandlers() {
       }
       console.log(`📤 IPC Response: pdf:get-document { title: ${document.title} }`);
       return successResponse({ document });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:get-document error:', error);
       return { ...errorResponse(error), document: null };
     }
@@ -210,7 +210,7 @@ export function setupPDFHandlers() {
         databasePath: stats.databasePath,
       };
       return successResponse({ statistics });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:get-statistics error:', error);
       return {
         ...errorResponse(error),
@@ -233,7 +233,7 @@ export function setupPDFHandlers() {
         totalModified: result.totalModified
       });
       return successResponse(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ pdf:check-modified-pdfs error:', error);
       return errorResponse(error);
     }

@@ -12,11 +12,17 @@
  * (provider registry, `.cliohints`, MCP tools, retrieval adapter).
  */
 
+import { BrowserWindow, dialog } from 'electron';
 import type { WebContents } from 'electron';
 import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
+import { manuscriptIndexService } from './manuscript-index-service.js';
 import { projectManager } from './project-manager.js';
-import { retrievalService, type MultiSourceSearchResult } from './retrieval-service.js';
+import {
+  retrievalService,
+  type ManuscriptMappedSearchResult,
+  type MultiSourceSearchResult,
+} from './retrieval-service.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
 import { type RAGExplanation } from '../../../backend/types/chat-source.js';
@@ -31,12 +37,17 @@ import { modeService } from './mode-service.js';
 import { historyService } from './history-service.js';
 import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
+import {
+  decideCloudConsent,
+  type ConsentPrompt,
+} from '../../../backend/security/cloud-consent.js';
 import { appendSecurityEvent } from '../../../backend/security/source-inspector.js';
 import type { SecurityEvent } from '../../../backend/security/events.js';
 
 export interface BrainstormSource {
-  kind: 'archive' | 'bibliographie' | 'note';
-  sourceType: 'primary' | 'secondary' | 'vault';
+  /** `manuscrit` : extrait du texte de l'auteur, pas d'une source. */
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
   title: string;
   snippet: string;
   similarity: number;
@@ -48,6 +59,8 @@ export interface BrainstormSource {
   itemId?: string;
   imagePath?: string;
   notePath?: string;
+  /** Manuscrit : chapitre d'origine. */
+  chapterId?: string;
   lineNumber?: number;
 }
 
@@ -99,6 +112,31 @@ export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource
 
     return base;
   });
+}
+
+/**
+ * Extraits du manuscrit → sources affichables. Le corpus manuscrit sort par
+ * un canal séparé de `RetrievalService` (il ne partage pas la forme des
+ * documents externes) ; ici il rejoint les autres, avec un `kind` distinct :
+ * l'auteur doit voir quand une réponse s'appuie sur son propre texte plutôt
+ * que sur une source.
+ */
+export function manuscriptHitsToSources(
+  hits: ManuscriptMappedSearchResult[]
+): BrainstormSource[] {
+  return hits.map((h) => ({
+    kind: 'manuscrit' as const,
+    sourceType: 'manuscript' as const,
+    title: h.source.sectionTitle
+      ? `${h.document.title ?? h.source.relativePath} — ${h.source.sectionTitle}`
+      : (h.document.title ?? h.source.relativePath),
+    snippet: h.chunk.content.replace(/\s+/g, ' ').slice(0, 400),
+    similarity: h.similarity,
+    relativePath: h.source.relativePath,
+    notePath: h.source.relativePath,
+    lineNumber: h.source.line,
+    chapterId: h.source.chapterId,
+  }));
 }
 import {
   loadWorkspaceHints,
@@ -259,6 +297,19 @@ class FusionChatService {
     return sessionId;
   }
 
+  /**
+   * Fenêtre de dialogue pour le consentement distant, ou `null` quand il n'y
+   * a pas d'interface (tests, headless) — auquel cas la politique est le
+   * refus, cf. `decideCloudConsent`.
+   */
+  private consentPrompt(): ConsentPrompt | null {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    if (!win) return null;
+    return {
+      showMessageBox: (options) => dialog.showMessageBox(win, options as never),
+    };
+  }
+
   cancel(sessionId: string): boolean {
     const c = this.active.get(sessionId);
     if (!c) return false;
@@ -297,8 +348,9 @@ class FusionChatService {
 
     let registry;
     let activeModel: string;
+    let cfg: ReturnType<typeof configManager.getLLMConfig>;
     try {
-      const cfg = configManager.getLLMConfig();
+      cfg = configManager.getLLMConfig();
       registry = createRegistryFromClioDeckConfig(cfg);
       activeModel = args.opts?.model ?? resolveActiveChatModel(cfg);
     } catch (e) {
@@ -306,6 +358,41 @@ class FusionChatService {
         { delta: '', done: true, finishReason: 'error' },
         {
           code: 'config_error',
+          message: e instanceof Error ? e.message : String(e),
+        }
+      );
+      return;
+    }
+
+    // --- Consentement d'envoi distant (ADR 0005) -------------------------
+    // La garde vit ici, et non plus seulement dans le renderer : le main est
+    // le seul à savoir quel fournisseur va réellement être appelé. Une
+    // nouvelle surface d'envoi qui oublierait le dialogue est arrêtée ici.
+    // Sans fenêtre (headless), on refuse plutôt que de supposer.
+    try {
+      const decision = await decideCloudConsent(
+        { backend: cfg.backend, ollamaURL: cfg.ollamaURL },
+        this.consentPrompt()
+      );
+      if (decision.allowed === false) {
+        const { providerName, reason } = decision;
+        const message =
+          reason === 'no-interface'
+            ? `Envoi vers ${providerName} refusé : aucun consentement accordé pour cette session.`
+            : `Envoi vers ${providerName} annulé.`;
+        await registry.dispose().catch(() => undefined);
+        sendChunk(
+          { delta: '', done: true, finishReason: 'error' },
+          { code: 'cloud_consent_required', message }
+        );
+        return;
+      }
+    } catch (e) {
+      await registry.dispose().catch(() => undefined);
+      sendChunk(
+        { delta: '', done: true, finishReason: 'error' },
+        {
+          code: 'cloud_consent_error',
           message: e instanceof Error ? e.message : String(e),
         }
       );
@@ -426,18 +513,24 @@ class FusionChatService {
             // `resolveRetrievalArgs`). `retrieval-service` natively
             // short-circuits `sourceType === 'vault'` to Obsidian only.
             const { sourceType, includeVault } = resolveRetrievalArgs(options);
-            const { hits, stats } = await retrievalService.searchWithStats({
+            // Le manuscrit est un quatrième corpus : ce que l'auteur a déjà
+            // écrit. Désactivable par `rag.indexManuscript`.
+            const includeManuscript = manuscriptIndexService.isEnabled();
+            const { hits, manuscriptHits, stats } = await retrievalService.searchWithStats({
               query: lastUser,
               sourceType,
               includeVault,
+              includeManuscript,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
               topK: options?.topK,
             });
-            if (hits.length === 0) return null;
+            const ownHits = manuscriptHits ?? [];
+            if (hits.length === 0 && ownHits.length === 0) return null;
             return {
-              systemPrompt: formatContextAsSystemPrompt(hits),
-              sources: hitsToSources(hits),
+              systemPrompt:
+                formatContextAsSystemPrompt(hits) + formatManuscriptContext(ownHits, hits.length),
+              sources: [...hitsToSources(hits), ...manuscriptHitsToSources(ownHits)],
               explanation: {
                 search: stats.search,
                 timing: stats.timing,
@@ -673,6 +766,36 @@ export const fusionChatService = new FusionChatService();
  * Snippet length bumped from 800 → 1500 chars so a single chunk has
  * enough prose for the model to ground a definition.
  */
+/**
+ * Bloc de contexte pour les extraits du manuscrit. Séparé de celui des
+ * sources : le modèle doit savoir qu'il lit le texte de l'auteur — s'y
+ * appuyer comme sur une source ferait passer une hypothèse de travail pour
+ * une preuve. La numérotation continue celle des sources.
+ */
+function formatManuscriptContext(
+  hits: ManuscriptMappedSearchResult[],
+  offset: number
+): string {
+  if (hits.length === 0) return '';
+  const SNIPPET_CHARS = 1500;
+  const lines: string[] = [
+    '',
+    "Extraits du MANUSCRIT EN COURS (texte de l'auteur, pas une source).",
+    "Tu peux t'y référer pour rappeler ce qui a déjà été écrit, signaler une répétition ou une contradiction. Ne le cite JAMAIS comme une preuve : ce n'est pas une source.",
+    '',
+  ];
+  hits.forEach((h, i) => {
+    const where = h.source.sectionTitle
+      ? `${h.document.title ?? h.source.relativePath} — ${h.source.sectionTitle}`
+      : (h.document.title ?? h.source.relativePath);
+    const snippet = h.chunk.content.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHARS);
+    lines.push(`[M${offset + i + 1}] ${where}`);
+    lines.push(`EXTRAIT : ${snippet}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
 function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
   const SNIPPET_CHARS = 1500;
   const DOC_HEADER_RE = /^\[Doc:[^\]]*\]\s*/;

@@ -61,7 +61,7 @@ export function setupFilesystemHandlers() {
 
       logger.info('ipc', 'fs:read-directory:response', { itemCount: sorted.length });
       return successResponse({ items: sorted });
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('ipc', 'fs:read-directory', { error: error instanceof Error ? error.message : String(error) });
       return { ...errorResponse(error), items: [] };
     }
@@ -91,7 +91,7 @@ export function setupFilesystemHandlers() {
       const content = await readFile(validatedPath, 'utf-8');
       logger.info('ipc', 'fs:read-file:response', { contentLength: content.length });
       return content;
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('ipc', 'fs:read-file', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -106,7 +106,7 @@ export function setupFilesystemHandlers() {
       await writeFile(validatedPath, content, 'utf-8');
       console.log('📤 IPC Response: fs:write-file - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ fs:write-file error:', error);
       throw error;
     }
@@ -122,7 +122,7 @@ export function setupFilesystemHandlers() {
       await copyFile(validatedSource, validatedTarget);
       console.log('📤 IPC Response: fs:copy-file - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ fs:copy-file error:', error);
       throw error;
     }
@@ -178,7 +178,7 @@ export function setupFilesystemHandlers() {
       await shell.openExternal(url);
       console.log('📤 IPC Response: shell:open-external - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ shell:open-external error:', error);
       return errorResponse(error);
     }
@@ -199,7 +199,7 @@ export function setupFilesystemHandlers() {
       }
       console.log('📤 IPC Response: shell:open-path - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ shell:open-path error:', error);
       return errorResponse(error);
     }

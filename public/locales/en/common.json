@@ -1526,7 +1526,13 @@
     "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}",
     "usageJournalBadge_one": "{{count}} session to annotate",
     "usageJournalBadge_other": "{{count}} sessions to annotate",
-    "usageJournalTooltip": "Substantial AI usage sessions without a decision — click to open the journal (Cmd/Ctrl+J)"
+    "usageJournalTooltip": "Substantial AI usage sessions without a decision — click to open the journal (Cmd/Ctrl+J)",
+    "savedAt": "Saved at {{time}}",
+    "savedTooltip": "Last saved at {{time}}",
+    "unsaved": "Unsaved changes",
+    "unsavedTooltip": "The document has changes that are not written to disk.",
+    "notSavedYet": "Not saved",
+    "notSavedYetTooltip": "This document has not been saved since it was opened."
   },
   "security": {
     "revokeTitle": "Key revocation",
@@ -1660,5 +1666,17 @@
     "allValid": "All citations are valid ({{count}} keys checked).",
     "missing": "{{count}} key(s) missing from the bibliography:",
     "checkError": "Could not check citations."
+  },
+  "search": {
+    "title": "Search the book",
+    "placeholder": "Term to search across the whole manuscript",
+    "run": "Run search",
+    "searching": "Searching…",
+    "error": "Search failed. Some chapters may not have been readable.",
+    "noResults": "No occurrence of “{{query}}” in the manuscript.",
+    "summary_one": "{{count}} occurrence in {{chapters}} chapter",
+    "summary_other": "{{count}} occurrences across {{chapters}} chapters",
+    "goToLine": "Go to line {{line}}",
+    "truncated": "Too many occurrences in this chapter: only the first ones are shown."
   }
 }

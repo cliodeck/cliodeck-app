@@ -175,10 +175,95 @@
   --scrollbar-track: var(--bg-app);
   --scrollbar-thumb: #424242;
   --scrollbar-thumb-hover: #4e4e4e;
+
+}
+
+
+/* Les alias ci-dessous sont déclarés sur `body`, et non sur `:root` :
+   une propriété personnalisée se résout sur l'élément qui la DÉCLARE.
+   Posée sur `html`, `--primary-color: var(--color-accent)` prendrait la
+   valeur sombre de `:root` et ignorerait `body.theme-light` — le panneau
+   Similarité restait sombre en thème clair (constaté à la vérification). */
+body {
+  /* === ALIAS DE COMPATIBILITÉ ===
+     Une partie des feuilles de style référence des noms de tokens qui
+     n'ont jamais existé : `var(--primary-color)`, `var(--bg-secondary)`,
+     `var(--accent-color)`… 282 références réparties sur 48 noms.
+     Conséquences constatées (audit item 23) : là où un repli était fourni,
+     l'élément ignorait le thème et gardait sa couleur en dur ; là où il
+     n'y en avait pas, la propriété ne faisait RIEN — les fonds de modale
+     (`--overlay-bg`) étaient transparents et `--shadow-focus` inexistant.
+
+     Ces alias pointent le vocabulaire parallèle vers les tokens réels :
+     tout suit désormais le thème, y compris en clair, puisque
+     `body.theme-light` surcharge les cibles. Le vocabulaire canonique
+     reste celui déclaré au-dessus ; ces alias sont une passerelle, pas une
+     invitation à en créer de nouveaux. */
+
+  /* Accent */
+  --primary-color: var(--color-accent);
+  --primary-hover: var(--color-accent-hover);
+  --primary-dark: var(--color-accent-active);
+  --accent-color: var(--color-accent);
+  --accent-primary: var(--color-accent);
+  --accent-color-hover: var(--color-accent-hover);
+  --accent-hover: var(--color-accent-hover);
+  --color-accent-light: var(--color-accent-bg);
+
+  /* Fonds */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-panel);
+  --bg-tertiary: var(--bg-card);
+  --bg-sidebar: var(--bg-panel);
+  --bg-hover: var(--bg-panel-hover);
+  --hover-bg: var(--bg-panel-hover);
+  --selected-bg: var(--bg-panel-hover);
+  --surface: var(--bg-card);
+  --surface-variant: var(--bg-card-hover);
+  --surface-hover: var(--bg-card-hover);
+  --card-bg: var(--bg-card);
+  --bg-btn-secondary: var(--bg-input);
+  --tag-bg: var(--bg-input);
+  --notification-bg: var(--bg-card);
+  --color-bg-primary: var(--bg-app);
+  --color-bg-secondary: var(--bg-panel);
+
+  /* Texte et bordures */
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border: var(--border-color);
+  --border-hover: var(--border-color-hover);
+  --notification-border: var(--border-color);
+
+  /* Sémantiques */
+  --warning-color: var(--color-warning);
+  --warning-dark: var(--color-warning);
+  --warning-bg: var(--color-warning-bg);
+  --color-warning-light: var(--color-warning-bg);
+  --color-warning-text: var(--color-warning);
+  --error-color: var(--color-danger);
+  --error-dark: var(--color-danger-hover);
+  --error-bg: var(--color-danger-bg);
+  --color-error: var(--color-danger);
+  --color-error-light: var(--color-danger-bg);
+  --success-color: var(--color-success);
+  --success-bg: var(--color-success-bg);
+  --color-success-light: var(--color-success-bg);
+
+  /* Divers — ces trois-là ne faisaient rien du tout faute de définition. */
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+  --shadow-focus: 0 0 0 2px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --radius-xs: var(--radius-sm);
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --mono-font: var(--font-mono);
 }
 
 /* Light theme - Override dark theme colors */
 body.theme-light {
+  /* Voile de modale : plus léger sur fond clair (l'alias ci-dessus vaut
+     pour le thème sombre). */
+  --overlay-bg: rgba(0, 0, 0, 0.35);
+
   /* Accent colors - slightly adjusted for better visibility on light background */
   --color-accent: #0078d4;
   --color-accent-hover: #106ebe;

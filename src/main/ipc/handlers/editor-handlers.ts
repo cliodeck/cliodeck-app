@@ -4,6 +4,8 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
 import { projectManager } from '../../services/project-manager.js';
+import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
+import { retrievalService } from '../../services/retrieval-service.js';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
@@ -49,7 +51,7 @@ export function setupEditorHandlers() {
       const content = await readFile(filePath, 'utf-8');
       console.log('📤 IPC Response: editor:load-file', { contentLength: content.length });
       return successResponse({ content });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ editor:load-file error:', error);
       return errorResponse(error);
     }
@@ -99,9 +101,27 @@ export function setupEditorHandlers() {
           );
         }
 
+        // Indexation du manuscrit : APRÈS écriture, donc le disque fait foi.
+        // De fond et best-effort — pas de `await` : l'indexation ne doit
+        // jamais retarder une sauvegarde, et son échec (Ollama éteint,
+        // corpus désactivé) n'a aucune conséquence visible.
+        void (async () => {
+          try {
+            if (!manuscriptIndexService.isEnabled()) return;
+            const root = projectManager.getCurrentProjectPath();
+            if (!root) return;
+            const embedder = retrievalService.getEmbeddingProvider();
+            if (!embedder) return;
+            manuscriptIndexService.configure(root);
+            await manuscriptIndexService.index(embedder);
+          } catch (error: unknown) {
+            console.warn('⚠️ Indexation du manuscrit ignorée:', error);
+          }
+        })();
+
         console.log('📤 IPC Response: editor:save-file - success');
         return successResponse();
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ editor:save-file error:', error);
         return errorResponse(error);
       }

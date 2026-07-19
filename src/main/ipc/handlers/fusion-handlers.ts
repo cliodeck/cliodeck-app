@@ -26,6 +26,16 @@ import { fusionChatService } from '../../services/fusion-chat-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
 import { secureStorage } from '../../services/secure-storage.js';
 import {
+  classifyProvider,
+  cloudConsent,
+} from '../../../../backend/security/cloud-consent.js';
+import {
+  validate,
+  FusionChatStartSchema,
+  FusionVaultIndexSchema,
+  FusionMcpServerPatchSchema,
+} from '../utils/validation.js';
+import {
   loadWorkspaceHints,
   writeWorkspaceHints,
 } from '../../../../backend/core/hints/loader.js';
@@ -288,25 +298,19 @@ export function setupFusionHandlers(): void {
   ipcMain.handle(
     'fusion:chat:start',
     async (event, rawMessages: unknown, rawOpts: unknown) => {
-      if (!Array.isArray(rawMessages)) {
-        return errorResponse('messages must be an array');
+      // Forme validée avant toute traversée : `messages` était castée sans
+      // regarder son contenu, et les options passaient telles quelles.
+      let parsed;
+      try {
+        parsed = validate(FusionChatStartSchema, {
+          messages: rawMessages,
+          opts: rawOpts ?? undefined,
+        });
+      } catch (e) {
+        return errorResponse(e as Error);
       }
-      const messages = rawMessages as ChatMessage[];
-      const rawOptsObj = (rawOpts ?? {}) as {
-        model?: string;
-        temperature?: number;
-        maxTokens?: number;
-        numCtx?: number;
-        retrievalOptions?: {
-          documentIds?: string[];
-          collectionKeys?: string[];
-          sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
-          includeVault?: boolean;
-          topK?: number;
-        };
-        systemPrompt?: { modeId?: string; customText?: string };
-        enabledTools?: string[];
-      };
+      const messages = parsed.messages as ChatMessage[];
+      const rawOptsObj = parsed.opts ?? {};
       // Clamp `numCtx` defensively — Ollama silently ignores absurd
       // values, but the validation here surfaces user-config errors
       // ("0 = use default" stays as undefined, < 512 is too small for
@@ -472,26 +476,6 @@ export function setupFusionHandlers(): void {
     }
   });
 
-  ipcMain.handle(
-    'fusion:mcp:call-tool',
-    async (
-      _e,
-      rawName: unknown,
-      rawTool: unknown,
-      rawArgs: unknown
-    ) => {
-      if (typeof rawName !== 'string' || typeof rawTool !== 'string') {
-        return errorResponse('name and tool must be strings');
-      }
-      const args =
-        rawArgs && typeof rawArgs === 'object'
-          ? (rawArgs as Record<string, unknown>)
-          : {};
-      const res = await mcpClientsService.callTool(rawName, rawTool, args);
-      return successResponse(res);
-    }
-  );
-
   // Broadcast manager events to every renderer so all open windows stay
   // in sync when a client changes state.
   mcpClientsService.subscribe((event) => {
@@ -548,10 +532,12 @@ export function setupFusionHandlers(): void {
     async (_e, rawPatch: unknown) => {
       const root = projectManager.getCurrentProjectPath();
       if (!root) return noProject();
-      if (!rawPatch || typeof rawPatch !== 'object') {
-        return errorResponse('patch must be an object');
+      let patch: { enabled?: boolean; serverName?: string };
+      try {
+        patch = validate(FusionMcpServerPatchSchema, rawPatch);
+      } catch (e) {
+        return errorResponse(e as Error);
       }
-      const patch = rawPatch as { enabled?: unknown; serverName?: unknown };
       try {
         const cfg = await readOrInitWorkspaceConfig(root);
         const current =
@@ -652,7 +638,12 @@ export function setupFusionHandlers(): void {
   ipcMain.handle('fusion:vault:index', async (event, rawOpts: unknown) => {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
-    const opts = (rawOpts ?? {}) as { force?: boolean };
+    let opts: { force?: boolean };
+    try {
+      opts = validate(FusionVaultIndexSchema, rawOpts ?? undefined) ?? {};
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
       const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
@@ -835,6 +826,43 @@ export function setupFusionHandlers(): void {
     } catch (e) {
       return errorResponse(e as Error);
     }
+  });
+
+  // MARK: - cloud consent (ADR 0005)
+  // La décision et l'état vivent dans le main (backend/security/cloud-consent).
+  // Ces canaux existent pour que le dialogue du renderer, quand il a déjà
+  // obtenu l'accord de l'utilisateur, le fasse savoir au main — sans quoi
+  // celui-ci afficherait son propre dialogue natif de secours.
+  ipcMain.handle('fusion:consent:status', async () => {
+    const cfg = configManager.getLLMConfig();
+    const { isCloud, providerName } = classifyProvider({
+      backend: cfg.backend,
+      ollamaURL: cfg.ollamaURL,
+    });
+    return successResponse({
+      isCloud,
+      providerName,
+      granted: cloudConsent.isGranted(),
+      consentedProvider: cloudConsent.consentedProvider(),
+    });
+  });
+
+  ipcMain.handle('fusion:consent:grant', async (_e, rawProvider: unknown) => {
+    const cfg = configManager.getLLMConfig();
+    const { providerName } = classifyProvider({
+      backend: cfg.backend,
+      ollamaURL: cfg.ollamaURL,
+    });
+    // Le nom fourni par le renderer n'est qu'un libellé d'affichage : la
+    // classification qui fait foi est celle du main.
+    const label = typeof rawProvider === 'string' && rawProvider ? rawProvider : providerName;
+    cloudConsent.grant(label);
+    return successResponse({ granted: true, consentedProvider: label });
+  });
+
+  ipcMain.handle('fusion:consent:revoke', async () => {
+    cloudConsent.revoke();
+    return successResponse({ granted: false });
   });
 
   // MARK: - credential revocation (ADR 0006)

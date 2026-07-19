@@ -3,8 +3,8 @@
  */
 
 .similarity-card {
-  background: var(--bg-secondary, #1e1e1e);
-  border: 1px solid var(--border-color, #333);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 10px 12px;
 }
@@ -25,7 +25,7 @@
 .similarity-card-title {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-primary, #e0e0e0);
+  color: var(--text-primary);
   line-height: 1.3;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -36,7 +36,7 @@
 
 .similarity-card-authors {
   font-size: 11px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -51,18 +51,18 @@
 }
 
 .similarity-card-score.similarity-high {
-  background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
+  background: color-mix(in srgb, var(--color-success) 20%, transparent);
+  color: var(--color-success);
 }
 
 .similarity-card-score.similarity-medium {
-  background: rgba(234, 179, 8, 0.2);
-  color: #eab308;
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  color: var(--color-warning);
 }
 
 .similarity-card-score.similarity-low {
-  background: rgba(100, 100, 100, 0.2);
-  color: var(--text-secondary, #888);
+  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
+  color: var(--text-secondary);
 }
 
 /* Preview toggle */
@@ -74,7 +74,7 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -82,13 +82,13 @@
 }
 
 .similarity-card-preview-toggle:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.05));
-  color: var(--text-primary, #e0e0e0);
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 /* Preview content */
 .similarity-card-preview {
-  background: var(--bg-tertiary, #252525);
+  background: var(--bg-tertiary);
   border-radius: 4px;
   padding: 10px;
   margin-bottom: 10px;
@@ -96,7 +96,7 @@
 
 .similarity-card-preview-text {
   font-size: 11px;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-secondary);
   line-height: 1.5;
   margin: 0;
 }
@@ -105,7 +105,7 @@
   display: inline-block;
   margin-top: 8px;
   font-size: 10px;
-  color: var(--text-secondary, #666);
+  color: var(--text-secondary);
 }
 
 /* Actions */
@@ -119,19 +119,19 @@
   align-items: center;
   gap: 4px;
   padding: 6px 10px;
-  background: var(--bg-tertiary, #252525);
-  border: 1px solid var(--border-color, #333);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .similarity-card-action:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
-  border-color: var(--accent-color, #4a9eff);
-  color: var(--accent-color, #4a9eff);
+  background: var(--hover-bg);
+  border-color: var(--accent-color, var(--color-accent));
+  color: var(--accent-color, var(--color-accent));
 }
 
 /* Source type badge */
@@ -149,22 +149,22 @@
 }
 
 .similarity-card-badge.badge-secondary {
-  background: rgba(74, 158, 255, 0.15);
-  color: #4a9eff;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
 }
 
 .similarity-card-badge.badge-primary {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
 }
 
 /* Primary source specific styling */
 .similarity-card.primary-source {
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--color-warning);
 }
 
 .similarity-card.secondary-source {
-  border-left: 3px solid #4a9eff;
+  border-left: 3px solid var(--color-accent);
 }
 
 /* Primary source metadata */
@@ -174,7 +174,7 @@
   gap: 8px;
   margin-top: 4px;
   font-size: 10px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
 }
 
 .similarity-card-archive {

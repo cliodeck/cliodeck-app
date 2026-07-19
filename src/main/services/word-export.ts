@@ -580,9 +580,9 @@ export class WordExportService {
 
       console.log('✅ Word document exported successfully with pandoc:', outputPath);
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Pandoc Word export failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     } finally {
       // Un seul point de nettoyage : le manuscrit intermédiaire ne survit ni
       // au succès, ni à l'échec, ni à un futur retour anticipé.
@@ -995,9 +995,9 @@ export class WordExportService {
 
       console.log('✅ Word document exported successfully:', outputPath);
       return { success: true, outputPath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Word export failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 

@@ -126,6 +126,15 @@ export interface RAGConfig {
   /** Include the workspace Obsidian vault (if indexed) in the retrieval pipeline. */
   includeObsidianVault?: boolean;
 
+  // === Manuscrit comme corpus RAG (item 25 des audits) ===
+  /**
+   * Indexer le texte que l'auteur écrit lui-même (chapitres du livre, ou
+   * `document.md`), pour que l'assistant puisse répondre à « qu'ai-je déjà
+   * écrit sur X ? ». Activé par défaut ; mettre à `false` désactive
+   * l'indexation ET la recherche dans le manuscrit.
+   */
+  indexManuscript?: boolean;
+
   // === Query expansion (A20) ===
   /** User-defined FR→EN term dictionary merged on top of built-in defaults. */
   queryExpansionDictionary?: Record<string, string[]>;

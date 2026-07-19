@@ -77,7 +77,7 @@ export function setupProjectHandlers() {
 
       console.log('📤 IPC Response: project:create', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:create error:', error);
       return errorResponse(error);
     }
@@ -93,7 +93,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.getProjectMetadata(path);
       console.log('📤 IPC Response: project:get-metadata', result.success ? 'success' : 'failed');
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:get-metadata error:', error);
       return errorResponse(error);
     }
@@ -130,7 +130,7 @@ export function setupProjectHandlers() {
 
       console.log('📤 IPC Response: project:load', result.success ? 'success' : 'failed');
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:load error:', error);
       return errorResponse(error);
     }
@@ -156,7 +156,7 @@ export function setupProjectHandlers() {
 
       console.log('📤 IPC Response: project:close - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:close error:', error);
       return errorResponse(error);
     }
@@ -170,7 +170,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.saveProject(validatedData);
       console.log('📤 IPC Response: project:save', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:save error:', error);
       return errorResponse(error);
     }
@@ -189,9 +189,9 @@ export function setupProjectHandlers() {
         unattached: result.unattached.length,
       });
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:get-chapters error:', error);
-      return { success: false, chapters: [], unattached: [], error: error.message };
+      return { ...errorResponse(error), chapters: [], unattached: [] };
     }
   });
 
@@ -202,7 +202,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.saveChapters(data);
       console.log('📤 IPC Response: project:save-chapters', result.success);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:save-chapters error:', error);
       return errorResponse(error);
     }
@@ -213,7 +213,7 @@ export function setupProjectHandlers() {
       const data = validate(ProjectReadChaptersSchema, rawData);
       const result = await projectManager.readChapters(data);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:read-chapters error:', error);
       return errorResponse(error);
     }
@@ -226,7 +226,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.createChapter(data);
       console.log('📤 IPC Response: project:create-chapter', result.success);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:create-chapter error:', error);
       return errorResponse(error);
     }
@@ -239,7 +239,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.saveBookSettings(data);
       console.log('📤 IPC Response: project:save-book-settings', result.success);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:save-book-settings error:', error);
       return errorResponse(error);
     }
@@ -252,7 +252,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.setBibliographySource(validatedData);
       console.log('📤 IPC Response: project:set-bibliography-source', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:set-bibliography-source error:', error);
       return errorResponse(error);
     }
@@ -265,7 +265,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.setCSLPath(data);
       console.log('📤 IPC Response: project:set-csl-path', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:set-csl-path error:', error);
       return errorResponse(error);
     }
@@ -278,7 +278,7 @@ export function setupProjectHandlers() {
       const config = await projectManager.getConfig(projectPath);
       console.log('📤 IPC Response: project:get-config', config ? 'success' : 'not found');
       return config;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:get-config error:', error);
       return null;
     }
@@ -291,7 +291,7 @@ export function setupProjectHandlers() {
       const result = await projectManager.updateConfig(projectPath, updates);
       console.log('📤 IPC Response: project:update-config', result);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ project:update-config error:', error);
       return errorResponse(error);
     }
