@@ -100,7 +100,7 @@ propriété sur la vue CM6, ouverture de projet résiliente à l'échec des
 chapitres. Branche `fix/file-switch-data-loss`, 3 tests de régression,
 vérifié dans l'app.
 
-### Phase 1 — Modèle et manifeste
+### Phase 1 — Modèle et manifeste *(fait — `ceffab7`)*
 
 - Type `Chapter` **partagé** (`src/shared/` ou `backend/types/`), importé
   par le main et le renderer ; suppression du doublon.
@@ -127,7 +127,7 @@ cohérent ; un fichier ajouté à la main apparaît « non rattaché » et peut
 être rattaché ; les réglages survivent à une fermeture/réouverture ; tests
 de réconciliation (manifeste vide, fichier orphelin, fichier manquant).
 
-### Phase 2 — Écriture multi-chapitres
+### Phase 2 — Écriture multi-chapitres *(fait — `04c62da`)*
 
 - **Panneau chapitres** dans `EditorPanel` : liste ordonnée, création,
   renommage, suppression (fichier conservé, sortie du manifeste),
@@ -146,7 +146,7 @@ annulation, curseur), réordonner, fermer/rouvrir le projet et retrouver
 l'état ; aucun fichier écrasé — test de non-régression du scénario Phase 0
 étendu à N chapitres.
 
-### Phase 3 — Vue d'ensemble du manuscrit
+### Phase 3 — Vue d'ensemble du manuscrit *(fait — `3a3add5` ; recherche multi-chapitres reportée)*
 
 - **Plan (outline)** : `parseOutline(tree)` sur les titres — jumeau de
   `parseSlides` — et panneau de navigation. Deux niveaux : chapitres
