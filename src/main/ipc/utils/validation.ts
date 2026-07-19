@@ -8,7 +8,10 @@ export const ProjectCreateSchema = z.object({
   name: z.string().min(1, 'Project name is required'),
   type: z.enum(['article', 'book', 'presentation']).optional(),
   path: z.string().min(1, 'Project path is required'),
-  chapters: z.array(z.string()).optional(),
+  // Pas de `chapters` ici : le manifeste d'un livre est construit par
+  // `createProject` puis géré par ses propres canaux (`ChapterSchema`).
+  // Le champ qui traînait déclarait un `string[]`, incompatible avec le
+  // type `Chapter` — vestige d'avant le chantier livre, jamais émis.
   bibliographySource: z
     .object({
       type: z.enum(['file', 'zotero']),
@@ -623,6 +626,12 @@ export const ProposalAdjudicationSchema = z.object({
   proposed: z.string().max(100_000).optional(),
   final: z.string().max(100_000).optional(),
   rejectionNote: z.string().max(2_000).optional(),
+  /**
+   * Document où l'adjudication a eu lieu — un chapitre, dans un livre.
+   * Journal de recherche UNIQUEMENT : le journal d'usage IA n'en reçoit
+   * jamais (règle de granularité, docs/INSTRUCTIONS_journal-usage-ia.md).
+   */
+  filePath: z.string().max(4_096).optional(),
 });
 
 export const UsageSaveDecisionSchema = z.object({

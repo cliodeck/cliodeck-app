@@ -8,7 +8,9 @@
  *     l'événement complet, contenus inclus ;
  *   - **journal d'usage IA** (`proposal_adjudications`, journal.db) :
  *     {decision, category, model, task, at, workspace} — RIEN d'autre, le
- *     type `RecordAdjudicationInput` ne peut pas transporter de contenu ;
+ *     type `RecordAdjudicationInput` ne peut pas transporter de contenu,
+ *     ni le chemin du document (le `filePath` reçu s'arrête au journal de
+ *     recherche : un chemin de chapitre est une donnée de manuscrit) ;
  *   - la note de rejet échantillonnée devient un **brouillon** de la couche
  *     décisionnelle (`decision_drafts`), jamais une décision.
  *
@@ -40,6 +42,7 @@ export function setupProposalHandlers() {
         proposedText: event.proposed,
         finalText: event.final,
         rejectionNote: event.rejectionNote,
+        filePath: event.filePath,
       });
 
       // 2. Journal d'usage IA — agrégats décisionnels sans contenu.

@@ -1,5 +1,9 @@
 # Plan d'implémentation — chapitres multi-fichiers (projets « livre »)
 
+> **Plan exécuté (phases 0 à 5, juillet 2026) — archivé.** L'architecture
+> livrée se lit dans [`../book-architecture.md`](../book-architecture.md).
+> Ce document conserve le raisonnement, les mesures et les arbitrages.
+
 **Objet** : faire du type `book` une vraie fonctionnalité — un manuscrit en
 N fichiers, navigable, assemblé correctement à l'export.
 **État des lieux préalable** : [`book-etat-des-lieux.md`](book-etat-des-lieux.md).
@@ -161,7 +165,7 @@ l'état ; aucun fichier écrasé — test de non-régression du scénario Phase 
 propre sur les seuls fichiers concernés ; les compteurs distinguent chapitre
 et ouvrage.
 
-### Phase 4 — Assemblage et exports
+### Phase 4 — Assemblage et exports *(fait — `5ccce9f`)*
 
 - **Assembleur partagé** (main) : lit les chapitres dans l'ordre, préfixe
   les identifiants de notes par chapitre (stratégie D, via les extensions
@@ -190,7 +194,7 @@ citations et un renvoi croisé, produit un PDF avec chapitres numérotés, TOC,
 notes correctes et bibliographie unique ; le même en Word ; **aucun
 avertissement pandoc de note dupliquée**.
 
-### Phase 5 — Journaux et finitions
+### Phase 5 — Journaux et finitions *(fait)*
 
 - `history_proposal_events` gagne une colonne `file_path` (migration
   additive v3→v4) : une adjudication devient rattachable à un chapitre —

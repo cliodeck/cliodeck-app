@@ -5,6 +5,60 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — branche `feat/livre-chapitres`
+
+### Added — les livres s'écrivent enfin en chapitres
+
+Le type de projet « livre » n'était qu'une étiquette dans `project.json`
+plus un modèle LaTeX : l'API de chapitres existait dans le code mais
+n'avait jamais reçu d'interface et ne persistait rien. Un manuscrit se
+rédigeait donc dans un unique fichier monolithique. Bilan de départ :
+`docs/book-etat-des-lieux.md` ; plan exécuté :
+`docs/archive/PLAN_chapitres-livre.md` ; architecture livrée :
+`docs/book-architecture.md`.
+
+- **Manifeste de chapitres** dans `project.json` : un chapitre est un
+  fichier, l'ordre et les titres sont persistés. La réconciliation
+  manifeste ↔ disque signale les fichiers manquants et propose de
+  rattacher ceux trouvés hors manifeste — on ne perd jamais de texte par
+  désynchronisation.
+- **Panneau de chapitres** : création, renommage, réordonnancement,
+  retrait du manifeste sans effacer le fichier. Basculer d'un chapitre à
+  l'autre préserve le texte, le curseur et **l'historique d'annulation**.
+- **Plan du manuscrit** à deux niveaux (chapitres et titres internes),
+  lu sur l'arbre de syntaxe : un `#` dans un bloc de code n'est pas un
+  titre.
+- **Fonctions à l'échelle de l'ouvrage** : renumérotation des notes sur
+  tout le manuscrit (atomique — tous les fichiers réécrits ou aucun),
+  vérification des citations sur tout le livre, statistiques distinguant
+  le chapitre de l'ouvrage.
+- **Réglages d'ouvrage** : notes de bas de page, de fin de chapitre ou de
+  fin d'ouvrage ; numérotation continue ou repartant à chaque chapitre ;
+  bibliographie unique ou par chapitre ; numérotation des titres.
+- **Exports** : assemblage du manuscrit avec préfixage des identifiants de
+  notes par chapitre — sans quoi deux chapitres utilisant chacun `[^1]`
+  produisaient **la même note** dans le document final, le texte du
+  premier disparaissant en silence. PDF avec chapitres réellement
+  numérotés et table des matières, Word avec une section par chapitre,
+  table des matières et sauts de page, et tirage d'un chapitre isolé.
+
+### Fixed — trois bugs qui touchaient aussi les articles
+
+- **Tout document contenant un bloc de code échouait à l'export PDF**
+  (« Environment Shaded undefined ») : les modèles LaTeX ne déclaraient
+  pas les macros de coloration de pandoc.
+- **Une citation écrasait une note manuelle homonyme** : le moteur
+  numérotait ses notes sans regarder celles déjà présentes, et le texte
+  de l'auteur disparaissait du document exporté.
+- **Changer de fichier détruisait le fichier d'arrivée** : il était
+  écrasé par le contenu du précédent, dont les dernières frappes étaient
+  par ailleurs perdues.
+
+Corrigés en chemin : le résumé qui imprimait son propre titre
+(`\# Résumé`) dans le PDF, les notes manuelles mal mappées en Word, et
+deux normalisations de fins de ligne CRLF qui violaient la fidélité
+octet par octet.
+
 ## [Unreleased] — branche `feat/editor-cm6`
 
 ### Changed — l'éditeur d'écriture migre vers CodeMirror 6

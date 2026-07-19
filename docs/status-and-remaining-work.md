@@ -46,6 +46,14 @@ Partially done:
   adjudication journaling), −4.7 MB renderer bundle. See
   `docs/editor-architecture.md`, `docs/editor-proposals.md`,
   `docs/archive/PLAN_migration-editeur-cm6.md`
+- **Book chapters** (`feat/livre-chapitres`, phases 1-5 complete, 2026-07-19):
+  the `book` project type is no longer an empty shell — multi-file chapter
+  manifest with disk reconciliation, chapter panel, per-chapter editor state
+  cache (undo survives switching), manuscript outline, manuscript-wide
+  footnote renumbering / citation check / statistics, per-book settings
+  (note style and numbering, bibliography placement, heading numbering), and
+  assembly-based PDF/Word exports with per-chapter footnote namespacing.
+  See `docs/book-architecture.md`, `docs/archive/PLAN_chapitres-livre.md`
 
 ---
 
@@ -77,6 +85,10 @@ Partially done:
 | Design | Installer strategy (`docs/installer-strategy.md`): embedded Ollama, first-run wizard, bundled Pandoc/tectonic |
 | Backend | Publish the Lezer extensions (`src/editor/lezer-extensions/`) as separate npm packages, MIT (CM6 plan arbitration 4 — unlocked since Phase 3; no Lezer pandoc-citation extension exists in the ecosystem) |
 
+| Frontend | Book: multi-chapter search (deferred from phase 3 — needs its own result panel and refresh model) |
+| Backend | Book: index (`\index{}`) and typed cross-references — same technical family as footnotes/citations (Lezer extension + resolution at assembly) |
+| Backend | Book: Word export ignores `noteStyle`/`noteNumbering` (LaTeX path only) |
+| Backend | Index the manuscript itself in the RAG — nothing currently reads the text being written; a book is where it would matter most |
 | Backend | `searchEuropeana` tool: scaffolded but not registered (needs API key) |
 | Frontend | Brainstorm flagged-sources badge (follow-up from security events panel) |
 | Frontend | "Drafts" panel for Brainstorm->Write flow |

@@ -83,7 +83,12 @@ export interface ChatMessage {
  * Adjudication d'une proposition IA de l'éditeur (plan CM6, Phase 4), avec
  * contenus complets — c'est le journal de recherche : les textes y ont leur
  * place, contrairement au journal d'usage IA (journal.db) qui n'en reçoit
- * jamais. Schéma v3, table `history_proposal_events`.
+ * jamais. Schéma v4, table `history_proposal_events`.
+ *
+ * `filePath` (v4, chantier livre) rattache l'adjudication au document où
+ * elle a eu lieu — un chapitre, dans un manuscrit à N fichiers. Le journal
+ * d'usage IA, lui, n'en reçoit PAS : sa couche factuelle reste sans contenu
+ * ni chemin (cf. docs/INSTRUCTIONS_journal-usage-ia.md).
  */
 export interface ProposalEvent {
   id: string;
@@ -99,6 +104,8 @@ export interface ProposalEvent {
   proposedText?: string;
   finalText?: string;
   rejectionNote?: string;
+  /** Document où l'adjudication a eu lieu (chapitre d'un livre) — v4. */
+  filePath?: string;
 }
 
 export interface HistoryStatistics {
@@ -286,6 +293,7 @@ export class HistoryManager {
         proposed_text TEXT,
         final_text TEXT,
         rejection_note TEXT,
+        file_path TEXT,
         FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
       );
     `);
@@ -377,6 +385,31 @@ export class HistoryManager {
         console.log('📝 History database migrated to schema version 3');
       } catch (error) {
         console.error('❌ Migration v3 error:', error);
+      }
+    }
+
+    // Migration v4 (chantier livre) : colonne file_path sur
+    // history_proposal_events, pour rattacher une adjudication au chapitre
+    // où elle a eu lieu. Additive : les bases v3 gagnent la colonne par
+    // ALTER, les bases neuves l'ont déjà via createTables().
+    if (currentVersion < 4) {
+      try {
+        const proposalColumns = this.db.pragma(
+          'table_info(history_proposal_events)'
+        ) as any[];
+        if (!proposalColumns.some((c: any) => c.name === 'file_path')) {
+          this.db.exec(
+            'ALTER TABLE history_proposal_events ADD COLUMN file_path TEXT'
+          );
+          console.log('📝 Migration v4: Added file_path to history_proposal_events');
+        }
+
+        this.db
+          .prepare('INSERT OR REPLACE INTO history_metadata (key, value) VALUES (?, ?)')
+          .run('schema_version', '4');
+        console.log('📝 History database migrated to schema version 4');
+      } catch (error) {
+        console.error('❌ Migration v4 error:', error);
       }
     }
   }
@@ -564,8 +597,9 @@ export class HistoryManager {
     const stmt = this.db.prepare(`
       INSERT INTO history_proposal_events (
         id, session_id, at, proposal_id, decision, category, model, task,
-        latency_ms, original_text, proposed_text, final_text, rejection_note
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        latency_ms, original_text, proposed_text, final_text, rejection_note,
+        file_path
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -581,12 +615,14 @@ export class HistoryManager {
       event.originalText ?? null,
       event.proposedText ?? null,
       event.finalText ?? null,
-      event.rejectionNote ?? null
+      event.rejectionNote ?? null,
+      event.filePath ?? null
     );
 
     this.logEvent('proposal_adjudication', {
       decision: event.decision,
       category: event.category,
+      filePath: event.filePath,
       id: eventId,
     });
     return eventId;
@@ -611,6 +647,7 @@ export class HistoryManager {
       proposed_text: string | null;
       final_text: string | null;
       rejection_note: string | null;
+      file_path: string | null;
     }>;
 
     return rows.map((r) => ({
@@ -627,6 +664,7 @@ export class HistoryManager {
       proposedText: r.proposed_text ?? undefined,
       finalText: r.final_text ?? undefined,
       rejectionNote: r.rejection_note ?? undefined,
+      filePath: r.file_path ?? undefined,
     }));
   }
 

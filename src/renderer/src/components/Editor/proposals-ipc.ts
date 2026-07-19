@@ -1,4 +1,5 @@
 import type { ProposalAdjudicationEvent } from '@/editor/proposals';
+import { useEditorStore } from '../../stores/editorStore';
 
 /**
  * Accès défensif au canal d'adjudication (préload
@@ -10,8 +11,17 @@ import type { ProposalAdjudicationEvent } from '@/editor/proposals';
  * jamais l'adjudication elle-même — no-op + warning en dev.
  */
 
+/**
+ * L'événement enrichi du document où l'adjudication a eu lieu — un
+ * chapitre, dans un manuscrit à N fichiers. La couche éditeur
+ * (`src/editor/proposals`) ignore délibérément les projets : le chemin
+ * est ajouté ICI, au passage vers le main, qui le route vers le SEUL
+ * journal de recherche (le journal d'usage IA n'en reçoit jamais).
+ */
+type AdjudicationPayload = ProposalAdjudicationEvent & { filePath?: string };
+
 interface ProposalsBridge {
-  recordAdjudication: (event: ProposalAdjudicationEvent) => unknown;
+  recordAdjudication: (event: AdjudicationPayload) => unknown;
 }
 
 let warned = false;
@@ -23,7 +33,8 @@ export function recordAdjudication(event: ProposalAdjudicationEvent): void {
 
   if (bridge && typeof bridge.recordAdjudication === 'function') {
     try {
-      void bridge.recordAdjudication(event);
+      const filePath = useEditorStore.getState().filePath ?? undefined;
+      void bridge.recordAdjudication(filePath ? { ...event, filePath } : event);
     } catch (error) {
       console.warn('[proposals] échec d’émission de l’adjudication', error);
     }
