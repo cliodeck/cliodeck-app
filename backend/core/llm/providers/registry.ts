@@ -27,24 +27,36 @@ import {
 import { AnthropicProvider } from './anthropic.js';
 import { MistralEmbeddingProvider, MistralProvider } from './mistral.js';
 import { GeminiEmbeddingProvider, GeminiProvider } from './gemini.js';
+import { EmbeddedEmbeddingProvider, EmbeddedProvider } from './embedded.js';
+import {
+  FallbackEmbeddingProvider,
+  FallbackLLMProvider,
+} from './fallback.js';
 
 export type LLMProviderId =
   | 'ollama'
   | 'openai-compatible'
   | 'anthropic'
   | 'mistral'
-  | 'gemini';
+  | 'gemini'
+  // llama.cpp en processus : aucune dépendance réseau, aucun serveur tiers.
+  | 'embedded';
 export type EmbeddingProviderId =
   | 'ollama'
   | 'openai-compatible'
   | 'mistral'
-  | 'gemini';
+  | 'gemini'
+  | 'embedded';
 
 export interface LLMConfig {
   provider: LLMProviderId;
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  /** `embedded` uniquement : chemin absolu du fichier GGUF téléchargé. */
+  modelPath?: string;
+  /** Repli en cas d'indisponibilité du primaire (réglage `auto`). */
+  fallback?: Omit<LLMConfig, 'fallback'>;
 }
 
 export interface EmbeddingConfig {
@@ -55,6 +67,14 @@ export interface EmbeddingConfig {
   apiKey?: string;
   /** Ollama-only: override `num_ctx` for embedding requests (see `OllamaEmbeddingProviderConfig`). */
   numCtx?: number;
+  /** `embedded` uniquement : chemin absolu du fichier GGUF téléchargé. */
+  modelPath?: string;
+  /**
+   * Repli utilisé quand ce provider ne répond pas au sondage de santé
+   * (réglage `auto` : Ollama d'abord, embarqué ensuite). Un seul niveau —
+   * un repli n'a pas lui-même de repli.
+   */
+  fallback?: Omit<EmbeddingConfig, 'fallback'>;
 }
 
 export interface RegistryConfig {
@@ -99,6 +119,21 @@ registerEmbeddingProvider('ollama', (cfg) =>
     baseUrl: cfg.baseUrl,
     numCtx: cfg.numCtx,
   } satisfies OllamaEmbeddingProviderConfig)
+);
+
+registerLLMProvider('embedded', (cfg) =>
+  new EmbeddedProvider({
+    modelPath: cfg.modelPath,
+    modelId: cfg.model,
+  })
+);
+
+registerEmbeddingProvider('embedded', (cfg) =>
+  new EmbeddedEmbeddingProvider({
+    modelPath: cfg.modelPath,
+    modelId: cfg.model,
+    dimension: cfg.dimension,
+  })
 );
 
 registerLLMProvider('openai-compatible', (cfg) => {
@@ -175,6 +210,24 @@ registerEmbeddingProvider('gemini', (cfg) => {
   });
 });
 
+function buildLLM(cfg: LLMConfig): LLMProvider {
+  const f = llmFactories.get(cfg.provider);
+  if (!f) {
+    throw new Error(
+      `Unknown LLM provider: ${cfg.provider}. Registered: ${[...llmFactories.keys()].join(', ')}`
+    );
+  }
+  return f(cfg);
+}
+
+function buildEmbedding(cfg: EmbeddingConfig): EmbeddingProvider {
+  const f = embeddingFactories.get(cfg.provider);
+  if (!f) {
+    throw new Error(`Unknown embedding provider: ${cfg.provider}`);
+  }
+  return f(cfg);
+}
+
 export class ProviderRegistry {
   private llm: LLMProvider | null = null;
   private embedding: EmbeddingProvider | null = null;
@@ -186,15 +239,16 @@ export class ProviderRegistry {
 
   getLLM(): LLMProvider {
     if (!this.llm) {
-      const f = llmFactories.get(this.config.llm.provider);
-      if (!f) {
-        throw new Error(
-          `Unknown LLM provider: ${this.config.llm.provider}. Registered: ${[...llmFactories.keys()].join(', ')}`
-        );
-      }
+      const cfg = this.config.llm;
+      const primary = buildLLM(cfg);
+      // L'instrumentation enveloppe le composite, pas chacune des branches :
+      // le journal d'usage compte un appel, quel que soit le moteur retenu.
+      const provider = cfg.fallback
+        ? new FallbackLLMProvider(primary, buildLLM(cfg.fallback))
+        : primary;
       // Décoré pour le journal d'usage IA (best-effort ; inerte si journal absent).
       this.llm = instrumentLLM(
-        f(this.config.llm),
+        provider,
         this.config.llm.provider,
         this.config.llm.baseUrl
       );
@@ -204,14 +258,13 @@ export class ProviderRegistry {
 
   getEmbedding(): EmbeddingProvider {
     if (!this.embedding) {
-      const f = embeddingFactories.get(this.config.embedding.provider);
-      if (!f) {
-        throw new Error(
-          `Unknown embedding provider: ${this.config.embedding.provider}`
-        );
-      }
+      const cfg = this.config.embedding;
+      const primary = buildEmbedding(cfg);
+      const provider = cfg.fallback
+        ? new FallbackEmbeddingProvider(primary, buildEmbedding(cfg.fallback))
+        : primary;
       this.embedding = instrumentEmbedding(
-        f(this.config.embedding),
+        provider,
         this.config.embedding.provider,
         this.config.embedding.baseUrl
       );

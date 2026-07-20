@@ -141,6 +141,23 @@ export const RAGSettingsPanel: React.FC = () => {
     loadAvailableModels();
   };
 
+  /**
+   * Le choix du moteur doit atteindre la configuration, pas seulement le
+   * store : c'est `llm.generationProvider` que lit
+   * `cliodeck-config-adapter` pour assembler le provider. Tant que cette
+   * écriture manquait, sélectionner « embarqué » ici n'avait aucun effet
+   * côté main — le symptôme rapporté par l'utilisateur.
+   */
+  const handleProviderChange = async (provider: LLMProvider) => {
+    setParams({ provider });
+    try {
+      const llmConfig = await window.electron.config.get('llm');
+      await window.electron.config.set('llm', { ...llmConfig, generationProvider: provider });
+    } catch (error) {
+      console.error('Could not persist generationProvider', error);
+    }
+  };
+
   const handleRefreshCollections = () => {
     loadAvailableCollections();
   };
@@ -179,7 +196,7 @@ export const RAGSettingsPanel: React.FC = () => {
             <select
               id="provider-select"
               value={params.provider}
-              onChange={(e) => setParams({ provider: e.target.value as LLMProvider })}
+              onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
             >
               <option value="auto">{t('ragSettings.providerAuto')}</option>
               <option value="ollama">{t('ragSettings.providerOllama')}</option>
