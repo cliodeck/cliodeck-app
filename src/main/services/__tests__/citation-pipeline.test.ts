@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { processMarkdownCitations } from '../citation-pipeline';
+
+// Ces tests exercent le VRAI moteur citeproc : chaque appel construit un
+// `CSL.Engine` et parse la feuille de style CSL (CitationEngine.ts:95).
+// ~700 ms par citation en local, ~4 s sur un coureur d'intégration continue
+// — le défaut de 5 s de Vitest y suffit à peine, et le test à deux citations
+// le dépassait. On allonge ici plutôt que globalement : un dépassement
+// ailleurs doit rester le signe d'un blocage, pas d'une machine lente.
+vi.setConfig({ testTimeout: 60_000 });
 import type { Citation } from '../../../../backend/types/citation';
 
 function makeCitation(overrides: Partial<Citation>): Citation {
