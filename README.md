@@ -2,8 +2,6 @@
 
 Desktop application (Electron + React + TypeScript) for the full historian workflow: **explore → brainstorm → write → export**, with RAG, knowledge graph, Zotero / Tropy / Obsidian integrations, and a local-first footprint.
 
-> **v2 (fusion branch):** this branch absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode. Historians keep a single app that covers the whole cycle instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md).
-
 > **Note:** ClioDeck is a [vibe-coding](https://en.wikipedia.org/wiki/Vibe_coding) experiment. Provided *as is*, at your own risk. Designed by [Frédéric Clavert](https://inactinique.net), coded with [Claude Code](https://claude.ai/code). See my [talk on vibe-coding for historians](https://inactinique.net/prez/2025-07-03_DH-LLM/2025-07-03_DH-LLM.html#/title-slide) (French) and [ethics considerations](https://github.com/inactinique/cliodeck/wiki/4.-Ethics).
 
 **License:** [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html)
@@ -15,11 +13,9 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 - **macOS**: DMG for Intel and Apple Silicon
 - **Linux**: AppImage and .deb packages
 
-v2.0 (fusion) release builds land when the branch merges to main. Until then build from source (see below).
-
 ## Four modes, one workspace
 
-ClioDeck v2 organises work into four top-level modes that share the same project / sources / index:
+ClioDeck organises work into four top-level modes that share the same project / sources / index:
 
 - **Brainstorm** — chat-driven exploration of your corpus, with durable workspace [`.cliohints`](#cliohints) injected into every prompt and a one-click *Send to Write* button that lands a formatted draft block in the editor.
 - **Write** — CodeMirror 6 live-render Markdown editor (Obsidian-style) with Pandoc citations (`[@key]`, autocomplete from Zotero), footnotes with in-place editing, and byte-perfect file fidelity.
