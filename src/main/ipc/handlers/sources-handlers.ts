@@ -34,6 +34,12 @@ import { projectManager } from '../../services/project-manager.js';
 import { tropyService } from '../../services/tropy-service.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { readWorkspaceConfig } from '../../../../backend/core/workspace/config.js';
+import {
+  validate,
+  SourceOpenPdfSchema,
+  SourceRevealTropySchema,
+  SourceOpenNoteSchema,
+} from '../utils/validation.js';
 
 interface VaultConfigBlock { path?: string }
 
@@ -163,21 +169,39 @@ async function openObsidianNote(
 }
 
 export function setupSourcesHandlers(): void {
+  // Les entrées sont validées plutôt que coercées : une clé absente donnait
+  // un « missing documentId » indistinguable d'un vrai identifiant vide.
   ipcMain.handle('sources:open-pdf', async (_e, rawId: unknown, rawPage?: unknown) => {
-    const id = typeof rawId === 'string' ? rawId : '';
-    const page = typeof rawPage === 'number' ? rawPage : undefined;
-    return openPdfAtPage(id, page);
+    try {
+      const { documentId, pageNumber } = validate(SourceOpenPdfSchema, {
+        documentId: rawId,
+        pageNumber: typeof rawPage === 'number' ? rawPage : undefined,
+      });
+      return openPdfAtPage(documentId, pageNumber);
+    } catch (e) {
+      return errFrom(e instanceof Error ? e.message : String(e));
+    }
   });
 
   ipcMain.handle('sources:reveal-tropy', async (_e, rawId: unknown) => {
-    const id = typeof rawId === 'string' ? rawId : '';
-    return revealTropyItem(id);
+    try {
+      const { itemId } = validate(SourceRevealTropySchema, { itemId: rawId });
+      return revealTropyItem(itemId);
+    } catch (e) {
+      return errFrom(e instanceof Error ? e.message : String(e));
+    }
   });
 
   ipcMain.handle('sources:open-note', async (_e, rawRel: unknown, rawLine?: unknown) => {
-    const rel = typeof rawRel === 'string' ? rawRel : '';
-    const line = typeof rawLine === 'number' ? rawLine : undefined;
-    return openObsidianNote(rel, line);
+    try {
+      const { relativePath, lineNumber } = validate(SourceOpenNoteSchema, {
+        relativePath: rawRel,
+        lineNumber: typeof rawLine === 'number' ? rawLine : undefined,
+      });
+      return openObsidianNote(relativePath, lineNumber);
+    } catch (e) {
+      return errFrom(e instanceof Error ? e.message : String(e));
+    }
   });
 }
 

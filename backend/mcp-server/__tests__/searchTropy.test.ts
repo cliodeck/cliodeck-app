@@ -18,6 +18,7 @@ import {
   rmrf,
 } from './_helpers.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { TRUNCATE } from '../tools/budget.js';
 
 let workspaceRoot: string;
 beforeEach(() => {
@@ -87,7 +88,7 @@ describe('search_tropy', () => {
 
   it.skipIf(!sqliteAvailable)('orders by date DESC and truncates oversize content', async () => {
     const db = createTempPrimarySourcesDb(workspaceRoot);
-    const long = 'spam '.repeat(300);
+    const long = 'spam '.repeat(Math.ceil((TRUNCATE + 500) / 5));
     db.prepare(
       `INSERT INTO tropy_sources (id, title, date) VALUES ('s1', 'old', '1900')`
     ).run();
@@ -118,6 +119,6 @@ describe('search_tropy', () => {
     expect(payload.hits[0].sourceId).toBe('s2'); // 2020 > 1900
     expect(payload.hits[1].sourceId).toBe('s1');
     expect(payload.hits[0].content.endsWith('…')).toBe(true);
-    expect(payload.hits[0].content.length).toBeLessThanOrEqual(801);
+    expect(payload.hits[0].content.length).toBeLessThanOrEqual(TRUNCATE + 1);
   });
 });

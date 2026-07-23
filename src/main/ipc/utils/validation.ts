@@ -201,10 +201,26 @@ export const PDFExportSchema = z.object({
     path: ['content'],
   });
 
+/**
+ * Chemin de sortie d'un export.
+ *
+ * Refuse les caractères qui n'ont rien à faire dans un nom de fichier et
+ * qui servaient à s'échapper d'une commande shell (guillemets, `$`, backtick,
+ * `;`, `|`, `&`, retour à la ligne). L'ouverture passe désormais par
+ * `shell.openPath`, donc sans shell — cette contrainte est une seconde
+ * barrière, pas la seule.
+ */
+export const OutputPathSchema = z
+  .string()
+  .min(1)
+  .refine((p) => !/["'`$;|&\n\r]/.test(p), {
+    message: 'Le chemin de sortie contient des caractères non autorisés.',
+  });
+
 export const RevealJSExportSchema = z.object({
   projectPath: z.string().min(1),
   content: z.string().min(1),
-  outputPath: z.string().optional(),
+  outputPath: OutputPathSchema.optional(),
   metadata: z
     .object({
       title: z.string().optional(),
@@ -651,6 +667,111 @@ export const UsageSaveDecisionSchema = z.object({
  * @returns Validated and typed data
  * @throws Error if validation fails
  */
+// MARK: - Fusion / chat / slides / citations / sources
+//
+// Ces canaux passaient jusqu'ici par des vérifications à la main, parfois
+// absentes (slides), parfois partielles (`chat:start` castait `messages`
+// sans regarder sa forme). Les schémas ci-dessous rejoignent le patron des
+// autres handlers : une entrée malformée est refusée avec un message
+// explicite au lieu de traverser la couche métier.
+
+export const ChatMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant', 'tool']),
+  content: z.string(),
+  // Métadonnées libres portées par le renderer (ragCitation, toolCallId…).
+  meta: z.record(z.string(), z.unknown()).optional(),
+  name: z.string().optional(),
+  toolCallId: z.string().optional(),
+});
+
+export const FusionChatStartSchema = z.object({
+  messages: z.array(ChatMessageSchema).min(1, 'messages cannot be empty'),
+  opts: z
+    .object({
+      model: z.string().optional(),
+      temperature: z.number().min(0).max(2).optional(),
+      maxTokens: z.number().int().positive().optional(),
+      // Le clamp métier (512..262144) reste dans le handler : ici on refuse
+      // seulement ce qui n'est pas un nombre fini.
+      numCtx: z.number().finite().optional(),
+      retrievalOptions: z
+        .object({
+          documentIds: z.array(z.string()).optional(),
+          collectionKeys: z.array(z.string()).optional(),
+          sourceType: z.enum(['primary', 'secondary', 'both', 'vault']).optional(),
+          includeVault: z.boolean().optional(),
+          topK: z.number().int().min(1).max(100).optional(),
+        })
+        .optional(),
+      systemPrompt: z
+        .object({
+          modeId: z.string().optional(),
+          customText: z.string().optional(),
+          noPrompt: z.boolean().optional(),
+        })
+        .optional(),
+      enabledTools: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+export const FusionVaultIndexSchema = z
+  .object({ force: z.boolean().optional() })
+  .optional();
+
+export const FusionVaultImportIdeasSchema = z
+  .object({
+    limit: z.number().int().positive().max(10_000).optional(),
+    tag: z.string().optional(),
+  })
+  .optional();
+
+export const FusionMcpServerPatchSchema = z.object({
+  enabled: z.boolean().optional(),
+  serverName: z.string().min(1).optional(),
+});
+
+export const SlidesGenerateSchema = z.object({
+  text: z.string().min(1, 'text is required'),
+  language: z.string().min(1, 'language is required'),
+  citations: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+export const SlidesPreviewSchema = z.object({
+  content: z.string(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  activeSlideIndex: z.number().int().min(0).optional(),
+});
+
+/** Un item CSL-JSON : forme libre, mais bien un objet (citeproc plante sur autre chose). */
+export const CSLItemSchema = z.record(z.string(), z.unknown());
+
+export const CitationFormatSchema = z.object({
+  items: z.array(CSLItemSchema),
+  styleId: z.string().min(1, 'styleId is required'),
+  locale: z.string().optional(),
+});
+
+export const CitationPreviewSchema = z.object({
+  bibKey: z.string().min(1, 'bibKey is required'),
+  styleId: z.string().min(1, 'styleId is required'),
+  locale: z.string().optional(),
+});
+
+export const SourceOpenPdfSchema = z.object({
+  documentId: z.string().min(1, 'documentId is required'),
+  pageNumber: z.number().int().positive().optional(),
+});
+
+export const SourceRevealTropySchema = z.object({
+  itemId: z.string().min(1, 'itemId is required'),
+});
+
+export const SourceOpenNoteSchema = z.object({
+  relativePath: z.string().min(1, 'relativePath is required'),
+  lineNumber: z.number().int().positive().optional(),
+});
+
 export function validate<T>(schema: z.ZodSchema<T>, data: unknown): T {
   try {
     return schema.parse(data);

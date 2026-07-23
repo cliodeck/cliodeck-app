@@ -401,29 +401,6 @@ class PDFService {
   }
 
   /**
-   * Lit le contexte du projet depuis context.md
-   */
-  getProjectContext(): string | null {
-    if (!this.currentProjectPath) {
-      return null;
-    }
-
-    const contextPath = path.join(this.currentProjectPath, 'context.md');
-
-    try {
-      if (fs.existsSync(contextPath)) {
-        const context = fs.readFileSync(contextPath, 'utf-8').trim();
-        console.log('📋 [PROJECT CONTEXT] Loaded:', context.substring(0, 100) + '...');
-        return context;
-      }
-    } catch (error: unknown) {
-      console.warn('⚠️  [PROJECT CONTEXT] Could not read context file:', error);
-    }
-
-    return null;
-  }
-
-  /**
    * Construit et retourne le graphe de connaissances
    */
   async buildKnowledgeGraph(options?: KnowledgeGraphOptions): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {

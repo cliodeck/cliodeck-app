@@ -1,7 +1,7 @@
 /**
  * Partial-success retrieval (fusion 1.7).
  *
- * `RetrievalService.search` now returns a typed `{ hits, outcomes }`
+ * `RetrievalService.search` now returns a typed `{ hits, manuscriptHits, outcomes }`
  * envelope. Each retrieval call always reports the per-corpus outcome
  * (secondary / primary / vault) so a Tropy crash doesn't silently
  * erase the bibliography hits the same query produced.
@@ -86,13 +86,15 @@ describe('RetrievalService partial-success envelope (1.7)', () => {
     vi.restoreAllMocks();
   });
 
-  it('reports outcomes for all three corpora, marking unattempted ones', async () => {
+  it('reports outcomes for all four corpora, marking unattempted ones', async () => {
     const result = await retrievalService.search({
       query: 'q',
       sourceType: 'secondary',
       includeVault: false,
     });
-    expect(result.outcomes).toHaveLength(3);
+    // Quatre corpus depuis l'ajout du manuscrit (item 25 des audits) :
+    // secondaire, primaire, vault, manuscrit.
+    expect(result.outcomes).toHaveLength(4);
     const map = Object.fromEntries(result.outcomes.map((o) => [o.source, o]));
     expect(map.secondary.attempted).toBe(true);
     expect(map.secondary.ok).toBe(true);

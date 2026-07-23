@@ -5,12 +5,23 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { slidesGenerationService } from '../../services/slides-generation-service.js';
 import { generatePreviewHtml } from '../../services/revealjs-export.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import {
+  validate,
+  SlidesGenerateSchema,
+  SlidesPreviewSchema,
+} from '../utils/validation.js';
 import { logger } from '../../utils/logger.js';
 import { configManager } from '../../services/config-manager.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 
 export function setupSlidesHandlers() {
-  ipcMain.handle('slides:generate', async (event, options: { text: string; language: string; citations?: any[] }) => {
+  ipcMain.handle('slides:generate', async (event, rawOptions: unknown) => {
+    let options;
+    try {
+      options = validate(SlidesGenerateSchema, rawOptions);
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
     logger.info('ipc', 'slides:generate', { textLength: options.text?.length, language: options.language });
 
     let registry: ReturnType<typeof createRegistryFromClioDeckConfig> | null = null;
@@ -37,8 +48,10 @@ export function setupSlidesHandlers() {
       // Le modèle remonte au renderer : la proposition d'application (contrat
       // Phase 4) doit porter un `source.model` réel, pas 'unknown'.
       return successResponse({ content, model: llm.model });
-    } catch (error: any) {
-      logger.error('ipc', 'slides:generate', { error: error.message });
+    } catch (error: unknown) {
+      logger.error('ipc', 'slides:generate', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return errorResponse(error);
     } finally {
       slidesGenerationService.setLLMProvider(null);
@@ -53,13 +66,19 @@ export function setupSlidesHandlers() {
     try {
       slidesGenerationService.cancelGeneration();
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });
 
   // Phase 2 — Live preview: returns HTML string for srcdoc rendering
-  ipcMain.handle('slides:get-preview-html', async (_event, options: { content: string; config?: any; activeSlideIndex?: number }) => {
+  ipcMain.handle('slides:get-preview-html', async (_event, rawOptions: unknown) => {
+    let options;
+    try {
+      options = validate(SlidesPreviewSchema, rawOptions);
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
     try {
       const html = generatePreviewHtml(
         options.content || '',
@@ -71,7 +90,7 @@ export function setupSlidesHandlers() {
         typeof options.activeSlideIndex === 'number' ? options.activeSlideIndex : 0
       );
       return successResponse({ html });
-    } catch (error: any) {
+    } catch (error: unknown) {
       return errorResponse(error);
     }
   });

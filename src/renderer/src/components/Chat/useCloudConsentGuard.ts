@@ -67,6 +67,15 @@ export function useCloudConsentGuard(
 
   const onConsent = useCallback(() => {
     grant(cloudCheck.providerName);
+    // Transmettre l'accord au processus principal, qui porte désormais la
+    // garde de l'ADR 0005 : sans cela il poserait sa propre question et
+    // l'utilisateur en verrait deux pour un seul envoi. La garde main reste
+    // la barrière ; ce dialogue-ci n'est que l'UX.
+    void (
+      window.electron?.fusion?.consent as
+        | { grant?: (provider: string) => Promise<unknown> }
+        | undefined
+    )?.grant?.(cloudCheck.providerName);
     setIsOpen(false);
     if (pendingMessage) {
       const message = pendingMessage;

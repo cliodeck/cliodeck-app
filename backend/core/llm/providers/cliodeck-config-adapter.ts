@@ -11,6 +11,19 @@
  *
  * Embedding dimensions for known Ollama models default to 768
  * (nomic-embed-text); override via the `dimensionOverride` argument.
+ *
+ * **Modèle embarqué (llama.cpp en processus)** : les réglages
+ * `llm.generationProvider` et `llm.embeddingProvider` (`'ollama' | 'embedded'
+ * | 'auto'`) sont honorés ici. Ils ne l'étaient plus depuis la suppression de
+ * `LLMProviderManager` (commit 6063021, 2026-04-25) : la ligne
+ * `const embedding = cloudEmbedding ?? ollamaEmbedding` décidait seule, et
+ * choisir « embarqué » dans les réglages n'avait aucun effet. Sémantique
+ * reprise de l'ancien gestionnaire : `auto` = Ollama d'abord, repli embarqué
+ * s'il est indisponible.
+ *
+ * Ces réglages ne concernent que le local. Choisir un backend cloud
+ * (claude / openai / mistral / gemini) le laisse maître de la génération :
+ * l'utilisateur qui a saisi une clé API veut ce modèle-là.
  */
 
 import type { LLMConfig as ClioDeckLLMConfig } from '../../../types/config.js';
@@ -74,7 +87,64 @@ export function clioDeckConfigToRegistryConfig(
             }
           : null;
 
-  const embedding = cloudEmbedding ?? ollamaEmbedding;
+  // Dimension du modèle d'embedding embarqué (nomic-embed-text-v2 : 768).
+  const embeddedEmbedding = cfg.embeddedEmbeddingModelPath
+    ? {
+        provider: 'embedded' as const,
+        model: cfg.embeddedEmbeddingModelId || 'nomic-embed-text-v2',
+        dimension: opts.dimensionOverride ?? 768,
+        modelPath: cfg.embeddedEmbeddingModelPath,
+      }
+    : null;
+
+  const embeddedLLM = cfg.embeddedModelPath
+    ? {
+        provider: 'embedded' as const,
+        model: cfg.embeddedModelId || 'embedded',
+        modelPath: cfg.embeddedModelPath,
+      }
+    : null;
+
+  /**
+   * Un index vectoriel construit avec un modèle puis interrogé avec un autre
+   * est silencieusement faux : on n'assemble le repli que si les dimensions
+   * concordent. Sinon, mieux vaut un provider en échec — visible — qu'un
+   * corpus dont les résultats sont subtilement aberrants.
+   */
+  function embeddingWithFallback(): RegistryConfig['embedding'] {
+    const choice = cfg.embeddingProvider ?? 'auto';
+    if (choice === 'embedded') {
+      // Réglage explicite : si le modèle n'est pas téléchargé, on retombe sur
+      // Ollama plutôt que de laisser l'indexation sans moteur.
+      return embeddedEmbedding ?? ollamaEmbedding;
+    }
+    if (
+      choice === 'auto' &&
+      embeddedEmbedding &&
+      embeddedEmbedding.dimension === ollamaEmbedding.dimension
+    ) {
+      return { ...ollamaEmbedding, fallback: embeddedEmbedding };
+    }
+    return ollamaEmbedding;
+  }
+
+  // Un embedding cloud demandé explicitement prime : c'est un choix de
+  // l'utilisateur, pas un défaut.
+  const embedding = cloudEmbedding ?? embeddingWithFallback();
+
+  function localLLM(): RegistryConfig['llm'] {
+    const ollamaLLM = {
+      provider: 'ollama' as const,
+      model: cfg.ollamaChatModel || 'llama3.2',
+      baseUrl: cfg.ollamaURL,
+    };
+    const choice = cfg.generationProvider ?? 'auto';
+    if (choice === 'embedded') return embeddedLLM ?? ollamaLLM;
+    if (choice === 'auto' && embeddedLLM) {
+      return { ...ollamaLLM, fallback: embeddedLLM };
+    }
+    return ollamaLLM;
+  }
 
   switch (cfg.backend) {
     case 'claude':
@@ -140,14 +210,7 @@ export function clioDeckConfigToRegistryConfig(
 
     case 'ollama':
     default:
-      return {
-        llm: {
-          provider: 'ollama',
-          model: cfg.ollamaChatModel || 'llama3.2',
-          baseUrl: cfg.ollamaURL,
-        },
-        embedding,
-      };
+      return { llm: localLLM(), embedding };
   }
 }
 
@@ -170,7 +233,11 @@ export function resolveActiveChatModel(cfg: ClioDeckLLMConfig): string {
       return cfg.geminiModel || 'gemini-2.0-flash';
     case 'ollama':
     default:
-      return cfg.ollamaChatModel || 'llama3.2';
+      // En `embedded`, le modèle actif est le GGUF chargé : c'est sa fenêtre
+      // de contexte que le compacteur doit consulter, pas celle de llama3.2.
+      return cfg.generationProvider === 'embedded' && cfg.embeddedModelPath
+        ? cfg.embeddedModelId || 'embedded'
+        : cfg.ollamaChatModel || 'llama3.2';
   }
 }
 

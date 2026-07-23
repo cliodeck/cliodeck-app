@@ -70,12 +70,12 @@ describe('WordExportModal citation section', () => {
     const toggle = screen.getByTestId('export-citation-toggle') as HTMLInputElement;
     // No config → off; dropdowns absent.
     await waitFor(() => expect(toggle.checked).toBe(false));
-    expect(screen.queryByLabelText('Citation style')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('export.citation.styleAria')).not.toBeInTheDocument();
 
     // Turn on; dropdowns appear.
     fireEvent.click(toggle);
-    expect(await screen.findByLabelText('Citation style')).toBeInTheDocument();
-    expect(screen.getByLabelText('Citation locale')).toBeInTheDocument();
+    expect(await screen.findByLabelText('export.citation.styleAria')).toBeInTheDocument();
+    expect(screen.getByLabelText('export.citation.localeAria')).toBeInTheDocument();
   });
 
   it('sends citation option in word-export payload when enabled', async () => {
@@ -87,7 +87,7 @@ describe('WordExportModal citation section', () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle.checked).toBe(true));
 
-    const exportBtn = await screen.findByRole('button', { name: /Exporter/ });
+    const exportBtn = await screen.findByRole('button', { name: /export\.(pdf|word)\.export/ });
     await waitFor(() => expect(exportBtn).not.toBeDisabled());
     fireEvent.click(exportBtn);
 

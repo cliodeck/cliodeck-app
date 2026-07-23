@@ -5,6 +5,7 @@ import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
+import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
 import {
   CHAPTERS_DIR,
   DEFAULT_BOOK_SETTINGS,
@@ -183,8 +184,12 @@ export class ProjectManager {
       const abstractFile = path.join(projectPath, 'abstract.md');
       await writeFile(abstractFile, '# Résumé\n\nRésumé à compléter...');
 
-      const contextFile = path.join(projectPath, 'context.md');
-      await writeFile(contextFile, '# Contexte du projet\n\nDécrivez ici le contexte de votre recherche. Ce contexte sera utilisé pour améliorer les réponses de l\'assistant IA.\n\nExemple : "Cette recherche porte sur l\'impact de l\'intelligence artificielle dans l\'éducation supérieure, avec un focus particulier sur la taxonomie de Bloom et les stratégies pédagogiques actives."');
+      // Gabarit inerte : les instructions vivent dans un commentaire HTML,
+      // retiré avant injection (cf. backend/core/hints/loader.ts). Un
+      // context.md jamais édité n'apprend donc rien au modèle — l'ancien
+      // gabarit, lui, aurait injecté son exemple sur l'IA dans l'éducation.
+      const contextFile = path.join(projectPath, CONTEXT_FILE);
+      await writeFile(contextFile, CONTEXT_TEMPLATE);
     }
 
     // For presentations, create slides.md with reveal.js syntax

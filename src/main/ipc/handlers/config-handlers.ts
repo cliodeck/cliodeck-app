@@ -69,7 +69,12 @@ function maskSectionKeys<T extends object>(sectionKey: string, section: T): T {
  * the renderer round-trips masked configs on save, and an unchanged mask must
  * not overwrite the real key. An empty string still means "delete the key".
  */
-function stripUnchangedMaskedKeys(
+/**
+ * Exporté pour les tests : c'est la garantie « un masque renvoyé par le
+ * renderer n'écrase jamais la vraie clé ». Une régression ici effacerait
+ * silencieusement les clés d'API à chaque enregistrement des réglages.
+ */
+export function stripUnchangedMaskedKeys(
   sectionKey: string,
   value: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -161,7 +166,7 @@ export function setupConfigHandlers() {
 
       console.log('IPC Response: config:set - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('config:set error:', error);
       return errorResponse(error);
     }
@@ -206,24 +211,9 @@ export function setupConfigHandlers() {
       console.log('✅ Successfully fetched', models.length, 'models');
       console.log('IPC Response: ollama:list-models', { count: models.length });
       return successResponse({ models });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('ollama:list-models error:', error);
       return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('ollama:check-availability', async () => {
-    console.log('IPC Call: ollama:check-availability');
-    try {
-      const baseUrl = configManager.getLLMConfig().ollamaURL || 'http://127.0.0.1:11434';
-      const url = `${baseUrl.replace(/\/$/, '')}/api/tags`;
-      const res = await fetch(url);
-      const available = res.ok;
-      console.log('IPC Response: ollama:check-availability', { available });
-      return successResponse({ available });
-    } catch (error: any) {
-      console.error('ollama:check-availability error:', error);
-      return { ...errorResponse(error), available: false };
     }
   });
 

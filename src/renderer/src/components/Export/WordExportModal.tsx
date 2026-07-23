@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
@@ -15,9 +16,10 @@ interface WordExportModalProps {
 }
 
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { content, filePath, getLiveContent } = useEditorStore();
-  const isBook = currentProject?.type === 'book' && chapters.length > 0;
+  const isBook = currentProject?.type === 'book' && (chapters ?? []).length > 0;
   // Livre : tout l'ouvrage, ou le chapitre courant seul (tirage de travail).
   const [bookScope, setBookScope] = useState<'book' | 'chapter'>('book');
 
@@ -96,8 +98,8 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       const result = await window.electron.dialog.saveFile({
         defaultPath: outputPath,
         filters: [
-          { name: 'Word Document', extensions: ['docx'] },
-          { name: 'Tous les fichiers', extensions: ['*'] },
+          { name: t('export.word.wordFiles'), extensions: ['docx'] },
+          { name: t('export.word.allFiles'), extensions: ['*'] },
         ],
       });
 
@@ -111,12 +113,12 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
 
   const handleExport = async () => {
     if (!currentProject) {
-      setError('Aucun projet ouvert');
+      setError(t('export.word.noProject'));
       return;
     }
 
     if (!title) {
-      setError('Veuillez entrer un titre');
+      setError(t('export.word.enterTitle'));
       return;
     }
 
@@ -132,7 +134,8 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           const slidesPath = `${currentProject.path}/slides.md`;
           exportContent = await window.electron.fs.readFile(slidesPath);
         } catch (err) {
-          setError('Impossible de lire slides.md. Assurez-vous que le fichier existe.');
+          console.error('Failed to read slides.md:', err);
+          setError(t('export.word.slidesUnreadable'));
           setIsExporting(false);
           return;
         }
@@ -153,7 +156,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           ? filePath.slice(currentProject.path.length + 1)
           : null;
         const current = relative
-          ? chapters.find((c) => c.filePath === relative)
+          ? (chapters ?? []).find((c) => c.filePath === relative)
           : undefined;
         manuscript = {
           chapters,
@@ -199,11 +202,13 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           setProgress({ stage: '', message: '', progress: 0 });
         }, 2000);
       } else {
-        setError(result.error || 'Erreur inconnue lors de l\'export');
+        console.error('Word export failed:', result.error);
+        setError(result.error || t('export.word.unknownError'));
         setIsExporting(false);
       }
     } catch (err: unknown) {
-      setError('Erreur lors de l\'export: ' + (err instanceof Error ? err.message : String(err)));
+      console.error('Word export threw:', err);
+      setError(t('export.word.error'));
       setIsExporting(false);
     }
   };
@@ -222,10 +227,21 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
 
   return (
     <div className="pdf-export-modal" onClick={handleClose}>
-      <div className="pdf-export-content" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="pdf-export-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="word-export-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="pdf-export-header">
-          <h3>Export Word (.docx)</h3>
-          <button className="close-btn" onClick={handleClose} disabled={isExporting}>
+          <h3 id="word-export-modal-title">{t('export.word.title')}</h3>
+          <button
+            className="close-btn"
+            onClick={handleClose}
+            disabled={isExporting}
+            aria-label={t('export.word.cancel')}
+          >
             <X size={20} />
           </button>
         </div>
@@ -233,57 +249,59 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         <div className="pdf-export-body">
           {/* Template Detection */}
           {hasTemplate && templatePath && (
-            <div style={{ fontSize: '0.875rem', color: 'var(--color-success)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
+            <div className="export-hint export-hint--success">
               <CheckCircle size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
-              Modèle Word détecté: <code style={{ color: 'var(--color-success)' }}>{templatePath.split('/').pop()}</code>
+              {t('export.word.templateDetected', { file: templatePath.split('/').pop() })}
             </div>
           )}
 
           {/* Livre : périmètre de l'export (arbitrage 9 — tirage de travail) */}
           {isBook && (
             <div className="form-field">
-              <label>Contenu à exporter</label>
+              <label htmlFor="word-export-scope">{t('export.scope.label')}</label>
               <select
+                id="word-export-scope"
                 value={bookScope}
                 onChange={(e) => setBookScope(e.target.value as 'book' | 'chapter')}
                 disabled={isExporting}
               >
                 <option value="book">
-                  Tout le livre ({chapters.length} chapitre
-                  {chapters.length > 1 ? 's' : ''})
+                  {t('export.scope.wholeBook', { count: (chapters ?? []).length })}
                 </option>
-                <option value="chapter">Ce chapitre seulement</option>
+                <option value="chapter">{t('export.scope.currentChapter')}</option>
               </select>
             </div>
           )}
 
           {/* Form Fields */}
           <div className="form-field">
-            <label>Titre du document</label>
+            <label htmlFor="word-export-title">{t('export.word.documentTitle')}</label>
             <input
+              id="word-export-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Mon document"
+              placeholder={t('export.word.titlePlaceholder')}
               disabled={isExporting}
             />
           </div>
 
           <div className="form-field">
-            <label>Auteur (optionnel)</label>
+            <label htmlFor="word-export-author">{t('export.word.author')}</label>
             <input
+              id="word-export-author"
               type="text"
               value={author}
               onChange={(e) => setAuthor(e.target.value)}
-              placeholder="Votre nom"
+              placeholder={t('export.word.authorPlaceholder')}
               disabled={isExporting}
             />
           </div>
 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
-              💡 Le résumé sera automatiquement lu depuis le fichier <code style={{ color: 'var(--color-success)' }}>abstract.md</code> de votre projet
+            <div className="export-hint">
+              💡 {t('export.word.abstractNote', { file: 'abstract.md' })}
             </div>
           )}
 
@@ -294,17 +312,18 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           />
 
           <div className="form-field">
-            <label>Fichier de sortie</label>
+            <label htmlFor="word-export-output">{t('export.word.outputFile')}</label>
             <div className="path-selector">
               <input
+                id="word-export-output"
                 type="text"
                 value={outputPath}
                 onChange={(e) => setOutputPath(e.target.value)}
-                placeholder="/chemin/vers/fichier.docx"
+                placeholder={t('export.word.outputPlaceholder')}
                 disabled={isExporting}
               />
               <button onClick={handleSelectOutputPath} disabled={isExporting}>
-                Parcourir
+                {t('export.word.browse')}
               </button>
             </div>
           </div>
@@ -331,14 +350,14 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           {success && (
             <div className="export-success">
               <CheckCircle size={16} />
-              <span>Export réussi! Document Word créé à: {outputPath}</span>
+              <span>{t('export.word.success', { path: outputPath })}</span>
             </div>
           )}
         </div>
 
         <div className="pdf-export-footer">
           <button className="btn-cancel" onClick={handleClose} disabled={isExporting}>
-            Annuler
+            {t('export.word.cancel')}
           </button>
           <button
             className="btn-export"
@@ -346,7 +365,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             disabled={isExporting || !title}
           >
             <FileDown size={16} />
-            {isExporting ? 'Export en cours...' : 'Exporter'}
+            {isExporting ? t('export.word.exporting') : t('export.word.export')}
           </button>
         </div>
       </div>

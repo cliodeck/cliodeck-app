@@ -3,11 +3,15 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import {
+  CONTEXT_FILE,
+  CONTEXT_TEMPLATE,
+  extractContextContent,
   loadWorkspaceHints,
   prependAsPrompt,
   prependAsSystemMessage,
   writeWorkspaceHints,
 } from '../loader.js';
+import { workspaceFiles } from '../../workspace/layout.js';
 import { ensureWorkspaceDirectories } from '../../workspace/layout.js';
 import type { ChatMessage } from '../../llm/providers/base.js';
 
@@ -23,11 +27,12 @@ afterEach(async () => {
 });
 
 describe('Workspace hints loader (4.1)', () => {
-  it('reports absent when hints.md does not exist', async () => {
+  it('reports absent when no context file exists', async () => {
     const h = await loadWorkspaceHints(tmp);
     expect(h.present).toBe(false);
     expect(h.normalized).toBe('');
-    expect(h.sourcePath).toContain('hints.md');
+    // context.md est désormais la face visible et la cible d'écriture.
+    expect(h.sourcePath).toContain(CONTEXT_FILE);
   });
 
   it('reports absent for an empty/whitespace-only hints.md', async () => {
@@ -38,15 +43,14 @@ describe('Workspace hints loader (4.1)', () => {
     expect(h.normalized).toBe('');
   });
 
-  it('loads and normalizes user-authored hints', async () => {
+  it('loads user-authored context, heading stripped', async () => {
     await writeWorkspaceHints(
       tmp,
-      '  # Directives\n\nCite en Chicago author-date.\n\n'
+      '# Contexte du projet\n\nCite en Chicago author-date.\n\n'
     );
     const h = await loadWorkspaceHints(tmp);
     expect(h.present).toBe(true);
-    expect(h.normalized.startsWith('# Directives')).toBe(true);
-    expect(h.normalized.endsWith('Chicago author-date.')).toBe(true);
+    expect(h.normalized).toBe('Cite en Chicago author-date.');
   });
 
   it('prependAsPrompt is a no-op when hints absent', async () => {
@@ -84,5 +88,50 @@ describe('Workspace hints loader (4.1)', () => {
     expect(out[0].content).toContain('Cite en Chicago.');
     expect(out[1]).toBe(msgs[0]);
     expect(out[2]).toBe(msgs[1]);
+  });
+
+  // --- context.md face visible, hints.md hérité ---
+
+  it('n’injecte RIEN pour un context.md jamais édité', async () => {
+    // Le gabarit porte ses instructions dans un commentaire HTML : un
+    // fichier neuf ne doit rien apprendre au modèle.
+    await writeWorkspaceHints(tmp, CONTEXT_TEMPLATE);
+    const h = await loadWorkspaceHints(tmp);
+    expect(h.present).toBe(false);
+    expect(h.normalized).toBe('');
+  });
+
+  it('n’injecte pas l’ancien gabarit des projets déjà créés', async () => {
+    await writeWorkspaceHints(
+      tmp,
+      '# Contexte du projet\n\nDécrivez ici le contexte de votre recherche. ' +
+        'Ce contexte sera utilisé pour améliorer les réponses de l’assistant IA.\n\n' +
+        'Exemple : "Cette recherche porte sur l’impact de l’intelligence artificielle."'
+    );
+    const h = await loadWorkspaceHints(tmp);
+    expect(h.present).toBe(false);
+  });
+
+  it('lit encore .cliodeck/hints.md et concatène les deux sources', async () => {
+    await fs.writeFile(workspaceFiles(tmp).hints, 'Toujours en Chicago.', 'utf8');
+    await writeWorkspaceHints(tmp, '# Contexte\n\nDanzig, 1919-1939.');
+    const h = await loadWorkspaceHints(tmp);
+    expect(h.present).toBe(true);
+    expect(h.sources.context.present).toBe(true);
+    expect(h.sources.legacyHints.present).toBe(true);
+    // context.md d'abord (le sujet), puis les directives héritées.
+    expect(h.normalized).toBe('Danzig, 1919-1939.\n\nToujours en Chicago.');
+  });
+
+  it('fonctionne avec le seul hints.md hérité', async () => {
+    await fs.writeFile(workspaceFiles(tmp).hints, 'Langue : français.', 'utf8');
+    const h = await loadWorkspaceHints(tmp);
+    expect(h.present).toBe(true);
+    expect(h.normalized).toBe('Langue : français.');
+  });
+
+  it('extractContextContent retire commentaires et titre de tête', () => {
+    expect(extractContextContent('# Titre\n\n<!-- note -->\nCorps.')).toBe('Corps.');
+    expect(extractContextContent('<!-- tout est commenté -->')).toBe('');
   });
 });

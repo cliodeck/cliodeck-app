@@ -23,8 +23,9 @@ import { useModeStore } from './modeStore';
 // MARK: - Types (brainstorm, canonical)
 
 export interface BrainstormSource {
-  kind: 'archive' | 'bibliographie' | 'note';
-  sourceType: 'primary' | 'secondary' | 'vault';
+  /** `manuscrit` : extrait du texte de l'auteur lui-même. */
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
   title: string;
   snippet: string;
   similarity: number;
@@ -36,6 +37,8 @@ export interface BrainstormSource {
   imagePath?: string;
   notePath?: string;
   lineNumber?: number;
+  /** Manuscrit : chapitre d'origine, pour rouvrir au bon endroit. */
+  chapterId?: string;
 }
 
 export interface BrainstormToolCall {

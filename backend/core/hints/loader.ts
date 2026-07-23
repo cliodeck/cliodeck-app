@@ -1,85 +1,164 @@
 /**
- * Workspace hints loader (fusion step 4.1, goose lesson #3: `.cliohints`).
+ * Contexte de projet — chargeur et injection de prompt.
  *
- * A workspace's `hints.md` is durable context the historian wants injected
- * into every prompt: citation style, house rules ("toujours en Chicago"),
- * period focus, language preference, disambiguations. Kept as plain Markdown
- * so the user edits it in any editor and can version-control it with the
- * workspace.
+ * Historique : deux mécanismes concurrents ont coexisté. `.cliodeck/hints.md`
+ * (goose lesson #3, `.cliohints`) était injecté à chaque conversation mais
+ * enfoui dans un dossier caché ; `context.md`, à la racine du projet, était
+ * créé d'office avec la promesse écrite qu'il « sera utilisé pour améliorer
+ * les réponses de l'assistant IA » — et **personne ne le lisait**. Le fichier
+ * découvrable était mort, le fichier vivant était caché.
  *
- * Scope: backend loader + prompt-injection helper. The renderer settings
- * editor arrives with Phase 3 UI work.
+ * `context.md` est désormais la face visible : l'historien l'ouvre et l'édite
+ * comme n'importe quel document, il se versionne avec le projet.
+ * `.cliodeck/hints.md` reste lu quand il existe — les projets qui s'en
+ * servent déjà ne perdent rien — et les deux sources sont concaténées.
  *
- * Two injection modes are exposed — pick per call site:
- *   - `prependAsSystemMessage`: prepends a `system` `ChatMessage` to an
- *     existing chat array (for brainstorm / write tool flows).
- *   - `prependAsPrompt`: wraps a bare prompt string (for recipe steps
- *     calling `llm.complete`).
+ * **Piège traité** : `context.md` naît avec un gabarit d'instructions. Injecter
+ * ce gabarit apprendrait au modèle un sujet de recherche qui n'est pas celui
+ * de l'utilisateur (l'ancien exemple parlait d'intelligence artificielle dans
+ * l'éducation supérieure). Le gabarit est donc inerte par construction — ses
+ * instructions vivent dans un commentaire HTML, invisible au rendu et retiré
+ * ici — et l'ancien gabarit littéral est reconnu et ignoré pour les projets
+ * déjà créés.
  *
- * External MCP tools MUST NOT receive workspace hints unless the user
- * explicitly opts in per-tool — `.cliohints` may contain private
- * historiographical judgements the historian doesn't want leaked to
- * third-party servers. The helpers here stay local; the MCP client phase
- * (4.4) layers opt-in on top.
+ * Les outils MCP externes NE DOIVENT PAS recevoir ce contexte sans opt-in
+ * explicite : il peut contenir des jugements historiographiques privés.
  */
 
 import fs from 'fs/promises';
+import path from 'path';
 import { workspaceFiles } from '../workspace/layout.js';
 import type { ChatMessage } from '../llm/providers/base.js';
 
-export interface WorkspaceHints {
-  /** Raw markdown as authored by the user. Empty string when no hints file. */
-  raw: string;
-  /** Trimmed and whitespace-collapsed version, ready for prompt injection. */
-  normalized: string;
-  /** Absolute path of the `hints.md` that was read (whether or not present). */
+/** Nom du fichier de contexte, à la racine du projet. */
+export const CONTEXT_FILE = 'context.md';
+
+/**
+ * Gabarit d'un `context.md` neuf. Les instructions sont dans un commentaire
+ * HTML : invisibles au rendu markdown, retirées avant injection, donc un
+ * fichier jamais édité n'apprend rien au modèle.
+ */
+export const CONTEXT_TEMPLATE = `# Contexte du projet
+
+<!--
+  Décrivez ici le contexte de votre recherche : sujet, période, corpus,
+  angle d'analyse, conventions que l'assistant doit respecter (style de
+  citation, langue, façon de nommer les sources).
+
+  Ce texte est transmis à l'assistant au début de chaque conversation.
+  Tant que ce fichier ne contient que ces instructions, rien n'est envoyé.
+-->
+`;
+
+/**
+ * Ancien gabarit, écrit par les versions antérieures. Reconnu pour ne pas
+ * injecter son exemple dans les projets déjà créés.
+ */
+const LEGACY_PLACEHOLDER_MARKERS = [
+  'Décrivez ici le contexte de votre recherche',
+  'Ce contexte sera utilisé pour améliorer les réponses',
+];
+
+export interface ContextSource {
+  /** Chemin absolu du fichier (qu'il existe ou non). */
   sourcePath: string;
-  /** True if the hints file existed and was non-empty. */
+  /** Contenu utile, gabarit et commentaires retirés. Vide si rien à injecter. */
+  content: string;
   present: boolean;
 }
 
-export async function loadWorkspaceHints(
-  workspaceRoot: string
-): Promise<WorkspaceHints> {
-  const sourcePath = workspaceFiles(workspaceRoot).hints;
+export interface WorkspaceHints {
+  /** Markdown brut du fichier principal (`context.md`), tel qu'écrit. */
+  raw: string;
+  /** Contenu prêt à injecter — les deux sources concaténées. */
+  normalized: string;
+  /** Chemin du fichier principal, édité par les réglages. */
+  sourcePath: string;
+  /** Vrai si au moins une source apporte du contenu. */
+  present: boolean;
+  /** Détail par source, pour l'interface. */
+  sources: { context: ContextSource; legacyHints: ContextSource };
+}
+
+/**
+ * Retire ce qui ne doit jamais atteindre le modèle : commentaires HTML
+ * (les instructions du gabarit), titre de tête, et gabarits hérités.
+ */
+export function extractContextContent(raw: string): string {
+  let text = raw.replace(/<!--[\s\S]*?-->/g, '');
+  text = text.replace(/^\s*#\s+[^\n]*\n?/, '');
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  // Gabarit hérité laissé tel quel : inerte, comme le gabarit actuel.
+  if (LEGACY_PLACEHOLDER_MARKERS.some((marker) => trimmed.includes(marker))) {
+    return '';
+  }
+  return trimmed;
+}
+
+async function readSource(sourcePath: string): Promise<ContextSource> {
   let raw = '';
   try {
     raw = await fs.readFile(sourcePath, 'utf8');
   } catch {
-    return {
-      raw: '',
-      normalized: '',
-      sourcePath,
-      present: false,
-    };
+    return { sourcePath, content: '', present: false };
   }
-  const normalized = raw.trim();
+  const content = extractContextContent(raw);
+  return { sourcePath, content, present: content.length > 0 };
+}
+
+/**
+ * Charge le contexte d'un projet : `context.md` (face visible) puis
+ * `.cliodeck/hints.md` (hérité, toujours honoré).
+ */
+export async function loadWorkspaceHints(
+  workspaceRoot: string
+): Promise<WorkspaceHints> {
+  const contextPath = path.join(workspaceRoot, CONTEXT_FILE);
+  const hintsPath = workspaceFiles(workspaceRoot).hints;
+
+  const [context, legacyHints] = await Promise.all([
+    readSource(contextPath),
+    readSource(hintsPath),
+  ]);
+
+  let raw = '';
+  try {
+    raw = await fs.readFile(contextPath, 'utf8');
+  } catch {
+    raw = '';
+  }
+
+  const parts = [context.content, legacyHints.content].filter(Boolean);
+  const normalized = parts.join('\n\n');
+
   return {
     raw,
     normalized,
-    sourcePath,
+    sourcePath: contextPath,
     present: normalized.length > 0,
+    sources: { context, legacyHints },
   };
 }
 
+/** Écrit le fichier de contexte visible du projet. */
 export async function writeWorkspaceHints(
   workspaceRoot: string,
   markdown: string
 ): Promise<void> {
-  const sourcePath = workspaceFiles(workspaceRoot).hints;
-  await fs.writeFile(sourcePath, markdown, 'utf8');
+  await fs.writeFile(path.join(workspaceRoot, CONTEXT_FILE), markdown, 'utf8');
 }
 
-const HEADER = 'Directives durables du workspace (.cliohints)';
-const FOOTER = 'Fin des directives.';
+const HEADER = 'Contexte du projet, fourni par l’auteur';
+const FOOTER = 'Fin du contexte.';
 
 function wrap(hints: WorkspaceHints): string {
   return `[${HEADER}]\n${hints.normalized}\n[${FOOTER}]`;
 }
 
 /**
- * Prepend a `system` message carrying the hints to an existing chat. If the
- * conversation already opens with a `system` message, the hints are merged
+ * Prepend a `system` message carrying the context to an existing chat. If the
+ * conversation already opens with a `system` message, the context is merged
  * into a *new* leading system message so both stay distinguishable for
  * compactor logic (meta.ragCitation=false, ordinary system).
  */
@@ -92,7 +171,7 @@ export function prependAsSystemMessage(
 }
 
 /**
- * Wrap a bare prompt string with a hints preamble. Recipes / one-shot
+ * Wrap a bare prompt string with a context preamble. Recipes / one-shot
  * `llm.complete` calls use this when they don't have a message array.
  */
 export function prependAsPrompt(prompt: string, hints: WorkspaceHints): string {

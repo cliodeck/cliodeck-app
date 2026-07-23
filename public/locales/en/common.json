@@ -256,8 +256,8 @@
   "project": {
     "title": "Project",
     "fillAllFields": "Please fill all fields",
-    "createError": "Error creating project",
-    "openError": "Error opening project",
+    "createError": "The project could not be created. Check that the chosen folder is writable.",
+    "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
     "newProject": "New project",
     "openProject": "Open a project",
     "closeProject": "Close project",
@@ -299,7 +299,7 @@
     "cslSaveError": "Error saving CSL path",
     "cslRemoveError": "Error removing CSL path",
     "openInFinder": "Open in file manager",
-    "openFolderError": "Error opening project folder",
+    "openFolderError": "The project folder could not be opened.",
     "zoteroSettings": "Zotero Settings",
     "zoteroSettingsHelp": "Configure Zotero group and collection specific to this project. These settings override global Zotero configuration.",
     "zoteroGroupId": "Group ID",
@@ -312,41 +312,88 @@
     "zoteroCollectionKey": "Collection Key",
     "zoteroCollectionKeyPlaceholder": "Enter collection key (optional)",
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
-    "loading": "Opening project..."
+    "loading": "Opening project...",
+    "chaptersInNavigator_one": "{{count}} chapter — see the chapter navigator",
+    "chaptersInNavigator_other": "{{count}} chapters — see the chapter navigator",
+    "reopenOnboarding": "Replay the setup assistant"
   },
   "export": {
     "pdf": {
-      "title": "PDF Export",
+      "title": "PDF export",
       "documentTitle": "Document title",
       "author": "Author (optional)",
       "missingDeps": "Missing dependencies:",
       "pandoc": "Pandoc",
       "xelatex": "XeLaTeX",
-      "abstractNote": "The abstract will be automatically read from...",
-      "beamer": "Beamer presentation",
+      "abstractNote": "The abstract will be read automatically from your project's {{file}} file",
+      "beamer": "Beamer presentation: content will be read from {{file}}",
       "outputFile": "Output file",
-      "exporting": "Exporting...",
-      "success": "Export successful! PDF created at:",
-      "error": "Export error"
+      "exporting": "Exporting…",
+      "success": "Export complete. PDF created at: {{path}}",
+      "error": "The export failed.",
+      "titlePlaceholder": "My document",
+      "authorPlaceholder": "Your name",
+      "missingPandoc": "Pandoc (install with: brew install pandoc)",
+      "missingXelatex": "XeLaTeX (install with: brew install --cask mactex)",
+      "installed": "installed",
+      "missing": "missing",
+      "depsCheckError": "Could not check the export dependencies.",
+      "beamerSyntax": "Syntax:",
+      "beamerSlideTitle": "Slide title (level 1)",
+      "beamerSubtitle": "Subtitle (level 2)",
+      "beamerNotes": "Speaker notes",
+      "outputPlaceholder": "/path/to/file.pdf",
+      "browse": "Browse",
+      "export": "Export",
+      "cancel": "Cancel",
+      "unknownError": "The export failed for an unknown reason.",
+      "noProject": "No project is open.",
+      "enterTitle": "Please enter a title.",
+      "depsRequired": "Pandoc and XeLaTeX are required. Install them before continuing.",
+      "slidesUnreadable": "Could not read slides.md. Check that the file exists in the project.",
+      "noChapterOpen": "No chapter is open to export.",
+      "pdfFiles": "PDF",
+      "allFiles": "All files"
     },
     "word": {
-      "title": "Word Export (.docx)",
+      "title": "Word export (.docx)",
       "documentTitle": "Document title",
       "author": "Author (optional)",
-      "templateDetected": "Word template detected:",
-      "abstractNote": "The abstract will be automatically read from...",
+      "templateDetected": "Word template detected: {{file}}",
+      "abstractNote": "The abstract will be read automatically from your project's {{file}} file",
       "outputFile": "Output file",
-      "exporting": "Exporting...",
-      "success": "Export successful! Word document created at:",
-      "error": "Export error"
+      "exporting": "Exporting…",
+      "success": "Export complete. Word document created at: {{path}}",
+      "error": "The export failed.",
+      "titlePlaceholder": "My document",
+      "authorPlaceholder": "Your name",
+      "outputPlaceholder": "/path/to/file.docx",
+      "browse": "Browse",
+      "export": "Export",
+      "cancel": "Cancel",
+      "unknownError": "The export failed for an unknown reason.",
+      "noProject": "No project is open.",
+      "enterTitle": "Please enter a title.",
+      "slidesUnreadable": "Could not read slides.md. Check that the file exists in the project.",
+      "wordFiles": "Word document",
+      "allFiles": "All files"
     },
     "exportToPDF": "Export to PDF",
     "exportToWord": "Export to Word",
     "citation": {
       "toggle": "Format citations with CSL (Chicago, MLA…)",
       "style": "Style",
-      "locale": "Locale",
-      "help": "[@key] markers become numbered footnotes and a bibliography is appended at the end."
+      "locale": "Language",
+      "help": "[@key] markers become numbered footnotes and a bibliography is appended at the end.",
+      "toggleAria": "Use the CSL citation engine",
+      "styleAria": "Citation style",
+      "localeAria": "Citation language"
+    },
+    "scope": {
+      "label": "Scope",
+      "wholeBook_one": "Whole book ({{count}} part)",
+      "wholeBook_other": "Whole book ({{count}} parts)",
+      "currentChapter": "This chapter only (working draft)"
     }
   },
   "rag": {
@@ -614,7 +661,11 @@
     "notConfigured": "The model is not responding. Check that Ollama is running, or pick another provider in Settings.",
     "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
     "openSettings": "Open Settings",
-    "sourcesLabel": "Sources"
+    "sourcesLabel": "Sources",
+    "noProjectState": {
+      "title": "Start with a project",
+      "message": "Create or open a project to write, explore your sources and talk to the assistant."
+    }
   },
   "corpus": {
     "title": "Corpus",
@@ -728,7 +779,7 @@
     "checkCitations": "Check citations",
     "newFileConfirm": "Create a new file? Unsaved changes will be lost.",
     "markdown": "Markdown",
-    "openError": "Error opening file",
+    "openError": "This file could not be opened. It may be missing or unreadable.",
     "saveError": "Error saving file",
     "renumberFootnotes": "Renumber footnotes"
   },
@@ -1202,21 +1253,22 @@
   },
   "hints": {
     "title": "Persistent context",
-    "hint": "These notes are injected as a system message into every Brainstorm conversation (and the recipes that use it). Useful for reminding the model of project conventions, canonical sources, and exclusions.",
+    "hint": "This text is sent to the assistant at the start of every conversation: research topic and period, corpus, conventions to follow. It lives in context.md at the project root — you can also edit it like any other document and version it with your work.",
     "filePath": "File:",
     "errors": {
       "noFusionApi": "Fusion API not exposed by the preload.",
-      "noProject": "Open a project to edit hints.",
+      "noProject": "Open a project to edit its context.",
       "saveFailed": "Save failed."
     },
     "buttons": {
       "save": "Save",
-      "saveTitle": "Save hints"
+      "saveTitle": "Save project context"
     },
     "status": {
       "saved": "✓ saved"
     },
-    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n"
+    "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n",
+    "legacyNotice": "An earlier hints file ({{path}}) is also read and sent to the assistant. Copy its content here if you would rather keep everything in one file."
   },
   "recipes": {
     "title": "Recipes (read-only)",
@@ -1474,7 +1526,13 @@
     "syncTooltip": "Syncing: {{phase}} {{current}}/{{total}}",
     "usageJournalBadge_one": "{{count}} session to annotate",
     "usageJournalBadge_other": "{{count}} sessions to annotate",
-    "usageJournalTooltip": "Substantial AI usage sessions without a decision — click to open the journal (Cmd/Ctrl+J)"
+    "usageJournalTooltip": "Substantial AI usage sessions without a decision — click to open the journal (Cmd/Ctrl+J)",
+    "savedAt": "Saved at {{time}}",
+    "savedTooltip": "Last saved at {{time}}",
+    "unsaved": "Unsaved changes",
+    "unsavedTooltip": "The document has changes that are not written to disk.",
+    "notSavedYet": "Not saved",
+    "notSavedYetTooltip": "This document has not been saved since it was opened."
   },
   "security": {
     "revokeTitle": "Key revocation",
@@ -1570,8 +1628,9 @@
     "paragraphs": "par.",
     "citations": "cit.",
     "footnotes": "notes",
-    "bookWords": "book",
-    "bookTotalHint": "Total words in the manuscript (all chapters)"
+    "bookWords": "words (book)",
+    "bookTotalHint": "Total words in the manuscript (all chapters)",
+    "scrollHint": "Scroll horizontally to see all counters"
   },
   "book": {
     "chapterCount_one": "{{count}} chapter",
@@ -1607,5 +1666,17 @@
     "allValid": "All citations are valid ({{count}} keys checked).",
     "missing": "{{count}} key(s) missing from the bibliography:",
     "checkError": "Could not check citations."
+  },
+  "search": {
+    "title": "Search the book",
+    "placeholder": "Term to search across the whole manuscript",
+    "run": "Run search",
+    "searching": "Searching…",
+    "error": "Search failed. Some chapters may not have been readable.",
+    "noResults": "No occurrence of “{{query}}” in the manuscript.",
+    "summary_one": "{{count}} occurrence in {{chapters}} chapter",
+    "summary_other": "{{count}} occurrences across {{chapters}} chapters",
+    "goToLine": "Go to line {{line}}",
+    "truncated": "Too many occurrences in this chapter: only the first ones are shown."
   }
 }

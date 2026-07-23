@@ -1,0 +1,74 @@
+name: Tests
+
+# Aucun job n'exécutait les tests jusqu'ici : la « suite verte » l'était
+# sur les postes de développement, où les gardes `native-guards.ts` sautent
+# les suites SQLite (better-sqlite3 y est compilé pour l'ABI d'Electron par
+# le `postinstall`). Huit échecs réels s'y cachaient — voir
+# docs/audits-2026-07-19.md. Ce job tourne donc sur l'ABI **Node**, où les
+# gardes ne masquent plus que l'indisponibilité authentique du binding.
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        # Le `postinstall` du dépôt (electron-builder install-app-deps)
+        # compile les modules natifs pour l'ABI d'Electron : c'est ce qu'il
+        # faut pour lancer l'app, pas pour lancer les tests.
+        run: npm ci
+
+      - name: Recompiler better-sqlite3 pour l'ABI Node
+        # Sans cette étape, les suites SQLite seraient sautées et la CI
+        # serait verte sans rien avoir vérifié.
+        run: npm rebuild better-sqlite3
+
+      - name: Build
+        # AVANT le typecheck : le tsconfig racine référence le projet
+        # composite `tsconfig.node.json` et lit ses fichiers de
+        # déclaration. Sur un dépôt fraîchement cloné, `dist/` n'existe
+        # pas et `tsc --noEmit` échoue sur des erreurs fantômes (TS6305).
+        run: npm run build
+
+      - name: Typecheck (racine, main, preload)
+        run: |
+          npm run typecheck
+          npx tsc -p tsconfig.node.json --noEmit
+          npx tsc -p tsconfig.preload.json --noEmit
+
+      - name: Tests
+        run: npx vitest run --reporter=default
+
+      - name: Récapitulatif des tests sautés
+        # Un skip est légitime (binding indisponible) ou suspect (une suite
+        # entière qui cesse de tourner sans qu'on le remarque). On le rend
+        # visible plutôt que de le découvrir six mois plus tard.
+        if: always()
+        run: npx vitest run --reporter=json --outputFile=/tmp/vitest.json || true
+
+# Non inclus, volontairement :
+#  - `npm run lint` : aucune configuration ESLint n'existe dans le dépôt
+#    (`eslint .` échoue par absence de config, pas par faute de code).
+#    À ajouter au workflow le jour où une configuration est écrite.
+#  - Les tests Ollama en direct : ils exigent un serveur local ; leur garde
+#    (`ollamaAvailable`) les saute proprement ici.
+#  - La construction des artefacts distribuables (electron-builder) : c'est
+#    un travail de publication, pas de vérification.

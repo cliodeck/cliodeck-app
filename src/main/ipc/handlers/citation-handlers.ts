@@ -14,6 +14,11 @@ import { ipcMain, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import {
+  validate,
+  CitationFormatSchema,
+  CitationPreviewSchema,
+} from '../utils/validation.js';
 import { bibliographyService } from '../../services/bibliography-service.js';
 import {
   CitationEngine,
@@ -110,17 +115,15 @@ export function setupCitationHandlers(): void {
       rawLocale: unknown
     ) => {
       try {
-        if (!Array.isArray(rawItems)) {
-          throw new Error('citation:format — items must be an array');
-        }
-        if (typeof rawStyleId !== 'string' || !rawStyleId) {
-          throw new Error('citation:format — styleId must be a non-empty string');
-        }
-        const locale =
-          typeof rawLocale === 'string' && rawLocale ? rawLocale : 'en-US';
+        const { items, styleId, locale: rawLoc } = validate(CitationFormatSchema, {
+          items: rawItems,
+          styleId: rawStyleId,
+          locale: typeof rawLocale === 'string' ? rawLocale : undefined,
+        });
+        const locale = rawLoc || 'en-US';
         const result = getEngine().formatCitation(
-          rawItems as CSLItem[],
-          rawStyleId,
+          items as unknown as CSLItem[],
+          styleId,
           locale as 'fr-FR' | 'en-US'
         );
         return successResponse(result);
@@ -140,24 +143,22 @@ export function setupCitationHandlers(): void {
       rawLocale: unknown
     ) => {
       try {
-        if (typeof rawBibKey !== 'string' || !rawBibKey) {
-          throw new Error('citation:preview — bibKey must be a non-empty string');
-        }
-        if (typeof rawStyleId !== 'string' || !rawStyleId) {
-          throw new Error('citation:preview — styleId must be a non-empty string');
-        }
-        const locale =
-          typeof rawLocale === 'string' && rawLocale ? rawLocale : 'en-US';
+        const { bibKey, styleId, locale: rawLoc } = validate(CitationPreviewSchema, {
+          bibKey: rawBibKey,
+          styleId: rawStyleId,
+          locale: typeof rawLocale === 'string' ? rawLocale : undefined,
+        });
+        const locale = rawLoc || 'en-US';
 
         const all = bibliographyService.getCitations();
-        const hit = all.find((c) => c.key === rawBibKey || c.id === rawBibKey);
+        const hit = all.find((c) => c.key === bibKey || c.id === bibKey);
         if (!hit) {
-          throw new Error(`citation:preview — unknown bibKey "${rawBibKey}"`);
+          throw new Error(`citation:preview — unknown bibKey "${bibKey}"`);
         }
         const cslItem = citationToCSL(hit);
         const result = getEngine().formatCitation(
           [cslItem],
-          rawStyleId,
+          styleId,
           locale as 'fr-FR' | 'en-US'
         );
         return successResponse({

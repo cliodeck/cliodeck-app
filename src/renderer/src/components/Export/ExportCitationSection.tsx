@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Per-export CSL citation options.
@@ -49,6 +50,7 @@ export async function loadDefaultCitationValue(): Promise<ExportCitationValue> {
 }
 
 export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabled }) => {
+  const { t } = useTranslation('common');
   const [styles, setStyles] = useState<StyleEntry[]>([]);
   const [locales, setLocales] = useState<string[]>([]);
 
@@ -98,10 +100,10 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
           checked={value.useEngine}
           onChange={toggleEngine}
           disabled={disabled}
-          aria-label="Use CSL citation engine"
+          aria-label={t('export.citation.toggleAria')}
           data-testid="export-citation-toggle"
         />
-        <span>Formater les citations avec CSL (Chicago, MLA…)</span>
+        <span>{t('export.citation.toggle')}</span>
       </label>
 
       {value.useEngine && (
@@ -115,11 +117,11 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
         >
           <div>
             <label htmlFor="export-citation-style" style={{ color: 'var(--text-secondary)' }}>
-              Style
+              {t('export.citation.style')}
             </label>
             <select
               id="export-citation-style"
-              aria-label="Citation style"
+              aria-label={t('export.citation.styleAria')}
               value={value.style}
               disabled={disabled}
               onChange={(e) => onChange({ ...value, style: e.target.value })}
@@ -135,11 +137,11 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
 
           <div>
             <label htmlFor="export-citation-locale" style={{ color: 'var(--text-secondary)' }}>
-              Locale
+              {t('export.citation.locale')}
             </label>
             <select
               id="export-citation-locale"
-              aria-label="Citation locale"
+              aria-label={t('export.citation.localeAria')}
               value={value.locale}
               disabled={disabled}
               onChange={(e) => onChange({ ...value, locale: e.target.value })}
@@ -163,8 +165,7 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
           color: 'var(--text-tertiary)',
         }}
       >
-        Les marqueurs <code>[@key]</code> deviendront des notes de bas de page numérotées et la
-        bibliographie sera ajoutée à la fin.
+        {t('export.citation.help')}
       </p>
     </div>
   );

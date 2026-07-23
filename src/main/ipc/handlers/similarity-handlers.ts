@@ -76,7 +76,7 @@ export function setupSimilarityHandlers() {
       });
 
       return successResponse({ results });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ similarity:analyze error:', error);
       return errorResponse(error);
     } finally {
@@ -97,7 +97,7 @@ export function setupSimilarityHandlers() {
       similarityService.cancelAnalysis();
       console.log('📤 IPC Response: similarity:cancel - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ similarity:cancel error:', error);
       return errorResponse(error);
     }
@@ -106,28 +106,6 @@ export function setupSimilarityHandlers() {
   /**
    * Get results for a specific segment
    */
-  ipcMain.handle('similarity:get-segment-results', async (_event, rawSegmentId: unknown) => {
-    const segmentId = validate(StringIdSchema, rawSegmentId);
-    console.log('📞 IPC Call: similarity:get-segment-results', { segmentId });
-
-    try {
-      const projectPath = projectManager.getCurrentProjectPath();
-      requireProject(projectPath);
-
-      const result = await similarityService.getResultsForSegment(segmentId);
-
-      console.log('📤 IPC Response: similarity:get-segment-results', {
-        found: !!result,
-        recommendations: result?.recommendations.length || 0,
-      });
-
-      return successResponse({ result });
-    } catch (error: any) {
-      console.error('❌ similarity:get-segment-results error:', error);
-      return errorResponse(error);
-    }
-  });
-
   /**
    * Get all cached results
    */
@@ -145,7 +123,7 @@ export function setupSimilarityHandlers() {
       });
 
       return successResponse({ results });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ similarity:get-all-results error:', error);
       return errorResponse(error);
     }
@@ -165,7 +143,7 @@ export function setupSimilarityHandlers() {
 
       console.log('📤 IPC Response: similarity:clear-cache - success');
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ similarity:clear-cache error:', error);
       return errorResponse(error);
     }

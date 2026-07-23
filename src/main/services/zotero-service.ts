@@ -99,9 +99,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero test connection failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -122,9 +122,9 @@ class ZoteroService {
       } finally {
         localDB.close();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to list Zotero libraries:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -158,9 +158,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to list Zotero collections:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -261,9 +261,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero sync failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -306,9 +306,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero PDF download failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -353,9 +353,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero enrich citations failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -400,9 +400,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero check updates failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -447,9 +447,9 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Zotero apply updates failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -547,7 +547,7 @@ class ZoteroService {
       } finally {
         this.closeDataSource(ds);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to refresh collection links:', error);
       return {
         collections: [],

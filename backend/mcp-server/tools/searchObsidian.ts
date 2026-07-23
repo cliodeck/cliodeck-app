@@ -20,9 +20,9 @@ import { ObsidianVaultStore } from '../../integrations/obsidian/ObsidianVaultSto
 import { obsidianStorePath } from '../../integrations/obsidian/ObsidianVaultIndexer.js';
 import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
+import { truncate } from './budget.js';
 
 const TOOL_NAME = 'search_obsidian';
-const TRUNCATE = 4000;
 
 export function registerSearchObsidian(
   server: McpServer,
@@ -54,9 +54,7 @@ export function registerSearchObsidian(
           section: h.chunk.sectionTitle ?? null,
           score: h.score,
           content:
-            h.chunk.content.length > TRUNCATE
-              ? h.chunk.content.slice(0, TRUNCATE) + '…'
-              : h.chunk.content,
+            truncate(h.chunk.content),
         }));
 
         logger.log({

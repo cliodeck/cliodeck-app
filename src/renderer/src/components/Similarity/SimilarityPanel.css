@@ -8,8 +8,8 @@
   right: 20px;
   width: 380px;
   max-height: calc(100vh - 100px);
-  background: var(--bg-secondary, #1e1e1e);
-  border: 1px solid var(--border-color, #333);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   display: flex;
@@ -24,8 +24,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color, #333);
-  background: var(--bg-tertiary, #252525);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 .similarity-panel-title-wrapper {
@@ -37,7 +37,7 @@
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary, #e0e0e0);
+  color: var(--text-primary);
 }
 
 .similarity-panel-actions {
@@ -55,14 +55,14 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .similarity-icon-btn:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
-  color: var(--text-primary, #e0e0e0);
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 /* Content */
@@ -78,8 +78,8 @@
   align-items: flex-start;
   gap: 8px;
   padding: 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
   border-radius: 6px;
   margin-bottom: 12px;
 }
@@ -91,7 +91,7 @@
 
 .similarity-error-message {
   font-size: 13px;
-  color: var(--error-color, #ef4444);
+  color: var(--error-color, var(--color-danger));
   line-height: 1.4;
 }
 
@@ -101,14 +101,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: var(--bg-tertiary, #252525);
+  background: var(--bg-tertiary);
   border-radius: 6px;
   margin-bottom: 12px;
 }
 
 .similarity-summary-text {
   font-size: 12px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
 }
 
 .similarity-refresh-btn {
@@ -121,14 +121,14 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .similarity-refresh-btn:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
-  color: var(--accent-color, #4a9eff);
+  background: var(--hover-bg);
+  color: var(--accent-color, var(--color-accent));
 }
 
 /* Empty state */
@@ -149,7 +149,7 @@
 
 .similarity-empty-text {
   font-size: 13px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   margin: 0 0 20px 0;
   line-height: 1.5;
 }
@@ -159,7 +159,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
-  background: var(--accent-color, #4a9eff);
+  background: var(--accent-color, var(--color-accent));
   border: none;
   border-radius: 6px;
   color: white;
@@ -170,7 +170,7 @@
 }
 
 .similarity-analyze-btn:hover:not(:disabled) {
-  background: var(--accent-color-hover, #3a8eef);
+  background: var(--accent-color-hover, var(--color-accent-hover));
 }
 
 .similarity-analyze-btn:disabled {

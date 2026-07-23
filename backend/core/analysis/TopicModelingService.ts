@@ -863,10 +863,10 @@ export class TopicModelingService {
         venvPath: venvDir,
         pythonVersion,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         installed: false,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -916,11 +916,11 @@ export class TopicModelingService {
       log('✅ Environnement Python installé avec succès');
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Failed to setup environment:', error);
       return {
         success: false,
-        error: error.message || 'Unknown error',
+        error: (error instanceof Error ? error.message : String(error)) || 'Unknown error',
       };
     }
   }

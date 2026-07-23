@@ -16,7 +16,7 @@ export function setupTopicModelingHandlers() {
       const status = await topicModelingService.checkEnvironmentStatus();
       console.log('📤 IPC Response: topic-modeling:check-status', status);
       return successResponse(status);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ topic-modeling:check-status error:', error);
       return errorResponse(error);
     }
@@ -37,7 +37,7 @@ export function setupTopicModelingHandlers() {
 
       console.log('📤 IPC Response: topic-modeling:setup-environment', result);
       return successResponse(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ topic-modeling:setup-environment error:', error);
       return errorResponse(error);
     }

@@ -70,7 +70,13 @@ export interface RAGExplanation {
  * of `'secondary'` by consumers that only care about the bibliography /
  * archive / note split.
  */
-export type UnifiedSourceKind = 'pdf' | 'primary' | 'secondary' | 'vault';
+export type UnifiedSourceKind =
+  | 'pdf'
+  | 'primary'
+  | 'secondary'
+  | 'vault'
+  // Le manuscrit de l'auteur : quatrième corpus, distingué à dessein.
+  | 'manuscript';
 
 export interface UnifiedSource {
   kind: UnifiedSourceKind;
@@ -113,8 +119,10 @@ export interface UnifiedSource {
 // `src/main/` and `backend/` without pulling the renderer tree in.
 
 interface BrainstormSourceLike {
-  kind: 'archive' | 'bibliographie' | 'note';
-  sourceType: 'primary' | 'secondary' | 'vault';
+  // `manuscrit` : le texte que l'auteur écrit lui-même. Distinct des trois
+  // corpus externes — un historien doit voir quand il se cite lui-même.
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
   title: string;
   snippet: string;
   similarity: number;

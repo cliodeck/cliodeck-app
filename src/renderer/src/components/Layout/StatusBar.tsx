@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useProjectStore } from '../../stores/projectStore';
+import { useEditorStore } from '../../stores/editorStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useUsageJournalStore } from '../../stores/usageJournalStore';
@@ -21,6 +22,20 @@ export const StatusBar: React.FC = () => {
   const { currentProject } = useProjectStore();
   const [mcpClients, setMcpClients] = useState<MCPClientSummary[]>([]);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+
+  // État de sauvegarde du document courant (audit item 20) : sur un
+  // manuscrit long, ne pas savoir si son texte est sur le disque est
+  // anxiogène. `isDirty` bascule à la frappe, `lastSavedAt` à l'écriture.
+  const isDirty = useEditorStore((s) => s.isDirty);
+  const filePath = useEditorStore((s) => s.filePath);
+  const lastSavedAt = useEditorStore((s) => s.lastSavedAt);
+  // Re-rend chaque minute pour que « il y a 3 min » reste vrai sans
+  // re-rendre à la frappe.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // PDF indexing progress from bibliography store
   const batchIndexing = useBibliographyStore((s) => s.batchIndexing);
@@ -107,6 +122,33 @@ export const StatusBar: React.FC = () => {
       </div>
 
       <div className="status-bar__section status-bar__section--right">
+        {/* Save state of the current document */}
+        {filePath && (
+          <span
+            className={`status-bar__item ${isDirty ? 'status-bar__item--warning' : ''}`}
+            title={
+              isDirty
+                ? t('statusBar.unsavedTooltip')
+                : lastSavedAt
+                  ? t('statusBar.savedTooltip', {
+                      time: new Date(lastSavedAt).toLocaleTimeString(),
+                    })
+                  : t('statusBar.notSavedYetTooltip')
+            }
+          >
+            {isDirty
+              ? t('statusBar.unsaved')
+              : lastSavedAt
+                ? t('statusBar.savedAt', {
+                    time: new Date(lastSavedAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                  })
+                : t('statusBar.notSavedYet')}
+          </span>
+        )}
+
         {/* PDF indexing in progress */}
         {batchIndexing.isIndexing && (
           <span

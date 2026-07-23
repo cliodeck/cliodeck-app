@@ -19,6 +19,7 @@ import {
   rmrf,
 } from './_helpers.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { TRUNCATE } from '../tools/budget.js';
 
 let workspaceRoot: string;
 
@@ -108,7 +109,10 @@ describe.skipIf(!sqliteAvailable)('search_obsidian', () => {
     const db = createTempObsidianDb(workspaceRoot);
     // FTS5 ignores 1-char tokens, so build a long chunk full of a real
     // word and search for it.
-    const long = ('Wartheland is a region. ').repeat(100);
+    // Le contenu doit DÉPASSER le budget partagé, sinon rien n'est
+    // tronqué et le test ne prouve rien (il a dormi rouge ainsi).
+    const unit = 'Wartheland is a region. ';
+    const long = unit.repeat(Math.ceil((TRUNCATE + 500) / unit.length));
     seedNote(db, {
       noteId: 'n1',
       title: 'long',
@@ -130,8 +134,8 @@ describe.skipIf(!sqliteAvailable)('search_obsidian', () => {
 
     const payload = JSON.parse(result.content[0].text);
     expect(payload.hits[0].content.endsWith('…')).toBe(true);
-    // Truncation budget is 800 chars + ellipsis.
-    expect(payload.hits[0].content.length).toBeLessThanOrEqual(801);
+    // Budget partagé (tools/budget.ts) + l'ellipse.
+    expect(payload.hits[0].content.length).toBeLessThanOrEqual(TRUNCATE + 1);
   });
 
   it('returns an empty hit list (not an error) when no FTS rows match', async () => {

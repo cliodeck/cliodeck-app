@@ -17,14 +17,13 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
-
-const TOOL_NAME = 'graph_neighbors';
-const TRUNCATE = 4000;
+import { truncate as truncateToBudget } from './budget.js';
 
 function truncate(s: string | null | undefined): string {
-  if (!s) return '';
-  return s.length > TRUNCATE ? s.slice(0, TRUNCATE) + '…' : s;
+  return s ? truncateToBudget(s) : '';
 }
+
+const TOOL_NAME = 'graph_neighbors';
 
 export function registerGraphNeighbors(
   server: McpServer,

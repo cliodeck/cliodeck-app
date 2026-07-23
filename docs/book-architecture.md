@@ -159,13 +159,18 @@ disjoint de celui du moteur de citations.
 
 ## 7. Points d'extension
 
-- **Recherche multi-chapitres** : non livrée (panneau de résultats + modèle
-  de rafraîchissement propres). `manuscriptStore.readManuscript()` fournit
-  déjà la matière.
 - **Index** (`\index{}`) et **références croisées typées** : même famille
   technique que les notes et citations — une extension Lezer plus une
-  résolution à l'assemblage.
+  résolution à l'assemblage. C'est le prochain point d'extension naturel.
 - **Word et les réglages de notes** : `noteStyle`/`noteNumbering` ne pilotent
   aujourd'hui que la voie LaTeX.
-- **Indexation du manuscrit dans le RAG** : rien ne regarde le texte en
-  cours d'écriture ; c'est dans un livre que ça manquerait le plus.
+- **Propositions IA et bascule de chapitre** : les propositions en attente
+  expirent au changement de chapitre (arbitrage 5 du plan CM6) ; les rendre
+  survivantes suppose de distinguer une bascule d'une fermeture.
+
+Livrés depuis la rédaction de cette note, et retirés de cette liste :
+la **recherche dans tout le manuscrit**
+(`services/manuscript-search.ts`, `components/Book/ManuscriptSearch.tsx`) et
+l'**indexation du manuscrit** comme quatrième corpus RAG
+(`docs/manuscript-corpus.md` ; extraits étiquetés à part des sources par
+`manuscriptHitsToSources`).

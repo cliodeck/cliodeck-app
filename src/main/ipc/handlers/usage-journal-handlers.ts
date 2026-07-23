@@ -24,7 +24,7 @@ export function setupUsageJournalHandlers() {
         return { ...errorResponse('No project open'), code: 'NO_PROJECT', today: null };
       }
       return successResponse({ today });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ usage:get-today error:', error);
       return { ...errorResponse(error), today: null };
     }
@@ -39,7 +39,7 @@ export function setupUsageJournalHandlers() {
         return { ...errorResponse('No project open'), code: 'NO_PROJECT', today: null };
       }
       return successResponse({ today });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ usage:save-decision error:', error);
       return { ...errorResponse(error), today: null };
     }
@@ -54,7 +54,7 @@ export function setupUsageJournalHandlers() {
         return { ...errorResponse('No project open'), code: 'NO_PROJECT', adjudications: null };
       }
       return successResponse({ adjudications });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ usage:get-adjudications error:', error);
       return { ...errorResponse(error), adjudications: null };
     }
@@ -66,7 +66,7 @@ export function setupUsageJournalHandlers() {
     try {
       usageJournalService.setActiveMode(mode);
       return successResponse();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ usage:set-mode error:', error);
       return errorResponse(error);
     }

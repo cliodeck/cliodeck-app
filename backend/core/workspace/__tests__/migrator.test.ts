@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import {
   detectWorkspaceVersion,
   workspaceFiles,
@@ -11,6 +12,7 @@ import {
 } from '../layout.js';
 import { migrateWorkspaceToFlat } from '../migrator.js';
 import { readWorkspaceConfig } from '../config.js';
+import { sqliteAvailable } from '../../../__tests__/helpers/native-guards.js';
 
 let tmpRoot = '';
 
@@ -21,6 +23,38 @@ async function makeTmp(): Promise<string> {
 async function write(p: string, content = 'x'): Promise<void> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, content, 'utf8');
+}
+
+/**
+ * Écrit une VRAIE base SQLite minimale, marquée pour être reconnaissable
+ * après migration.
+ *
+ * Les fixtures écrivaient auparavant un fichier texte nommé `history.db` :
+ * le migrateur l'ouvrait pour de bon et échouait sur « file is not a
+ * database ». Ces quatre tests dormaient rouges derrière les gardes ABI.
+ */
+async function writeDb(p: string, marker: string): Promise<void> {
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  const db = new Database(p);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS fixture_marker (tag TEXT)');
+    db.prepare('INSERT INTO fixture_marker (tag) VALUES (?)').run(marker);
+  } finally {
+    db.close();
+  }
+}
+
+/** Relit le marqueur d'une base de fixture. */
+function readDbMarker(p: string): string | null {
+  const db = new Database(p, { readonly: true });
+  try {
+    const row = db.prepare('SELECT tag FROM fixture_marker LIMIT 1').get() as
+      | { tag: string }
+      | undefined;
+    return row?.tag ?? null;
+  } finally {
+    db.close();
+  }
 }
 
 beforeEach(async () => {
@@ -91,55 +125,55 @@ describe('migrateWorkspaceToFlat — none / flat', () => {
 });
 
 describe('migrateWorkspaceToFlat — db consolidation (history → brain)', () => {
-  it('renames history.db to brain.db on a flat workspace', async () => {
+  // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
+  it.skipIf(!sqliteAvailable)('renames history.db to brain.db on a flat workspace', async () => {
     await write(
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       '{"schema_version":2}',
     );
-    await write(
-      path.join(tmpRoot, CLIODECK_DIR, 'history.db'),
-      'PRETEND-SQLITE-BYTES',
-    );
+    await writeDb(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HISTORY');
 
     const r = await migrateWorkspaceToFlat(tmpRoot);
     expect(r.copied.some((c) => c.target.endsWith('brain.db'))).toBe(true);
 
     const flat = workspaceFiles(tmpRoot);
-    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('PRETEND-SQLITE-BYTES');
+    expect(readDbMarker(flat.brainDb)).toBe('HISTORY');
     await expect(
       fs.access(path.join(tmpRoot, CLIODECK_DIR, 'history.db')),
     ).rejects.toThrow();
   });
 
-  it('warns and skips when both history.db and brain.db exist', async () => {
+  // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
+  it.skipIf(!sqliteAvailable)('warns and skips when both history.db and brain.db exist', async () => {
     await write(
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       '{"schema_version":2}',
     );
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HISTORY');
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'), 'BRAIN');
+    await writeDb(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HISTORY');
+    await writeDb(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'), 'BRAIN');
 
     const r = await migrateWorkspaceToFlat(tmpRoot);
     expect(r.warnings.some((w) => w.includes('both files exist'))).toBe(true);
     // Both files stay put — the user is the only authority on what to merge.
-    expect(
-      await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'utf8'),
-    ).toBe('HISTORY');
-    expect(
-      await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'), 'utf8'),
-    ).toBe('BRAIN');
+    expect(readDbMarker(path.join(tmpRoot, CLIODECK_DIR, 'history.db'))).toBe(
+      'HISTORY',
+    );
+    expect(readDbMarker(path.join(tmpRoot, CLIODECK_DIR, 'brain.db'))).toBe(
+      'BRAIN',
+    );
   });
 
-  it('runs consolidation alongside the legacy-subdir flatten in one pass', async () => {
+  // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
+  it.skipIf(!sqliteAvailable)('runs consolidation alongside the legacy-subdir flatten in one pass', async () => {
     const v2 = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR);
     await write(path.join(v2, 'config.json'), '{"schema_version":2}');
     // history.db lived flat in pre-fusion v1 — it never moved into v2/.
-    await write(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HIST');
+    await writeDb(path.join(tmpRoot, CLIODECK_DIR, 'history.db'), 'HIST');
 
     const r = await migrateWorkspaceToFlat(tmpRoot);
     expect(r.kind).toBe('legacy-subdir');
     const flat = workspaceFiles(tmpRoot);
-    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('HIST');
+    expect(readDbMarker(flat.brainDb)).toBe('HIST');
   });
 
   it('skips the obsidian/tropy/vectors consolidation steps when their files are absent', async () => {
@@ -231,9 +265,10 @@ describe('migrateWorkspaceToFlat — legacy-subdir (in-flight v2)', () => {
 });
 
 describe('migrateWorkspaceToFlat — cliobrain', () => {
-  it('copies canonical artifacts and merges config', async () => {
+  // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
+  it.skipIf(!sqliteAvailable)('copies canonical artifacts and merges config', async () => {
     const cb = path.join(tmpRoot, CLIOBRAIN_DIR);
-    await write(path.join(cb, 'brain.db'), 'SQLITE');
+    await writeDb(path.join(cb, 'brain.db'), 'CLIOBRAIN');
     await write(path.join(cb, 'hnsw.index'), 'VEC');
     await write(path.join(cb, 'hints.md'), '# hints');
     await write(
@@ -248,7 +283,7 @@ describe('migrateWorkspaceToFlat — cliobrain', () => {
     );
 
     const flat = workspaceFiles(tmpRoot);
-    expect(await fs.readFile(flat.brainDb, 'utf8')).toBe('SQLITE');
+    expect(readDbMarker(flat.brainDb)).toBe('CLIOBRAIN');
 
     const cfg = await readWorkspaceConfig(tmpRoot);
     expect(cfg.schema_version).toBe(2);

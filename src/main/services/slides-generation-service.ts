@@ -241,14 +241,14 @@ export class SlidesGenerationService {
       logger.info('slides', 'generateSlides:done', { outputLength: normalised.length });
 
       return normalised;
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (signal.aborted) {
         const normalised = normaliseToRevealFormat(fullResponse);
         window.webContents.send('slides:stream-done', { content: normalised, cancelled: true });
         return normalised;
       }
-      logger.error('slides', 'generateSlides:error', { error: error.message });
-      window.webContents.send('slides:stream-error', { error: error.message });
+      logger.error('slides', 'generateSlides:error', { error: (error instanceof Error ? error.message : String(error)) });
+      window.webContents.send('slides:stream-error', { error: (error instanceof Error ? error.message : String(error)) });
       throw error;
     } finally {
       this.abortController = null;

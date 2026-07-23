@@ -61,3 +61,13 @@
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
+
+/* La barre défile horizontalement quand les compteurs dépassent la largeur
+   disponible (constaté dans les trois types de projets — audit du
+   2026-07-19). Un dégradé sur le bord droit signale qu'il reste du contenu,
+   là où la colonne coupée nette laissait croire à un défaut d'affichage. */
+.document-stats {
+  position: relative;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+}

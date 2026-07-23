@@ -1,6 +1,6 @@
 {
   "name": "cliodeck",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "type": "module",
   "description": "Assistant d'écriture pour historiens avec RAG et intégration Zotero/Tropy",
   "main": "dist/src/main/index.js",

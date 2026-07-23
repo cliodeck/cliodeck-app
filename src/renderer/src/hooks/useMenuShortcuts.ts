@@ -1,18 +1,18 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
-import { useBibliographyStore } from '../stores/bibliographyStore';
-import { useDialogStore } from '../stores/dialogStore';
+import { runCitationCheck } from '../services/check-citations';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
  * This should be called once at the app root level
  */
 export function useMenuShortcuts() {
-  const { saveCurrentFile, loadFile, createNewFile, insertFormatting, togglePreview, toggleStats } =
+  const { t } = useTranslation('common');
+  const { saveCurrentFile, loadFile, createNewFile, insertFormatting, togglePreview } =
     useEditorStore();
   const { createProject, loadProject } = useProjectStore();
-  const { citations } = useBibliographyStore();
 
   useEffect(() => {
     // Vérifier que l'API Electron est disponible
@@ -108,35 +108,11 @@ export function useMenuShortcuts() {
       insertFormatting('blockquote');
     };
 
-    const handleToggleStats = () => {
-      toggleStats();
-    };
-
+    // Une seule implémentation, partagée avec le bouton de la barre
+    // d'outils (services/check-citations.ts) : le menu donnait auparavant un
+    // résultat différent, calculé en regex sur le seul chapitre ouvert.
     const handleCheckCitations = async () => {
-      // Extract all citations from content
-      const { content } = useEditorStore.getState();
-      const citationMatches = content.match(/\[@([^\]]+)\]/g) || [];
-      const citedKeys = citationMatches.map(match => match.replace(/\[@|]/g, ''));
-
-      // Get all available citation keys
-      const availableKeys = citations.map(c => c.id);
-
-      // Find missing citations
-      const missingCitations = citedKeys.filter(key => !availableKeys.includes(key));
-      const duplicateCitations = citedKeys.filter((key, index) => citedKeys.indexOf(key) !== index);
-
-      if (missingCitations.length === 0 && duplicateCitations.length === 0) {
-        await useDialogStore.getState().showAlert('✅ Toutes les citations sont valides !');
-      } else {
-        let message = '';
-        if (missingCitations.length > 0) {
-          message += `❌ Citations manquantes dans la bibliographie:\n${missingCitations.join(', ')}\n\n`;
-        }
-        if (duplicateCitations.length > 0) {
-          message += `⚠️ Citations en double:\n${[...new Set(duplicateCitations)].join(', ')}`;
-        }
-        await useDialogStore.getState().showAlert(message);
-      }
+      await runCitationCheck(t);
     };
 
     // View operations
@@ -187,7 +163,6 @@ export function useMenuShortcuts() {
     window.electron.ipcRenderer.on('menu:insert-table', handleInsertTable);
     window.electron.ipcRenderer.on('menu:insert-footnote', handleInsertFootnote);
     window.electron.ipcRenderer.on('menu:insert-blockquote', handleInsertBlockQuote);
-    window.electron.ipcRenderer.on('menu:toggle-stats', handleToggleStats);
     window.electron.ipcRenderer.on('menu:check-citations', handleCheckCitations);
     window.electron.ipcRenderer.on('menu:toggle-preview', handleTogglePreview);
     window.electron.ipcRenderer.on('menu:switch-panel', handleSwitchPanel);
@@ -212,7 +187,6 @@ export function useMenuShortcuts() {
       window.electron.ipcRenderer.removeListener('menu:insert-table', handleInsertTable);
       window.electron.ipcRenderer.removeListener('menu:insert-footnote', handleInsertFootnote);
       window.electron.ipcRenderer.removeListener('menu:insert-blockquote', handleInsertBlockQuote);
-      window.electron.ipcRenderer.removeListener('menu:toggle-stats', handleToggleStats);
       window.electron.ipcRenderer.removeListener('menu:check-citations', handleCheckCitations);
       window.electron.ipcRenderer.removeListener('menu:toggle-preview', handleTogglePreview);
       window.electron.ipcRenderer.removeListener('menu:switch-panel', handleSwitchPanel);
@@ -228,9 +202,8 @@ export function useMenuShortcuts() {
     createNewFile,
     insertFormatting,
     togglePreview,
-    toggleStats,
     createProject,
     loadProject,
-    citations,
+    t,
   ]);
 }

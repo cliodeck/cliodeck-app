@@ -74,7 +74,7 @@ export const ProjectPanel: React.FC = () => {
       setShowOnboarding(true);
     } catch (error: unknown) {
       console.error('Failed to create project:', error);
-      await useDialogStore.getState().showAlert(t('project.createError') + ': ' + (error instanceof Error ? error.message : String(error)));
+      await useDialogStore.getState().showAlert(t('project.createError'));
     } finally {
       setIsCreating(false);
     }
@@ -95,7 +95,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: unknown) {
       console.error('Failed to open project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
+      await useDialogStore.getState().showAlert(t('project.openError'));
     }
   };
 
@@ -119,7 +119,7 @@ export const ProjectPanel: React.FC = () => {
       await loadProject(projectPath);
     } catch (error: unknown) {
       console.error('Failed to load recent project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
+      await useDialogStore.getState().showAlert(t('project.openError'));
     }
   };
 
@@ -151,7 +151,7 @@ export const ProjectPanel: React.FC = () => {
       await loadFile(filePath);
     } catch (error: unknown) {
       console.error('Failed to load file:', error);
-      await useDialogStore.getState().showAlert(t('toolbar.openError') + ': ' + (error instanceof Error ? error.message : String(error)));
+      await useDialogStore.getState().showAlert(t('toolbar.openError'));
     }
   };
 
@@ -252,24 +252,16 @@ export const ProjectPanel: React.FC = () => {
             {(currentProject.type === 'article' || currentProject.type === 'book') && (
               <CollapsibleSection title={t('project.projectFiles')} defaultExpanded={true}>
                 <div className="project-files-list">
-                  {/* Un livre n'a pas de document.md : son texte vit dans les
-                      chapitres du manifeste. La gestion complète (création,
-                      ordre, rattachement) arrive en Phase 2 ; ici on se
-                      contente de lister et d'ouvrir. */}
+                  {/* Les chapitres d'un livre ne sont PAS répétés ici : le
+                      navigateur de chapitres en fait autorité (il seul permet
+                      de créer, réordonner et rattacher). Deux listes des mêmes
+                      fichiers, avec des capacités différentes, laissaient
+                      l'utilisateur sans savoir laquelle fait foi — audit du
+                      2026-07-19. Ne restent que les pièces communes. */}
                   {currentProject.type === 'book' ? (
-                    chapters
-                      .filter((chapter) => !chapter.missing)
-                      .map((chapter) => (
-                        <div
-                          key={chapter.id}
-                          className="project-file-item"
-                          onClick={() =>
-                            handleFileSelect(`${currentProject.path}/${chapter.filePath}`)
-                          }
-                        >
-                          <FileText size={16} strokeWidth={1.5} /> {chapter.title}
-                        </div>
-                      ))
+                    <p className="project-files-hint">
+                      {t('project.chaptersInNavigator', { count: chapters.length })}
+                    </p>
                   ) : (
                     <div
                       className="project-file-item"
@@ -335,10 +327,25 @@ export const ProjectPanel: React.FC = () => {
             {/* Database Actions - project-specific */}
             <ActionsSection />
 
+            {/* L'entretien de démarrage n'était joué qu'une fois, juste après
+                la création du projet : un utilisateur qui l'avait passé ne
+                pouvait plus y revenir (audit du 2026-07-19). Il écrit le
+                fichier de contexte du projet, il exige donc un projet ouvert. */}
+            <button
+              className="project-btn"
+              onClick={() => {
+                setOnboardingProjectName(currentProject.name);
+                setShowOnboarding(true);
+              }}
+              style={{ marginTop: '1rem', width: '100%' }}
+            >
+              {t('project.reopenOnboarding')}
+            </button>
+
             <button
               className="project-btn"
               onClick={closeProject}
-              style={{ marginTop: '1rem', width: '100%' }}
+              style={{ marginTop: '0.5rem', width: '100%' }}
             >
               {t('project.closeProject')}
             </button>

@@ -256,8 +256,8 @@
   "project": {
     "title": "Projekt",
     "fillAllFields": "Bitte alle Felder ausfüllen",
-    "createError": "Fehler beim Erstellen des Projekts",
-    "openError": "Fehler beim Öffnen des Projekts",
+    "createError": "Das Projekt konnte nicht erstellt werden. Prüfen Sie, ob der gewählte Ordner beschreibbar ist.",
+    "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
     "newProject": "Neues Projekt",
     "openProject": "Projekt öffnen",
     "closeProject": "Projekt schließen",
@@ -299,7 +299,7 @@
     "cslSaveError": "Fehler beim Speichern des CSL-Pfads",
     "cslRemoveError": "Fehler beim Entfernen des CSL-Pfads",
     "openInFinder": "Im Dateimanager öffnen",
-    "openFolderError": "Fehler beim Öffnen des Projektordners",
+    "openFolderError": "Der Projektordner konnte nicht geöffnet werden.",
     "zoteroSettings": "Zotero-Einstellungen",
     "zoteroSettingsHelp": "Konfigurieren Sie die projektspezifischen Zotero-Gruppe und Sammlung. Diese Einstellungen überschreiben die globale Zotero-Konfiguration.",
     "zoteroGroupId": "Gruppen-ID",
@@ -312,7 +312,10 @@
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
-    "loading": "Projekt wird geöffnet..."
+    "loading": "Projekt wird geöffnet...",
+    "chaptersInNavigator_one": "{{count}} Kapitel — siehe Kapitelnavigator",
+    "chaptersInNavigator_other": "{{count}} Kapitel — siehe Kapitelnavigator",
+    "reopenOnboarding": "Einrichtungsassistent erneut starten"
   },
   "export": {
     "pdf": {
@@ -322,31 +325,75 @@
       "missingDeps": "Fehlende Abhängigkeiten:",
       "pandoc": "Pandoc",
       "xelatex": "XeLaTeX",
-      "abstractNote": "Die Zusammenfassung wird automatisch gelesen von...",
-      "beamer": "Beamer-Präsentation",
+      "abstractNote": "Die Zusammenfassung wird automatisch aus der Datei {{file}} Ihres Projekts gelesen",
+      "beamer": "Beamer-Präsentation: Der Inhalt wird aus {{file}} gelesen",
       "outputFile": "Ausgabedatei",
-      "exporting": "Wird exportiert...",
-      "success": "Export erfolgreich! PDF erstellt unter:",
-      "error": "Exportfehler"
+      "exporting": "Export läuft…",
+      "success": "Export erfolgreich. PDF erstellt unter: {{path}}",
+      "error": "Der Export ist fehlgeschlagen.",
+      "titlePlaceholder": "Mein Dokument",
+      "authorPlaceholder": "Ihr Name",
+      "missingPandoc": "Pandoc (Installation: brew install pandoc)",
+      "missingXelatex": "XeLaTeX (Installation: brew install --cask mactex)",
+      "installed": "installiert",
+      "missing": "fehlt",
+      "depsCheckError": "Die Export-Abhängigkeiten konnten nicht geprüft werden.",
+      "beamerSyntax": "Syntax:",
+      "beamerSlideTitle": "Folientitel (Ebene 1)",
+      "beamerSubtitle": "Untertitel (Ebene 2)",
+      "beamerNotes": "Vortragsnotizen",
+      "outputPlaceholder": "/pfad/zur/datei.pdf",
+      "browse": "Durchsuchen",
+      "export": "Exportieren",
+      "cancel": "Abbrechen",
+      "unknownError": "Der Export ist aus unbekanntem Grund fehlgeschlagen.",
+      "noProject": "Kein Projekt geöffnet.",
+      "enterTitle": "Bitte geben Sie einen Titel ein.",
+      "depsRequired": "Pandoc und XeLaTeX werden benötigt. Bitte installieren Sie sie zuerst.",
+      "slidesUnreadable": "slides.md konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
+      "noChapterOpen": "Kein Kapitel zum Exportieren geöffnet.",
+      "pdfFiles": "PDF",
+      "allFiles": "Alle Dateien"
     },
     "word": {
       "title": "Word-Export (.docx)",
       "documentTitle": "Dokumenttitel",
       "author": "Autor (optional)",
-      "templateDetected": "Word-Vorlage erkannt:",
-      "abstractNote": "Die Zusammenfassung wird automatisch gelesen von...",
+      "templateDetected": "Word-Vorlage erkannt: {{file}}",
+      "abstractNote": "Die Zusammenfassung wird automatisch aus der Datei {{file}} Ihres Projekts gelesen",
       "outputFile": "Ausgabedatei",
-      "exporting": "Wird exportiert...",
-      "success": "Export erfolgreich! Word-Dokument erstellt unter:",
-      "error": "Exportfehler"
+      "exporting": "Export läuft…",
+      "success": "Export erfolgreich. Word-Dokument erstellt unter: {{path}}",
+      "error": "Der Export ist fehlgeschlagen.",
+      "titlePlaceholder": "Mein Dokument",
+      "authorPlaceholder": "Ihr Name",
+      "outputPlaceholder": "/pfad/zur/datei.docx",
+      "browse": "Durchsuchen",
+      "export": "Exportieren",
+      "cancel": "Abbrechen",
+      "unknownError": "Der Export ist aus unbekanntem Grund fehlgeschlagen.",
+      "noProject": "Kein Projekt geöffnet.",
+      "enterTitle": "Bitte geben Sie einen Titel ein.",
+      "slidesUnreadable": "slides.md konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
+      "wordFiles": "Word-Dokument",
+      "allFiles": "Alle Dateien"
     },
     "exportToPDF": "Als PDF exportieren",
     "exportToWord": "Als Word exportieren",
     "citation": {
       "toggle": "Zitate mit CSL formatieren (Chicago, MLA…)",
       "style": "Stil",
-      "locale": "Gebietsschema",
-      "help": "[@key]-Marker werden zu nummerierten Fußnoten, und am Ende wird eine Bibliographie angefügt."
+      "locale": "Sprache",
+      "help": "[@key]-Marker werden zu nummerierten Fußnoten, und am Ende wird eine Bibliographie angefügt.",
+      "toggleAria": "CSL-Zitations-Engine verwenden",
+      "styleAria": "Zitationsstil",
+      "localeAria": "Sprache der Zitate"
+    },
+    "scope": {
+      "label": "Umfang",
+      "wholeBook_one": "Ganzes Buch ({{count}} Teil)",
+      "wholeBook_other": "Ganzes Buch ({{count}} Teile)",
+      "currentChapter": "Nur dieses Kapitel (Arbeitsfassung)"
     }
   },
   "rag": {
@@ -614,7 +661,11 @@
     "notConfigured": "Das Modell antwortet nicht. Prüfen Sie, ob Ollama läuft, oder wählen Sie in den Einstellungen einen anderen Anbieter.",
     "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
     "openSettings": "Einstellungen öffnen",
-    "sourcesLabel": "Quellen"
+    "sourcesLabel": "Quellen",
+    "noProjectState": {
+      "title": "Beginnen Sie mit einem Projekt",
+      "message": "Erstellen oder öffnen Sie ein Projekt, um zu schreiben, Ihre Quellen zu erkunden und mit dem Assistenten zu sprechen."
+    }
   },
   "corpus": {
     "title": "Korpus",
@@ -728,7 +779,7 @@
     "checkCitations": "Zitate überprüfen",
     "newFileConfirm": "Neue Datei erstellen? Nicht gespeicherte Änderungen gehen verloren.",
     "markdown": "Markdown",
-    "openError": "Fehler beim Öffnen der Datei",
+    "openError": "Diese Datei konnte nicht geöffnet werden. Sie ist möglicherweise nicht vorhanden oder unlesbar.",
     "saveError": "Fehler beim Speichern der Datei",
     "renumberFootnotes": "Fußnoten neu nummerieren"
   },
@@ -1202,21 +1253,22 @@
   },
   "hints": {
     "title": "Dauerhafter Kontext",
-    "hint": "Diese Notizen werden als Systemnachricht in jede Brainstorm-Konversation (und die Rezepte, die sie verwenden) eingefügt. Ideal, um das Modell an Projektkonventionen, kanonische Quellen und Ausschlüsse zu erinnern.",
+    "hint": "Dieser Text wird der Assistenz zu Beginn jedes Gesprächs übermittelt: Thema und Zeitraum der Forschung, Korpus, einzuhaltende Konventionen. Er liegt in context.md im Projektstamm — Sie können ihn auch wie jedes andere Dokument bearbeiten und mit Ihrer Arbeit versionieren.",
     "filePath": "Datei:",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
-      "noProject": "Öffnen Sie ein Projekt, um Hints zu bearbeiten.",
+      "noProject": "Öffnen Sie ein Projekt, um seinen Kontext zu bearbeiten.",
       "saveFailed": "Speichern fehlgeschlagen."
     },
     "buttons": {
       "save": "Speichern",
-      "saveTitle": "Hints speichern"
+      "saveTitle": "Projektkontext speichern"
     },
     "status": {
       "saved": "✓ gespeichert"
     },
-    "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n"
+    "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n",
+    "legacyNotice": "Eine ältere Hinweisdatei ({{path}}) wird ebenfalls gelesen und an die Assistenz übermittelt. Kopieren Sie deren Inhalt hierher, wenn Sie alles in einer Datei bündeln möchten."
   },
   "recipes": {
     "title": "Rezepte (schreibgeschützt)",
@@ -1474,7 +1526,13 @@
     "syncTooltip": "Synchronisierung: {{phase}} {{current}}/{{total}}",
     "usageJournalBadge_one": "{{count}} Sitzung zu annotieren",
     "usageJournalBadge_other": "{{count}} Sitzungen zu annotieren",
-    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)"
+    "usageJournalTooltip": "Substanzielle KI-Sitzungen ohne Entscheidung — klicken, um das Journal zu öffnen (Cmd/Strg+J)",
+    "savedAt": "Gespeichert um {{time}}",
+    "savedTooltip": "Zuletzt gespeichert um {{time}}",
+    "unsaved": "Nicht gespeicherte Änderungen",
+    "unsavedTooltip": "Das Dokument enthält Änderungen, die nicht auf der Festplatte gespeichert sind.",
+    "notSavedYet": "Nicht gespeichert",
+    "notSavedYetTooltip": "Dieses Dokument wurde seit dem Öffnen nicht gespeichert."
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",
@@ -1570,8 +1628,9 @@
     "paragraphs": "Abs.",
     "citations": "Zit.",
     "footnotes": "Noten",
-    "bookWords": "Buch",
-    "bookTotalHint": "Wörter im gesamten Manuskript (alle Kapitel)"
+    "bookWords": "Wörter (Buch)",
+    "bookTotalHint": "Wörter im gesamten Manuskript (alle Kapitel)",
+    "scrollHint": "Horizontal scrollen, um alle Zähler zu sehen"
   },
   "book": {
     "chapterCount_one": "{{count}} Kapitel",
@@ -1607,5 +1666,17 @@
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
     "missing": "{{count}} Schlüssel fehlen in der Bibliografie:",
     "checkError": "Zitate konnten nicht geprüft werden."
+  },
+  "search": {
+    "title": "Im Buch suchen",
+    "placeholder": "Begriff im gesamten Manuskript suchen",
+    "run": "Suche starten",
+    "searching": "Suche läuft…",
+    "error": "Die Suche ist fehlgeschlagen. Einige Kapitel konnten möglicherweise nicht gelesen werden.",
+    "noResults": "Kein Vorkommen von „{{query}}“ im Manuskript.",
+    "summary_one": "{{count}} Vorkommen in {{chapters}} Kapitel",
+    "summary_other": "{{count}} Vorkommen in {{chapters}} Kapiteln",
+    "goToLine": "Zu Zeile {{line}} springen",
+    "truncated": "Zu viele Vorkommen in diesem Kapitel: nur die ersten werden angezeigt."
   }
 }

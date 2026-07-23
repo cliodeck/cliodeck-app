@@ -18,7 +18,7 @@ export function setupHistoryHandlers() {
       const sessions = hm.getAllSessions();
       console.log('📤 IPC Response: history:get-sessions', { count: sessions.length });
       return successResponse({ sessions });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-sessions error:', error);
       return { ...errorResponse(error), sessions: [] };
     }
@@ -36,7 +36,7 @@ export function setupHistoryHandlers() {
       const events = hm.getEventsForSession(sessionId);
       console.log('📤 IPC Response: history:get-events', { count: events.length });
       return successResponse({ events });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-events error:', error);
       return { ...errorResponse(error), events: [] };
     }
@@ -54,7 +54,7 @@ export function setupHistoryHandlers() {
       const messages = hm.getChatMessagesForSession(sessionId);
       console.log('📤 IPC Response: history:get-chat-history', { count: messages.length });
       return successResponse({ messages });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-chat-history error:', error);
       return { ...errorResponse(error), messages: [] };
     }
@@ -72,7 +72,7 @@ export function setupHistoryHandlers() {
       const operations = hm.getAIOperationsForSession(sessionId);
       console.log('📤 IPC Response: history:get-ai-operations', { count: operations.length });
       return successResponse({ operations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-ai-operations error:', error);
       return { ...errorResponse(error), operations: [] };
     }
@@ -97,7 +97,7 @@ export function setupHistoryHandlers() {
         length: report.length,
       });
       return successResponse({ report });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:export-report error:', error);
       return errorResponse(error);
     }
@@ -114,7 +114,7 @@ export function setupHistoryHandlers() {
       const statistics = hm.getStatistics();
       console.log('📤 IPC Response: history:get-statistics', statistics);
       return successResponse({ statistics });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-statistics error:', error);
       return errorResponse(error);
     }
@@ -140,7 +140,7 @@ export function setupHistoryHandlers() {
       const events = hm.searchEvents(processedFilters);
       console.log('📤 IPC Response: history:search-events', { count: events.length });
       return successResponse({ events });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:search-events error:', error);
       return { ...errorResponse(error), events: [] };
     }
@@ -158,7 +158,7 @@ export function setupHistoryHandlers() {
       const events = hm.getAllEvents();
       console.log('📤 IPC Response: history:get-all-events', { count: events.length });
       return successResponse({ events });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-all-events error:', error);
       return { ...errorResponse(error), events: [] };
     }
@@ -175,7 +175,7 @@ export function setupHistoryHandlers() {
       const operations = hm.getAllAIOperations();
       console.log('📤 IPC Response: history:get-all-ai-operations', { count: operations.length });
       return successResponse({ operations });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-all-ai-operations error:', error);
       return { ...errorResponse(error), operations: [] };
     }
@@ -192,7 +192,7 @@ export function setupHistoryHandlers() {
       const messages = hm.getAllChatMessages();
       console.log('📤 IPC Response: history:get-all-chat-messages', { count: messages.length });
       return successResponse({ messages });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ history:get-all-chat-messages error:', error);
       return { ...errorResponse(error), messages: [] };
     }

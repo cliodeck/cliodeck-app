@@ -202,9 +202,9 @@ class TropyService {
         itemCount: projectInfo.itemCount,
         lastModified: projectInfo.lastModified.toISOString(),
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to open Tropy project:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -289,9 +289,9 @@ class TropyService {
           const stats = this.vectorStore.getIndexStats();
           console.log(`💾 [TROPY-SERVICE] Index saved. HNSW: ${stats.hnswSize}, BM25: ${stats.bm25Size}`);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ [TROPY-SERVICE] Embedding generation failed:', error);
-        result.errors.push(`Embedding generation failed: ${error.message}`);
+        result.errors.push(`Embedding generation failed: ${(error instanceof Error ? error.message : String(error))}`);
       }
     }
 
@@ -603,9 +603,9 @@ class TropyService {
         text: result.text,
         confidence: result.confidence,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OCR failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -628,9 +628,9 @@ class TropyService {
         text: result.text,
         confidence: result.confidence,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Batch OCR failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -678,9 +678,9 @@ class TropyService {
         text: result.text,
         format: result.format,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Transcription import failed:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -943,9 +943,9 @@ class TropyService {
       });
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to update transcription:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -965,9 +965,9 @@ class TropyService {
       // Cela nécessite l'accès à OllamaClient pour les embeddings
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to reindex source:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -988,9 +988,9 @@ class TropyService {
       console.log('🗑️ Purged tropy_* tables in brain.db');
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to purge primary sources database:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
