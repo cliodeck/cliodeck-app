@@ -18,9 +18,15 @@ Builds are **not code-signed**: macOS will refuse the app on first launch until 
 
 ## Three kinds of project
 
+A project is an **article**, a **book**, or a **presentation** — the choice shapes the editor and the export.
+
+- **Article** — a single `document.md`.
+- **Book** — a manuscript in **chapters**, one Markdown file each, ordered by a manifest. Chapter navigator, manuscript-wide outline and search, footnote renumbering from the first chapter to the last, PDF with numbered chapters and a table of contents — or a single chapter for a working proof. Notes can be footnotes, per-chapter endnotes, or endnotes at the end of the volume; numbering restarts per chapter or runs through; the bibliography is single or per chapter. Those note and bibliography settings shape the **PDF export only** — Word ignores them for now, and a per-chapter bibliography needs a bibliography file, falling back to a single one when ClioDeck formats the citations itself. See [`docs/book-architecture.md`](docs/book-architecture.md).
+- **Presentation** — a `slides.md` edited in the same editor, exported to RevealJS.
+
 ## Four modes, one workspace
 
-ClioDeck organises work into four top-level modes that share the same project / sources / index:
+The modes share the same project, sources and index:
 
 - **Explore** — corpus explorer, similarity finder, textometrics.
 - **Brainstorm** — chat-driven exploration of your corpus, with an ideas board and a graph, and a one-click *Send to Write* that lands a formatted draft block in the editor.
