@@ -1,57 +1,72 @@
 # ClioDeck — Research environment for historians
 
-Desktop application (Electron + React + TypeScript) for the full historian workflow: **explore → brainstorm → write → export**, with RAG, knowledge graph, Zotero / Tropy / Obsidian integrations, and a local-first footprint.
+Desktop application (Electron + React + TypeScript) for the full historian workflow: **explore → brainstorm → write → export**, with RAG, Zotero / Tropy / Obsidian integrations, and a local-first footprint.
 
-> **v2 (fusion branch):** this branch absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode. Historians keep a single app that covers the whole cycle instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md).
-
-> **Note:** ClioDeck is a [vibe-coding](https://en.wikipedia.org/wiki/Vibe_coding) experiment. Provided *as is*, at your own risk. Designed by [Frédéric Clavert](https://inactinique.net), coded with [Claude Code](https://claude.ai/code). See my [talk on vibe-coding for historians](https://inactinique.net/prez/2025-07-03_DH-LLM/2025-07-03_DH-LLM.html#/title-slide) (French) and [ethics considerations](https://github.com/inactinique/cliodeck/wiki/4.-Ethics).
+> **Note:** ClioDeck is a [vibe-coding](https://en.wikipedia.org/wiki/Vibe_coding) experiment. Provided *as is*, at your own risk. Designed by [Frédéric Clavert](https://inactinique.net), coded with [Claude Code](https://claude.ai/code). See my [talk on vibe-coding for historians](https://inactinique.net/prez/2025-07-03_DH-LLM/2025-07-03_DH-LLM.html#/title-slide) (French) and [ethics considerations](https://github.com/cliodeck/cliodeck-app/wiki/4.-Ethics).
 
 **License:** [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html)
 
 ## Download
 
-**[Download v1.0.0-rc.1 (macOS and Linux)](https://github.com/inactinique/cliodeck/releases/tag/v1.0.0-RC1)**
+**[Download v1.0.0-rc.3](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.3)** — release candidate.
 
-- **macOS**: DMG for Intel and Apple Silicon
-- **Linux**: AppImage and .deb packages
+- **macOS** — DMG for Apple Silicon and Intel
+- **Linux** — AppImage and `.deb`, **arm64 only** in this candidate; on x86_64, build from source (below)
+- **Windows** — no build shipped; the code should work on Windows but is **untested**
 
-v2.0 (fusion) release builds land when the branch merges to main. Until then build from source (see below).
+Builds are **not code-signed**: macOS will refuse the app on first launch until you allow it explicitly. See the [installation guides](https://github.com/cliodeck/cliodeck-app/wiki/1.-ClioDeck-Installation) for how to get past it.
+
+## Three kinds of project
+
+A project is an **article**, a **book**, or a **presentation** — the choice shapes the editor and the export.
+
+- **Article** — a single `document.md`.
+- **Book** — a manuscript in **chapters**, one Markdown file each, ordered by a manifest. Chapter navigator, manuscript-wide outline and search, footnote renumbering from the first chapter to the last, PDF with numbered chapters and a table of contents — or a single chapter for a working proof. Notes can be footnotes, per-chapter endnotes, or endnotes at the end of the volume; numbering restarts per chapter or runs through; the bibliography is single or per chapter. Those note and bibliography settings shape the **PDF export only** — Word ignores them for now, and a per-chapter bibliography needs a bibliography file, falling back to a single one when ClioDeck formats the citations itself. See [`docs/book-architecture.md`](docs/book-architecture.md).
+- **Presentation** — a `slides.md` edited in the same editor, exported to RevealJS.
 
 ## Four modes, one workspace
 
-ClioDeck v2 organises work into four top-level modes that share the same project / sources / index:
+The modes share the same project, sources and index:
 
-- **Brainstorm** — chat-driven exploration of your corpus, with durable workspace [`.cliohints`](#cliohints) injected into every prompt and a one-click *Send to Write* button that lands a formatted draft block in the editor.
+- **Explore** — corpus explorer, similarity finder, textometrics.
+- **Brainstorm** — chat-driven exploration of your corpus, with an ideas board and a graph, and a one-click *Send to Write* that lands a formatted draft block in the editor.
 - **Write** — CodeMirror 6 live-render Markdown editor (Obsidian-style) with Pandoc citations (`[@key]`, autocomplete from Zotero), footnotes with in-place editing, and byte-perfect file fidelity.
-- **Analyze** — knowledge graph, textometrics, topic modeling, similarity finder.
 - **Export** — PDF (Pandoc / LaTeX), Word, RevealJS slides.
 
 ## Key features
 
-- **Four-mode workflow** — Brainstorm / Write / Analyze / Export share the same workspace.
-- **Typed LLM provider layer** — Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM, OpenAI), Anthropic Claude, Mistral, Google Gemini. Switch backend in 3 clicks, no code change. API keys encrypted at rest via Electron `safeStorage` (key derived from the OS keyring; on Linux without a keyring it falls back to plain text with a warning).
-- **Cloud embeddings** — optional: when you pick a cloud LLM backend, use the same provider for embeddings too (Gemini `text-embedding-004`, OpenAI `text-embedding-3-small`, Mistral `mistral-embed`) so you don't need a local Ollama.
-- **RAG-powered assistant** — hybrid search (HNSW + BM25 + RRF K=60), context compression with RAG citations preserved verbatim, query-aware reranking.
+- **Your file stays your file** — the editor never converts your text to an internal document and back. Open a file, save it untouched, and it is identical byte for byte, line endings and trailing spaces included.
+- **The assistant can read your manuscript** — what you have already written becomes a fourth corpus, next to your PDFs, Tropy archives and Obsidian notes, so you can ask what you wrote about a subject three chapters ago. Excerpts from your own draft are labelled apart from your sources, and the assistant is told not to cite them as evidence. Indexing runs after each save and needs an embeddings model. See [`docs/manuscript-corpus.md`](docs/manuscript-corpus.md).
+- **The AI only ever proposes** — no AI feature writes into your document on its own. Anything it suggests arrives as a proposal you accept, alter or refuse, and each decision is recorded: in full in the research journal, as bare counts in the AI usage journal.
+- **Consent before sending** — the assistant will not reach a remote provider without your explicit consent, a rule the application core enforces itself rather than leaving to the interface.
+- **Typed LLM provider layer** — embedded (bundled `llama.cpp`), Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM, OpenAI), Anthropic Claude, Mistral, Google Gemini. Switch backend in a few clicks, no code change. API keys are encrypted at rest via Electron `safeStorage` (key derived from the OS keyring; on Linux without a keyring it falls back to plain text with a warning).
+- **Runs fully offline** — with Ollama and local models, or with the small embedded models downloaded from the settings panel; no API key needed.
+- **RAG-powered assistant** — hybrid search (HNSW + BM25 + RRF K=60), context compression that keeps RAG citations verbatim, query-aware reranking.
 - **Zotero integration** — sync bibliography, download PDFs, manage tags and metadata.
 - **Tropy integration** — import and search primary sources with OCR + multilingual NER (fr / en / de).
 - **Obsidian vault integration** — index notes (frontmatter, wikilinks, tags) into a parallel SQLite+FTS5 store, searchable from Brainstorm.
-- **ClioRecipes** — YAML workflows chaining brainstorm → search → graph → write → export steps. Four builtin recipes ship for common historian tasks (Zotero review, Tropy thematic analysis, chapter brainstorm, Chicago export). Run them from Settings → Recipes with a typed inputs form and live event log.
+- **Project context** — a `context.md` at the project root (subject, period, conventions to observe) is given to the assistant at the start of every conversation. Until you write in it, nothing is sent. See [`.cliohints`](#project-context-and-cliohints).
+- **ClioRecipes** — YAML workflows chaining brainstorm → search → graph → write → export steps. Four builtin recipes ship for common historian tasks (Zotero review, Tropy thematic analysis, chapter brainstorm, Chicago export). Run them from Settings → Recipes with a typed inputs form and a live event log.
 - **MCP server (inactive by default)** — expose your corpus to Claude Desktop / Cursor over stdio with a typed, auditable JSONL access log.
-- **MCP clients** — `MCPClientManager` consumes external MCP servers (stdio + SSE transports) with a typed lifecycle state machine, infra-only auto-recovery, and a status view in Settings; their tools are exposed to the Brainstorm agent loop.
-- **Source inspector** — scans RAG chunks for prompt-injection patterns before they reach the model (warn / audit / block modes, default warn).
-- **`.cliohints`** — durable workspace context injected into every prompt (style guide, period focus, language preference).
-- **AI usage journal** — a reflexive, ethics-oriented record of your inference use (volumes, tasks, corpora) plus a manual decision layer (what non-AI alternative existed, why it was set aside, was it worth it). Local-first, kept in a separate `.cliodeck/journal.db` so it can be archived and published independently. Distinct from the research journal — it logs volumes and decisions, never prompts. See [`docs/journal-usage-ia.md`](docs/journal-usage-ia.md).
-- **Headless CLI** — `bin/cliodeck` (`recipe run`, `search`, `hints`, `import-cliobrain`, `rag-benchmark`) for batch / CI workflows, with AI-usage capture in the journal; `bin/cliodeck-journal today|week|export` to review and annotate that usage.
-- **Local-first** — all data stays on your machine; works offline with embedded LLM.
-- **Export** — PDF (via Pandoc/LaTeX) and Word with template support; RevealJS slide generation.
+- **MCP clients** — consume external MCP servers (stdio + SSE) with a typed lifecycle state machine, infra-only auto-recovery, and a status view in Settings; their tools are offered to the agent loop.
+- **Source inspector** — scans RAG chunks for prompt-injection patterns before they reach the model (warn / audit / block, default warn).
+- **AI usage journal** — a reflexive, ethics-oriented record of your inference use (volumes, tasks, corpora) plus a manual decision layer: what non-AI alternative existed, why it was set aside, was it worth it. Kept in a separate `.cliodeck/journal.db` so it can be archived and published independently. It logs volumes and decisions, **never prompts**. See [`docs/journal-usage-ia.md`](docs/journal-usage-ia.md).
+- **Headless CLI** — `bin/cliodeck` (`recipe list|run`, `search`, `hints show|set`, `import-cliobrain`, `rag-benchmark`) for batch / CI work, with usage captured in the journal; `bin/cliodeck-journal today|week|export` to review and annotate it.
 
-### .cliohints
+### Project context and .cliohints
 
-Every workspace can carry a `.cliodeck/hints.md` file — house rules injected into every prompt. Examples: citation style ("always Chicago author-date"), period focus ("WWII France, 1939-1945"), language ("reply in French"). Hints are *local-only* and never leaked to MCP clients unless you opt in per-tool.
+Two layers of durable context, both local-only and never leaked to MCP clients unless you opt in per tool:
+
+- **`context.md`** at the project root — the visible one. Subject, period, conventions. Edit it like any other file.
+- **`.cliodeck/hints.md`** — workspace house rules injected into every prompt: citation style ("always Chicago author-date"), language ("reply in French").
 
 ## Quick start
 
-### 1. Install Ollama and models
+### 1. Pick how the AI runs
+
+**Fully local, nothing to install** — download one of the small embedded models from Settings → LLM (Qwen2.5-0.5B, ~470 MB, or Qwen2.5-1.5B, ~1 GB), plus the embedded embedding model (Nomic Embed Text v2, ~344 MB) if you want RAG. Modest quality, but no dependency and no network.
+
+**Local with Ollama** — better quality, still offline:
 
 ```bash
 # macOS
@@ -62,73 +77,83 @@ curl -fsSL https://ollama.ai/install.sh | sh
 ```
 
 ```bash
-# Required for local mode
-ollama pull nomic-embed-text
-ollama pull gemma2:2b   # or llama3.2, mistral:7b, …
+ollama pull nomic-embed-text          # embeddings
+ollama pull qwen3:8b                  # generation, tool-capable
 ```
+
+Pick a **tool-capable** model if you want the assistant to search your corpus on its own: `qwen3:8b/14b/32b`, `ministral-3:8b/14b`, `mistral-nemo`. The Llama 3.x / 4.x families are served without tools (see `OLLAMA_TOOL_CAPABLE_PATTERNS` in `backend/core/llm/providers/ollama.ts`).
+
+**Cloud** — Anthropic, Mistral, Gemini or any OpenAI-compatible endpoint. The same provider can serve embeddings, so no local Ollama is needed.
 
 ### 2. Install ClioDeck
 
-Download from [Releases](https://github.com/inactinique/cliodeck/releases) and run.
-
-For detailed installation instructions, see:
-- [macOS Installation Guide](https://github.com/inactinique/cliodeck/wiki/1.2-ClioDeck-Installation-‐-macOS)
-- [Linux Installation Guide](https://github.com/inactinique/cliodeck/wiki/1.1-ClioDeck-Installation-‐-Linux)
-
-### 3. Coming from ClioBrain?
-
-```bash
-npm run cliodeck -- import-cliobrain /path/to/your/cliobrain/workspace
-```
-
-The importer copies `brain.db`, `hnsw.index`, `hints.md`, and the MCP access log into the workspace's `.cliodeck/`, merging your existing `config.json` and preserving unknown keys. The same command also auto-migrates legacy `.cliodeck/v2/*` layouts (in-flight fusion-branch artifacts) up to the flat layout. See [docs/fusion-cliobrain-strategy.md](docs/archive/fusion-cliobrain-strategy.md) for the full migration rationale. ClioBrain enters maintenance mode; new features go to ClioDeck.
+Download from [Releases](https://github.com/cliodeck/cliodeck-app/releases) and run. Detailed guides: [macOS](https://github.com/cliodeck/cliodeck-app/wiki/1.2-ClioDeck-Installation-‐-macOS) · [Linux](https://github.com/cliodeck/cliodeck-app/wiki/1.1-ClioDeck-Installation-‐-Linux).
 
 ### Build from source
 
 ```bash
-git clone https://github.com/inactinique/cliodeck.git
-cd cliodeck
+git clone https://github.com/cliodeck/cliodeck-app.git
+cd cliodeck-app
 npm install
 npm run build
 npm start
 ```
 
-See [Build and Deployment Guide](https://github.com/inactinique/cliodeck/wiki/2.1-Build-and-Deployment-Guide) for distribution builds.
+Native modules (`better-sqlite3`, `hnswlib-node`) are compiled for Electron's ABI by the postinstall. Running the test suite under Node needs `npm rebuild better-sqlite3` first — that is what `npm run test:integration` does, and what CI does. See the [Build and Deployment Guide](https://github.com/cliodeck/cliodeck-app/wiki/2.1-Build-and-Deployment-Guide).
+
+### Coming from ClioBrain?
+
+ClioBrain was absorbed into ClioDeck as the *Brainstorm* mode and is in maintenance mode; new features go to ClioDeck.
+
+```bash
+npm run cliodeck -- import-cliobrain /path/to/your/cliobrain/workspace
+```
+
+The importer copies `brain.db`, `hnsw.index`, `hints.md` and the MCP access log into the workspace's `.cliodeck/`, merging your existing `config.json` and preserving unknown keys. Legacy workspace layouts are migrated automatically when a project is opened. See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md).
 
 ## Documentation
 
-Full documentation is available in the **[ClioDeck Wiki](https://github.com/inactinique/cliodeck/wiki)**:
+Full documentation lives in the **[ClioDeck Wiki](https://github.com/cliodeck/cliodeck-app/wiki)**.
 
 ### User guides
-- [Installation](https://github.com/inactinique/cliodeck/wiki/1.-ClioDeck-Installation) — quick start
-- [Keyboard Shortcuts](https://github.com/inactinique/cliodeck/wiki/1.4-Keyboard-Shortcuts) — complete reference
-- [Zotero Integration](https://github.com/inactinique/cliodeck/wiki/1.5-Zotero-Integration-Guide) — bibliography sync
-- [Tropy Integration](https://github.com/inactinique/cliodeck/wiki/1.6-Tropy-Integration-Guide) — primary sources
-- [Embedded LLM](https://github.com/inactinique/cliodeck/wiki/1.7-Embedded-LLM-Guide) — offline mode
-- [Corpus Analysis](https://github.com/inactinique/cliodeck/wiki/1.8-Corpus-Analysis-Guide) — knowledge graph & textometrics
-- [Export Options](https://github.com/inactinique/cliodeck/wiki/1.10-Export-Presentations) — PDF & Word
+- [Getting started](https://github.com/cliodeck/cliodeck-app/wiki/1.0-Getting-Started)
+- [Installation](https://github.com/cliodeck/cliodeck-app/wiki/1.-ClioDeck-Installation)
+- [The editor](https://github.com/cliodeck/cliodeck-app/wiki/1.16-The-Editor)
+- [Books and chapters](https://github.com/cliodeck/cliodeck-app/wiki/1.15-Books-and-Chapters)
+- [Brainstorm mode](https://github.com/cliodeck/cliodeck-app/wiki/1.11-Brainstorm-Mode-Guide)
+- [Keyboard shortcuts](https://github.com/cliodeck/cliodeck-app/wiki/1.4-Keyboard-Shortcuts)
+- [Zotero integration](https://github.com/cliodeck/cliodeck-app/wiki/1.5-Zotero-Integration-Guide)
+- [Tropy integration](https://github.com/cliodeck/cliodeck-app/wiki/1.6-Tropy-Integration-Guide)
+- [Obsidian vault](https://github.com/cliodeck/cliodeck-app/wiki/1.14-Obsidian-Vault-Guide)
+- [Embedded LLM](https://github.com/cliodeck/cliodeck-app/wiki/1.7-Embedded-LLM-Guide)
+- [Corpus analysis](https://github.com/cliodeck/cliodeck-app/wiki/1.8-Corpus-Analysis-Guide)
+- [Journals and history](https://github.com/cliodeck/cliodeck-app/wiki/1.9-Journal-and-History)
+- [Export presentations](https://github.com/cliodeck/cliodeck-app/wiki/1.10-Export-Presentations)
+- [Word templates](https://github.com/cliodeck/cliodeck-app/wiki/1.3-Guide-for-Using-Word-Templates)
 
 ### Technical documentation
-- [Features Overview](https://github.com/inactinique/cliodeck/wiki/Features) — complete feature list
-- [Technical Architecture](https://github.com/inactinique/cliodeck/wiki/2.-Technical-Architecture) — RAG system design
-- [Build Guide](https://github.com/inactinique/cliodeck/wiki/2.1-Build-and-Deployment-Guide) — development setup
-- [Fusion strategy](docs/archive/fusion-cliobrain-strategy.md) — why v2 absorbs ClioBrain
+- [Release notes — RC3](https://github.com/cliodeck/cliodeck-app/wiki/3.3-RC3-Release-Notes)
+- [Technical architecture](https://github.com/cliodeck/cliodeck-app/wiki/2.-Technical-Architecture)
+- [Book architecture](docs/book-architecture.md) · [Editor architecture](docs/editor-architecture.md) · [Manuscript corpus](docs/manuscript-corpus.md)
+- [Editor proposals contract](docs/editor-proposals.md) — how AI suggestions are adjudicated
 - [ADR 0001](docs/adr/0001-rag-pipeline-arbitration.md) — RAG pipeline arbitration
-- [AI usage journal](docs/journal-usage-ia.md) — reflexive inference-use record ([ADR 0007](docs/adr/0007-usage-journal-separate-db-and-provider-hook.md))
+- [AI usage journal](docs/journal-usage-ia.md) ([ADR 0007](docs/adr/0007-usage-journal-separate-db-and-provider-hook.md))
+- [Status and remaining work](docs/status-and-remaining-work.md)
 
 ## Tech stack
 
 | Layer | Technologies |
 |-------|--------------|
-| **Frontend** | Electron 28, React 18, TypeScript, CodeMirror 6, Zustand, Vite |
+| **Frontend** | Electron 40, React 18, TypeScript, CodeMirror 6 / Lezer, Zustand, Vite |
 | **Backend** | Node.js, better-sqlite3, hnswlib-node, pdfjs-dist, chokidar |
-| **LLM layer** | Ollama, OpenAI-compatible, Anthropic, Mistral, Gemini (typed provider registry) |
-| **Embeddings** | nomic-embed-text, mxbai-embed-large, OpenAI / Mistral embeddings |
+| **LLM layer** | Embedded (`node-llama-cpp`), Ollama, OpenAI-compatible, Anthropic, Mistral, Gemini (typed provider registry) |
+| **Embeddings** | nomic-embed-text, mxbai-embed-large, Nomic Embed v2 (embedded), OpenAI / Mistral / Gemini embeddings |
 | **MCP** | `@modelcontextprotocol/sdk` (server + clients) |
+| **Export** | Pandoc / LaTeX, `docx`, RevealJS |
 | **Analysis** | Python 3.11+, BERTopic (optional) |
+
+The Markdown extensions written for the editor are kept as standalone packages under [`packages/`](packages/) — `@cliodeck/lezer-pandoc-citations` and `@cliodeck/lezer-footnotes` — so they can be reused outside ClioDeck. Not published to npm yet.
 
 ## Contributing
 
-Issues and contributions are welcome on [GitHub](https://github.com/inactinique/cliodeck/issues).
-
-For the fusion branch specifically, see the implementation plan at [`docs/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md) — every commit message references the step numbers defined there.
+Issues and contributions are welcome on [GitHub](https://github.com/cliodeck/cliodeck-app/issues).
