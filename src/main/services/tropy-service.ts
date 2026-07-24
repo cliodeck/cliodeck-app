@@ -80,6 +80,17 @@ class TropyService {
    * Initialise le service Tropy pour un projet
    */
   async init(projectPath: string): Promise<void> {
+    // Bascule de projet : démonter l'instance précédente AVANT de la
+    // remplacer. project:load appelle init() sans close() ; sans ce
+    // teardown, l'ancien watcher chokidar survivait et son callback
+    // `change` — closure sur le singleton — pouvait déclencher une resync
+    // sur le projet nouvellement chargé ; l'ancien vector store restait
+    // aussi ouvert (fuite de handle SQLite).
+    this.stopWatching();
+    await this.ocrPipeline?.dispose();
+    this.vectorStore?.close();
+    this.currentTPYPath = null;
+
     this.projectPath = projectPath;
     this.vectorStore = new PrimarySourcesVectorStore(projectPath);
     this.tropySync = new TropySync();
