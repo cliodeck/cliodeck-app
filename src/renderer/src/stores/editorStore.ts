@@ -286,6 +286,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
+    // Gras/italique : bascule wrap/unwrap via la façade — le remplacement
+    // par placeholder écrasait la sélection (#10). Repli sur l'ancien
+    // comportement seulement sans façade montée.
+    if ((type === 'bold' || type === 'italic') && editorFacade?.toggleInline) {
+      editorFacade.toggleInline(type);
+      set({ isDirty: true });
+      return;
+    }
+
     let textToInsert = '';
     switch (type) {
       case 'bold':
