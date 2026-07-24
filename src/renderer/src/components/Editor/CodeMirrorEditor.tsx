@@ -125,6 +125,12 @@ function getFontFamily(fontFamily: string): string {
       return "'Source Code Pro', 'Consolas', monospace";
     case 'cascadia':
       return "'Cascadia Code', 'Consolas', monospace";
+    // Polices de prose (#12) : ClioDeck édite des manuscrits, pas du code —
+    // piles système, rien à installer.
+    case 'serif':
+      return "'Iowan Old Style', 'Palatino', 'Georgia', 'Times New Roman', serif";
+    case 'sans':
+      return "-apple-system, 'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif";
     case 'system':
     default:
       return "'SF Mono', 'Monaco', 'Consolas', 'Ubuntu Mono', monospace";

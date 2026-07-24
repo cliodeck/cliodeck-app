@@ -95,7 +95,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             <label className="config-label">
               {t('editor.fontFamily')}
               <span className="config-help">
-                Choisissez la police pour l'éditeur de code
+                Choisissez la police de l'éditeur
               </span>
             </label>
             <select
@@ -103,15 +103,21 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
               onChange={(e) => handleFieldChange('fontFamily', e.target.value)}
               className="config-select"
             >
-              <option value="system">Polices système (SF Mono, Monaco, Consolas)</option>
-              <option value="jetbrains">JetBrains Mono</option>
-              <option value="fira">Fira Code</option>
-              <option value="source">Source Code Pro</option>
-              <option value="cascadia">Cascadia Code</option>
+              <optgroup label="Prose">
+                <option value="serif">Sérif (Palatino, Georgia)</option>
+                <option value="sans">Sans-sérif (police système)</option>
+              </optgroup>
+              <optgroup label="Monospace">
+                <option value="system">Polices système (SF Mono, Monaco, Consolas)</option>
+                <option value="jetbrains">JetBrains Mono</option>
+                <option value="fira">Fira Code</option>
+                <option value="source">Source Code Pro</option>
+                <option value="cascadia">Cascadia Code</option>
+              </optgroup>
             </select>
             <div className="config-description">
               <small>
-                Les polices système sont toujours disponibles. Les autres nécessitent d'être installées sur votre système.
+                Les polices de prose et les polices système sont toujours disponibles. JetBrains Mono, Fira Code, Source Code Pro et Cascadia Code nécessitent d'être installées sur votre système.
               </small>
             </div>
           </div>
