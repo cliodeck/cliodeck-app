@@ -258,6 +258,9 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
         { role: 'zoom' as const },
         ...(isMac
           ? [
+              // `close` fournit l'accélérateur natif Cmd+W ; le menu étant
+              // entièrement custom, sans lui le raccourci n'existe pas (#26).
+              { role: 'close' as const },
               { type: 'separator' as const },
               { role: 'front' as const },
               { type: 'separator' as const },
@@ -275,14 +278,14 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('documentation'),
           click: async () => {
             const { shell } = await import('electron');
-            await shell.openExternal('https://github.com/inactinique/cliodeck');
+            await shell.openExternal('https://github.com/cliodeck/cliodeck-app');
           },
         },
         {
           label: t('reportIssue'),
           click: async () => {
             const { shell } = await import('electron');
-            await shell.openExternal('https://github.com/inactinique/cliodeck/issues');
+            await shell.openExternal('https://github.com/cliodeck/cliodeck-app/issues');
           },
         },
         { type: 'separator' as const },
