@@ -515,6 +515,7 @@
       "loadError": "Erreur lors du chargement des collections Zotero",
       "loadCollections": "Charger les collections",
       "loadCollectionsButton": "Charger les collections",
+      "savedCollection": "Collection mémorisée ({{key}})",
       "loadCollectionsError": "Erreur lors du chargement des collections",
       "allCollections": "Toutes les collections",
       "selectCollection": "Sélectionner une collection",

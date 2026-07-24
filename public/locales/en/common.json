@@ -515,6 +515,7 @@
       "loadError": "Error loading Zotero collections",
       "loadCollections": "Load collections",
       "loadCollectionsButton": "Load collections",
+      "savedCollection": "Saved collection ({{key}})",
       "loadCollectionsError": "Error loading collections",
       "allCollections": "All collections",
       "selectCollection": "Select a collection",
