@@ -648,6 +648,14 @@ export const ProposalAdjudicationSchema = z.object({
    * jamais (règle de granularité, docs/INSTRUCTIONS_journal-usage-ia.md).
    */
   filePath: z.string().max(4_096).optional(),
+  /**
+   * Projet auquel l'adjudication appartient, capturé côté renderer à la
+   * création de la vue. Le handler ignore l'événement s'il ne correspond
+   * plus au projet courant : les journaux (brain.db / journal.db) sont
+   * des singletons remplacés à la bascule, écrire « dans le courant »
+   * attribuerait l'événement au mauvais projet (#40).
+   */
+  projectPath: z.string().max(4_096).optional(),
 });
 
 export const UsageSaveDecisionSchema = z.object({

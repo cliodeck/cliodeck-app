@@ -24,11 +24,25 @@ import { historyService } from '../../services/history-service.js';
 import { usageJournalService } from '../../services/usage-journal-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validate, ProposalAdjudicationSchema } from '../utils/validation.js';
+import { projectManager } from '../../services/project-manager.js';
 
 export function setupProposalHandlers() {
   ipcMain.handle('proposals:adjudication', async (_event, rawEvent: unknown) => {
     const event = validate(ProposalAdjudicationSchema, rawEvent);
     try {
+      // Les deux journaux sont des singletons remplacés à la bascule de
+      // projet (project:load → historyService.init / usageJournal). Si
+      // l'événement a été émis pour un AUTRE projet que le courant (IPC en
+      // vol pendant la bascule), écrire « dans le courant » l'attribuerait
+      // au mauvais projet : on l'ignore, best-effort assumé (#40).
+      const currentRoot = projectManager.getCurrentProjectPath();
+      if (event.projectPath && currentRoot && event.projectPath !== currentRoot) {
+        console.warn(
+          `⚠️ proposals:adjudication ignoré — émis pour ${event.projectPath}, projet courant ${currentRoot}`
+        );
+        return successResponse();
+      }
+
       // 1. Journal de recherche — événement complet, contenus inclus.
       historyService.logProposalAdjudication({
         at: event.at,
