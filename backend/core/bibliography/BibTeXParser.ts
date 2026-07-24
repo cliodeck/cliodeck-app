@@ -4,6 +4,17 @@ import type { Citation } from '../../types/citation';
 import { createCitation } from '../../types/citation';
 
 export class BibTeXParser {
+  /**
+   * Entrées rejetées lors du DERNIER parse (réinitialisé à chaque appel).
+   * Un import qui perd des entrées ne doit plus être silencieux : les
+   * appelants peuvent journaliser/afficher ce compte (#32).
+   */
+  private rejected: Array<{ key: string; reason: 'missing-title' }> = [];
+
+  get lastRejected(): ReadonlyArray<{ key: string; reason: 'missing-title' }> {
+    return this.rejected;
+  }
+
   // Parse un fichier BibTeX et retourne une liste de citations
   parseFile(filePath: string): Citation[] {
     try {
@@ -19,6 +30,7 @@ export class BibTeXParser {
   // Parse le contenu d'un fichier BibTeX
   // bibDir: répertoire de base pour résoudre les chemins relatifs des fichiers
   parse(content: string, bibDir?: string): Citation[] {
+    this.rejected = [];
     const citations: Citation[] = [];
 
     // ✅ APPROCHE SIMPLIFIÉE : Trouver chaque @type{key, et parser jusqu'au } correspondant
@@ -376,15 +388,17 @@ export class BibTeXParser {
     fields: Record<string, string>,
     bibDir?: string
   ): Citation | null {
-    // Champs obligatoires : author et title (year optionnel)
-    const author = fields.author;
+    // Champ obligatoire : title. author retombe sur editor (volumes
+    // dirigés, actes) puis sur vide (œuvres anonymes) : exiger author
+    // rejetait silencieusement des entrées légitimes (#32) —
+    // displayString retombe sur le titre quand author est vide.
+    const author = fields.author || fields.editor || '';
     const year = fields.year || fields.date || 'n.d.';
     const title = fields.title;
 
-    if (!author || !title) {
-      console.warn(
-        `⚠️ Citation incomplète ignorée: ${key} (author=${!!author}, title=${!!title})`
-      );
+    if (!title) {
+      console.warn(`⚠️ Citation incomplète ignorée: ${key} (title manquant)`);
+      this.rejected.push({ key, reason: 'missing-title' });
       return null;
     }
 
