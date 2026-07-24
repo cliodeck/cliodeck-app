@@ -442,6 +442,27 @@ export class ObsidianVaultStore {
   close(): void {
     this.db.close();
   }
+
+  /**
+   * Drops the `obsidian_*` tables from the store at `dbPath`, leaving the
+   * rest of the shared brain.db (PDF, Tropy, history domains) untouched.
+   * Deleting the whole file here would wipe the other domains' indexes —
+   * and pull the file out from under their open connections.
+   */
+  static purgeObsidianData(dbPath: string): void {
+    if (!fs.existsSync(dbPath)) return;
+    const db = new Database(dbPath);
+    try {
+      db.pragma('busy_timeout = 3000');
+      db.exec(`
+        DROP TABLE IF EXISTS obsidian_chunks_fts;
+        DROP TABLE IF EXISTS obsidian_chunks;
+        DROP TABLE IF EXISTS obsidian_notes;
+      `);
+    } finally {
+      db.close();
+    }
+  }
 }
 
 // MARK: - row helpers
