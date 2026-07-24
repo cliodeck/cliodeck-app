@@ -25,6 +25,27 @@ import {
  * the apiKey it round-trips in handler options may be a mask. Substitute the
  * real stored key when the incoming value matches the mask of the stored one.
  */
+/**
+ * Les handlers Zotero écrivent dans le vector store APRÈS de longs `await`
+ * (sync réseau/SQLite). Un `project:load` concurrent remplace le store via
+ * `pdfService.init` : relire `getVectorStore()` après l'await écrirait les
+ * collections dans le NOUVEAU projet. On capture donc la référence avant
+ * l'await et on n'écrit que si elle est encore le store courant — sinon on
+ * abandonne les écritures (la synchro elle-même reste valide côté fichiers).
+ */
+function vectorStoreIfStillCurrent(
+  captured: ReturnType<typeof pdfService.getVectorStore>
+): ReturnType<typeof pdfService.getVectorStore> {
+  const current = pdfService.getVectorStore();
+  if (!captured || current !== captured) {
+    if (captured) {
+      console.warn('⚠️ Projet changé pendant l\'opération Zotero — écritures vector store ignorées');
+    }
+    return null;
+  }
+  return current;
+}
+
 function withResolvedZoteroApiKey<T extends object>(options: T): T {
   if (!('apiKey' in options)) return options;
   const incoming = (options as { apiKey?: unknown }).apiKey;
@@ -87,11 +108,12 @@ export function setupZoteroHandlers() {
     console.log('📞 IPC Call: zotero:sync');
     try {
       const validatedData = withResolvedZoteroApiKey(validate(ZoteroSyncSchema, options));
+      const vectorStoreBefore = pdfService.getVectorStore();
       const result = await zoteroService.sync(validatedData);
 
       // Save collections to VectorStore if sync was successful
       if (result.success && result.collections && result.collections.length > 0) {
-        const vectorStore = pdfService.getVectorStore();
+        const vectorStore = vectorStoreIfStillCurrent(vectorStoreBefore);
         if (vectorStore) {
           vectorStore.saveCollections(result.collections);
           console.log(`📁 Saved ${result.collections.length} collections to VectorStore`);
@@ -115,15 +137,22 @@ export function setupZoteroHandlers() {
                 });
 
                 if (refreshResult.bibtexKeyToCollections && Object.keys(refreshResult.bibtexKeyToCollections).length > 0) {
-                  const linkedCount = vectorStore.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
-                  console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
+                  // refreshCollectionLinks est un nouvel await : re-vérifier.
+                  const store = vectorStoreIfStillCurrent(vectorStoreBefore);
+                  if (store) {
+                    const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
+                    console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
+                  }
                 }
               }
             } catch (parseError) {
               console.error('⚠️ Could not parse BibTeX for collection linking:', parseError);
               if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
-                const linkedCount = vectorStore.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
-                console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections (fallback)`);
+                const store = vectorStoreIfStillCurrent(vectorStoreBefore);
+                if (store) {
+                  const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
+                  console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections (fallback)`);
+                }
               }
             }
           } else if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
@@ -214,11 +243,12 @@ export function setupZoteroHandlers() {
       citationCount: options.currentCitations?.length,
     });
     try {
+      const vectorStoreBefore = pdfService.getVectorStore();
       const result = await zoteroService.applyUpdates(options as any);
 
       // After applying updates, refresh document-collection links
       if (result.success) {
-        const vectorStore = pdfService.getVectorStore();
+        const vectorStore = vectorStoreIfStillCurrent(vectorStoreBefore);
         if (vectorStore) {
           const originalCitations = options.currentCitations || [];
           const finalCitations = result.finalCitations || [];
@@ -245,14 +275,18 @@ export function setupZoteroHandlers() {
             localCitations,
           } as any);
 
-          if (refreshResult.collections && refreshResult.collections.length > 0) {
-            vectorStore.saveCollections(refreshResult.collections);
-            console.log(`📁 Updated ${refreshResult.collections.length} collections in VectorStore`);
-          }
+          // refreshCollectionLinks est un nouvel await : re-vérifier.
+          const store = vectorStoreIfStillCurrent(vectorStoreBefore);
+          if (store) {
+            if (refreshResult.collections && refreshResult.collections.length > 0) {
+              store.saveCollections(refreshResult.collections);
+              console.log(`📁 Updated ${refreshResult.collections.length} collections in VectorStore`);
+            }
 
-          if (refreshResult.bibtexKeyToCollections && Object.keys(refreshResult.bibtexKeyToCollections).length > 0) {
-            const linkedCount = vectorStore.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
-            console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
+            if (refreshResult.bibtexKeyToCollections && Object.keys(refreshResult.bibtexKeyToCollections).length > 0) {
+              const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
+              console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
+            }
           }
         }
       }
