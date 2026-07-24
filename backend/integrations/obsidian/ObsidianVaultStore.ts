@@ -99,6 +99,9 @@ export class ObsidianVaultStore {
     this.db = new Database(cfg.dbPath);
     this.dimension = cfg.dimension;
     this.db.pragma('journal_mode = WAL');
+    // brain.db est partagé entre plusieurs writers : attendre le verrou
+    // plutôt qu'échouer en SQLITE_BUSY (#29).
+    this.db.pragma('busy_timeout = 3000');
     this.initSchema();
   }
 

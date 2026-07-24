@@ -180,6 +180,11 @@ export class HistoryManager {
 
   private enableForeignKeys(): void {
     this.db.pragma('foreign_keys = ON');
+    // brain.db est partagé entre plusieurs writers : attendre le verrou
+    // plutôt qu'échouer en SQLITE_BUSY ; WAL posé explicitement pour ne
+    // pas dépendre de l'ordre d'ouverture (#29).
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 3000');
   }
 
   private createTables(): void {
