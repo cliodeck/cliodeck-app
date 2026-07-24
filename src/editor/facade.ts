@@ -34,6 +34,14 @@ export interface EditorFacade {
   replaceSelection(text: string, origin?: ChangeOrigin): void;
 
   /**
+   * Bascule une marque inline (gras/italique) sur la sélection : wrap si
+   * absente, unwrap si présente, placeholder sélectionné si sélection
+   * vide. Contrairement à replaceSelection, n'écrase JAMAIS le texte
+   * sélectionné (#10).
+   */
+  toggleInline?(type: 'bold' | 'italic'): void;
+
+  /**
    * Remplace tout le document en une seule édition (annulable d'un coup),
    * en plaçant le curseur à `cursorOffset` si fourni.
    */

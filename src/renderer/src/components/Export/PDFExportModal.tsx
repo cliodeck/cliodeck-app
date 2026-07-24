@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
-import { currentRelativePath } from '../../stores/manuscriptStore';
+import { currentRelativePath, useManuscriptStore } from '../../stores/manuscriptStore';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -124,6 +124,14 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const handleExport = async () => {
     if (!currentProject) {
       setError(t('export.pdf.noProject'));
+      return;
+    }
+
+    // Renumérotation en cours : les chapitres s'écrivent un par un sur le
+    // disque, exporter maintenant assemblerait un manuscrit mi-renuméroté
+    // (#30).
+    if (useManuscriptStore.getState().renumbering) {
+      setError(t('book.renumberInProgress'));
       return;
     }
 

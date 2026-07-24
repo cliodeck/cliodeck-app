@@ -185,6 +185,8 @@ const api = {
       proposed?: string;
       final?: string;
       rejectionNote?: string;
+      filePath?: string;
+      projectPath?: string;
     }) => ipcRenderer.invoke('proposals:adjudication', event),
   },
 
@@ -875,6 +877,8 @@ const api = {
           stage: string;
           processed: number;
           total: number;
+          /** Projet émetteur — permet au renderer d'ignorer un job périmé. */
+          projectRoot?: string;
         }) => void
       ) => {
         const listener = (_e: unknown, p: unknown): void =>

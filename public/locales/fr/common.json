@@ -1661,7 +1661,8 @@
     "untitledHeading": "(sans titre)",
     "renumberNoChange": "Les notes sont déjà numérotées dans l'ordre.",
     "renumberDone": "Notes renumérotées dans {{count}} chapitre(s).",
-    "renumberError": "La renumérotation a échoué : le manuscrit est inchangé."
+    "renumberError": "La renumérotation a échoué : le manuscrit est inchangé.",
+    "renumberInProgress": "Renumérotation des notes en cours — réessayez dans un instant."
   },
   "citations": {
     "allValid": "Toutes les citations sont valides ({{count}} clés vérifiées).",

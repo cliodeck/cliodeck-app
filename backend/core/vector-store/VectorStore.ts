@@ -67,6 +67,7 @@ export class VectorStore {
 
     // ✅ IMPORTANT : Activer les clés étrangères (désactivées par défaut dans SQLite)
     this.enableForeignKeys();
+    this.configureSharedFileAccess();
 
     // Créer les tables
     this.createTables();
@@ -75,6 +76,18 @@ export class VectorStore {
   private enableForeignKeys(): void {
     this.db.pragma('foreign_keys = ON');
     console.log('✅ Clés étrangères activées');
+  }
+
+  /**
+   * brain.db est PARTAGÉ (pdf_*, tropy_*, obsidian_*, history_*) : d'autres
+   * connexions écrivent en même temps. Sans busy_timeout, better-sqlite3
+   * échoue immédiatement en SQLITE_BUSY au lieu d'attendre le verrou (#29).
+   * WAL est une propriété persistante du fichier, posée ici explicitement
+   * pour ne pas dépendre de l'ordre d'ouverture des autres writers.
+   */
+  private configureSharedFileAccess(): void {
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 3000');
   }
 
   private createTables(): void {

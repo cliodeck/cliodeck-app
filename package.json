@@ -13,7 +13,7 @@
     "name": "Frédéric Clavert",
     "email": "frederic.clavert@uni.lu"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\"",
     "dev:full": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run wait-and-start\"",

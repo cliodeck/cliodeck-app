@@ -623,12 +623,9 @@ export function setupFusionHandlers(): void {
       const cfg = await readOrInitWorkspaceConfig(root);
       delete cfg.vault;
       await writeWorkspaceConfig(root, cfg);
-      const dbPath = obsidianStorePath(root);
-      try {
-        await fs.unlink(dbPath);
-      } catch {
-        // db already gone — fine.
-      }
+      // brain.db est partagé (PDF, Tropy, journal) : on ne supprime que les
+      // tables obsidian_*, jamais le fichier lui-même.
+      ObsidianVaultStore.purgeObsidianData(obsidianStorePath(root));
       return successResponse({});
     } catch (e) {
       return errorResponse(e as Error);
@@ -674,7 +671,15 @@ export function setupFusionHandlers(): void {
               onProgress: (p) => {
                 try {
                   if (!event.sender.isDestroyed()) {
-                    event.sender.send('fusion:vault:progress', p);
+                    // Le job est scopé par `root` (capturé en tête de
+                    // handler) mais l'événement ne l'était pas : des
+                    // Settings rouverts sur un AUTRE projet affichaient
+                    // les chiffres de ce job (#35). Le renderer filtre
+                    // sur projectRoot.
+                    event.sender.send('fusion:vault:progress', {
+                      ...p,
+                      projectRoot: root,
+                    });
                   }
                 } catch {
                   // Renderer gone — continue indexing anyway.
