@@ -40,6 +40,14 @@ interface ManuscriptState {
   /** Dérivé par chemin de chapitre (relatif au projet). */
   info: Record<string, ChapterInfo>;
   refreshing: boolean;
+  /**
+   * Une renumérotation des notes écrit les chapitres UN PAR UN sur le
+   * disque : un export lancé pendant la boucle assemblerait un manuscrit
+   * mi-renuméroté (#30). Les modales d'export refusent de partir tant que
+   * ce verrou est posé ; le bouton de renumérotation se désactive aussi.
+   */
+  renumbering: boolean;
+  setRenumbering: (renumbering: boolean) => void;
   /** Recalcule le dérivé de tous les chapitres du manifeste. */
   refreshAll: () => Promise<void>;
   /** Recalcule le dérivé d'un seul chapitre à partir d'un texte connu. */
@@ -65,6 +73,8 @@ function derive(content: string): ChapterInfo {
 export const useManuscriptStore = create<ManuscriptState>((set) => ({
   info: {},
   refreshing: false,
+  renumbering: false,
+  setRenumbering: (renumbering: boolean) => set({ renumbering }),
 
   refreshAll: async () => {
     const { currentProject, chapters } = useProjectStore.getState();
