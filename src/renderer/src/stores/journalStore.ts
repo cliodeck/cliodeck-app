@@ -117,6 +117,8 @@ interface JournalState {
 
   // Actions
   loadSessions: () => Promise<void>;
+  /** Purge complète du journal (#16) — destructif ; recharge tout après. */
+  purgeJournal: () => Promise<{ success: boolean; deletedSessions?: number }>;
   selectSession: (sessionId: string) => Promise<void>;
   loadEvents: (sessionId: string) => Promise<void>;
   loadAIOperations: (sessionId: string) => Promise<void>;
@@ -170,6 +172,32 @@ export const useJournalStore = create<JournalState>((set, get) => ({
       }
     } catch (error) {
       set({ error: errMsg(error), loading: false });
+    }
+  },
+
+  purgeJournal: async () => {
+    set({ loading: true, error: null });
+    try {
+      const result = await window.electron.history.purge();
+      if (!result.success) {
+        set({ error: result.error, loading: false });
+        return { success: false };
+      }
+      // Tout l'état dérivé est périmé : remise à zéro puis rechargement.
+      set({
+        selectedSession: null,
+        events: [],
+        aiOperations: [],
+        chatMessages: [],
+        allEvents: [],
+        allAIOperations: [],
+        allChatMessages: [],
+      });
+      await Promise.all([get().loadSessions(), get().loadStatistics()]);
+      return { success: true, deletedSessions: result.deletedSessions };
+    } catch (error) {
+      set({ error: errMsg(error), loading: false });
+      return { success: false };
     }
   },
 

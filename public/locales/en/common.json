@@ -913,7 +913,12 @@
     "projectOverviewHelp": "In \"Project overview\" mode, you can see the timeline, AI operations and chat history aggregated for all sessions.",
     "sessionTimeline": "Session Timeline",
     "fullProjectTimeline": "Full Project Timeline",
-    "tooltipHelp": "Complete traceability of your research process. Exportable for academic appendices."
+    "tooltipHelp": "Complete traceability of your research process. Exportable for academic appendices.",
+    "purge": "Purge journal",
+    "purgeTitle": "Delete this project's entire research history",
+    "purgeConfirm1": "Delete this project's ENTIRE research journal (sessions, events, AI operations, chat history)?",
+    "purgeConfirm2": "This action is irreversible. Reports that were not exported will be permanently lost. Confirm the purge?",
+    "purgeDone": "Journal purged: {{count}} session(s) deleted."
   },
   "presentation": {
     "title": "reveal.js Presentation Export",
