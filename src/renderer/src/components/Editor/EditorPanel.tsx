@@ -48,6 +48,7 @@ export const EditorPanel: React.FC = () => {
   // ouvre l'atelier de la même façon que pour les présentations.
   const isBook = useProjectStore((s) => s.currentProject?.type === 'book');
   const addChapter = useProjectStore((s) => s.addChapter);
+  const isRenumbering = useManuscriptStore((s) => s.renumbering);
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
   // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
@@ -161,7 +162,11 @@ export const EditorPanel: React.FC = () => {
     }
 
     // Livre : la numérotation traverse les chapitres, dans l'ordre du
-    // manifeste et selon le réglage d'ouvrage (arbitrage 3).
+    // manifeste et selon le réglage d'ouvrage (arbitrage 3). Verrou posé
+    // pendant toute l'opération : les chapitres s'écrivent un par un et un
+    // export concurrent assemblerait un manuscrit mi-renuméroté (#30).
+    if (useManuscriptStore.getState().renumbering) return;
+    useManuscriptStore.getState().setRenumbering(true);
     try {
       const docs = await useManuscriptStore.getState().readManuscript();
       if (docs.length === 0) return;
@@ -223,6 +228,8 @@ export const EditorPanel: React.FC = () => {
     } catch (error) {
       logger.error('EditorPanel', error);
       await useDialogStore.getState().showAlert(t('book.renumberError'));
+    } finally {
+      useManuscriptStore.getState().setRenumbering(false);
     }
   };
 
@@ -266,6 +273,7 @@ export const EditorPanel: React.FC = () => {
             <button
               className="toolbar-btn"
               onClick={() => void handleRenumberFootnotes()}
+              disabled={isRenumbering}
               title={t('toolbar.renumberFootnotes')}
             >
               <ListOrdered size={18} strokeWidth={1.5} />
