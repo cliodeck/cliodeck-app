@@ -7,6 +7,26 @@ import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validate, HistoryExportReportSchema, HistorySearchEventsSchema, StringIdSchema } from '../utils/validation.js';
 
 export function setupHistoryHandlers() {
+  /**
+   * Purge du journal de recherche (#16). Destructif et irréversible — la
+   * confirmation vit côté renderer ; ici on exécute et on rend les comptes.
+   */
+  ipcMain.handle('history:purge', async () => {
+    console.log('📞 IPC Call: history:purge');
+    try {
+      const hm = historyService.getHistoryManager();
+      if (!hm || !hm.isDatabaseOpen()) {
+        return errorResponse('No project open or database closed');
+      }
+      const result = hm.purgeAll();
+      console.log('📤 IPC Response: history:purge', result);
+      return successResponse(result);
+    } catch (error: unknown) {
+      console.error('❌ history:purge error:', error);
+      return errorResponse(error);
+    }
+  });
+
   ipcMain.handle('history:get-sessions', async () => {
     console.log('📞 IPC Call: history:get-sessions');
     try {
