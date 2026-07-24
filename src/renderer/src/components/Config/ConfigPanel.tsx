@@ -86,7 +86,6 @@ export interface LLMConfig {
   ollamaChatModel: string;
   /** Override Ollama's num_ctx for embeddings; only honoured by long-context models. */
   ollamaEmbeddingNumCtx?: number;
-  embeddingStrategy?: 'nomic-fallback' | 'mxbai-only' | 'custom';
   // Cloud providers — keys persisted via secureStorage by config-manager.
   claudeAPIKey?: string;
   claudeModel?: string;
@@ -150,7 +149,6 @@ export const ConfigPanel: React.FC = () => {
     ollamaURL: 'http://127.0.0.1:11434',
     ollamaEmbeddingModel: 'nomic-embed-text',
     ollamaChatModel: 'gemma2:2b',
-    embeddingStrategy: 'nomic-fallback',
   });
 
   const [editorConfig, setEditorConfig] = useState<EditorConfig>({
@@ -231,7 +229,6 @@ export const ConfigPanel: React.FC = () => {
           ollamaURL: 'http://127.0.0.1:11434',
           ollamaEmbeddingModel: 'nomic-embed-text',
           ollamaChatModel: 'gemma2:2b',
-          embeddingStrategy: 'nomic-fallback',
           ...llm, // Override with saved values
         });
       }
@@ -296,7 +293,6 @@ export const ConfigPanel: React.FC = () => {
         ollamaURL: 'http://127.0.0.1:11434',
         ollamaEmbeddingModel: 'nomic-embed-text',
         ollamaChatModel: 'gemma2:2b',
-        embeddingStrategy: 'nomic-fallback',
       });
       setEditorConfig({
         fontSize: 14,

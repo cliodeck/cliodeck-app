@@ -436,21 +436,9 @@
     "embeddingNumCtxDetails": "Avancé. La plupart des modèles d'embedding plafonnent leur contexte en dur (nomic-embed-text = 2048 tokens) et ignorent cette valeur. Elle n'est utile que pour les modèles à grande fenêtre (bge-m3, nomic-embed-text-v2). Les textes trop longs sont tronqués automatiquement côté serveur, jamais rejetés — vous n'avez pas besoin d'y toucher pour corriger l'erreur « input length exceeds the context length ».",
     "chatModel": "Modèle de chat",
     "chatModelHelp": "Modèle pour la génération de texte",
-    "embeddingStrategy": "Stratégie d'embeddings",
-    "embeddingStrategyHelp": "Choix du modèle et comportement en cas d'erreur",
     "embeddingStrategyWarning": "⚠️ Attention : Changer ce modèle nécessite de ré-indexer tous les PDFs.",
     "embeddingStrategyWarningDetails": "Les embeddings ne sont pas compatibles entre modèles différents. Vous devrez supprimer tous les PDFs indexés et les ré-indexer après le changement.",
     "embeddingStrategyRecommended": "Modèles recommandés :",
-    "embeddingStrategyOptions": {
-      "nomicFallback": "nomic-embed-text avec fallback vers mxbai-embed-large",
-      "mxbaiOnly": "mxbai-embed-large uniquement (pas de fallback)",
-      "custom": "Modèle personnalisé (pas de fallback)"
-    },
-    "embeddingStrategyDescriptions": {
-      "nomicFallback": "Utilise nomic-embed-text, bascule automatiquement vers mxbai-embed-large en cas d'erreur (recommandé)",
-      "mxbaiOnly": "Utilise uniquement mxbai-embed-large, pas de fallback (pour la cohérence)",
-      "custom": "Utilise le modèle personnalisé ci-dessus, pas de fallback (pour utilisateurs avancés)"
-    },
     "availableModels": "Modèles disponibles",
     "modelsAvailable": "modèles disponibles",
     "noModelsLoaded": "Cliquez 🔄 pour charger les modèles depuis Ollama",
