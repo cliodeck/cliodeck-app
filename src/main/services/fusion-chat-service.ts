@@ -34,6 +34,7 @@ import {
   type ChatEngineToolHandler,
 } from './chat-engine.js';
 import { modeService } from './mode-service.js';
+import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.js';
 import { historyService } from './history-service.js';
 import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
@@ -527,13 +528,72 @@ class FusionChatService {
             });
             const ownHits = manuscriptHits ?? [];
             if (hits.length === 0 && ownHits.length === 0) return null;
+
+            // --- Compression du contexte (#28) --------------------------
+            // ContextCompressor existait depuis la fusion sans aucun site
+            // d'appel. Branché ici, entre la recherche et l'injection :
+            // mode prioritaire (ragOverrides.enableContextCompression),
+            // repli sur le réglage RAG global (défaut : activé). Le
+            // compresseur est lui-même un no-op sous 10 k caractères.
+            // IMPORTANT : prompt ET sources partent des MÊMES hits
+            // compressés — les citations [N] du modèle doivent correspondre
+            // au panneau de sources.
+            let effectiveHits = hits;
+            let compressionSlice: RAGExplanation['compression'] | undefined;
+            let compressionMs: number | undefined;
+            if (
+              hits.length > 0 &&
+              (await isCompressionEnabled(args.systemPrompt?.modeId))
+            ) {
+              const t0 = Date.now();
+              const chunks = hits.map((h, i) => ({
+                content: h.chunk.content,
+                // Clé de correspondance vers le hit d'origine — le
+                // compresseur filtre et réécrit le contenu, pas les
+                // métadonnées.
+                documentId: String(i),
+                documentTitle: h.document.title || '',
+                pageNumber: (h.chunk as { pageNumber?: number }).pageNumber ?? 0,
+                similarity: h.similarity,
+              }));
+              const compressed = new ContextCompressor().compress(chunks, lastUser);
+              compressionMs = Date.now() - t0;
+              effectiveHits = compressed.chunks.map((c) => {
+                const original = hits[Number(c.documentId)];
+                // Seul le contenu du chunk est réécrit ; le discriminant
+                // sourceType/document est préservé — le spread élargit
+                // l'union, d'où le cast.
+                return {
+                  ...original,
+                  chunk: { ...original.chunk, content: c.content },
+                } as MultiSourceSearchResult;
+              });
+              compressionSlice = {
+                enabled: true,
+                originalChunks: compressed.stats.originalChunks,
+                finalChunks: compressed.stats.compressedChunks,
+                originalSize: compressed.stats.originalSize,
+                finalSize: compressed.stats.compressedSize,
+                reductionPercent: compressed.stats.reductionPercent,
+                strategy: compressed.stats.strategy,
+              };
+            }
+
             return {
               systemPrompt:
-                formatContextAsSystemPrompt(hits) + formatManuscriptContext(ownHits, hits.length),
-              sources: [...hitsToSources(hits), ...manuscriptHitsToSources(ownHits)],
+                formatContextAsSystemPrompt(effectiveHits) +
+                formatManuscriptContext(ownHits, effectiveHits.length),
+              sources: [
+                ...hitsToSources(effectiveHits),
+                ...manuscriptHitsToSources(ownHits),
+              ],
               explanation: {
                 search: stats.search,
-                timing: stats.timing,
+                ...(compressionSlice ? { compression: compressionSlice } : {}),
+                timing: {
+                  ...stats.timing,
+                  ...(compressionMs !== undefined ? { compressionMs } : {}),
+                },
               },
             };
           },
@@ -794,6 +854,25 @@ function formatManuscriptContext(
     lines.push('');
   });
   return lines.join('\n');
+}
+
+/**
+ * La compression du contexte est-elle active pour ce tour ? (#28)
+ * Priorité : override du mode (ragOverrides.enableContextCompression),
+ * puis réglage RAG global (défaut : activé). Un mode irrésoluble retombe
+ * sur le réglage global — jamais d'échec de tour pour un flag de confort.
+ */
+async function isCompressionEnabled(modeId?: string): Promise<boolean> {
+  if (modeId) {
+    try {
+      const mode = await modeService.getModeManager().getMode(modeId);
+      const override = mode?.ragOverrides?.enableContextCompression;
+      if (override !== undefined) return override;
+    } catch {
+      // Mode irrésoluble : réglage global seul.
+    }
+  }
+  return configManager.getRAGConfig().enableContextCompression !== false;
 }
 
 function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
