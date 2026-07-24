@@ -110,6 +110,12 @@ export const ZoteroImport: React.FC = () => {
         }
         if (projectConfig?.zotero?.collectionKey) {
           setSelectedCollection(projectConfig.zotero.collectionKey);
+        } else if (projectConfig?.bibliographySource?.zoteroCollection) {
+          // Projets dont l'association n'a été écrite que par l'import
+          // (champ historique) : sans ce repli, la collection choisie au
+          // dropdown n'était jamais re-proposée (#9) et la resync
+          // suivante l'écrasait par undefined (#20).
+          setSelectedCollection(projectConfig.bibliographySource.zoteroCollection);
         } else {
           setSelectedCollection('');
         }
@@ -229,12 +235,30 @@ export const ZoteroImport: React.FC = () => {
             filePath: bibFileName,
             zoteroCollection: selectedCollection || undefined,
           });
+
+          // Persister AUSSI dans zotero.collectionKey — le champ que
+          // loadZoteroConfig relit au montage. Sans cette écriture, seul le
+          // panneau technique ZoteroProjectSettings (saisie manuelle de la
+          // clé) alimentait la pré-sélection (#9). Merge du bloc existant :
+          // updateConfig remplace la clé zotero entière.
+          try {
+            const cfg = await window.electron.project.getConfig(projectJsonPath);
+            await window.electron.project.updateConfig(projectJsonPath, {
+              zotero: {
+                ...(cfg?.zotero ?? {}),
+                collectionKey: selectedCollection || undefined,
+              },
+            });
+          } catch (cfgError) {
+            console.warn('Failed to persist Zotero collection key:', cfgError);
+          }
         }
 
         await useDialogStore.getState().showAlert(t('zotero.import.success', { count: citationCount }));
 
-        // Reset selection
-        setSelectedCollection('');
+        // La sélection reste affichée : c'est l'association mémorisée du
+        // projet, la remettre à vide faisait croire qu'elle était perdue —
+        // et la resync suivante l'écrasait réellement (#20).
       } else {
         await useDialogStore.getState().showAlert(t('zotero.import.error', { error: syncResult.error }));
       }
@@ -385,6 +409,15 @@ export const ZoteroImport: React.FC = () => {
             <option value="">
               {collections.length === 0 ? t('zotero.import.loadCollections') : t('zotero.import.allItems')}
             </option>
+            {/* Collection mémorisée du projet, avant chargement de la liste :
+                sans cette option le select affichait « vide » alors que la
+                synchro utiliserait bien la collection sauvegardée (#9). */}
+            {selectedCollection &&
+              !collections.some((col) => col.key === selectedCollection) && (
+                <option value={selectedCollection}>
+                  {t('zotero.import.savedCollection', { key: selectedCollection })}
+                </option>
+              )}
             {collections.map((col) => {
               const depth = getCollectionDepth(col.key);
               const indent = '\u00A0\u00A0\u00A0'.repeat(depth);
