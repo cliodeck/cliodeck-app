@@ -466,6 +466,18 @@
     "usedSpace": "Used space",
     "location": "Location"
   },
+  "embeddedEmbedding": {
+    "title": "Embeddings (semantic search)",
+    "providerLabel": "Embeddings provider",
+    "providerHelp": "Engine that vectorises your documents for RAG search",
+    "providerAuto": "Auto — Ollama first, fall back to the embedded model",
+    "providerOllama": "Ollama (model chosen in the LLM section)",
+    "providerEmbedded": "Embedded model (offline, no server required)",
+    "providerSaveError": "Could not save the embeddings provider",
+    "reindexWarning": "⚠️ Changing the embeddings provider or model invalidates the existing vector index: you will need to re-index your PDFs (Settings → Actions).",
+    "modelsLabel": "Embedded embeddings model",
+    "modelsHelp": "Download once for fully offline RAG"
+  },
   "zotero": {
     "title": "Zotero Configuration",
     "mode": "Connection mode",

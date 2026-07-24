@@ -466,6 +466,18 @@
     "usedSpace": "Verwendeter Speicher",
     "location": "Speicherort"
   },
+  "embeddedEmbedding": {
+    "title": "Embeddings (semantische Suche)",
+    "providerLabel": "Embeddings-Provider",
+    "providerHelp": "Engine, die Ihre Dokumente für die RAG-Suche vektorisiert",
+    "providerAuto": "Auto — zuerst Ollama, Rückfall auf das eingebettete Modell",
+    "providerOllama": "Ollama (Modell aus dem LLM-Abschnitt)",
+    "providerEmbedded": "Eingebettetes Modell (offline, kein Server nötig)",
+    "providerSaveError": "Embeddings-Provider konnte nicht gespeichert werden",
+    "reindexWarning": "⚠️ Ein Wechsel des Embeddings-Providers oder -Modells macht den bestehenden Vektorindex unbrauchbar: Ihre PDFs müssen neu indexiert werden (Einstellungen → Aktionen).",
+    "modelsLabel": "Eingebettetes Embeddings-Modell",
+    "modelsHelp": "Einmal herunterladen für vollständig offline RAG"
+  },
   "zotero": {
     "title": "Zotero-Konfiguration",
     "mode": "Verbindungsmodus",
