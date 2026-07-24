@@ -33,8 +33,10 @@ export const PrimarySourcesPanel: React.FC = () => {
     isSyncing,
     syncProgress,
     searchQuery,
+    selectedCollection,
     statistics,
     searchSources,
+    setCollectionFilter,
     openTPYProject,
     syncTPY,
     startWatching,
@@ -43,6 +45,15 @@ export const PrimarySourcesPanel: React.FC = () => {
     refreshStatistics,
     loadOCRLanguages,
   } = usePrimarySourcesStore();
+
+  // Listes Tropy distinctes présentes dans le corpus, pour le filtre.
+  const tropyCollections = React.useMemo(
+    () =>
+      [...new Set(sources.map((s) => s.collection).filter((c): c is string => !!c))].sort(
+        (a, b) => a.localeCompare(b)
+      ),
+    [sources]
+  );
 
   const [showOCRModal, setShowOCRModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -268,6 +279,27 @@ export const PrimarySourcesPanel: React.FC = () => {
               onChange={(e) => searchSources(e.target.value)}
             />
           </div>
+
+          {/* Filtre par liste Tropy (#21) : setCollectionFilter existait dans
+              le store sans aucun contrôle pour l'invoquer. */}
+          {tropyCollections.length > 0 && (
+            <select
+              className="config-select"
+              style={{ marginTop: '8px', width: '100%' }}
+              value={selectedCollection ?? ''}
+              onChange={(e) => setCollectionFilter(e.target.value || null)}
+              aria-label={t('primarySources.collectionFilter', 'Filter by collection')}
+            >
+              <option value="">
+                {t('primarySources.allCollections', 'All collections')}
+              </option>
+              {tropyCollections.map((collection) => (
+                <option key={collection} value={collection}>
+                  {collection}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* Transcription Status */}
           <div className="transcription-status">

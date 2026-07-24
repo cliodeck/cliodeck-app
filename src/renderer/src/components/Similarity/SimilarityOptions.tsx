@@ -3,10 +3,12 @@
  *
  * Modal for configuring similarity analysis options.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { useSimilarityStore, type Granularity, type SourceType } from '../../stores/similarityStore';
+import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { CollectionMultiSelect } from '../Chat/CollectionMultiSelect';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import './SimilarityOptions.css';
 
@@ -17,6 +19,17 @@ interface SimilarityOptionsProps {
 export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose }) => {
   const { t } = useTranslation('common');
   const { options, setOptions } = useSimilarityStore();
+
+  // Collections Zotero pour le filtre (#21) : le backend acceptait
+  // options.collectionFilter depuis toujours, seul ce contrôle manquait.
+  // Même source que l'assistant IA (liste scopée au projet, cf. #2).
+  const { availableCollections, loadAvailableCollections } = useRAGQueryStore();
+  useEffect(() => {
+    if (availableCollections.length === 0) {
+      void loadAvailableCollections();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chargement unique à l'ouverture
+  }, []);
 
   const handleGranularityChange = (granularity: Granularity) => {
     setOptions({ granularity });
@@ -132,6 +145,37 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
               </button>
             </div>
           </div>
+
+          {/* Collections (#21) */}
+          {availableCollections.length > 0 && (
+            <div className="similarity-option-group">
+              <div className="similarity-option-label-wrapper">
+                <label className="similarity-option-label">
+                  {t('similarity.collections', 'Collections')}
+                </label>
+                <HelperTooltip
+                  content={t(
+                    'similarity.help.collections',
+                    'Restreint la recherche aux collections Zotero choisies. Vide = toutes les collections.'
+                  )}
+                />
+              </div>
+              <p className="similarity-option-description">
+                {t(
+                  'similarity.collectionsDescription',
+                  'Limiter la recherche de similarités à certaines collections'
+                )}
+              </p>
+              <CollectionMultiSelect
+                collections={availableCollections}
+                selectedKeys={options.collectionFilter ?? []}
+                onChange={(keys) =>
+                  setOptions({ collectionFilter: keys.length > 0 ? keys : null })
+                }
+                placeholder={t('similarity.allCollections', 'Toutes les collections')}
+              />
+            </div>
+          )}
 
           {/* Max Results */}
           <div className="similarity-option-group">
