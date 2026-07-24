@@ -694,6 +694,8 @@ const api = {
     // Sources
     getAllSources: () => ipcRenderer.invoke('tropy:get-all-sources'),
     getSource: (sourceId: string) => ipcRenderer.invoke('tropy:get-source', sourceId),
+    getSourcePhotos: (sourceId: string) =>
+      ipcRenderer.invoke('tropy:get-source-photos', sourceId),
     updateTranscription: (
       sourceId: string,
       transcription: string,

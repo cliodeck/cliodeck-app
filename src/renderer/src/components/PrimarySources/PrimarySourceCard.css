@@ -103,3 +103,31 @@
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
 }
+
+/* Bouton OCR par source (#23) — même gabarit que les badges d'état. */
+.primary-source-card .status-badge.ocr-rerun {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.primary-source-card .status-badge.ocr-rerun:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.primary-source-card .status-badge.ocr-rerun:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.primary-source-card .status-badge.ocr-rerun .spinning {
+  animation: ocr-spin 1s linear infinite;
+}
+
+@keyframes ocr-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
