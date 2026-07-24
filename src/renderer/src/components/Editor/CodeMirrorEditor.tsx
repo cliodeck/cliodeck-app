@@ -35,6 +35,7 @@ import {
 import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
 import { scholarlyMarkdown } from '@/editor/lezer-extensions';
 import { changeOrigin, changeOriginGuard } from '@/editor/cm/change-origin';
+import { toggleInlineMark } from '@/editor/cm/inline-formatting';
 import {
   proposals,
   type Proposal,
@@ -232,6 +233,9 @@ function createFacade(
     getSelectionText: () => {
       const { from, to } = view.state.selection.main;
       return from === to ? null : view.state.sliceDoc(from, to);
+    },
+    toggleInline: (type) => {
+      toggleInlineMark(view, type);
     },
     replaceSelection: (text, origin) => {
       view.dispatch({
