@@ -1091,7 +1091,9 @@
     "contextualEmbeddingDescription": "Adds document title and section to improve search relevance",
     "contextualEnabled": "Enabled",
     "contextualDisabled": "Disabled",
-    "help": "Analyzes your text and finds similar bibliographic sources in your indexed PDFs. Uses hybrid search (semantic + keywords) combined with AI reranking for more relevant results.",
+    "help": {
+      "collections": "Restricts the search to the chosen Zotero collections. Empty = all collections."
+    },
     "help.granularity": "Determines how your text is split for analysis. 'Section' analyzes by headings, 'Paragraph' by text blocks, 'Sentence' for fine-grained analysis.",
     "help.maxResults": "Limits the number of suggested PDFs per text segment. Higher numbers give more choices but may include less relevant results.",
     "help.threshold": "Filters out results below a certain similarity score. 'Auto' lets the system decide automatically.",
@@ -1108,7 +1110,10 @@
     "insertCitation": "Cite",
     "showPreview": "Show excerpt",
     "hidePreview": "Hide excerpt",
-    "page": "Page {{page}}"
+    "page": "Page {{page}}",
+    "collections": "Collections",
+    "collectionsDescription": "Limit the similarity search to specific collections",
+    "allCollections": "All collections"
   },
   "primarySources": {
     "noClioDeckProject": "No Project Open",
@@ -1162,7 +1167,9 @@
     "transkribus": "Transkribus",
     "manual": "Manual",
     "noCorpusData": "No OCR data. Run OCR during synchronization.",
-    "closeReport": "Close"
+    "closeReport": "Close",
+    "collectionFilter": "Filter by list",
+    "allCollections": "All lists"
   },
   "modes": {
     "selector": {
