@@ -76,6 +76,25 @@ interface ProjectState {
   loadRecentProjects: () => Promise<void>;
 }
 
+// MARK: - Helpers
+
+/**
+ * Sauvegarde le document ouvert dans l'éditeur s'il a des modifications non
+ * écrites. Appelé avant toute bascule/fermeture de projet : à ce moment le
+ * garde d'`editorStore.loadFile` (scoped aux bascules de fichier) ne joue
+ * pas encore, et une fois le projet remplacé il serait trop tard pour
+ * écrire le fichier sortant. Import dynamique pour éviter le cycle
+ * projectStore ↔ editorStore.
+ */
+async function saveOutgoingEditorIfDirty(): Promise<void> {
+  const { useEditorStore } = await import('./editorStore');
+  const editor = useEditorStore.getState();
+  if (editor.filePath && editor.isDirty) {
+    await editor.saveFile();
+    console.log('💾 Document sortant sauvegardé avant bascule de projet');
+  }
+}
+
 // MARK: - Store
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -90,6 +109,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProject: async (projectPath: string) => {
     set({ loadState: { kind: 'loading', path: projectPath } });
     try {
+      // Bascule de PROJET : le garde anti-perte d'editorStore.loadFile ne
+      // couvre que les bascules de fichier — ici le document sortant doit
+      // être sauvegardé AVANT project.load, pendant que son projet est
+      // encore le projet courant (chemins validés côté main). Échec de
+      // sauvegarde → on annule la bascule plutôt que de perdre les frappes.
+      await saveOutgoingEditorIfDirty();
+
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
 
@@ -246,6 +272,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createProject: async (name: string, type: Project['type'], path: string) => {
     set({ loadState: { kind: 'loading', path } });
     try {
+      // Même garde que loadProject : créer un projet bascule aussi hors du
+      // document courant.
+      await saveOutgoingEditorIfDirty();
+
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
@@ -287,6 +317,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   closeProject: async () => {
+    // Fermer le projet abandonne le document courant : on le sauvegarde
+    // tant que le backend du projet est encore ouvert. Best-effort ici (la
+    // fermeture doit rester possible), mais l'échec est signalé.
+    try {
+      await saveOutgoingEditorIfDirty();
+    } catch (error) {
+      console.error('❌ Sauvegarde du document sortant impossible à la fermeture:', error);
+    }
+
     try {
       // Close backend resources (PDF Service, vector store, etc.)
       await window.electron.project.close();
