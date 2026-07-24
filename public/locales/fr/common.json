@@ -1162,7 +1162,11 @@
     "transkribus": "Transkribus",
     "manual": "Manuel",
     "noCorpusData": "Aucune donnée OCR. Lancez un OCR lors de la synchronisation.",
-    "closeReport": "Fermer"
+    "closeReport": "Fermer",
+    "ocrRerun": "Lancer l'OCR sur cette source",
+    "ocrOverwriteConfirm": "Relancer l'OCR ? La transcription existante de cette source sera remplacée.",
+    "ocrNoPhotos": "Aucune image trouvée pour cette source (fichiers déplacés ou manquants).",
+    "ocrFailed": "L'OCR a échoué pour cette source."
   },
   "modes": {
     "selector": {
