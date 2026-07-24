@@ -24,6 +24,10 @@ export function useCorpusData() {
   const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
   const [numTopics, setNumTopics] = useState<number>(10);
   const [graphSimilarityThreshold, setGraphSimilarityThreshold] = useState<number>(0.7);
+  // #22 : le KnowledgeGraphBuilder sait produire des nœuds auteurs depuis
+  // toujours, mais les deux appels passaient `false` en dur. Comme le seuil
+  // de similarité, le réglage prend effet à la régénération du graphe.
+  const [includeAuthorNodes, setIncludeAuthorNodes] = useState<boolean>(false);
   const [regeneratingGraph, setRegeneratingGraph] = useState(false);
   const [filters, setFilters] = useState<Filters>({
     year: null,
@@ -75,7 +79,7 @@ export function useCorpusData() {
       const graphResult = await window.electron.corpus.getGraph({
         includeSimilarityEdges: true,
         similarityThreshold: configuredThreshold,
-        includeAuthorNodes: false,
+        includeAuthorNodes,
         computeLayout: true,
       });
 
@@ -119,7 +123,7 @@ export function useCorpusData() {
       const graphResult = await window.electron.corpus.getGraph({
         includeSimilarityEdges: true,
         similarityThreshold: graphSimilarityThreshold,
-        includeAuthorNodes: false,
+        includeAuthorNodes,
         computeLayout: true,
       });
 
@@ -255,6 +259,8 @@ export function useCorpusData() {
     setNumTopics,
     graphSimilarityThreshold,
     setGraphSimilarityThreshold,
+    includeAuthorNodes,
+    setIncludeAuthorNodes,
     regeneratingGraph,
     filters,
     setFilters,

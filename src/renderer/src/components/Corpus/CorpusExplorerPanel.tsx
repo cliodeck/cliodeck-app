@@ -236,6 +236,8 @@ export const CorpusExplorerPanel: React.FC = () => {
           setSelectedNode={data.setSelectedNode}
           graphSimilarityThreshold={data.graphSimilarityThreshold}
           setGraphSimilarityThreshold={data.setGraphSimilarityThreshold}
+          includeAuthorNodes={data.includeAuthorNodes}
+          setIncludeAuthorNodes={data.setIncludeAuthorNodes}
           regeneratingGraph={data.regeneratingGraph}
           onRegenerateGraph={() => data.regenerateGraph(t)}
           onExportGEXF={() => data.fullGraphData && exportGraphAsGEXF(data.fullGraphData)}

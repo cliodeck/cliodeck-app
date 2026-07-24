@@ -14,6 +14,8 @@ interface Props {
   setSelectedNode: (n: GraphNode | null) => void;
   graphSimilarityThreshold: number;
   setGraphSimilarityThreshold: (v: number) => void;
+  includeAuthorNodes: boolean;
+  setIncludeAuthorNodes: (v: boolean) => void;
   regeneratingGraph: boolean;
   onRegenerateGraph: () => void;
   onExportGEXF: () => void;
@@ -55,6 +57,8 @@ export const CorpusGraphSection: React.FC<Props> = ({
   setSelectedNode,
   graphSimilarityThreshold,
   setGraphSimilarityThreshold,
+  includeAuthorNodes,
+  setIncludeAuthorNodes,
   regeneratingGraph,
   onRegenerateGraph,
   onExportGEXF,
@@ -87,6 +91,14 @@ export const CorpusGraphSection: React.FC<Props> = ({
             style={{ width: '100px' }}
           />
           <span style={{ minWidth: '40px' }}>{graphSimilarityThreshold.toFixed(2)}</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9em' }}>
+          <input
+            type="checkbox"
+            checked={includeAuthorNodes}
+            onChange={(e) => setIncludeAuthorNodes(e.target.checked)}
+          />
+          {t('corpus.includeAuthorNodes')}
         </label>
         <button
           onClick={onRegenerateGraph}

@@ -720,6 +720,7 @@
     "showDocuments": "Voir {{count}} documents",
     "knowledgeGraph": "Graphe de connaissances",
     "similarityThreshold": "Seuil de similarité:",
+    "includeAuthorNodes": "Nœuds auteurs",
     "regenerateGraph": "Regénérer le graphe",
     "regenerating": "Génération...",
     "citations": "Citations",
