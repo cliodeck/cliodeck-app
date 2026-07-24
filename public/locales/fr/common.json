@@ -478,6 +478,18 @@
     "usedSpace": "Espace utilisé",
     "location": "Emplacement"
   },
+  "embeddedEmbedding": {
+    "title": "Embeddings (recherche sémantique)",
+    "providerLabel": "Provider d'embeddings",
+    "providerHelp": "Moteur qui vectorise vos documents pour la recherche RAG",
+    "providerAuto": "Auto — Ollama d'abord, repli sur le modèle embarqué",
+    "providerOllama": "Ollama (modèle choisi dans la section LLM)",
+    "providerEmbedded": "Modèle embarqué (hors ligne, aucun serveur requis)",
+    "providerSaveError": "Impossible d'enregistrer le provider d'embeddings",
+    "reindexWarning": "⚠️ Changer de provider ou de modèle d'embeddings rend l'index vectoriel existant inutilisable : il faudra ré-indexer vos PDFs (Réglages → Actions).",
+    "modelsLabel": "Modèle d'embeddings embarqué",
+    "modelsHelp": "À télécharger une fois pour un RAG entièrement hors ligne"
+  },
   "zotero": {
     "title": "Configuration Zotero",
     "mode": "Mode de connexion",
