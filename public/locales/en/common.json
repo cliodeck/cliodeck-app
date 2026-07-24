@@ -708,6 +708,7 @@
     "showDocuments": "Show {{count}} documents",
     "knowledgeGraph": "Knowledge Graph",
     "similarityThreshold": "Similarity threshold:",
+    "includeAuthorNodes": "Author nodes",
     "regenerateGraph": "Regenerate graph",
     "regenerating": "Generating...",
     "citations": "Citations",

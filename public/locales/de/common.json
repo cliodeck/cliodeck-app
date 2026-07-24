@@ -708,6 +708,7 @@
     "showDocuments": "{{count}} Dokumente anzeigen",
     "knowledgeGraph": "Wissensgraph",
     "similarityThreshold": "Ähnlichkeitsschwelle:",
+    "includeAuthorNodes": "Autoren-Knoten",
     "regenerateGraph": "Graph neu generieren",
     "regenerating": "Wird generiert...",
     "citations": "Zitate",
