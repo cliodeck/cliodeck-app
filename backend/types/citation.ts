@@ -45,6 +45,9 @@ export function createCitation(data: Omit<Citation, 'displayString' | 'details' 
   return {
     ...data,
     get displayString() {
+      // Œuvre anonyme / sans author ni editor : le titre est le seul
+      // libellé disponible (#32).
+      if (!this.author) return this.title;
       return `${this.author} (${this.year})`;
     },
     get details() {

@@ -155,10 +155,7 @@ describe('BibTeXParser', () => {
       expect(citations[0].displayString).toBe('John Smith (2023)');
     });
 
-    // SKIP: current impl requires author (BibTeXParser.ts:384 rejects entries w/o author)
-    // and displayString getter unconditionally uses author. Test describes a non-feature.
-    // Follow-up: decide whether to implement title fallback in createCitation.displayString.
-    it.skip('should fall back to title if no author', () => {
+    it('should fall back to title if no author', () => {
       const bibtex = `
 @article{test2023,
   title = {Anonymous Work},
@@ -168,7 +165,51 @@ describe('BibTeXParser', () => {
 
       const citations = parser.parse(bibtex);
 
+      expect(citations).toHaveLength(1);
       expect(citations[0].displayString).toBe('Anonymous Work');
+    });
+
+    // Régression #32 : un volume dirigé (editor sans author) était rejeté
+    // silencieusement.
+    it('falls back to editor when author is missing', () => {
+      const bibtex = `
+@book{dirige2020,
+  editor = {Marc Bloch and Lucien Febvre},
+  title = {Mélanges},
+  year = {2020}
+}
+      `;
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations).toHaveLength(1);
+      expect(citations[0].author).toBe('Marc Bloch and Lucien Febvre');
+      expect(citations[0].displayString).toBe('Marc Bloch and Lucien Febvre (2020)');
+    });
+
+    it('tracks rejected entries (missing title) in lastRejected', () => {
+      const bibtex = `
+@misc{sansTitre2021,
+  author = {Quelqu'un},
+  year = {2021}
+}
+@article{ok2022,
+  author = {Une Autrice},
+  title = {Un titre},
+  year = {2022}
+}
+      `;
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations).toHaveLength(1);
+      expect(parser.lastRejected).toEqual([
+        { key: 'sansTitre2021', reason: 'missing-title' },
+      ]);
+
+      // Réinitialisé au parse suivant.
+      parser.parse('@article{a, author = {X}, title = {T}, year = {2000}}');
+      expect(parser.lastRejected).toHaveLength(0);
     });
 
     it('carries the zoterokey field into citation.zoteroKey', () => {
