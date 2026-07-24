@@ -630,6 +630,23 @@ export class WordExportService {
           `${options.metadata?.title || 'output'}.docx`
         );
 
+      // Manuscrit assemblé côté main, AVANT le branchement pandoc/natif :
+      // le renderer envoie content='' pour les livres (le contenu passe par
+      // options.manuscript), donc assembler seulement sur le chemin natif
+      // faisait produire au chemin pandoc un .docx vide (#19). Même
+      // stratégie que pdf-export : assemblage inconditionnel d'abord.
+      if (options.manuscript?.chapters?.length) {
+        const assembled = await assembleManuscript({
+          projectPath: options.projectPath,
+          chapters: options.manuscript.chapters,
+          settings: normalizeBookSettings(options.bookSettings),
+          liveOverrides: options.manuscript.liveOverrides,
+          scope: options.manuscript.scope,
+        });
+        for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
+        options = { ...options, content: assembled.markdown };
+      }
+
       // Check if we should use pandoc (when bibliography is present)
       const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
       const hasPandoc = await this.checkPandoc();
@@ -659,21 +676,9 @@ export class WordExportService {
       // Run CitationEngine pipeline if requested, transforming [@key]
       // clusters into {{FN:N}} placeholders that the inline parser turns
       // into FootnoteReferenceRuns.
+      // L'assemblage du manuscrit a déjà eu lieu plus haut (avant le
+      // branchement pandoc) : options.content est le flux complet.
       let sourceMarkdown = options.content;
-      // Manuscrit assemblé côté main : le renderer n'a plus à concaténer
-      // (il envoyait jusqu'ici le tampon de l'éditeur, donc le seul
-      // chapitre ouvert).
-      if (options.manuscript?.chapters?.length) {
-        const assembled = await assembleManuscript({
-          projectPath: options.projectPath,
-          chapters: options.manuscript.chapters,
-          settings: normalizeBookSettings(options.bookSettings),
-          liveOverrides: options.manuscript.liveOverrides,
-          scope: options.manuscript.scope,
-        });
-        for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
-        sourceMarkdown = assembled.markdown;
-      }
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       if (useEnginePipeline) {
