@@ -75,15 +75,24 @@ class MCPClientsService {
   private listeners = new Set<(e: MCPClientEvent) => void>();
   private auditLogStream: WriteStream | null = null;
 
-  private writeAuditLog(e: MCPClientEvent): void {
-    if (!this.auditLogStream) return;
+  /**
+   * Écrit dans le flux passé en paramètre, jamais dans le champ vivant du
+   * singleton : un callTool en vol sur l'ANCIEN manager peut se résoudre
+   * après la bascule de projet, et lire `this.auditLogStream` à ce moment
+   * enverrait son entrée dans le mcp-access.jsonl du NOUVEAU projet (#39).
+   * Chaque manager est donc lié par closure au flux ouvert pour lui ; un
+   * événement tardif sur un flux déjà fermé est perdu avec un warning
+   * (intégrité d'attribution > complétude, pour un journal d'audit).
+   */
+  private writeAuditLog(stream: WriteStream | null, e: MCPClientEvent): void {
+    if (!stream) return;
     try {
       // Reuse the central redaction helper so the file written by this
       // service stays in the same shape as the one written by the MCP
       // server logger (same key filtering, same env masking) — one audit
       // file, one contract.
       const redacted = redactForAudit(e);
-      this.auditLogStream.write(JSON.stringify(redacted) + '\n');
+      stream.write(JSON.stringify(redacted) + '\n');
     } catch (err) {
       console.warn('[mcp-clients] failed to write audit log entry:', err);
     }
@@ -117,10 +126,13 @@ class MCPClientsService {
       this.auditLogStream = null;
     }
 
+    // Flux capturé par closure : ce manager n'écrira jamais dans le flux
+    // d'un autre projet, même si un événement arrive après la bascule.
+    const auditStreamForThisManager = this.auditLogStream;
     this.manager = new MCPClientManager({
       factory: realMCPClientFactory,
       onEvent: (e) => {
-        this.writeAuditLog(e);
+        this.writeAuditLog(auditStreamForThisManager, e);
         this.listeners.forEach((l) => {
           try {
             l(e);

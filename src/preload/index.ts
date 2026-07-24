@@ -185,6 +185,8 @@ const api = {
       proposed?: string;
       final?: string;
       rejectionNote?: string;
+      filePath?: string;
+      projectPath?: string;
     }) => ipcRenderer.invoke('proposals:adjudication', event),
   },
 

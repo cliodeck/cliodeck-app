@@ -335,9 +335,18 @@ export const CodeMirrorEditor: React.FC = () => {
     };
 
     // Contrat propositionnel (Phase 4b) : les adjudications partent vers le
-    // main (routage journaux) via l'accesseur défensif.
+    // main (routage journaux) via l'accesseur défensif. Contexte capturé à
+    // la création de la vue : l'événement `expired` émis par view.destroy()
+    // part APRÈS que les stores portent le nouveau chapitre/projet — le
+    // lire à ce moment attribuait l'expiration au mauvais document (#31).
+    const ownProjectPath =
+      useProjectStore.getState().currentProject?.path ?? undefined;
     const proposalsInstance = proposals({
-      onEvent: recordAdjudication,
+      onEvent: (e) =>
+        recordAdjudication(e, {
+          filePath: ownFilePath ?? undefined,
+          projectPath: ownProjectPath,
+        }),
       labels: {
         accept: t('editor.proposalAccept'),
         reject: t('editor.proposalReject'),
