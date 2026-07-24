@@ -674,7 +674,15 @@ export function setupFusionHandlers(): void {
               onProgress: (p) => {
                 try {
                   if (!event.sender.isDestroyed()) {
-                    event.sender.send('fusion:vault:progress', p);
+                    // Le job est scopé par `root` (capturé en tête de
+                    // handler) mais l'événement ne l'était pas : des
+                    // Settings rouverts sur un AUTRE projet affichaient
+                    // les chiffres de ce job (#35). Le renderer filtre
+                    // sur projectRoot.
+                    event.sender.send('fusion:vault:progress', {
+                      ...p,
+                      projectRoot: root,
+                    });
                   }
                 } catch {
                   // Renderer gone — continue indexing anyway.

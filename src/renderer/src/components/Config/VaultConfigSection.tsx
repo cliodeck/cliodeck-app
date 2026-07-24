@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, Link2Off, Play } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { useProjectStore } from '../../stores/projectStore';
 
 interface VaultStatus {
   indexed: boolean;
@@ -32,7 +33,12 @@ interface VaultApi {
     error?: string;
   }>;
   onProgress(
-    cb: (p: { stage: string; processed: number; total: number }) => void
+    cb: (p: {
+      stage: string;
+      processed: number;
+      total: number;
+      projectRoot?: string;
+    }) => void
   ): () => void;
 }
 
@@ -87,7 +93,15 @@ export const VaultConfigSection: React.FC = () => {
   useEffect(() => {
     void refresh();
     const api = vaultApi();
-    const unsub = api?.onProgress((p) => setProgress(p));
+    const unsub = api?.onProgress((p) => {
+      // Un job d'indexation lancé sur un AUTRE projet continue d'émettre
+      // après une bascule : sans ce filtre, ses chiffres s'affichaient ici
+      // (#35). Absence de projectRoot = main antérieur au scoping, on
+      // accepte.
+      const currentRoot = useProjectStore.getState().currentProject?.path;
+      if (p.projectRoot && currentRoot && p.projectRoot !== currentRoot) return;
+      setProgress(p);
+    });
     return () => {
       unsub?.();
     };
