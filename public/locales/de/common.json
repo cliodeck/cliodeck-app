@@ -1661,7 +1661,8 @@
     "untitledHeading": "(ohne Titel)",
     "renumberNoChange": "Die Fußnoten sind bereits der Reihe nach nummeriert.",
     "renumberDone": "Fußnoten in {{count}} Kapitel(n) neu nummeriert.",
-    "renumberError": "Neunummerierung fehlgeschlagen: Das Manuskript ist unverändert."
+    "renumberError": "Neunummerierung fehlgeschlagen: Das Manuskript ist unverändert.",
+    "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal."
   },
   "citations": {
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
