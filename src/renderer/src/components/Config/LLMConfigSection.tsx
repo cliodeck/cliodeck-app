@@ -373,41 +373,10 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             </div>
           </div>
 
-          {/* Embedding Strategy */}
-          <div className="config-field">
-            <label className="config-label">
-              {t('llm.embeddingStrategy')}
-              <span className="config-help">
-                {t('llm.embeddingStrategyHelp')}
-              </span>
-            </label>
-            <select
-              value={config.embeddingStrategy || 'nomic-fallback'}
-              onChange={(e) => handleFieldChange('embeddingStrategy', e.target.value as 'nomic-fallback' | 'mxbai-only' | 'custom')}
-              className="config-input"
-            >
-              <option value="nomic-fallback">
-                {t('llm.embeddingStrategyOptions.nomicFallback')}
-              </option>
-              <option value="mxbai-only">
-                {t('llm.embeddingStrategyOptions.mxbaiOnly')}
-              </option>
-              <option value="custom">
-                {t('llm.embeddingStrategyOptions.custom')}
-              </option>
-            </select>
-            <div className="config-description">
-              <small>
-                <strong>{t('llm.embeddingStrategyRecommended')}</strong>
-                <br />
-                • <strong>nomic-fallback</strong> : {t('llm.embeddingStrategyDescriptions.nomicFallback')}
-                <br />
-                • <strong>mxbai-only</strong> : {t('llm.embeddingStrategyDescriptions.mxbaiOnly')}
-                <br />
-                • <strong>custom</strong> : {t('llm.embeddingStrategyDescriptions.custom')}
-              </small>
-            </div>
-          </div>
+          {/* Le sélecteur « Embedding strategy » a été retiré (#17) : il
+              écrivait un champ (embeddingStrategy) que plus aucun service
+              ne lisait — la sélection réelle du provider d'embeddings passe
+              par embeddingProvider (cliodeck-config-adapter). */}
         </div>
       </div>
     </CollapsibleSection>
