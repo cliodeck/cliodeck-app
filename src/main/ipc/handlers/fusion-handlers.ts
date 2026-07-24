@@ -623,12 +623,9 @@ export function setupFusionHandlers(): void {
       const cfg = await readOrInitWorkspaceConfig(root);
       delete cfg.vault;
       await writeWorkspaceConfig(root, cfg);
-      const dbPath = obsidianStorePath(root);
-      try {
-        await fs.unlink(dbPath);
-      } catch {
-        // db already gone — fine.
-      }
+      // brain.db est partagé (PDF, Tropy, journal) : on ne supprime que les
+      // tables obsidian_*, jamais le fichier lui-même.
+      ObsidianVaultStore.purgeObsidianData(obsidianStorePath(root));
       return successResponse({});
     } catch (e) {
       return errorResponse(e as Error);
