@@ -92,6 +92,19 @@ interface WordExportProgress {
  * chapitre. Ce qui précède le premier titre (liminaires éventuels) forme
  * un bloc à part, pour ne rien perdre.
  */
+/**
+ * Scalaire YAML entre guillemets, sûr pour le frontmatter pandoc :
+ * antislashs et guillemets échappés, retours à la ligne aplatis en espace
+ * (un champ de métadonnée est mono-ligne ; un `\n` brut permettrait
+ * d'injecter des clés arbitraires dans le frontmatter).
+ */
+export function yamlQuote(value: string): string {
+  return `"${value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, ' ')}"`;
+}
+
 export function splitIntoChapters(markdown: string): string[] {
   const starts = parseOutline(markdown)
     .filter((h) => h.level === 1)
@@ -484,16 +497,19 @@ export class WordExportService {
       // Write content to temp file
       const inputPath = join(tempDir, 'input.md');
 
-      // Build YAML frontmatter for metadata
+      // Build YAML frontmatter for metadata. Les valeurs passent par
+      // yamlQuote : un guillemet dans un titre cassait le frontmatter, et
+      // un retour à la ligne permettait d'y injecter des clés arbitraires
+      // (seul abstract était déjà sûr, en scalaire bloc).
       let yamlFrontmatter = '---\n';
       if (options.metadata?.title) {
-        yamlFrontmatter += `title: "${options.metadata.title}"\n`;
+        yamlFrontmatter += `title: ${yamlQuote(options.metadata.title)}\n`;
       }
       if (options.metadata?.author) {
-        yamlFrontmatter += `author: "${options.metadata.author}"\n`;
+        yamlFrontmatter += `author: ${yamlQuote(options.metadata.author)}\n`;
       }
       if (options.metadata?.date) {
-        yamlFrontmatter += `date: "${options.metadata.date}"\n`;
+        yamlFrontmatter += `date: ${yamlQuote(options.metadata.date)}\n`;
       }
       if (options.metadata?.abstract) {
         yamlFrontmatter += `abstract: |\n  ${options.metadata.abstract.replace(/\n/g, '\n  ')}\n`;
