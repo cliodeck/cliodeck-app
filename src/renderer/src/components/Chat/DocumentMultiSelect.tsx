@@ -45,11 +45,17 @@ export const DocumentMultiSelect: React.FC<Props> = ({
     }
   }, [isOpen]);
 
-  const toggleDocument = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter((i) => i !== id));
+  // Une ligne = une entrée bibliographique, qui peut couvrir plusieurs
+  // fichiers PDF (doc.ids, #3) : la bascule ajoute/retire le groupe
+  // entier pour que le filtre de recherche voie chacun des fichiers.
+  const isDocSelected = (doc: AvailableDocument) =>
+    doc.ids.every((id) => selectedIds.includes(id));
+
+  const toggleDocument = (doc: AvailableDocument) => {
+    if (isDocSelected(doc)) {
+      onChange(selectedIds.filter((i) => !doc.ids.includes(i)));
     } else {
-      onChange([...selectedIds, id]);
+      onChange([...new Set([...selectedIds, ...doc.ids])]);
     }
   };
 
@@ -58,7 +64,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
     onChange([]);
   };
 
-  const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
+  const selectedDocs = documents.filter(isDocSelected);
 
   // Filter documents by search term
   const filteredDocuments = documents.filter((doc) => {
@@ -99,9 +105,9 @@ export const DocumentMultiSelect: React.FC<Props> = ({
         <span className="selected-text">
           {selectedIds.length === 0
             ? placeholder
-            : selectedIds.length === 1
+            : selectedDocs.length === 1
               ? formatDocName(selectedDocs[0])
-              : `${selectedIds.length} document(s)`}
+              : `${selectedDocs.length || selectedIds.length} document(s)`}
         </span>
         {selectedIds.length > 0 && !disabled && (
           <button
@@ -168,18 +174,18 @@ export const DocumentMultiSelect: React.FC<Props> = ({
               filteredDocuments.map((doc) => (
                 <div
                   key={doc.id}
-                  className={`collection-option ${selectedIds.includes(doc.id) ? 'selected' : ''}`}
+                  className={`collection-option ${isDocSelected(doc) ? 'selected' : ''}`}
                   style={{ paddingLeft: '12px' }}
-                  onClick={() => toggleDocument(doc.id)}
+                  onClick={() => toggleDocument(doc)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      toggleDocument(doc.id);
+                      toggleDocument(doc);
                     }
                   }}
                   tabIndex={0}
                   role="option"
-                  aria-selected={selectedIds.includes(doc.id)}
+                  aria-selected={isDocSelected(doc)}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                     <span className="collection-name" style={{
@@ -201,7 +207,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
                       </span>
                     )}
                   </div>
-                  {selectedIds.includes(doc.id) && (
+                  {isDocSelected(doc) && (
                     <svg
                       className="check-icon"
                       width="14"
