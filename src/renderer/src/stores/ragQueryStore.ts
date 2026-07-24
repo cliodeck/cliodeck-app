@@ -78,7 +78,15 @@ export interface AvailableCollection {
 
 // Issue #16: Available document for filtering
 export interface AvailableDocument {
+  /** Représentant du groupe (premier fichier) — clé React stable. */
   id: string;
+  /**
+   * Tous les fichiers PDF de la même entrée bibliographique (#3) : une
+   * citation Zotero à plusieurs pièces jointes (PDF annoté + original)
+   * est UNE ligne de liste, mais la sélection doit filtrer la recherche
+   * sur chacun de ses fichiers.
+   */
+  ids: string[];
   title: string;
   author?: string;
   year?: string;
@@ -353,13 +361,33 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           const result = await window.electron.pdf.getAll();
 
           if (result.success && result.documents) {
-            // Map to AvailableDocument format
-            const documents: AvailableDocument[] = result.documents.map((doc: { id: string; title?: string; author?: string; year?: string }) => ({
-              id: doc.id,
-              title: doc.title || 'Untitled',
-              author: doc.author,
-              year: doc.year,
-            }));
+            // Regroupement par entrée bibliographique (bibtexKey) : une
+            // citation à plusieurs pièces jointes donnait autant de lignes
+            // au même titre (#3). Sans clé (PDF importé à la main), chaque
+            // fichier reste sa propre entrée.
+            const groups = new Map<string, AvailableDocument>();
+            for (const doc of result.documents as Array<{
+              id: string;
+              title?: string;
+              author?: string;
+              year?: string;
+              bibtexKey?: string;
+            }>) {
+              const key = doc.bibtexKey || doc.id;
+              const existing = groups.get(key);
+              if (existing) {
+                existing.ids.push(doc.id);
+              } else {
+                groups.set(key, {
+                  id: doc.id,
+                  ids: [doc.id],
+                  title: doc.title || 'Untitled',
+                  author: doc.author,
+                  year: doc.year,
+                });
+              }
+            }
+            const documents: AvailableDocument[] = [...groups.values()];
 
             // Sort by author, then title
             documents.sort((a, b) => {
