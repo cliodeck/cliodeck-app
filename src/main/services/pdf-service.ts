@@ -46,6 +46,14 @@ class PDFService {
   private currentProjectPath: string | null = null;
 
   /**
+   * Indexations en vol. `init()`/`close()` les attendent avant de fermer le
+   * store : l'indexeur garde sa propre référence SQLite et une bascule de
+   * projet en plein `await` d'extraction le laissait écrire sur un handle
+   * fermé (« database connection is not open »).
+   */
+  private inFlightIndexing = new Set<Promise<unknown>>();
+
+  /**
    * Typed provider registry (fusion 1.2e). pdf-service owns the
    * `ProviderRegistry` lifecycle for the active project: built from
    * the workspace LLM config in `init()`, rebuilt by
@@ -77,8 +85,10 @@ class PDFService {
       throw new Error('PDF Service requires a project path');
     }
 
-    // Fermer la base précédente si elle existe
+    // Fermer la base précédente si elle existe — après avoir laissé les
+    // indexations en vol se terminer (ou expirer).
     if (this.vectorStore) {
+      await this.drainInFlightIndexing();
       this.vectorStore.close();
     }
 
@@ -259,13 +269,47 @@ class PDFService {
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
     this.ensureInitialized();
-    return this.pdfIndexer!.indexPDF(
+    const job = this.pdfIndexer!.indexPDF(
       filePath,
       bibtexKey,
       onProgress,
       bibliographyMetadata,
       collectionKeys
     );
+    this.inFlightIndexing.add(job);
+    void job
+      .catch(() => undefined)
+      .finally(() => {
+        this.inFlightIndexing.delete(job);
+      });
+    return job;
+  }
+
+  /**
+   * Attend la fin des indexations en vol avant une fermeture de store.
+   * Attente bornée : une extraction bloquée ne doit pas geler la bascule
+   * de projet — au-delà du délai, on ferme quand même (l'indexation
+   * échouera avec une erreur visible côté renderer, pas un crash muet).
+   */
+  private async drainInFlightIndexing(timeoutMs = 30_000): Promise<void> {
+    if (this.inFlightIndexing.size === 0) return;
+    console.log(
+      `⏳ ${this.inFlightIndexing.size} indexation(s) PDF en vol — attente avant fermeture du vector store`
+    );
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+    const drained = Promise.allSettled([...this.inFlightIndexing]).then(
+      () => 'drained' as const
+    );
+    const outcome = await Promise.race([drained, timeout]);
+    if (timer) clearTimeout(timer);
+    if (outcome === 'timeout') {
+      console.warn(
+        `⚠️ Indexation(s) PDF toujours en vol après ${timeoutMs}ms — fermeture du store malgré tout`
+      );
+    }
   }
 
   /**
@@ -771,6 +815,7 @@ class PDFService {
   async close() {
     if (this.vectorStore) {
       console.log('🔒 Closing PDF Service vector store...');
+      await this.drainInFlightIndexing();
       this.vectorStore.close();
       this.vectorStore = null;
     }
