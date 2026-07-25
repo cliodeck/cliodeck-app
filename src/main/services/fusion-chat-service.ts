@@ -577,18 +577,25 @@ class FusionChatService {
               const t0 = Date.now();
               const chunks = hits.map((h, i) => ({
                 content: h.chunk.content,
-                // Clé de correspondance vers le hit d'origine — le
-                // compresseur filtre et réécrit le contenu, pas les
-                // métadonnées.
-                documentId: String(i),
+                // Le VRAI document d'origine : la dédup du compresseur est
+                // intra-document (les fenêtres de chunking qui se
+                // chevauchent), un même passage cité par deux documents est
+                // une corroboration à garder.
+                documentId:
+                  h.document.id ??
+                  (h.chunk as { documentId?: string }).documentId ??
+                  `hit-${i}`,
                 documentTitle: h.document.title || '',
                 pageNumber: (h.chunk as { pageNumber?: number }).pageNumber ?? 0,
                 similarity: h.similarity,
+                // Clé de correspondance vers le hit d'origine — opaque pour
+                // le compresseur, qui la transporte telle quelle.
+                key: String(i),
               }));
               const compressed = new ContextCompressor().compress(chunks, lastUser);
               compressionMs = Date.now() - t0;
               effectiveHits = compressed.chunks.map((c) => {
-                const original = hits[Number(c.documentId)];
+                const original = hits[Number(c.key)];
                 // Seul le contenu du chunk est réécrit ; le discriminant
                 // sourceType/document est préservé — le spread élargit
                 // l'union, d'où le cast.

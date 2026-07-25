@@ -211,6 +211,30 @@ describe('ContextCompressor', () => {
       const result = deduplicate([], 0.85);
       expect(result.length).toBe(0);
     });
+
+    // Dédup INTRA-document : un même passage cité par deux documents
+    // différents est une corroboration, pas un doublon.
+    it('keeps identical passages when they come from different documents', () => {
+      const passage = 'Le télégramme du 3 août 1914 annonce la mobilisation générale.';
+      const chunks = [
+        makeChunk(passage, { documentId: 'doc-archives' }),
+        makeChunk(passage, { documentId: 'doc-memoires' }),
+      ];
+
+      const result = deduplicate(chunks, 0.85);
+      expect(result.length).toBe(2);
+    });
+
+    it('still removes overlapping windows within the same document', () => {
+      const passage = 'Le télégramme du 3 août 1914 annonce la mobilisation générale.';
+      const chunks = [
+        makeChunk(passage, { documentId: 'doc-archives', pageNumber: 1 }),
+        makeChunk(passage, { documentId: 'doc-archives', pageNumber: 1 }),
+      ];
+
+      const result = deduplicate(chunks, 0.85);
+      expect(result.length).toBe(1);
+    });
   });
 
   describe('selectTopKChunks()', () => {
@@ -281,6 +305,60 @@ describe('ContextCompressor', () => {
     it('returns empty array for empty string', () => {
       const sentences = splitSentences('');
       expect(sentences.length).toBe(0);
+    });
+
+    // Régressions français : abréviations et majuscules accentuées.
+    it('does not split after French abbreviations (M., cf., p., vol.)', () => {
+      const sentences = splitSentences(
+        'Selon M. Clemenceau, la guerre continue. Cf. p. 12 du vol. 3.'
+      );
+      expect(sentences.length).toBe(2);
+      expect(sentences[0]).toBe('Selon M. Clemenceau, la guerre continue.');
+      expect(sentences[1]).toBe('Cf. p. 12 du vol. 3.');
+    });
+
+    it('splits before accented capitals (É, À…)', () => {
+      const sentences = splitSentences("Bataille perdue. Épuisée, l'armée recule.");
+      expect(sentences.length).toBe(2);
+      expect(sentences[1]).toBe("Épuisée, l'armée recule.");
+    });
+  });
+
+  describe('extractKeywords() — accents (régression)', () => {
+    const getKeywords = (query: string) => {
+      return (compressor as any)['extractKeywords'](query);
+    };
+
+    it('keeps accented French terms intact', () => {
+      const keywords = getKeywords(
+        "L'armée coloniale pendant la Révolution : décolonisation et mémoire"
+      );
+      expect(keywords).toContain('révolution');
+      expect(keywords).toContain('décolonisation');
+      expect(keywords).toContain('mémoire');
+      expect(keywords).not.toContain('volution');
+      expect(keywords).not.toContain('moire');
+    });
+  });
+
+  describe('compress() — clé de correspondance et zone 10-15k', () => {
+    it('transporte la clé opaque `key` jusqu’aux chunks compressés', () => {
+      const chunks = Array.from({ length: 6 }, (_, i) => ({
+        ...makeChunk(`Contenu unique numéro ${i}. ` + `mot${i} `.repeat(500), {
+          documentId: `doc-${i}`,
+        }),
+        key: `k-${i}`,
+      }));
+      const result = compressor.compress(chunks as any, 'contenu unique');
+      for (const c of result.chunks) {
+        expect((c as any).key).toMatch(/^k-\d$/);
+      }
+    });
+
+    it('applique la dédup légère dès 10k (ancienne zone morte)', () => {
+      const chunks = makeChunksOfSize(12000, 4);
+      const result = compressor.compress(chunks, 'test');
+      expect(result.stats.strategy).toBe('light-deduplication');
     });
   });
 });
