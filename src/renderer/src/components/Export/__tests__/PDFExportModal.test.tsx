@@ -14,8 +14,14 @@ vi.mock('../../../stores/projectStore', () => ({
     },
   }),
 }));
+// Le manuscrit de l'article est le fichier ouvert : l'export doit alors
+// prendre le texte VIVANT de l'éditeur, pas relire le disque.
 vi.mock('../../../stores/editorStore', () => ({
-  useEditorStore: () => ({ content: 'Some body [@smith2020]' }),
+  useEditorStore: () => ({
+    content: 'Some body [@smith2020]',
+    filePath: '/tmp/demo/document.md',
+    getLiveContent: () => 'Some body [@smith2020]',
+  }),
 }));
 
 import { PDFExportModal } from '../PDFExportModal';

@@ -4,6 +4,7 @@ import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
+import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -19,7 +20,7 @@ interface WordExportModalProps {
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
-  const { content, filePath, getLiveContent } = useEditorStore();
+  const { filePath, getLiveContent } = useEditorStore();
   const isBook = currentProject?.type === 'book' && (chapters ?? []).length > 0;
   // Livre : tout l'ouvrage, ou le chapitre courant seul (tirage de travail).
   const [bookScope, setBookScope] = useState<'book' | 'chapter'>('book');
@@ -136,18 +137,24 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setSuccess(false);
 
     try {
-      // For presentations, load slides.md instead of document.md
-      let exportContent = content;
-      if (currentProject.type === 'presentation') {
-        try {
-          const slidesPath = `${currentProject.path}/slides.md`;
-          exportContent = await window.electron.fs.readFile(slidesPath);
-        } catch (err) {
-          console.error('Failed to read slides.md:', err);
-          setError(t('export.word.slidesUnreadable'));
+      // Article et présentation : ne PAS prendre le tampon de l'éditeur tel
+      // quel — il contient le fichier ouvert, qui peut être `abstract.md` ou
+      // `context.md`. Le service résout le vrai manuscrit et privilégie le
+      // texte vivant quand c'est bien lui qui est ouvert.
+      let exportContent = '';
+      if (currentProject.type !== 'book') {
+        const resolved = await resolveManuscriptContent(
+          currentProject.path,
+          currentProject.type,
+          filePath,
+          getLiveContent
+        );
+        if (!resolved.ok) {
+          setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
           setIsExporting(false);
           return;
         }
+        exportContent = resolved.content;
       }
 
       // Livre : le manifeste part au main, qui assemble (ordre, isolation

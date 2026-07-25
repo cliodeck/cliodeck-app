@@ -75,32 +75,6 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
 
 // MARK: - Petites décisions pures
 
-const LATEX_ESCAPES: Record<string, string> = {
-  '\\': '\\textbackslash{}',
-  '&': '\\&',
-  '%': '\\%',
-  $: '\\$',
-  '#': '\\#',
-  _: '\\_',
-  '{': '\\{',
-  '}': '\\}',
-  '~': '\\textasciitilde{}',
-  '^': '\\textasciicircum{}',
-};
-
-/**
- * Échappe les caractères que LaTeX interpréterait dans une métadonnée.
- *
- * Passe UNIQUE, à dessein : la version d'origine enchaînait quatre `replace`,
- * si bien que les accolades produites par `\textbackslash{}` étaient
- * ré-échappées par la passe suivante — un titre contenant une barre oblique
- * inverse s'imprimait `\textbackslash\{\}` au lieu de `\`. Bug préexistant
- * révélé par ces tests (item 24).
- */
-export function escapeLatex(str: string): string {
-  return str.replace(/[\\&%$#_{}~^]/g, (ch) => LATEX_ESCAPES[ch] ?? ch);
-}
-
 /** Réglages d'ouvrage complétés par les défauts. */
 export function resolveBookSettings(settings?: BookSettings): BookSettings {
   return { ...DEFAULT_BOOK_SETTINGS, ...(settings ?? {}) };
@@ -281,23 +255,31 @@ function documentArgs(input: {
   return args;
 }
 
-/** Métadonnées passées à pandoc, échappées pour LaTeX. */
+/**
+ * Métadonnées passées à pandoc, EN CLAIR.
+ *
+ * Ne pas échapper ici : une valeur passée en `-M clef=valeur` est une
+ * MetaString, et pandoc l'échappe lui-même en écrivant le gabarit LaTeX.
+ * Échapper en amont produisait un double échappement — `Dupont & Fils`
+ * s'imprimait `Dupont \textbackslash& Fils` sur la page de titre, et le
+ * résumé devenait illisible dès la première esperluette.
+ */
 function metadataArgs(input: {
   metadata?: { title?: string; author?: string; date?: string };
   abstract?: string;
 }): string[] {
   const args: string[] = [];
   if (input.metadata?.title) {
-    args.push('-M', `title=${escapeLatex(input.metadata.title)}`);
+    args.push('-M', `title=${input.metadata.title}`);
   }
   if (input.metadata?.author) {
-    args.push('-M', `author=${escapeLatex(input.metadata.author)}`);
+    args.push('-M', `author=${input.metadata.author}`);
   }
   if (input.metadata?.date) {
     args.push('-M', `date=${input.metadata.date}`);
   }
   if (input.abstract) {
-    args.push('-M', `abstract=${escapeLatex(input.abstract)}`);
+    args.push('-M', `abstract=${input.abstract}`);
   }
   return args;
 }

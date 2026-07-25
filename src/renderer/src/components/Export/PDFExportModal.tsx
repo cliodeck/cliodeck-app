@@ -4,6 +4,7 @@ import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { currentRelativePath, useManuscriptStore } from '../../stores/manuscriptStore';
+import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -19,7 +20,7 @@ interface PDFExportModalProps {
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
-  const { content } = useEditorStore();
+  const { filePath, getLiveContent } = useEditorStore();
   const isBook = currentProject?.type === 'book';
   // Tirage de travail : l'auteur peut n'exporter que le chapitre ouvert
   // (arbitrage 9). Par défaut, le livre entier.
@@ -185,18 +186,24 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         };
       }
 
-      // For presentations, load slides.md instead of document.md
-      let exportContent = content;
-      if (currentProject.type === 'presentation') {
-        try {
-          const slidesPath = `${currentProject.path}/slides.md`;
-          exportContent = await window.electron.fs.readFile(slidesPath);
-        } catch (err) {
-          console.error('Failed to read slides.md:', err);
-          setError(t('export.pdf.slidesUnreadable'));
+      // Article et présentation : ne PAS prendre le tampon de l'éditeur tel
+      // quel — il contient le fichier ouvert, qui peut être `abstract.md` ou
+      // `context.md`. Le service résout le vrai manuscrit et privilégie le
+      // texte vivant quand c'est bien lui qui est ouvert.
+      let exportContent = '';
+      if (currentProject.type !== 'book') {
+        const resolved = await resolveManuscriptContent(
+          currentProject.path,
+          currentProject.type,
+          filePath,
+          getLiveContent
+        );
+        if (!resolved.ok) {
+          setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
           setIsExporting(false);
           return;
         }
+        exportContent = resolved.content;
       }
 
       // For presentations, load Beamer configuration if it exists
