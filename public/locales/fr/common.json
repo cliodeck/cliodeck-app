@@ -1715,5 +1715,20 @@
     "summary_other": "{{count}} occurrences dans {{chapters}} chapitres",
     "goToLine": "Aller à la ligne {{line}}",
     "truncated": "Trop d'occurrences dans ce chapitre : seules les premières sont affichées."
+  },
+  "drafts": {
+    "title": "Brouillons Brainstorm",
+    "empty": "Aucun brouillon en attente. Depuis le chat, « Mettre en brouillon » ajoute une réponse ici.",
+    "dragHint": "Glissez une carte dans l'éditeur pour l'insérer à l'endroit exact du dépôt (Cmd+Z pour annuler).",
+    "insert": "Insérer au curseur",
+    "insertTitle": "Insérer ce brouillon à la position du curseur (proposition adjudicable)",
+    "inserted": "Inséré ✓",
+    "discard": "Jeter",
+    "discardTitle": "Retirer ce brouillon de la file (le chat n'est pas modifié)",
+    "clearAll": "Vider la file",
+    "clearConfirm": "Jeter les {{count}} brouillon(s) en attente ?",
+    "enqueue": "Mettre en brouillon",
+    "enqueueTitle": "Ajouter cette réponse à la file de brouillons du mode Écriture, sans l'insérer",
+    "enqueued": "En brouillon ✓"
   }
 }

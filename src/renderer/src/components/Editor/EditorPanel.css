@@ -4,6 +4,25 @@
   height: 100%;
   width: 100%;
   background-color: var(--bg-app);
+  /* Ancre des panneaux flottants (similarités, brouillons #7). */
+  position: relative;
+}
+
+/* Pastille de compte sur un bouton de barre d'outils (brouillons #7). */
+.toolbar-btn__count {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--color-accent);
+  color: var(--bg-app);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
 }
 
 /* Toolbar */
