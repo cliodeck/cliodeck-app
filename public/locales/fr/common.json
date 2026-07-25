@@ -913,7 +913,12 @@
     "projectOverviewHelp": "En mode \"Vue d'ensemble du projet\", vous pouvez voir la timeline, les opérations IA et l'historique de chat agrégés pour toutes les sessions.",
     "sessionTimeline": "Timeline de la session",
     "fullProjectTimeline": "Timeline complète du projet",
-    "tooltipHelp": "Traçabilité complète de votre processus de recherche. Exportable pour annexes académiques."
+    "tooltipHelp": "Traçabilité complète de votre processus de recherche. Exportable pour annexes académiques.",
+    "purge": "Purger le journal",
+    "purgeTitle": "Supprimer tout l'historique de recherche de ce projet",
+    "purgeConfirm1": "Supprimer TOUT le journal de recherche de ce projet (sessions, événements, opérations IA, historique de chat) ?",
+    "purgeConfirm2": "Cette action est irréversible. Les rapports non exportés seront définitivement perdus. Confirmer la purge ?",
+    "purgeDone": "Journal purgé : {{count}} session(s) supprimée(s)."
   },
   "presentation": {
     "title": "Export Présentation reveal.js",

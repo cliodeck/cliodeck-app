@@ -16,6 +16,33 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Purge du journal (#16) — action destructive, teinte danger discrète. */
+.journal-purge-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.625rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.journal-purge-btn:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background-color: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+
+.journal-purge-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .journal-header h2 {
   font-size: 16px;
   font-weight: 600;

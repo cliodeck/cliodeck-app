@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Trash2 } from 'lucide-react';
 import { useJournalStore } from '../../stores/journalStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { SessionTimeline } from './SessionTimeline';
 import { AIOperationsTable } from './AIOperationsTable';
 import { ChatHistoryView } from './ChatHistoryView';
@@ -32,6 +34,7 @@ export const JournalPanel: React.FC = () => {
     setHideEmptySessions,
     setViewScope,
     loadAllProjectData,
+    purgeJournal,
   } = useJournalStore();
 
   const [viewMode, setViewMode] = useState<'sessions' | 'timeline' | 'ai-ops' | 'chat'>(
@@ -68,6 +71,21 @@ export const JournalPanel: React.FC = () => {
 
   const handleLearnMore = () => {
     window.dispatchEvent(new CustomEvent('show-methodology-modal', { detail: { feature: 'journal' } }));
+  };
+
+  // Purge du journal (#16) : destructif et irréversible — double
+  // confirmation, la seconde rappelant que les exports n'existent que si
+  // l'utilisateur les a faits.
+  const handlePurge = async () => {
+    const dialogs = useDialogStore.getState();
+    if (!(await dialogs.showConfirm(t('journal.purgeConfirm1')))) return;
+    if (!(await dialogs.showConfirm(t('journal.purgeConfirm2')))) return;
+    const result = await purgeJournal();
+    if (result.success) {
+      await dialogs.showAlert(
+        t('journal.purgeDone', { count: result.deletedSessions ?? 0 })
+      );
+    }
   };
 
   // Filter sessions based on hideEmptySessions option
@@ -109,6 +127,15 @@ export const JournalPanel: React.FC = () => {
             <span>{statistics.totalAIOperations} {t('journal.aiOperations')}</span>
           </div>
         )}
+        <button
+          className="journal-purge-btn"
+          onClick={() => void handlePurge()}
+          disabled={loading || sessions.length === 0}
+          title={t('journal.purgeTitle')}
+        >
+          <Trash2 size={14} strokeWidth={1.5} />
+          {t('journal.purge')}
+        </button>
       </div>
 
       {/* Error message */}

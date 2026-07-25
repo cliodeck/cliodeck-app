@@ -913,7 +913,12 @@
     "projectOverviewHelp": "Im Modus \"Projektübersicht\" können Sie die Zeitachse, KI-Operationen und den Chat-Verlauf für alle Sitzungen aggregiert sehen.",
     "sessionTimeline": "Sitzungs-Zeitachse",
     "fullProjectTimeline": "Vollständige Projekt-Zeitachse",
-    "tooltipHelp": "Vollständige Nachverfolgbarkeit Ihres Forschungsprozesses. Exportierbar für akademische Anhänge."
+    "tooltipHelp": "Vollständige Nachverfolgbarkeit Ihres Forschungsprozesses. Exportierbar für akademische Anhänge.",
+    "purge": "Journal leeren",
+    "purgeTitle": "Gesamten Forschungsverlauf dieses Projekts löschen",
+    "purgeConfirm1": "Das GESAMTE Forschungsjournal dieses Projekts löschen (Sitzungen, Ereignisse, KI-Operationen, Chat-Verlauf)?",
+    "purgeConfirm2": "Diese Aktion ist unwiderruflich. Nicht exportierte Berichte gehen dauerhaft verloren. Leeren bestätigen?",
+    "purgeDone": "Journal geleert: {{count}} Sitzung(en) gelöscht."
   },
   "presentation": {
     "title": "reveal.js Präsentationsexport",
