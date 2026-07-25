@@ -98,15 +98,43 @@ class ManuscriptIndexService {
    */
   configure(workspaceRoot: string | null): void {
     if (workspaceRoot === this.workspaceRoot) return;
-    this.store?.close();
-    this.store = null;
+    this.detachStore();
     this.workspaceRoot = workspaceRoot;
   }
 
   clear(): void {
-    this.store?.close();
-    this.store = null;
+    this.detachStore();
     this.workspaceRoot = null;
+  }
+
+  /**
+   * Détache le store courant et ne le ferme qu'une fois la passe en vol
+   * terminée.
+   *
+   * `runIndex` garde une référence locale au store : le fermer sous ses
+   * pieds faisait écrire dans une base close. C'est le défaut que #38 avait
+   * corrigé côté PDF (`drainInFlightIndexing`) et que ce service, écrit dans
+   * le même cycle, rejouait. Le champ est vidé tout de suite pour que le
+   * projet suivant ouvre bien un nouveau handle.
+   */
+  private detachStore(): void {
+    const previous = this.store;
+    const pending = this.running;
+    this.store = null;
+    if (!previous) return;
+    if (pending) {
+      void pending
+        .catch(() => undefined)
+        .then(() => {
+          try {
+            previous.close();
+          } catch (e) {
+            console.warn('[manuscript-index] close after drain failed:', e);
+          }
+        });
+      return;
+    }
+    previous.close();
   }
 
   private getStore(): ManuscriptStore | null {
@@ -305,21 +333,28 @@ class ManuscriptIndexService {
       }
 
       try {
-        store.upsertChapter(record);
-        store.deleteChapterChunks(id);
-        for (let i = 0; i < chunks.length; i++) {
-          store.addChunk(
-            {
-              id: `${id}-${chunks[i].chunkIndex}`,
-              chapterId: id,
-              chunkIndex: chunks[i].chunkIndex,
-              content: chunks[i].content,
-              sectionTitle: chunks[i].sectionTitle,
-              line: chunks[i].line,
-            },
-            vectors[i]
-          );
-        }
+        // Tout ou rien : l'empreinte du chapitre ne doit être committée que
+        // si TOUS ses chunks le sont. Sinon un échec en cours de boucle
+        // laissait un hash valide sans chunks, et la passe suivante sautait
+        // le chapitre comme « inchangé » — disparition définitive de
+        // l'index, silencieuse.
+        store.transaction(() => {
+          store.upsertChapter(record);
+          store.deleteChapterChunks(id);
+          for (let i = 0; i < chunks.length; i++) {
+            store.addChunk(
+              {
+                id: `${id}-${chunks[i].chunkIndex}`,
+                chapterId: id,
+                chunkIndex: chunks[i].chunkIndex,
+                content: chunks[i].content,
+                sectionTitle: chunks[i].sectionTitle,
+                line: chunks[i].line,
+              },
+              vectors[i]
+            );
+          }
+        });
         report.indexed += 1;
         report.chunks += chunks.length;
       } catch (e) {

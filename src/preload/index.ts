@@ -583,6 +583,20 @@ const api = {
     getAllChatMessages: () => ipcRenderer.invoke('history:get-all-chat-messages'),
   },
 
+  /**
+   * Corpus manuscrit — le texte de l'auteur, indexé comme quatrième corpus.
+   *
+   * Les deux handlers existaient côté main mais n'étaient liés nulle part
+   * ici : ils étaient donc injoignables depuis l'interface, ce qui rendait
+   * l'index impossible à consulter comme à reconstruire.
+   */
+  manuscript: {
+    /** Réindexe le manuscrit du projet courant (incrémental par empreinte). */
+    index: () => ipcRenderer.invoke('manuscript:index'),
+    /** État de l'index : nombre de chapitres et de chunks. */
+    stats: () => ipcRenderer.invoke('manuscript:stats'),
+  },
+
   // Modes
   mode: {
     getAll: () => ipcRenderer.invoke('mode:get-all'),

@@ -105,7 +105,25 @@ export class ManuscriptStore {
     this.db = new Database(cfg.dbPath);
     this.dimension = cfg.dimension ?? null;
     this.db.pragma('journal_mode = WAL');
+    // 5e writer de `brain.db`, au même titre que VectorStore,
+    // PrimarySourcesVectorStore, HistoryManager et ObsidianVaultStore : sans
+    // busy_timeout, une écriture concurrente (le journal de recherche écrit
+    // à la même sauvegarde) échoue immédiatement sur SQLITE_BUSY.
+    this.db.pragma('busy_timeout = 5000');
     this.initSchema();
+  }
+
+  /**
+   * Exécute `fn` dans une transaction SQLite.
+   *
+   * Indispensable à l'indexation : l'empreinte du chapitre et ses chunks
+   * doivent être écrits tout ou rien. Écrire l'empreinte d'abord faisait
+   * qu'un échec en cours de route laissait un hash committé sans chunks —
+   * la passe suivante voyait « inchangé » et sautait le chapitre, qui
+   * disparaissait définitivement de l'index.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   private initSchema(): void {
