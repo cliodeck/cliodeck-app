@@ -2,7 +2,7 @@
  * Badge « source signalée » (#8) — helpers partagés entre la liste des
  * sources (AssistantChat) et le détail (SourcePopover).
  */
-import type { SecurityEvent } from '../../../../backend/security/events';
+import type { SecurityEvent } from '@backend/security/events';
 
 type Severity = 'low' | 'medium' | 'high';
 
@@ -39,4 +39,6 @@ export function eventDetail(e: SecurityEvent): string {
     case 'unusual_encoding':
       return e.detail;
   }
+  // Union exhaustive — inatteignable, mais noImplicitReturns exige une fin.
+  return '';
 }
