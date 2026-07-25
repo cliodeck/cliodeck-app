@@ -2,7 +2,10 @@
  * ContextCompressor - Intelligent chunk compression for RAG
  *
  * Implements multi-strategy compression:
- * 1. Semantic deduplication (remove similar chunks)
+ * 1. Near-duplicate removal — Jaccard LEXICAL sur les mots (pas
+ *    d'embeddings), limité au MÊME document : les fenêtres de chunking
+ *    qui se chevauchent sont des doublons, un même passage cité par deux
+ *    documents différents est une corroboration qu'on garde.
  * 2. Relevance-based sentence extraction (keep only relevant sentences)
  * 3. Hierarchical compression (adapt strategy based on size)
  * 4. Keyword preservation (always keep sentences with query terms)
@@ -10,11 +13,16 @@
 
 interface Chunk {
   content: string;
+  /** Identifiant du document d'origine — porte la dédup intra-document. */
   documentId: string;
   documentTitle: string;
   pageNumber: number;
   similarity: number;
-  embedding?: number[];
+  /**
+   * Clé de correspondance opaque pour l'appelant (ex. index du hit
+   * d'origine) — transportée telle quelle, jamais interprétée ici.
+   */
+  key?: string;
 }
 
 interface CompressedResult {
@@ -71,10 +79,12 @@ export class ContextCompressor {
     let processed = [...chunks];
     let strategy = 'none';
 
-    // Level 1: Light compression (15k-25k chars) - Semantic deduplication only
-    if (originalSize > 15000 && originalSize <= 25000) {
+    // Level 1: Light compression (10k-25k chars) - deduplication only.
+    // (Couvre l'ancienne zone morte 10-15k, où aucun niveau ne
+    // s'appliquait alors que les stats annonçaient une stratégie.)
+    if (originalSize <= 25000) {
       strategy = 'light-deduplication';
-      console.log('📊 [COMPRESSION] Applying Level 1: Light semantic deduplication (threshold: 0.88)');
+      console.log('📊 [COMPRESSION] Applying Level 1: Light near-duplicate removal (threshold: 0.88)');
       processed = this.deduplicateSemanticChunks(processed, 0.88);
     }
     // Level 2: Medium compression (25k-35k chars) - Dedup + sentence extraction
@@ -157,9 +167,12 @@ export class ContextCompressor {
       'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'what', 'which',
     ]);
 
+    // \p{L}/\p{N} et non \w : \w est ASCII et mutilait les termes
+    // accentués (« mémoire » → « moire », « été » disparaissait) — fatal
+    // pour la préservation par mots-clés dans une app francophone.
     const words = query
       .toLowerCase()
-      .replace(/[^\w\s'-]/g, ' ')
+      .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
       .split(/\s+/)
       .filter(word => word.length > 2 && !stopwords.has(word));
 
@@ -170,7 +183,11 @@ export class ContextCompressor {
   }
 
   /**
-   * Semantic deduplication - Remove chunks that are too similar to each other
+   * Near-duplicate removal (Jaccard lexical), INTRA-DOCUMENT uniquement.
+   * Les fenêtres de chunking qui se chevauchent produisent des doublons au
+   * sein d'un même document ; un même passage cité par deux documents
+   * différents est une corroboration — on la garde (et elle reste visible
+   * dans le panneau de sources, aligné sur le prompt).
    */
   private deduplicateSemanticChunks(chunks: Chunk[], threshold: number): Chunk[] {
     if (chunks.length <= 1) return chunks;
@@ -179,8 +196,9 @@ export class ContextCompressor {
     const removed: string[] = [];
 
     for (const chunk of chunks) {
-      // Check if this chunk is too similar to any already kept chunk
+      // Trop proche d'un chunk déjà retenu DU MÊME document ?
       const isSimilar = kept.some(keptChunk => {
+        if (keptChunk.documentId !== chunk.documentId) return false;
         const similarity = this.calculateTextSimilarity(chunk.content, keptChunk.content);
         return similarity > threshold;
       });
@@ -292,15 +310,28 @@ export class ContextCompressor {
   }
 
   /**
-   * Split text into sentences (handles common abbreviations)
+   * Split text into sentences (handles common abbreviations).
+   *
+   * Deux pièges des textes historiques français, vérifiés empiriquement :
+   * les abréviations (« M. Clemenceau » était coupé en deux, et le
+   * fragment « Selon M. » — court donc pénalisé — était jeté, détachant
+   * les noms de leurs attributions) et les majuscules accentuées
+   * (« . Épuisée » ne coupait pas car [A-Z] ignore É/À).
    */
   private splitIntoSentences(text: string): string[] {
-    // Simple sentence splitter (handles . ! ?)
-    // Preserves common abbreviations like "Dr." "M." "etc."
-    return text
-      .replace(/([.!?])\s+(?=[A-Z])/g, '$1|')
+    // Protéger les abréviations courantes (adressage, historiographie)
+    // avant le découpage : leur point n'est pas une fin de phrase.
+    const ABBREVIATIONS =
+      /\b(M|MM|Mme|Mlle|Dr|Pr|St|Ste|etc|cf|p|pp|vol|no|art|chap|fig|éd|ibid|op|loc|trad|ms|mss|fol|t)\.\s+/g;
+    const SENTINEL = '\u0000';
+    const protectedText = text.replace(ABBREVIATIONS, (m) =>
+      m.replace(/\.\s+$/, `.${SENTINEL}`)
+    );
+
+    return protectedText
+      .replace(/([.!?])\s+(?=\p{Lu})/gu, '$1|')
       .split('|')
-      .map(s => s.trim())
+      .map(s => s.split(SENTINEL).join(' ').trim())
       .filter(s => s.length > 0);
   }
 
