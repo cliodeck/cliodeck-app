@@ -86,7 +86,7 @@ export class ZoteroSyncResolver {
     modifiedCount: number;
     deletedCount: number;
   } {
-    let finalCitations = [...citations];
+    const finalCitations = [...citations];
     let addedCount = 0;
     let modifiedCount = 0;
     let deletedCount = 0;
@@ -131,7 +131,7 @@ export class ZoteroSyncResolver {
     addedCount: number;
     skippedCount: number;
   } {
-    let finalCitations = [...citations];
+    const finalCitations = [...citations];
     let addedCount = 0;
     let skippedCount = 0;
 
@@ -157,7 +157,7 @@ export class ZoteroSyncResolver {
     citations: Citation[],
     resolution: SyncResolution
   ): MergeResult {
-    let finalCitations = [...citations];
+    const finalCitations = [...citations];
     let addedCount = 0;
     let modifiedCount = 0;
     let deletedCount = 0;

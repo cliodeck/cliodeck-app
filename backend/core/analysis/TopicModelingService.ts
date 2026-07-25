@@ -658,7 +658,7 @@ export class TopicModelingService {
       });
 
       if (!response.ok) {
-        let errorText = await response.text();
+        const errorText = await response.text();
         let errorMessage = errorText;
         try {
           // Essayer de parser le JSON pour obtenir plus de détails
@@ -737,6 +737,7 @@ export class TopicModelingService {
   private async checkCriticalPackages(venvPython: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let resolved = false;
+      // eslint-disable-next-line prefer-const -- assigné une seule fois plus bas, mais après doResolve qui le capture
       let timeoutId: NodeJS.Timeout;
 
       const doResolve = (value: boolean) => {

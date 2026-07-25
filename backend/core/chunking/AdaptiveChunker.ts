@@ -78,7 +78,7 @@ export class AdaptiveChunker {
 
     let currentSection: Section | null = null;
     let currentContent = '';
-    let currentStart = 0;
+    const currentStart = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();

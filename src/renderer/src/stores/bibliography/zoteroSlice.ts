@@ -186,7 +186,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
 
       const errors: string[] = [];
       let downloaded = 0;
-      let skipped = 0;
+      const skipped = 0;
 
       // Update batch indexing state
       set({

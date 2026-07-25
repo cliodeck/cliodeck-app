@@ -211,7 +211,7 @@ export class TextometricsService {
    */
   private tokenize(text: string): string[] {
     // Supprimer les URLs et DOIs avant la tokenisation
-    let cleanedText = text
+    const cleanedText = text
       // Supprimer les URLs (http, https, ftp)
       .replace(/(?:https?|ftp):\/\/[^\s]+/gi, ' ')
       // Supprimer les DOIs (format doi:10.xxxx ou https://doi.org/10.xxxx)

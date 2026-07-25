@@ -13,7 +13,7 @@ import { logger } from '../utils/logger.js';
  */
 function normaliseToRevealFormat(raw: string): string {
   // Strip wrapping ```markdown … ``` if present
-  let text = raw.replace(/^\s*```\s*(?:markdown)?\s*\n/i, '').replace(/\n\s*```\s*$/i, '');
+  const text = raw.replace(/^\s*```\s*(?:markdown)?\s*\n/i, '').replace(/\n\s*```\s*$/i, '');
 
   // If the output already has multiple # headings separated by ---,
   // AND uses ** sparingly (not as primary headings), assume it's well-formatted.
