@@ -350,7 +350,6 @@
       "noProject": "No project is open.",
       "enterTitle": "Please enter a title.",
       "depsRequired": "Pandoc and XeLaTeX are required. Install them before continuing.",
-      "slidesUnreadable": "Could not read slides.md. Check that the file exists in the project.",
       "noChapterOpen": "No chapter is open to export.",
       "pdfFiles": "PDF",
       "allFiles": "All files"
@@ -374,7 +373,6 @@
       "unknownError": "The export failed for an unknown reason.",
       "noProject": "No project is open.",
       "enterTitle": "Please enter a title.",
-      "slidesUnreadable": "Could not read slides.md. Check that the file exists in the project.",
       "wordFiles": "Word document",
       "allFiles": "All files"
     },
@@ -394,7 +392,8 @@
       "wholeBook_one": "Whole book ({{count}} part)",
       "wholeBook_other": "Whole book ({{count}} parts)",
       "currentChapter": "This chapter only (working draft)"
-    }
+    },
+    "manuscriptUnreadable": "Could not read {{file}}. Check that the file exists in the project."
   },
   "rag": {
     "title": "RAG Configuration",
@@ -1194,7 +1193,15 @@
     "ocrRerun": "Run OCR on this source",
     "ocrOverwriteConfirm": "Re-run OCR? The existing transcription of this source will be replaced.",
     "ocrNoPhotos": "No image found for this source (files moved or missing).",
-    "ocrFailed": "OCR failed for this source."
+    "ocrFailed": "OCR failed for this source.",
+    "ocrSettings": "OCR Settings",
+    "ocrDescription": "Configure optical character recognition to extract text from archival photographs. Tesseract.js analyses the images and turns them into searchable text.",
+    "ocrLanguage": "Document language",
+    "languageHint": "Pick the main language of your archival documents — accuracy depends on it.",
+    "forceOCR": "Re-run OCR on every source (ignore existing transcriptions)",
+    "ocrWarning": "OCR can take several minutes on a large collection. Processing runs locally, on your own computer.",
+    "processingOCR": "Processing",
+    "runOCR": "Run OCR"
   },
   "modes": {
     "selector": {
@@ -1283,7 +1290,8 @@
       "indexed": "Indexed",
       "skipped": "skipped",
       "failed": "failed"
-    }
+    },
+    "unlinkConfirm": "Unlink this vault? Its local index will be deleted and will have to be rebuilt from scratch next time you link it. Your Obsidian notes themselves are left untouched."
   },
   "hints": {
     "title": "Persistent context",

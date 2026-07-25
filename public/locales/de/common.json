@@ -350,7 +350,6 @@
       "noProject": "Kein Projekt geöffnet.",
       "enterTitle": "Bitte geben Sie einen Titel ein.",
       "depsRequired": "Pandoc und XeLaTeX werden benötigt. Bitte installieren Sie sie zuerst.",
-      "slidesUnreadable": "slides.md konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
       "noChapterOpen": "Kein Kapitel zum Exportieren geöffnet.",
       "pdfFiles": "PDF",
       "allFiles": "Alle Dateien"
@@ -374,7 +373,6 @@
       "unknownError": "Der Export ist aus unbekanntem Grund fehlgeschlagen.",
       "noProject": "Kein Projekt geöffnet.",
       "enterTitle": "Bitte geben Sie einen Titel ein.",
-      "slidesUnreadable": "slides.md konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
       "wordFiles": "Word-Dokument",
       "allFiles": "Alle Dateien"
     },
@@ -394,7 +392,8 @@
       "wholeBook_one": "Ganzes Buch ({{count}} Teil)",
       "wholeBook_other": "Ganzes Buch ({{count}} Teile)",
       "currentChapter": "Nur dieses Kapitel (Arbeitsfassung)"
-    }
+    },
+    "manuscriptUnreadable": "{{file}} konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist."
   },
   "rag": {
     "title": "RAG-Konfiguration",
@@ -1194,7 +1193,15 @@
     "ocrRerun": "OCR für diese Quelle ausführen",
     "ocrOverwriteConfirm": "OCR erneut ausführen? Die vorhandene Transkription dieser Quelle wird ersetzt.",
     "ocrNoPhotos": "Kein Bild für diese Quelle gefunden (Dateien verschoben oder fehlend).",
-    "ocrFailed": "OCR für diese Quelle fehlgeschlagen."
+    "ocrFailed": "OCR für diese Quelle fehlgeschlagen.",
+    "ocrSettings": "OCR-Einstellungen",
+    "ocrDescription": "Konfigurieren Sie die optische Zeichenerkennung, um Text aus Archivfotografien zu gewinnen. Tesseract.js wertet die Bilder aus und wandelt sie in durchsuchbaren Text um.",
+    "ocrLanguage": "Sprache des Dokuments",
+    "languageHint": "Wählen Sie die Hauptsprache Ihrer Archivdokumente — davon hängt die Genauigkeit ab.",
+    "forceOCR": "OCR für alle Quellen erneut ausführen (vorhandene Transkriptionen ignorieren)",
+    "ocrWarning": "Bei einer umfangreichen Sammlung kann OCR mehrere Minuten dauern. Die Verarbeitung erfolgt lokal auf Ihrem Rechner.",
+    "processingOCR": "Verarbeitung",
+    "runOCR": "OCR starten"
   },
   "modes": {
     "selector": {
@@ -1283,7 +1290,8 @@
       "indexed": "Indiziert",
       "skipped": "übersprungen",
       "failed": "Fehler"
-    }
+    },
+    "unlinkConfirm": "Diesen Vault trennen? Sein lokaler Index wird gelöscht und muss beim nächsten Verknüpfen vollständig neu aufgebaut werden. Ihre Obsidian-Notizen selbst bleiben unberührt."
   },
   "hints": {
     "title": "Dauerhafter Kontext",

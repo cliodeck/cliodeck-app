@@ -350,7 +350,6 @@
       "noProject": "Aucun projet ouvert.",
       "enterTitle": "Veuillez saisir un titre.",
       "depsRequired": "Pandoc et XeLaTeX sont nécessaires. Installez-les avant de continuer.",
-      "slidesUnreadable": "Impossible de lire slides.md. Vérifiez que le fichier existe dans le projet.",
       "noChapterOpen": "Aucun chapitre ouvert à exporter.",
       "pdfFiles": "PDF",
       "allFiles": "Tous les fichiers"
@@ -374,7 +373,6 @@
       "unknownError": "L'export a échoué pour une raison inconnue.",
       "noProject": "Aucun projet ouvert.",
       "enterTitle": "Veuillez saisir un titre.",
-      "slidesUnreadable": "Impossible de lire slides.md. Vérifiez que le fichier existe dans le projet.",
       "wordFiles": "Document Word",
       "allFiles": "Tous les fichiers"
     },
@@ -394,7 +392,8 @@
       "wholeBook_one": "Tout le livre ({{count}} pièce)",
       "wholeBook_other": "Tout le livre ({{count}} pièces)",
       "currentChapter": "Ce chapitre seul (tirage de travail)"
-    }
+    },
+    "manuscriptUnreadable": "Impossible de lire {{file}}. Vérifiez que le fichier existe dans le projet."
   },
   "rag": {
     "title": "Configuration RAG",
@@ -1194,7 +1193,15 @@
     "ocrRerun": "Lancer l'OCR sur cette source",
     "ocrOverwriteConfirm": "Relancer l'OCR ? La transcription existante de cette source sera remplacée.",
     "ocrNoPhotos": "Aucune image trouvée pour cette source (fichiers déplacés ou manquants).",
-    "ocrFailed": "L'OCR a échoué pour cette source."
+    "ocrFailed": "L'OCR a échoué pour cette source.",
+    "ocrSettings": "Réglages de l'OCR",
+    "ocrDescription": "Configurez la reconnaissance optique de caractères pour extraire le texte des photographies d'archives. Tesseract.js analyse les images et les convertit en texte interrogeable.",
+    "ocrLanguage": "Langue du document",
+    "languageHint": "Choisissez la langue principale de vos documents d'archives : la précision en dépend.",
+    "forceOCR": "Relancer l'OCR sur toutes les sources (ignorer les transcriptions existantes)",
+    "ocrWarning": "L'OCR peut prendre plusieurs minutes sur une collection importante. Le traitement se fait localement, sur votre ordinateur.",
+    "processingOCR": "Traitement",
+    "runOCR": "Lancer l'OCR"
   },
   "modes": {
     "selector": {
@@ -1283,7 +1290,8 @@
       "indexed": "Indexé",
       "skipped": "ignoré",
       "failed": "échecs"
-    }
+    },
+    "unlinkConfirm": "Détacher ce vault ? Son index local sera supprimé et devra être reconstruit entièrement à la prochaine liaison. Vos notes Obsidian, elles, ne sont pas touchées."
   },
   "hints": {
     "title": "Consignes de projet",
