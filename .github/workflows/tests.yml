@@ -4,7 +4,7 @@ name: Tests
 # sur les postes de développement, où les gardes `native-guards.ts` sautent
 # les suites SQLite (better-sqlite3 y est compilé pour l'ABI d'Electron par
 # le `postinstall`). Huit échecs réels s'y cachaient — voir
-# docs/audits-2026-07-19.md. Ce job tourne donc sur l'ABI **Node**, où les
+# docs/archive/audits-2026-07-19.md. Ce job tourne sur l'ABI **Node**, où les
 # gardes ne masquent plus que l'indisponibilité authentique du binding.
 
 on:

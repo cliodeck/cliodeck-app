@@ -1,6 +1,6 @@
 # Repérage — Journal d'usage IA
 
-> Compte rendu d'exploration exigé par `docs/INSTRUCTIONS_journal-usage-ia.md` §6.1,
+> Compte rendu d'exploration exigé par `docs/archive/INSTRUCTIONS_journal-usage-ia.md` §6.1,
 > à produire **avant** de coder. Liste les points d'insertion retenus et les pièges.
 > Statut : rédigé en amont de la Phase 1.
 

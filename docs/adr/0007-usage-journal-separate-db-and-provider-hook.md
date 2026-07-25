@@ -2,7 +2,7 @@
 
 Status: accepted — 2026-07-12
 Context: fonctionnalité « journal d'usage IA » réflexif (voir
-`docs/INSTRUCTIONS_journal-usage-ia.md`)
+`docs/archive/INSTRUCTIONS_journal-usage-ia.md`)
 
 ## Contexte
 

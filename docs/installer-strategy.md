@@ -1,7 +1,10 @@
 # Installer strategy — reducing install friction for non-developer historians
 
-> Design doc, not an implementation. Scope: ClioDeck v2 (`feat/fusion-cliobrain`).
-> Status: proposal. Owners: @inactinique. Target: ship with the v2.0 GA release.
+> Design doc, not an implementation. Scope: ClioDeck v2.
+> Status: **still a proposal** — nothing in section 7 has been built as of
+> 2026-07-25. Owners: @inactinique. Target: ship with the v2.0 GA release.
+> The fusion branch this was written against (`feat/fusion-cliobrain`) merged
+> into `main` at `v1.0.0-rc.2`; the plan itself is unaffected.
 
 ## 1. Target user
 
@@ -75,7 +78,14 @@ Mode A ships as `ClioDeck-offline-<version>-<os>.<ext>` from the same CI with a 
 
 ## 4. First-run wizard
 
-Lives in `src/renderer/src/components/Onboarding/`. Trigger: no `config.json` at `userData` or `schema_version < 2`. Skippable via "Advanced → I know what I'm doing".
+> **Partly superseded by what shipped.** An onboarding wizard exists —
+> `src/renderer/src/components/Project/OnboardingWizard.tsx`, with `onboarding.*`
+> i18n keys — not the `components/Onboarding/` package of files sketched below,
+> and it does not gate on a `hasCompletedOnboarding` flag. Read this section as
+> the *intended flow* (the four steps, the defaults, the LLM choice), not as a
+> description of the current component tree.
+
+Planned location: `src/renderer/src/components/Onboarding/`. Trigger: no `config.json` at `userData` or `schema_version < 2`. Skippable via "Advanced → I know what I'm doing".
 
 ### Flow (4 steps, skippable at any point)
 
@@ -189,9 +199,14 @@ Placed in `resources/bin/ollama/<platform>/` via a CI prebuild step, declared in
 
 1. **Tectonic** (MIT, ~20 MB, self-bootstraps missing packages on first export into `userData/tectonic-cache/`). Ship this; it is the realistic bundle target.
 2. **WeasyPrint via a sidecar Python** — already have `backend/python-services/` tooling, but adds a Python runtime requirement.
-3. **Fall back to HTML → PDF via Chromium** (Puppeteer is already a dep). Worse typography, but a zero-dep safety net.
+3. **Fall back to HTML → PDF via Chromium.** Worse typography, but a safety
+   net that needs no new binary: Electron already ships Chromium, and
+   `BrowserWindow.webContents.printToPDF` covers it. (This bullet originally
+   proposed Puppeteer as "already a dep" — Puppeteer was **removed** from the
+   project during the fusion phase 1, so any fallback must go through
+   Electron's own Chromium.)
 
-Recommendation: tectonic as primary, Chromium/Puppeteer as fallback. Drop the MacTeX/TeX Live requirement entirely from the user's path.
+Recommendation: tectonic as primary, Electron/Chromium as fallback. Drop the MacTeX/TeX Live requirement entirely from the user's path.
 
 ## 7. Required code changes
 
@@ -217,7 +232,10 @@ Non-exhaustive task list. Each bullet is a discrete PR.
 
 **Renderer**
 
-- `src/renderer/src/components/Onboarding/` (new): `OnboardingWizard.tsx`, `StepWelcome.tsx`, `StepLLM.tsx`, `StepModelDownload.tsx`, `StepIntegrations.tsx`, plus one `useOnboardingState` store (Zustand).
+- `src/renderer/src/components/Onboarding/` (new): split the existing
+  `Project/OnboardingWizard.tsx` into `StepWelcome.tsx`, `StepLLM.tsx`,
+  `StepModelDownload.tsx`, `StepIntegrations.tsx`, plus one
+  `useOnboardingState` store (Zustand).
 - `src/renderer/src/App.tsx`: gate on `hasCompletedOnboarding` (written to `config.json`).
 - i18n: new keys in `public/locales/{fr,en}/common.json` under `onboarding.*`.
 - Settings → "LLM" section: add a "Repair / redownload model" action that calls back into the same service.

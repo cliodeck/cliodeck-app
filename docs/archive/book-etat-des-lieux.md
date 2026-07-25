@@ -3,8 +3,8 @@
 > **Bilan daté, conservé pour mémoire.** Il décrit l'état AVANT le chantier
 > chapitres et a servi à le motiver. L'architecture courante — manifeste,
 > cache d'état, assembleur, exports — se lit dans
-> [`book-architecture.md`](book-architecture.md) ; le plan exécuté est
-> archivé dans [`archive/PLAN_chapitres-livre.md`](archive/PLAN_chapitres-livre.md).
+> [`book-architecture.md`](../book-architecture.md) ; le plan exécuté est
+> archivé dans [`PLAN_chapitres-livre.md`](PLAN_chapitres-livre.md).
 
 > Analyse en lecture seule sur `main` @ `fa20191`. Références fichier:ligne
 > vérifiées dans le code ; le comportement de pandoc a été vérifié

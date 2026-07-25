@@ -1,6 +1,6 @@
 # Path A readiness — RAG benchmark gate
 
-Status: scaffolded — 2026-04-14 | updated 2026-05-07
+Status: scaffolded — 2026-04-14 | updated 2026-07-25
 
 ## What Path A is
 
@@ -128,6 +128,17 @@ benchmark design:
    This is important for benchmark design — low-confidence OCR chunks
    introduce noise into retrieval evaluation.
 
-3. **Query expansion gap**: FR->EN query expansion only applies in
-   `SecondaryRetriever`, not in `TropyService` for primary sources.
-   This may affect recall for French queries against OCR'd text.
+3. ~~**Query expansion gap**~~ — **closed 2026-07-18**: `TropyService` now
+   reuses `expandQueryToText` (built-in dictionary +
+   `rag.queryExpansionDictionary`), identity when no term matches. Primary
+   sources and secondary sources expand queries the same way, so a French
+   query no longer under-retrieves against OCR'd text.
+
+## Note on the manuscript corpus (2026-07-25)
+
+A fourth corpus has shipped since — the manuscript itself
+([`manuscript-corpus.md`](manuscript-corpus.md)), with its own tables in
+`brain.db`. It does **not** change the Path A gate: like the Obsidian vault,
+it is a parallel store that `RetrievalService` reads at query time. It does
+raise the cost of Path A slightly, since a unified `SourceDocument` surface
+would now have three parallel stores to absorb rather than two.

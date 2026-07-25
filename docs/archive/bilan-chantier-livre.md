@@ -1,9 +1,14 @@
 # Bilan du chantier « livre » (2026-07-19)
 
+> **Archivé (2026-07-25).** Bilan d'un chantier clos. Deux des cinq points de
+> « Ce qui reste » ont été livrés depuis (recherche multi-chapitres, indexation
+> du manuscrit dans le RAG) et l'angle mort de la suite verte est comblé —
+> voir les annotations en fin de document.
+>
 > Récapitulatif de bout en bout du chantier des chapitres multi-fichiers.
-> Architecture courante : [`book-architecture.md`](book-architecture.md).
-> Bilan de l'état antérieur : [`book-etat-des-lieux.md`](archive/book-etat-des-lieux.md).
-> Plan exécuté : [`archive/PLAN_chapitres-livre.md`](archive/PLAN_chapitres-livre.md).
+> Architecture courante : [`book-architecture.md`](../book-architecture.md).
+> Bilan de l'état antérieur : [`book-etat-des-lieux.md`](book-etat-des-lieux.md).
+> Plan exécuté : [`PLAN_chapitres-livre.md`](PLAN_chapitres-livre.md).
 
 ## Point de départ
 
@@ -80,12 +85,23 @@ Les gardes `skipIf` de `native-guards.ts` sautent les suites SQLite quand
 de dev. En recompilant pour l'ABI Node, **8 échecs réels apparaissent**
 (migrateur de workspace ×4, outils MCP ×3, migration CLI ×1), vérifiés
 présents à l'identique sur `main` et donc antérieurs à ce chantier. Détail
-et remède dans [`status-and-remaining-work.md`](status-and-remaining-work.md).
+et remède dans [`status-and-remaining-work.md`](../status-and-remaining-work.md).
+
+> **Comblé depuis (2026-07)** : les 8 échecs sont corrigés et
+> `.github/workflows/tests.yml` recompile `better-sqlite3` pour l'ABI Node
+> avant de lancer la suite — les gardes ne masquent plus rien en intégration
+> continue.
 
 ## Ce qui reste
 
-- **Recherche multi-chapitres** — écartée en Phase 3 ;
-  `manuscriptStore.readManuscript()` fournit déjà la matière.
+> **Mis à jour le 2026-07-25** : les deux premiers points barrés ont été
+> livrés depuis la rédaction de ce bilan.
+
+- ~~**Recherche multi-chapitres**~~ — **livrée** :
+  `src/renderer/src/services/manuscript-search.ts` +
+  `components/Book/ManuscriptSearch.tsx`.
+- ~~**Indexation du manuscrit dans le RAG**~~ — **livrée** : quatrième corpus,
+  voir [`manuscript-corpus.md`](../manuscript-corpus.md).
 - **Index (`\index{}`) et références croisées typées** — même famille
   technique que notes et citations : extension Lezer + résolution à
   l'assemblage.
@@ -93,7 +109,5 @@ et remède dans [`status-and-remaining-work.md`](status-and-remaining-work.md).
   pilotent que la voie LaTeX.
 - **Les propositions IA expirent à la bascule** de chapitre — limite
   assumée en Phase 2.
-- **Indexation du manuscrit dans le RAG** : rien ne regarde le texte en
-  cours d'écriture — c'est dans un livre que ça manquerait le plus.
 - Cosmétique : en-tête courant des pages d'annexes portant le titre du
   chapitre précédent ; titre du chapitre actif tronqué sur panneau étroit.

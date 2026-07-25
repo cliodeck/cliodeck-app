@@ -62,9 +62,9 @@ Le contrat CM6 (« l'éditeur ne sérialise jamais ») rend le test trivial par 
 
 ## 2. Corpus et harnais de fidélité
 
-- Corpus : [`test-fixtures/editor/`](../test-fixtures/editor/) — 11 fixtures couvrant notes (multiples, imbriquées, identifiants libres), citations pandoc (locator, clusters `[@a; @b]`, préfixe/suffixe, nue, clé non résolue), frontmatter YAML, tables GFM, task lists, blocs de code (langues, tildes, indenté), liens/images (inline, référence, autolien), non-ASCII (fr/de/pl, guillemets typographiques), fins de ligne mixtes CRLF+LF, blancs significatifs (saut dur `␣␣\n`, tabulation finale, pas de saut final), artefacts Milkdown (`\[@clef\]`, `<!-- cliodeck-gen -->`).
+- Corpus : [`test-fixtures/editor/`](../../test-fixtures/editor/) — 11 fixtures couvrant notes (multiples, imbriquées, identifiants libres), citations pandoc (locator, clusters `[@a; @b]`, préfixe/suffixe, nue, clé non résolue), frontmatter YAML, tables GFM, task lists, blocs de code (langues, tildes, indenté), liens/images (inline, référence, autolien), non-ASCII (fr/de/pl, guillemets typographiques), fins de ligne mixtes CRLF+LF, blancs significatifs (saut dur `␣␣\n`, tabulation finale, pas de saut final), artefacts Milkdown (`\[@clef\]`, `<!-- cliodeck-gen -->`).
 - **`.gitattributes` marque `test-fixtures/editor/** -text`** : git ne doit jamais normaliser les fins de ligne du corpus. Ne pas ouvrir ces fichiers avec un éditeur/formateur qui les réécrirait.
-- Harnais : [`src/editor/__tests__/fidelity.test.ts`](../src/editor/__tests__/fidelity.test.ts) — tests d'intégrité du corpus (verts dès la Phase 0) + boucle `charger(doc) → sauvegarder() === doc` sur un registre `ENGINES`, vide jusqu'à la Phase 1 (`it.todo`).
+- Harnais : [`src/editor/__tests__/fidelity.test.ts`](../../src/editor/__tests__/fidelity.test.ts) — tests d'intégrité du corpus (verts dès la Phase 0) + boucle `charger(doc) → sauvegarder() === doc` sur un registre `ENGINES`, vide jusqu'à la Phase 1 (`it.todo`).
 - `src/editor/` est le foyer des modules éditeur prévus par le plan (`lezer-extensions/`, `proposals/`) : hors du build main (`tsconfig.node.json` ne l'inclut pas), typé par le tsconfig racine, importable depuis le renderer (précédent : imports `@backend`).
 
 ## 3. Suivi des phases

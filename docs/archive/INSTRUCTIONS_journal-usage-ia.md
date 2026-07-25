@@ -1,7 +1,13 @@
 # Instructions — Journal d'usage IA (ClioDeck)
 
+> **Archivé.** Cahier des charges d'une fonctionnalité **livrée** (juillet 2026).
+> Conservé pour ses arbitrages — notamment la distinction impérative avec le
+> journal de recherche (§1) et les points tranchés (§7), qui restent opposables.
+> Pour l'état courant : [`journal-usage-ia.md`](../journal-usage-ia.md) et
+> l'[ADR 0007](../adr/0007-usage-journal-separate-db-and-provider-hook.md).
+>
 > Fichier d'instructions pour Claude Code. À lire en entier avant de coder.
-> Lire aussi `CLAUDE.md`, `docs/fusion-cliobrain-strategy.md` et les ADR existants avant toute décision d'architecture.
+> Lire aussi `CLAUDE.md`, `docs/archive/fusion-cliobrain-strategy.md` et les ADR existants avant toute décision d'architecture.
 
 ## 1. Contexte et intention
 
@@ -65,7 +71,7 @@ Cas particuliers :
 ### 3.2 bis Adjudications de propositions IA (amendement Phase 4 du plan CM6, 2026-07-17)
 
 > Amendement au périmètre v1 ci-dessus, requis par le contrat propositionnel de
-> l'éditeur (plan `archive/PLAN_migration-editeur-cm6.md`, Phase 4 ; spec côté éditeur :
+> l'éditeur (plan `PLAN_migration-editeur-cm6.md`, Phase 4 ; spec côté éditeur :
 > `docs/editor-proposals.md`). La liste des événements v1 (completion/embedding)
 > reste inchangée par ailleurs.
 

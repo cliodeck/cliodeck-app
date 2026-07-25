@@ -3,7 +3,7 @@
 **Date** : 2026-04-24
 **Branche** : `feat/fusion-cliobrain` (5 commits ahead of origin)
 **Sources** : audit croisé backend / frontend / sécurité / design — voir §1.
-**Document annexe** : `docs/actions-frederic.md` — étapes où ton intervention personnelle est requise.
+**Document annexe** : `docs/archive/actions-frederic.md` — étapes où ton intervention personnelle est requise.
 
 ---
 
@@ -105,7 +105,7 @@ Quatre phases, ordonnées par criticité. Chaque phase a un gate : si elle n'est
 
 Notation :
 - **[S/M/L]** = effort estimé (Small ≤ 1 jour, Medium 1-3 jours, Large 3+ jours)
-- **[USER]** = intervention de Frédéric requise — détails dans `docs/actions-frederic.md`
+- **[USER]** = intervention de Frédéric requise — détails dans `docs/archive/actions-frederic.md`
 - Référence fichier : `file:L` = ligne de départ
 
 ### Phase 0 — Stopper l'hémorragie (≈ 1 semaine)
@@ -134,11 +134,11 @@ Les gaps du plan `fusion-cliobrain-implementation-plan.md` qui étaient marqués
 | 1.2 | Backend | M | ✅ Step 1.4 finalisé : `OllamaClient.ts` (1104 LOC) + `LLMProviderManager.ts` (532 LOC) + bridge.ts supprimés ; tous les consommateurs (similarity, slides, retrieval, tropy, NER, summarizer, pdf, config-handlers) sur `ProviderRegistry` typé. Polling redondant de `/api/tags` éliminé | Fait |
 | 1.3 | Backend | M | ✅ `ContextCompactor` câblé dans `chat-engine.ts` ; table `getContextWindow(model)` couvre Claude/GPT/Mistral/Gemini/Llama/Qwen/Gemma/Phi (commit `30a137c`) | Fait |
 | 1.4a | Frontend | M | ✅ Refactor des 5 composants fusion vers `t()` ; nouveaux espaces de noms `vault.*`, `hints.*`, `recipes.*`, `mcp.*`, `recipeRun.*` créés en FR (langue source), EN et DE (premières passes) ; ~60 chaînes extraites | Fait |
-| 1.4b | Frontend | S | ✅ Premières passes EN + DE acceptées telles quelles — relecture fine renvoyée à un audit locales global de fin de cycle. Checklist dans `docs/i18n-fusion-1.4b-review.md` reste utile pour ce passage final. | Fait (validé tel quel) |
+| 1.4b | Frontend | S | ✅ Premières passes EN + DE acceptées telles quelles — relecture fine renvoyée à un audit locales global de fin de cycle. Checklist dans `docs/archive/i18n-fusion-1.4b-review.md` reste utile pour ce passage final. | Fait (validé tel quel) |
 | 1.5 | Sécurité | M | ✅ Routage `mcpClients[].env[*]` → `secureStorage` (sentinel `__cliodeck_secret__` + heuristique `KEY/TOKEN/SECRET/PASSWORD/PASS/CREDENTIAL`) ; migration idempotente au `loadProject` (commit `1f9817f`) | Fait |
 | 1.6 | Sécurité | L | ✅ Suppression de `backend/export/PDFExporter.ts` (dead code) + désinstallation `puppeteer` (53 paquets transitifs supprimés, ~400 MB) ; le seul vrai consommateur Chromium-PDF (revealjs-export) utilisait déjà `webContents.printToPDF` | Fait |
 | 1.7 | Backend | M | ✅ Enveloppe typée `{ hits, outcomes }` pour `retrievalService.search` — partial-success first-class (principe 6.3) ; facade `pdf-service` préserve la forme aplatie pour l'IPC `pdf:search` (commit `31958a9`) | Fait |
-| 1.8 | Backend | M | ✅ Whitelist tool-use Ollama implémentée : `OLLAMA_TOOL_CAPABLE_PATTERNS` couvre `ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo` ; `capabilities` devient un getter qui consulte le modèle configuré. La famille Llama (3.x + 4.x) reste exclue. Le normaliseur `arguments` (object vs string, issue #6002) est déjà OK dans le code existant — vérifié les deux directions. 31 tests dédiés. Voir `docs/research-ollama-tools-1.8.md` pour le rationale documenté. | Fait |
+| 1.8 | Backend | M | ✅ Whitelist tool-use Ollama implémentée : `OLLAMA_TOOL_CAPABLE_PATTERNS` couvre `ministral-3:8b/14b`, `qwen3:8b/14b/32b`, `mistral-nemo` ; `capabilities` devient un getter qui consulte le modèle configuré. La famille Llama (3.x + 4.x) reste exclue. Le normaliseur `arguments` (object vs string, issue #6002) est déjà OK dans le code existant — vérifié les deux directions. 31 tests dédiés. Voir `docs/archive/research-ollama-tools-1.8.md` pour le rationale documenté. | Fait |
 | 1.9 | Backend | M | ✅ Tests pour les 7 outils MCP non couverts (`searchEuropeana`, `searchObsidian`, `searchTropy`, `searchZotero`, `searchDocuments`, `entityContext`, `graphNeighbors`) — 54 nouveaux cas, 100% des outils exposés ont désormais une suite. Helper `_helpers.ts` mutualise capture du `McpServer.tool()` + fixtures sqlite éphémères. Script `npm run test:integration` rebuild better-sqlite3 pour Node ABI puis le restore | Fait |
 
 **Gate Phase 1** : la promesse goose #1 (« ajouter un provider = un fichier ») est vraie sans concession ; aucun `OllamaClient` hors backup de git history ; Electron ≥ 34 ; tous les secrets sensibles passent par `secureStorage`.
@@ -206,7 +206,7 @@ Voir tableaux par phase ci-dessus. Total : **~64 items** dont :
 - 16 Phase 3 (6 avec intervention)
 - 5 Phase 4 (5 avec intervention — décisions produit et budget)
 
-Sous-total d'items nécessitant Frédéric : **27 points d'intervention**, détaillés dans `docs/actions-frederic.md`.
+Sous-total d'items nécessitant Frédéric : **27 points d'intervention**, détaillés dans `docs/archive/actions-frederic.md`.
 
 ---
 
@@ -220,4 +220,4 @@ Sous-total d'items nécessitant Frédéric : **27 points d'intervention**, déta
 
 **Pour l'estimation de temps** : en solo et temps partiel, Phase 0+1 = ~6 semaines ; Phase 2 = ~8 semaines ; Phase 3 = 4 semaines qui peuvent se glisser dedans. Phase 4 dépend du calendrier release.
 
-**Tes points d'intervention chronologiques** → `docs/actions-frederic.md`.
+**Tes points d'intervention chronologiques** → `docs/archive/actions-frederic.md`.

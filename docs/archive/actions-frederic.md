@@ -1,6 +1,6 @@
 # Actions Frédéric — pas-à-pas des interventions humaines
 
-**Contexte** : document annexe de `docs/plan-post-fusion.md`. Ici, *uniquement* les étapes où ton intervention personnelle est nécessaire — parce qu'elles relèvent d'une décision produit, d'un input disciplinaire, d'une obtention de clé/certificat, ou d'un arbitrage que je ne peux pas prendre à ta place.
+**Contexte** : document annexe de `docs/archive/plan-post-fusion.md`. Ici, *uniquement* les étapes où ton intervention personnelle est nécessaire — parce qu'elles relèvent d'une décision produit, d'un input disciplinaire, d'une obtention de clé/certificat, ou d'un arbitrage que je ne peux pas prendre à ta place.
 
 **Règle** : pour chaque item, je te donne **pourquoi** on te sollicite, **quoi décider / fournir**, **quand** (avant quelle phase), et **combien de temps** ça risque de prendre. L'ordre suit la roadmap, donc tu peux lire de haut en bas et agir au fur et à mesure.
 
@@ -96,7 +96,7 @@
 ## Phase 2 — Identité du mode Brainstorm (décisions produit majeures)
 
 ### A10. Positionnement : Explorer vs Brainstorm vs Analyze
-- **Pourquoi** : le doc stratégique (`docs/fusion-cliobrain-strategy.md:20`) décrit un cycle **Explorer → Brainstormer → Écrire → Exporter**. Mais `WorkspaceModeBar` a **Brainstorm / Write / Analyze / Export**. *Explorer* est invisible, et *Analyze* (textométrie/topics/similarité) s'y est substitué — deux concepts différents confondus dans la même case.
+- **Pourquoi** : le doc stratégique (`docs/archive/fusion-cliobrain-strategy.md:20`) décrit un cycle **Explorer → Brainstormer → Écrire → Exporter**. Mais `WorkspaceModeBar` a **Brainstorm / Write / Analyze / Export**. *Explorer* est invisible, et *Analyze* (textométrie/topics/similarité) s'y est substitué — deux concepts différents confondus dans la même case.
 - **Options** :
   - **(a) Renommer Brainstorm → Explorer**, redéfinir son périmètre pour couvrir la phase amont du cycle. Garder *Analyze* comme mode outillé DH.
   - **(b) Ajouter un 5ᵉ mode Explorer** entre Brainstorm et Analyze. Plus fidèle au narratif mais plus d'UI à maintenir.

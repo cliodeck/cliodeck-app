@@ -580,6 +580,9 @@
       "untrackablePdf": "Document PDF non traçable (documentId manquant).",
       "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
       "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
+      "untrackableManuscript": "Extrait de manuscrit non traçable (chemin manquant).",
+      "manuscriptOutsideProject": "Chemin refusé : il sort du dossier du projet.",
+      "manuscriptNoProject": "Aucun projet ouvert.",
       "securityFlagged": "Source signalée par l'inspecteur de sécurité",
       "securityHint": "Détail complet dans Réglages → Sécurité → Événements détectés.",
       "securityKind": {

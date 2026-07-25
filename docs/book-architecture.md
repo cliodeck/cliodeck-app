@@ -154,7 +154,7 @@ disjoint de celui du moteur de citations.
   déjà.
 - **Journal d'usage IA** (`journal.db`) : **aucun chemin de fichier**, jamais.
   La couche factuelle reste sans contenu ni chemin (cf.
-  [`INSTRUCTIONS_journal-usage-ia.md`](INSTRUCTIONS_journal-usage-ia.md)) ;
+  [`archive/INSTRUCTIONS_journal-usage-ia.md`](archive/INSTRUCTIONS_journal-usage-ia.md)) ;
   le `filePath` reçu par le handler s'arrête au journal de recherche.
 
 ## 7. Points d'extension
@@ -170,7 +170,8 @@ disjoint de celui du moteur de citations.
 
 Livrés depuis la rédaction de cette note, et retirés de cette liste :
 la **recherche dans tout le manuscrit**
-(`services/manuscript-search.ts`, `components/Book/ManuscriptSearch.tsx`) et
+(`src/renderer/src/services/manuscript-search.ts`,
+`components/Book/ManuscriptSearch.tsx`) et
 l'**indexation du manuscrit** comme quatrième corpus RAG
 (`docs/manuscript-corpus.md` ; extraits étiquetés à part des sources par
 `manuscriptHitsToSources`).

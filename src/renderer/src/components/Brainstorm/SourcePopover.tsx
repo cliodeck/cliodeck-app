@@ -3,13 +3,19 @@
  *
  * Academic trust requires every citation to be *reachable*: the user
  * must be able to jump from a chunk shown in Brainstorm back to the
- * primary/secondary/vault document it came from. This popover is the
- * minimal UI surface that turns an opaque similarity hit into an
- * openable reference.
+ * document it came from. This popover is the minimal UI surface that turns
+ * an opaque similarity hit into an openable reference.
  *
- * The component is purely presentational — it reads a `BrainstormSource`
- * and dispatches one of three `window.electron.sources.*` IPCs. Errors
- * surface as a small inline banner (no global toast system yet).
+ * Two routes, because the four corpora do not live in the same place:
+ *
+ * - **outside ClioDeck** (PDF, Tropy, Obsidian vault) — dispatches one of
+ *   three `window.electron.sources.*` IPCs, which hand off to the OS.
+ * - **inside the project** (the manuscript) — navigates in-app via
+ *   `openManuscriptSource`: switch to Write mode, load the chapter, place the
+ *   cursor. Routing a chapter through `sources:open-note` would resolve its
+ *   path against the *Obsidian vault* and open the wrong file, or nothing.
+ *
+ * Errors surface as a small inline banner (no global toast system yet).
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
@@ -17,6 +23,11 @@ import { useTranslation } from 'react-i18next';
 import { ExternalLink, Lightbulb, ShieldAlert, X } from 'lucide-react';
 import type { BrainstormSource } from '../../stores/chatStore';
 import { useIdeaStore } from '../../stores/ideaStore';
+import {
+  canOpenManuscriptSource,
+  manuscriptRelativePath,
+  openManuscriptSource,
+} from '../../services/open-manuscript-source';
 import { eventDetail, eventSeverity, securityBadgeColor } from './security-badge';
 
 interface Props {
@@ -51,6 +62,11 @@ export function positionLabel(s: BrainstormSource): string | null {
   if (s.sourceType === 'primary') {
     return s.itemId ? `item #${s.itemId}` : null;
   }
+  if (s.sourceType === 'manuscript') {
+    const rel = manuscriptRelativePath(s);
+    if (!rel) return null;
+    return s.lineNumber != null ? `${rel} · L${s.lineNumber}` : rel;
+  }
   return null;
 }
 
@@ -60,6 +76,26 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
   const [busy, setBusy] = useState(false);
 
   const handleOpen = useCallback(async () => {
+    // Le manuscrit s'ouvre dans l'éditeur de ClioDeck : ni IPC `sources:*`, ni
+    // preload requis. Traité avant la garde ci-dessous, qui ne concerne que
+    // les corpus délégués à l'OS.
+    if (source.sourceType === 'manuscript') {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await openManuscriptSource(source);
+        // L'utilisateur est emmené ailleurs : garder le popover ouvert
+        // par-dessus l'éditeur n'aurait pas de sens.
+        if (res.success) onClose();
+        else setError(t(res.errorKey ?? 'chat.sources.openFailed'));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const api = getSourcesApi();
     if (!api) {
       setError(t('chat.sources.openUnavailable'));
@@ -98,13 +134,14 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
     } finally {
       setBusy(false);
     }
-  }, [source, t]);
+  }, [source, t, onClose]);
 
   const position = positionLabel(source);
   const canOpen =
     (source.sourceType === 'secondary' && !!source.documentId) ||
     (source.sourceType === 'primary' && !!source.itemId) ||
-    (source.sourceType === 'vault' && !!(source.notePath ?? source.relativePath));
+    (source.sourceType === 'vault' && !!(source.notePath ?? source.relativePath)) ||
+    (source.sourceType === 'manuscript' && canOpenManuscriptSource(source));
 
   return (
     <div

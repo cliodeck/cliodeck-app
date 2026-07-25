@@ -580,6 +580,9 @@
       "untrackablePdf": "PDF-Dokument nicht rückverfolgbar (documentId fehlt).",
       "untrackableTropy": "Tropy-Quelle nicht rückverfolgbar (itemId fehlt).",
       "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt).",
+      "untrackableManuscript": "Manuskript-Auszug nicht rückverfolgbar (Pfad fehlt).",
+      "manuscriptOutsideProject": "Pfad abgelehnt: er verlässt den Projektordner.",
+      "manuscriptNoProject": "Kein Projekt geöffnet.",
       "securityFlagged": "Quelle vom Sicherheitsinspektor markiert",
       "securityHint": "Details unter Einstellungen → Sicherheit → Erkannte Ereignisse.",
       "securityKind": {

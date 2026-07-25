@@ -1,7 +1,7 @@
 # ADR 0001 — RAG pipeline arbitration: keep ClioDeck, defer full unification
 
 Status: accepted — 2026-04-13
-Context: fusion step 2.4 (see `docs/fusion-cliobrain-implementation-plan.md`)
+Context: fusion step 2.4 (see `docs/archive/fusion-cliobrain-implementation-plan.md`)
 
 ## Decision
 

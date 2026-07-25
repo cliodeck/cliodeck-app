@@ -25,7 +25,7 @@ Ce document est destiné à guider l'implémentation (y compris par un agent de 
 
 **Objectif : savoir exactement ce qu'on remplace et pouvoir prouver qu'on ne casse rien.**
 
-L'essentiel de l'inventaire est déjà établi (exploration du 16/07/2026) ; le consigner dans `docs/migration-cm6.md` et le vérifier :
+L'essentiel de l'inventaire est déjà établi (exploration du 16/07/2026) ; le consigner dans `docs/archive/migration-cm6.md` et le vérifier :
 
 - **Milkdown** : un seul point d'instanciation, `MilkdownEditor.tsx` (Crepe + preset GFM pour les footnotes). Sortie : listener `markdownUpdated` → `editorStore.setContent` ; entrée : `replaceAll` sur changement externe ; **recréation complète de l'éditeur à chaque changement de `filePath`**. Commandes : `editorStore.insertFormatting` (bold/italic/lien/citation/table/quote/footnote), `insertFootnoteAtPosition`, `insertDraftAtCursor` (Brainstorm), canal IPC `editor:insert-text`.
 - **Monaco** : éditeur source de la prose (`MarkdownEditor.tsx` — raccourcis Cmd+B/I/L, Cmd+', Cmd+Shift+T/F/Q ; completion provider `[@`), moteur des quatre panneaux Slides (via `editorStore.monacoEditor`), éditeur de recettes YAML.
@@ -34,7 +34,7 @@ L'essentiel de l'inventaire est déjà établi (exploration du 16/07/2026) ; le 
 - Constituer un **corpus de documents de test** (dossier `test-fixtures/editor/`) couvrant : notes de bas de page multiples et imbriquées dans des paragraphes, citations pandoc avec préfixe/locator, **clusters `[@a; @b]`**, frontmatter YAML, tables, listes de tâches, blocs de code avec langues, liens et images, caractères non-ASCII (allemand, français — corpus Lester oblige), fins de ligne mixtes, **et les artefacts des documents réels existants : échappements Milkdown (`\[@clef\]`) et marqueurs de provenance `<!-- cliodeck-gen ... -->`**.
 - Écrire le test de fidélité : `charger(doc) → sauvegarder() === doc` pour tout le corpus. Ce test échoue par construction avec Milkdown si le corpus contient des notes : le documenter comme justification de la migration (le hack `unescapeCitations` de `pdf-export.ts`, qui répare les échappements de Milkdown à l'export, est une pièce à conviction supplémentaire).
 
-**Critère d'acceptation :** inventaire écrit dans `docs/migration-cm6.md` ; corpus et test de fidélité en place (le test tournera à vide jusqu'à la Phase 1).
+**Critère d'acceptation :** inventaire écrit dans `docs/archive/migration-cm6.md` ; corpus et test de fidélité en place (le test tournera à vide jusqu'à la Phase 1).
 
 ---
 

@@ -36,7 +36,7 @@ Recipes today require editing YAML in `.cliodeck/v2/recipes/`. The article's mos
 Right now `hints.md` is a single file. Splitting into sections (Purpose, Safety, Naming, Style, Workstreams) — even if rendered as one prompt — gives historians a vocabulary for *what* to put in hints. Greenstreet treats this as the differentiator vs. raw Claude.
 
 ### 3.4 Curate domain-archive MCPs as a community surface
-ClioDeck already has Gallica/Europeana/HAL (French/EU bias). Greenstreet's list (Old Bailey, Riksarkivet, Virtual Treasury of Ireland, Ottoman gazettes) suggests an open registry for community-contributed archive MCPs. The pattern in `backend/mcp-server/tools/searchGallica.ts` is already the right template — what's missing is discoverability. See also `docs/archive-mcp-connectors.md`.
+ClioDeck already has Gallica/Europeana/HAL (French/EU bias). Greenstreet's list (Old Bailey, Riksarkivet, Virtual Treasury of Ireland, Ottoman gazettes) suggests an open registry for community-contributed archive MCPs. The pattern in `backend/mcp-server/tools/searchGallica.ts` is already the right template — what's missing is discoverability. See also `docs/archive/archive-mcp-connectors.md`.
 
 ### 3.5 Pair each archive MCP with an "interview" recipe
 Greenstreet's insight is that an archive MCP alone is just a search box; pairing it with a Socratic skill that knows the archive's structure (e.g., Old Bailey's defendant/judge/charge schema) is what makes it usable. For ClioDeck this could be a recipe-per-MCP convention shipped under `backend/recipes/builtin/`.

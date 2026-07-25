@@ -30,8 +30,9 @@ origine résoluble.
 Les marqueurs HTML `<!-- cliodeck-gen … -->` sont rendus obsolètes par ce
 traçage : l'éditeur CM6 n'en produit plus (le contenu IA devient une
 proposition) ; les documents existants qui en contiennent sont tolérés tels
-quels, et les éditeurs hérités Monaco/Milkdown (gelés jusqu'à la Phase 5)
-continuent de les produire à l'identique, reconstruits côté renderer.
+quels. Monaco et Milkdown, qui les produisaient et étaient gelés jusqu'à la
+Phase 5, ont été **supprimés** à cette phase : CM6 est l'unique éditeur et
+plus aucun code ne génère ces marqueurs.
 
 ## 2. La proposition (4b)
 
