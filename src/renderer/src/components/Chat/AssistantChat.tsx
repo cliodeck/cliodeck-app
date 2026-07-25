@@ -20,7 +20,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Highlighter, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, Check, Highlighter, Inbox, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { useDraftsStore } from '../../stores/draftsStore';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
@@ -64,6 +65,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
   const { modes } = useModeStore();
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
+  const [draftedId, setDraftedId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nerEnabled, setNerEnabled] = useState(false);
@@ -150,6 +152,20 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
       return () => clearTimeout(timer);
     }
   }, [isStreaming, ragStatus]);
+
+  // Mise en brouillon (#7, A13 option c) : l'alternative SANS engagement à
+  // sendToWrite — la réponse attend dans la file du mode Écriture au lieu
+  // d'être insérée immédiatement.
+  const sendToDrafts = useCallback((m: BrainstormMessage): void => {
+    useDraftsStore.getState().enqueue({
+      content: messageToDraft(m),
+      source: {
+        model: activeModelRef.current,
+        task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
+      },
+    });
+    setDraftedId(m.id);
+  }, []);
 
   const sendToWrite = useCallback(
     (m: BrainstormMessage): void => {
@@ -382,11 +398,20 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
                 ? t('chat.brainstorm.sentToWrite')
                 : t('chat.brainstorm.sendToWrite')}
             </button>
+            <button
+              type="button"
+              className="chat-surface__inline-btn"
+              onClick={() => sendToDrafts(orig)}
+              title={t('drafts.enqueueTitle')}
+            >
+              <Inbox size={12} />{' '}
+              {draftedId === orig.id ? t('drafts.enqueued') : t('drafts.enqueue')}
+            </button>
           </div>
         )}
       </>
     );
-  }, [sendToWrite, sentToWriteId, activeSource, t]);
+  }, [sendToWrite, sentToWriteId, sendToDrafts, draftedId, activeSource, t]);
 
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 

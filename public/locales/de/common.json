@@ -1697,5 +1697,20 @@
     "summary_other": "{{count}} Vorkommen in {{chapters}} Kapiteln",
     "goToLine": "Zu Zeile {{line}} springen",
     "truncated": "Zu viele Vorkommen in diesem Kapitel: nur die ersten werden angezeigt."
+  },
+  "drafts": {
+    "title": "Brainstorm-Entwürfe",
+    "empty": "Keine wartenden Entwürfe. Im Chat fügt „Als Entwurf speichern“ eine Antwort hier hinzu.",
+    "dragHint": "Ziehen Sie eine Karte in den Editor, um sie an der Abwurfstelle einzufügen (Cmd+Z zum Rückgängigmachen).",
+    "insert": "Am Cursor einfügen",
+    "insertTitle": "Diesen Entwurf an der Cursorposition einfügen (adjudizierbarer Vorschlag)",
+    "inserted": "Eingefügt ✓",
+    "discard": "Verwerfen",
+    "discardTitle": "Diesen Entwurf aus der Warteschlange entfernen (der Chat bleibt unverändert)",
+    "clearAll": "Warteschlange leeren",
+    "clearConfirm": "Die {{count}} wartenden Entwürfe verwerfen?",
+    "enqueue": "Als Entwurf speichern",
+    "enqueueTitle": "Diese Antwort der Entwurfs-Warteschlange des Schreibmodus hinzufügen, ohne sie einzufügen",
+    "enqueued": "Als Entwurf ✓"
   }
 }

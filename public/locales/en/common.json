@@ -1697,5 +1697,20 @@
     "summary_other": "{{count}} occurrences across {{chapters}} chapters",
     "goToLine": "Go to line {{line}}",
     "truncated": "Too many occurrences in this chapter: only the first ones are shown."
+  },
+  "drafts": {
+    "title": "Brainstorm drafts",
+    "empty": "No pending drafts. In the chat, “Save as draft” adds a reply here.",
+    "dragHint": "Drag a card into the editor to insert it at the exact drop position (Cmd+Z to undo).",
+    "insert": "Insert at cursor",
+    "insertTitle": "Insert this draft at the cursor position (adjudicable proposal)",
+    "inserted": "Inserted ✓",
+    "discard": "Discard",
+    "discardTitle": "Remove this draft from the queue (the chat is not modified)",
+    "clearAll": "Clear the queue",
+    "clearConfirm": "Discard the {{count}} pending draft(s)?",
+    "enqueue": "Save as draft",
+    "enqueueTitle": "Add this reply to the Write mode draft queue without inserting it",
+    "enqueued": "Drafted ✓"
   }
 }

@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next';
 import {
   FileText, FolderOpen, Save, CheckCircle, BookOpen, Superscript, Search,
   ListOrdered, Columns, Plus, MessageSquare, Eye, Sparkles, FileDown,
-  SearchCode,
+  SearchCode, Inbox,
 } from 'lucide-react';
+import { DraftsPanel } from './DraftsPanel';
+import { useDraftsStore } from '../../stores/draftsStore';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { renumberFootnotes, renumberManuscript } from '@/editor/footnote-tools';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
@@ -49,6 +51,10 @@ export const EditorPanel: React.FC = () => {
   const isBook = useProjectStore((s) => s.currentProject?.type === 'book');
   const addChapter = useProjectStore((s) => s.addChapter);
   const isRenumbering = useManuscriptStore((s) => s.renumbering);
+  // Brouillons Brainstorm (#7) — panneau flottant, compteur sur le bouton.
+  const draftsCount = useDraftsStore((s) => s.drafts.length);
+  const isDraftsPanelOpen = useDraftsStore((s) => s.isPanelOpen);
+  const toggleDraftsPanel = useDraftsStore((s) => s.togglePanel);
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
   // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
@@ -304,6 +310,19 @@ export const EditorPanel: React.FC = () => {
           >
             <Search size={18} strokeWidth={1.5} />
           </button>
+          {!isPresentation && (
+            <button
+              className={`toolbar-btn ${isDraftsPanelOpen ? 'active' : ''}`}
+              onClick={toggleDraftsPanel}
+              title={t('drafts.title')}
+              style={{ position: 'relative' }}
+            >
+              <Inbox size={18} strokeWidth={1.5} />
+              {draftsCount > 0 && (
+                <span className="toolbar-btn__count">{draftsCount}</span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Slides insertion (presentation projects) */}
@@ -425,6 +444,9 @@ export const EditorPanel: React.FC = () => {
           <SimilarityPanel />
         </Suspense>
       )}
+
+      {/* Brouillons Brainstorm (#7, flottant) */}
+      {isDraftsPanelOpen && <DraftsPanel />}
 
       {/* Export presentation modal */}
       {showExportModal && (
