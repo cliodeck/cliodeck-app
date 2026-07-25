@@ -1679,7 +1679,25 @@
     "renumberNoChange": "Die Fußnoten sind bereits der Reihe nach nummeriert.",
     "renumberDone": "Fußnoten in {{count}} Kapitel(n) neu nummeriert.",
     "renumberError": "Neunummerierung fehlgeschlagen: Das Manuskript ist unverändert.",
-    "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal."
+    "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal.",
+    "settings": {
+      "title": "Bucheinstellungen",
+      "saveError": "Einstellungen konnten nicht gespeichert werden — Änderung zurückgenommen.",
+      "noteStyle": "Anmerkungsstil",
+      "noteStyleFootnote": "Fußnoten",
+      "noteStyleEndnoteChapter": "Endnoten je Kapitel",
+      "noteStyleEndnoteBook": "Endnoten am Buchende",
+      "noteNumbering": "Nummerierung der Anmerkungen",
+      "noteNumberingContinuous": "Durchgehend im ganzen Buch",
+      "noteNumberingPerChapter": "In jedem Kapitel neu ab 1",
+      "noteNumberingHint": "Wirkt bei der nächsten Neunummerierung der Fußnoten (Werkzeugleiste).",
+      "bibliography": "Bibliographie",
+      "bibliographySingle": "Eine, am Buchende",
+      "bibliographyPerChapter": "Je Kapitel",
+      "numberChapters": "Kapitel nummerieren",
+      "numberSections": "Abschnitte nummerieren",
+      "exportHint": "Diese Einstellungen steuern die Manuskript-Zusammenstellung und die Exporte (PDF, Word)."
+    }
   },
   "citations": {
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",

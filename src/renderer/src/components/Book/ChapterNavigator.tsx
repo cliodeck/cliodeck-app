@@ -7,8 +7,10 @@ import {
   ChevronUp,
   FilePlus,
   Link2,
+  Settings2,
   X,
 } from 'lucide-react';
+import { BookSettingsModal } from './BookSettingsModal';
 import type { Chapter, ResolvedChapter } from '@backend/types/book';
 import { parseOutline, replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../stores/projectStore';
@@ -89,6 +91,8 @@ export const ChapterNavigator: React.FC = () => {
   /** `'new'` = saisie de création ; sinon identifiant du chapitre renommé. */
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // Réglages de l'ouvrage (#24) — modale ouverte depuis l'en-tête.
+  const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -291,6 +295,14 @@ export const ChapterNavigator: React.FC = () => {
         </span>
         <button
           className="chapter-navigator-action"
+          onClick={() => setShowSettings(true)}
+          disabled={!currentProject}
+          title={t('book.settings.title')}
+        >
+          <Settings2 size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          className="chapter-navigator-action"
           onClick={() => startEditing('new', '')}
           disabled={busy || !currentProject}
           title={t('book.addChapter')}
@@ -298,6 +310,8 @@ export const ChapterNavigator: React.FC = () => {
           <FilePlus size={14} strokeWidth={1.5} />
         </button>
       </div>
+
+      <BookSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       {chapters.length === 0 && editing !== 'new' && (
         <p className="chapter-navigator-empty">{t('book.noChapters')}</p>

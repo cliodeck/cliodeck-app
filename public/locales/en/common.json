@@ -1679,7 +1679,25 @@
     "renumberNoChange": "Footnotes are already numbered in order.",
     "renumberDone": "Footnotes renumbered across {{count}} chapter(s).",
     "renumberError": "Renumbering failed: the manuscript is unchanged.",
-    "renumberInProgress": "Footnote renumbering in progress — try again in a moment."
+    "renumberInProgress": "Footnote renumbering in progress — try again in a moment.",
+    "settings": {
+      "title": "Book settings",
+      "saveError": "Could not save the settings — change reverted.",
+      "noteStyle": "Note style",
+      "noteStyleFootnote": "Footnotes",
+      "noteStyleEndnoteChapter": "Endnotes per chapter",
+      "noteStyleEndnoteBook": "Endnotes at end of book",
+      "noteNumbering": "Note numbering",
+      "noteNumberingContinuous": "Continuous across the book",
+      "noteNumberingPerChapter": "Restart at 1 in each chapter",
+      "noteNumberingHint": "Takes effect at the next footnote renumbering (toolbar button).",
+      "bibliography": "Bibliography",
+      "bibliographySingle": "Single, at end of book",
+      "bibliographyPerChapter": "Per chapter",
+      "numberChapters": "Number chapters",
+      "numberSections": "Number sections",
+      "exportHint": "These settings drive manuscript assembly and exports (PDF, Word)."
+    }
   },
   "citations": {
     "allValid": "All citations are valid ({{count}} keys checked).",
