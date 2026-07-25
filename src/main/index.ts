@@ -26,8 +26,9 @@ process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', r
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync } from 'fs';
+import { attachNavigationGuard } from './navigation-guard.js';
 import { setupIPCHandlers } from './ipc/index.js';
 import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
@@ -39,6 +40,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+
+/** URL servie par l'application — référence du garde de navigation. */
+function resolveAppUrl(): string {
+  return process.env.NODE_ENV === 'development'
+    ? 'http://localhost:5173'
+    : pathToFileURL(path.join(__dirname, '../../../dist/renderer/index.html')).href;
+}
 
 function createWindow() {
   const preloadPath = path.join(__dirname, '../../preload/index.js');
@@ -70,8 +78,11 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   const debugEnabled = process.env.CLIODESK_DEBUG === '1' || process.env.DEBUG === '1';
 
+  const appUrl = resolveAppUrl();
+  attachNavigationGuard(mainWindow.webContents, appUrl);
+
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(appUrl);
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
@@ -88,6 +99,12 @@ function createWindow() {
   // Setup application menu with keyboard shortcuts
   setupApplicationMenu(mainWindow);
 }
+
+// Filet global : tout WebContents créé plus tard (webview, aperçu) hérite
+// du même garde, sans dépendre du souvenir de l'appeler.
+app.on('web-contents-created', (_event, contents) => {
+  attachNavigationGuard(contents, resolveAppUrl());
+});
 
 app.whenReady().then(async () => {
   // Initialiser configManager (async pour electron-store ES module)
