@@ -579,7 +579,20 @@
       "openUnavailable": "Öffnen von Quellen nicht verfügbar (Preload fehlt).",
       "untrackablePdf": "PDF-Dokument nicht rückverfolgbar (documentId fehlt).",
       "untrackableTropy": "Tropy-Quelle nicht rückverfolgbar (itemId fehlt).",
-      "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt)."
+      "untrackableNote": "Obsidian-Notiz nicht rückverfolgbar (Pfad fehlt).",
+      "securityFlagged": "Quelle vom Sicherheitsinspektor markiert",
+      "securityHint": "Details unter Einstellungen → Sicherheit → Erkannte Ereignisse.",
+      "securityKind": {
+        "suspicious_instruction": "Verdächtige Anweisung:",
+        "external_url": "Externe URL:",
+        "unusual_encoding": "Ungewöhnliche Kodierung:",
+        "prompt_injection_blocked": "Prompt-Injektion blockiert:"
+      },
+      "securitySeverity": {
+        "low": "geringer Schweregrad",
+        "medium": "mittlerer Schweregrad",
+        "high": "hoher Schweregrad"
+      }
     },
     "source": "Quelle",
     "page": "Seite",

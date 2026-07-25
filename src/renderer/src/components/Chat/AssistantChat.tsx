@@ -20,7 +20,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Highlighter, Inbox, Loader2, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, Check, Highlighter, Inbox, Loader2, Settings, ShieldAlert, SlidersHorizontal, X } from 'lucide-react';
+import { securityBadgeColor } from '../Brainstorm/security-badge';
 import { useDraftsStore } from '../../stores/draftsStore';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -328,6 +329,17 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
                       <div className="brainstorm-chat__source-head">
                         <span className="brainstorm-chat__source-kind">{s.kind}</span>
                         <strong>{s.title}</strong>
+                        {(s.securityEvents?.length ?? 0) > 0 && (
+                          <ShieldAlert
+                            size={11}
+                            strokeWidth={2}
+                            style={{
+                              flexShrink: 0,
+                              color: securityBadgeColor(s.securityEvents!),
+                            }}
+                            aria-label={t('chat.sources.securityFlagged')}
+                          />
+                        )}
                         <span className="brainstorm-chat__source-score">
                           {(s.similarity * 100).toFixed(1)}%
                         </span>

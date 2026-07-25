@@ -18,6 +18,7 @@
 
 import { create } from 'zustand';
 import type { RAGExplanation as RAGExplanationBackend } from '../../../../backend/types/chat-source';
+import type { SecurityEvent } from '../../../../backend/security/events';
 import { useModeStore } from './modeStore';
 
 // MARK: - Types (brainstorm, canonical)
@@ -39,6 +40,8 @@ export interface BrainstormSource {
   lineNumber?: number;
   /** Manuscrit : chapitre d'origine, pour rouvrir au bon endroit. */
   chapterId?: string;
+  /** Événements de l'inspecteur de sécurité pour ce chunk (#8). */
+  securityEvents?: SecurityEvent[];
 }
 
 export interface BrainstormToolCall {

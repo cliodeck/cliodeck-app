@@ -14,9 +14,10 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Lightbulb, X } from 'lucide-react';
+import { ExternalLink, Lightbulb, ShieldAlert, X } from 'lucide-react';
 import type { BrainstormSource } from '../../stores/chatStore';
 import { useIdeaStore } from '../../stores/ideaStore';
+import { eventDetail, eventSeverity, securityBadgeColor } from './security-badge';
 
 interface Props {
   source: BrainstormSource;
@@ -154,6 +155,47 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
       >
         {source.snippet}
       </p>
+
+      {(source.securityEvents?.length ?? 0) > 0 && (
+        <div
+          data-testid="source-security-events"
+          style={{
+            marginTop: 8,
+            fontSize: 12,
+            padding: 8,
+            borderRadius: 4,
+            border: `1px solid ${securityBadgeColor(source.securityEvents!)}`,
+            background: `color-mix(in srgb, ${securityBadgeColor(source.securityEvents!)} 8%, transparent)`,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              color: securityBadgeColor(source.securityEvents!),
+              fontWeight: 600,
+              marginBottom: 4,
+            }}
+          >
+            <ShieldAlert size={13} />
+            {t('chat.sources.securityFlagged')}
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)' }}>
+            {source.securityEvents!.map((e, i) => (
+              <li key={i}>
+                {t(`chat.sources.securityKind.${e.kind}`)}{' '}
+                <code style={{ fontSize: 11 }}>{eventDetail(e)}</code>
+                {' · '}
+                {t(`chat.sources.securitySeverity.${eventSeverity(e)}`)}
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 4, color: 'var(--text-tertiary)' }}>
+            {t('chat.sources.securityHint')}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div

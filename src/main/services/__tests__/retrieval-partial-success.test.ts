@@ -16,7 +16,7 @@ import { retrievalService } from '../retrieval-service.js';
 interface PrivateBranches {
   searchSecondary: (...args: unknown[]) => Promise<unknown>;
   searchVault: (...args: unknown[]) => Promise<unknown>;
-  inspectAndFilter: <T>(r: T[]) => T[];
+  inspectAndFilter: <T>(r: T[]) => { results: T[]; securityEvents: unknown[] };
   ensureReady: () => void;
 }
 
@@ -45,9 +45,10 @@ describe('RetrievalService partial-success envelope (1.7)', () => {
       .spyOn(retrievalService as unknown as PrivateBranches, 'ensureReady')
       .mockImplementation(() => undefined);
     // Pass-through inspector — partial-success behaviour is orthogonal.
+    // (Nouveau contrat #8 : l'inspecteur retourne aussi les événements.)
     inspectSpy = vi
       .spyOn(retrievalService as unknown as PrivateBranches, 'inspectAndFilter')
-      .mockImplementation(<T,>(r: T[]) => r);
+      .mockImplementation(<T,>(r: T[]) => ({ results: r, securityEvents: [] }));
 
     // `search` reads topK / similarityThreshold from the user config; we
     // don't init electron-store in unit tests, so stub getRAGConfig.

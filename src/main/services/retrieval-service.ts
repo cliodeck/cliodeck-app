@@ -44,6 +44,7 @@ import {
   type InspectableChunk,
   type InspectorMode,
 } from '../../../backend/security/source-inspector.js';
+import type { SecurityEvent } from '../../../backend/security/events.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { readWorkspaceConfig } from '../../../backend/core/workspace/config.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
@@ -205,6 +206,12 @@ export interface RetrievalSearchResult {
   manuscriptHits: ManuscriptMappedSearchResult[];
   /** Per-corpus outcomes (always 4: secondary, primary, vault, manuscript). */
   outcomes: RetrievalSourceOutcome[];
+  /**
+   * Événements de l'inspecteur de sécurité pour les chunks retournés (#8),
+   * chacun porteur de son `chunkId` — l'appelant les rattache aux sources
+   * qu'il affiche. Vide en l'absence de signalement.
+   */
+  securityEvents: SecurityEvent[];
 }
 
 /**
@@ -236,6 +243,8 @@ export interface RetrievalSearchWithStatsResult {
   hits: MultiSourceSearchResult[];
   /** Extraits du manuscrit, séparés (cf. `RetrievalSearchResult`). */
   manuscriptHits: ManuscriptMappedSearchResult[];
+  /** Événements de sécurité des chunks retournés (cf. `RetrievalSearchResult`). */
+  securityEvents: SecurityEvent[];
   stats: RetrievalSearchStats;
   /** Per-corpus outcomes (fusion 1.7) — surfaced here so callers that
    *  use `searchWithStats` can render error banners alongside
@@ -533,7 +542,7 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const { hits, manuscriptHits, outcomes } = await this.search(q);
+    const { hits, manuscriptHits, outcomes, securityEvents } = await this.search(q);
     const searchMs = Date.now() - t0;
 
     const documentMap = new Map<
@@ -565,6 +574,7 @@ class RetrievalService {
     return {
       hits,
       manuscriptHits,
+      securityEvents,
       outcomes,
       stats: {
         search: {
@@ -776,7 +786,8 @@ class RetrievalService {
     // Run the inspector before returning chunks to the caller. In `warn`
     // mode this is a logging side-effect; in `audit`/`block` it filters
     // chunks the inspector deems unsafe.
-    const inspectedResults = this.inspectAndFilter(sortedResults);
+    const { results: inspectedResults, securityEvents } =
+      this.inspectAndFilter(sortedResults);
 
     if (DEBUG) {
       console.log(
@@ -799,6 +810,7 @@ class RetrievalService {
     return {
       hits: externalHits,
       manuscriptHits,
+      securityEvents,
       outcomes: [
         outcomeSecondary,
         outcomePrimary,
@@ -815,28 +827,46 @@ class RetrievalService {
    * input list is returned unchanged; in `audit`/`block` mode chunks
    * flagged as injection attempts are filtered out.
    */
-  private inspectAndFilter(results: AnySearchResult[]): AnySearchResult[] {
-    if (results.length === 0) return results;
+  private inspectAndFilter(results: AnySearchResult[]): {
+    results: AnySearchResult[];
+    /**
+     * Événements émis pour les chunks RETOURNÉS (#8) : le badge de la
+     * surface de chat doit pouvoir pointer la source affichée. Les
+     * événements des chunks bloqués sont journalisés mais pas remontés —
+     * un chunk absent n'a pas de badge à porter.
+     */
+    securityEvents: SecurityEvent[];
+  } {
+    if (results.length === 0) return { results, securityEvents: [] };
     const logPath = this.workspaceRoot
       ? workspaceFiles(this.workspaceRoot).securityEventsLog
       : null;
+    const collected: SecurityEvent[] = [];
     const inspector = new SourceInspector({
       mode: this.inspectorMode,
-      onEvent: logPath
-        ? (e) => {
-            void appendSecurityEvent(logPath, e).catch((err) => {
-              console.warn('[retrieval] security event log failed:', err);
-            });
-          }
-        : undefined,
+      onEvent: (e) => {
+        collected.push(e);
+        if (logPath) {
+          void appendSecurityEvent(logPath, e).catch((err) => {
+            console.warn('[retrieval] security event log failed:', err);
+          });
+        }
+      },
     });
     const inspectables: InspectableChunk[] = results.map((r) =>
       toInspectable(r)
     );
     const outcome = inspector.inspect(inspectables);
-    if (outcome.blocked.length === 0) return results;
     const blockedIds = new Set(outcome.blocked.map((c) => c.id));
-    return results.filter((r) => !blockedIds.has(r.chunk.id));
+    const kept =
+      blockedIds.size === 0
+        ? results
+        : results.filter((r) => !blockedIds.has(r.chunk.id));
+    const keptIds = new Set(kept.map((r) => r.chunk.id));
+    return {
+      results: kept,
+      securityEvents: collected.filter((e) => keptIds.has(e.chunkId)),
+    };
   }
 
   private async searchVault(
