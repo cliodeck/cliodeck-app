@@ -560,6 +560,8 @@ const api = {
   // History / Journal
   history: {
     getSessions: () => ipcRenderer.invoke('history:get-sessions'),
+    /** Purge complète du journal de recherche (#16) — destructif. */
+    purge: () => ipcRenderer.invoke('history:purge'),
     getEvents: (sessionId: string) => ipcRenderer.invoke('history:get-events', sessionId),
     getChatHistory: (sessionId: string) =>
       ipcRenderer.invoke('history:get-chat-history', sessionId),
@@ -694,6 +696,8 @@ const api = {
     // Sources
     getAllSources: () => ipcRenderer.invoke('tropy:get-all-sources'),
     getSource: (sourceId: string) => ipcRenderer.invoke('tropy:get-source', sourceId),
+    getSourcePhotos: (sourceId: string) =>
+      ipcRenderer.invoke('tropy:get-source-photos', sourceId),
     updateTranscription: (
       sourceId: string,
       transcription: string,

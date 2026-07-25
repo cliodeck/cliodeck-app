@@ -72,6 +72,9 @@ interface PrimarySourcesState {
   // OCR state
   isPerformingOCR: boolean;
   ocrProgress: { current: number; total: number } | null;
+  /** Langue OCR courante — partagée entre la synchro (modale OCR) et
+   *  l'OCR manuel par source (#23). */
+  ocrLanguage: string;
 
   // Search & filters
   searchQuery: string;
@@ -104,6 +107,10 @@ interface PrimarySourcesState {
 
   // Actions - OCR
   performOCR: (sourceId: string, imagePaths: string[], language: string) => Promise<{ success: boolean; text?: string }>;
+  /** OCR manuel d'une source (#23) : résout les photos côté main puis
+   *  délègue à performOCR avec la langue courante. */
+  performManualOCR: (sourceId: string) => Promise<{ success: boolean; error?: 'no-photos' | 'failed' }>;
+  setOCRLanguage: (language: string) => void;
   importTranscription: (sourceId: string, filePath: string) => Promise<{ success: boolean; error?: string }>;
   loadOCRLanguages: () => Promise<void>;
 
@@ -140,6 +147,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   syncProgress: null,
   isPerformingOCR: false,
   ocrProgress: null,
+  ocrLanguage: 'fra',
   searchQuery: '',
   selectedTags: [],
   selectedArchive: null,
@@ -309,6 +317,24 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     } finally {
       set({ isPerformingOCR: false, ocrProgress: null });
     }
+  },
+
+  performManualOCR: async (sourceId: string) => {
+    try {
+      const photosRes = await window.electron.tropy.getSourcePhotos(sourceId);
+      if (!photosRes.success || !photosRes.paths || photosRes.paths.length === 0) {
+        return { success: false, error: 'no-photos' as const };
+      }
+      const result = await get().performOCR(sourceId, photosRes.paths, get().ocrLanguage);
+      return result.success ? { success: true } : { success: false, error: 'failed' as const };
+    } catch (error) {
+      console.error('Manual OCR failed:', error);
+      return { success: false, error: 'failed' as const };
+    }
+  },
+
+  setOCRLanguage: (language: string) => {
+    set({ ocrLanguage: language });
   },
 
   importTranscription: async (sourceId: string, filePath: string) => {

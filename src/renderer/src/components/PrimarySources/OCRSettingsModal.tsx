@@ -19,7 +19,10 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
     loadOCRLanguages,
   } = usePrimarySourcesStore();
 
-  const [selectedLanguage, setSelectedLanguage] = useState('fra');
+  // Langue OCR : dans le store (et plus en état local) pour que l'OCR
+  // manuel par source (#23) utilise le même réglage que la synchro.
+  const { ocrLanguage: selectedLanguage, setOCRLanguage: setSelectedLanguage } =
+    usePrimarySourcesStore();
   const [performOCROnSync, setPerformOCROnSync] = useState(false);
 
   useEffect(() => {

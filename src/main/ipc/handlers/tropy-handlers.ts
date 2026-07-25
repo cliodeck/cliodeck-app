@@ -230,6 +230,23 @@ export function setupTropyHandlers() {
   });
 
   /**
+   * Chemins des images d'une source — nécessaires à l'OCR manuel par
+   * source (#23) : le renderer ne connaît pas les photos, seulement les
+   * métadonnées indexées.
+   */
+  ipcMain.handle('tropy:get-source-photos', async (_event, rawSourceId: unknown) => {
+    const sourceId = validate(StringIdSchema, rawSourceId);
+    console.log('📞 IPC Call: tropy:get-source-photos', { sourceId });
+    try {
+      const paths = tropyService.getSourcePhotoPaths(sourceId);
+      return { success: true, paths };
+    } catch (error: unknown) {
+      console.error('❌ tropy:get-source-photos error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  /**
    * Met à jour la transcription d'une source
    */
   ipcMain.handle(

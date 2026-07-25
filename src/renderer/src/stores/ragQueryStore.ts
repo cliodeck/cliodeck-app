@@ -179,6 +179,52 @@ function sortCollectionsHierarchically(
 }
 
 /**
+ * Restreint la liste des collections à celle associée au projet et ses
+ * descendantes (#2). Repli intégral (liste complète) dans tous les cas
+ * dégradés : pas de projet, pas d'association, clé inconnue de la liste,
+ * ou erreur de lecture — le scoping ne doit jamais faire disparaître le
+ * filtre. Import dynamique du projectStore pour éviter tout cycle.
+ */
+async function scopeToProjectCollection(
+  collections: Array<{ key: string; name: string; parentKey?: string }>
+): Promise<Array<{ key: string; name: string; parentKey?: string }>> {
+  try {
+    const { useProjectStore } = await import('./projectStore');
+    const projectPath = useProjectStore.getState().currentProject?.path;
+    if (!projectPath) return collections;
+
+    const cfg = await window.electron.project.getConfig(`${projectPath}/project.json`);
+    const rootKey: string | undefined =
+      cfg?.zotero?.collectionKey || cfg?.bibliographySource?.zoteroCollection;
+    if (!rootKey || !collections.some((c) => c.key === rootKey)) {
+      return collections;
+    }
+
+    // Fermeture transitive : la collection racine et toutes ses
+    // descendantes, quelle que soit la profondeur.
+    const keep = new Set([rootKey]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const c of collections) {
+        if (!keep.has(c.key) && c.parentKey && keep.has(c.parentKey)) {
+          keep.add(c.key);
+          grew = true;
+        }
+      }
+    }
+
+    // La racine du sous-arbre devient top-level : son parent d'origine est
+    // exclu, et le tri hiérarchique ne part que des nœuds sans parent.
+    return collections
+      .filter((c) => keep.has(c.key))
+      .map((c) => (c.key === rootKey ? { ...c, parentKey: undefined } : c));
+  } catch {
+    return collections;
+  }
+}
+
+/**
  * Map the three independent toggles to the filter bag expected by the
  * retrieval pipeline (`sourceType` understood by `fusion-chat-service` +
  * `retrieval-service`, plus a separate `includeVault` opt-in).
@@ -321,8 +367,14 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           const result = await window.electron.corpus.getCollections();
 
           if (result.success && result.collections) {
-            // Sort hierarchically for display
-            const sortedCollections = sortCollectionsHierarchically(result.collections);
+            // La synchro sauvegarde TOUTES les collections de la
+            // bibliothèque (zotero-service.listCollections) ; quand le
+            // projet est associé à une collection précise, en proposer
+            // d'autres est incohérent — leurs documents ne sont même pas
+            // indexés ici (#2). On scope à la collection mémorisée et ses
+            // descendantes ; sans association, liste complète.
+            const scoped = await scopeToProjectCollection(result.collections);
+            const sortedCollections = sortCollectionsHierarchically(scoped);
 
             set({
               availableCollections: sortedCollections,

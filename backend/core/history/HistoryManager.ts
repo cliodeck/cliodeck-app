@@ -444,6 +444,43 @@ export class HistoryManager {
     return sessionId;
   }
 
+  /**
+   * Purge complète du journal de recherche (#16) : vide toutes les tables
+   * history_* — et uniquement elles, brain.db étant partagé avec les
+   * domaines PDF/Tropy/Obsidian. `history_metadata` (versions de schéma)
+   * est conservée. La session courante disparaissant avec les autres, une
+   * nouvelle session est ouverte aussitôt : les écritures suivantes ne
+   * doivent pas casser la contrainte de clé étrangère.
+   */
+  purgeAll(): { deletedSessions: number; deletedEvents: number } {
+    const sessions = (
+      this.db.prepare('SELECT COUNT(*) AS c FROM history_sessions').get() as { c: number }
+    ).c;
+    const events = (
+      this.db.prepare('SELECT COUNT(*) AS c FROM history_events').get() as { c: number }
+    ).c;
+
+    const purge = this.db.transaction(() => {
+      // Enfants d'abord (FK session_id), sessions en dernier.
+      this.db.exec(`
+        DELETE FROM history_proposal_events;
+        DELETE FROM history_pdf_operations;
+        DELETE FROM history_document_operations;
+        DELETE FROM history_ai_operations;
+        DELETE FROM history_chat_messages;
+        DELETE FROM history_events;
+        DELETE FROM history_sessions;
+      `);
+    });
+    purge();
+
+    this.currentSessionId = null;
+    this.startSession({ startedAfterPurge: true });
+
+    console.log(`🗑️ Journal purgé: ${sessions} sessions, ${events} événements`);
+    return { deletedSessions: sessions, deletedEvents: events };
+  }
+
   endSession(sessionId?: string): void {
     const id = sessionId || this.currentSessionId;
     if (!id) return;
