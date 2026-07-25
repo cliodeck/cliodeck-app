@@ -897,6 +897,32 @@ class TropyService {
     return this.vectorStore.getSource(id);
   }
 
+  /**
+   * Chemins d'images uniques et existants d'une source, pour l'OCR manuel
+   * (#23). Même règle que TropySync.performOCROnItem : Tropy crée une
+   * entrée photo par page de PDF, on déduplique par chemin et on écarte
+   * les fichiers disparus.
+   */
+  getSourcePhotoPaths(sourceId: string): string[] {
+    if (!this.vectorStore || !this.currentTPYPath) {
+      return [];
+    }
+    const source = this.vectorStore.getSource(sourceId);
+    if (!source) {
+      return [];
+    }
+
+    const reader = new TropyReader();
+    reader.openProject(this.currentTPYPath);
+    try {
+      const item = reader.getItem(source.tropyId);
+      const unique = [...new Set((item?.photos ?? []).map((p) => p.path))];
+      return unique.filter((p) => fs.existsSync(p));
+    } finally {
+      reader.closeProject();
+    }
+  }
+
   // MARK: - Statistics
 
   /**
