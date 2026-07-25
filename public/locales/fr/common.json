@@ -1692,7 +1692,25 @@
     "renumberNoChange": "Les notes sont déjà numérotées dans l'ordre.",
     "renumberDone": "Notes renumérotées dans {{count}} chapitre(s).",
     "renumberError": "La renumérotation a échoué : le manuscrit est inchangé.",
-    "renumberInProgress": "Renumérotation des notes en cours — réessayez dans un instant."
+    "renumberInProgress": "Renumérotation des notes en cours — réessayez dans un instant.",
+    "settings": {
+      "title": "Réglages de l'ouvrage",
+      "saveError": "Enregistrement des réglages impossible — modification annulée.",
+      "noteStyle": "Style des notes",
+      "noteStyleFootnote": "Notes de bas de page",
+      "noteStyleEndnoteChapter": "Notes de fin de chapitre",
+      "noteStyleEndnoteBook": "Notes de fin d'ouvrage",
+      "noteNumbering": "Numérotation des notes",
+      "noteNumberingContinuous": "Continue sur tout l'ouvrage",
+      "noteNumberingPerChapter": "Reprise à 1 à chaque chapitre",
+      "noteNumberingHint": "Prend effet à la prochaine renumérotation des notes (bouton de la barre d'outils).",
+      "bibliography": "Bibliographie",
+      "bibliographySingle": "Unique, en fin d'ouvrage",
+      "bibliographyPerChapter": "Par chapitre",
+      "numberChapters": "Numéroter les chapitres",
+      "numberSections": "Numéroter les sections",
+      "exportHint": "Ces réglages pilotent l'assemblage du manuscrit et les exports (PDF, Word)."
+    }
   },
   "citations": {
     "allValid": "Toutes les citations sont valides ({{count}} clés vérifiées).",
@@ -1710,5 +1728,20 @@
     "summary_other": "{{count}} occurrences dans {{chapters}} chapitres",
     "goToLine": "Aller à la ligne {{line}}",
     "truncated": "Trop d'occurrences dans ce chapitre : seules les premières sont affichées."
+  },
+  "drafts": {
+    "title": "Brouillons Brainstorm",
+    "empty": "Aucun brouillon en attente. Depuis le chat, « Mettre en brouillon » ajoute une réponse ici.",
+    "dragHint": "Glissez une carte dans l'éditeur pour l'insérer à l'endroit exact du dépôt (Cmd+Z pour annuler).",
+    "insert": "Insérer au curseur",
+    "insertTitle": "Insérer ce brouillon à la position du curseur (proposition adjudicable)",
+    "inserted": "Inséré ✓",
+    "discard": "Jeter",
+    "discardTitle": "Retirer ce brouillon de la file (le chat n'est pas modifié)",
+    "clearAll": "Vider la file",
+    "clearConfirm": "Jeter les {{count}} brouillon(s) en attente ?",
+    "enqueue": "Mettre en brouillon",
+    "enqueueTitle": "Ajouter cette réponse à la file de brouillons du mode Écriture, sans l'insérer",
+    "enqueued": "En brouillon ✓"
   }
 }

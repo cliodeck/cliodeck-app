@@ -1692,7 +1692,25 @@
     "renumberNoChange": "Die Fußnoten sind bereits der Reihe nach nummeriert.",
     "renumberDone": "Fußnoten in {{count}} Kapitel(n) neu nummeriert.",
     "renumberError": "Neunummerierung fehlgeschlagen: Das Manuskript ist unverändert.",
-    "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal."
+    "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal.",
+    "settings": {
+      "title": "Bucheinstellungen",
+      "saveError": "Einstellungen konnten nicht gespeichert werden — Änderung zurückgenommen.",
+      "noteStyle": "Anmerkungsstil",
+      "noteStyleFootnote": "Fußnoten",
+      "noteStyleEndnoteChapter": "Endnoten je Kapitel",
+      "noteStyleEndnoteBook": "Endnoten am Buchende",
+      "noteNumbering": "Nummerierung der Anmerkungen",
+      "noteNumberingContinuous": "Durchgehend im ganzen Buch",
+      "noteNumberingPerChapter": "In jedem Kapitel neu ab 1",
+      "noteNumberingHint": "Wirkt bei der nächsten Neunummerierung der Fußnoten (Werkzeugleiste).",
+      "bibliography": "Bibliographie",
+      "bibliographySingle": "Eine, am Buchende",
+      "bibliographyPerChapter": "Je Kapitel",
+      "numberChapters": "Kapitel nummerieren",
+      "numberSections": "Abschnitte nummerieren",
+      "exportHint": "Diese Einstellungen steuern die Manuskript-Zusammenstellung und die Exporte (PDF, Word)."
+    }
   },
   "citations": {
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
@@ -1710,5 +1728,20 @@
     "summary_other": "{{count}} Vorkommen in {{chapters}} Kapiteln",
     "goToLine": "Zu Zeile {{line}} springen",
     "truncated": "Zu viele Vorkommen in diesem Kapitel: nur die ersten werden angezeigt."
+  },
+  "drafts": {
+    "title": "Brainstorm-Entwürfe",
+    "empty": "Keine wartenden Entwürfe. Im Chat fügt „Als Entwurf speichern“ eine Antwort hier hinzu.",
+    "dragHint": "Ziehen Sie eine Karte in den Editor, um sie an der Abwurfstelle einzufügen (Cmd+Z zum Rückgängigmachen).",
+    "insert": "Am Cursor einfügen",
+    "insertTitle": "Diesen Entwurf an der Cursorposition einfügen (adjudizierbarer Vorschlag)",
+    "inserted": "Eingefügt ✓",
+    "discard": "Verwerfen",
+    "discardTitle": "Diesen Entwurf aus der Warteschlange entfernen (der Chat bleibt unverändert)",
+    "clearAll": "Warteschlange leeren",
+    "clearConfirm": "Die {{count}} wartenden Entwürfe verwerfen?",
+    "enqueue": "Als Entwurf speichern",
+    "enqueueTitle": "Diese Antwort der Entwurfs-Warteschlange des Schreibmodus hinzufügen, ohne sie einzufügen",
+    "enqueued": "Als Entwurf ✓"
   }
 }
