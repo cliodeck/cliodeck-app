@@ -5,6 +5,144 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.4] — 2026-07-25
+
+Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
+219 fichiers modifiés depuis la rc.3. Le fil conducteur des correctifs :
+**ce que l'application affiche doit être ce que la source contient**, et
+**ce que la documentation annonce doit être ce que le code fait**.
+
+### Security
+
+- **La fenêtre principale ne quitte plus l'application.** Seul
+  `setWindowOpenHandler` était posé : il couvre `window.open` et
+  `target=_blank`, pas la navigation du frame principal. Un lien cliqué dans
+  une réponse de l'assistant — dont le contenu peut être dicté par un PDF,
+  une archive Tropy, une note Obsidian ou un serveur MCP hostile — faisait
+  naviguer la fenêtre, et le préload réinjecté livrait ses ~184 canaux IPC,
+  dont la lecture et l'écriture de fichiers, à la page distante. Les liens
+  web partent désormais vers le navigateur du système, le reste est refusé.
+- **Les serveurs MCP déclarés dans un projet ne démarrent plus sans
+  accord.** Le garde-fou existait (whitelist d'interpréteurs, dialogue natif,
+  audit JSONL) mais n'était câblé que sur l'ajout manuel : ouvrir un projet
+  partagé par un collègue exécutait la commande de son `config.json`, sans
+  la moindre question. Le chargement passe maintenant par le même garde. Les
+  accords sont mémorisés par empreinte (commande + arguments) dans le
+  répertoire utilisateur de l'application — **jamais dans le workspace**,
+  qu'un projet hostile pourrait s'auto-approuver ; modifier la commande d'un
+  serveur déjà approuvé redemande l'autorisation.
+
+### Fixed
+
+- **Toute page de titre PDF était corrompue dès qu'un nom contenait `&`.**
+  Les métadonnées étaient échappées pour LaTeX avant d'être passées à
+  pandoc, qui les échappe lui-même : `Dupont & Fils` s'imprimait
+  `Dupont \textbackslash& Fils`. Les dix caractères `\ & % $ # _ { } ~ ^`
+  étaient touchés — donc le **résumé entier**, illisible dès la première
+  esperluette. Le test verrouillait le comportement fautif ; il verrouille
+  désormais le bon.
+- **L'export d'un article pouvait produire le mauvais document.** Les
+  modales prenaient le tampon de l'éditeur, qui contient le fichier
+  *ouvert* — or le panneau projet invite à ouvrir `abstract.md` et
+  `context.md`. Exporter depuis le résumé produisait un PDF contenant le
+  résumé, sous le titre de l'article, sans un mot. Le manuscrit est
+  maintenant résolu explicitement ; au passage, les présentations prennent
+  le texte vivant de `slides.md` au lieu de le relire sur le disque, ce qui
+  perdait les frappes non sauvegardées.
+- **Les extraits montrés dans le panneau « Sources » ne venaient plus
+  toujours de la source.** Le compresseur de contexte, actif par défaut,
+  réécrit le contenu des extraits — et le panneau en tire son aperçu. Trois
+  défauts cumulés : un **tableau markdown était pulvérisé** (son séparateur
+  `|` servait aussi de frontière de phrase) puis recomposé en lignes qui
+  n'avaient jamais existé ; des phrases prélevées loin les unes des autres
+  étaient **collées sans marque de coupe**, donnant à lire une citation
+  continue introuvable dans le document ; et le repli « garder les deux
+  meilleures » les rendait **dans l'ordre du score**, réécrivant la
+  chronologie. Les tableaux et blocs de code passent désormais entiers, les
+  coupes sont signalées par `[…]`, et l'ordre du document est préservé.
+- **Le corpus manuscrit atteint enfin l'assistant.** Il était indexé à
+  chaque sauvegarde, mais ne remontait jamais : ses extraits portaient un
+  score RRF (maximum ≈ 0,016) là où les autres corpus portent un cosinus
+  filtré à 0,12, et le `slice(0, topK)` s'appliquait au tri global. Dès que
+  la bibliographie rendait dix extraits, « qu'ai-je déjà écrit sur X ? »
+  restait sans réponse — l'historien payait le calcul sans rien recevoir. Le
+  cosinus réel est désormais publié (le store l'exposait déjà) et une part
+  des places est réservée au manuscrit quand il a quelque chose à dire. Les
+  canaux `manuscript:index` et `manuscript:stats`, enregistrés côté main
+  mais absents du préload, sont exposés.
+- **Un chapitre pouvait disparaître définitivement de l'index du
+  manuscrit.** L'empreinte du chapitre était écrite *avant* ses chunks : un
+  échec en cours de route laissait un hash committé sans contenu, et la
+  passe suivante sautait le chapitre comme « inchangé ». L'écriture est
+  maintenant transactionnelle. `ManuscriptStore` — cinquième writer de
+  `brain.db`, oublié par le correctif des quatre autres — reçoit son
+  `busy_timeout`, et le store n'est plus fermé sous une passe d'indexation
+  en vol (le défaut que le service PDF avait corrigé et que celui-ci
+  rejouait).
+- **La modale des réglages OCR était en anglais en français comme en
+  allemand** : ses huit clés n'existaient dans aucune des trois locales, le
+  repli s'appliquait donc partout. Le test de parité ne pouvait pas le
+  voir — il compare les fichiers de traduction entre eux, et la clé manquait
+  des trois côtés. C'est la porte d'entrée de l'OCR Tropy, geste central du
+  travail sur sources primaires.
+- **Détacher un vault supprimait son index local sans confirmation**, alors
+  que l'infobulle du bouton l'annonçait et qu'un index volumineux est long à
+  reconstruire. Une confirmation nomme désormais ce qui est perdu — et
+  rappelle que les notes Obsidian, elles, ne sont pas touchées.
+
+### Ajouté depuis la rc.3
+
+- **Livre** — modale des réglages de l'ouvrage (#24) ; verrou entre
+  renumérotation des notes et exports (#30) ; assemblage du manuscrit avant
+  le branchement pandoc (#19).
+- **Brainstorm** — panneau de brouillons vers le mode Écriture (#7).
+- **Corpus et RAG** — `ContextCompressor` câblé dans le chemin de retrieval
+  (#28), puis réparé pour le français et dédupliqué par document (#57) ;
+  filtre de collections branché sur Similarity et Tropy (#21) ; « All
+  collections » scopé à la collection du projet (#2) ; « All documents »
+  dédupliqué par entrée bibliographique (#3) ; toggle « nœuds auteurs » du
+  graphe de connaissances (#22).
+- **Sources primaires** — bouton OCR manuel par source (#23).
+- **Journal** — purge du journal de recherche (#16), avec double
+  confirmation ; attribution correcte après bascule de chapitre ou de
+  projet (#40, #31, #39).
+- **Sécurité** — badge sur les sources signalées dans le chat (#8).
+- **Configuration** — section Embeddings, provider et modèle embarqué (#18) ;
+  sélecteur mort « Embedding strategy » retiré (#17).
+- **Éditeur** — polices de prose dans le sélecteur (#12) ; vrai toggle
+  gras/italique, wrap et unwrap au lieu d'un placeholder (#10).
+- **Robustesse à la bascule de projet** — sauvegarde du document sortant
+  (#37) ; attente des indexations PDF en vol avant fermeture du store (#38) ;
+  démontage du watcher et du store Tropy (#34) ; scope de l'événement de
+  progression du vault (#35) ; `busy_timeout` et WAL explicite sur les
+  writers de `brain.db` (#29) ; collections Zotero écrites dans le bon
+  projet (#33) et collection d'import réellement mémorisée (#9, #20).
+- **Correctifs divers** — `brain.db` n'est plus supprimé entier au détachement
+  d'un vault (#27) ; entrées BibTeX sans auteur ne sont plus rejetées
+  silencieusement (#32) ; filtre par tags lisible (#11) ; `Cmd+W` sur macOS
+  et liens d'aide corrigés (#25, #26) ; `context.md` nourrit enfin
+  l'assistant ; modèle embarqué remis en service.
+- **Outillage** — configuration ESLint, `npm run lint` fonctionne (#36) ;
+  suite de tests exécutée sur l'ABI Node en CI ; `RAGConfigSection` scindé,
+  912 lignes en trois fichiers (#57) ; licence GPLv3 déclarée partout.
+
+### Connu, non corrigé dans cette RC
+
+- **Aucune sauvegarde à la fermeture de l'application** : `Cmd+Q` dans les
+  trois secondes suivant une frappe perd le texte. Même classe de perte que
+  #37, à la sortie plutôt qu'à la bascule.
+- **Le verrou renumérotation/export est unidirectionnel** : rien n'empêche
+  de renuméroter pendant un export déjà lancé.
+- **Toute la section Configuration RAG est en français littéral** (une
+  centaine de libellés), y compris dans les deux fichiers créés par le split
+  #57. Le test anti-français ne balaye que `components/Export/`.
+- **Les modales n'écoutent pas `Échap`** (18 sur 20) et n'utilisent pas le
+  piège de focus pourtant disponible.
+- **Les embeddings cloud ne passent par aucun consentement**, alors
+  qu'indexer envoie l'intégralité du corpus au fournisseur. Réglage opt-in.
+- **`macOS` : signature et notarisation** toujours bloquées sur un certificat
+  Apple Developer ID ([#75](https://github.com/cliodeck/cliodeck-app/issues/75)).
+
 ## [1.0.0-rc.3] — 2026-07-19
 
 Candidat de version 1, préparé après trois audits (sécurité, interface,
@@ -64,7 +202,10 @@ cohérence du code) menés sur l'ensemble de l'application.
 - Code mort retiré : 8 méthodes du préload sans consommateur, une entrée de
   menu « Statistiques du document » qui ne faisait rien.
 
-## [Unreleased] — branche `feat/livre-chapitres`
+## [1.0.0-rc.3] — chapitres de livre (branche `feat/livre-chapitres`)
+
+> Détail du chantier livré dans la rc.3, conservé séparément pour sa valeur
+> d'explication. La section était restée marquée « Unreleased » après le tag.
 
 ### Added — les livres s'écrivent enfin en chapitres
 
@@ -118,7 +259,10 @@ Corrigés en chemin : le résumé qui imprimait son propre titre
 deux normalisations de fins de ligne CRLF qui violaient la fidélité
 octet par octet.
 
-## [Unreleased] — branche `feat/editor-cm6`
+## [1.0.0-rc.3] — éditeur CodeMirror 6 (branche `feat/editor-cm6`)
+
+> Détail du chantier livré dans la rc.3, conservé séparément pour sa valeur
+> d'explication. La section était restée marquée « Unreleased » après le tag.
 
 ### Changed — l'éditeur d'écriture migre vers CodeMirror 6
 
@@ -161,7 +305,10 @@ Les raisons de la migration :
   `\]` → `]` dans les citations) suffit, l'éditeur préserve désormais
   le fichier tel quel.
 
-## [2.0.0] — Unreleased (fusion branch `feat/fusion-cliobrain`)
+## [1.0.0-rc.2] — fusion ClioBrain (branche `feat/fusion-cliobrain`)
+
+> Livré dans la rc.2. La section portait un numéro `2.0.0` et la mention
+> « Unreleased », tous deux périmés : la fusion est bien dans la ligne 1.0.
 
 Absorbs [ClioBrain](https://github.com/inactinique/cliobrain) into
 ClioDeck as the **Brainstorm** mode. One app now covers the whole
