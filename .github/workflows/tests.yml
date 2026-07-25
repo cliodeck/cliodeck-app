@@ -57,6 +57,12 @@ jobs:
       - name: Tests
         run: npx vitest run --reporter=default
 
+      - name: Lint
+        # Config écrite en 2026-07 (#36) : 0 erreur exigé sur le code
+        # actuel ; les warnings (recensés, ~410) sont le stock à résorber
+        # règle par règle (#57) — ils ne bloquent pas.
+        run: npm run lint
+
       - name: Récapitulatif des tests sautés
         # Un skip est légitime (binding indisponible) ou suspect (une suite
         # entière qui cesse de tourner sans qu'on le remarque). On le rend
@@ -65,9 +71,6 @@ jobs:
         run: npx vitest run --reporter=json --outputFile=/tmp/vitest.json || true
 
 # Non inclus, volontairement :
-#  - `npm run lint` : aucune configuration ESLint n'existe dans le dépôt
-#    (`eslint .` échoue par absence de config, pas par faute de code).
-#    À ajouter au workflow le jour où une configuration est écrite.
 #  - Les tests Ollama en direct : ils exigent un serveur local ; leur garde
 #    (`ollamaAvailable`) les saute proprement ici.
 #  - La construction des artefacts distribuables (electron-builder) : c'est

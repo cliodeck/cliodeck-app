@@ -384,7 +384,7 @@ export class TropyOCRPipeline {
 
     // Reconstruire les lignes (approximation: une TextLine = une ligne)
     // Pour une meilleure reconstruction, il faudrait parser la structure complète
-    let currentLine: string[] = [];
+    const currentLine: string[] = [];
     const textLineMatches = content.match(/<TextLine[\s\S]*?<\/TextLine>/gi) || [];
 
     for (const textLineXml of textLineMatches) {

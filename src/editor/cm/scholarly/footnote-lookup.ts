@@ -110,7 +110,7 @@ export function citationAt(
   state: EditorState,
   pos: number
 ): { keys: string[]; from: number; to: number } | null {
-  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
+  const node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
   for (let n: SyntaxNode | null = node; n; n = n.parent) {
     if (n.name === 'PandocCitation') {
       const keys = n
