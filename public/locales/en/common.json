@@ -579,7 +579,20 @@
       "openUnavailable": "Source opening unavailable (preload missing).",
       "untrackablePdf": "PDF document not traceable (missing documentId).",
       "untrackableTropy": "Tropy source not traceable (missing itemId).",
-      "untrackableNote": "Obsidian note not traceable (missing path)."
+      "untrackableNote": "Obsidian note not traceable (missing path).",
+      "securityFlagged": "Source flagged by the security inspector",
+      "securityHint": "Full detail in Settings → Security → Detected events.",
+      "securityKind": {
+        "suspicious_instruction": "Suspicious instruction:",
+        "external_url": "External URL:",
+        "unusual_encoding": "Unusual encoding:",
+        "prompt_injection_blocked": "Prompt injection blocked:"
+      },
+      "securitySeverity": {
+        "low": "low severity",
+        "medium": "medium severity",
+        "high": "high severity"
+      }
     },
     "source": "Source",
     "page": "Page",

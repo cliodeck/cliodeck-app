@@ -63,6 +63,12 @@ export interface BrainstormSource {
   /** Manuscrit : chapitre d'origine. */
   chapterId?: string;
   lineNumber?: number;
+  /**
+   * Événements de l'inspecteur de sécurité attachés à CE chunk (#8) —
+   * alimente le badge « source signalée » de la surface de chat. Absent
+   * quand rien n'a été détecté.
+   */
+  securityEvents?: SecurityEvent[];
 }
 
 /**
@@ -72,7 +78,24 @@ export interface BrainstormSource {
  * for the citation click-through flow (`sources:open-pdf`,
  * `sources:reveal-tropy`, `sources:open-note`).
  */
-export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource[] {
+/** Indexe les événements de l'inspecteur par chunk (#8). */
+function groupEventsByChunk(
+  events: SecurityEvent[]
+): Map<string, SecurityEvent[]> | undefined {
+  if (events.length === 0) return undefined;
+  const map = new Map<string, SecurityEvent[]>();
+  for (const e of events) {
+    const list = map.get(e.chunkId);
+    if (list) list.push(e);
+    else map.set(e.chunkId, [e]);
+  }
+  return map;
+}
+
+export function hitsToSources(
+  hits: MultiSourceSearchResult[],
+  securityEventsByChunk?: Map<string, SecurityEvent[]>
+): BrainstormSource[] {
   return hits.map((h) => {
     const kind: BrainstormSource['kind'] =
       h.sourceType === 'primary'
@@ -94,6 +117,11 @@ export function hitsToSources(hits: MultiSourceSearchResult[]): BrainstormSource
       similarity: h.similarity,
       relativePath: vaultSrc?.relativePath,
     };
+
+    const events = securityEventsByChunk?.get(h.chunk.id);
+    if (events && events.length > 0) {
+      base.securityEvents = events;
+    }
 
     if (h.sourceType === 'secondary') {
       // SearchResult: chunk.documentId + chunk.pageNumber + chunk.startPosition.
@@ -517,7 +545,8 @@ class FusionChatService {
             // Le manuscrit est un quatrième corpus : ce que l'auteur a déjà
             // écrit. Désactivable par `rag.indexManuscript`.
             const includeManuscript = manuscriptIndexService.isEnabled();
-            const { hits, manuscriptHits, stats } = await retrievalService.searchWithStats({
+            const { hits, manuscriptHits, stats, securityEvents } =
+              await retrievalService.searchWithStats({
               query: lastUser,
               sourceType,
               includeVault,
@@ -584,7 +613,7 @@ class FusionChatService {
                 formatContextAsSystemPrompt(effectiveHits) +
                 formatManuscriptContext(ownHits, effectiveHits.length),
               sources: [
-                ...hitsToSources(effectiveHits),
+                ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
                 ...manuscriptHitsToSources(ownHits),
               ],
               explanation: {

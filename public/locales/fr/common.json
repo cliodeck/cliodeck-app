@@ -579,7 +579,20 @@
       "openUnavailable": "Ouverture de sources indisponible (preload manquant).",
       "untrackablePdf": "Document PDF non traçable (documentId manquant).",
       "untrackableTropy": "Source Tropy non traçable (itemId manquant).",
-      "untrackableNote": "Note Obsidian non traçable (chemin manquant)."
+      "untrackableNote": "Note Obsidian non traçable (chemin manquant).",
+      "securityFlagged": "Source signalée par l'inspecteur de sécurité",
+      "securityHint": "Détail complet dans Réglages → Sécurité → Événements détectés.",
+      "securityKind": {
+        "suspicious_instruction": "Instruction suspecte :",
+        "external_url": "URL externe :",
+        "unusual_encoding": "Encodage inhabituel :",
+        "prompt_injection_blocked": "Injection de prompt bloquée :"
+      },
+      "securitySeverity": {
+        "low": "sévérité faible",
+        "medium": "sévérité moyenne",
+        "high": "sévérité haute"
+      }
     },
     "source": "Source",
     "page": "Page",
