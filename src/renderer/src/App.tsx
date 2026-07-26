@@ -9,6 +9,7 @@ import { ConfirmDialog } from './components/common/ConfirmDialog';
 import { ErrorFallback } from './components/ErrorFallback';
 import { useMenuShortcuts } from './hooks/useMenuShortcuts';
 import { useUsageModeMirror } from './hooks/useUsageModeMirror';
+import { useSaveOnQuit } from './hooks/useSaveOnQuit';
 import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
 import { useEditorStore } from './stores/editorStore';
@@ -25,6 +26,11 @@ function App() {
 
   // Mirror the active workspace mode into the main-process usage journal
   useUsageModeMirror();
+
+  // Vider l'éditeur sur le disque avant que l'application ne se ferme.
+  // Monté ici, au-dessus de l'éditeur : un panneau démonté ne doit pas
+  // faire disparaître le filet.
+  useSaveOnQuit();
 
   // Initialiser la langue
   const initializeLanguage = useLanguageStore((state) => state.initializeLanguage);

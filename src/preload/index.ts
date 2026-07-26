@@ -584,6 +584,25 @@ const api = {
   },
 
   /**
+   * Cycle de vie de l'application.
+   *
+   * Le main demande au renderer de vider l'éditeur avant de quitter, et
+   * attend son accusé — sans quoi `Cmd+Q` juste après une frappe perdait le
+   * texte non encore sauvegardé.
+   */
+  lifecycle: {
+    onFlushBeforeQuit: (callback: () => void): (() => void) => {
+      const listener = (): void => callback();
+      ipcRenderer.on('app:flush-before-quit', listener);
+      return () => {
+        ipcRenderer.removeListener('app:flush-before-quit', listener);
+      };
+    },
+    /** Accusé : le renderer a fini d'écrire, la sortie peut se poursuivre. */
+    flushDone: () => ipcRenderer.send('app:flush-done'),
+  },
+
+  /**
    * Corpus manuscrit — le texte de l'auteur, indexé comme quatrième corpus.
    *
    * Les deux handlers existaient côté main mais n'étaient liés nulle part
