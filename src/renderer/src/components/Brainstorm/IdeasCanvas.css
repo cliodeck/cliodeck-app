@@ -16,7 +16,7 @@
   position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 10;
+  z-index: var(--z-docked);
   display: flex;
   align-items: center;
   gap: 4px;

@@ -177,7 +177,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
 }
 
 .create-project-content {
@@ -372,7 +372,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-dropdown);
   gap: var(--spacing-md);
 }
 

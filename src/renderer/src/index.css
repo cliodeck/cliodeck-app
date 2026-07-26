@@ -63,7 +63,7 @@
   position: absolute;
   left: 0.5rem;
   top: -100px;
-  z-index: 9999;
+  z-index: var(--z-skip-link);
   padding: 0.5rem 1rem;
   background: var(--color-accent);
   color: var(--text-primary);
@@ -175,6 +175,32 @@
   --scrollbar-track: var(--bg-app);
   --scrollbar-thumb: #424242;
   --scrollbar-thumb-hover: #4e4e4e;
+
+  /* === SUPERPOSITION ===
+     Une échelle déclarée, parce qu'il n'y en avait aucune : le dépôt
+     employait 1, 10, 40, 100, 900, 1000, 1100, 9000, 9999 et 10000 au
+     jugé. Deux panneaux flottants voisins se retrouvaient ainsi à 1000
+     et 40 — celui des brouillons disparaissait sous celui des
+     similarités, sans que rien ne l'indique.
+
+     Les valeurs reprennent les paliers DÉJÀ employés plutôt que d'en
+     imposer de nouveaux : l'ordre existant traduit des intentions justes
+     (un dialogue de confirmation doit passer au-dessus d'une modale, qui
+     l'a souvent ouvert ; une notification doit rester lisible par-dessus
+     une modale). Seuls les panneaux flottants changent de palier, pour
+     cesser d'être au niveau des modales.
+
+     Toute nouvelle surface prend un de ces tokens plutôt qu'un nombre,
+     sans quoi l'échelle se redéfait aussitôt. */
+  --z-docked: 10;          /* panneaux ancrés dans la mise en page */
+  --z-dropdown: 100;       /* listes déroulantes, popovers */
+  --z-floating: 500;       /* panneaux flottants (similarités, brouillons) */
+  --z-chrome: 900;         /* boutons flottants de l'habillage */
+  --z-modal: 1000;         /* modales et leur voile */
+  --z-modal-raised: 1100;  /* surface ouverte DEPUIS une modale */
+  --z-toast: 9000;         /* notifications */
+  --z-skip-link: 9999;     /* lien d'évitement clavier */
+  --z-dialog: 10000;       /* alerte / confirmation — au-dessus de tout */
 
 }
 

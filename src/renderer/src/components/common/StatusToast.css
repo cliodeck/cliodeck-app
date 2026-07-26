@@ -2,7 +2,7 @@
   position: fixed;
   bottom: 36px; /* above the status bar */
   right: 16px;
-  z-index: 9000;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column-reverse;
   gap: 8px;

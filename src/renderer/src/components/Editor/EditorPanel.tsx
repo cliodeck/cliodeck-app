@@ -40,7 +40,9 @@ import './EditorPanel.css';
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const { loadFile, saveFile, setContent, insertFormatting } = useEditorStore();
-  const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
+  const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } =
+    useSimilarityStore();
+  const closeSimilarityPanel = useSimilarityStore((s) => s.closePanel);
 
   // Chantier « même éditeur » : un projet presentation garde CE panneau —
   // la toolbar gagne une section slides et Navigator/Preview/Génération
@@ -55,6 +57,21 @@ export const EditorPanel: React.FC = () => {
   const draftsCount = useDraftsStore((s) => s.drafts.length);
   const isDraftsPanelOpen = useDraftsStore((s) => s.isPanelOpen);
   const toggleDraftsPanel = useDraftsStore((s) => s.togglePanel);
+  const closeDraftsPanel = useDraftsStore((s) => s.closePanel);
+
+  // Les deux panneaux flottants occupent le MÊME coin de l'écran : les
+  // ouvrir ensemble en masquait un derrière l'autre, son bouton restant
+  // pourtant en état actif. Ils s'excluent donc. C'est ici que ça se règle,
+  // et non dans les stores, qui deviendraient mutuellement dépendants —
+  // et parce que c'est le seul écran où les deux coexistent.
+  const showSimilarityPanel = (): void => {
+    closeDraftsPanel();
+    openSimilarityPanel();
+  };
+  const showDraftsPanel = (): void => {
+    closeSimilarityPanel();
+    toggleDraftsPanel();
+  };
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
   // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
@@ -322,7 +339,7 @@ export const EditorPanel: React.FC = () => {
           )}
           <button
             className={`toolbar-btn ${isSimilarityPanelOpen ? 'active' : ''}`}
-            onClick={openSimilarityPanel}
+            onClick={showSimilarityPanel}
             title={t('similarity.title')}
           >
             <Search size={18} strokeWidth={1.5} />
@@ -330,7 +347,7 @@ export const EditorPanel: React.FC = () => {
           {!isPresentation && (
             <button
               className={`toolbar-btn ${isDraftsPanelOpen ? 'active' : ''}`}
-              onClick={toggleDraftsPanel}
+              onClick={showDraftsPanel}
               title={t('drafts.title')}
               style={{ position: 'relative' }}
             >
