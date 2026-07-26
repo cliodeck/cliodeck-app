@@ -133,4 +133,6 @@ La version 4 abandonne le chemin CommonJS `legacy/build/pdf.js` que
 `pdf-extract-worker.ts` charge par `require()`. Le bump imposerait donc de
 réécrire l'amorçage de l'ingestion PDF. Fait en pleine RC, ce serait
 prendre un risque réel sur le chemin d'entrée du corpus pour supprimer un
-risque nul. **À faire en rc.5**, avec la vérification qui va avec.
+risque nul. **À faire en rc.5**, avec la vérification qui va avec : [#77](https://github.com/cliodeck/cliodeck-app/issues/77), qui détaille la réécriture de l'amorçage et les contrôles d'extraction à passer.
+
+Cette immunité repose sur un **invariant non gardé** : le jour où un aperçu de PDF rendu est ajouté, la CVE devient exploitable sans que rien ne le signale. L'issue propose un test qui échoue si `page.render(` apparaît dans le code.
