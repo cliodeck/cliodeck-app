@@ -68,36 +68,75 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          found=0
-          for f in release/*.AppImage; do
-            found=1
-            arch=$(readelf -h "$f" | awk -F: '/Machine:/ {gsub(/^ +/,"",$2); print $2}')
-            echo "$f → $arch"
+
+          verifier_elf() { # $1 = binaire ELF attendu en x86-64
+            local arch
+            arch=$(readelf -h "$1" | awk -F: '/Machine:/ {gsub(/^ +/,"",$2); print $2}')
+            echo "  $1 → $arch"
             case "$arch" in
-              *X86-64*) ;;
-              *) echo "::error::$f n'est pas x86-64 mais « $arch »"; exit 1 ;;
+              *X86-64*) return 0 ;;
+              *) echo "::error::$1 n'est pas x86-64 mais « $arch »"; return 1 ;;
             esac
+          }
+
+          # L'AppImage EST un exécutable ELF : on la lit directement.
+          appimages=0
+          for f in release/*.AppImage; do
+            appimages=1
+            verifier_elf "$f"
           done
-          if [ "$found" -eq 0 ]; then
-            echo "::error::aucun AppImage produit dans release/"
-            exit 1
-          fi
+          [ "$appimages" -eq 1 ] || { echo "::error::aucun AppImage produit"; exit 1; }
+
+          # Le .deb, lui, est une archive : son en-tete declare une
+          # architecture, et son contenu la respecte ou non. On verifie les
+          # deux — un paquet qui s'annonce amd64 en embarquant de l'aarch64
+          # s'installerait sans broncher puis refuserait de demarrer.
+          debs=0
+          for f in release/*.deb; do
+            debs=1
+            declaree=$(dpkg-deb --field "$f" Architecture)
+            echo "$f → déclare « $declaree »"
+            [ "$declaree" = "amd64" ] || { echo "::error::$f déclare « $declaree »"; exit 1; }
+            rm -rf /tmp/deb-check && mkdir -p /tmp/deb-check
+            dpkg-deb --extract "$f" /tmp/deb-check
+            binaire=$(find /tmp/deb-check -type f -name cliodeck -perm -u+x | head -1)
+            [ -n "$binaire" ] || { echo "::error::exécutable introuvable dans $f"; exit 1; }
+            verifier_elf "$binaire"
+          done
+          [ "$debs" -eq 1 ] || { echo "::error::aucun .deb produit"; exit 1; }
+
           ls -lh release/*.AppImage release/*.deb
 
       # Les fichiers publiés portent un préfixe de plateforme, posé à la
       # main jusqu'ici. On le reproduit pour que la documentation — qui
       # cite ces noms — reste vraie.
+      #
+      # electron-builder ne suffixe l'architecture QUE lorsqu'elle n'est pas
+      # celle par défaut : l'AppImage arm64 s'appelle `…-arm64.AppImage`,
+      # celle-ci `….AppImage` tout court. Sur une page de release les deux se
+      # retrouvent côte à côte et la x86_64 est alors celle qui ne dit rien —
+      # exactement l'ambiguïté qui a fait télécharger un binaire arm64 à des
+      # utilisateurs x86_64. On l'écrit donc explicitement.
       - name: Renommer selon la convention de publication
         id: rename
         run: |
           set -euo pipefail
           mkdir -p upload
           version=$(node -p "require('./package.json').version")
+
+          marquer() { # ajoute -x86_64 avant l'extension si aucune archi n'est nommée
+            local base="$1" ext="$2"
+            case "$base" in
+              *x86_64*|*amd64*|*x64*) echo "$base" ;;
+              *) echo "${base%$ext}-x86_64$ext" ;;
+            esac
+          }
+
           for f in release/*.AppImage; do
-            cp "$f" "upload/Linux.AppImage.-.$(basename "$f")"
+            cp "$f" "upload/Linux.AppImage.-.$(marquer "$(basename "$f")" .AppImage)"
           done
           for f in release/*.deb; do
-            cp "$f" "upload/Linux.Debian.-.$(basename "$f")"
+            cp "$f" "upload/Linux.Debian.-.$(marquer "$(basename "$f")" .deb)"
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -1 upload/
