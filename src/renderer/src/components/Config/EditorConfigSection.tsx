@@ -30,7 +30,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             <label className="config-label">
               {t('editor.fontSize')}
               <span className="config-help">
-                Taille du texte dans l'éditeur Markdown
+                {t('editor.fontSizeHelp')}
               </span>
             </label>
             <div className="config-input-group">
@@ -52,9 +52,9 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
               />
             </div>
             <div className="config-description">
-              Taille actuelle: {config.fontSize}px
+              {t('editor.fontSizeCurrent', { size: config.fontSize })}
               <br />
-              <small>S'applique uniquement à l'éditeur de texte principal</small>
+              <small>{t('editor.fontSizeScope')}</small>
             </div>
           </div>
 
@@ -69,7 +69,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
               />
               {t('editor.wordWrap')}
               <span className="config-help">
-                Les longues lignes sont automatiquement coupées pour rester visibles
+                {t('editor.wordWrapHelp')}
               </span>
             </label>
           </div>
@@ -85,7 +85,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
               />
               {t('editor.minimap')}
               <span className="config-help">
-                Barre de défilement avec aperçu miniature du document (comme dans VS Code)
+                {t('editor.minimapHelp')}
               </span>
             </label>
           </div>
@@ -95,7 +95,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             <label className="config-label">
               {t('editor.fontFamily')}
               <span className="config-help">
-                Choisissez la police de l'éditeur
+                {t('editor.fontFamilyHelp')}
               </span>
             </label>
             <select
@@ -103,12 +103,12 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
               onChange={(e) => handleFieldChange('fontFamily', e.target.value)}
               className="config-select"
             >
-              <optgroup label="Prose">
-                <option value="serif">Sérif (Palatino, Georgia)</option>
-                <option value="sans">Sans-sérif (police système)</option>
+              <optgroup label={t('editor.fontGroup.prose')}>
+                <option value="serif">{t('editor.font.serif')}</option>
+                <option value="sans">{t('editor.font.sans')}</option>
               </optgroup>
-              <optgroup label="Monospace">
-                <option value="system">Polices système (SF Mono, Monaco, Consolas)</option>
+              <optgroup label={t('editor.fontGroup.mono')}>
+                <option value="system">{t('editor.font.system')}</option>
                 <option value="jetbrains">JetBrains Mono</option>
                 <option value="fira">Fira Code</option>
                 <option value="source">Source Code Pro</option>
@@ -117,7 +117,7 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
             </select>
             <div className="config-description">
               <small>
-                Les polices de prose et les polices système sont toujours disponibles. JetBrains Mono, Fira Code, Source Code Pro et Cascadia Code nécessitent d'être installées sur votre système.
+                {t('editor.fontAvailability')}
               </small>
             </div>
           </div>

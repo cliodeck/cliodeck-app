@@ -31,10 +31,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
           {/* Backend selector */}
           <div className="config-field">
             <label className="config-label">
-              Backend de génération
+              {t('llm.backend.label')}
               <span className="config-help">
-                Choisis le fournisseur LLM utilisé pour la génération.
-                Les embeddings restent toujours via Ollama (rapide, local).
+                {t('llm.backend.help')}
               </span>
             </label>
             <select
@@ -42,11 +41,11 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               onChange={(e) => handleFieldChange('backend', e.target.value)}
               className="config-input"
             >
-              <option value="ollama">Ollama (local)</option>
-              <option value="claude">Anthropic Claude (API cloud)</option>
-              <option value="openai">OpenAI (API cloud)</option>
-              <option value="mistral">Mistral (API cloud)</option>
-              <option value="gemini">Google Gemini (API cloud)</option>
+              <option value="ollama">{t('llm.backend.ollama')}</option>
+              <option value="claude">{t('llm.backend.claude')}</option>
+              <option value="openai">{t('llm.backend.openai')}</option>
+              <option value="mistral">{t('llm.backend.mistral')}</option>
+              <option value="gemini">{t('llm.backend.gemini')}</option>
             </select>
           </div>
 
@@ -54,9 +53,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <>
               <div className="config-field">
                 <label className="config-label">
-                  Clé API Anthropic
+                  {t('llm.apiKey.anthropic')}
                   <span className="config-help">
-                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                    {t('llm.apiKey.help')}
                   </span>
                 </label>
                 <input
@@ -69,7 +68,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
               </div>
               <div className="config-field">
-                <label className="config-label">Modèle Claude</label>
+                <label className="config-label">{t('llm.model.claude')}</label>
                 <input
                   type="text"
                   value={config.claudeModel ?? ''}
@@ -79,7 +78,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    Recommandés : <code>claude-opus-4-6</code>,{' '}
+                    {t('llm.model.recommended')} <code>claude-opus-4-6</code>,{' '}
                     <code>claude-sonnet-4-6</code>, <code>claude-haiku-4-5-20251001</code>
                   </small>
                 </div>
@@ -91,9 +90,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <>
               <div className="config-field">
                 <label className="config-label">
-                  Clé API OpenAI
+                  {t('llm.apiKey.openai')}
                   <span className="config-help">
-                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                    {t('llm.apiKey.help')}
                   </span>
                 </label>
                 <input
@@ -106,7 +105,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
               </div>
               <div className="config-field">
-                <label className="config-label">Modèle OpenAI</label>
+                <label className="config-label">{t('llm.model.openai')}</label>
                 <input
                   type="text"
                   value={config.openaiModel ?? ''}
@@ -116,7 +115,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    Exemples : <code>gpt-4o</code>, <code>gpt-4o-mini</code>,{' '}
+                    {t('llm.model.examples')} <code>gpt-4o</code>, <code>gpt-4o-mini</code>,{' '}
                     <code>gpt-4-turbo</code>, <code>o1-mini</code>
                   </small>
                 </div>
@@ -128,9 +127,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <>
               <div className="config-field">
                 <label className="config-label">
-                  Clé API Mistral
+                  {t('llm.apiKey.mistral')}
                   <span className="config-help">
-                    Stockée chiffrée via le keyring système (jamais en clair sur disque).
+                    {t('llm.apiKey.help')}
                   </span>
                 </label>
                 <input
@@ -143,7 +142,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
               </div>
               <div className="config-field">
-                <label className="config-label">Modèle Mistral</label>
+                <label className="config-label">{t('llm.model.mistral')}</label>
                 <input
                   type="text"
                   value={config.mistralModel ?? ''}
@@ -153,9 +152,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    Exemples : <code>mistral-large-latest</code>,{' '}
-                    <code>mistral-small-latest</code>, <code>open-mistral-nemo</code>.
-                    Particulièrement bon en français.
+                    {t('llm.model.examples')} <code>mistral-large-latest</code>,{' '}
+                    <code>mistral-small-latest</code>, <code>open-mistral-nemo</code>.{' '}
+                    {t('llm.model.mistralNote')}
                   </small>
                 </div>
               </div>
@@ -166,10 +165,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <>
               <div className="config-field">
                 <label className="config-label">
-                  Clé API Google AI Studio
+                  {t('llm.apiKey.google')}
                   <span className="config-help">
-                    Stockée chiffrée via le keyring système. À créer sur{' '}
-                    <code>aistudio.google.com</code>.
+                    {t('llm.apiKey.helpGoogle')} <code>aistudio.google.com</code>.
                   </span>
                 </label>
                 <input
@@ -182,7 +180,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
               </div>
               <div className="config-field">
-                <label className="config-label">Modèle Gemini</label>
+                <label className="config-label">{t('llm.model.gemini')}</label>
                 <input
                   type="text"
                   value={config.geminiModel ?? ''}
@@ -192,7 +190,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    Exemples : <code>gemini-2.0-flash</code>,{' '}
+                    {t('llm.model.examples')} <code>gemini-2.0-flash</code>,{' '}
                     <code>gemini-2.0-flash-lite</code>,{' '}
                     <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code>.
                   </small>
@@ -204,12 +202,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
           {backend !== 'ollama' && backend !== 'claude' && (
             <div className="config-field">
               <label className="config-label">
-                Utiliser ce fournisseur pour les embeddings aussi
+                {t('llm.cloudEmbeddings.label')}
                 <span className="config-help">
-                  Par défaut les embeddings passent par Ollama. Cochez si
-                  vous n'avez pas d'Ollama local. Changer cette option
-                  invalide l'index vectoriel (dimensions différentes) —
-                  il faudra réindexer vos PDFs.
+                  {t('llm.cloudEmbeddings.help')}
                 </span>
               </label>
               <div className="config-input-group">
@@ -226,7 +221,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                       : backend === 'openai'
                         ? 'text-embedding-3-small (1536 dim)'
                         : 'mistral-embed (1024 dim)'
-                    : 'Ollama (local)'}
+                    : t('llm.backend.ollama')}
                 </span>
               </div>
             </div>
@@ -294,11 +289,11 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                   ? `${availableModels.length} ${t('llm.modelsAvailable')}`
                   : t('llm.noModelsLoaded')}
                 <br />
-                • gemma2:2b (rapide, CPU)
+                {t('llm.chatModelHints.fast')}
                 <br />
-                • phi3:mini (équilibré)
+                {t('llm.chatModelHints.balanced')}
                 <br />
-                • mistral:7b-instruct (qualité, français)
+                {t('llm.chatModelHints.quality')}
               </small>
             </div>
           </div>
@@ -335,11 +330,11 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <small style={{ display: 'block', marginTop: '8px' }}>
                 <strong>{t('llm.embeddingStrategyRecommended')}</strong>
                 <br />
-                • <code>nomic-embed-text</code> - 768 dim, multilingue, recommandé
+                • <code>nomic-embed-text</code> — {t('llm.embeddingHints.nomic')}
                 <br />
-                • <code>mxbai-embed-large</code> - 1024 dim, très performant
+                • <code>mxbai-embed-large</code> — {t('llm.embeddingHints.mxbai')}
                 <br />
-                • <code>all-minilm</code> - 384 dim, léger et rapide
+                • <code>all-minilm</code> — {t('llm.embeddingHints.minilm')}
               </small>
             </div>
           </div>
