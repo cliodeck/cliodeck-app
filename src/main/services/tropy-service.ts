@@ -547,6 +547,13 @@ class TropyService {
       this.watcher = new TropyWatcher();
     }
 
+    // Le watcher est REUTILISE d'un appel à l'autre : sans purge, chaque
+    // bascule de la synchro automatique empilait un écouteur de plus, et
+    // un seul enregistrement dans Tropy déclenchait alors autant de `sync()`
+    // concurrents qu'il y avait eu d'activations — sur le même store.
+    this.watcher.removeAllListeners('change');
+    this.watcher.removeAllListeners('error');
+
     // Configurer le callback de changement
     this.watcher.on('change', async (changedPath: string) => {
       console.log(`📝 Tropy file changed: ${changedPath}`);
@@ -583,6 +590,11 @@ class TropyService {
    * Arrête la surveillance
    */
   stopWatching(): void {
+    // Retirer les écouteurs AVANT de démonter : `unwatch()` ne les touche
+    // pas, et un watcher gardé en champ les conserverait pour la prochaine
+    // activation.
+    this.watcher?.removeAllListeners('change');
+    this.watcher?.removeAllListeners('error');
     this.watcher?.unwatch();
   }
 
