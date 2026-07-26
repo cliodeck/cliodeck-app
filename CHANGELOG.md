@@ -259,7 +259,8 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   rendu canvas, que ClioDeck n'appelle jamais — l'extraction se limite au
   texte, dans un processus fils isolé. La version 4 abandonne le chemin
   CommonJS que le worker charge, ce qui imposerait de réécrire l'amorçage de
-  l'ingestion PDF. Décision consignée dans l'ADR 0005 : à faire en rc.5.
+  l'ingestion PDF. Décision consignée dans l'ADR 0005 et suivie en
+  [#77](https://github.com/cliodeck/cliodeck-app/issues/77) : à faire en rc.5.
 - **L'inspecteur de sources est en détection seule par défaut** (`warn`) :
   aucun extrait n'est jamais écarté. Arbitrage assumé — une source primaire
   contient légitimement des impératifs — désormais écrit dans l'ADR 0005,
