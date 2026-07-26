@@ -2,6 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import './BibImportModeModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface BibImportModeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,6 +18,9 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   onMerge,
   currentCitationCount,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   const hasCitations = currentCitationCount > 0;

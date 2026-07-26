@@ -2,6 +2,7 @@ import React from 'react';
 import { X, CheckCircle } from 'lucide-react';
 import './BibImportSummaryModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface BibImportSummaryModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -19,6 +20,9 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
   newCitations,
   duplicates,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   return (

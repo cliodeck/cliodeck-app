@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, AlertCircle, Plus, Edit, Trash2, Check } from 'lucide-react';
 import './SyncPreviewModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface Citation {
   id: string;
   title: string;
@@ -39,6 +40,9 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
   diff,
   onApplySync,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const [strategy, setStrategy] = useState<'local' | 'remote' | 'manual'>('remote');
   const [selectedAdded, setSelectedAdded] = useState<Set<string>>(
     new Set(diff.added.map((c) => c.id))

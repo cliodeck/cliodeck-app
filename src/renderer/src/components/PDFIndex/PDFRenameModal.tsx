@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, FileText, Edit2, Check } from 'lucide-react';
 import './PDFRenameModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface PDFFile {
   path: string;
   suggestedName: string;
@@ -22,6 +23,9 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   files,
   onConfirm,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const [pdfFiles, setPdfFiles] = useState<PDFFile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);

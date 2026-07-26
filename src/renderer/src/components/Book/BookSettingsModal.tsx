@@ -15,12 +15,16 @@ import { useProjectStore, type BookSettings } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import './BookSettingsModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface BookSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const BookSettingsModal: React.FC<BookSettingsModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const bookSettings = useProjectStore((s) => s.bookSettings);
   const updateBookSettings = useProjectStore((s) => s.updateBookSettings);

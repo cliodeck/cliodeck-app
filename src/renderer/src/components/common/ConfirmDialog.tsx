@@ -7,7 +7,7 @@ import './ConfirmDialog.css'
 export function ConfirmDialog() {
   const { t } = useTranslation('common')
   const { confirmOpen, confirmMessage, confirmTitle, resolveConfirm } = useDialogStore()
-  const confirmButtonRef = useRef<HTMLButtonElement>(null)
+  const cancelButtonRef = useRef<HTMLButtonElement>(null)
 
   const dialogRef = useFocusTrap({
     active: confirmOpen,
@@ -15,10 +15,16 @@ export function ConfirmDialog() {
     restoreFocus: true,
   })
 
-  // Focus the confirm button when dialog opens
+  // Le focus initial va sur ANNULER, jamais sur Confirmer.
+  //
+  // Ce dialogue sert aux actions destructrices — purge du journal de
+  // recherche, détachement de vault. Avec le focus sur Confirmer, deux
+  // Entrée successifs suffisaient à effacer tout le journal, la purge
+  // demandant justement deux confirmations d'affilée. Le geste par défaut
+  // doit être celui qui ne détruit rien.
   useEffect(() => {
-    if (confirmOpen && confirmButtonRef.current) {
-      confirmButtonRef.current.focus()
+    if (confirmOpen && cancelButtonRef.current) {
+      cancelButtonRef.current.focus()
     }
   }, [confirmOpen])
 
@@ -49,13 +55,13 @@ export function ConfirmDialog() {
         </div>
         <div className="confirm-dialog-footer">
           <button
+            ref={cancelButtonRef}
             className="confirm-dialog-btn-cancel"
             onClick={() => resolveConfirm(false)}
           >
             {t('dialog.cancel')}
           </button>
           <button
-            ref={confirmButtonRef}
             className="confirm-dialog-btn-confirm"
             onClick={() => resolveConfirm(true)}
           >

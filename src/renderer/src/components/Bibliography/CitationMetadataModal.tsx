@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Save, FileText } from 'lucide-react';
 import { TagManager } from './TagManager';
 import './CitationMetadataModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface Citation {
   id: string;
   title: string;
@@ -31,6 +32,9 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
   allTags,
   onSave,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const [editedCitation, setEditedCitation] = useState<Citation>(citation);
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');

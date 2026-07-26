@@ -4,6 +4,7 @@ import { X, FileText, Upload, FolderOpen, CheckCircle, AlertCircle } from 'lucid
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './TranscriptionImportModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface TranscriptionImportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -16,6 +17,9 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
   isOpen,
   onClose,
 }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { selectedSourceId, importTranscription, syncTPY } = usePrimarySourcesStore();
 

@@ -7,12 +7,16 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface PresentationExportModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const PresentationExportModal: React.FC<PresentationExportModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject } = useProjectStore();
   const { content } = useEditorStore();

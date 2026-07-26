@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { X, HelpCircle } from 'lucide-react';
 import './HelpModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface HelpModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,15 +25,9 @@ export const HelpModal: React.FC<HelpModalProps> = ({
   title,
   children,
 }) => {
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
-
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   return (

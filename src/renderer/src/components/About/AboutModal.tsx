@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { X, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import './AboutModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface AboutModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -55,6 +56,9 @@ const licenseGroups = dependencies.reduce<Record<string, Dependency[]>>((acc, de
 const licenseOrder = ['MIT', 'Apache-2.0', 'ISC', 'BlueOak-1.0.0', 'MIT / GPL-3.0'];
 
 export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const [creditsOpen, setCreditsOpen] = useState(false);
 

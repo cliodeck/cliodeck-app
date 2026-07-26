@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { X, ExternalLink } from 'lucide-react';
 import './ReportIssueModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface ReportIssueModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -19,6 +20,9 @@ const LABEL_MAP: Record<IssueType, string> = {
 };
 
 export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const [issueType, setIssueType] = useState<IssueType>('bug');
   const [title, setTitle] = useState('');
