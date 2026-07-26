@@ -1,0 +1,122 @@
+# Construction des distribuables Linux x86_64.
+#
+# Pourquoi un workflow plutôt qu'une ligne de configuration : la cible
+# `linux` de `package.json` ne déclare pas d'architecture, donc
+# electron-builder compile pour celle de la machine de build — un Mac
+# Apple Silicon, d'où des artefacts arm64 uniquement. Ajouter `x64` à la
+# configuration ne suffirait pas : les modules natifs (better-sqlite3,
+# hnswlib-node, node-llama-cpp, canvas) doivent être COMPILÉS pour
+# linux-x64, ce qu'un Mac arm64 ne sait pas faire sans Docker.
+#
+# Ce runner, lui, EST un linux-x64, et il compile déjà ces modules avec
+# succès à chaque exécution de la suite de tests. C'est donc la machine
+# qui convient ; il ne manquait qu'un travail de publication.
+#
+# Déclenchement MANUEL à dessein. Attacher automatiquement des binaires à
+# un tag, c'est découvrir le résultat en production. On lance, on vérifie
+# l'artefact, et on ne l'attache à une release que si on le demande
+# explicitement.
+name: Build Linux x86_64
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: >-
+          Tag auquel attacher les fichiers (ex. v1.0.0-rc.4).
+          Laisser vide pour ne produire qu'un artefact téléchargeable.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # appimagetool a besoin de FUSE 2. Le nom du paquet a changé sur
+      # Ubuntu 24.04 (`libfuse2t64`) : on tente les deux sans faire échouer
+      # le travail, la construction pouvant aboutir sans lui selon l'image.
+      - name: Dépendances système pour l'AppImage
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
+
+      - name: Installer les dépendances
+        # Le `postinstall` (electron-builder install-app-deps) compile les
+        # modules natifs pour l'ABI d'Electron, ici en x86_64.
+        run: npm ci
+
+      - name: Construire les distribuables x86_64
+        run: npm run build:linux-x64
+
+      # Le contrôle qui justifie ce workflow. Un AppImage porte le nom de
+      # son architecture mais rien ne garantit son contenu : c'est
+      # précisément ainsi qu'un binaire arm64 s'est retrouvé proposé à des
+      # utilisateurs x86_64. On lit l'en-tête ELF plutôt que le nom.
+      - name: Vérifier l'architecture produite
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for f in release/*.AppImage; do
+            found=1
+            arch=$(readelf -h "$f" | awk -F: '/Machine:/ {gsub(/^ +/,"",$2); print $2}')
+            echo "$f → $arch"
+            case "$arch" in
+              *X86-64*) ;;
+              *) echo "::error::$f n'est pas x86-64 mais « $arch »"; exit 1 ;;
+            esac
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::aucun AppImage produit dans release/"
+            exit 1
+          fi
+          ls -lh release/*.AppImage release/*.deb
+
+      # Les fichiers publiés portent un préfixe de plateforme, posé à la
+      # main jusqu'ici. On le reproduit pour que la documentation — qui
+      # cite ces noms — reste vraie.
+      - name: Renommer selon la convention de publication
+        id: rename
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          version=$(node -p "require('./package.json').version")
+          for f in release/*.AppImage; do
+            cp "$f" "upload/Linux.AppImage.-.$(basename "$f")"
+          done
+          for f in release/*.deb; do
+            cp "$f" "upload/Linux.Debian.-.$(basename "$f")"
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -1 upload/
+
+      - name: Publier l'artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cliodeck-linux-x64-${{ steps.rename.outputs.version }}
+          path: upload/
+          if-no-files-found: error
+          retention-days: 14
+
+      # N'a lieu QUE si un tag a été fourni explicitement au lancement.
+      - name: Attacher à la release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "${{ inputs.release_tag }}" >/dev/null
+          gh release upload "${{ inputs.release_tag }}" upload/* --clobber
+          echo "Fichiers attachés à ${{ inputs.release_tag }}."
