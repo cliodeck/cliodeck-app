@@ -27,7 +27,7 @@
     "build:renderer": "vite build",
     "build:all": "npm run typecheck && npm run build && npm run rebuild:native && electron-builder",
     "build:linux": "npm run build && npm run rebuild:native && electron-builder --linux",
-    "build:linux-x64": "npm run build && npm run rebuild:x64 && electron-builder --linux --x64",
+    "build:linux-x64": "npm run build && npm run rebuild:x64 && electron-builder --linux --x64 --publish never",
     "build:mac": "npm run build && npm run rebuild:native && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
     "build:dir": "npm run build && electron-builder --dir",

@@ -87,17 +87,33 @@ jobs:
       # Les fichiers publiés portent un préfixe de plateforme, posé à la
       # main jusqu'ici. On le reproduit pour que la documentation — qui
       # cite ces noms — reste vraie.
+      #
+      # electron-builder ne suffixe l'architecture QUE lorsqu'elle n'est pas
+      # celle par défaut : l'AppImage arm64 s'appelle `…-arm64.AppImage`,
+      # celle-ci `….AppImage` tout court. Sur une page de release les deux se
+      # retrouvent côte à côte et la x86_64 est alors celle qui ne dit rien —
+      # exactement l'ambiguïté qui a fait télécharger un binaire arm64 à des
+      # utilisateurs x86_64. On l'écrit donc explicitement.
       - name: Renommer selon la convention de publication
         id: rename
         run: |
           set -euo pipefail
           mkdir -p upload
           version=$(node -p "require('./package.json').version")
+
+          marquer() { # ajoute -x86_64 avant l'extension si aucune archi n'est nommée
+            local base="$1" ext="$2"
+            case "$base" in
+              *x86_64*|*amd64*|*x64*) echo "$base" ;;
+              *) echo "${base%$ext}-x86_64$ext" ;;
+            esac
+          }
+
           for f in release/*.AppImage; do
-            cp "$f" "upload/Linux.AppImage.-.$(basename "$f")"
+            cp "$f" "upload/Linux.AppImage.-.$(marquer "$(basename "$f")" .AppImage)"
           done
           for f in release/*.deb; do
-            cp "$f" "upload/Linux.Debian.-.$(basename "$f")"
+            cp "$f" "upload/Linux.Debian.-.$(marquer "$(basename "$f")" .deb)"
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -1 upload/
