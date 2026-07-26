@@ -126,6 +126,29 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   aucune raison de rester inaccessible à deux tiers des lecteurs.
 
   Parité des locales : **1685 clés** dans chacune des trois langues.
+- **Plus aucune chaîne visible n'est codée en dur.** Le critère a changé en
+  cours de route : « pas de français » ne suffisait pas, puisqu'une chaîne
+  anglaise en dur est tout aussi intraduisible. Un détecteur aveugle à la
+  langue en a trouvé **181 dans 29 fichiers** — là où la recherche du seul
+  français n'en voyait que 27. L'essentiel était anglais et concentré sur la
+  bibliothèque : statistiques de bibliographie, métadonnées de référence,
+  aperçu de synchronisation Zotero, modales d'import. Le panneau de réglages
+  RAG du chat était à moitié traduit depuis toujours — la section Sources
+  passait par `t()`, la suite non.
+
+  Cas particulier, corrigé au passage : les **gabarits d'insertion écrivent
+  dans le manuscrit**, pas dans l'interface. « texte en gras », « Titre de la
+  slide » et « Notes du présentateur » arrivaient en français à l'intérieur du
+  document d'un germanophone.
+
+  Neuf chaînes restent volontairement en l'état, listées une par une dans le
+  garde-fou : le vocabulaire YAML du format de recettes, qui appartient à la
+  syntaxe, les amorces de clé d'API, qui sont des formats, et les endonymes du
+  sélecteur de langue — un germanophone cherche « Deutsch », pas « Allemand ».
+
+  L'ancien test anti-français, qui ne balayait que `components/Export/`, est
+  remplacé par un garde-fou couvrant tous les composants et toutes les
+  langues. Parité finale : **1864 clés** par langue.
 - **21 clés manquaient dans les trois locales à la fois**, dont une modale
   entière : l'import de transcriptions Transkribus, quinze clés, intégralement
   en repli anglais. Elles ont été trouvées en confrontant les appels `t()` du
@@ -183,12 +206,6 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
 
 ### Connu, non corrigé dans cette RC
 
-- **27 chaînes françaises codées en dur subsistent**, réparties sur neuf
-  composants hors des réglages — la plus fournie étant la configuration de
-  présentation (11). L'écran Préférences, lui, est intégralement traduit. Le
-  test anti-français du dépôt ne balaye toujours que `components/Export/` ;
-  le nouveau test de clés, lui, ne voit que les chaînes passant déjà par
-  `t()`.
 - **Les embeddings cloud ne passent par aucun consentement**, alors
   qu'indexer envoie l'intégralité du corpus au fournisseur. Réglage opt-in.
 - **Le piège de focus n'est actif que là où la ref est câblée** : `Échap`
