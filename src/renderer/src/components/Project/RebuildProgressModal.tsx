@@ -1,7 +1,9 @@
 import { useRebuildStore } from '../../stores/rebuildStore';
+import { useTranslation } from 'react-i18next';
 import './RebuildProgressModal.css';
 
 export function RebuildProgressModal() {
+  const { t } = useTranslation('common');
   const { isRebuilding, progress } = useRebuildStore();
 
   if (!isRebuilding) {
@@ -18,9 +20,9 @@ export function RebuildProgressModal() {
         aria-describedby="rebuild-modal-description"
       >
         <div className="rebuild-modal-header">
-          <h2 id="rebuild-modal-title">Building Search Indexes</h2>
+          <h2 id="rebuild-modal-title">{t('rebuild.title')}</h2>
           <p id="rebuild-modal-description" className="rebuild-modal-subtitle">
-            Optimizing search performance for your corpus...
+            {t('rebuild.subtitle')}
           </p>
         </div>
 
@@ -32,7 +34,7 @@ export function RebuildProgressModal() {
               aria-valuenow={progress.percentage}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-label="Index rebuild progress"
+              aria-label={t('rebuild.progressAria')}
               style={{ width: `${progress.percentage}%` }}
             />
           </div>

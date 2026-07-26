@@ -1432,7 +1432,8 @@
     "addInput": "Ajouter",
     "addStep": "Ajouter",
     "noInputs": "Aucun paramètre défini.",
-    "noSteps": "Aucune étape."
+    "noSteps": "Aucune étape.",
+    "required": "requis"
   },
   "mcp": {
     "title": "Clients MCP",
@@ -1612,7 +1613,8 @@
     "created": "Créée le",
     "delete": "Supprimer",
     "importObsidian": "Importer depuis le vault Obsidian",
-    "relatedIdeas": "Idées liées"
+    "relatedIdeas": "Idées liées",
+    "removeLink": "Supprimer le lien"
   },
   "exportHub": {
     "title": "Exporter",
@@ -2053,5 +2055,236 @@
       "noteTitle": "Note :",
       "note": "désactiver la compression envoie davantage de contexte au modèle. Cela peut améliorer la précision sur des documents très standardisés (procès-verbaux, registres d'archives), au prix de la latence et du coût."
     }
+  },
+  "biblioStats": {
+    "analyzing": "Analyse de la bibliographie…",
+    "loadFailed": "Le chargement des statistiques a échoué.",
+    "title": "Statistiques de la bibliographie",
+    "tabs": {
+      "overview": "Vue d'ensemble",
+      "authors": "Auteurs",
+      "publications": "Publications",
+      "tags": "Mots-clés",
+      "timeline": "Chronologie"
+    },
+    "totalCitations": "Références au total",
+    "uniqueAuthors": "Auteurs distincts",
+    "journals": "Revues",
+    "yearRange": "Années couvertes",
+    "avgAuthors": "Auteurs par référence (moyenne)",
+    "pdfCoverage": "Taux de PDF joints",
+    "byType": "Publications par type",
+    "topAuthors": "Auteurs les plus présents",
+    "topAuthorsHint": "Les auteurs les plus représentés dans votre bibliographie",
+    "topJournals": "Revues les plus présentes",
+    "topJournalsHint": "Les lieux de publication les plus fréquents",
+    "byYear": "Publications par année",
+    "noTags": "Aucun mot-clé",
+    "noTagsHint": "Ajoutez des mots-clés à vos références pour voir des statistiques.",
+    "tagStats": "Statistiques des mots-clés",
+    "tagStatsHint": "Les mots-clés les plus employés dans votre bibliographie",
+    "tagCoverage": "Références portant un mot-clé",
+    "growth": "Croissance de la bibliographie",
+    "growthHint": "Évolution cumulée et annuelle",
+    "cumulative": "Cumul",
+    "annual": "Par année"
+  },
+  "citationMeta": {
+    "title": "Modifier les métadonnées de la référence",
+    "tags": "Mots-clés",
+    "tagsHint": "Les mots-clés servent à organiser et filtrer vos références.",
+    "keywords": "Termes d'indexation",
+    "keywordsHint": "Séparez les termes par des virgules.",
+    "notes": "Notes",
+    "notesPlaceholder": "Vos notes sur cette référence…",
+    "notesHint": "Notes et commentaires personnels sur cette référence.",
+    "customFields": "Champs personnalisés",
+    "value": "Valeur",
+    "removeField": "Supprimer le champ",
+    "fieldName": "Nom du champ",
+    "fieldValue": "Valeur du champ",
+    "addField": "Ajouter un champ",
+    "customFieldsHint": "Ajoutez vos propres champs pour des informations particulières.",
+    "timestamps": "Horodatage",
+    "cancel": "Annuler",
+    "save": "Enregistrer"
+  },
+  "zoteroSync": {
+    "title": "Aperçu de la synchronisation Zotero",
+    "upToDate": "Votre bibliographie est à jour.",
+    "noChanges": "Aucun changement détecté depuis Zotero.",
+    "zoteroWinsHint": "Accepter tous les changements venus de Zotero. Les PDF locaux sont conservés.",
+    "localWins": "Priorité au local",
+    "localWinsHint": "N'ajouter que les nouvelles références. Les modifications locales sont gardées et les suppressions ignorées.",
+    "manual": "Choix manuel",
+    "manualHint": "Choisir précisément les changements à appliquer.",
+    "added": "Ajoutées",
+    "modified": "Modifiées",
+    "deleted": "Supprimées",
+    "unchanged": "Inchangées",
+    "selectAll": "Tout cocher",
+    "deselectAll": "Tout décocher",
+    "local": "Local",
+    "cancel": "Annuler",
+    "apply": "Appliquer"
+  },
+  "bibImport": {
+    "title": "Importer une bibliographie",
+    "youHaveBefore": "Vous avez actuellement",
+    "youHaveAfter": "dans votre bibliographie.",
+    "question": "Comment importer le nouveau fichier ?",
+    "replace": "Remplacer",
+    "replaceHint": "Supprimer toutes les références actuelles et les remplacer par celles du fichier.",
+    "merge": "Fusionner",
+    "empty": "Votre bibliographie est vide : le fichier y sera simplement chargé.",
+    "cancel": "Annuler",
+    "import": "Importer"
+  },
+  "bibImportSummary": {
+    "title": "Import terminé",
+    "replaced": "Bibliographie remplacée.",
+    "total": "Références au total",
+    "merged": "Bibliographie fusionnée.",
+    "newAdded": "Nouvelles références ajoutées",
+    "duplicates": "Doublons ignorés"
+  },
+  "tagManager": {
+    "none": "Aucun mot-clé",
+    "remove": "Retirer le mot-clé",
+    "add": "Ajouter un mot-clé",
+    "noneAvailable": "Aucun mot-clé disponible",
+    "filter": "Filtrer par mots-clés"
+  },
+  "ragPanel": {
+    "title": "Réglages du RAG",
+    "refreshModels": "Recharger la liste des modèles",
+    "noModels": "Aucun modèle chargé. Ouvrez d'abord un projet, puis cliquez sur",
+    "sources": "Sources",
+    "refreshCollections": "Recharger les collections",
+    "allCollections": "Toutes les collections (sans filtre)",
+    "refreshDocuments": "Recharger les documents",
+    "allDocuments": "Tous les documents (sans filtre)",
+    "topKHelp": "Nombre d'extraits de documents à récupérer",
+    "timeoutHelp": "Délai d'attente maximal de la réponse",
+    "advanced": "Paramètres avancés",
+    "tokens": "jetons",
+    "useRecommended": "Valeur recommandée",
+    "promptLanguage": "Langue du prompt système",
+    "customPrompt": "Utiliser un prompt système personnalisé",
+    "customPromptHelp": "Remplacer le prompt système par défaut par le vôtre",
+    "customPromptLabel": "Prompt système personnalisé",
+    "customPromptPlaceholder": "Saisissez ici votre prompt système…",
+    "customPromptHint": "Ce prompt indique au modèle comment répondre à vos questions.",
+    "temperatureHelp": "Plus bas = plus ciblé, plus haut = plus inventif",
+    "topPHelp": "Seuil d'échantillonnage par noyau",
+    "topKTokensHelp": "Nombre de jetons pris en considération",
+    "repeatPenaltyHelp": "Pénalise les répétitions",
+    "reset": "Rétablir les valeurs de la configuration"
+  },
+  "presentationConfig": {
+    "title": "Configuration de la présentation",
+    "theme": "Thème",
+    "transition": "Transition",
+    "transitionNone": "Aucune",
+    "showControls": "Afficher les contrôles de navigation",
+    "showProgress": "Afficher la barre de progression",
+    "showSlideNumbers": "Afficher les numéros de diapositive",
+    "speakerNotesHint": "Activez cette option pour voir vos notes pendant la présentation.",
+    "center": "Centrer les diapositives verticalement",
+    "loop": "Boucle infinie",
+    "zeroDisabled": "0 = désactivé",
+    "saving": "Enregistrement…"
+  },
+  "aiOps": {
+    "title": "Journal des opérations d'IA",
+    "empty": "Aucune opération d'IA dans cette session",
+    "time": "Heure",
+    "operation": "Opération",
+    "model": "Modèle",
+    "duration": "Durée",
+    "success": "Succès",
+    "actions": "Actions"
+  },
+  "sourceStats": {
+    "sources": "Sources",
+    "photos": "Photographies",
+    "chunks": "Extraits",
+    "transcriptionProgress": "Avancement des transcriptions",
+    "topArchives": "Fonds les plus représentés",
+    "topCollections": "Collections les plus représentées"
+  },
+  "pdfRename": {
+    "title": "Renommer les documents avant indexation",
+    "extracting": "Extraction des métadonnées des PDF…",
+    "save": "Enregistrer",
+    "editName": "Modifier le nom",
+    "cancel": "Annuler"
+  },
+  "errorFallback": {
+    "title": "Quelque chose s'est mal passé",
+    "details": "Détail de l'erreur",
+    "retry": "Réessayer"
+  },
+  "canvas": {
+    "zoomIn": "Agrandir",
+    "zoomOut": "Réduire",
+    "resetView": "Rétablir la vue"
+  },
+  "rebuild": {
+    "title": "Reconstruction des index de recherche",
+    "subtitle": "Optimisation de la recherche sur votre corpus…",
+    "progressAria": "Avancement de la reconstruction de l'index"
+  },
+  "fileTree": {
+    "loading": "Chargement des fichiers…",
+    "empty": "Aucun fichier Markdown"
+  },
+  "multiSelect": {
+    "clear": "Vider la sélection",
+    "searchDocuments": "Rechercher un document…",
+    "noCollections": "Aucune collection"
+  },
+  "sourceCard": {
+    "hasTranscription": "Transcription disponible",
+    "noTranscription": "Pas de transcription"
+  },
+  "projectPanel": {
+    "namePlaceholder": "Mon article",
+    "pathPlaceholder": "/chemin/vers/dossier"
+  },
+  "preview": {
+    "empty": "Commencez à écrire pour voir l'aperçu…",
+    "parseError": "Le markdown n'a pas pu être interprété."
+  },
+  "timeline": {
+    "empty": "Aucun événement dans cette session"
+  },
+  "messageList": {
+    "aria": "Messages de la conversation"
+  },
+  "layout": {
+    "markdownEditor": "Éditeur Markdown"
+  },
+  "csl": {
+    "remove": "Retirer le style CSL"
+  },
+  "toast": {
+    "dismiss": "Fermer"
+  },
+  "helpModal": {
+    "close": "Fermer"
+  },
+  "snippets": {
+    "boldText": "texte en gras",
+    "italicText": "texte en italique",
+    "linkText": "texte du lien",
+    "citationKey": "clé_citation",
+    "column": "Colonne {{n}}",
+    "cell": "Cellule {{n}}",
+    "quoteFirst": "Citation ou passage important",
+    "quoteSecond": "Suite de la citation",
+    "newSection": "Nouvelle section",
+    "slideTitle": "Titre de la diapositive",
+    "speakerNotes": "Notes du présentateur ici."
   }
 }

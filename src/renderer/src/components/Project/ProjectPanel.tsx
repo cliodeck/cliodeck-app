@@ -416,7 +416,7 @@ export const ProjectPanel: React.FC = () => {
                 type="text"
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
-                placeholder="Mon article"
+                placeholder={t('projectPanel.namePlaceholder')}
                 autoFocus
               />
             </div>
@@ -428,7 +428,7 @@ export const ProjectPanel: React.FC = () => {
                   type="text"
                   value={newProjectPath}
                   onChange={(e) => setNewProjectPath(e.target.value)}
-                  placeholder="/chemin/vers/dossier"
+                  placeholder={t('projectPanel.pathPlaceholder')}
                   readOnly
                 />
                 <button onClick={handleSelectPath}>{t('actions.browse')}</button>

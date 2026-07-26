@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, HelpCircle } from 'lucide-react';
 import './HelpModal.css';
 
@@ -25,6 +26,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
   title,
   children,
 }) => {
+  const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
   useFocusTrap({ active: isOpen, onEscape: onClose });
@@ -47,7 +49,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
           <button
             className="help-modal-close"
             onClick={onClose}
-            aria-label="Fermer"
+            aria-label={t('helpModal.close')}
           >
             <X size={20} />
           </button>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Settings } from 'lucide-react';
 import { useDialogStore } from '../../stores/dialogStore';
 import './PresentationConfig.css';
@@ -36,6 +37,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
   projectPath,
   onConfigChange,
 }) => {
+  const { t } = useTranslation('common');
   const [config, setConfig] = useState<RevealJsConfig>(DEFAULT_CONFIG);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -83,11 +85,11 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
     <div className="presentation-config">
       <div className="config-header">
         <Settings size={18} />
-        <h4>Configuration de la présentation</h4>
+        <h4>{t('presentationConfig.title')}</h4>
       </div>
 
       <div className="config-section">
-        <label>Thème</label>
+        <label>{t('presentationConfig.theme')}</label>
         <select
           value={config.theme}
           onChange={(e) => handleChange('theme', e.target.value as RevealJsConfig['theme'])}
@@ -108,13 +110,13 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
       </div>
 
       <div className="config-section">
-        <label>Transition</label>
+        <label>{t('presentationConfig.transition')}</label>
         <select
           value={config.transition}
           onChange={(e) => handleChange('transition', e.target.value as RevealJsConfig['transition'])}
           disabled={isSaving}
         >
-          <option value="none">Aucune</option>
+          <option value="none">{t('presentationConfig.transitionNone')}</option>
           <option value="fade">Fade</option>
           <option value="slide">Slide (défaut)</option>
           <option value="convex">Convex</option>
@@ -131,7 +133,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
             onChange={(e) => handleChange('controls', e.target.checked)}
             disabled={isSaving}
           />
-          <span>Afficher les contrôles de navigation</span>
+          <span>{t('presentationConfig.showControls')}</span>
         </label>
       </div>
 
@@ -143,7 +145,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
             onChange={(e) => handleChange('progress', e.target.checked)}
             disabled={isSaving}
           />
-          <span>Afficher la barre de progression</span>
+          <span>{t('presentationConfig.showProgress')}</span>
         </label>
       </div>
 
@@ -155,7 +157,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
             onChange={(e) => handleChange('slideNumber', e.target.checked)}
             disabled={isSaving}
           />
-          <span>Afficher les numéros de slides</span>
+          <span>{t('presentationConfig.showSlideNumbers')}</span>
         </label>
       </div>
 
@@ -170,7 +172,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
           <span>Mode présentateur avec notes (touche S)</span>
         </label>
         <small className="config-hint">
-          Activez cette option pour voir vos notes pendant la présentation
+          {t('presentationConfig.speakerNotesHint')}
         </small>
       </div>
 
@@ -182,7 +184,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
             onChange={(e) => handleChange('center', e.target.checked)}
             disabled={isSaving}
           />
-          <span>Centrer les slides verticalement</span>
+          <span>{t('presentationConfig.center')}</span>
         </label>
       </div>
 
@@ -194,7 +196,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
             onChange={(e) => handleChange('loop', e.target.checked)}
             disabled={isSaving}
           />
-          <span>Boucle infinie</span>
+          <span>{t('presentationConfig.loop')}</span>
         </label>
       </div>
 
@@ -207,7 +209,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
           value={config.autoSlide / 1000}
           onChange={(e) => handleChange('autoSlide', parseInt(e.target.value) * 1000)}
           disabled={isSaving}
-          placeholder="0 = désactivé"
+          placeholder={t('presentationConfig.zeroDisabled')}
         />
         <small className="config-hint">
           0 = désactivé. Définissez le nombre de secondes entre chaque slide.
@@ -216,7 +218,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
 
       {isSaving && (
         <div className="config-saving">
-          Sauvegarde...
+          {t('presentationConfig.saving')}
         </div>
       )}
     </div>

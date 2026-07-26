@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Folder, FolderOpen, FileText } from 'lucide-react';
 import './FileTree.css';
 
@@ -92,6 +93,7 @@ const DirectoryNode: React.FC<DirectoryNodeProps> = ({ item, level, onFileSelect
 };
 
 export const FileTree: React.FC<FileTreeProps> = ({ rootPath, onFileSelect }) => {
+  const { t } = useTranslation('common');
   const [rootItems, setRootItems] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export const FileTree: React.FC<FileTreeProps> = ({ rootPath, onFileSelect }) =>
   if (isLoading) {
     return (
       <div className="file-tree-loading-container">
-        <p>Chargement des fichiers...</p>
+        <p>{t('fileTree.loading')}</p>
       </div>
     );
   }
@@ -143,7 +145,7 @@ export const FileTree: React.FC<FileTreeProps> = ({ rootPath, onFileSelect }) =>
   if (rootItems.length === 0) {
     return (
       <div className="file-tree-empty">
-        <p>Aucun fichier Markdown trouvé</p>
+        <p>{t('fileTree.empty')}</p>
       </div>
     );
   }

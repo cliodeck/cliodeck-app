@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, Tag } from 'lucide-react';
 import './TagManager.css';
 
@@ -15,6 +16,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
   allTags = [],
   readOnly = false,
 }) => {
+  const { t } = useTranslation('common');
   const [inputValue, setInputValue] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +81,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
     return (
       <div className="tag-manager read-only">
         {tags.length === 0 ? (
-          <span className="no-tags">No tags</span>
+          <span className="no-tags">{t('tagManager.none')}</span>
         ) : (
           <div className="tag-list">
             {tags.map((tag) => (
@@ -105,7 +107,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
               <button
                 className="remove-tag"
                 onClick={() => removeTag(tag)}
-                title="Remove tag"
+                title={t('tagManager.remove')}
               >
                 <X size={12} />
               </button>
@@ -127,7 +129,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
           <button
             className="add-tag-button"
             onClick={() => addTag(inputValue)}
-            title="Add tag"
+            title={t('tagManager.add')}
           >
             <Plus size={16} />
           </button>
@@ -165,6 +167,8 @@ export const TagFilter: React.FC<TagFilterProps> = ({
   onTagsChange,
   onClear,
 }) => {
+  const { t } = useTranslation('common');
+
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
       onTagsChange(selectedTags.filter((t) => t !== tag));
@@ -183,7 +187,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
   if (uniqueTags.length === 0) {
     return (
       <div className="tag-filter-empty">
-        <p>No tags available</p>
+        <p>{t('tagManager.noneAvailable')}</p>
       </div>
     );
   }
@@ -193,7 +197,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({
       <div className="tag-filter-header">
         <span className="tag-filter-title">
           <Tag size={16} />
-          Filter by tags
+          {t('tagManager.filter')}
         </span>
         {selectedTags.length > 0 && (
           <button className="clear-tags" onClick={onClear}>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, AlertCircle, Plus, Edit, Trash2, Check } from 'lucide-react';
 import './SyncPreviewModal.css';
 
@@ -40,6 +41,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
   diff,
   onApplySync,
 }) => {
+  const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
   useFocusTrap({ active: isOpen, onEscape: onClose });
@@ -128,7 +130,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content sync-preview-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Zotero Sync Preview</h3>
+          <h3>{t('zoteroSync.title')}</h3>
           <button className="close-button" onClick={onClose}>
             <X size={20} />
           </button>
@@ -138,8 +140,8 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
           {totalChanges === 0 ? (
             <div className="no-changes">
               <Check size={48} color="var(--success-color)" />
-              <p>Your bibliography is up to date!</p>
-              <p className="text-muted">No changes detected from Zotero.</p>
+              <p>{t('zoteroSync.upToDate')}</p>
+              <p className="text-muted">{t('zoteroSync.noChanges')}</p>
             </div>
           ) : (
             <>
@@ -158,7 +160,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                     <div className="option-content">
                       <div className="option-title">Remote Wins (Recommended)</div>
                       <div className="option-description">
-                        Accept all changes from Zotero. Local PDFs will be preserved.
+                        {t('zoteroSync.zoteroWinsHint')}
                       </div>
                     </div>
                   </label>
@@ -172,9 +174,9 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                       onChange={() => setStrategy('local')}
                     />
                     <div className="option-content">
-                      <div className="option-title">Local Wins</div>
+                      <div className="option-title">{t('zoteroSync.localWins')}</div>
                       <div className="option-description">
-                        Only add new citations. Keep local modifications and ignore deletions.
+                        {t('zoteroSync.localWinsHint')}
                       </div>
                     </div>
                   </label>
@@ -188,9 +190,9 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                       onChange={() => setStrategy('manual')}
                     />
                     <div className="option-content">
-                      <div className="option-title">Manual Selection</div>
+                      <div className="option-title">{t('zoteroSync.manual')}</div>
                       <div className="option-description">
-                        Choose exactly which changes to apply.
+                        {t('zoteroSync.manualHint')}
                       </div>
                     </div>
                   </label>
@@ -203,27 +205,27 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                   <div className="stat-item success">
                     <Plus size={20} />
                     <span className="stat-value">{diff.added.length}</span>
-                    <span className="stat-label">Added</span>
+                    <span className="stat-label">{t('zoteroSync.added')}</span>
                   </div>
                 )}
                 {diff.modified.length > 0 && (
                   <div className="stat-item warning">
                     <Edit size={20} />
                     <span className="stat-value">{diff.modified.length}</span>
-                    <span className="stat-label">Modified</span>
+                    <span className="stat-label">{t('zoteroSync.modified')}</span>
                   </div>
                 )}
                 {diff.deleted.length > 0 && (
                   <div className="stat-item error">
                     <Trash2 size={20} />
                     <span className="stat-value">{diff.deleted.length}</span>
-                    <span className="stat-label">Deleted</span>
+                    <span className="stat-label">{t('zoteroSync.deleted')}</span>
                   </div>
                 )}
                 <div className="stat-item">
                   <Check size={20} />
                   <span className="stat-value">{diff.unchanged.length}</span>
-                  <span className="stat-label">Unchanged</span>
+                  <span className="stat-label">{t('zoteroSync.unchanged')}</span>
                 </div>
               </div>
 
@@ -238,10 +240,10 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                       {strategy === 'manual' && (
                         <div className="bulk-actions">
                           <button className="link-button" onClick={selectAllAdded}>
-                            Select All
+                            {t('zoteroSync.selectAll')}
                           </button>
                           <button className="link-button" onClick={deselectAllAdded}>
-                            Deselect All
+                            {t('zoteroSync.deselectAll')}
                           </button>
                         </div>
                       )}
@@ -300,7 +302,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                             <div className="change-details">
                               <div className="comparison">
                                 <div className="comparison-column">
-                                  <h5>Local</h5>
+                                  <h5>{t('zoteroSync.local')}</h5>
                                   <div className="field-list">
                                     {change.modifiedFields.map((field) => (
                                       <div key={field} className="field-item">
@@ -364,11 +366,11 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>
-            Cancel
+            {t('zoteroSync.cancel')}
           </button>
           {totalChanges > 0 && (
             <button className="btn-primary" onClick={handleApply}>
-              Apply Changes
+              {t('zoteroSync.apply')}
             </button>
           )}
         </div>

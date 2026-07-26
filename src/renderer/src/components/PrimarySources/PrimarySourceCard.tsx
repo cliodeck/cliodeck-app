@@ -116,11 +116,11 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({
           )}
         </button>
         {source.transcription ? (
-          <span className="status-badge transcribed" title="Has transcription">
+          <span className="status-badge transcribed" title={t('sourceCard.hasTranscription')}>
             <FileText size={14} strokeWidth={1} />
           </span>
         ) : (
-          <span className="status-badge no-transcription" title="No transcription">
+          <span className="status-badge no-transcription" title={t('sourceCard.noTranscription')}>
             <FileText size={14} strokeWidth={1} />
           </span>
         )}

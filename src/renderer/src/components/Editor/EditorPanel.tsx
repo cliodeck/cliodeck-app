@@ -347,21 +347,21 @@ export const EditorPanel: React.FC = () => {
           <div className="toolbar-section">
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\n---\n\n# Nouvelle section\n\n')}
+              onClick={() => insertSlideSnippet(`\n\n---\n\n# ${t('snippets.newSection')}\n\n`)}
               title={t('presentation.addSection')}
             >
               <Columns size={18} strokeWidth={1.5} />
             </button>
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\n---\n\n## Titre de la slide\n\n')}
+              onClick={() => insertSlideSnippet(`\n\n---\n\n## ${t('snippets.slideTitle')}\n\n`)}
               title={t('presentation.addSlide')}
             >
               <Plus size={18} strokeWidth={1.5} />
             </button>
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\nNote:\nNotes du présentateur ici.\n')}
+              onClick={() => insertSlideSnippet(`\n\nNote:\n${t('snippets.speakerNotes')}\n`)}
               title={t('presentation.addNote')}
             >
               <MessageSquare size={18} strokeWidth={1.5} />

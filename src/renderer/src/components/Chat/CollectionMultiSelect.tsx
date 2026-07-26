@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AvailableCollection } from '../../stores/ragQueryStore';
 import './CollectionMultiSelect.css';
 
@@ -17,6 +18,7 @@ export const CollectionMultiSelect: React.FC<Props> = ({
   placeholder = 'All collections',
   disabled = false,
 }) => {
+  const { t } = useTranslation('common');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +74,7 @@ export const CollectionMultiSelect: React.FC<Props> = ({
           <button
             className="clear-btn"
             onClick={clearAll}
-            title="Clear selection"
+            title={t('multiSelect.clear')}
             type="button"
           >
             <svg
@@ -104,7 +106,7 @@ export const CollectionMultiSelect: React.FC<Props> = ({
       {isOpen && !disabled && (
         <div className="multiselect-dropdown">
           {collections.length === 0 ? (
-            <div className="no-collections">No collections found</div>
+            <div className="no-collections">{t('multiSelect.noCollections')}</div>
           ) : (
             collections.map((collection) => (
               <div

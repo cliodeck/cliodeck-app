@@ -8,6 +8,7 @@
  * white card on a grey backdrop.
  */
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { FallbackProps } from 'react-error-boundary';
 import './ErrorFallback.css';
 
@@ -15,17 +16,18 @@ export const ErrorFallback: React.FC<FallbackProps> = ({
   error,
   resetErrorBoundary,
 }) => {
+  const { t } = useTranslation('common');
   const err = error instanceof Error ? error : new Error(String(error));
   return (
     <div role="alert" className="error-fallback">
       <div className="error-fallback__card">
-        <h1 className="error-fallback__title">Oops! Something went wrong</h1>
+        <h1 className="error-fallback__title">{t('errorFallback.title')}</h1>
         <p className="error-fallback__lede">
           The application encountered an unexpected error. Please try reloading
           or contact support if the problem persists.
         </p>
         <details className="error-fallback__details">
-          <summary>Error details</summary>
+          <summary>{t('errorFallback.details')}</summary>
           <pre className="error-fallback__stack">
             {err.message}
             {err.stack && '\n\n' + err.stack}
@@ -36,7 +38,7 @@ export const ErrorFallback: React.FC<FallbackProps> = ({
           onClick={resetErrorBoundary}
           className="error-fallback__retry"
         >
-          Try again
+          {t('errorFallback.retry')}
         </button>
       </div>
     </div>

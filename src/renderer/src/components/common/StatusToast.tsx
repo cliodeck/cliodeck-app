@@ -7,6 +7,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, ChevronDown, ChevronRight, Info, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import { useNotificationStore, type NotificationLevel } from '../../stores/notificationStore';
 import './StatusToast.css';
@@ -19,6 +20,7 @@ const ICONS: Record<NotificationLevel, React.ReactNode> = {
 };
 
 export const StatusToast: React.FC = () => {
+  const { t } = useTranslation('common');
   const notifications = useNotificationStore((s) => s.notifications);
   const expandedId = useNotificationStore((s) => s.expandedId);
   const dismiss = useNotificationStore((s) => s.dismiss);
@@ -59,7 +61,7 @@ export const StatusToast: React.FC = () => {
               <button
                 className="status-toast__dismiss"
                 onClick={() => dismiss(notif.id)}
-                aria-label="Dismiss"
+                aria-label={t('toast.dismiss')}
               >
                 <X size={14} />
               </button>

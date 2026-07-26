@@ -1432,7 +1432,8 @@
     "addInput": "Add",
     "addStep": "Add",
     "noInputs": "No parameters defined.",
-    "noSteps": "No steps."
+    "noSteps": "No steps.",
+    "required": "required"
   },
   "mcp": {
     "title": "MCP Clients",
@@ -1612,7 +1613,8 @@
     "created": "Created",
     "delete": "Delete",
     "importObsidian": "Import from Obsidian vault",
-    "relatedIdeas": "Related ideas"
+    "relatedIdeas": "Related ideas",
+    "removeLink": "Remove the link"
   },
   "exportHub": {
     "title": "Export",
@@ -2053,5 +2055,236 @@
       "noteTitle": "Note:",
       "note": "turning compression off sends more context to the model. That can improve accuracy on highly standardised documents (minutes, archival registers), at the cost of latency and price."
     }
+  },
+  "biblioStats": {
+    "analyzing": "Analysing the bibliography…",
+    "loadFailed": "Statistics could not be loaded.",
+    "title": "Bibliography statistics",
+    "tabs": {
+      "overview": "Overview",
+      "authors": "Authors",
+      "publications": "Publications",
+      "tags": "Tags",
+      "timeline": "Timeline"
+    },
+    "totalCitations": "References in total",
+    "uniqueAuthors": "Distinct authors",
+    "journals": "Journals",
+    "yearRange": "Years covered",
+    "avgAuthors": "Authors per reference (average)",
+    "pdfCoverage": "References with a PDF",
+    "byType": "Publications by type",
+    "topAuthors": "Most present authors",
+    "topAuthorsHint": "The authors best represented in your bibliography",
+    "topJournals": "Most present journals",
+    "topJournalsHint": "The most frequent publication venues",
+    "byYear": "Publications by year",
+    "noTags": "No tags",
+    "noTagsHint": "Add tags to your references to see tag statistics.",
+    "tagStats": "Tag statistics",
+    "tagStatsHint": "The tags used most often in your bibliography",
+    "tagCoverage": "References carrying a tag",
+    "growth": "Bibliography growth",
+    "growthHint": "Cumulative and annual trends",
+    "cumulative": "Cumulative",
+    "annual": "Per year"
+  },
+  "citationMeta": {
+    "title": "Edit reference metadata",
+    "tags": "Tags",
+    "tagsHint": "Tags help you organise and filter your references.",
+    "keywords": "Index terms",
+    "keywordsHint": "Separate terms with commas.",
+    "notes": "Notes",
+    "notesPlaceholder": "Your notes on this reference…",
+    "notesHint": "Personal notes and comments on this reference.",
+    "customFields": "Custom fields",
+    "value": "Value",
+    "removeField": "Remove the field",
+    "fieldName": "Field name",
+    "fieldValue": "Field value",
+    "addField": "Add a field",
+    "customFieldsHint": "Add your own fields for specialised information.",
+    "timestamps": "Timestamps",
+    "cancel": "Cancel",
+    "save": "Save"
+  },
+  "zoteroSync": {
+    "title": "Zotero sync preview",
+    "upToDate": "Your bibliography is up to date.",
+    "noChanges": "No change detected from Zotero.",
+    "zoteroWinsHint": "Accept every change coming from Zotero. Local PDFs are kept.",
+    "localWins": "Local wins",
+    "localWinsHint": "Only add new references. Local edits are kept and deletions ignored.",
+    "manual": "Manual choice",
+    "manualHint": "Pick exactly which changes to apply.",
+    "added": "Added",
+    "modified": "Modified",
+    "deleted": "Deleted",
+    "unchanged": "Unchanged",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "local": "Local",
+    "cancel": "Cancel",
+    "apply": "Apply"
+  },
+  "bibImport": {
+    "title": "Import a bibliography",
+    "youHaveBefore": "You currently have",
+    "youHaveAfter": "in your bibliography.",
+    "question": "How should the new file be imported?",
+    "replace": "Replace",
+    "replaceHint": "Remove every current reference and replace them with the file's.",
+    "merge": "Merge",
+    "empty": "Your bibliography is empty: the file will simply be loaded into it.",
+    "cancel": "Cancel",
+    "import": "Import"
+  },
+  "bibImportSummary": {
+    "title": "Import complete",
+    "replaced": "Bibliography replaced.",
+    "total": "References in total",
+    "merged": "Bibliography merged.",
+    "newAdded": "New references added",
+    "duplicates": "Duplicates ignored"
+  },
+  "tagManager": {
+    "none": "No tags",
+    "remove": "Remove the tag",
+    "add": "Add a tag",
+    "noneAvailable": "No tag available",
+    "filter": "Filter by tags"
+  },
+  "ragPanel": {
+    "title": "RAG settings",
+    "refreshModels": "Reload the model list",
+    "noModels": "No model loaded. Open a project first, then click",
+    "sources": "Sources",
+    "refreshCollections": "Reload the collections",
+    "allCollections": "All collections (no filter)",
+    "refreshDocuments": "Reload the documents",
+    "allDocuments": "All documents (no filter)",
+    "topKHelp": "How many document chunks to retrieve",
+    "timeoutHelp": "Maximum time to wait for the answer",
+    "advanced": "Advanced parameters",
+    "tokens": "tokens",
+    "useRecommended": "Recommended value",
+    "promptLanguage": "System prompt language",
+    "customPrompt": "Use a custom system prompt",
+    "customPromptHelp": "Replace the default system prompt with your own",
+    "customPromptLabel": "Custom system prompt",
+    "customPromptPlaceholder": "Enter your system prompt here…",
+    "customPromptHint": "This prompt tells the model how to answer your questions.",
+    "temperatureHelp": "Lower = more focused, higher = more inventive",
+    "topPHelp": "Nucleus sampling threshold",
+    "topKTokensHelp": "How many tokens are considered",
+    "repeatPenaltyHelp": "Penalises repetition",
+    "reset": "Restore the configuration values"
+  },
+  "presentationConfig": {
+    "title": "Presentation settings",
+    "theme": "Theme",
+    "transition": "Transition",
+    "transitionNone": "None",
+    "showControls": "Show the navigation controls",
+    "showProgress": "Show the progress bar",
+    "showSlideNumbers": "Show slide numbers",
+    "speakerNotesHint": "Turn this on to see your notes while presenting.",
+    "center": "Centre slides vertically",
+    "loop": "Endless loop",
+    "zeroDisabled": "0 = off",
+    "saving": "Saving…"
+  },
+  "aiOps": {
+    "title": "AI operations journal",
+    "empty": "No AI operation in this session",
+    "time": "Time",
+    "operation": "Operation",
+    "model": "Model",
+    "duration": "Duration",
+    "success": "Success",
+    "actions": "Actions"
+  },
+  "sourceStats": {
+    "sources": "Sources",
+    "photos": "Photographs",
+    "chunks": "Chunks",
+    "transcriptionProgress": "Transcription progress",
+    "topArchives": "Best-represented archives",
+    "topCollections": "Best-represented collections"
+  },
+  "pdfRename": {
+    "title": "Rename the documents before indexing",
+    "extracting": "Extracting metadata from the PDFs…",
+    "save": "Save",
+    "editName": "Edit the name",
+    "cancel": "Cancel"
+  },
+  "errorFallback": {
+    "title": "Something went wrong",
+    "details": "Error details",
+    "retry": "Try again"
+  },
+  "canvas": {
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetView": "Reset the view"
+  },
+  "rebuild": {
+    "title": "Rebuilding the search indexes",
+    "subtitle": "Optimising search across your corpus…",
+    "progressAria": "Index rebuild progress"
+  },
+  "fileTree": {
+    "loading": "Loading the files…",
+    "empty": "No Markdown file"
+  },
+  "multiSelect": {
+    "clear": "Clear the selection",
+    "searchDocuments": "Search for a document…",
+    "noCollections": "No collection"
+  },
+  "sourceCard": {
+    "hasTranscription": "Transcription available",
+    "noTranscription": "No transcription"
+  },
+  "projectPanel": {
+    "namePlaceholder": "My article",
+    "pathPlaceholder": "/path/to/folder"
+  },
+  "preview": {
+    "empty": "Start writing to see the preview…",
+    "parseError": "The Markdown could not be parsed."
+  },
+  "timeline": {
+    "empty": "No event in this session"
+  },
+  "messageList": {
+    "aria": "Conversation messages"
+  },
+  "layout": {
+    "markdownEditor": "Markdown editor"
+  },
+  "csl": {
+    "remove": "Remove the CSL style"
+  },
+  "toast": {
+    "dismiss": "Dismiss"
+  },
+  "helpModal": {
+    "close": "Close"
+  },
+  "snippets": {
+    "boldText": "bold text",
+    "italicText": "italic text",
+    "linkText": "link text",
+    "citationKey": "citation_key",
+    "column": "Column {{n}}",
+    "cell": "Cell {{n}}",
+    "quoteFirst": "Quotation or important passage",
+    "quoteSecond": "Continuation of the quotation",
+    "newSection": "New section",
+    "slideTitle": "Slide title",
+    "speakerNotes": "Speaker notes here."
   }
 }

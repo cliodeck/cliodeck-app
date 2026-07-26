@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   BarChart3,
   Users,
@@ -73,6 +74,7 @@ interface BibliographyStatsProps {
 }
 
 export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations, onClose }) => {
+  const { t } = useTranslation('common');
   const [statistics, setStatistics] = useState<BibliographyStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'authors' | 'publications' | 'tags' | 'timeline'>('overview');
@@ -99,7 +101,7 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
     return (
       <div className="bibliography-stats-loading">
         <div className="spinner"></div>
-        <p>Analyzing bibliography...</p>
+        <p>{t('biblioStats.analyzing')}</p>
       </div>
     );
   }
@@ -107,7 +109,7 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
   if (!statistics) {
     return (
       <div className="bibliography-stats-error">
-        <p>Failed to load statistics</p>
+        <p>{t('biblioStats.loadFailed')}</p>
       </div>
     );
   }
@@ -115,7 +117,7 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
   return (
     <div className="bibliography-stats">
       <div className="stats-header">
-        <h2>Bibliography Statistics</h2>
+        <h2>{t('biblioStats.title')}</h2>
         {onClose && (
           <button className="close-button" onClick={onClose}>×</button>
         )}
@@ -128,35 +130,35 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
           onClick={() => setActiveTab('overview')}
         >
           <BarChart3 size={16} />
-          Overview
+          {t('biblioStats.tabs.overview')}
         </button>
         <button
           className={`tab-button ${activeTab === 'authors' ? 'active' : ''}`}
           onClick={() => setActiveTab('authors')}
         >
           <Users size={16} />
-          Authors
+          {t('biblioStats.tabs.authors')}
         </button>
         <button
           className={`tab-button ${activeTab === 'publications' ? 'active' : ''}`}
           onClick={() => setActiveTab('publications')}
         >
           <BookOpen size={16} />
-          Publications
+          {t('biblioStats.tabs.publications')}
         </button>
         <button
           className={`tab-button ${activeTab === 'tags' ? 'active' : ''}`}
           onClick={() => setActiveTab('tags')}
         >
           <Tag size={16} />
-          Tags
+          {t('biblioStats.tabs.tags')}
         </button>
         <button
           className={`tab-button ${activeTab === 'timeline' ? 'active' : ''}`}
           onClick={() => setActiveTab('timeline')}
         >
           <TrendingUp size={16} />
-          Timeline
+          {t('biblioStats.tabs.timeline')}
         </button>
       </div>
 
@@ -183,6 +185,7 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
 
 // Overview Tab Component
 const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   return (
     <div className="overview-tab">
       <div className="stats-grid">
@@ -192,7 +195,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
           </div>
           <div className="stat-info">
             <div className="stat-value">{statistics.totalCitations}</div>
-            <div className="stat-label">Total Citations</div>
+            <div className="stat-label">{t('biblioStats.totalCitations')}</div>
           </div>
         </div>
 
@@ -202,7 +205,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
           </div>
           <div className="stat-info">
             <div className="stat-value">{statistics.totalAuthors}</div>
-            <div className="stat-label">Unique Authors</div>
+            <div className="stat-label">{t('biblioStats.uniqueAuthors')}</div>
           </div>
         </div>
 
@@ -212,7 +215,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
           </div>
           <div className="stat-info">
             <div className="stat-value">{statistics.totalJournals}</div>
-            <div className="stat-label">Journals</div>
+            <div className="stat-label">{t('biblioStats.journals')}</div>
           </div>
         </div>
 
@@ -224,7 +227,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
             <div className="stat-value">
               {statistics.yearRange.min} - {statistics.yearRange.max}
             </div>
-            <div className="stat-label">Year Range</div>
+            <div className="stat-label">{t('biblioStats.yearRange')}</div>
           </div>
         </div>
 
@@ -234,7 +237,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
           </div>
           <div className="stat-info">
             <div className="stat-value">{statistics.averageAuthorsPerPaper}</div>
-            <div className="stat-label">Avg Authors/Paper</div>
+            <div className="stat-label">{t('biblioStats.avgAuthors')}</div>
           </div>
         </div>
 
@@ -244,7 +247,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
           </div>
           <div className="stat-info">
             <div className="stat-value">{statistics.pdfCoverage}%</div>
-            <div className="stat-label">PDF Coverage</div>
+            <div className="stat-label">{t('biblioStats.pdfCoverage')}</div>
             <div className="stat-subtitle">
               {statistics.citationsWithPDFs} / {statistics.totalCitations} with PDFs
             </div>
@@ -254,7 +257,7 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
 
       {/* Publications by Type */}
       <div className="chart-section">
-        <h3><PieChart size={18} /> Publications by Type</h3>
+        <h3><PieChart size={18} /> {t('biblioStats.byType')}</h3>
         <div className="type-chart">
           {statistics.publicationsByType.map((type, idx) => (
             <div key={idx} className="type-item">
@@ -278,11 +281,12 @@ const OverviewTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
 
 // Authors Tab Component
 const AuthorsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   return (
     <div className="authors-tab">
       <div className="section-header">
-        <h3><Award size={18} /> Top Authors</h3>
-        <p className="section-subtitle">Most prolific authors in your bibliography</p>
+        <h3><Award size={18} /> {t('biblioStats.topAuthors')}</h3>
+        <p className="section-subtitle">{t('biblioStats.topAuthorsHint')}</p>
       </div>
 
       <div className="authors-list">
@@ -326,13 +330,14 @@ const AuthorsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statisti
 
 // Publications Tab Component
 const PublicationsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   return (
     <div className="publications-tab">
       {/* Top Journals */}
       <div className="section">
         <div className="section-header">
-          <h3><BookOpen size={18} /> Top Journals</h3>
-          <p className="section-subtitle">Most frequent publication venues</p>
+          <h3><BookOpen size={18} /> {t('biblioStats.topJournals')}</h3>
+          <p className="section-subtitle">{t('biblioStats.topJournalsHint')}</p>
         </div>
         <div className="journals-list">
           {statistics.topJournals.slice(0, 10).map((journal, idx) => (
@@ -360,7 +365,7 @@ const PublicationsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ sta
       {/* Publications by Year */}
       <div className="section">
         <div className="section-header">
-          <h3><Calendar size={18} /> Publications by Year</h3>
+          <h3><Calendar size={18} /> {t('biblioStats.byYear')}</h3>
         </div>
         <div className="year-chart">
           {statistics.publicationsByYear.map((year, idx) => {
@@ -386,12 +391,13 @@ const PublicationsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ sta
 
 // Tags Tab Component
 const TagsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   if (!statistics.topTags || statistics.topTags.length === 0) {
     return (
       <div className="tags-tab">
         <div className="section-header">
-          <h3><Tag size={18} /> No Tags Available</h3>
-          <p className="section-subtitle">Add tags to your citations to see tag statistics</p>
+          <h3><Tag size={18} /> {t('biblioStats.noTags')}</h3>
+          <p className="section-subtitle">{t('biblioStats.noTagsHint')}</p>
         </div>
       </div>
     );
@@ -400,8 +406,8 @@ const TagsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics 
   return (
     <div className="tags-tab">
       <div className="section-header">
-        <h3><Tag size={18} /> Tag Statistics</h3>
-        <p className="section-subtitle">Most frequently used tags in your bibliography</p>
+        <h3><Tag size={18} /> {t('biblioStats.tagStats')}</h3>
+        <p className="section-subtitle">{t('biblioStats.tagStatsHint')}</p>
       </div>
 
       {/* Tag Coverage Card */}
@@ -411,7 +417,7 @@ const TagsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics 
         </div>
         <div className="stat-info">
           <div className="stat-value">{statistics.tagCoverage}%</div>
-          <div className="stat-label">Tag Coverage</div>
+          <div className="stat-label">{t('biblioStats.tagCoverage')}</div>
           <div className="stat-subtitle">
             {statistics.citationsWithTags} / {statistics.totalCitations} citations have tags
           </div>
@@ -452,25 +458,26 @@ const TagsTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics 
 
 // Timeline Tab Component
 const TimelineTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   const maxCumulative = Math.max(...statistics.timelineData.map(d => d.cumulative));
   const maxAnnual = Math.max(...statistics.timelineData.map(d => d.annual));
 
   return (
     <div className="timeline-tab">
       <div className="section-header">
-        <h3><TrendingUp size={18} /> Bibliography Growth Over Time</h3>
-        <p className="section-subtitle">Cumulative and annual publication trends</p>
+        <h3><TrendingUp size={18} /> {t('biblioStats.growth')}</h3>
+        <p className="section-subtitle">{t('biblioStats.growthHint')}</p>
       </div>
 
       <div className="timeline-chart">
         <div className="chart-legend">
           <div className="legend-item">
             <span className="legend-color cumulative"></span>
-            Cumulative
+            {t('biblioStats.cumulative')}
           </div>
           <div className="legend-item">
             <span className="legend-color annual"></span>
-            Annual
+            {t('biblioStats.annual')}
           </div>
         </div>
 
@@ -480,7 +487,7 @@ const TimelineTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
               <div className="timeline-year">{data.year}</div>
               <div className="timeline-bars">
                 <div className="bar-row">
-                  <div className="bar-label">Cumulative</div>
+                  <div className="bar-label">{t('biblioStats.cumulative')}</div>
                   <div className="bar-container">
                     <div
                       className="bar cumulative"
@@ -490,7 +497,7 @@ const TimelineTab: React.FC<{ statistics: BibliographyStatistics }> = ({ statist
                   </div>
                 </div>
                 <div className="bar-row">
-                  <div className="bar-label">Annual</div>
+                  <div className="bar-label">{t('biblioStats.annual')}</div>
                   <div className="bar-container">
                     <div
                       className="bar annual"

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, CheckCircle } from 'lucide-react';
 import './BibImportSummaryModal.css';
 
@@ -20,6 +21,7 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
   newCitations,
   duplicates,
 }) => {
+  const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
   useFocusTrap({ active: isOpen, onEscape: onClose });
@@ -29,7 +31,7 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content bib-import-summary-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Import Complete</h3>
+          <h3>{t('bibImportSummary.title')}</h3>
           <button className="close-button" onClick={onClose}>
             <X size={20} />
           </button>
@@ -44,33 +46,33 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
             {mode === 'replace' ? (
               <>
                 <p className="summary-main">
-                  Bibliography replaced successfully!
+                  {t('bibImportSummary.replaced')}
                 </p>
                 <div className="summary-stats">
                   <div className="stat-item">
                     <span className="stat-value">{totalCitations}</span>
-                    <span className="stat-label">Total citations</span>
+                    <span className="stat-label">{t('bibImportSummary.total')}</span>
                   </div>
                 </div>
               </>
             ) : (
               <>
                 <p className="summary-main">
-                  Bibliography merged successfully!
+                  {t('bibImportSummary.merged')}
                 </p>
                 <div className="summary-stats">
                   <div className="stat-item success">
                     <span className="stat-value">{newCitations}</span>
-                    <span className="stat-label">New citations added</span>
+                    <span className="stat-label">{t('bibImportSummary.newAdded')}</span>
                   </div>
                   <div className="stat-item">
                     <span className="stat-value">{totalCitations}</span>
-                    <span className="stat-label">Total citations</span>
+                    <span className="stat-label">{t('bibImportSummary.total')}</span>
                   </div>
                   {duplicates > 0 && (
                     <div className="stat-item warning">
                       <span className="stat-value">{duplicates}</span>
-                      <span className="stat-label">Duplicates ignored</span>
+                      <span className="stat-label">{t('bibImportSummary.duplicates')}</span>
                     </div>
                   )}
                 </div>
