@@ -1340,7 +1340,7 @@
   },
   "vault": {
     "title": "Vault Obsidian",
-    "hint": "Lie un vault Obsidian (dossier de notes Markdown) pour que le chat Brainstorm puisse citer tes notes en plus de ta bibliographie. Les notes sont indexées localement dans .cliodeck/obsidian-vectors.db.",
+    "hint": "Liez un vault Obsidian — un dossier de notes Markdown — pour que le chat Brainstorm puisse citer vos notes en plus de votre bibliographie. Les notes sont indexées localement, dans .cliodeck/obsidian-vectors.db.",
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
       "noProject": "Ouvrez un projet pour configurer le vault.",
@@ -1576,13 +1576,13 @@
       "failed": "Échec :"
     },
     "log": {
-      "runStarted": "▶ Run started — {{recipe}}",
-      "stepInProgress": "… step {{stepId}} ({{kind}})",
-      "stepOk": "✓ step {{stepId}}",
-      "stepOkStub": "✓ step {{stepId}} (stub)",
-      "stepFailed": "✗ step {{stepId}} — {{message}}",
-      "runCompleted": "✓ Run completed",
-      "runFailed": "✗ Run failed — {{message}}"
+      "runStarted": "▶ Exécution lancée — {{recipe}}",
+      "stepInProgress": "… étape {{stepId}} ({{kind}})",
+      "stepOk": "✓ étape {{stepId}}",
+      "stepOkStub": "✓ étape {{stepId}} (ébauche)",
+      "stepFailed": "✗ étape {{stepId}} — {{message}}",
+      "runCompleted": "✓ Exécution terminée",
+      "runFailed": "✗ Exécution échouée — {{message}}"
     },
     "placeholder": {
       "path": "/absolute/path/…"
@@ -1916,10 +1916,11 @@
     "discard": "Jeter",
     "discardTitle": "Retirer ce brouillon de la file (le chat n'est pas modifié)",
     "clearAll": "Vider la file",
-    "clearConfirm": "Jeter les {{count}} brouillon(s) en attente ?",
     "enqueue": "Mettre en brouillon",
     "enqueueTitle": "Ajouter cette réponse à la file de brouillons du mode Écriture, sans l'insérer",
-    "enqueued": "En brouillon ✓"
+    "enqueued": "En brouillon ✓",
+    "clearConfirm_one": "Jeter le brouillon en attente ?",
+    "clearConfirm_other": "Jeter les {{count}} brouillons en attente ?"
   },
   "ragRetrieval": {
     "title": "Configuration RAG",

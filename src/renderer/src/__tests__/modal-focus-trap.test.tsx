@@ -80,6 +80,11 @@ describe('câblage des modales', () => {
     for (const file of modalFiles(COMPONENTS)) {
       const src = fs.readFileSync(file, 'utf8');
       if (!src.includes('useFocusTrap(')) continue;
+      // Exception explicite : un PANNEAU peut vouloir `Échap` sans piéger
+      // le Tab — l'y enfermer empêcherait de revenir à l'éditeur au
+      // clavier. Le marqueur rend le choix visible et cherchable, au lieu
+      // de laisser croire à un oubli.
+      if (src.includes('focus-trap:escape-only')) continue;
       // La ref rendue par le hook doit être attachée quelque part.
       const declared = src.match(/const\s+(\w+)\s*=\s*useFocusTrap\(/);
       if (!declared) {

@@ -28,6 +28,7 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // FootnoteReferenceRun is the inline run; document footnotes are declared
@@ -528,6 +529,22 @@ export class WordExportService {
         '--to', 'docx',
       ];
 
+      // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage
+      // du manuscrit ET les exports (PDF, Word) » — c'était vrai du seul
+      // PDF : word-export construisait ses propres arguments, sans
+      // `--number-sections` ni `--top-level-division`. Décocher « numéroter
+      // les chapitres » puis exporter en .docx pour un éditeur donnait des
+      // chapitres numérotés quand même.
+      if (options.projectType === 'book') {
+        const settings = resolveBookSettings(
+          options.bookSettings as BookSettings | undefined
+        );
+        pandocArgs.push('--top-level-division=chapter');
+        if (settings.numberChapters !== false || settings.numberSections) {
+          pandocArgs.push('--number-sections');
+        }
+      }
+
       // Add bibliography and CSL if provided
       const bibPath = options.bibliographyPath;
       if (bibPath && existsSync(bibPath)) {
@@ -542,7 +559,9 @@ export class WordExportService {
         }
 
         // Add reference section title
-        pandocArgs.push('--metadata', 'reference-section-title=Références');
+        // Titre de section écrit DANS le document exporté : il doit suivre la
+        // langue de l'interface, sinon un germanophone reçoit « Références ».
+        pandocArgs.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
       }
 
       // Add reference doc (template) if provided

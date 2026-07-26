@@ -1340,7 +1340,7 @@
   },
   "vault": {
     "title": "Obsidian Vault",
-    "hint": "Link an Obsidian vault (folder of Markdown notes) so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally in .cliodeck/obsidian-vectors.db.",
+    "hint": "Link an Obsidian vault — a folder of Markdown notes — so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally, in .cliodeck/obsidian-vectors.db.",
     "errors": {
       "noFusionApi": "Fusion API not exposed by the preload.",
       "noProject": "Open a project to configure the vault.",
@@ -1916,10 +1916,11 @@
     "discard": "Discard",
     "discardTitle": "Remove this draft from the queue (the chat is not modified)",
     "clearAll": "Clear the queue",
-    "clearConfirm": "Discard the {{count}} pending draft(s)?",
     "enqueue": "Save as draft",
     "enqueueTitle": "Add this reply to the Write mode draft queue without inserting it",
-    "enqueued": "Drafted ✓"
+    "enqueued": "Drafted ✓",
+    "clearConfirm_one": "Discard the pending draft?",
+    "clearConfirm_other": "Discard the {{count}} pending drafts?"
   },
   "ragRetrieval": {
     "title": "RAG configuration",

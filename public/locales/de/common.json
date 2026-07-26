@@ -1340,7 +1340,7 @@
   },
   "vault": {
     "title": "Obsidian-Vault",
-    "hint": "Verknüpfen Sie einen Obsidian-Vault (Ordner mit Markdown-Notizen), damit der Brainstorm-Chat Ihre Notizen zusätzlich zur Bibliografie zitieren kann. Notizen werden lokal in .cliodeck/obsidian-vectors.db indiziert.",
+    "hint": "Verknüpfen Sie einen Obsidian-Vault — einen Ordner mit Markdown-Notizen —, damit der Brainstorm-Chat neben Ihrer Bibliographie auch Ihre Notizen zitieren kann. Die Notizen werden lokal indexiert, in .cliodeck/obsidian-vectors.db.",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "noProject": "Öffnen Sie ein Projekt, um den Vault zu konfigurieren.",
@@ -1576,13 +1576,13 @@
       "failed": "Fehlgeschlagen:"
     },
     "log": {
-      "runStarted": "▶ Run started — {{recipe}}",
-      "stepInProgress": "… step {{stepId}} ({{kind}})",
-      "stepOk": "✓ step {{stepId}}",
-      "stepOkStub": "✓ step {{stepId}} (stub)",
-      "stepFailed": "✗ step {{stepId}} — {{message}}",
-      "runCompleted": "✓ Run completed",
-      "runFailed": "✗ Run failed — {{message}}"
+      "runStarted": "▶ Ausführung gestartet — {{recipe}}",
+      "stepInProgress": "… Schritt {{stepId}} ({{kind}})",
+      "stepOk": "✓ Schritt {{stepId}}",
+      "stepOkStub": "✓ Schritt {{stepId}} (Entwurf)",
+      "stepFailed": "✗ Schritt {{stepId}} — {{message}}",
+      "runCompleted": "✓ Ausführung abgeschlossen",
+      "runFailed": "✗ Ausführung fehlgeschlagen — {{message}}"
     },
     "placeholder": {
       "path": "/absolute/path/…"
@@ -1916,10 +1916,11 @@
     "discard": "Verwerfen",
     "discardTitle": "Diesen Entwurf aus der Warteschlange entfernen (der Chat bleibt unverändert)",
     "clearAll": "Warteschlange leeren",
-    "clearConfirm": "Die {{count}} wartenden Entwürfe verwerfen?",
     "enqueue": "Als Entwurf speichern",
     "enqueueTitle": "Diese Antwort der Entwurfs-Warteschlange des Schreibmodus hinzufügen, ohne sie einzufügen",
-    "enqueued": "Als Entwurf ✓"
+    "enqueued": "Als Entwurf ✓",
+    "clearConfirm_one": "Den ausstehenden Entwurf verwerfen?",
+    "clearConfirm_other": "Die {{count}} ausstehenden Entwürfe verwerfen?"
   },
   "ragRetrieval": {
     "title": "RAG-Konfiguration",

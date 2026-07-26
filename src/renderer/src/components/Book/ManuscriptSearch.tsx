@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { waitForEditorFacade } from '../../services/wait-for-facade';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import {
@@ -46,6 +47,16 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // focus-trap:escape-only — VOLONTAIRE, pas un oubli.
+  //
+  // Ce panneau n'est pas une modale : il occupe le tiers droit de l'espace
+  // d'écriture et se présente comme le pendant de Cmd+F, dont on attend
+  // qu'Échap le referme. Mais piéger le Tab à l'intérieur empêcherait de
+  // revenir à l'éditeur au clavier — ce qui serait pire que le défaut
+  // corrigé. On prend donc `Échap` sans le piégeage, ce que le hook permet
+  // depuis qu'il ne dépend plus de sa ref.
+  useFocusTrap({ active: true, onEscape: onClose, restoreFocus: false });
 
   const run = useCallback(async () => {
     const term = query.trim();

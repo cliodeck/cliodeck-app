@@ -16,6 +16,7 @@
  */
 
 import type { BookSettings } from '../../../backend/types/book.js';
+import { getLanguage } from '../i18n.js';
 
 // MARK: - Types
 
@@ -300,7 +301,9 @@ function bibliographyArgs(input: {
   if (input.cslPath && input.cslAvailable) {
     args.push('--csl', input.cslPath);
   } else {
-    args.push('--metadata', 'reference-section-title=Références');
+    // Titre de section écrit DANS le document exporté : il doit suivre la
+    // langue de l'interface, sinon un germanophone reçoit « Références ».
+    args.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
     args.push('--metadata', 'suppress-bibliography=false');
   }
   return args;
@@ -348,4 +351,20 @@ export function buildPandocArgs(input: PandocArgsInput): string[] {
   );
 
   return args;
+}
+
+/**
+ * Titre de la section bibliographique, dans la langue de l'interface.
+ *
+ * Il est écrit DANS le document produit, pas dans l'écran : le laisser en
+ * français donnait une section « Références » à un lecteur germanophone,
+ * au milieu de son propre livre.
+ */
+export function referenceSectionTitle(): string {
+  const titles: Record<string, string> = {
+    fr: 'Références',
+    en: 'References',
+    de: 'Literatur',
+  };
+  return titles[getLanguage()] ?? titles.fr;
 }

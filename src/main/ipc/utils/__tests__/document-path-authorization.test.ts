@@ -3,9 +3,11 @@
  * `editor:load-file` / `editor:save-file` appliquent désormais : validateur
  * de chemins d'abord, registre de consentement en repli.
  *
- * Le test reproduit la garde plutôt que d'importer le handler, qui exige un
- * runtime Electron complet (ipcMain, BrowserWindow). Les deux briques
- * combinées sont les mêmes.
+ * Le test importait autrefois une RECOPIE de la garde, faute de pouvoir
+ * charger le handler qui exige un runtime Electron complet. Il ne testait
+ * donc rien du code réel : inverser l'ordre validateur/consentement dans le
+ * handler l'aurait laissé vert. La fonction vit désormais dans son propre
+ * module, et c'est elle qui est exercée ici.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import path from 'path';
@@ -23,22 +25,13 @@ vi.mock('../../../services/project-manager.js', () => ({
   },
 }));
 
-const { validateReadPath, validateWritePath } = await import('../path-validator');
-const { rememberConsentedPath, isConsentedPath, __resetConsentedPaths } = await import(
+const { rememberConsentedPath, __resetConsentedPaths } = await import(
   '../user-consented-paths'
 );
 
-/** Réplique de `authorizeDocumentPath` (editor-handlers.ts). */
-async function authorize(filePath: string, intent: 'read' | 'write'): Promise<string> {
-  try {
-    return intent === 'read'
-      ? await validateReadPath(filePath)
-      : await validateWritePath(filePath);
-  } catch (error) {
-    if (await isConsentedPath(filePath)) return path.resolve(filePath);
-    throw error;
-  }
-}
+const { authorizeDocumentPath: authorize } = await import(
+  '../document-path-authorization'
+);
 
 let tmpRoot: string;
 let projectDir: string;
