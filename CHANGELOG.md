@@ -89,6 +89,45 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   que l'infobulle du bouton l'annonçait et qu'un index volumineux est long à
   reconstruire. Une confirmation nomme désormais ce qui est perdu — et
   rappelle que les notes Obsidian, elles, ne sont pas touchées.
+- **`Cmd+Q` juste après une frappe perdait le texte.** `before-quit` arrêtait
+  les services mais ne touchait pas à l'éditeur, et aucun `beforeunload`
+  n'existait côté renderer ; sans autosave, la perte n'était pas bornée. Le
+  processus principal demande maintenant au renderer d'écrire avant de sortir
+  et attend son accusé — quatre secondes au plus, un renderer bloqué ne devant
+  jamais empêcher de quitter. La décision d'écrire compare le texte **vivant**
+  au miroir du store : la synchronisation CM6 → store étant debouncée,
+  `isDirty` est encore faux au moment précis où le travail risque d'être
+  perdu. Même classe de perte que #37, à la sortie plutôt qu'à la bascule.
+- **Le verrou entre renumérotation et export n'était consulté que dans un
+  sens** : rien n'empêchait de renuméroter pendant un export déjà lancé, dont
+  l'assemblage lit les chapitres plusieurs secondes durant. Le manuscrit était
+  alors réécrit sous l'assemblage en cours — le scénario même que le correctif
+  de la rc.3 prétendait fermer (#30). Au passage, son rollback « atomique » ne
+  restaurait que le tampon de l'éditeur pour le chapitre ouvert, alors que
+  l'aller avait écrit sur le disque.
+- **Toute la section Configuration RAG était en français littéral** — une
+  centaine de libellés, descriptions et repères de réglage qu'aucun anglophone
+  ni germanophone ne pouvait lire. Le split #57 n'avait pas créé cette dette
+  mais l'avait recopiée verbatim dans deux fichiers neufs, qui n'appelaient
+  donc jamais `t()`. Idem pour le sélecteur de style de citation.
+- **21 clés manquaient dans les trois locales à la fois**, dont une modale
+  entière : l'import de transcriptions Transkribus, quinze clés, intégralement
+  en repli anglais. Elles ont été trouvées en confrontant les appels `t()` du
+  code aux fichiers de traduction — contrôle qu'un **test** effectue
+  désormais, là où le test de parité ne peut structurellement rien voir. Le
+  même contrôle a levé un défaut d'une autre nature : `t('similarity.help')`
+  visait un objet, et i18next rend alors la clé elle-même ; l'infobulle du
+  panneau Similarités affichait littéralement « similarity.help ».
+- **18 modales sur 20 ne se fermaient pas avec `Échap`**, alors que le hook
+  idoine existait et n'était branché que sur deux dialogues. Il exigeait que
+  sa ref soit attachée à un conteneur avant de traiter la moindre touche : une
+  modale qui l'appelait sans câbler la ref restait insensible, sans le moindre
+  signe. `Échap` n'en dépend plus. La modale de progression reste
+  volontairement non fermable.
+- **Le focus initial des confirmations partait sur « Confirmer ».** Ce
+  dialogue sert aux actions destructrices, et la purge du journal en demande
+  deux d'affilée : deux `Entrée` successifs suffisaient à tout effacer. Le
+  geste par défaut est désormais celui qui ne détruit rien.
 
 ### Ajouté depuis la rc.3
 
@@ -128,18 +167,23 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
 
 ### Connu, non corrigé dans cette RC
 
-- **Aucune sauvegarde à la fermeture de l'application** : `Cmd+Q` dans les
-  trois secondes suivant une frappe perd le texte. Même classe de perte que
-  #37, à la sortie plutôt qu'à la bascule.
-- **Le verrou renumérotation/export est unidirectionnel** : rien n'empêche
-  de renuméroter pendant un export déjà lancé.
-- **Toute la section Configuration RAG est en français littéral** (une
-  centaine de libellés), y compris dans les deux fichiers créés par le split
-  #57. Le test anti-français ne balaye que `components/Export/`.
-- **Les modales n'écoutent pas `Échap`** (18 sur 20) et n'utilisent pas le
-  piège de focus pourtant disponible.
+- **75 chaînes françaises codées en dur subsistent hors de la Configuration
+  RAG**, dont 48 dans trois autres sections des réglages (sécurité, LLM,
+  éditeur). Le test anti-français du dépôt ne balaye toujours que
+  `components/Export/` ; le nouveau test de clés, lui, ne voit que les
+  chaînes qui passent déjà par `t()`.
 - **Les embeddings cloud ne passent par aucun consentement**, alors
   qu'indexer envoie l'intégralité du corpus au fournisseur. Réglage opt-in.
+- **Le piège de focus n'est actif que là où la ref est câblée** : `Échap`
+  ferme désormais toutes les modales, mais le `Tab` peut encore sortir de
+  la modale sur celles qui n'attachent pas la ref du hook.
+- **Trois panneaux flottants, trois conventions de superposition** :
+  Similarités (`fixed`, z-index 1000), Brouillons (`absolute`, z-index 40)
+  et la recherche manuscrit (docké). Ouvrir les deux premiers en même temps
+  masque le second, sans que rien ne l'indique.
+- **Le corpus manuscrit n'a toujours pas d'interface** : il atteint
+  l'assistant depuis cette RC, mais rien n'affiche l'état de l'index, ne
+  propose de le reconstruire, ni n'expose `rag.indexManuscript`.
 - **`macOS` : signature et notarisation** toujours bloquées sur un certificat
   Apple Developer ID ([#75](https://github.com/cliodeck/cliodeck-app/issues/75)).
 
