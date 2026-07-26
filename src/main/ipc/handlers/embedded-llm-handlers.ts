@@ -4,6 +4,7 @@
  */
 
 import { ipcMain, app, BrowserWindow } from 'electron';
+import { retrievalService } from '../../services/retrieval-service.js';
 import { ModelDownloader, type DownloadProgress } from '../../../../backend/core/llm/ModelDownloader.js';
 import { EMBEDDED_MODELS, DEFAULT_EMBEDDED_MODEL, EMBEDDED_EMBEDDING_MODELS, DEFAULT_EMBEDDED_EMBEDDING_MODEL } from '../../../../backend/core/llm/EmbeddedLLMClient.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
@@ -429,8 +430,13 @@ export function setupEmbeddedLLMHandlers() {
         ...llmConfig,
         embeddingProvider: provider,
       });
+      // Écrire la config ne suffisait pas : le registre gardait l'ancien
+      // fournisseur jusqu'au redémarrage. Requêtes et index se retrouvaient
+      // dans deux espaces vectoriels différents, sans erreur — `cosine()`
+      // compare sur la longueur minimale.
+      retrievalService.rebuildEmbeddingProvider();
       console.log('📤 IPC Response: embedded-embedding:set-provider - success');
-      return successResponse({ provider });
+      return successResponse({ provider, reindexRequired: true });
     } catch (error: unknown) {
       console.error('❌ embedded-embedding:set-provider error:', error);
       return errorResponse(error);

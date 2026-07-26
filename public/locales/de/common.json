@@ -532,7 +532,9 @@
     "providerSaveError": "Embeddings-Provider konnte nicht gespeichert werden",
     "reindexWarning": "⚠️ Ein Wechsel des Embeddings-Providers oder -Modells macht den bestehenden Vektorindex unbrauchbar: Ihre PDFs müssen neu indexiert werden (Einstellungen → Aktionen).",
     "modelsLabel": "Eingebettetes Embeddings-Modell",
-    "modelsHelp": "Einmal herunterladen für vollständig offline RAG"
+    "modelsHelp": "Einmal herunterladen für vollständig offline RAG",
+    "providerChangeConfirm": "Ein Wechsel des Embedding-Anbieters macht sämtliche vorhandenen Indizes unbrauchbar — PDFs, Tropy-Archive, Obsidian-Vault und Manuskript. Vektoren eines Modells lassen sich nicht mit denen eines anderen vergleichen, und im Betrieb weist nichts darauf hin: die Suche wird schlicht schlecht. Alles muss neu indexiert werden. Fortfahren?",
+    "providerChanged": "Anbieter gewechselt. Indexieren Sie Ihre Korpora neu, damit die Suche wieder verlässlich wird."
   },
   "zotero": {
     "title": "Zotero-Konfiguration",

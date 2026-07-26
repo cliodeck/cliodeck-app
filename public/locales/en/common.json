@@ -532,7 +532,9 @@
     "providerSaveError": "Could not save the embeddings provider",
     "reindexWarning": "⚠️ Changing the embeddings provider or model invalidates the existing vector index: you will need to re-index your PDFs (Settings → Actions).",
     "modelsLabel": "Embedded embeddings model",
-    "modelsHelp": "Download once for fully offline RAG"
+    "modelsHelp": "Download once for fully offline RAG",
+    "providerChangeConfirm": "Changing the embedding provider makes every existing index unusable — PDFs, Tropy archives, Obsidian vault and manuscript. Vectors from one model cannot be compared with another's, and nothing will flag it in use: searches will simply become poor. Everything will need re-indexing. Continue?",
+    "providerChanged": "Provider changed. Re-index your corpora so that searches become reliable again."
   },
   "zotero": {
     "title": "Zotero Configuration",

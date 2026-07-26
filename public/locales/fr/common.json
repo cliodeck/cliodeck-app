@@ -532,7 +532,9 @@
     "providerSaveError": "Impossible d'enregistrer le provider d'embeddings",
     "reindexWarning": "⚠️ Changer de provider ou de modèle d'embeddings rend l'index vectoriel existant inutilisable : il faudra ré-indexer vos PDFs (Réglages → Actions).",
     "modelsLabel": "Modèle d'embeddings embarqué",
-    "modelsHelp": "À télécharger une fois pour un RAG entièrement hors ligne"
+    "modelsHelp": "À télécharger une fois pour un RAG entièrement hors ligne",
+    "providerChangeConfirm": "Changer de fournisseur d'embeddings rend inutilisables tous les index existants — PDF, archives Tropy, vault Obsidian et manuscrit. Les vecteurs d'un modèle ne se comparent pas à ceux d'un autre, et rien ne le signalera à l'usage : les recherches deviendront simplement mauvaises. Il faudra tout réindexer. Continuer ?",
+    "providerChanged": "Fournisseur changé. Réindexez vos corpus pour que les recherches redeviennent fiables."
   },
   "zotero": {
     "title": "Configuration Zotero",

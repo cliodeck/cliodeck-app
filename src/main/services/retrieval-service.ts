@@ -518,6 +518,28 @@ class RetrievalService {
     return this.embedding;
   }
 
+  /**
+   * Reconstruit le fournisseur d'embeddings depuis la configuration.
+   *
+   * Changer de fournisseur écrivait la config sans toucher au registre :
+   * le service continuait d'embarquer avec l'ancien modèle jusqu'au
+   * redémarrage, sans que rien ne le dise. Les requêtes et l'index se
+   * retrouvaient alors dans deux espaces vectoriels différents — et
+   * `cosine()` compare sur la longueur minimale, donc sans erreur.
+   */
+  rebuildEmbeddingProvider(): void {
+    void this.disposePreviousRegistry();
+    try {
+      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      this.embedding = this.registry.getEmbedding();
+      console.log('🔄 [retrieval] fournisseur d’embeddings reconstruit');
+    } catch (e) {
+      console.warn('[retrieval] failed to rebuild embedding provider:', e);
+      this.registry = null;
+      this.embedding = null;
+    }
+  }
+
   private ensureReady(): void {
     if (!this.vectorStore || !this.embedding) {
       throw new Error(

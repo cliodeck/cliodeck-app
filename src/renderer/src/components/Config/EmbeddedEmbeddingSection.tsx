@@ -91,10 +91,24 @@ export const EmbeddedEmbeddingSection: React.FC = () => {
 
   const handleProviderChange = async (next: EmbeddingProvider) => {
     const previous = provider;
+    if (next === previous) return;
+
+    // Changer de fournisseur d'embeddings rend les index existants
+    // inutilisables : les vecteurs d'un modèle ne se comparent pas à ceux
+    // d'un autre. Le défaut ne se voit pas — `cosine()` compare sur la
+    // longueur minimale et ne lève rien — d'où la confirmation explicite.
+    const confirmed = await useDialogStore
+      .getState()
+      .showConfirm(t('embeddedEmbedding.providerChangeConfirm'));
+    if (!confirmed) return;
+
     setProvider(next);
     try {
       const res = await window.electron.embeddedEmbedding.setProvider(next);
       if (!res?.success) throw new Error(res?.error || 'setProvider failed');
+      await useDialogStore
+        .getState()
+        .showAlert(t('embeddedEmbedding.providerChanged'));
     } catch (err) {
       console.error('Failed to set embedding provider:', err);
       setProvider(previous);

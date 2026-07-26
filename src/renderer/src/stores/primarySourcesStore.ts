@@ -118,7 +118,8 @@ interface PrimarySourcesState {
   refreshSources: () => Promise<void>;
   selectSource: (sourceId: string | null) => void;
   getSource: (sourceId: string) => Promise<PrimarySource | null>;
-  updateTranscription: (sourceId: string, transcription: string, source: 'manual') => Promise<void>;
+  /** `false` si l'écriture a échoué — la carte ne doit pas annoncer un succès. */
+  updateTranscription: (sourceId: string, transcription: string, source: 'manual') => Promise<boolean>;
 
   // Actions - Search & Filters
   searchSources: (query: string) => void;
@@ -304,8 +305,11 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       const result = await window.electron.tropy.performBatchOCR(imagePaths, language);
 
       if (result.success && result.text) {
-        // Update the source with the transcription
-        await get().updateTranscription(sourceId, result.text, 'manual');
+        // L'OCR a réussi, mais l'ÉCRITURE peut échouer : annoncer un succès
+        // sans le vérifier laissait croire que la transcription était
+        // enregistrée alors que rien ne l'avait été.
+        const written = await get().updateTranscription(sourceId, result.text, 'manual');
+        if (!written) return { success: false };
 
         return { success: true, text: result.text };
       }
@@ -412,11 +416,24 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   },
 
   updateTranscription: async (sourceId: string, transcription: string, source: 'manual') => {
+    // Le résultat était AWAITÉ sans être lu : `updateSourceTranscription`
+    // rend `{success:false}` sans lever, si bien que la carte affichait une
+    // réussite alors que rien n'avait été écrit.
     try {
-      await window.electron.tropy.updateTranscription(sourceId, transcription, source);
+      const result = await window.electron.tropy.updateTranscription(
+        sourceId,
+        transcription,
+        source
+      );
+      if (!result?.success) {
+        console.error('Transcription non écrite:', result?.error);
+        return false;
+      }
       await get().refreshSources();
+      return true;
     } catch (error) {
       console.error('Failed to update transcription:', error);
+      return false;
     }
   },
 
