@@ -29,11 +29,38 @@ function parse(content: string): Tree {
   return scholarlyParser.parse(content);
 }
 
+/**
+ * Appel de note à l'intérieur d'un bloc HTML : `[^label]` non suivi de `:`.
+ *
+ * Lezer traite un `HTMLBlock` comme opaque et n'y cherche pas d'inline —
+ * pandoc, lui, y voit très bien les notes (mesuré : un `[^1]` dans un
+ * `<div>` rend un `\footnote`). Sans ce rattrapage, le préfixage par
+ * chapitre renommait la DÉFINITION sans toucher à l'APPEL resté dans
+ * l'encadré : les deux devenaient orphelins et le texte de la note
+ * disparaissait du livre.
+ */
+const HTML_FOOTNOTE_REFERENCE = /\[\^([^\]\s]+)\](?!:)/g;
+
 /** Toutes les occurrences de notes (appels et définitions), ordre du document. */
 export function collectFootnotes(content: string): FootnoteOccurrence[] {
   const out: FootnoteOccurrence[] = [];
   parse(content).iterate({
     enter: (node) => {
+      if (node.name === 'HTMLBlock') {
+        // Bloc opaque pour Lezer : on y cherche les appels nous-mêmes.
+        const block = content.slice(node.from, node.to);
+        HTML_FOOTNOTE_REFERENCE.lastIndex = 0;
+        for (const m of block.matchAll(HTML_FOOTNOTE_REFERENCE)) {
+          const labelStart = node.from + (m.index ?? 0) + 2; // après `[^`
+          out.push({
+            label: m[1],
+            from: labelStart,
+            to: labelStart + m[1].length,
+            kind: 'reference',
+          });
+        }
+        return false; // rien d'autre à y chercher
+      }
       if (node.name !== 'FootnoteReference' && node.name !== 'FootnoteDefinition') {
         return;
       }
@@ -50,7 +77,9 @@ export function collectFootnotes(content: string): FootnoteOccurrence[] {
       // continuer la descente.
     },
   });
-  return out;
+  // L'ordre du document n'est plus garanti : les appels d'un bloc HTML sont
+  // ajoutés à la visite du bloc, pas à leur position exacte dans la suite.
+  return out.sort((a, b) => a.from - b.from);
 }
 
 /**

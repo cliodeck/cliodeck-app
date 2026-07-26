@@ -651,6 +651,15 @@ export class WordExportService {
       // options.manuscript), donc assembler seulement sur le chemin natif
       // faisait produire au chemin pandoc un .docx vide (#19). Même
       // stratégie que pdf-export : assemblage inconditionnel d'abord.
+      // La cible doit être connue AVANT d'assembler : le chemin docx natif
+      // ne comprend pas le LaTeX de structure, et rendait `\mainmatter`
+      // comme un paragraphe de texte en tête de document.
+      const willUsePandoc =
+        !!options.bibliographyPath &&
+        existsSync(options.bibliographyPath) &&
+        (await this.checkPandoc()) &&
+        !options.citation?.useEngine;
+
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
@@ -658,22 +667,20 @@ export class WordExportService {
           settings: normalizeBookSettings(options.bookSettings),
           liveOverrides: options.manuscript.liveOverrides,
           scope: options.manuscript.scope,
+          target: willUsePandoc ? 'latex' : 'plain',
         });
         for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
         options = { ...options, content: assembled.markdown };
       }
 
-      // Check if we should use pandoc (when bibliography is present)
+      // Même décision que celle prise plus haut pour choisir la cible
+      // d'assemblage : les deux DOIVENT concorder, sinon on assemblerait
+      // du LaTeX pour le générateur natif, ou l'inverse.
       const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
       const hasPandoc = await this.checkPandoc();
-
-      // When the CitationEngine pipeline is requested we stay on the
-      // native docx path so we can emit proper Word footnotes via
-      // FootnoteReferenceRun — pandoc's citeproc would otherwise fight
-      // for the same markers.
       const useEnginePipeline = !!options.citation?.useEngine;
 
-      if (hasBibliography && hasPandoc && !useEnginePipeline) {
+      if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
         return await this.exportWithPandoc(options, outputPath, onProgress);
       }

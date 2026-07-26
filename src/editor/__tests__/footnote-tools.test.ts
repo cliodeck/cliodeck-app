@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   collectFootnotes,
+  prefixFootnoteLabels,
   nextFootnoteNumber,
   renumberFootnotes,
 } from '../footnote-tools';
@@ -73,5 +74,52 @@ describe('collectFootnotes', () => {
     const occ = collectFootnotes('A[^1].\n\n[^1]: def.\n');
     expect(occ.map((o) => o.kind)).toEqual(['reference', 'definition']);
     expect(occ.map((o) => o.label)).toEqual(['1', '1']);
+  });
+
+  /**
+   * Régression : un `[^1]` dans un bloc HTML était invisible.
+   *
+   * Lezer traite un `HTMLBlock` comme opaque ; pandoc, lui, y voit très
+   * bien les notes — vérifié à la main, un `[^1]` dans un `<div>` rend un
+   * `\footnote`. Le préfixage par chapitre renommait donc la DÉFINITION
+   * sans toucher à l'APPEL resté dans l'encadré : les deux devenaient
+   * orphelins et le texte de la note disparaissait du livre exporté.
+   */
+  it('voit les appels à l’intérieur d’un bloc HTML', () => {
+    const doc = '<div class="encadre">\nTexte[^1] ici.\n</div>\n\n[^1]: note.\n';
+    const occ = collectFootnotes(doc);
+
+    expect(occ.map((o) => o.kind)).toEqual(['reference', 'definition']);
+    expect(occ.map((o) => o.label)).toEqual(['1', '1']);
+  });
+
+  it('rend les occurrences dans l’ordre du document', () => {
+    // Les appels d'un bloc HTML sont trouvés à la visite du bloc, pas à
+    // leur position : sans tri, l'ordre serait faux.
+    const doc = 'Avant[^a].\n\n<div>\nDedans[^b].\n</div>\n\nAprès[^c].\n';
+    const occ = collectFootnotes(doc);
+
+    expect(occ.map((o) => o.label)).toEqual(['a', 'b', 'c']);
+    expect(occ.map((o) => o.from)).toEqual([...occ.map((o) => o.from)].sort((x, y) => x - y));
+  });
+
+  it('ne prend pas une définition pour un appel dans un bloc HTML', () => {
+    const doc = '<div>\n[^1]: ceci ressemble à une définition\n</div>\n';
+    const occ = collectFootnotes(doc);
+
+    expect(occ).toEqual([]);
+  });
+});
+
+describe('prefixFootnoteLabels — blocs HTML', () => {
+  it('préfixe appel ET définition, y compris dans un encadré', () => {
+    const doc = '<div class="encadre">\nTexte[^1] ici.\n</div>\n\n[^1]: note.\n';
+
+    const out = prefixFootnoteLabels(doc, 'ch1');
+
+    // Les deux moitiés portent le même label : la note survit à l'assemblage.
+    expect(out).toContain('[^ch1-1] ici.');
+    expect(out).toContain('[^ch1-1]: note.');
+    expect(out).not.toContain('[^1]');
   });
 });

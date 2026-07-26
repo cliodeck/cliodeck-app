@@ -219,3 +219,62 @@ describe('assembleManuscript', () => {
     expect(markdown).not.toMatch(/\[\^1\]/);
   });
 });
+
+/**
+ * Régression : le LaTeX de structure partait dans le générateur docx natif.
+ *
+ * L'assembleur injecte `\mainmatter`, `\backmatter`, le vidage des notes
+ * de fin et la remise à zéro du compteur — pandoc les laisse passer vers
+ * LaTeX, mais le chemin docx natif les rendait en PARAGRAPHES de texte. Un
+ * livre sans bibliographie s'ouvrait donc sur la ligne « \mainmatter ».
+ */
+describe('assembleManuscript — cible de sortie', () => {
+  it('injecte le LaTeX de structure pour pandoc (défaut)', async () => {
+    await write('chapters/01.md', '# Un\n\nTexte.\n');
+    const { markdown } = await assembleManuscript({
+      projectPath: dir,
+      settings: DEFAULT_BOOK_SETTINGS,
+      chapters: [CH({ id: 'a', filePath: 'chapters/01.md', order: 0 })],
+    });
+
+    expect(markdown).toContain('\\mainmatter');
+  });
+
+  it('n’injecte aucun LaTeX pour le docx natif', async () => {
+    await write('chapters/01.md', '# Un\n\nTexte.\n');
+    const { markdown } = await assembleManuscript({
+      projectPath: dir,
+      settings: DEFAULT_BOOK_SETTINGS,
+      chapters: [CH({ id: 'a', filePath: 'chapters/01.md', order: 0 })],
+      target: 'plain',
+    });
+
+    expect(markdown).not.toContain('\\mainmatter');
+    expect(markdown).not.toContain('\\backmatter');
+    expect(markdown).toContain('Texte.');
+  });
+
+  it('n’injecte ni vidage de notes de fin ni remise à zéro en cible plain', async () => {
+    await write('chapters/01.md', 'Un[^1].\n\n[^1]: a.\n');
+    await write('chapters/02.md', 'Deux[^1].\n\n[^1]: b.\n');
+    const chapters = [
+      CH({ id: 'a', filePath: 'chapters/01.md', order: 0 }),
+      CH({ id: 'b', filePath: 'chapters/02.md', order: 1 }),
+    ];
+    const settings = {
+      ...DEFAULT_BOOK_SETTINGS,
+      noteStyle: 'endnote-chapter' as const,
+      noteNumbering: 'per-chapter' as const,
+    };
+
+    const { markdown } = await assembleManuscript({
+      projectPath: dir, settings, chapters, target: 'plain',
+    });
+
+    expect(markdown).not.toContain('\\theendnotes');
+    expect(markdown).not.toContain('\\setcounter');
+    // L'isolation des notes, elle, reste indispensable dans les deux cibles.
+    expect(markdown).toContain('[^ch1-1]');
+    expect(markdown).toContain('[^ch2-1]');
+  });
+});
