@@ -8,7 +8,7 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 
 ## Download
 
-**[Download v1.0.0-rc.3](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.3)** — release candidate.
+**[Download v1.0.0-rc.4](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.4)** — release candidate.
 
 - **macOS** — DMG for Apple Silicon and Intel
 - **Linux** — AppImage and `.deb`, **arm64 only** in this candidate; on x86_64, build from source (below)
@@ -21,7 +21,7 @@ Builds are **not code-signed**: macOS will refuse the app on first launch until 
 A project is an **article**, a **book**, or a **presentation** — the choice shapes the editor and the export.
 
 - **Article** — a single `document.md`.
-- **Book** — a manuscript in **chapters**, one Markdown file each, ordered by a manifest. Chapter navigator, manuscript-wide outline and search, footnote renumbering from the first chapter to the last, PDF with numbered chapters and a table of contents — or a single chapter for a working proof. Notes can be footnotes, per-chapter endnotes, or endnotes at the end of the volume; numbering restarts per chapter or runs through; the bibliography is single or per chapter. Those note and bibliography settings shape the **PDF export only** — Word ignores them for now, and a per-chapter bibliography needs a bibliography file, falling back to a single one when ClioDeck formats the citations itself. See [`docs/book-architecture.md`](docs/book-architecture.md).
+- **Book** — a manuscript in **chapters**, one Markdown file each, ordered by a manifest. Chapter navigator, manuscript-wide outline and search, footnote renumbering from the first chapter to the last, PDF with numbered chapters and a table of contents — or a single chapter for a working proof. Notes can be footnotes, per-chapter endnotes, or endnotes at the end of the volume; numbering restarts per chapter or runs through; the bibliography is single or per chapter. All of this is set from a dialog (until rc.4 it could only be changed by hand-editing `project.json`). Chapter numbering and document structure reach **both** the PDF and Word exports; the choice between footnotes and endnotes stays PDF-only, since it relies on typesetting commands a `.docx` cannot express. A per-chapter bibliography needs a bibliography file, falling back to a single one when ClioDeck formats the citations itself. See [`docs/book-architecture.md`](docs/book-architecture.md).
 - **Presentation** — a `slides.md` edited in the same editor, exported to RevealJS.
 
 ## Four modes, one workspace
@@ -36,11 +36,12 @@ The modes share the same project, sources and index:
 ## Key features
 
 - **Your file stays your file** — the editor never converts your text to an internal document and back. Open a file, save it untouched, and it is identical byte for byte, line endings and trailing spaces included.
-- **The assistant can read your manuscript** — what you have already written becomes a fourth corpus, next to your PDFs, Tropy archives and Obsidian notes, so you can ask what you wrote about a subject three chapters ago. Excerpts from your own draft are labelled apart from your sources, and the assistant is told not to cite them as evidence. Indexing runs after each save and needs an embeddings model. See [`docs/manuscript-corpus.md`](docs/manuscript-corpus.md).
+- **The assistant can read your manuscript** — what you have already written becomes a fourth corpus, next to your PDFs, Tropy archives and Obsidian notes, so you can ask what you wrote about a subject three chapters ago. Excerpts from your own draft are labelled apart from your sources, and the assistant is told not to cite them as evidence. Indexing runs after each save and needs an embeddings model; Settings shows the index state and lets you rebuild it. Until rc.4 the corpus was indexed on every save but never actually surfaced in an answer — its hits were scored on a scale that put them below every external source. See [`docs/manuscript-corpus.md`](docs/manuscript-corpus.md).
 - **The AI only ever proposes** — no AI feature writes into your document on its own. Anything it suggests arrives as a proposal you accept, alter or refuse, and each decision is recorded: in full in the research journal, as bare counts in the AI usage journal.
 - **Consent before sending** — the assistant will not reach a remote provider without your explicit consent, a rule the application core enforces itself rather than leaving to the interface.
 - **Typed LLM provider layer** — embedded (bundled `llama.cpp`), Ollama, OpenAI-compatible (llama.cpp, LM Studio, vLLM, OpenAI), Anthropic Claude, Mistral, Google Gemini. Switch backend in a few clicks, no code change. API keys are encrypted at rest via Electron `safeStorage` (key derived from the OS keyring; on Linux without a keyring it falls back to plain text with a warning).
 - **Runs fully offline** — with Ollama and local models, or with the small embedded models downloaded from the settings panel; no API key needed.
+- **Interface in French, English and German** — fully, since rc.4. Including the templates inserted into your manuscript, which used to arrive in French whatever your language.
 - **RAG-powered assistant** — hybrid search (HNSW + BM25 + RRF K=60), context compression that keeps RAG citations verbatim, query-aware reranking.
 - **Zotero integration** — sync bibliography, download PDFs, manage tags and metadata.
 - **Tropy integration** — import and search primary sources with OCR + multilingual NER (fr / en / de).
@@ -49,7 +50,7 @@ The modes share the same project, sources and index:
 - **ClioRecipes** — YAML workflows chaining brainstorm → search → graph → write → export steps. Four builtin recipes ship for common historian tasks (Zotero review, Tropy thematic analysis, chapter brainstorm, Chicago export). Run them from Settings → Recipes with a typed inputs form and a live event log.
 - **MCP server (inactive by default)** — expose your corpus to Claude Desktop / Cursor over stdio with a typed, auditable JSONL access log.
 - **MCP clients** — consume external MCP servers (stdio + SSE) with a typed lifecycle state machine, infra-only auto-recovery, and a status view in Settings; their tools are offered to the agent loop.
-- **Source inspector** — scans RAG chunks for prompt-injection patterns before they reach the model (warn / audit / block, default warn).
+- **Source inspector** — scans everything reaching the model from outside for prompt-injection patterns: RAG chunks, third-party MCP tool results, and the project's own `context.md`, which is injected with high authority and travels with a shared folder. Modes are warn / audit / block; the default is **warn**, which records without discarding — a primary source legitimately contains imperatives, and truncating a genuine testimony would be worse than the risk avoided. Use `audit` for corpora of third-party origin.
 - **AI usage journal** — a reflexive, ethics-oriented record of your inference use (volumes, tasks, corpora) plus a manual decision layer: what non-AI alternative existed, why it was set aside, was it worth it. Kept in a separate `.cliodeck/journal.db` so it can be archived and published independently. It logs volumes and decisions, **never prompts**. See [`docs/journal-usage-ia.md`](docs/journal-usage-ia.md).
 - **Headless CLI** — `bin/cliodeck` (`recipe list|run`, `search`, `hints show|set`, `import-cliobrain`, `rag-benchmark`) for batch / CI work, with usage captured in the journal; `bin/cliodeck-journal today|week|export` to review and annotate it.
 
@@ -132,11 +133,12 @@ Full documentation lives in the **[ClioDeck Wiki](https://github.com/cliodeck/cl
 - [Word templates](https://github.com/cliodeck/cliodeck-app/wiki/1.3-Guide-for-Using-Word-Templates)
 
 ### Technical documentation
-- [Release notes — RC3](https://github.com/cliodeck/cliodeck-app/wiki/3.3-RC3-Release-Notes)
+- Release notes — [RC4](https://github.com/cliodeck/cliodeck-app/wiki/3.4-RC4-Release-Notes) (current) · [RC3](https://github.com/cliodeck/cliodeck-app/wiki/3.3-RC3-Release-Notes)
 - [Technical architecture](https://github.com/cliodeck/cliodeck-app/wiki/2.-Technical-Architecture)
 - [Book architecture](docs/book-architecture.md) · [Editor architecture](docs/editor-architecture.md) · [Manuscript corpus](docs/manuscript-corpus.md)
 - [Editor proposals contract](docs/editor-proposals.md) — how AI suggestions are adjudicated
 - [ADR 0001](docs/adr/0001-rag-pipeline-arbitration.md) — RAG pipeline arbitration
+- [ADR 0005](docs/adr/0005-threat-model.md) — threat model, and why the source inspector only warns by default
 - [AI usage journal](docs/journal-usage-ia.md) ([ADR 0007](docs/adr/0007-usage-journal-separate-db-and-provider-hook.md))
 - [Status and remaining work](docs/status-and-remaining-work.md)
 
