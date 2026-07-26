@@ -168,6 +168,54 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   deux d'affilée : deux `Entrée` successifs suffisaient à tout effacer. Le
   geste par défaut est désormais celui qui ne détruit rien.
 
+- **Une note de bas de page placée dans un encadré HTML disparaissait du
+  livre.** L'analyseur syntaxique traite un bloc HTML comme opaque ; pandoc,
+  lui, y voit très bien les notes — mesuré. Le préfixage par chapitre
+  renommait donc la définition sans toucher à l'appel resté dans l'encadré :
+  les deux devenaient orphelins, `[^1]` s'imprimait en clair et le texte de
+  la note était perdu.
+- **Deux chemins d'export échouaient.** La recette `export` appelait pandoc
+  sans les réglages d'ouvrage, alors que l'assemblage venait de s'en servir
+  pour injecter `\theendnotes` : xelatex s'arrêtait sur « Undefined control
+  sequence », aucun PDF n'était produit. Et l'assembleur injectait son LaTeX
+  de structure quel que soit le format : le générateur .docx natif rendait
+  `\mainmatter` en paragraphe, si bien qu'un livre sans bibliographie
+  s'ouvrait sur cette ligne.
+- **Les réglages d'ouvrage ne pilotaient pas l'export Word**, alors que la
+  modale l'annonce. Décocher « numéroter les chapitres » donnait un .docx
+  numéroté quand même. Au passage, le titre de la section bibliographique
+  était codé en dur en français — dans le document produit, pas dans
+  l'écran : un germanophone recevait une section « Références » au milieu de
+  son propre livre.
+- **`context.md` était injecté en rôle `system` sans inspection.** Ce fichier
+  vit à la racine du projet : il voyage avec un dossier partagé. Il se
+  retrouvait donc au-dessus des consignes de l'application elle-même, sans
+  passer par l'inspecteur qui filtre déjà les extraits RAG et les résultats
+  d'outils MCP. C'était la dernière entrée non défendue du modèle de menace.
+- **Le consentement d'envoi vers un service en ligne valait « pour le
+  cloud »**, pas pour un fournisseur : accepter un envoi vers Mistral ouvrait
+  silencieusement les envois vers Anthropic. Et cocher « utiliser ce
+  fournisseur pour les embeddings » expédiait l'intégralité du corpus — PDF,
+  transcriptions, notes, manuscrit — sans un mot.
+- **L'OCR manuel annonçait un succès sans le vérifier**, et sa transcription
+  n'atteignait jamais le moteur de recherche : la fonction de réindexation
+  portait un `TODO` et, surtout, **supprimait les extraits sans les
+  regénérer**.
+- **Changer de modèle d'embedding restait sans effet jusqu'au redémarrage**,
+  et invalidait tous les index sans le dire — les vecteurs d'un modèle ne se
+  comparant pas à ceux d'un autre, et la comparaison ne levant aucune erreur.
+- **« Ouvrir la source » et « chercher dans le livre » n'atteignaient pas le
+  passage** : le défilement était demandé à l'éditeur du chapitre *sortant*,
+  la vue n'étant reconstruite qu'au rendu suivant. Un commentaire du code
+  affirmait le contraire — c'est ce qui rendait le défaut invisible.
+- **Le watcher Tropy empilait ses écouteurs** : basculer la synchronisation
+  automatique trois fois suffisait à ce qu'un seul enregistrement déclenche
+  trois synchronisations concurrentes.
+- **Deux tests ne testaient rien.** L'un recopiait la fonction qu'il
+  prétendait vérifier ; l'autre simulait précisément le mécanisme dont
+  dépendait le bug qu'il aurait dû voir. Les deux exercent désormais le code
+  réel — et le second échoue contre l'ancien, prouvant le défaut.
+
 ### Ajouté depuis la rc.3
 
 - **Livre** — modale des réglages de l'ouvrage (#24) ; verrou entre
@@ -206,8 +254,17 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
 
 ### Connu, non corrigé dans cette RC
 
-- **Les embeddings cloud ne passent par aucun consentement**, alors
-  qu'indexer envoie l'intégralité du corpus au fournisseur. Réglage opt-in.
+- **`pdfjs-dist` reste en 3.11.174.** `npm audit` signale CVE-2024-4367,
+  mais elle n'est pas atteignable ici : le point vulnérable est dans le
+  rendu canvas, que ClioDeck n'appelle jamais — l'extraction se limite au
+  texte, dans un processus fils isolé. La version 4 abandonne le chemin
+  CommonJS que le worker charge, ce qui imposerait de réécrire l'amorçage de
+  l'ingestion PDF. Décision consignée dans l'ADR 0005 : à faire en rc.5.
+- **L'inspecteur de sources est en détection seule par défaut** (`warn`) :
+  aucun extrait n'est jamais écarté. Arbitrage assumé — une source primaire
+  contient légitimement des impératifs — désormais écrit dans l'ADR 0005,
+  qui annonçait `audit`. Le mode `audit` reste le minimum pour un corpus de
+  provenance tierce.
 - **Le piège de focus n'est actif que là où la ref est câblée** : `Échap`
   ferme désormais toutes les modales, mais le `Tab` peut encore sortir de
   la modale sur celles qui n'attachent pas la ref du hook.
