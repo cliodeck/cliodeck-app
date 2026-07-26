@@ -24,6 +24,7 @@
 
 import type { BrainstormSource } from '../stores/chatStore';
 import { useEditorStore } from '../stores/editorStore';
+import { waitForEditorFacade } from './wait-for-facade';
 import { useProjectStore } from '../stores/projectStore';
 import { useWorkspaceModeStore } from '../stores/workspaceModeStore';
 import { currentRelativePath } from '../stores/manuscriptStore';
@@ -99,7 +100,11 @@ export async function openManuscriptSource(
 
   // Déjà ouvert : ne pas repasser par `loadFile`, qui recrée la vue et
   // détruirait l'historique d'annulation du chapitre pour rien.
-  if (currentRelativePath() !== relPath) {
+  const switched = currentRelativePath() !== relPath;
+  // Mémorisée AVANT la bascule : c'est à elle qu'on compare pour savoir si
+  // l'éditeur a fini de se remonter.
+  const facadeBeforeSwitch = useEditorStore.getState().editorFacade;
+  if (switched) {
     try {
       await useEditorStore.getState().loadFile(`${currentProject.path}/${relPath}`);
     } catch (error) {
@@ -116,8 +121,14 @@ export async function openManuscriptSource(
   }
 
   if (source.lineNumber != null) {
-    // Après `loadFile` la façade est reconstruite : lire l'état frais.
-    useEditorStore.getState().editorFacade?.revealLine(source.lineNumber);
+    // La façade N'EST PAS encore reconstruite ici : `loadFile` a installé le
+    // contenu dans le store, mais la vue CodeMirror ne se remonte qu'au
+    // commit React suivant. Lire l'état « frais » donnait la façade du
+    // chapitre SORTANT — la bascule avait lieu, le curseur n'y allait pas.
+    const facade = switched
+      ? await waitForEditorFacade(facadeBeforeSwitch)
+      : useEditorStore.getState().editorFacade;
+    facade?.revealLine(source.lineNumber);
   }
 
   return { success: true };

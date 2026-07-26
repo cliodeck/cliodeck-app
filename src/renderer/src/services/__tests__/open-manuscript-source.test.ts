@@ -37,9 +37,17 @@ interface Harness {
 function setup(options: { openFilePath?: string } = {}): Harness {
   const harness: Harness = { loaded: [], revealed: [] };
 
-  const facade = {
-    revealLine: (line: number) => harness.revealed.push(line),
-  } as unknown as EditorFacade;
+  /**
+   * Chaque bascule de fichier produit une façade NEUVE, comme dans l'app :
+   * `CodeMirrorEditor` détruit sa vue et en recrée une. Le stub d'origine
+   * laissait `editorFacade` intact — il rendait donc vert un code qui
+   * s'adressait à la façade du chapitre SORTANT, exactement le défaut que
+   * l'audit a trouvé. Un test ne doit pas mocker le mécanisme suspect.
+   */
+  const makeFacade = () =>
+    ({
+      revealLine: (line: number) => harness.revealed.push(line),
+    }) as unknown as EditorFacade;
 
   useProjectStore.setState({
     // Seuls `path` et `chapters` sont lus par le service.
@@ -49,10 +57,16 @@ function setup(options: { openFilePath?: string } = {}): Harness {
 
   useEditorStore.setState({
     filePath: options.openFilePath ?? null,
-    editorFacade: facade,
+    editorFacade: makeFacade(),
     loadFile: async (filePath: string) => {
       harness.loaded.push(filePath);
-      useEditorStore.setState({ filePath });
+      // Cycle réel : la vue est démontée (façade retirée), le contenu
+      // installé, puis la vue remontée au commit React SUIVANT — d'où le
+      // délai. Entre les deux, `editorFacade` est nul.
+      useEditorStore.setState({ filePath, editorFacade: null });
+      setTimeout(() => {
+        useEditorStore.setState({ editorFacade: makeFacade() });
+      }, 0);
     },
   });
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { waitForEditorFacade } from '../../services/wait-for-facade';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import {
   searchManuscript,
@@ -80,12 +81,20 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
       if (!chapter || !currentProject) return;
       try {
         const target = `${currentProject.path}/${chapter.filePath}`;
-        if (useEditorStore.getState().filePath !== target) {
+        const switched = useEditorStore.getState().filePath !== target;
+        const facadeBefore = useEditorStore.getState().editorFacade;
+        if (switched) {
           // `loadFile` sauvegarde le chapitre sortant avant de charger.
           await loadFile(target);
           setCurrentChapter(chapter.id);
         }
-        useEditorStore.getState().editorFacade?.revealLine(line);
+        // La vue CodeMirror n'est reconstruite qu'au commit React suivant :
+        // sans cette attente, on demandait le défilement à la façade du
+        // chapitre sortant et le curseur n'atteignait jamais l'occurrence.
+        const facade = switched
+          ? await waitForEditorFacade(facadeBefore)
+          : useEditorStore.getState().editorFacade;
+        facade?.revealLine(line);
       } catch (err) {
         logger.error('ManuscriptSearch', err);
         setError(t('search.error'));
