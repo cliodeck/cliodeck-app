@@ -171,6 +171,7 @@ import {
   loadWorkspaceHints,
   prependAsSystemMessage,
 } from '../../../backend/core/hints/loader.js';
+import { guardWorkspaceHints } from './hints-guard.js';
 import {
   createRegistryFromClioDeckConfig,
   resolveActiveChatModel,
@@ -432,6 +433,26 @@ class FusionChatService {
     const projectPath = projectManager.getCurrentProjectPath();
     const freeMode = isFreeMode(args.systemPrompt);
 
+    // Puits d'événements de sécurité, déclaré AVANT ses deux consommateurs
+    // — le garde du contexte de projet juste en dessous, et celui des
+    // résultats d'outils MCP plus bas. Le laisser près du second le rendait
+    // inaccessible au premier : une `ReferenceError` de zone morte
+    // temporelle, avalée par le `try/catch` des hints, aurait désactivé
+    // `context.md` sans le moindre signe.
+    //
+    // Les serveurs MCP tiers sont « semi-trusted » (ADR 0005) : leurs
+    // résultats sont du contenu non fiable, au même titre qu'un chunk RAG.
+    const securityLogPath = projectPath
+      ? workspaceFiles(projectPath).securityEventsLog
+      : null;
+    const emitSecurityEvent = securityLogPath
+      ? (e: SecurityEvent) => {
+          void appendSecurityEvent(securityLogPath, e).catch((err) => {
+            console.warn('[fusion-chat] security event log failed:', err);
+          });
+        }
+      : undefined;
+
     // Workspace hints — prepend before handing off to the engine so the
     // engine's retrieval-injected system message stacks on top cleanly.
     // Free-mode short-circuits hint injection to match legacy parity
@@ -440,7 +461,16 @@ class FusionChatService {
     if (projectPath && !freeMode) {
       try {
         const hints = await loadWorkspaceHints(projectPath);
-        messages = prependAsSystemMessage(messages, hints);
+        // `context.md` vit à la RACINE du projet : il voyage avec un dossier
+        // partagé. Injecté en rôle `system`, il se retrouverait au-dessus des
+        // consignes de l'application elle-même. Il passe donc par le même
+        // garde que les résultats d'outils MCP — borne de taille et
+        // inspection — au lieu d'être la dernière entrée non défendue.
+        const guarded = guardWorkspaceHints(hints, {
+          mode: retrievalService.getInspectorMode(),
+          onEvent: emitSecurityEvent,
+        });
+        messages = prependAsSystemMessage(messages, guarded);
       } catch {
         // Hints absent / unreadable — proceed without them.
       }
@@ -495,22 +525,6 @@ class FusionChatService {
         }
       }
     }
-
-    // Les serveurs MCP tiers sont « semi-trusted » (ADR 0005) : leurs
-    // résultats sont du contenu non fiable, au même titre qu'un chunk RAG.
-    // Ils passent donc par le SourceInspector et par une borne de taille
-    // avant d'atteindre le contexte du modèle — lequel dispose d'outils
-    // réels et boucle jusqu'à `maxTurns`.
-    const securityLogPath = projectPath
-      ? workspaceFiles(projectPath).securityEventsLog
-      : null;
-    const emitSecurityEvent = securityLogPath
-      ? (e: SecurityEvent) => {
-          void appendSecurityEvent(securityLogPath, e).catch((err) => {
-            console.warn('[fusion-chat] security event log failed:', err);
-          });
-        }
-      : undefined;
 
     const toolHandler: ChatEngineToolHandler = {
       async call(name, toolArgs) {

@@ -27,6 +27,18 @@ export interface AssembleOptions {
   /** `book` (défaut) ou un tirage de travail limité à un chapitre. */
   scope?: 'book' | { chapterId: string };
   /**
+   * Destination du flux assemblé.
+   *
+   * `latex` (défaut) injecte les commandes de structure — `\mainmatter`,
+   * `\backmatter`, vidage des notes de fin, remise à zéro du compteur.
+   * pandoc les laisse passer telles quelles vers LaTeX.
+   *
+   * `plain` ne les injecte pas : le générateur docx natif ne comprend pas
+   * le LaTeX et rendait `\mainmatter` comme un PARAGRAPHE de texte. Un
+   * livre sans bibliographie s'ouvrait donc sur cette ligne.
+   */
+  target?: 'latex' | 'plain';
+  /**
    * Transformation appliquée au texte d'un chapitre AVANT le préfixage des
    * notes. Sert la bibliographie par chapitre : citeproc y est exécuté
    * chapitre par chapitre, et ses notes générées sont préfixées comme les
@@ -86,7 +98,15 @@ const FOOTNOTE_RESET = '\n\n\\setcounter{footnote}{0}\n';
 export async function assembleManuscript(
   opts: AssembleOptions
 ): Promise<AssembledManuscript> {
-  const { projectPath, settings, liveOverrides = {}, scope = 'book' } = opts;
+  const {
+    projectPath,
+    settings,
+    liveOverrides = {},
+    scope = 'book',
+    target = 'latex',
+  } = opts;
+  /** Le docx natif n'interprète pas le LaTeX : on ne lui en donne pas. */
+  const emitsLatex = target === 'latex';
   const warnings: string[] = [];
 
   const selected =
@@ -142,22 +162,22 @@ export async function assembleManuscript(
     let piece = content.trimEnd();
 
     if (isBodyChapter && !mainOpened) {
-      piece = '\\mainmatter\n\n' + piece;
+      if (emitsLatex) piece = '\\mainmatter\n\n' + piece;
       mainOpened = true;
     } else if (kind === 'back' && !backOpened) {
       // `\backmatter` implique la sortie du corps : ouvrir la matière
       // principale si le manuscrit n'a que des liminaires et des annexes.
       if (!mainOpened) mainOpened = true;
-      piece = '\\backmatter\n\n' + piece;
+      if (emitsLatex) piece = '\\backmatter\n\n' + piece;
       backOpened = true;
     }
 
-    if (isBodyChapter && settings.noteNumbering === 'per-chapter'
+    if (emitsLatex && isBodyChapter && settings.noteNumbering === 'per-chapter'
         && settings.noteStyle === 'footnote') {
       piece = FOOTNOTE_RESET + piece;
     }
 
-    if (settings.noteStyle === 'endnote-chapter') {
+    if (emitsLatex && settings.noteStyle === 'endnote-chapter') {
       piece += endnoteFlush(settings);
     }
 
@@ -168,7 +188,7 @@ export async function assembleManuscript(
   let markdown = parts.join('\n\n');
 
   // Notes de fin d'ouvrage : un seul vidage, après la dernière pièce.
-  if (settings.noteStyle === 'endnote-book' && chapterCount > 0) {
+  if (emitsLatex && settings.noteStyle === 'endnote-book' && chapterCount > 0) {
     markdown += endnoteFlush({ ...settings, noteNumbering: 'continuous' });
   }
 

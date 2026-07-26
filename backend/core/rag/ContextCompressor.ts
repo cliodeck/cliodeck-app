@@ -37,6 +37,57 @@ interface CompressedResult {
   };
 }
 
+/**
+ * Frontière de phrase interne. `\u0001` ne peut pas figurer dans un texte
+ * extrait d'un PDF ou d'une note : contrairement à `|`, qui portait ce rôle
+ * et qui est le séparateur des tableaux markdown.
+ */
+const BOUNDARY = '\u0001';
+
+/** Marque d'élision, insérée là où des phrases ont été retirées. */
+export const ELISION = '[…]';
+
+/**
+ * Un tableau markdown ou un bloc de code n'est pas une suite de phrases.
+ * Découper puis filtrer y fabrique des lignes qui n'ont jamais existé —
+ * dans un logiciel de recherche historique, c'est inacceptable : l'extrait
+ * affiché doit être le texte de la source.
+ */
+function hasStructuredBlock(text: string): boolean {
+  if (text.includes('```') || text.includes('~~~')) return true;
+  // Deux lignes ou plus contenant un séparateur de cellule : tableau.
+  const tableRows = text
+    .split('\n')
+    .filter((line) => /\|.*\|/.test(line.trim())).length;
+  return tableRows >= 2;
+}
+
+/**
+ * Recompose le texte à partir des seules phrases retenues, en signalant
+ * chaque coupe par `[…]`.
+ *
+ * Sans cette marque, trois phrases prélevées aux positions 1, 4 et 7 se
+ * lisaient comme une citation continue : l'historien voyait dans le panneau
+ * « Sources » un passage qui n'existe nulle part dans le document.
+ */
+function joinWithElisions(sentences: string[], keptIndices: number[]): string {
+  if (keptIndices.length === 0) return '';
+
+  const parts: string[] = [];
+  if (keptIndices[0] > 0) parts.push(ELISION);
+
+  keptIndices.forEach((idx, n) => {
+    if (n > 0 && idx > keptIndices[n - 1] + 1) parts.push(ELISION);
+    parts.push(sentences[idx]);
+  });
+
+  if (keptIndices[keptIndices.length - 1] < sentences.length - 1) {
+    parts.push(ELISION);
+  }
+
+  return parts.join(' ');
+}
+
 export class ContextCompressor {
   /**
    * Main compression method - applies strategies based on content size
@@ -247,6 +298,15 @@ export class ContextCompressor {
     let totalSentencesRemoved = 0;
 
     const processed = chunks.map(chunk => {
+      // Un tableau ou un bloc de code n'est pas une suite de phrases :
+      // le découper puis en jeter des morceaux fabriquait des lignes qui
+      // n'ont jamais existé (deux cellules de lignes différentes collées).
+      // Ces chunks passent entiers.
+      if (hasStructuredBlock(chunk.content)) {
+        totalSentencesKept += 1;
+        return chunk;
+      }
+
       const sentences = this.splitIntoSentences(chunk.content);
 
       // Score each sentence based on keyword presence and position
@@ -278,25 +338,32 @@ export class ContextCompressor {
         return { sentence, score };
       });
 
-      // Keep sentences above threshold, but always keep at least 2 sentences
-      const relevantSentences = scoredSentences
+      // On raisonne sur les INDICES, pour deux raisons : restituer les
+      // phrases dans l'ordre du document, et savoir où des passages ont
+      // été retirés afin de les marquer.
+      let keptIndices = scoredSentences
+        .map((s, i) => ({ ...s, i }))
         .filter(s => s.score >= minRelevanceScore)
-        .map(s => s.sentence);
+        .map(s => s.i);
 
-      // Ensure minimum context (keep top 2 if filter was too aggressive)
-      const finalSentences = relevantSentences.length >= 2
-        ? relevantSentences
-        : scoredSentences
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 2)
-            .map(s => s.sentence);
+      // Contexte minimal : les 2 meilleures si le filtre a tout emporté.
+      // Le tri par score sert à CHOISIR, jamais à ordonner — les rendre
+      // dans l'ordre du score réécrivait la chronologie du texte.
+      if (keptIndices.length < 2) {
+        keptIndices = scoredSentences
+          .map((s, i) => ({ score: s.score, i }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 2)
+          .map(s => s.i)
+          .sort((a, b) => a - b);
+      }
 
-      totalSentencesKept += finalSentences.length;
-      totalSentencesRemoved += sentences.length - finalSentences.length;
+      totalSentencesKept += keptIndices.length;
+      totalSentencesRemoved += sentences.length - keptIndices.length;
 
       return {
         ...chunk,
-        content: finalSentences.join(' '),
+        content: joinWithElisions(sentences, keptIndices),
       };
     });
 
@@ -328,9 +395,13 @@ export class ContextCompressor {
       m.replace(/\.\s+$/, `.${SENTINEL}`)
     );
 
+    // Frontière de phrase : un caractère qui ne peut pas figurer dans le
+    // texte. `|` servait ici — or c'est le séparateur des tableaux
+    // markdown, qui étaient donc pulvérisés cellule par cellule, puis
+    // recomposés en lignes n'ayant jamais existé.
     return protectedText
-      .replace(/([.!?])\s+(?=\p{Lu})/gu, '$1|')
-      .split('|')
+      .replace(/([.!?])\s+(?=\p{Lu})/gu, `$1${BOUNDARY}`)
+      .split(BOUNDARY)
       .map(s => s.split(SENTINEL).join(' ').trim())
       .filter(s => s.length > 0);
   }

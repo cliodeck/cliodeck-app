@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Archive, FileText, Image, Tag, Building2, FolderOpen } from 'lucide-react';
 import { PrimarySourcesStatistics } from '../../stores/primarySourcesStore';
 import './PrimarySourceStats.css';
@@ -9,6 +10,7 @@ interface PrimarySourceStatsProps {
 }
 
 export const PrimarySourceStats: React.FC<PrimarySourceStatsProps> = ({ statistics }) => {
+  const { t } = useTranslation('common');
   const transcriptionRate =
     statistics.sourceCount > 0
       ? Math.round((statistics.withTranscription / statistics.sourceCount) * 100)
@@ -29,23 +31,23 @@ export const PrimarySourceStats: React.FC<PrimarySourceStatsProps> = ({ statisti
         <div className="stat-item">
           <Archive size={18} strokeWidth={1} />
           <div className="stat-value">{statistics.sourceCount}</div>
-          <div className="stat-label">Sources</div>
+          <div className="stat-label">{t('sourceStats.sources')}</div>
         </div>
         <div className="stat-item">
           <Image size={18} strokeWidth={1} />
           <div className="stat-value">{statistics.photoCount}</div>
-          <div className="stat-label">Photos</div>
+          <div className="stat-label">{t('sourceStats.photos')}</div>
         </div>
         <div className="stat-item">
           <FileText size={18} strokeWidth={1} />
           <div className="stat-value">{statistics.chunkCount}</div>
-          <div className="stat-label">Chunks</div>
+          <div className="stat-label">{t('sourceStats.chunks')}</div>
         </div>
       </div>
 
       {/* Transcription Progress */}
       <div className="stats-section">
-        <h5>Transcription Progress</h5>
+        <h5>{t('sourceStats.transcriptionProgress')}</h5>
         <div className="transcription-progress">
           <div className="progress-bar">
             <div
@@ -70,7 +72,7 @@ export const PrimarySourceStats: React.FC<PrimarySourceStatsProps> = ({ statisti
         <div className="stats-section">
           <h5>
             <Building2 size={14} strokeWidth={1} />
-            Top Archives
+            {t('sourceStats.topArchives')}
           </h5>
           <ul className="stat-list">
             {topArchives.map(([archive, count]) => (
@@ -88,7 +90,7 @@ export const PrimarySourceStats: React.FC<PrimarySourceStatsProps> = ({ statisti
         <div className="stats-section">
           <h5>
             <FolderOpen size={14} strokeWidth={1} />
-            Top Collections
+            {t('sourceStats.topCollections')}
           </h5>
           <ul className="stat-list">
             {topCollections.map(([collection, count]) => (

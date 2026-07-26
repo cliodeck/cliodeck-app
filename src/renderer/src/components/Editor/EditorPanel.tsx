@@ -40,7 +40,9 @@ import './EditorPanel.css';
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const { loadFile, saveFile, setContent, insertFormatting } = useEditorStore();
-  const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } = useSimilarityStore();
+  const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } =
+    useSimilarityStore();
+  const closeSimilarityPanel = useSimilarityStore((s) => s.closePanel);
 
   // Chantier « même éditeur » : un projet presentation garde CE panneau —
   // la toolbar gagne une section slides et Navigator/Preview/Génération
@@ -55,6 +57,21 @@ export const EditorPanel: React.FC = () => {
   const draftsCount = useDraftsStore((s) => s.drafts.length);
   const isDraftsPanelOpen = useDraftsStore((s) => s.isPanelOpen);
   const toggleDraftsPanel = useDraftsStore((s) => s.togglePanel);
+  const closeDraftsPanel = useDraftsStore((s) => s.closePanel);
+
+  // Les deux panneaux flottants occupent le MÊME coin de l'écran : les
+  // ouvrir ensemble en masquait un derrière l'autre, son bouton restant
+  // pourtant en état actif. Ils s'excluent donc. C'est ici que ça se règle,
+  // et non dans les stores, qui deviendraient mutuellement dépendants —
+  // et parce que c'est le seul écran où les deux coexistent.
+  const showSimilarityPanel = (): void => {
+    closeDraftsPanel();
+    openSimilarityPanel();
+  };
+  const showDraftsPanel = (): void => {
+    closeSimilarityPanel();
+    toggleDraftsPanel();
+  };
   const { isPanelOpen: isGenerationOpen, openPanel: openGeneration, isPreviewOpen, togglePreview } = useSlidesStore();
   const [showExportModal, setShowExportModal] = useState(false);
   // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
@@ -171,7 +188,15 @@ export const EditorPanel: React.FC = () => {
     // manifeste et selon le réglage d'ouvrage (arbitrage 3). Verrou posé
     // pendant toute l'opération : les chapitres s'écrivent un par un et un
     // export concurrent assemblerait un manuscrit mi-renuméroté (#30).
-    if (useManuscriptStore.getState().renumbering) return;
+    // Symétrie du verrou : un export en cours lit les chapitres pendant
+    // plusieurs secondes. Renuméroter maintenant les réécrirait sous
+    // l'assemblage — le scénario même que #30 prétendait fermer, resté
+    // ouvert parce que le verrou n'était consulté que dans un sens.
+    const busy = useManuscriptStore.getState().manuscriptBusyReason();
+    if (busy) {
+      await useDialogStore.getState().showAlert(t(busy));
+      return;
+    }
     useManuscriptStore.getState().setRenumbering(true);
     try {
       const docs = await useManuscriptStore.getState().readManuscript();
@@ -217,8 +242,17 @@ export const EditorPanel: React.FC = () => {
         for (const key of written) {
           const original = originals.get(key);
           if (original === undefined) continue;
-          if (key === openRel) store.editorFacade?.setValue(original);
-          else {
+          if (key === openRel) {
+            // L'aller a écrit ce chapitre SUR LE DISQUE (via saveFile) :
+            // restaurer le seul tampon de l'éditeur laissait donc le fichier
+            // renuméroté, et ne restaurait rien du tout si la façade était
+            // nulle ou l'autosave désactivé. On réécrit explicitement.
+            store.editorFacade?.setValue(original);
+            await useEditorStore
+              .getState()
+              .saveFile()
+              .catch(() => undefined);
+          } else {
             await window.electron.editor
               .saveFile(`${project.path}/${key}`, original)
               .catch(() => undefined);
@@ -305,7 +339,7 @@ export const EditorPanel: React.FC = () => {
           )}
           <button
             className={`toolbar-btn ${isSimilarityPanelOpen ? 'active' : ''}`}
-            onClick={openSimilarityPanel}
+            onClick={showSimilarityPanel}
             title={t('similarity.title')}
           >
             <Search size={18} strokeWidth={1.5} />
@@ -313,7 +347,7 @@ export const EditorPanel: React.FC = () => {
           {!isPresentation && (
             <button
               className={`toolbar-btn ${isDraftsPanelOpen ? 'active' : ''}`}
-              onClick={toggleDraftsPanel}
+              onClick={showDraftsPanel}
               title={t('drafts.title')}
               style={{ position: 'relative' }}
             >
@@ -330,21 +364,21 @@ export const EditorPanel: React.FC = () => {
           <div className="toolbar-section">
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\n---\n\n# Nouvelle section\n\n')}
+              onClick={() => insertSlideSnippet(`\n\n---\n\n# ${t('snippets.newSection')}\n\n`)}
               title={t('presentation.addSection')}
             >
               <Columns size={18} strokeWidth={1.5} />
             </button>
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\n---\n\n## Titre de la slide\n\n')}
+              onClick={() => insertSlideSnippet(`\n\n---\n\n## ${t('snippets.slideTitle')}\n\n`)}
               title={t('presentation.addSlide')}
             >
               <Plus size={18} strokeWidth={1.5} />
             </button>
             <button
               className="toolbar-btn"
-              onClick={() => insertSlideSnippet('\n\nNote:\nNotes du présentateur ici.\n')}
+              onClick={() => insertSlideSnippet(`\n\nNote:\n${t('snippets.speakerNotes')}\n`)}
               title={t('presentation.addNote')}
             >
               <MessageSquare size={18} strokeWidth={1.5} />

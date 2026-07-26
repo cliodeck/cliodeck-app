@@ -48,6 +48,20 @@ interface ManuscriptState {
    */
   renumbering: boolean;
   setRenumbering: (renumbering: boolean) => void;
+  /**
+   * Symétrique du précédent : l'assemblage d'un export LIT les chapitres
+   * pendant plusieurs secondes. Le verrou #30 n'était posé que dans un
+   * sens — rien n'empêchait de renuméroter pendant un export déjà lancé,
+   * qui réécrivait donc le manuscrit sous l'assemblage en cours. Exactement
+   * le scénario que #30 prétendait fermer.
+   */
+  exporting: boolean;
+  setExporting: (exporting: boolean) => void;
+  /**
+   * Une opération exclusive est-elle en cours ? `undefined` si le manuscrit
+   * est libre, sinon la clé i18n du message à afficher.
+   */
+  manuscriptBusyReason: () => 'book.renumberInProgress' | 'book.exportInProgress' | undefined;
   /** Recalcule le dérivé de tous les chapitres du manifeste. */
   refreshAll: () => Promise<void>;
   /** Recalcule le dérivé d'un seul chapitre à partir d'un texte connu. */
@@ -70,11 +84,20 @@ function derive(content: string): ChapterInfo {
   return { stats: computeDocumentStats(content), outline: parseOutline(content) };
 }
 
-export const useManuscriptStore = create<ManuscriptState>((set) => ({
+export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
   info: {},
   refreshing: false,
   renumbering: false,
   setRenumbering: (renumbering: boolean) => set({ renumbering }),
+  exporting: false,
+  setExporting: (exporting: boolean) => set({ exporting }),
+
+  manuscriptBusyReason: () => {
+    const { renumbering, exporting } = get();
+    if (renumbering) return 'book.renumberInProgress';
+    if (exporting) return 'book.exportInProgress';
+    return undefined;
+  },
 
   refreshAll: async () => {
     const { currentProject, chapters } = useProjectStore.getState();

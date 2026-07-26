@@ -368,77 +368,7 @@ class TropyService {
       });
 
       try {
-        // Créer le texte complet pour le chunking
-        let fullText = '';
-        if (source.title) fullText += `Titre: ${source.title}\n\n`;
-        if (source.creator) fullText += `Auteur: ${source.creator}\n`;
-        if (source.date) fullText += `Date: ${source.date}\n`;
-        if (source.archive) fullText += `Archive: ${source.archive}\n`;
-        if (source.collection) fullText += `Collection: ${source.collection}\n`;
-        fullText += '\n';
-        if (source.transcription) fullText += source.transcription;
-
-        // Get raw chunks from DocumentChunker for optimization
-        const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
-        const initialChunkCount = rawChunks.length;
-
-        // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
-        let optimizedChunks = rawChunks;
-        if (this.qualityScorer && optimizedChunks.length > 0) {
-          const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
-            minEntropy: 0.3,
-            minUniqueWordRatio: 0.4,
-          }, false); // Don't log each filtered chunk
-
-          if (qualityResult.stats.filteredChunks > 0) {
-            console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
-          }
-          optimizedChunks = qualityResult.passed;
-        }
-
-        // Deduplication - remove duplicate chunks (works on DocumentChunk type)
-        if (this.deduplicator && optimizedChunks.length > 0) {
-          const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
-            useContentHash: true,
-            useSimilarity: false, // Fast mode - hash only
-          });
-
-          if (dedupResult.duplicateCount > 0) {
-            console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
-          }
-          optimizedChunks = dedupResult.uniqueChunks;
-        }
-
-        // Log optimization results
-        if (optimizedChunks.length !== initialChunkCount) {
-          console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
-        }
-
-        // Convert to source chunks format and generate embeddings
-        for (const rawChunk of optimizedChunks) {
-          try {
-            // Score chunk quality if scorer is available
-            const qualityScore = this.qualityScorer
-              ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
-              : undefined;
-
-            const sourceChunk = {
-              id: rawChunk.id,
-              sourceId: source.id,
-              content: rawChunk.content,
-              chunkIndex: rawChunk.chunkIndex,
-              startPosition: rawChunk.startPosition,
-              endPosition: rawChunk.endPosition,
-              qualityScore,
-            };
-            const embedding = await this.embedOne(sourceChunk.content);
-            this.vectorStore!.saveChunk(sourceChunk, embedding);
-            chunksCreated++;
-          } catch (error) {
-            console.warn(`⚠️ [TROPY-SERVICE] Failed to generate embedding for chunk in source ${source.id}:`, error);
-          }
-        }
-
+        chunksCreated += await this.indexSourceChunks(source);
         sourcesProcessed++;
       } catch (error) {
         console.error(`❌ [TROPY-SERVICE] Failed to process source ${source.id}:`, error);
@@ -547,6 +477,13 @@ class TropyService {
       this.watcher = new TropyWatcher();
     }
 
+    // Le watcher est REUTILISE d'un appel à l'autre : sans purge, chaque
+    // bascule de la synchro automatique empilait un écouteur de plus, et
+    // un seul enregistrement dans Tropy déclenchait alors autant de `sync()`
+    // concurrents qu'il y avait eu d'activations — sur le même store.
+    this.watcher.removeAllListeners('change');
+    this.watcher.removeAllListeners('error');
+
     // Configurer le callback de changement
     this.watcher.on('change', async (changedPath: string) => {
       console.log(`📝 Tropy file changed: ${changedPath}`);
@@ -583,6 +520,11 @@ class TropyService {
    * Arrête la surveillance
    */
   stopWatching(): void {
+    // Retirer les écouteurs AVANT de démonter : `unwatch()` ne les touche
+    // pas, et un watcher gardé en champ les conserverait pour la prochaine
+    // activation.
+    this.watcher?.removeAllListeners('change');
+    this.watcher?.removeAllListeners('error');
     this.watcher?.unwatch();
   }
 
@@ -986,6 +928,100 @@ class TropyService {
     }
   }
 
+
+  /**
+   * Découpe, filtre, déduplique et embarque une source. Renvoie le nombre
+   * de chunks écrits.
+   *
+   * Extrait de la boucle de synchronisation pour que la réindexation d'UNE
+   * source puisse faire exactement le même travail : `reindexSource`
+   * supprimait les chunks sans jamais les regénérer — un `TODO` vieux de
+   * plusieurs mois — si bien que l'appeler aurait retiré la source du RAG.
+   */
+  private async indexSourceChunks(source: {
+    id: string;
+    title?: string;
+    creator?: string;
+    date?: string;
+    archive?: string;
+    collection?: string;
+    transcription?: string;
+  }): Promise<number> {
+    let created = 0;
+
+      let fullText = '';
+      if (source.title) fullText += `Titre: ${source.title}\n\n`;
+      if (source.creator) fullText += `Auteur: ${source.creator}\n`;
+      if (source.date) fullText += `Date: ${source.date}\n`;
+      if (source.archive) fullText += `Archive: ${source.archive}\n`;
+      if (source.collection) fullText += `Collection: ${source.collection}\n`;
+      fullText += '\n';
+      if (source.transcription) fullText += source.transcription;
+
+      // Get raw chunks from DocumentChunker for optimization
+      const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
+      const initialChunkCount = rawChunks.length;
+
+      // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
+      let optimizedChunks = rawChunks;
+      if (this.qualityScorer && optimizedChunks.length > 0) {
+        const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
+          minEntropy: 0.3,
+          minUniqueWordRatio: 0.4,
+        }, false); // Don't log each filtered chunk
+
+        if (qualityResult.stats.filteredChunks > 0) {
+          console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
+        }
+        optimizedChunks = qualityResult.passed;
+      }
+
+      // Deduplication - remove duplicate chunks (works on DocumentChunk type)
+      if (this.deduplicator && optimizedChunks.length > 0) {
+        const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
+          useContentHash: true,
+          useSimilarity: false, // Fast mode - hash only
+        });
+
+        if (dedupResult.duplicateCount > 0) {
+          console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
+        }
+        optimizedChunks = dedupResult.uniqueChunks;
+      }
+
+      // Log optimization results
+      if (optimizedChunks.length !== initialChunkCount) {
+        console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
+      }
+
+      // Convert to source chunks format and generate embeddings
+      for (const rawChunk of optimizedChunks) {
+        try {
+          // Score chunk quality if scorer is available
+          const qualityScore = this.qualityScorer
+            ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
+            : undefined;
+
+          const sourceChunk = {
+            id: rawChunk.id,
+            sourceId: source.id,
+            content: rawChunk.content,
+            chunkIndex: rawChunk.chunkIndex,
+            startPosition: rawChunk.startPosition,
+            endPosition: rawChunk.endPosition,
+            qualityScore,
+          };
+          const embedding = await this.embedOne(sourceChunk.content);
+          this.vectorStore!.saveChunk(sourceChunk, embedding);
+          created++;
+        } catch (error) {
+          console.warn(`⚠️ [TROPY-SERVICE] Failed to generate embedding for chunk in source ${source.id}:`, error);
+        }
+      }
+
+      return created;
+  }
+
   /**
    * Supprime les chunks existants et réindexe une source
    */
@@ -995,11 +1031,16 @@ class TropyService {
         return { success: false, error: 'Service not initialized' };
       }
 
-      // Supprimer les chunks existants
-      this.vectorStore.deleteChunks(sourceId);
+      const source = this.vectorStore.getSource(sourceId);
+      if (!source) {
+        return { success: false, error: `Source not found: ${sourceId}` };
+      }
 
-      // TODO: Regénérer les chunks et embeddings
-      // Cela nécessite l'accès à OllamaClient pour les embeddings
+      // Supprimer les chunks existants, puis les REGÉNÉRER. Supprimer sans
+      // regénérer retirait la source du RAG.
+      this.vectorStore.deleteChunks(sourceId);
+      const chunks = await this.indexSourceChunks(source);
+      console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${chunks} chunk(s)`);
 
       return { success: true };
     } catch (error: unknown) {

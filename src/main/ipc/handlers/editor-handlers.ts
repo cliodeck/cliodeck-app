@@ -3,6 +3,7 @@
  */
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
+import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import { projectManager } from '../../services/project-manager.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
@@ -17,29 +18,6 @@ import {
   EditorInsertTextSchema,
 } from '../utils/validation.js';
 
-/**
- * Autorise un chemin de document : à l'intérieur du projet courant, ou
- * explicitement désigné par l'utilisateur dans un dialogue natif.
- *
- * Sans cette garde, `editor:load-file` / `editor:save-file` lisaient et
- * écrivaient n'importe quel chemin absolu — de quoi laisser un renderer
- * compromis siphonner `~/.ssh/id_rsa` puis l'exfiltrer via le chat
- * (ADR 0005). Le registre de consentement préserve les usages légitimes
- * hors projet : ouvrir un document rangé ailleurs, « Enregistrer sous ».
- */
-async function authorizeDocumentPath(
-  filePath: string,
-  intent: 'read' | 'write'
-): Promise<string> {
-  try {
-    return intent === 'read'
-      ? await validateReadPath(filePath)
-      : await validateWritePath(filePath);
-  } catch (error) {
-    if (await isConsentedPath(filePath)) return path.resolve(filePath);
-    throw error;
-  }
-}
 
 export function setupEditorHandlers() {
   ipcMain.handle('editor:load-file', async (_event, rawFilePath: unknown) => {

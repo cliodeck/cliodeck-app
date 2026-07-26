@@ -33,7 +33,7 @@ export const WorkspaceModeBar: React.FC = () => {
   const setActive = useWorkspaceModeStore((s) => s.setActive);
 
   return (
-    <nav className="workspace-mode-bar" aria-label={t('workspaceMode.brainstorm')}>
+    <nav className="workspace-mode-bar" aria-label={t('workspaceMode.navAria')}>
       {WORKSPACE_MODES.map((m) => {
         const Icon = ICONS[m];
         const isActive = m === active;

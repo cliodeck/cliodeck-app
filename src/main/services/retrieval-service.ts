@@ -35,6 +35,7 @@ import {
   manuscriptStorePath,
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
+import { selectWithManuscriptQuota } from './retrieval-quota.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
 import {
@@ -517,6 +518,28 @@ class RetrievalService {
     return this.embedding;
   }
 
+  /**
+   * Reconstruit le fournisseur d'embeddings depuis la configuration.
+   *
+   * Changer de fournisseur écrivait la config sans toucher au registre :
+   * le service continuait d'embarquer avec l'ancien modèle jusqu'au
+   * redémarrage, sans que rien ne le dise. Les requêtes et l'index se
+   * retrouvaient alors dans deux espaces vectoriels différents — et
+   * `cosine()` compare sur la longueur minimale, donc sans erreur.
+   */
+  rebuildEmbeddingProvider(): void {
+    void this.disposePreviousRegistry();
+    try {
+      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      this.embedding = this.registry.getEmbedding();
+      console.log('🔄 [retrieval] fournisseur d’embeddings reconstruit');
+    } catch (e) {
+      console.warn('[retrieval] failed to rebuild embedding provider:', e);
+      this.registry = null;
+      this.embedding = null;
+    }
+  }
+
   private ensureReady(): void {
     if (!this.vectorStore || !this.embedding) {
       throw new Error(
@@ -779,9 +802,10 @@ class RetrievalService {
       }
     }
 
-    const sortedResults = allSourceResults
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
+    // Places réservées au manuscrit : sans elles, la bibliographie prend
+    // tout le `topK` et le corpus manuscrit — indexé à chaque sauvegarde —
+    // n'atteint jamais l'assistant.
+    const sortedResults = selectWithManuscriptQuota(allSourceResults, topK);
 
     // Run the inspector before returning chunks to the caller. In `warn`
     // mode this is a logging side-effect; in `audit`/`block` it filters
@@ -931,7 +955,16 @@ class RetrievalService {
           sectionTitle: h.chunk.sectionTitle,
           line: h.chunk.line,
         },
-        similarity: h.score,
+        // `h.score` est un score RRF (fusion dense+BM25, K=60) : son
+        // maximum arithmétique vaut 1/61 ≈ 0,016, très en dessous du seuil
+        // cosinus des autres corpus (0,12 par défaut). Publié tel quel, il
+        // classait TOUT extrait du manuscrit sous TOUT extrait externe, et
+        // le `slice(0, topK)` l'éliminait systématiquement.
+        //
+        // On publie donc le cosinus réel, que le store expose déjà dans ses
+        // signaux — comparable d'un corpus à l'autre. Le RRF garde son rôle,
+        // meilleur : il a déjà décidé QUELS extraits le store renvoie.
+        similarity: h.signals?.dense ?? h.score,
         sourceType: 'manuscript',
       })
     );

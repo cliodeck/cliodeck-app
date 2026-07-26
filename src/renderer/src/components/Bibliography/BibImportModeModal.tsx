@@ -1,7 +1,9 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import './BibImportModeModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface BibImportModeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,15 +19,19 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   onMerge,
   currentCitationCount,
 }) => {
+  const { t } = useTranslation('common');
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   const hasCitations = currentCitationCount > 0;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content bib-import-mode-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Import Bibliography</h3>
+          <h3>{t('bibImport.title')}</h3>
           <button className="close-button" onClick={onClose}>
             <X size={20} />
           </button>
@@ -35,25 +41,25 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
           {hasCitations ? (
             <>
               <p className="modal-info">
-                You currently have <strong>{currentCitationCount} citation{currentCitationCount !== 1 ? 's' : ''}</strong> in your bibliography.
+                {t('bibImport.youHaveBefore')} <strong>{currentCitationCount} citation{currentCitationCount !== 1 ? 's' : ''}</strong> {t('bibImport.youHaveAfter')}
               </p>
               <p className="modal-question">
-                How would you like to import the new file?
+                {t('bibImport.question')}
               </p>
 
               <div className="import-options">
                 <button className="import-option-btn replace-btn" onClick={onReplace}>
                   <div className="option-icon">🔄</div>
                   <div className="option-content">
-                    <h4>Replace</h4>
-                    <p>Remove all current citations and replace with the new file</p>
+                    <h4>{t('bibImport.replace')}</h4>
+                    <p>{t('bibImport.replaceHint')}</p>
                   </div>
                 </button>
 
                 <button className="import-option-btn merge-btn" onClick={onMerge}>
                   <div className="option-icon">➕</div>
                   <div className="option-content">
-                    <h4>Merge</h4>
+                    <h4>{t('bibImport.merge')}</h4>
                     <p>Add new citations to the existing ones (duplicates will be detected)</p>
                   </div>
                 </button>
@@ -61,13 +67,13 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
             </>
           ) : (
             <div className="first-import">
-              <p>You don't have any citations yet. The file will be loaded into your bibliography.</p>
+              <p>{t('bibImport.empty')}</p>
               <div className="modal-actions">
                 <button className="btn-cancel" onClick={onClose}>
-                  Cancel
+                  {t('bibImport.cancel')}
                 </button>
                 <button className="btn-primary" onClick={onReplace}>
-                  Import
+                  {t('bibImport.import')}
                 </button>
               </div>
             </div>

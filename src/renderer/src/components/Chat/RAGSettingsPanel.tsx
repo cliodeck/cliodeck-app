@@ -184,7 +184,7 @@ export const RAGSettingsPanel: React.FC = () => {
     <div className="rag-settings-panel">
       <button className="settings-toggle" onClick={handleTogglePanel}>
         <Settings size={14} />
-        <span>RAG Settings</span>
+        <span>{t('ragPanel.title')}</span>
         {isSettingsPanelOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
 
@@ -223,7 +223,7 @@ export const RAGSettingsPanel: React.FC = () => {
               <button
                 onClick={handleRefreshModels}
                 disabled={isLoadingModels}
-                title="Refresh models"
+                title={t('ragPanel.refreshModels')}
                 style={{
                   padding: '4px 6px',
                   fontSize: '11px',
@@ -258,7 +258,7 @@ export const RAGSettingsPanel: React.FC = () => {
             </select>
             <small className="setting-hint">
               {availableModels.length === 0 && !isLoadingModels
-                ? <><AlertTriangle size={12} /> No models loaded. Load a project first, then click <RefreshCw size={10} style={{ verticalAlign: 'middle' }} />.</>
+                ? <><AlertTriangle size={12} /> {t('ragPanel.noModels')} <RefreshCw size={10} style={{ verticalAlign: 'middle' }} />.</>
                 : `${availableModels.length} models available. Larger models are slower but better.`}
             </small>
           </div>
@@ -270,7 +270,7 @@ export const RAGSettingsPanel: React.FC = () => {
               permissive fallback so the turn doesn't silently die. */}
           <div className="setting-group">
             <label>{t('ragSettings.sources', 'Sources')}</label>
-            <div className="source-toggle-list" role="group" aria-label="Sources">
+            <div className="source-toggle-list" role="group" aria-label={t('ragPanel.sources')}>
               <label className="source-toggle-item">
                 <input
                   type="checkbox"
@@ -331,7 +331,7 @@ export const RAGSettingsPanel: React.FC = () => {
               <button
                 onClick={handleRefreshCollections}
                 disabled={isLoadingCollections}
-                title="Refresh collections"
+                title={t('ragPanel.refreshCollections')}
                 style={{
                   padding: '4px 6px',
                   fontSize: '11px',
@@ -352,7 +352,7 @@ export const RAGSettingsPanel: React.FC = () => {
               collections={availableCollections}
               selectedKeys={params.selectedCollectionKeys}
               onChange={setSelectedCollections}
-              placeholder="All collections (no filter)"
+              placeholder={t('ragPanel.allCollections')}
               disabled={isLoadingCollections}
             />
             <small className="setting-hint">
@@ -374,7 +374,7 @@ export const RAGSettingsPanel: React.FC = () => {
               <button
                 onClick={handleRefreshDocuments}
                 disabled={isLoadingDocuments}
-                title="Refresh documents"
+                title={t('ragPanel.refreshDocuments')}
                 style={{
                   padding: '4px 6px',
                   fontSize: '11px',
@@ -395,7 +395,7 @@ export const RAGSettingsPanel: React.FC = () => {
               documents={availableDocuments}
               selectedIds={params.selectedDocumentIds}
               onChange={setSelectedDocuments}
-              placeholder="All documents (no filter)"
+              placeholder={t('ragPanel.allDocuments')}
               disabled={isLoadingDocuments}
             />
             <small className="setting-hint">
@@ -420,7 +420,7 @@ export const RAGSettingsPanel: React.FC = () => {
               value={params.topK}
               onChange={(e) => setParams({ topK: parseInt(e.target.value) })}
             />
-            <small className="setting-hint">Number of document chunks to retrieve</small>
+            <small className="setting-hint">{t('ragPanel.topKHelp')}</small>
           </div>
 
           {/* Timeout */}
@@ -437,7 +437,7 @@ export const RAGSettingsPanel: React.FC = () => {
               value={params.timeout}
               onChange={(e) => setParams({ timeout: parseInt(e.target.value) })}
             />
-            <small className="setting-hint">Maximum wait time for response</small>
+            <small className="setting-hint">{t('ragPanel.timeoutHelp')}</small>
           </div>
 
           {/* Advanced Settings Toggle */}
@@ -446,7 +446,7 @@ export const RAGSettingsPanel: React.FC = () => {
             onClick={() => setShowAdvanced(!showAdvanced)}
           >
             {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span>Advanced Parameters</span>
+            <span>{t('ragPanel.advanced')}</span>
           </button>
 
           {showAdvanced && (
@@ -454,7 +454,7 @@ export const RAGSettingsPanel: React.FC = () => {
               {/* Context Window Size */}
               <div className="setting-group">
                 <label htmlFor="context-slider">
-                  Context Window: <strong>{formatContextSize(params.numCtx)}</strong> tokens
+                  Context Window: <strong>{formatContextSize(params.numCtx)}</strong> {t('ragPanel.tokens')}
                 </label>
                 <input
                   id="context-slider"
@@ -484,14 +484,14 @@ export const RAGSettingsPanel: React.FC = () => {
                       color: 'var(--text-secondary)',
                     }}
                   >
-                    Use recommended
+                    {t('ragPanel.useRecommended')}
                   </button>
                 </small>
               </div>
 
               {/* System Prompt Language */}
               <div className="setting-group">
-                <label htmlFor="system-prompt-lang">System Prompt Language</label>
+                <label htmlFor="system-prompt-lang">{t('ragPanel.promptLanguage')}</label>
                 <select
                   id="system-prompt-lang"
                   value={params.systemPromptLanguage}
@@ -513,23 +513,23 @@ export const RAGSettingsPanel: React.FC = () => {
                     checked={params.useCustomSystemPrompt}
                     onChange={(e) => setParams({ useCustomSystemPrompt: e.target.checked })}
                   />
-                  <span>Use Custom System Prompt</span>
+                  <span>{t('ragPanel.customPrompt')}</span>
                 </label>
                 <small className="setting-hint">
-                  Override the default system prompt with a custom one
+                  {t('ragPanel.customPromptHelp')}
                 </small>
               </div>
 
               {/* Custom System Prompt Textarea */}
               {params.useCustomSystemPrompt && (
                 <div className="setting-group">
-                  <label htmlFor="custom-prompt">Custom System Prompt</label>
+                  <label htmlFor="custom-prompt">{t('ragPanel.customPromptLabel')}</label>
                   <textarea
                     id="custom-prompt"
                     rows={6}
                     value={params.customSystemPrompt || ''}
                     onChange={(e) => setParams({ customSystemPrompt: e.target.value })}
-                    placeholder="Enter your custom system prompt here..."
+                    placeholder={t('ragPanel.customPromptPlaceholder')}
                     style={{
                       width: '100%',
                       padding: '8px',
@@ -543,7 +543,7 @@ export const RAGSettingsPanel: React.FC = () => {
                     }}
                   />
                   <small className="setting-hint">
-                    This prompt instructs the AI how to respond to your queries
+                    {t('ragPanel.customPromptHint')}
                   </small>
                 </div>
               )}
@@ -563,7 +563,7 @@ export const RAGSettingsPanel: React.FC = () => {
                   onChange={(e) => setParams({ temperature: parseFloat(e.target.value) })}
                 />
                 <small className="setting-hint">
-                  Lower = more focused, higher = more creative
+                  {t('ragPanel.temperatureHelp')}
                 </small>
               </div>
 
@@ -581,7 +581,7 @@ export const RAGSettingsPanel: React.FC = () => {
                   value={params.top_p}
                   onChange={(e) => setParams({ top_p: parseFloat(e.target.value) })}
                 />
-                <small className="setting-hint">Nucleus sampling threshold</small>
+                <small className="setting-hint">{t('ragPanel.topPHelp')}</small>
               </div>
 
               {/* Top K (LLM parameter, different from search topK) */}
@@ -598,7 +598,7 @@ export const RAGSettingsPanel: React.FC = () => {
                   value={params.top_k}
                   onChange={(e) => setParams({ top_k: parseInt(e.target.value) })}
                 />
-                <small className="setting-hint">Number of tokens to consider</small>
+                <small className="setting-hint">{t('ragPanel.topKTokensHelp')}</small>
               </div>
 
               {/* Repeat Penalty */}
@@ -617,7 +617,7 @@ export const RAGSettingsPanel: React.FC = () => {
                     setParams({ repeat_penalty: parseFloat(e.target.value) })
                   }
                 />
-                <small className="setting-hint">Penalize repetitive text</small>
+                <small className="setting-hint">{t('ragPanel.repeatPenaltyHelp')}</small>
               </div>
             </div>
           )}
@@ -625,7 +625,7 @@ export const RAGSettingsPanel: React.FC = () => {
           {/* Reset Button */}
           <button className="reset-button" onClick={handleResetDefaults}>
             <RotateCcw size={14} />
-            <span>Reset to Config Defaults</span>
+            <span>{t('ragPanel.reset')}</span>
           </button>
         </div>
       )}

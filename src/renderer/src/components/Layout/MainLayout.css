@@ -27,7 +27,7 @@
   justify-content: center;
   box-shadow: var(--shadow-md);
   transition: all var(--transition-normal);
-  z-index: 900;
+  z-index: var(--z-chrome);
 }
 
 .floating-help-btn:hover {

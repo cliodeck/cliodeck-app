@@ -18,6 +18,7 @@ import { MCPClientsSection } from './MCPClientsSection';
 import { MCPServerSection } from './MCPServerSection';
 import { ArchivesConfigSection } from './ArchivesConfigSection';
 import { SecurityConfigSection } from './SecurityConfigSection';
+import { ManuscriptCorpusSection } from './ManuscriptCorpusSection';
 import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -75,6 +76,10 @@ export interface RAGConfig {
 
   // === Context Compression ===
   enableContextCompression?: boolean; // Enable context compression before sending to LLM (default: true)
+  /** Corpus manuscrit — le texte de l'auteur, indexé comme quatrième
+   *  corpus RAG. Actif par défaut ; le désactiver arrête l'indexation
+   *  ET la recherche. */
+  indexManuscript?: boolean;
 
   // === Obsidian vault as RAG source ===
   includeObsidianVault?: boolean;
@@ -143,6 +148,7 @@ export const ConfigPanel: React.FC = () => {
     semanticWindowSize: 3,
     // Context compression
     enableContextCompression: true, // Enabled by default for performance
+    indexManuscript: true,
   });
 
   const [llmConfig, setLLMConfig] = useState<LLMConfig>({
@@ -385,6 +391,13 @@ export const ConfigPanel: React.FC = () => {
             <RAGConfigSection
               config={ragConfig}
               onChange={setRagConfig}
+            />
+
+            <ManuscriptCorpusSection
+              enabled={ragConfig.indexManuscript !== false}
+              onEnabledChange={(indexManuscript) =>
+                setRagConfig({ ...ragConfig, indexManuscript })
+              }
             />
 
             <EmbeddedLLMSection />

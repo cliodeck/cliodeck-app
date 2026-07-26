@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, FileText, Edit2, Check } from 'lucide-react';
 import './PDFRenameModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface PDFFile {
   path: string;
   suggestedName: string;
@@ -22,6 +24,10 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   files,
   onConfirm,
 }) => {
+  const { t } = useTranslation('common');
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const [pdfFiles, setPdfFiles] = useState<PDFFile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -89,10 +95,10 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content pdf-rename-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Rename Documents Before Indexing</h3>
+          <h3>{t('pdfRename.title')}</h3>
           <button className="close-button" onClick={onClose}>
             <X size={20} />
           </button>
@@ -102,7 +108,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
           {isLoading ? (
             <div className="loading-state">
               <div className="spinner"></div>
-              <p>Extracting metadata from PDFs...</p>
+              <p>{t('pdfRename.extracting')}</p>
             </div>
           ) : (
             <>
@@ -134,7 +140,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
                           <button
                             className="save-btn"
                             onClick={() => setEditingIndex(null)}
-                            title="Save"
+                            title={t('pdfRename.save')}
                           >
                             <Check size={16} />
                           </button>
@@ -145,7 +151,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
                           <button
                             className="edit-btn"
                             onClick={() => setEditingIndex(index)}
-                            title="Edit name"
+                            title={t('pdfRename.editName')}
                           >
                             <Edit2 size={14} />
                           </button>
@@ -167,7 +173,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
 
         <div className="modal-footer">
           <button className="btn-cancel" onClick={onClose}>
-            Cancel
+            {t('pdfRename.cancel')}
           </button>
           <button
             className="btn-primary"

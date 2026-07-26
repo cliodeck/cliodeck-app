@@ -180,13 +180,13 @@ export const IdeasCanvas: React.FC = () => {
         <button onClick={handleCreateAtCenter} title={t('ideas.create')}>
           <Plus size={16} />
         </button>
-        <button onClick={handleZoomIn} title="Zoom in">
+        <button onClick={handleZoomIn} title={t('canvas.zoomIn')}>
           <ZoomIn size={16} />
         </button>
-        <button onClick={handleZoomOut} title="Zoom out">
+        <button onClick={handleZoomOut} title={t('canvas.zoomOut')}>
           <ZoomOut size={16} />
         </button>
-        <button onClick={handleResetView} title="Reset view">
+        <button onClick={handleResetView} title={t('canvas.resetView')}>
           <Maximize2 size={16} />
         </button>
         <span className="ideas-canvas__zoom-label">{Math.round(view.scale * 100)}%</span>

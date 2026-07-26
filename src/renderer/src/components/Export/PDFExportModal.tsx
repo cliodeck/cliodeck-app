@@ -4,6 +4,7 @@ import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { currentRelativePath, useManuscriptStore } from '../../stores/manuscriptStore';
+import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -11,15 +12,19 @@ import {
 } from './ExportCitationSection';
 import './PDFExportModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface PDFExportModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
-  const { content } = useEditorStore();
+  const { filePath, getLiveContent } = useEditorStore();
   const isBook = currentProject?.type === 'book';
   // Tirage de travail : l'auteur peut n'exporter que le chapitre ouvert
   // (arbitrage 9). Par défaut, le livre entier.
@@ -127,11 +132,12 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       return;
     }
 
-    // Renumérotation en cours : les chapitres s'écrivent un par un sur le
-    // disque, exporter maintenant assemblerait un manuscrit mi-renuméroté
-    // (#30).
-    if (useManuscriptStore.getState().renumbering) {
-      setError(t('book.renumberInProgress'));
+    // Opération exclusive en cours sur le manuscrit : les chapitres
+    // s'écrivent un par un, exporter maintenant assemblerait un manuscrit
+    // mi-renuméroté (#30).
+    const busy = useManuscriptStore.getState().manuscriptBusyReason();
+    if (busy) {
+      setError(t(busy));
       return;
     }
 
@@ -148,6 +154,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    // Verrou posé pour toute la durée : l'assemblage lit les chapitres
+    // pendant plusieurs secondes, une renumérotation lancée entre-temps
+    // les réécrirait sous lui.
+    useManuscriptStore.getState().setExporting(true);
 
     try {
       // Un livre n'a pas de document unique : son manuscrit est assemblé
@@ -185,18 +195,24 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         };
       }
 
-      // For presentations, load slides.md instead of document.md
-      let exportContent = content;
-      if (currentProject.type === 'presentation') {
-        try {
-          const slidesPath = `${currentProject.path}/slides.md`;
-          exportContent = await window.electron.fs.readFile(slidesPath);
-        } catch (err) {
-          console.error('Failed to read slides.md:', err);
-          setError(t('export.pdf.slidesUnreadable'));
+      // Article et présentation : ne PAS prendre le tampon de l'éditeur tel
+      // quel — il contient le fichier ouvert, qui peut être `abstract.md` ou
+      // `context.md`. Le service résout le vrai manuscrit et privilégie le
+      // texte vivant quand c'est bien lui qui est ouvert.
+      let exportContent = '';
+      if (currentProject.type !== 'book') {
+        const resolved = await resolveManuscriptContent(
+          currentProject.path,
+          currentProject.type,
+          filePath,
+          getLiveContent
+        );
+        if (!resolved.ok) {
+          setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
           setIsExporting(false);
           return;
         }
+        exportContent = resolved.content;
       }
 
       // For presentations, load Beamer configuration if it exists
@@ -256,6 +272,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       console.error('PDF export threw:', err);
       setError(t('export.pdf.error'));
       setIsExporting(false);
+    } finally {
+      // Libéré ici, et non dans les branches : l'assemblage a fini de lire
+      // les chapitres, la renumérotation peut reprendre. Le `setTimeout`
+      // de la branche de succès ne fait que refermer la modale.
+      useManuscriptStore.getState().setExporting(false);
     }
   };
 
@@ -276,7 +297,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const partCount = (chapters ?? []).filter((c) => !c.missing).length;
 
   return (
-    <div className="pdf-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="pdf-export-modal" onClick={handleClose}>
       <div
         className="pdf-export-content"
         role="dialog"

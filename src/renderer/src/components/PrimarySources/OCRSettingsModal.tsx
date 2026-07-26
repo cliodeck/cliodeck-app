@@ -4,12 +4,16 @@ import { X, Languages, Play, AlertCircle } from 'lucide-react';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './OCRSettingsModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface OCRSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const {
     availableOCRLanguages,
@@ -43,7 +47,7 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content ocr-settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>

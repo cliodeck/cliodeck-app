@@ -117,7 +117,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
             className="csl-remove-btn"
             onClick={handleRemoveCSL}
             disabled={isSaving}
-            title="Remove CSL"
+            title={t('csl.remove')}
           >
             <X size={16} />
           </button>

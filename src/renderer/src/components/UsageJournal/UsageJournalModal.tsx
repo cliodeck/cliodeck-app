@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { UsageJournalPanel } from './UsageJournalPanel';
 import './UsageJournalModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface UsageJournalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -14,20 +15,14 @@ interface UsageJournalModalProps {
  * Même idiome que SettingsModal (overlay in-renderer, pas une fenêtre OS).
  */
 export const UsageJournalModal: React.FC<UsageJournalModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   return (
-    <div className="usage-modal" onClick={onClose}>
+    <div ref={trapRef} className="usage-modal" onClick={onClose}>
       <div
         className="usage-modal__content"
         role="dialog"

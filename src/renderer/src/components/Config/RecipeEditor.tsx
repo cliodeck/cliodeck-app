@@ -417,6 +417,7 @@ const InputField: React.FC<{
   onChange: (newKey: string, newDef: RecipeInputDef) => void;
   onRemove: () => void;
 }> = ({ inputKey, def, readOnly, onChange, onRemove }) => {
+  const { t } = useTranslation('common');
   return (
     <div
       style={{
@@ -455,7 +456,7 @@ const InputField: React.FC<{
           onChange={(e) => onChange(inputKey, { ...def, required: e.target.checked })}
           disabled={readOnly}
         />
-        req
+        {t('recipeEditor.required')}
       </label>
       <input
         type="text"

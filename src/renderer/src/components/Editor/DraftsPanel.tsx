@@ -110,6 +110,7 @@ export const DraftsPanel: React.FC = () => {
             onClick={() => void handleClear()}
             disabled={drafts.length === 0}
             title={t('drafts.clearAll')}
+            aria-label={t('drafts.clearAll')}
           >
             <Trash2 size={13} />
           </button>
@@ -118,6 +119,7 @@ export const DraftsPanel: React.FC = () => {
             className="drafts-panel__icon-btn"
             onClick={closePanel}
             title={t('common.close')}
+            aria-label={t('common.close')}
           >
             <X size={13} />
           </button>

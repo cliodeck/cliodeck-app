@@ -3,6 +3,7 @@
  * Allows users to filter RAG searches by specific documents
  */
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AvailableDocument } from '../../stores/ragQueryStore';
 import './CollectionMultiSelect.css'; // Reuse same styles
 
@@ -21,6 +22,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
   placeholder = 'All documents',
   disabled = false,
 }) => {
+  const { t } = useTranslation('common');
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,7 +115,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
           <button
             className="clear-btn"
             onClick={clearAll}
-            title="Clear selection"
+            title={t('multiSelect.clear')}
             type="button"
           >
             <svg
@@ -151,7 +153,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search documents..."
+              placeholder={t('multiSelect.searchDocuments')}
               onClick={(e) => e.stopPropagation()}
               style={{
                 width: '100%',

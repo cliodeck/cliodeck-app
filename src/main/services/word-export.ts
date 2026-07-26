@@ -28,6 +28,7 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // FootnoteReferenceRun is the inline run; document footnotes are declared
@@ -528,6 +529,22 @@ export class WordExportService {
         '--to', 'docx',
       ];
 
+      // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage
+      // du manuscrit ET les exports (PDF, Word) » — c'était vrai du seul
+      // PDF : word-export construisait ses propres arguments, sans
+      // `--number-sections` ni `--top-level-division`. Décocher « numéroter
+      // les chapitres » puis exporter en .docx pour un éditeur donnait des
+      // chapitres numérotés quand même.
+      if (options.projectType === 'book') {
+        const settings = resolveBookSettings(
+          options.bookSettings as BookSettings | undefined
+        );
+        pandocArgs.push('--top-level-division=chapter');
+        if (settings.numberChapters !== false || settings.numberSections) {
+          pandocArgs.push('--number-sections');
+        }
+      }
+
       // Add bibliography and CSL if provided
       const bibPath = options.bibliographyPath;
       if (bibPath && existsSync(bibPath)) {
@@ -542,7 +559,9 @@ export class WordExportService {
         }
 
         // Add reference section title
-        pandocArgs.push('--metadata', 'reference-section-title=Références');
+        // Titre de section écrit DANS le document exporté : il doit suivre la
+        // langue de l'interface, sinon un germanophone reçoit « Références ».
+        pandocArgs.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
       }
 
       // Add reference doc (template) if provided
@@ -651,6 +670,15 @@ export class WordExportService {
       // options.manuscript), donc assembler seulement sur le chemin natif
       // faisait produire au chemin pandoc un .docx vide (#19). Même
       // stratégie que pdf-export : assemblage inconditionnel d'abord.
+      // La cible doit être connue AVANT d'assembler : le chemin docx natif
+      // ne comprend pas le LaTeX de structure, et rendait `\mainmatter`
+      // comme un paragraphe de texte en tête de document.
+      const willUsePandoc =
+        !!options.bibliographyPath &&
+        existsSync(options.bibliographyPath) &&
+        (await this.checkPandoc()) &&
+        !options.citation?.useEngine;
+
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
@@ -658,22 +686,20 @@ export class WordExportService {
           settings: normalizeBookSettings(options.bookSettings),
           liveOverrides: options.manuscript.liveOverrides,
           scope: options.manuscript.scope,
+          target: willUsePandoc ? 'latex' : 'plain',
         });
         for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
         options = { ...options, content: assembled.markdown };
       }
 
-      // Check if we should use pandoc (when bibliography is present)
+      // Même décision que celle prise plus haut pour choisir la cible
+      // d'assemblage : les deux DOIVENT concorder, sinon on assemblerait
+      // du LaTeX pour le générateur natif, ou l'inverse.
       const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
       const hasPandoc = await this.checkPandoc();
-
-      // When the CitationEngine pipeline is requested we stay on the
-      // native docx path so we can emit proper Word footnotes via
-      // FootnoteReferenceRun — pandoc's citeproc would otherwise fight
-      // for the same markers.
       const useEnginePipeline = !!options.citation?.useEngine;
 
-      if (hasBibliography && hasPandoc && !useEnginePipeline) {
+      if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
         return await this.exportWithPandoc(options, outputPath, onProgress);
       }

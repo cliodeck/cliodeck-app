@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { HistoryEvent } from '../../stores/journalStore';
 import { formatEventForDisplay } from './EventFormatter';
 
@@ -8,13 +9,14 @@ interface Props {
 }
 
 export const SessionTimeline: React.FC<Props> = ({ events, title = 'Timeline des Événements' }) => {
+  const { t } = useTranslation('common');
   return (
     <div className="session-timeline">
       <h3>{title}</h3>
 
       {events.length === 0 ? (
         <div className="empty-state">
-          <p>Aucun événement dans cette session</p>
+          <p>{t('timeline.empty')}</p>
         </div>
       ) : (
         <div className="timeline-vertical">

@@ -261,7 +261,16 @@ export function setupTropyHandlers() {
       console.log('📞 IPC Call: tropy:update-transcription', { sourceId, source });
       try {
         const result = await tropyService.updateSourceTranscription(sourceId, transcription, source);
-        return result;
+        if (!result.success) return result;
+
+        // Réindexer : sans cela, la transcription est visible dans la fiche
+        // mais INVISIBLE au RAG — l'assistant continue de répondre sur
+        // l'ancien texte, ou sur rien. L'échec de réindexation ne fait pas
+        // échouer l'écriture, qui a bien eu lieu ; il est signalé à part.
+        const reindexed = await tropyService.reindexSource(sourceId);
+        return reindexed.success
+          ? result
+          : { ...result, reindexError: reindexed.error };
       } catch (error: unknown) {
         console.error('❌ tropy:update-transcription error:', error);
         return errorResponse(error);

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { RAGConfig } from './ConfigPanel';
 
 /**
@@ -12,6 +13,8 @@ interface Props {
 }
 
 export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
+  const { t } = useTranslation('common');
+
   const handleTopKChange = (value: number) => {
     onChange({ ...config, topK: value });
   };
@@ -65,9 +68,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Top K */}
           <div className="config-field">
             <label className="config-label">
-              Nombre de chunks (topK)
+              {t('ragRetrieval.topK.label')}
               <span className="config-help">
-                Nombre maximum de chunks récupérés pour répondre à une question
+                {t('ragRetrieval.topK.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -89,14 +92,14 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               />
             </div>
             <div className="config-description">
-              Valeur actuelle: {config.topK} chunks
+              {t('ragRetrieval.topK.current', { count: config.topK })}
               <br />
               <small>
-                • 1-5: Réponses rapides, contexte limité
+                {t('ragRetrieval.topK.hintLow')}
                 <br />
-                • 6-10: Équilibre vitesse/contexte (recommandé)
+                {t('ragRetrieval.topK.hintMid')}
                 <br />
-                • 11-20: Maximum de contexte, plus lent
+                {t('ragRetrieval.topK.hintHigh')}
               </small>
             </div>
           </div>
@@ -104,9 +107,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Similarity Threshold */}
           <div className="config-field">
             <label className="config-label">
-              Seuil de similarité
+              {t('ragRetrieval.threshold.label')}
               <span className="config-help">
-                Score minimum de similarité pour inclure un chunk (0.0 - 1.0)
+                {t('ragRetrieval.threshold.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -130,14 +133,14 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               />
             </div>
             <div className="config-description">
-              Valeur actuelle: {config.similarityThreshold.toFixed(2)}
+              {t('ragRetrieval.currentValue', { value: config.similarityThreshold.toFixed(2) })}
               <br />
               <small>
-                • 0.0-0.2: Plus de résultats, moins précis
+                {t('ragRetrieval.threshold.hintLow')}
                 <br />
-                • 0.2-0.4: Équilibre (recommandé)
+                {t('ragRetrieval.threshold.hintMid')}
                 <br />
-                • 0.4-1.0: Très précis, risque de ne rien trouver
+                {t('ragRetrieval.threshold.hintHigh')}
               </small>
             </div>
           </div>
@@ -145,9 +148,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Chunking Configuration */}
           <div className="config-field">
             <label className="config-label">
-              Stratégie de découpage
+              {t('ragRetrieval.chunking.label')}
               <span className="config-help">
-                Taille des chunks lors de l'indexation
+                {t('ragRetrieval.chunking.help')}
               </span>
             </label>
             <select
@@ -155,9 +158,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               onChange={(e) => handleChunkingChange(e.target.value as 'cpuOptimized' | 'standard' | 'large')}
               className="config-select"
             >
-              <option value="cpuOptimized">Optimisé CPU (petits chunks, rapide)</option>
-              <option value="standard">Standard (équilibré)</option>
-              <option value="large">Large (gros chunks, plus de contexte)</option>
+              <option value="cpuOptimized">{t('ragRetrieval.chunking.cpuOptimized')}</option>
+              <option value="standard">{t('ragRetrieval.chunking.standard')}</option>
+              <option value="large">{t('ragRetrieval.chunking.large')}</option>
             </select>
             <div className="config-description">
               <div style={{
@@ -167,10 +170,11 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚠️ Attention :</strong> Changer cette option nécessite de ré-indexer tous les PDFs.
+                <strong>⚠️ {t('ragRetrieval.chunking.warningTitle')}</strong>{' '}
+                {t('ragRetrieval.chunking.warning')}
                 <br />
                 <small>
-                  Les chunks existants ne seront pas mis à jour automatiquement.
+                  {t('ragRetrieval.chunking.warningDetail')}
                 </small>
               </div>
             </div>
@@ -179,9 +183,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Summary Generation */}
           <div className="config-field">
             <label className="config-label">
-              Génération de résumés
+              {t('ragRetrieval.summary.label')}
               <span className="config-help">
-                Méthode pour générer des résumés de documents
+                {t('ragRetrieval.summary.help')}
               </span>
             </label>
             <select
@@ -189,15 +193,15 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               onChange={(e) => handleSummaryGenerationChange(e.target.value as 'extractive' | 'abstractive' | 'disabled')}
               className="config-select"
             >
-              <option value="disabled">Désactivé</option>
-              <option value="extractive">Extractif (sélection de phrases clés)</option>
-              <option value="abstractive">Abstractif (génération via LLM)</option>
+              <option value="disabled">{t('ragRetrieval.summary.disabled')}</option>
+              <option value="extractive">{t('ragRetrieval.summary.extractive')}</option>
+              <option value="abstractive">{t('ragRetrieval.summary.abstractive')}</option>
             </select>
             <div className="config-description">
               <small>
-                • Extractif: Rapide, sélectionne les phrases importantes
+                {t('ragRetrieval.summary.hintExtractive')}
                 <br />
-                • Abstractif: Plus lent, génère un résumé original (nécessite LLM)
+                {t('ragRetrieval.summary.hintAbstractive')}
               </small>
             </div>
           </div>
@@ -206,9 +210,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {config.summaryGeneration !== 'disabled' && (
             <div className="config-field">
               <label className="config-label">
-                Longueur maximale des résumés
+                {t('ragRetrieval.summaryLength.label')}
                 <span className="config-help">
-                  Nombre maximum de mots dans le résumé
+                  {t('ragRetrieval.summaryLength.help')}
                 </span>
               </label>
               <div className="config-input-group">
@@ -232,7 +236,7 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 />
               </div>
               <div className="config-description">
-                Valeur actuelle: {config.summaryMaxLength} mots
+                {t('ragRetrieval.summaryLength.current', { count: config.summaryMaxLength })}
               </div>
             </div>
           )}
@@ -240,9 +244,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Use Graph Context */}
           <div className="config-field">
             <label className="config-label">
-              Utiliser le graphe de connaissances
+              {t('ragRetrieval.graph.label')}
               <span className="config-help">
-                Enrichir les résultats avec des documents liés (citations, similarité)
+                {t('ragRetrieval.graph.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -252,11 +256,11 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleUseGraphContextChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.useGraphContext ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.useGraphContext ? 'ragRetrieval.on' : 'ragRetrieval.off')}</span>
             </div>
             <div className="config-description">
               <small>
-                Active la recherche de documents liés via citations et similarité sémantique
+                {t('ragRetrieval.graph.hint')}
               </small>
             </div>
           </div>
@@ -266,9 +270,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
             <>
               <div className="config-field">
                 <label className="config-label">
-                  Documents liés à inclure
+                  {t('ragRetrieval.graphDocs.label')}
                   <span className="config-help">
-                    Nombre de documents liés à ajouter au contexte
+                    {t('ragRetrieval.graphDocs.help')}
                   </span>
                 </label>
                 <div className="config-input-group">
@@ -290,15 +294,15 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                   />
                 </div>
                 <div className="config-description">
-                  Valeur actuelle: {config.additionalGraphDocs} documents
+                  {t('ragRetrieval.graphDocs.current', { count: config.additionalGraphDocs })}
                 </div>
               </div>
 
               <div className="config-field">
                 <label className="config-label">
-                  Seuil de similarité pour le graphe
+                  {t('ragRetrieval.graphThreshold.label')}
                   <span className="config-help">
-                    Score minimum de similarité pour inclure un document lié
+                    {t('ragRetrieval.graphThreshold.help')}
                   </span>
                 </label>
                 <div className="config-input-group">
@@ -322,7 +326,7 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                   />
                 </div>
                 <div className="config-description">
-                  Valeur actuelle: {config.graphSimilarityThreshold.toFixed(2)}
+                  {t('ragRetrieval.currentValue', { value: config.graphSimilarityThreshold.toFixed(2) })}
                 </div>
               </div>
             </>
@@ -331,9 +335,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Include Summaries in RAG */}
           <div className="config-field">
             <label className="config-label">
-              Utiliser résumés dans le RAG
+              {t('ragRetrieval.useSummaries.label')}
               <span className="config-help">
-                Utiliser les résumés au lieu des chunks pour le contexte
+                {t('ragRetrieval.useSummaries.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -343,13 +347,13 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleIncludeSummariesChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.includeSummaries ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.includeSummaries ? 'ragRetrieval.on' : 'ragRetrieval.off')}</span>
             </div>
             <div className="config-description">
               <small>
-                Si activé, utilise les résumés de documents au lieu des chunks détaillés
+                {t('ragRetrieval.useSummaries.hint')}
                 <br />
-                ⚠️ Nécessite que la génération de résumés soit activée
+                ⚠️ {t('ragRetrieval.useSummaries.requires')}
               </small>
             </div>
           </div>
@@ -357,9 +361,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Include Obsidian vault in RAG */}
           <div className="config-field">
             <label className="config-label">
-              Inclure le vault Obsidian
+              {t('ragRetrieval.vault.label')}
               <span className="config-help">
-                Aussi interroger les notes Obsidian indexées (en plus des PDFs et archives Tropy)
+                {t('ragRetrieval.vault.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -369,12 +373,11 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleIncludeObsidianVaultChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.includeObsidianVault ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.includeObsidianVault ? 'ragRetrieval.on' : 'ragRetrieval.off')}</span>
             </div>
             <div className="config-description">
               <small>
-                Le chat Brainstorm interroge toujours le vault s'il est lié.
-                Cette option ajoute aussi le vault aux recherches du chat RAG classique.
+                {t('ragRetrieval.vault.hint')}
               </small>
             </div>
           </div>
@@ -382,9 +385,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Exploration Similarity Threshold */}
           <div className="config-field">
             <label className="config-label">
-              Seuil de similarité (Exploration)
+              {t('ragRetrieval.exploration.label')}
               <span className="config-help">
-                Score minimum pour créer des liens de similarité dans le graphe d'exploration
+                {t('ragRetrieval.exploration.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -408,14 +411,14 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               />
             </div>
             <div className="config-description">
-              Valeur actuelle: {config.explorationSimilarityThreshold.toFixed(2)}
+              {t('ragRetrieval.currentValue', { value: config.explorationSimilarityThreshold.toFixed(2) })}
               <br />
               <small>
-                • 0.5-0.6: Plus de connexions, graphe dense
+                {t('ragRetrieval.exploration.hintLow')}
                 <br />
-                • 0.7: Équilibre (recommandé)
+                {t('ragRetrieval.exploration.hintMid')}
                 <br />
-                • 0.8-0.95: Connexions très fortes uniquement
+                {t('ragRetrieval.exploration.hintHigh')}
               </small>
             </div>
           </div>
@@ -423,9 +426,9 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
           {/* Topic Modeling */}
           <div className="config-field">
             <label className="config-label">
-              Modélisation de topics
+              {t('ragRetrieval.topics.label')}
               <span className="config-help">
-                Activer l'analyse thématique automatique du corpus
+                {t('ragRetrieval.topics.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -435,11 +438,11 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleEnableTopicModelingChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.enableTopicModeling ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.enableTopicModeling ? 'ragRetrieval.on' : 'ragRetrieval.off')}</span>
             </div>
             <div className="config-description">
               <small>
-                Active BERTopic pour identifier automatiquement les thèmes du corpus
+                {t('ragRetrieval.topics.hint')}
               </small>
             </div>
           </div>

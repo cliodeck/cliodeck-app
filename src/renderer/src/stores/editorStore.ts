@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
@@ -295,25 +296,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
+    // Ces gabarits sont écrits DANS le manuscrit de l'auteur, pas dans
+    // l'interface : les laisser en français donnait « texte en gras » à un
+    // germanophone, à l'intérieur de son propre document.
+    const tr = i18n.t.bind(i18n);
     let textToInsert = '';
     switch (type) {
       case 'bold':
-        textToInsert = '**texte en gras**';
+        textToInsert = `**${tr('snippets.boldText')}**`;
         break;
       case 'italic':
-        textToInsert = '_texte en italique_';
+        textToInsert = `_${tr('snippets.italicText')}_`;
         break;
       case 'link':
-        textToInsert = '[texte du lien](url)';
+        textToInsert = `[${tr('snippets.linkText')}](url)`;
         break;
       case 'citation':
-        textToInsert = '[@clé_citation]';
+        textToInsert = `[@${tr('snippets.citationKey')}]`;
         break;
-      case 'table':
-        textToInsert = '\n| Colonne 1 | Colonne 2 |\n|-----------|----------|\n| Cellule 1 | Cellule 2 |\n';
+      case 'table': {
+        const c1 = tr('snippets.column', { n: 1 });
+        const c2 = tr('snippets.column', { n: 2 });
+        const v1 = tr('snippets.cell', { n: 1 });
+        const v2 = tr('snippets.cell', { n: 2 });
+        textToInsert = `\n| ${c1} | ${c2} |\n|---|---|\n| ${v1} | ${v2} |\n`;
         break;
+      }
       case 'blockquote':
-        textToInsert = '\n> Citation ou bloc de texte important\n> Continuation de la citation\n';
+        textToInsert = `\n> ${tr('snippets.quoteFirst')}\n> ${tr('snippets.quoteSecond')}\n`;
         break;
     }
 

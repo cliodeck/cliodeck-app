@@ -127,8 +127,30 @@ describe.skipIf(!sqliteAvailable)('ManuscriptStore', () => {
       vec([1, 0, 0])
     );
     store.deleteChapter('c1');
-    expect(store.stats()).toEqual({ chapterCount: 0, chunkCount: 0 });
+    expect(store.stats()).toEqual({
+      chapterCount: 0,
+      chunkCount: 0,
+      // Plus aucun chapitre : il n'y a plus de date d'indexation à donner.
+      lastIndexedAt: null,
+    });
     expect(store.listChapters()).toEqual([]);
+  });
+
+  it('rend la date de la dernière indexation', () => {
+    // Deux compteurs ne disent rien par eux-mêmes : ce que l'auteur veut
+    // savoir, c'est si l'index reflète ce qu'il vient d'écrire.
+    store.upsertChapter(chapter({ id: 'c1', indexedAt: '2026-07-01T10:00:00.000Z' }));
+    store.upsertChapter(
+      chapter({
+        id: 'c2',
+        relativePath: 'chapters/02.md',
+        order: 1,
+        indexedAt: '2026-07-20T18:30:00.000Z',
+      })
+    );
+
+    // La PLUS RÉCENTE des pièces : c'est elle qui dit si l'index est à jour.
+    expect(store.stats().lastIndexedAt).toBe('2026-07-20T18:30:00.000Z');
   });
 
   it('liste les chapitres dans l’ordre du manuscrit', () => {

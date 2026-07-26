@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessageBubble } from './MessageBubble';
 import { UnifiedMessage } from './types';
 import './MessageList.css';
@@ -21,6 +22,7 @@ function MessageListInner<M extends UnifiedMessage>({
   renderExtras,
   enableNER,
 }: MessageListProps<M>): React.ReactElement {
+  const { t } = useTranslation('common');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,7 +30,7 @@ function MessageListInner<M extends UnifiedMessage>({
   }, [messages, streamingContent, showTypingIndicator]);
 
   return (
-    <div className="message-list" role="log" aria-live="polite" aria-label="Chat messages">
+    <div className="message-list" role="log" aria-live="polite" aria-label={t('messageList.aria')}>
       {messages.map((message) => (
         <MessageBubble
           key={message.id}

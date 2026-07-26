@@ -222,13 +222,20 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
   const explicitDocument =
     asString(step.with.document_id).trim() || asString(step.with.document).trim();
 
+  // Réglages d'ouvrage : les MÊMES pour l'assemblage et pour pandoc.
+  // L'assemblage s'en servait déjà — pour injecter `\theendnotes` en style
+  // notes de fin, par exemple — mais l'export partait sans eux : le gabarit
+  // ne chargeait donc pas `\usepackage{endnotes}` et xelatex s'arrêtait sur
+  // « Undefined control sequence ». Aucun PDF, et un pavé LaTeX à l'écran.
+  const bookSettings = normalizeBookSettings(project?.book);
+
   let content: string;
   if (!explicitDocument && projectType === 'book' && project?.chapters?.length) {
     // Livre entier : le manifeste fait foi.
     const assembled = await assembleManuscript({
       projectPath: ctx.workspaceRoot,
       chapters: project.chapters,
-      settings: normalizeBookSettings(project.book),
+      settings: bookSettings,
     });
     for (const w of assembled.warnings) {
       console.warn('⚠️ export step:', w);
@@ -251,6 +258,7 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
     content,
     outputPath,
     bibliographyPath: bibliographyPath || undefined,
+    bookSettings: projectType === 'book' ? bookSettings : undefined,
   });
   if (!result.success) {
     throw new Error(result.error ?? 'export step: Pandoc pipeline failed');

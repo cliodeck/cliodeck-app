@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AIOperation } from '../../stores/journalStore';
 
 interface Props {
@@ -6,6 +7,7 @@ interface Props {
 }
 
 export const AIOperationsTable: React.FC<Props> = ({ operations }) => {
+  const { t } = useTranslation('common');
   const [expandedOp, setExpandedOp] = useState<string | null>(null);
 
   const toggleExpand = (opId: string) => {
@@ -14,22 +16,22 @@ export const AIOperationsTable: React.FC<Props> = ({ operations }) => {
 
   return (
     <div className="ai-operations-table">
-      <h3>Journal des Opérations IA</h3>
+      <h3>{t('aiOps.title')}</h3>
 
       {operations.length === 0 ? (
         <div className="empty-state">
-          <p>Aucune opération IA dans cette session</p>
+          <p>{t('aiOps.empty')}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Heure</th>
-              <th>Opération</th>
-              <th>Modèle</th>
-              <th>Durée</th>
-              <th>Succès</th>
-              <th>Actions</th>
+              <th>{t('aiOps.time')}</th>
+              <th>{t('aiOps.operation')}</th>
+              <th>{t('aiOps.model')}</th>
+              <th>{t('aiOps.duration')}</th>
+              <th>{t('aiOps.success')}</th>
+              <th>{t('aiOps.actions')}</th>
             </tr>
           </thead>
           <tbody>

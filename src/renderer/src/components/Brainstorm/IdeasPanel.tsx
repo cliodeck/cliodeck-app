@@ -345,7 +345,7 @@ const IdeaEditor: React.FC<IdeaEditorProps> = ({
                 ? linkedIdeaTitles.get(link.targetId) ?? link.targetId
                 : `📄 ${link.targetId}`}
               {link.label && <em> ({link.label})</em>}
-              <button onClick={() => onRemoveLink(link.targetId)} aria-label="Remove link">
+              <button onClick={() => onRemoveLink(link.targetId)} aria-label={t('ideas.removeLink')}>
                 <X size={10} />
               </button>
             </span>

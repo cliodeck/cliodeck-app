@@ -12,7 +12,6 @@ import {
   buildBeamerCustomizations,
   buildPandocArgs,
   computeSecnumdepth,
-  escapeLatex,
   resolveBibliographyMode,
   resolveBookSettings,
   type PandocArgsInput,
@@ -48,21 +47,6 @@ function meta(args: string[], key: string): string | undefined {
 
 const book = (over: Partial<BookSettings> = {}): BookSettings =>
   resolveBookSettings(over as BookSettings);
-
-describe('escapeLatex', () => {
-  it('échappe ce que LaTeX interpréterait dans un titre', () => {
-    expect(escapeLatex('Danzig & Co #1')).toBe('Danzig \\& Co \\#1');
-    expect(escapeLatex('100 % _sûr_')).toBe('100 \\% \\_sûr\\_');
-    expect(escapeLatex('a\\b')).toBe('a\\textbackslash{}b');
-    expect(escapeLatex('~x^2')).toBe('\\textasciitilde{}x\\textasciicircum{}2');
-  });
-
-  it('laisse un titre ordinaire intact', () => {
-    expect(escapeLatex('La Ville libre de Dantzig')).toBe(
-      'La Ville libre de Dantzig'
-    );
-  });
-});
 
 describe('computeSecnumdepth', () => {
   it('numérote les chapitres seuls par défaut', () => {
@@ -213,14 +197,25 @@ describe('buildPandocArgs — les trois styles de notes × les deux numérotatio
 });
 
 describe('buildPandocArgs — métadonnées et résumé', () => {
-  it('échappe titre et auteur, laisse la date brute', () => {
+  it('passe les métadonnées EN CLAIR — pandoc échappe lui-même', () => {
     const args = buildPandocArgs({
       ...BASE,
       metadata: { title: 'Danzig & Co #1', author: 'F. Clavert', date: '2026-07-19' },
     });
-    expect(meta(args, 'title')).toBe('Danzig \\& Co \\#1');
+    // Échapper ici produisait `Danzig \textbackslash& Co \textbackslash#1`
+    // sur la page de titre : pandoc ré-échappe la MetaString au rendu du
+    // gabarit LaTeX. Vérifié avec pandoc 3.8.
+    expect(meta(args, 'title')).toBe('Danzig & Co #1');
     expect(meta(args, 'author')).toBe('F. Clavert');
     expect(meta(args, 'date')).toBe('2026-07-19');
+  });
+
+  it('laisse le résumé intact, esperluettes comprises', () => {
+    const args = buildPandocArgs({
+      ...BASE,
+      abstract: 'Sur Dupont & Fils, 100 % des cas.',
+    });
+    expect(meta(args, 'abstract')).toBe('Sur Dupont & Fils, 100 % des cas.');
   });
 
   it('passe le résumé quand il existe', () => {

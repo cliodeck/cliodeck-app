@@ -186,7 +186,7 @@
   padding: var(--spacing-md);
   max-width: 300px;
   box-shadow: var(--shadow-lg);
-  z-index: 10;
+  z-index: var(--z-docked);
 }
 
 .node-details h4 {

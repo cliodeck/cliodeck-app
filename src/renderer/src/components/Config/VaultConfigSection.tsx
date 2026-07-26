@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { FolderOpen, Link2Off, Play } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDialogStore } from '../../stores/dialogStore';
 
 interface VaultStatus {
   indexed: boolean;
@@ -158,9 +159,16 @@ export const VaultConfigSection: React.FC = () => {
     [refresh, t]
   );
 
+  // Détacher un vault SUPPRIME son index local — l'infobulle du bouton le
+  // dit, mais un clic suffisait à le faire. Reconstruire l'index d'un gros
+  // vault est long : on confirme, en nommant ce qui est perdu et ce qui ne
+  // l'est pas (les notes elles-mêmes ne sont jamais touchées).
   const unlink = useCallback(async () => {
     const api = vaultApi();
     if (!api) return;
+    if (!(await useDialogStore.getState().showConfirm(t('vault.unlinkConfirm')))) {
+      return;
+    }
     setBusy(true);
     try {
       await api.unlink();
@@ -169,7 +177,7 @@ export const VaultConfigSection: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [refresh, t]);
 
   return (
     <CollapsibleSection title={t('vault.title')} defaultExpanded={false}>

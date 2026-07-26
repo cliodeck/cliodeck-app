@@ -163,17 +163,45 @@ class MCPClientsService {
       }
     }
 
+    // Ne JAMAIS démarrer ce que porte `config.json` sans l'avoir validé et
+    // fait approuver : un projet partagé par un tiers exécuterait sinon la
+    // commande de son choix à la simple ouverture (cf. mcp-approval-registry).
+    const approved: WorkspaceClientConfig[] = [];
     for (const w of clients) {
+      const verdict = await this.approvalGate(w, root);
+      if (verdict === 'approved') {
+        approved.push(w);
+        continue;
+      }
+      console.warn(
+        `[mcp-clients] serveur « ${w.name} » non démarré (${verdict})`
+      );
+    }
+
+    for (const w of approved) {
       try {
         this.manager.register(toManagerConfig(w));
       } catch (e) {
         console.warn('[mcp-clients] skipping invalid client:', e);
       }
     }
-    if (clients.length) {
+    if (approved.length) {
       await this.manager.startAll();
     }
   }
+
+  /**
+   * Décide du sort d'un serveur déclaré dans le workspace : validation de
+   * forme, puis approbation de l'utilisateur si l'empreinte est inconnue.
+   * Remplaçable dans les tests.
+   */
+  approvalGate: (
+    client: WorkspaceClientConfig,
+    root: string
+  ) => Promise<'approved' | 'rejected' | 'invalid'> = async (client, root) => {
+    const { defaultMcpApprovalGate } = await import('./mcp-approval-gate.js');
+    return defaultMcpApprovalGate(client, root);
+  };
 
   async unload(): Promise<void> {
     await this.manager?.stopAll();

@@ -4,6 +4,8 @@ import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
+import { resolveManuscriptContent } from '../../services/export-manuscript-content';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -17,9 +19,12 @@ interface WordExportModalProps {
 }
 
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
-  const { content, filePath, getLiveContent } = useEditorStore();
+  const { filePath, getLiveContent } = useEditorStore();
   const isBook = currentProject?.type === 'book' && (chapters ?? []).length > 0;
   // Livre : tout l'ouvrage, ou le chapitre courant seul (tirage de travail).
   const [bookScope, setBookScope] = useState<'book' | 'chapter'>('book');
@@ -118,11 +123,12 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       return;
     }
 
-    // Renumérotation en cours : les chapitres s'écrivent un par un sur le
-    // disque, exporter maintenant assemblerait un manuscrit mi-renuméroté
-    // (#30).
-    if (useManuscriptStore.getState().renumbering) {
-      setError(t('book.renumberInProgress'));
+    // Opération exclusive en cours sur le manuscrit : les chapitres
+    // s'écrivent un par un, exporter maintenant assemblerait un manuscrit
+    // mi-renuméroté (#30).
+    const busy = useManuscriptStore.getState().manuscriptBusyReason();
+    if (busy) {
+      setError(t(busy));
       return;
     }
 
@@ -134,20 +140,30 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    // Verrou posé pour toute la durée : l'assemblage lit les chapitres
+    // pendant plusieurs secondes, une renumérotation lancée entre-temps
+    // les réécrirait sous lui.
+    useManuscriptStore.getState().setExporting(true);
 
     try {
-      // For presentations, load slides.md instead of document.md
-      let exportContent = content;
-      if (currentProject.type === 'presentation') {
-        try {
-          const slidesPath = `${currentProject.path}/slides.md`;
-          exportContent = await window.electron.fs.readFile(slidesPath);
-        } catch (err) {
-          console.error('Failed to read slides.md:', err);
-          setError(t('export.word.slidesUnreadable'));
+      // Article et présentation : ne PAS prendre le tampon de l'éditeur tel
+      // quel — il contient le fichier ouvert, qui peut être `abstract.md` ou
+      // `context.md`. Le service résout le vrai manuscrit et privilégie le
+      // texte vivant quand c'est bien lui qui est ouvert.
+      let exportContent = '';
+      if (currentProject.type !== 'book') {
+        const resolved = await resolveManuscriptContent(
+          currentProject.path,
+          currentProject.type,
+          filePath,
+          getLiveContent
+        );
+        if (!resolved.ok) {
+          setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
           setIsExporting(false);
           return;
         }
+        exportContent = resolved.content;
       }
 
       // Livre : le manifeste part au main, qui assemble (ordre, isolation
@@ -219,6 +235,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       console.error('Word export threw:', err);
       setError(t('export.word.error'));
       setIsExporting(false);
+    } finally {
+      // Libéré ici, et non dans les branches : l'assemblage a fini de lire
+      // les chapitres, la renumérotation peut reprendre. Le `setTimeout`
+      // de la branche de succès ne fait que refermer la modale.
+      useManuscriptStore.getState().setExporting(false);
     }
   };
 
@@ -235,7 +256,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div className="pdf-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="pdf-export-modal" onClick={handleClose}>
       <div
         className="pdf-export-content"
         role="dialog"

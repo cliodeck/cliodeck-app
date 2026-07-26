@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, Trash2, Save, FileText } from 'lucide-react';
 import { TagManager } from './TagManager';
 import './CitationMetadataModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface Citation {
   id: string;
   title: string;
@@ -31,6 +33,10 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
   allTags,
   onSave,
 }) => {
+  const { t } = useTranslation('common');
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const [editedCitation, setEditedCitation] = useState<Citation>(citation);
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');
@@ -84,7 +90,7 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content citation-metadata-modal"
         onClick={(e) => e.stopPropagation()}
@@ -92,7 +98,7 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
         <div className="modal-header">
           <h3>
             <FileText size={20} />
-            Edit Citation Metadata
+            {t('citationMeta.title')}
           </h3>
           <button className="close-button" onClick={onClose}>
             <X size={20} />
@@ -110,24 +116,24 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
 
           {/* Tags */}
           <div className="metadata-section">
-            <label className="section-label">Tags</label>
+            <label className="section-label">{t('citationMeta.tags')}</label>
             <TagManager
               tags={editedCitation.tags || []}
               onTagsChange={handleTagsChange}
               allTags={allTags}
             />
             <p className="section-hint">
-              Tags help organize and filter your citations
+              {t('citationMeta.tagsHint')}
             </p>
           </div>
 
           {/* Keywords */}
           <div className="metadata-section">
-            <label className="section-label">Keywords</label>
+            <label className="section-label">{t('citationMeta.keywords')}</label>
             <input
               type="text"
               className="metadata-input"
-              placeholder="Separate keywords with commas"
+              placeholder={t('citationMeta.keywordsHint')}
               value={editedCitation.keywords || ''}
               onChange={handleKeywordsChange}
             />
@@ -138,22 +144,22 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
 
           {/* Notes */}
           <div className="metadata-section">
-            <label className="section-label">Notes</label>
+            <label className="section-label">{t('citationMeta.notes')}</label>
             <textarea
               className="metadata-textarea"
-              placeholder="Add your notes about this citation..."
+              placeholder={t('citationMeta.notesPlaceholder')}
               rows={4}
               value={editedCitation.notes || ''}
               onChange={handleNotesChange}
             />
             <p className="section-hint">
-              Personal notes and comments about this citation
+              {t('citationMeta.notesHint')}
             </p>
           </div>
 
           {/* Custom Fields */}
           <div className="metadata-section">
-            <label className="section-label">Custom Fields</label>
+            <label className="section-label">{t('citationMeta.customFields')}</label>
 
             {editedCitation.customFields &&
               Object.keys(editedCitation.customFields).length > 0 && (
@@ -174,13 +180,13 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
                           onChange={(e) =>
                             handleCustomFieldChange(key, e.target.value)
                           }
-                          placeholder="Value"
+                          placeholder={t('citationMeta.value')}
                         />
                       </div>
                       <button
                         className="remove-field-button"
                         onClick={() => handleRemoveCustomField(key)}
-                        title="Remove field"
+                        title={t('citationMeta.removeField')}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -193,14 +199,14 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
               <input
                 type="text"
                 className="custom-field-key"
-                placeholder="Field name"
+                placeholder={t('citationMeta.fieldName')}
                 value={newFieldKey}
                 onChange={(e) => setNewFieldKey(e.target.value)}
               />
               <input
                 type="text"
                 className="custom-field-value"
-                placeholder="Field value"
+                placeholder={t('citationMeta.fieldValue')}
                 value={newFieldValue}
                 onChange={(e) => setNewFieldValue(e.target.value)}
                 onKeyDown={(e) => {
@@ -213,20 +219,20 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
                 className="add-field-button"
                 onClick={handleAddCustomField}
                 disabled={!newFieldKey.trim() || !newFieldValue.trim()}
-                title="Add custom field"
+                title={t('citationMeta.addField')}
               >
                 <Plus size={16} />
               </button>
             </div>
             <p className="section-hint">
-              Add custom metadata fields for specialized information
+              {t('citationMeta.customFieldsHint')}
             </p>
           </div>
 
           {/* Timestamps */}
           {(editedCitation.dateAdded || editedCitation.dateModified) && (
             <div className="metadata-section">
-              <label className="section-label">Timestamps</label>
+              <label className="section-label">{t('citationMeta.timestamps')}</label>
               <div className="timestamp-info">
                 {editedCitation.dateAdded && (
                   <div className="timestamp-item">
@@ -251,11 +257,11 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>
-            Cancel
+            {t('citationMeta.cancel')}
           </button>
           <button className="btn-primary" onClick={handleSave}>
             <Save size={16} />
-            Save Changes
+            {t('citationMeta.save')}
           </button>
         </div>
       </div>

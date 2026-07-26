@@ -4,18 +4,22 @@ import { X } from 'lucide-react';
 import { ConfigPanel } from './ConfigPanel';
 import './SettingsModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
 
   if (!isOpen) return null;
 
   return (
-    <div className="settings-modal" onClick={onClose}>
+    <div ref={trapRef} className="settings-modal" onClick={onClose}>
       <div
         className="settings-content"
         role="dialog"

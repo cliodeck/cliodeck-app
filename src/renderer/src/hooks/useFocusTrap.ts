@@ -38,15 +38,20 @@ export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTML
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!active || !containerRef.current) return
+      if (!active) return
 
+      // Échap ne dépend PAS de la ref : le hook est utilisable en deux
+      // temps — d'abord la fermeture au clavier (une ligne dans la modale),
+      // le piégeage du Tab quand la ref est attachée. Sans cette
+      // distinction, brancher le hook sans ref donnait une modale toujours
+      // insensible à Échap, sans le moindre signe.
       if (e.key === 'Escape' && onEscape) {
         e.preventDefault()
         onEscape()
         return
       }
 
-      if (e.key !== 'Tab') return
+      if (e.key !== 'Tab' || !containerRef.current) return
 
       const focusableElements = containerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
 

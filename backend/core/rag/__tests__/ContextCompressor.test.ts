@@ -361,4 +361,111 @@ describe('ContextCompressor', () => {
       expect(result.stats.strategy).toBe('light-deduplication');
     });
   });
+
+  /**
+   * L'extrait montré à l'historien DOIT être le texte de la source. Ces
+   * trois régressions le fabriquaient : un tableau pulvérisé puis
+   * recomposé, des phrases éloignées collées sans marque de coupe, et un
+   * repli qui rendait les phrases dans l'ordre du score.
+   */
+  describe('fidélité de l’extrait', () => {
+    /** Force le chemin d'extraction de phrases (stratégie `medium-*`). */
+    function withFiller(chunk: ReturnType<typeof makeChunk>) {
+      const filler = Array.from({ length: 40 }, (_, i) =>
+        makeChunk('Remplissage sans aucun rapport. '.repeat(30), {
+          documentId: `filler-${i}`,
+        }),
+      );
+      return [chunk, ...filler];
+    }
+
+    const TABLE = [
+      "Le tableau suivant récapitule les effectifs de l'usine.",
+      '',
+      '| Année | Ouvriers | Employés |',
+      '|---|---|---|',
+      '| 1919 | 1200 | 300 |',
+      '| 1920 | 1450 | 340 |',
+      '',
+      'Ces chiffres proviennent du registre du personnel.',
+    ].join('\n');
+
+    it('ne découpe pas un tableau markdown', () => {
+      const target = makeChunk(TABLE, { documentId: 'cible' });
+      const result = compressor.compress(
+        withFiller(target),
+        'effectifs ouvriers',
+        8000,
+      );
+      const out = result.chunks.find((c) => c.documentId === 'cible');
+
+      // Le tableau ressort intact — chiffres compris.
+      expect(out?.content).toBe(TABLE);
+      expect(out?.content).toContain('| 1919 | 1200 | 300 |');
+      expect(out?.content).toContain('| 1920 | 1450 | 340 |');
+    });
+
+    it('ne découpe pas un bloc de code', () => {
+      const code = ['Voici la requête employée.', '```sql', 'SELECT * FROM x;', '```'].join('\n');
+      const target = makeChunk(code, { documentId: 'cible' });
+      const result = compressor.compress(withFiller(target), 'requête', 8000);
+
+      expect(result.chunks.find((c) => c.documentId === 'cible')?.content).toBe(code);
+    });
+
+    it('ne coupe pas sur un pipe isolé en prose', () => {
+      // Le garde structurel exige DEUX lignes de tableau : une prose
+      // contenant un seul `|` atteint donc le découpage en phrases, et
+      // c'est là que l'ancien séparateur `|` la tranchait en plein milieu.
+      const prose =
+        "Le registre porte la mention « entrée | sortie » en tête de colonne. " +
+        'Cette notation revient dans les trois volumes conservés. ' +
+        "Elle disparaît après 1921 sans explication connue à ce jour.";
+      const target = makeChunk(prose, { documentId: 'cible' });
+      const result = compressor.compress(withFiller(target), 'registre mention', 8000);
+      const out = result.chunks.find((c) => c.documentId === 'cible')?.content ?? '';
+
+      // La phrase qui porte le pipe doit rester entière si elle est retenue.
+      if (out.includes('entrée')) {
+        expect(out).toContain('« entrée | sortie »');
+      }
+      // Et en aucun cas le texte ne doit contenir de fragment orphelin
+      // commençant par la seconde moitié de la cellule.
+      expect(out).not.toMatch(/(^|\[…\] )sortie »/);
+    });
+
+    it('marque les coupes par […] et garde l’ordre du document', () => {
+      const prose = [
+        "Les ouvriers réclament quinze centimes de l'heure.",
+        'Le préfet télégraphie au ministre dès le matin.',
+        "La négociation s'ouvre le 12 mars dans la salle du conseil.",
+        'Elle échoue en moins de deux heures.',
+        'Le mouvement se durcit alors et gagne les fonderies.',
+        'La troupe est appelée le 15 mars.',
+      ].join(' ');
+      const target = makeChunk(prose, { documentId: 'cible' });
+      const result = compressor.compress(
+        withFiller(target),
+        'négociation ouvriers',
+        8000,
+      );
+      const out = result.chunks.find((c) => c.documentId === 'cible')?.content ?? '';
+
+      // Des phrases ont bien été retirées…
+      expect(out.length).toBeLessThan(prose.length);
+      // …et la coupe est signalée, au lieu de produire une fausse citation continue.
+      expect(out).toContain('[…]');
+
+      // Les phrases conservées restent dans l'ordre du document.
+      const positions = [
+        "Les ouvriers réclament quinze centimes de l'heure.",
+        "La négociation s'ouvre le 12 mars dans la salle du conseil.",
+        'La troupe est appelée le 15 mars.',
+      ]
+        .map((s) => out.indexOf(s))
+        .filter((i) => i >= 0);
+      const sorted = [...positions].sort((a, b) => a - b);
+      expect(positions).toEqual(sorted);
+    });
+  });
 });

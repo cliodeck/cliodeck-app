@@ -26,8 +26,9 @@ process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', r
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync } from 'fs';
+import { attachNavigationGuard } from './navigation-guard.js';
 import { setupIPCHandlers } from './ipc/index.js';
 import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
@@ -39,6 +40,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+
+/** URL servie par l'application — référence du garde de navigation. */
+function resolveAppUrl(): string {
+  return process.env.NODE_ENV === 'development'
+    ? 'http://localhost:5173'
+    : pathToFileURL(path.join(__dirname, '../../../dist/renderer/index.html')).href;
+}
 
 function createWindow() {
   const preloadPath = path.join(__dirname, '../../preload/index.js');
@@ -70,8 +78,11 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   const debugEnabled = process.env.CLIODESK_DEBUG === '1' || process.env.DEBUG === '1';
 
+  const appUrl = resolveAppUrl();
+  attachNavigationGuard(mainWindow.webContents, appUrl);
+
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(appUrl);
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
@@ -88,6 +99,12 @@ function createWindow() {
   // Setup application menu with keyboard shortcuts
   setupApplicationMenu(mainWindow);
 }
+
+// Filet global : tout WebContents créé plus tard (webview, aperçu) hérite
+// du même garde, sans dépendre du souvenir de l'appeler.
+app.on('web-contents-created', (_event, contents) => {
+  attachNavigationGuard(contents, resolveAppUrl());
+});
 
 app.whenReady().then(async () => {
   // Initialiser configManager (async pour electron-store ES module)
@@ -148,10 +165,51 @@ app.on('window-all-closed', () => {
   }
 });
 
+/**
+ * Demande au renderer de vider l'éditeur sur le disque avant la sortie.
+ *
+ * `before-quit` arrêtait proprement le topic modeling mais ne touchait pas
+ * à l'éditeur, et aucun `beforeunload` n'existait côté renderer : `Cmd+Q`
+ * dans les trois secondes suivant une frappe perdait le texte, et sans
+ * autosave la perte n'était pas bornée. Même classe de perte que la
+ * bascule de projet (#37), à la sortie plutôt qu'au changement.
+ *
+ * Borné dans le temps : un renderer bloqué ne doit jamais empêcher de
+ * quitter. Mieux vaut perdre la sauvegarde que la fenêtre ne se ferme pas.
+ */
+async function flushRendererBeforeQuit(timeoutMs = 4000): Promise<void> {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (why: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ipcMain.removeListener('app:flush-done', onDone);
+      console.log(`💾 [Quit] flush éditeur : ${why}`);
+      resolve();
+    };
+    const onDone = (): void => finish('terminé');
+    const timer = setTimeout(() => finish('délai dépassé'), timeoutMs);
+
+    ipcMain.once('app:flush-done', onDone);
+    try {
+      win.webContents.send('app:flush-before-quit');
+    } catch {
+      finish('renderer injoignable');
+    }
+  });
+}
+
 // Arrêter proprement le service Topic Modeling lors de la fermeture de l'app
 app.on('before-quit', async (event) => {
   // Empêcher la fermeture immédiate pour permettre un arrêt propre
   event.preventDefault();
+
+  // D'abord le travail de l'utilisateur, ensuite les services.
+  await flushRendererBeforeQuit();
 
   try {
     // Importer et arrêter le service s'il est en cours d'exécution
