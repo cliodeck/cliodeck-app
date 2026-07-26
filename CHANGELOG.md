@@ -105,11 +105,27 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   de la rc.3 prétendait fermer (#30). Au passage, son rollback « atomique » ne
   restaurait que le tampon de l'éditeur pour le chapitre ouvert, alors que
   l'aller avait écrit sur le disque.
-- **Toute la section Configuration RAG était en français littéral** — une
-  centaine de libellés, descriptions et repères de réglage qu'aucun anglophone
-  ni germanophone ne pouvait lire. Le split #57 n'avait pas créé cette dette
-  mais l'avait recopiée verbatim dans deux fichiers neufs, qui n'appelaient
-  donc jamais `t()`. Idem pour le sélecteur de style de citation.
+- **L'écran des Préférences était en grande partie en français littéral** —
+  environ 150 libellés, descriptions et repères de réglage qu'aucun anglophone
+  ni germanophone ne pouvait lire : toute la Configuration RAG, le sélecteur
+  de style de citation, et les sections sécurité, LLM et éditeur. Le split #57
+  n'avait pas créé cette dette mais l'avait recopiée verbatim dans deux
+  fichiers neufs, qui n'appelaient donc jamais `t()`.
+
+  Deux pièges dépassaient le simple libellé. La section sécurité portait ses
+  intitulés dans des **constantes de module** — table des types d'événement,
+  table des trois modes d'inspection — or une constante ne peut pas appeler
+  `t()` ; elles sont devenues des tables de clés, résolues au rendu. Et sa
+  fonction de date relative écrivait « il y a 3 j » en dur, puis retombait sur
+  un format `fr-FR` au-delà d'un mois : un lecteur germanophone voyait donc des
+  dates françaises dans son panneau d'événements.
+
+  La longue aide sur l'injection de prompt est traduite en entier : elle
+  explique un arbitrage propre au métier — une source primaire peut
+  légitimement contenir des impératifs, d'où « Avertir » par défaut — et n'avait
+  aucune raison de rester inaccessible à deux tiers des lecteurs.
+
+  Parité des locales : **1685 clés** dans chacune des trois langues.
 - **21 clés manquaient dans les trois locales à la fois**, dont une modale
   entière : l'import de transcriptions Transkribus, quinze clés, intégralement
   en repli anglais. Elles ont été trouvées en confrontant les appels `t()` du
@@ -167,11 +183,12 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
 
 ### Connu, non corrigé dans cette RC
 
-- **75 chaînes françaises codées en dur subsistent hors de la Configuration
-  RAG**, dont 48 dans trois autres sections des réglages (sécurité, LLM,
-  éditeur). Le test anti-français du dépôt ne balaye toujours que
-  `components/Export/` ; le nouveau test de clés, lui, ne voit que les
-  chaînes qui passent déjà par `t()`.
+- **27 chaînes françaises codées en dur subsistent**, réparties sur neuf
+  composants hors des réglages — la plus fournie étant la configuration de
+  présentation (11). L'écran Préférences, lui, est intégralement traduit. Le
+  test anti-français du dépôt ne balaye toujours que `components/Export/` ;
+  le nouveau test de clés, lui, ne voit que les chaînes passant déjà par
+  `t()`.
 - **Les embeddings cloud ne passent par aucun consentement**, alors
   qu'indexer envoie l'intégralité du corpus au fournisseur. Réglage opt-in.
 - **Le piège de focus n'est actif que là où la ref est câblée** : `Échap`
