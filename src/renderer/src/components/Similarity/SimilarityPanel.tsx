@@ -70,7 +70,7 @@ export const SimilarityPanel: React.FC = () => {
       <div className="similarity-panel-header">
         <div className="similarity-panel-title-wrapper">
           <h3 className="similarity-panel-title">{t('similarity.title')}</h3>
-          <HelperTooltip content={t('similarity.help')} />
+          <HelperTooltip content={t('similarity.help.panel')} />
         </div>
         <div className="similarity-panel-actions">
           <button

@@ -681,7 +681,10 @@
     "noProjectState": {
       "title": "Beginnen Sie mit einem Projekt",
       "message": "Erstellen oder öffnen Sie ein Projekt, um zu schreiben, Ihre Quellen zu erkunden und mit dem Assistenten zu sprechen."
-    }
+    },
+    "showExplanation": "Wie diese Antwort zustande kam",
+    "hideExplanation": "Details ausblenden",
+    "system": "System"
   },
   "corpus": {
     "title": "Korpus",
@@ -1052,7 +1055,8 @@
     "done": "Fertig",
     "dismiss": "Verwerfen",
     "showMore": "Mehr anzeigen",
-    "showLess": "Weniger anzeigen"
+    "showLess": "Weniger anzeigen",
+    "loading": "Wird geladen …"
   },
   "topicModeling": {
     "title": "Topic Modeling (Optional)",
@@ -1112,7 +1116,8 @@
     "contextualEnabled": "Aktiviert",
     "contextualDisabled": "Deaktiviert",
     "help": {
-      "collections": "Beschränkt die Suche auf die gewählten Zotero-Sammlungen. Leer = alle Sammlungen."
+      "collections": "Beschränkt die Suche auf die gewählten Zotero-Sammlungen. Leer = alle Sammlungen.",
+      "panel": "Vergleicht den entstehenden Text mit dem indexierten Korpus und weist auf verwandte Passagen hin. Hilfreich, um zu sehen, was Sie zu einem Punkt bereits geschrieben oder gelesen haben."
     },
     "help.granularity": "Bestimmt, wie Ihr Text für die Analyse aufgeteilt wird. 'Abschnitt' analysiert nach Überschriften, 'Absatz' nach Textblöcken, 'Satz' für feinkörnige Analyse.",
     "help.maxResults": "Begrenzt die Anzahl der vorgeschlagenen PDFs pro Textsegment. Höhere Zahlen geben mehr Auswahl, können aber weniger relevante Ergebnisse enthalten.",
@@ -1201,7 +1206,23 @@
     "forceOCR": "OCR für alle Quellen erneut ausführen (vorhandene Transkriptionen ignorieren)",
     "ocrWarning": "Bei einer umfangreichen Sammlung kann OCR mehrere Minuten dauern. Die Verarbeitung erfolgt lokal auf Ihrem Rechner.",
     "processingOCR": "Verarbeitung",
-    "runOCR": "OCR starten"
+    "runOCR": "OCR starten",
+    "title": "Primärquellen",
+    "importDescription": "Importieren Sie Transkriptionen aus externen Werkzeugen wie Transkribus. Unterstützte Formate: ALTO XML, PAGE XML und reiner Text.",
+    "singleFile": "Einzelne Datei",
+    "singleFileDesc": "Eine Transkription für die gewählte Quelle importieren",
+    "batchImport": "Stapelimport",
+    "batchImportDesc": "Alle Transkriptionen eines Ordners importieren",
+    "batchImportSuccess": "Transkriptionen für {{count}} Quelle(n) importiert",
+    "format": "Dateiformat",
+    "autoDetect": "Automatisch erkennen",
+    "plainText": "Reiner Text",
+    "selectSourceFirst": "Wählen Sie zuerst eine Quelle aus.",
+    "selectSourceWarning": "Wählen Sie eine Quelle aus der Liste, bevor Sie eine einzelne Datei importieren.",
+    "importing": "Import läuft …",
+    "import": "Importieren",
+    "importSuccess": "Transkription importiert.",
+    "importFailed": "Der Import ist fehlgeschlagen."
   },
   "modes": {
     "selector": {
@@ -1721,7 +1742,8 @@
       "numberChapters": "Kapitel nummerieren",
       "numberSections": "Abschnitte nummerieren",
       "exportHint": "Diese Einstellungen steuern die Manuskript-Zusammenstellung und die Exporte (PDF, Word)."
-    }
+    },
+    "exportInProgress": "Ein Export läuft gerade. Warten Sie, bis er abgeschlossen ist, bevor Sie die Fußnoten neu nummerieren."
   },
   "citations": {
     "allValid": "Alle Zitate sind gültig ({{count}} Schlüssel geprüft).",
@@ -1754,5 +1776,150 @@
     "enqueue": "Als Entwurf speichern",
     "enqueueTitle": "Diese Antwort der Entwurfs-Warteschlange des Schreibmodus hinzufügen, ohne sie einzufügen",
     "enqueued": "Als Entwurf ✓"
+  },
+  "ragRetrieval": {
+    "title": "RAG-Konfiguration",
+    "on": "Ein",
+    "off": "Aus",
+    "currentValue": "Aktueller Wert: {{value}}",
+    "topK": {
+      "label": "Anzahl der Chunks (topK)",
+      "help": "Höchstzahl der Chunks, die zur Beantwortung einer Frage herangezogen werden",
+      "current_one": "Aktueller Wert: {{count}} Chunk",
+      "current_other": "Aktueller Wert: {{count}} Chunks",
+      "hintLow": "• 1-5: schnelle Antworten, wenig Kontext",
+      "hintMid": "• 6-10: ausgewogen zwischen Tempo und Kontext (empfohlen)",
+      "hintHigh": "• 11-20: maximaler Kontext, langsamer"
+    },
+    "threshold": {
+      "label": "Ähnlichkeitsschwelle",
+      "help": "Mindestwert der Ähnlichkeit, damit ein Chunk aufgenommen wird (0,0 – 1,0)",
+      "hintLow": "• 0,0-0,2: mehr Treffer, weniger genau",
+      "hintMid": "• 0,2-0,4: ausgewogen (empfohlen)",
+      "hintHigh": "• 0,4-1,0: sehr genau, findet unter Umständen nichts"
+    },
+    "chunking": {
+      "label": "Zerlegungsstrategie",
+      "help": "Größe der Chunks bei der Indexierung",
+      "cpuOptimized": "CPU-optimiert (kleine Chunks, schnell)",
+      "standard": "Standard (ausgewogen)",
+      "large": "Groß (große Chunks, mehr Kontext)",
+      "warningTitle": "Achtung:",
+      "warning": "Wird diese Einstellung geändert, müssen sämtliche PDFs neu indexiert werden.",
+      "warningDetail": "Vorhandene Chunks werden nicht automatisch aktualisiert."
+    },
+    "summary": {
+      "label": "Erstellung von Zusammenfassungen",
+      "help": "Verfahren zur Zusammenfassung von Dokumenten",
+      "disabled": "Deaktiviert",
+      "extractive": "Extraktiv (Auswahl zentraler Sätze)",
+      "abstractive": "Abstraktiv (vom Modell verfasst)",
+      "hintExtractive": "• Extraktiv: schnell, behält die wichtigen Sätze",
+      "hintAbstractive": "• Abstraktiv: langsamer, verfasst eine eigene Zusammenfassung (Modell erforderlich)"
+    },
+    "summaryLength": {
+      "label": "Maximale Länge der Zusammenfassung",
+      "help": "Höchstzahl der Wörter in der Zusammenfassung",
+      "current_one": "Aktueller Wert: {{count}} Wort",
+      "current_other": "Aktueller Wert: {{count}} Wörter"
+    },
+    "graph": {
+      "label": "Wissensgraph verwenden",
+      "help": "Ergebnisse um verwandte Dokumente ergänzen (Zitate, Ähnlichkeit)",
+      "hint": "Sucht verwandte Dokumente über Zitate und semantische Ähnlichkeit."
+    },
+    "graphDocs": {
+      "label": "Aufzunehmende verwandte Dokumente",
+      "help": "Anzahl der verwandten Dokumente, die dem Kontext hinzugefügt werden",
+      "current_one": "Aktueller Wert: {{count}} Dokument",
+      "current_other": "Aktueller Wert: {{count}} Dokumente"
+    },
+    "graphThreshold": {
+      "label": "Ähnlichkeitsschwelle des Graphen",
+      "help": "Mindestwert der Ähnlichkeit, damit ein verwandtes Dokument aufgenommen wird"
+    },
+    "useSummaries": {
+      "label": "Zusammenfassungen im RAG verwenden",
+      "help": "Zusammenfassungen statt Chunks als Kontext heranziehen",
+      "hint": "Ist die Option aktiv, treten Zusammenfassungen an die Stelle der ausführlichen Chunks.",
+      "requires": "Setzt voraus, dass die Erstellung von Zusammenfassungen aktiviert ist."
+    },
+    "vault": {
+      "label": "Obsidian-Vault einbeziehen",
+      "help": "Auch indexierte Obsidian-Notizen durchsuchen, zusätzlich zu PDFs und Tropy-Archiven",
+      "hint": "Der Brainstorm-Chat durchsucht den Vault stets, sofern einer verknüpft ist. Diese Option nimmt ihn zusätzlich in den klassischen RAG-Chat auf."
+    },
+    "exploration": {
+      "label": "Ähnlichkeitsschwelle (Exploration)",
+      "help": "Mindestwert, ab dem im Explorationsgraphen eine Ähnlichkeitsverbindung entsteht",
+      "hintLow": "• 0,5-0,6: mehr Verbindungen, dichter Graph",
+      "hintMid": "• 0,7: ausgewogen (empfohlen)",
+      "hintHigh": "• 0,8-0,95: nur sehr starke Verbindungen"
+    },
+    "topics": {
+      "label": "Themenmodellierung",
+      "help": "Automatische thematische Auswertung des Korpus aktivieren",
+      "hint": "Nutzt BERTopic, um die Themen des Korpus automatisch herauszuarbeiten."
+    }
+  },
+  "ragConfig": {
+    "title": "RAG-Konfiguration"
+  },
+  "citationStyle": {
+    "title": "Zitierstil",
+    "style": "Stil",
+    "styleAria": "Zitierstil",
+    "locale": "Sprache",
+    "localeAria": "Sprache der Zitation",
+    "preview": "Vorschau",
+    "previewFailed": "Die Vorschau konnte nicht erzeugt werden."
+  },
+  "ragChunk": {
+    "heading": "Optimierung der Chunk-Qualität",
+    "on": "Ein",
+    "off": "Aus",
+    "yes": "Ja",
+    "no": "Nein",
+    "custom": {
+      "label": "Eigene Einstellungen",
+      "help": "Die Chunk-Größe selbst festlegen",
+      "max": "Maximale Größe (Wörter)",
+      "min": "Minimale Größe (Wörter)",
+      "overlap": "Überlappung (Wörter)"
+    },
+    "quality": {
+      "label": "Qualitätsfilter",
+      "help": "Chunks geringer Qualität aussondern (Entropie, Wiederholung)",
+      "entropy": "Mindestentropie",
+      "entropyHint": "Je höher der Wert, desto mehr wiederholende Chunks werden ausgesondert.",
+      "uniqueRatio": "Mindestanteil eindeutiger Wörter"
+    },
+    "preprocessing": {
+      "label": "Textvorverarbeitung",
+      "help": "Text vor der Zerlegung bereinigen (OCR, Kopf- und Fußzeilen)",
+      "ocr": "OCR-Bereinigung",
+      "headerFooter": "Kopf- und Fußzeilen entfernen"
+    },
+    "dedup": {
+      "label": "Deduplizierung",
+      "help": "Doppelte Chunks entfernen",
+      "bySimilarity": "Deduplizierung nach Ähnlichkeit",
+      "yesSlower": "Ja (langsamer)",
+      "threshold": "Ähnlichkeitsschwelle"
+    },
+    "semantic": {
+      "label": "Semantische Zerlegung",
+      "help": "Grenzen mithilfe von Embeddings erkennen (experimentell)",
+      "infoTitle": "Hinweis:",
+      "info": "verdreifacht die Indexierungsdauer etwa.",
+      "sensitivity": "Semantische Empfindlichkeit",
+      "window": "Fenstergröße (Sätze)"
+    },
+    "compression": {
+      "label": "Kontextkomprimierung",
+      "help": "Den an das Modell gesendeten Kontext verkleinern",
+      "noteTitle": "Hinweis:",
+      "note": "Wird die Komprimierung abgeschaltet, erhält das Modell mehr Kontext. Bei stark standardisierten Dokumenten (Protokolle, Archivregister) kann das die Genauigkeit erhöhen — auf Kosten von Laufzeit und Preis."
+    }
   }
 }

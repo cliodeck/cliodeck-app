@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { sanitizeChat } from '../../utils/sanitize';
 
@@ -27,6 +28,7 @@ const DEFAULT_CITATION: CitationConfig = {
 };
 
 export const CitationStyleSection: React.FC = () => {
+  const { t } = useTranslation('common');
   const [styles, setStyles] = useState<StyleEntry[]>([]);
   const [locales, setLocales] = useState<string[]>([]);
   const [style, setStyle] = useState<string>(DEFAULT_CITATION.style);
@@ -97,7 +99,7 @@ export const CitationStyleSection: React.FC = () => {
           setPreviewBibliography(res.bibliography ?? '');
           setPreviewError('');
         } else {
-          setPreviewError(res?.error ?? 'Preview failed');
+          setPreviewError(res?.error ?? t('citationStyle.previewFailed'));
         }
       } catch (err) {
         if (!cancelled) setPreviewError((err as Error).message);
@@ -121,16 +123,16 @@ export const CitationStyleSection: React.FC = () => {
   };
 
   return (
-    <CollapsibleSection title="Citation style" defaultExpanded={false}>
+    <CollapsibleSection title={t('citationStyle.title')} defaultExpanded={false}>
       <div className="config-section">
         <div className="config-section-content">
           <div className="config-field">
             <label className="config-label" htmlFor="citation-style-select">
-              Style
+              {t('citationStyle.style')}
             </label>
             <select
               id="citation-style-select"
-              aria-label="Citation style"
+              aria-label={t('citationStyle.styleAria')}
               className="config-select"
               value={style}
               onChange={onStyleChange}
@@ -146,11 +148,11 @@ export const CitationStyleSection: React.FC = () => {
 
           <div className="config-field">
             <label className="config-label" htmlFor="citation-locale-select">
-              Locale
+              {t('citationStyle.locale')}
             </label>
             <select
               id="citation-locale-select"
-              aria-label="Citation locale"
+              aria-label={t('citationStyle.localeAria')}
               className="config-select"
               value={locale}
               onChange={onLocaleChange}
@@ -166,7 +168,7 @@ export const CitationStyleSection: React.FC = () => {
 
           {previewKey && (
             <div className="config-field">
-              <label className="config-label">Preview</label>
+              <label className="config-label">{t('citationStyle.preview')}</label>
               {previewError ? (
                 <div className="config-description" style={{ color: 'var(--color-danger)' }}>
                   {previewError}

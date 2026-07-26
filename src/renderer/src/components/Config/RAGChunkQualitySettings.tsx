@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { RAGConfig } from './ConfigPanel';
 
 /**
@@ -13,6 +14,8 @@ interface Props {
 
 export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) => {
   // === Chunk Quality Optimization Handlers ===
+  const { t } = useTranslation('common');
+
   const handleCustomChunkingEnabledChange = (value: boolean) => {
     onChange({ ...config, customChunkingEnabled: value });
   };
@@ -84,15 +87,15 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
     <>
           {/* === CHUNK QUALITY OPTIMIZATION === */}
           <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)' }}>🎯 Optimisation qualité des chunks</h4>
+            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)' }}>🎯 {t('ragChunk.heading')}</h4>
           </div>
 
           {/* Custom Chunking */}
           <div className="config-field">
             <label className="config-label">
-              Paramètres personnalisés
+              {t('ragChunk.custom.label')}
               <span className="config-help">
-                Définir manuellement la taille des chunks
+                {t('ragChunk.custom.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -102,14 +105,14 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleCustomChunkingEnabledChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.customChunkingEnabled ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.customChunkingEnabled ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
           </div>
 
           {config.customChunkingEnabled && (
             <>
               <div className="config-field">
-                <label className="config-label">Taille max (mots)</label>
+                <label className="config-label">{t('ragChunk.custom.max')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -132,7 +135,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
               </div>
 
               <div className="config-field">
-                <label className="config-label">Taille min (mots)</label>
+                <label className="config-label">{t('ragChunk.custom.min')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -155,7 +158,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
               </div>
 
               <div className="config-field">
-                <label className="config-label">Chevauchement (mots)</label>
+                <label className="config-label">{t('ragChunk.custom.overlap')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -182,9 +185,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {/* Quality Filtering */}
           <div className="config-field">
             <label className="config-label">
-              Filtrage qualité
+              {t('ragChunk.quality.label')}
               <span className="config-help">
-                Filtrer les chunks de faible qualité (entropie, répétition)
+                {t('ragChunk.quality.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -194,14 +197,14 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleEnableQualityFilteringChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.enableQualityFiltering !== false ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.enableQualityFiltering !== false ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
           </div>
 
           {config.enableQualityFiltering !== false && (
             <>
               <div className="config-field">
-                <label className="config-label">Entropie minimale</label>
+                <label className="config-label">{t('ragChunk.quality.entropy')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -223,12 +226,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                   />
                 </div>
                 <div className="config-description">
-                  <small>Plus élevé = filtre les chunks répétitifs</small>
+                  <small>{t('ragChunk.quality.entropyHint')}</small>
                 </div>
               </div>
 
               <div className="config-field">
-                <label className="config-label">Ratio mots uniques min</label>
+                <label className="config-label">{t('ragChunk.quality.uniqueRatio')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -256,9 +259,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {/* Preprocessing */}
           <div className="config-field">
             <label className="config-label">
-              Prétraitement texte
+              {t('ragChunk.preprocessing.label')}
               <span className="config-help">
-                Nettoyer le texte avant découpage (OCR, headers/footers)
+                {t('ragChunk.preprocessing.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -268,14 +271,14 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleEnablePreprocessingChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.enablePreprocessing !== false ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.enablePreprocessing !== false ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
           </div>
 
           {config.enablePreprocessing !== false && (
             <>
               <div className="config-field">
-                <label className="config-label">Nettoyage OCR</label>
+                <label className="config-label">{t('ragChunk.preprocessing.ocr')}</label>
                 <div className="config-input-group">
                   <input
                     type="checkbox"
@@ -283,12 +286,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleEnableOCRCleanupChange(e.target.checked)}
                     className="config-checkbox"
                   />
-                  <span>{config.enableOCRCleanup !== false ? 'Oui' : 'Non'}</span>
+                  <span>{t(config.enableOCRCleanup !== false ? 'ragChunk.yes' : 'ragChunk.no')}</span>
                 </div>
               </div>
 
               <div className="config-field">
-                <label className="config-label">Supprimer en-têtes/pieds</label>
+                <label className="config-label">{t('ragChunk.preprocessing.headerFooter')}</label>
                 <div className="config-input-group">
                   <input
                     type="checkbox"
@@ -296,7 +299,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleEnableHeaderFooterRemovalChange(e.target.checked)}
                     className="config-checkbox"
                   />
-                  <span>{config.enableHeaderFooterRemoval !== false ? 'Oui' : 'Non'}</span>
+                  <span>{t(config.enableHeaderFooterRemoval !== false ? 'ragChunk.yes' : 'ragChunk.no')}</span>
                 </div>
               </div>
             </>
@@ -305,9 +308,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {/* Deduplication */}
           <div className="config-field">
             <label className="config-label">
-              Déduplication
+              {t('ragChunk.dedup.label')}
               <span className="config-help">
-                Supprimer les chunks en double
+                {t('ragChunk.dedup.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -317,14 +320,14 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleEnableDeduplicationChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.enableDeduplication !== false ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.enableDeduplication !== false ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
           </div>
 
           {config.enableDeduplication !== false && (
             <>
               <div className="config-field">
-                <label className="config-label">Déduplication par similarité</label>
+                <label className="config-label">{t('ragChunk.dedup.bySimilarity')}</label>
                 <div className="config-input-group">
                   <input
                     type="checkbox"
@@ -332,13 +335,13 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleEnableSimilarityDedupChange(e.target.checked)}
                     className="config-checkbox"
                   />
-                  <span>{config.enableSimilarityDedup ? 'Oui (plus lent)' : 'Non'}</span>
+                  <span>{t(config.enableSimilarityDedup ? 'ragChunk.dedup.yesSlower' : 'ragChunk.no')}</span>
                 </div>
               </div>
 
               {config.enableSimilarityDedup && (
                 <div className="config-field">
-                  <label className="config-label">Seuil similarité</label>
+                  <label className="config-label">{t('ragChunk.dedup.threshold')}</label>
                   <div className="config-input-group">
                     <input
                       type="range"
@@ -367,9 +370,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {/* Semantic Chunking */}
           <div className="config-field">
             <label className="config-label">
-              Chunking sémantique
+              {t('ragChunk.semantic.label')}
               <span className="config-help">
-                Utiliser les embeddings pour détecter les frontières (expérimental)
+                {t('ragChunk.semantic.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -379,7 +382,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleUseSemanticChunkingChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.useSemanticChunking ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.useSemanticChunking ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
             <div className="config-description">
               <div style={{
@@ -389,7 +392,8 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚡ Info :</strong> Augmente le temps d'indexation (~3x)
+                <strong>⚡ {t('ragChunk.semantic.infoTitle')}</strong>{' '}
+                {t('ragChunk.semantic.info')}
               </div>
             </div>
           </div>
@@ -397,7 +401,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {config.useSemanticChunking && (
             <>
               <div className="config-field">
-                <label className="config-label">Sensibilité sémantique</label>
+                <label className="config-label">{t('ragChunk.semantic.sensitivity')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -421,7 +425,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
               </div>
 
               <div className="config-field">
-                <label className="config-label">Taille fenêtre (phrases)</label>
+                <label className="config-label">{t('ragChunk.semantic.window')}</label>
                 <div className="config-input-group">
                   <input
                     type="range"
@@ -447,9 +451,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
           {/* Context Compression */}
           <div className="config-field">
             <label className="config-label">
-              Compression du contexte
+              {t('ragChunk.compression.label')}
               <span className="config-help">
-                Réduit le contexte envoyé au LLM pour améliorer les performances
+                {t('ragChunk.compression.help')}
               </span>
             </label>
             <div className="config-input-group">
@@ -459,7 +463,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 onChange={(e) => handleEnableContextCompressionChange(e.target.checked)}
                 className="config-checkbox"
               />
-              <span>{config.enableContextCompression !== false ? 'Activé' : 'Désactivé'}</span>
+              <span>{t(config.enableContextCompression !== false ? 'ragChunk.on' : 'ragChunk.off')}</span>
             </div>
             <div className="config-description">
               <div style={{
@@ -469,9 +473,8 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚠️ Note :</strong> Désactiver la compression envoie plus de contexte au LLM,
-                ce qui peut améliorer la précision des réponses pour les documents avec des structures
-                standardisées (ex: procès-verbaux, archives) mais augmente la latence et le coût.
+                <strong>⚠️ {t('ragChunk.compression.noteTitle')}</strong>{' '}
+                {t('ragChunk.compression.note')}
               </div>
             </div>
           </div>

@@ -63,10 +63,10 @@ describe('CitationStyleSection', () => {
     render(<CitationStyleSection />);
 
     // Header auto-collapsed; expand it so the selects are in the DOM tree.
-    fireEvent.click(screen.getByText('Citation style'));
+    fireEvent.click(screen.getByText('citationStyle.title'));
 
-    const styleSelect = (await screen.findByLabelText('Citation style')) as HTMLSelectElement;
-    const localeSelect = screen.getByLabelText('Citation locale') as HTMLSelectElement;
+    const styleSelect = (await screen.findByLabelText('citationStyle.styleAria')) as HTMLSelectElement;
+    const localeSelect = screen.getByLabelText('citationStyle.localeAria') as HTMLSelectElement;
 
     await waitFor(() => {
       expect(styleSelect.querySelectorAll('option').length).toBeGreaterThanOrEqual(2);
@@ -84,9 +84,9 @@ describe('CitationStyleSection', () => {
   it('persists config changes via window.electron.config.set', async () => {
     const mock = installElectronMock();
     render(<CitationStyleSection />);
-    fireEvent.click(screen.getByText('Citation style'));
+    fireEvent.click(screen.getByText('citationStyle.title'));
 
-    const styleSelect = (await screen.findByLabelText('Citation style')) as HTMLSelectElement;
+    const styleSelect = (await screen.findByLabelText('citationStyle.styleAria')) as HTMLSelectElement;
     await waitFor(() => {
       expect(styleSelect.querySelectorAll('option').length).toBeGreaterThanOrEqual(2);
     });

@@ -681,7 +681,10 @@
     "noProjectState": {
       "title": "Commencez par un projet",
       "message": "Créez ou ouvrez un projet pour écrire, explorer vos sources et dialoguer avec l'assistant."
-    }
+    },
+    "showExplanation": "Comment cette réponse a été produite",
+    "hideExplanation": "Masquer les détails",
+    "system": "Système"
   },
   "corpus": {
     "title": "Corpus",
@@ -1052,7 +1055,8 @@
     "done": "Terminé",
     "dismiss": "Ignorer",
     "showMore": "Voir plus",
-    "showLess": "Voir moins"
+    "showLess": "Voir moins",
+    "loading": "Chargement…"
   },
   "topicModeling": {
     "title": "Topic Modeling (Optionnel)",
@@ -1112,7 +1116,8 @@
     "contextualEnabled": "Activé",
     "contextualDisabled": "Désactivé",
     "help": {
-      "collections": "Restreint la recherche aux collections Zotero choisies. Vide = toutes les collections."
+      "collections": "Restreint la recherche aux collections Zotero choisies. Vide = toutes les collections.",
+      "panel": "Compare le texte en cours d'écriture au corpus indexé et signale les passages proches. Utile pour repérer ce que vous avez déjà écrit ou lu sur un point."
     },
     "help.granularity": "Détermine comment votre texte est découpé pour l'analyse. 'Section' analyse par titres, 'Paragraphe' par blocs de texte, 'Phrase' pour une analyse fine.",
     "help.maxResults": "Limite le nombre de PDFs suggérés par segment de texte. Un nombre plus élevé donne plus de choix mais peut inclure des résultats moins pertinents.",
@@ -1201,7 +1206,23 @@
     "forceOCR": "Relancer l'OCR sur toutes les sources (ignorer les transcriptions existantes)",
     "ocrWarning": "L'OCR peut prendre plusieurs minutes sur une collection importante. Le traitement se fait localement, sur votre ordinateur.",
     "processingOCR": "Traitement",
-    "runOCR": "Lancer l'OCR"
+    "runOCR": "Lancer l'OCR",
+    "title": "Sources primaires",
+    "importDescription": "Importez des transcriptions produites par des outils externes comme Transkribus. Formats acceptés : ALTO XML, PAGE XML et texte brut.",
+    "singleFile": "Fichier unique",
+    "singleFileDesc": "Importer une transcription pour la source sélectionnée",
+    "batchImport": "Import par lot",
+    "batchImportDesc": "Importer toutes les transcriptions d'un dossier",
+    "batchImportSuccess": "Transcriptions importées pour {{count}} source(s)",
+    "format": "Format du fichier",
+    "autoDetect": "Détection automatique",
+    "plainText": "Texte brut",
+    "selectSourceFirst": "Sélectionnez d'abord une source.",
+    "selectSourceWarning": "Sélectionnez une source dans la liste avant d'importer un fichier unique.",
+    "importing": "Import en cours…",
+    "import": "Importer",
+    "importSuccess": "Transcription importée.",
+    "importFailed": "L'import a échoué."
   },
   "modes": {
     "selector": {
@@ -1721,7 +1742,8 @@
       "numberChapters": "Numéroter les chapitres",
       "numberSections": "Numéroter les sections",
       "exportHint": "Ces réglages pilotent l'assemblage du manuscrit et les exports (PDF, Word)."
-    }
+    },
+    "exportInProgress": "Un export est en cours. Attendez qu'il se termine avant de renuméroter les notes."
   },
   "citations": {
     "allValid": "Toutes les citations sont valides ({{count}} clés vérifiées).",
@@ -1754,5 +1776,150 @@
     "enqueue": "Mettre en brouillon",
     "enqueueTitle": "Ajouter cette réponse à la file de brouillons du mode Écriture, sans l'insérer",
     "enqueued": "En brouillon ✓"
+  },
+  "ragRetrieval": {
+    "title": "Configuration RAG",
+    "on": "Activé",
+    "off": "Désactivé",
+    "currentValue": "Valeur actuelle : {{value}}",
+    "topK": {
+      "label": "Nombre de chunks (topK)",
+      "help": "Nombre maximum de chunks récupérés pour répondre à une question",
+      "current_one": "Valeur actuelle : {{count}} chunk",
+      "current_other": "Valeur actuelle : {{count}} chunks",
+      "hintLow": "• 1-5 : réponses rapides, contexte limité",
+      "hintMid": "• 6-10 : équilibre vitesse/contexte (recommandé)",
+      "hintHigh": "• 11-20 : contexte maximal, plus lent"
+    },
+    "threshold": {
+      "label": "Seuil de similarité",
+      "help": "Score minimum de similarité pour inclure un chunk (0,0 – 1,0)",
+      "hintLow": "• 0,0-0,2 : plus de résultats, moins précis",
+      "hintMid": "• 0,2-0,4 : équilibre (recommandé)",
+      "hintHigh": "• 0,4-1,0 : très précis, risque de ne rien trouver"
+    },
+    "chunking": {
+      "label": "Stratégie de découpage",
+      "help": "Taille des chunks au moment de l'indexation",
+      "cpuOptimized": "Optimisé CPU (petits chunks, rapide)",
+      "standard": "Standard (équilibré)",
+      "large": "Large (gros chunks, plus de contexte)",
+      "warningTitle": "Attention :",
+      "warning": "changer cette option oblige à réindexer tous les PDF.",
+      "warningDetail": "Les chunks existants ne seront pas mis à jour automatiquement."
+    },
+    "summary": {
+      "label": "Génération de résumés",
+      "help": "Méthode employée pour résumer les documents",
+      "disabled": "Désactivée",
+      "extractive": "Extractive (sélection de phrases clés)",
+      "abstractive": "Abstractive (génération par le modèle)",
+      "hintExtractive": "• Extractive : rapide, retient les phrases importantes",
+      "hintAbstractive": "• Abstractive : plus lente, rédige un résumé original (nécessite un modèle)"
+    },
+    "summaryLength": {
+      "label": "Longueur maximale des résumés",
+      "help": "Nombre maximum de mots dans le résumé",
+      "current_one": "Valeur actuelle : {{count}} mot",
+      "current_other": "Valeur actuelle : {{count}} mots"
+    },
+    "graph": {
+      "label": "Utiliser le graphe de connaissances",
+      "help": "Enrichir les résultats avec les documents liés (citations, similarité)",
+      "hint": "Active la recherche de documents liés par citation et par similarité sémantique."
+    },
+    "graphDocs": {
+      "label": "Documents liés à inclure",
+      "help": "Nombre de documents liés ajoutés au contexte",
+      "current_one": "Valeur actuelle : {{count}} document",
+      "current_other": "Valeur actuelle : {{count}} documents"
+    },
+    "graphThreshold": {
+      "label": "Seuil de similarité du graphe",
+      "help": "Score minimum de similarité pour retenir un document lié"
+    },
+    "useSummaries": {
+      "label": "Utiliser les résumés dans le RAG",
+      "help": "Employer les résumés plutôt que les chunks comme contexte",
+      "hint": "Si actif, les résumés de documents remplacent les chunks détaillés.",
+      "requires": "Nécessite que la génération de résumés soit activée."
+    },
+    "vault": {
+      "label": "Inclure le vault Obsidian",
+      "help": "Interroger aussi les notes Obsidian indexées, en plus des PDF et des archives Tropy",
+      "hint": "Le chat Brainstorm interroge toujours le vault lorsqu'il est lié. Cette option l'ajoute également aux recherches du chat RAG classique."
+    },
+    "exploration": {
+      "label": "Seuil de similarité (exploration)",
+      "help": "Score minimum pour créer un lien de similarité dans le graphe d'exploration",
+      "hintLow": "• 0,5-0,6 : plus de connexions, graphe dense",
+      "hintMid": "• 0,7 : équilibre (recommandé)",
+      "hintHigh": "• 0,8-0,95 : connexions très fortes uniquement"
+    },
+    "topics": {
+      "label": "Modélisation thématique",
+      "help": "Activer l'analyse thématique automatique du corpus",
+      "hint": "Active BERTopic pour dégager automatiquement les thèmes du corpus."
+    }
+  },
+  "ragConfig": {
+    "title": "Configuration RAG"
+  },
+  "citationStyle": {
+    "title": "Style de citation",
+    "style": "Style",
+    "styleAria": "Style de citation",
+    "locale": "Langue",
+    "localeAria": "Langue de citation",
+    "preview": "Aperçu",
+    "previewFailed": "L'aperçu n'a pas pu être généré."
+  },
+  "ragChunk": {
+    "heading": "Optimisation de la qualité des chunks",
+    "on": "Activé",
+    "off": "Désactivé",
+    "yes": "Oui",
+    "no": "Non",
+    "custom": {
+      "label": "Paramètres personnalisés",
+      "help": "Fixer soi-même la taille des chunks",
+      "max": "Taille maximale (mots)",
+      "min": "Taille minimale (mots)",
+      "overlap": "Chevauchement (mots)"
+    },
+    "quality": {
+      "label": "Filtrage qualité",
+      "help": "Écarter les chunks de faible qualité (entropie, répétition)",
+      "entropy": "Entropie minimale",
+      "entropyHint": "Plus la valeur est haute, plus les chunks répétitifs sont écartés.",
+      "uniqueRatio": "Ratio minimal de mots uniques"
+    },
+    "preprocessing": {
+      "label": "Prétraitement du texte",
+      "help": "Nettoyer le texte avant découpage (OCR, en-têtes et pieds de page)",
+      "ocr": "Nettoyage OCR",
+      "headerFooter": "Supprimer en-têtes et pieds de page"
+    },
+    "dedup": {
+      "label": "Déduplication",
+      "help": "Supprimer les chunks en double",
+      "bySimilarity": "Déduplication par similarité",
+      "yesSlower": "Oui (plus lent)",
+      "threshold": "Seuil de similarité"
+    },
+    "semantic": {
+      "label": "Découpage sémantique",
+      "help": "Détecter les frontières à l'aide des embeddings (expérimental)",
+      "infoTitle": "Information :",
+      "info": "multiplie le temps d'indexation par trois environ.",
+      "sensitivity": "Sensibilité sémantique",
+      "window": "Taille de la fenêtre (phrases)"
+    },
+    "compression": {
+      "label": "Compression du contexte",
+      "help": "Réduire le contexte envoyé au modèle",
+      "noteTitle": "Note :",
+      "note": "désactiver la compression envoie davantage de contexte au modèle. Cela peut améliorer la précision sur des documents très standardisés (procès-verbaux, registres d'archives), au prix de la latence et du coût."
+    }
   }
 }
