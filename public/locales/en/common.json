@@ -2293,5 +2293,29 @@
     "newSection": "New section",
     "slideTitle": "Slide title",
     "speakerNotes": "Speaker notes here."
+  },
+  "manuscriptCorpus": {
+    "title": "Manuscript corpus",
+    "hint": "Your own text is indexed as a fourth corpus, alongside the bibliography, Tropy archives and Obsidian vault. The assistant can then answer “what have I already written about this?”. Extracts are always marked as coming from the manuscript, never from the bibliography: you must be able to see when you are citing yourself.",
+    "enabled": "Index the manuscript",
+    "enabledHelp": "Turning this off stops indexing and removes the manuscript from searches",
+    "on": "On",
+    "off": "Off",
+    "state": "Index state",
+    "chapters_one": "{{count}} piece",
+    "chapters_other": "{{count}} pieces",
+    "chunks_one": "{{count}} extract",
+    "chunks_other": "{{count}} extracts",
+    "lastIndexed": "Last indexed: {{when}}",
+    "empty": "Nothing indexed yet. Indexing happens on save, or through the button below.",
+    "noProject": "Open a project to see the state of its index.",
+    "reindex": "Re-index",
+    "indexing": "Indexing…",
+    "reindexTitle": "Re-index the manuscript now",
+    "indexDone": "{{indexed}} piece(s) re-indexed, {{unchanged}} unchanged.",
+    "partialFailure": "{{count}} piece(s) could not be indexed; the rest were.",
+    "noProvider": "No embedding provider available — is Ollama running? The index is left as it is.",
+    "indexError": "Indexing failed.",
+    "statsError": "The index state could not be read."
   }
 }

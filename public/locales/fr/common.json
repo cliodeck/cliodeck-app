@@ -2293,5 +2293,29 @@
     "newSection": "Nouvelle section",
     "slideTitle": "Titre de la diapositive",
     "speakerNotes": "Notes du présentateur ici."
+  },
+  "manuscriptCorpus": {
+    "title": "Corpus manuscrit",
+    "hint": "Votre propre texte est indexé comme quatrième corpus, à côté de la bibliographie, des archives Tropy et du vault Obsidian. L'assistant peut ainsi répondre à « qu'ai-je déjà écrit sur ce point ? ». Les extraits sont toujours signalés comme provenant du manuscrit, jamais de la bibliographie : vous devez voir quand vous vous citez vous-même.",
+    "enabled": "Indexer le manuscrit",
+    "enabledHelp": "Désactiver arrête l'indexation et retire le manuscrit des recherches",
+    "on": "Activé",
+    "off": "Désactivé",
+    "state": "État de l'index",
+    "chapters_one": "{{count}} pièce",
+    "chapters_other": "{{count}} pièces",
+    "chunks_one": "{{count}} extrait",
+    "chunks_other": "{{count}} extraits",
+    "lastIndexed": "Dernière indexation : {{when}}",
+    "empty": "Rien d'indexé pour l'instant. L'indexation se fait à l'enregistrement, ou par le bouton ci-dessous.",
+    "noProject": "Ouvrez un projet pour voir l'état de son index.",
+    "reindex": "Réindexer",
+    "indexing": "Indexation…",
+    "reindexTitle": "Réindexer le manuscrit maintenant",
+    "indexDone": "{{indexed}} pièce(s) réindexée(s), {{unchanged}} inchangée(s).",
+    "partialFailure": "{{count}} pièce(s) n'ont pas pu être indexées ; le reste l'a été.",
+    "noProvider": "Aucun fournisseur d'embeddings disponible — Ollama est-il lancé ? L'index reste en l'état.",
+    "indexError": "L'indexation a échoué.",
+    "statsError": "L'état de l'index n'a pas pu être lu."
   }
 }

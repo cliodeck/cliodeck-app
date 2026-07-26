@@ -2293,5 +2293,29 @@
     "newSection": "Neuer Abschnitt",
     "slideTitle": "Titel der Folie",
     "speakerNotes": "Hier die Notizen des Vortragenden."
+  },
+  "manuscriptCorpus": {
+    "title": "Manuskript-Korpus",
+    "hint": "Ihr eigener Text wird als viertes Korpus indexiert, neben der Bibliographie, den Tropy-Archiven und dem Obsidian-Vault. So kann der Assistent beantworten, was Sie zu einem Punkt bereits geschrieben haben. Auszüge werden stets als aus dem Manuskript stammend gekennzeichnet, nie als Bibliographie: Sie müssen erkennen können, wann Sie sich selbst zitieren.",
+    "enabled": "Manuskript indexieren",
+    "enabledHelp": "Abschalten beendet die Indexierung und nimmt das Manuskript aus der Suche",
+    "on": "Ein",
+    "off": "Aus",
+    "state": "Zustand des Index",
+    "chapters_one": "{{count}} Teil",
+    "chapters_other": "{{count}} Teile",
+    "chunks_one": "{{count}} Auszug",
+    "chunks_other": "{{count}} Auszüge",
+    "lastIndexed": "Zuletzt indexiert: {{when}}",
+    "empty": "Noch nichts indexiert. Die Indexierung erfolgt beim Speichern oder über die Schaltfläche unten.",
+    "noProject": "Öffnen Sie ein Projekt, um den Zustand seines Index zu sehen.",
+    "reindex": "Neu indexieren",
+    "indexing": "Indexierung läuft …",
+    "reindexTitle": "Das Manuskript jetzt neu indexieren",
+    "indexDone": "{{indexed}} Teil(e) neu indexiert, {{unchanged}} unverändert.",
+    "partialFailure": "{{count}} Teil(e) konnten nicht indexiert werden; die übrigen schon.",
+    "noProvider": "Kein Embedding-Anbieter verfügbar — läuft Ollama? Der Index bleibt unverändert.",
+    "indexError": "Die Indexierung ist fehlgeschlagen.",
+    "statsError": "Der Zustand des Index konnte nicht gelesen werden."
   }
 }

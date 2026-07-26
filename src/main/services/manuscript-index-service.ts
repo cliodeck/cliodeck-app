@@ -387,7 +387,11 @@ class ManuscriptIndexService {
     return this.index(embedder);
   }
 
-  stats(): { chapterCount: number; chunkCount: number } | null {
+  stats(): {
+    chapterCount: number;
+    chunkCount: number;
+    lastIndexedAt: string | null;
+  } | null {
     return this.store ? this.store.stats() : null;
   }
 
