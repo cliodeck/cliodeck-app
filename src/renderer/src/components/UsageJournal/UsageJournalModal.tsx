@@ -17,12 +17,12 @@ interface UsageJournalModalProps {
 export const UsageJournalModal: React.FC<UsageJournalModalProps> = ({ isOpen, onClose }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   if (!isOpen) return null;
 
   return (
-    <div className="usage-modal" onClick={onClose}>
+    <div ref={trapRef} className="usage-modal" onClick={onClose}>
       <div
         className="usage-modal__content"
         role="dialog"

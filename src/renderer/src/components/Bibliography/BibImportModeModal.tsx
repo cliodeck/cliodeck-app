@@ -22,13 +22,13 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   const hasCitations = currentCitationCount > 0;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content bib-import-mode-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('bibImport.title')}</h3>

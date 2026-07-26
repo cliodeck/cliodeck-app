@@ -19,7 +19,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
 }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { selectedSourceId, importTranscription, syncTPY } = usePrimarySourcesStore();
 
@@ -129,7 +129,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content transcription-import-modal"
         onClick={(e) => e.stopPropagation()}

@@ -27,7 +27,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const [pdfFiles, setPdfFiles] = useState<PDFFile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -95,7 +95,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content pdf-rename-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('pdfRename.title')}</h3>

@@ -21,7 +21,7 @@ interface PDFExportModalProps {
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { filePath, getLiveContent } = useEditorStore();
@@ -297,7 +297,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const partCount = (chapters ?? []).filter((c) => !c.missing).length;
 
   return (
-    <div className="pdf-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="pdf-export-modal" onClick={handleClose}>
       <div
         className="pdf-export-content"
         role="dialog"

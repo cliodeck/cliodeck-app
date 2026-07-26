@@ -16,7 +16,7 @@ type ViewMode = 'overview' | 'feature' | 'faq' | 'glossary';
 export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeature }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
   const [selectedFeature, setSelectedFeature] = useState<string | null>(initialFeature || null);
@@ -54,7 +54,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
     if (!feature) return null;
 
     return (
-      <div className="feature-detail">
+      <div ref={trapRef} className="feature-detail">
         <h2>{feature.title}</h2>
         <p className="feature-description">{feature.description}</p>
 

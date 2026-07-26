@@ -36,7 +36,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
 }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
 
   const [scanning, setScanning] = useState(false);
@@ -213,7 +213,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content orphan-pdf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('bibliography.orphanPDFCleanup')}</h3>

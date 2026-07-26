@@ -16,7 +16,7 @@ interface PresentationExportModalProps {
 export const PresentationExportModal: React.FC<PresentationExportModalProps> = ({ isOpen, onClose }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject } = useProjectStore();
   const { content } = useEditorStore();
@@ -158,7 +158,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <div className="presentation-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="presentation-export-modal" onClick={handleClose}>
       <div className="presentation-export-content" onClick={(e) => e.stopPropagation()}>
         <div className="presentation-export-header">
           <h3>{t('presentation.title')}</h3>

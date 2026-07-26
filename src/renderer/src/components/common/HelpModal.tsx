@@ -29,11 +29,11 @@ export const HelpModal: React.FC<HelpModalProps> = ({
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   if (!isOpen) return null;
 
   return (
-    <div className="help-modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="help-modal-overlay" onClick={onClose}>
       <div
         className="help-modal"
         role="dialog"

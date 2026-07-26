@@ -13,13 +13,13 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
 
   if (!isOpen) return null;
 
   return (
-    <div className="settings-modal" onClick={onClose}>
+    <div ref={trapRef} className="settings-modal" onClick={onClose}>
       <div
         className="settings-content"
         role="dialog"

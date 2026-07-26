@@ -36,7 +36,7 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const [editedCitation, setEditedCitation] = useState<Citation>(citation);
   const [newFieldKey, setNewFieldKey] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');
@@ -90,7 +90,7 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content citation-metadata-modal"
         onClick={(e) => e.stopPropagation()}

@@ -21,7 +21,7 @@ interface WordExportModalProps {
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { filePath, getLiveContent } = useEditorStore();
@@ -256,7 +256,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div className="pdf-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="pdf-export-modal" onClick={handleClose}>
       <div
         className="pdf-export-content"
         role="dialog"

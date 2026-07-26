@@ -44,7 +44,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
   // est attachée au conteneur).
-  useFocusTrap({ active: isOpen, onEscape: onClose });
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const [strategy, setStrategy] = useState<'local' | 'remote' | 'manual'>('remote');
   const [selectedAdded, setSelectedAdded] = useState<Set<string>>(
     new Set(diff.added.map((c) => c.id))
@@ -127,7 +127,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
       <div className="modal-content sync-preview-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('zoteroSync.title')}</h3>
