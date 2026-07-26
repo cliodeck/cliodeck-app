@@ -215,9 +215,13 @@ Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les
   Similarités (`fixed`, z-index 1000), Brouillons (`absolute`, z-index 40)
   et la recherche manuscrit (docké). Ouvrir les deux premiers en même temps
   masque le second, sans que rien ne l'indique.
-- **Le corpus manuscrit n'a toujours pas d'interface** : il atteint
-  l'assistant depuis cette RC, mais rien n'affiche l'état de l'index, ne
-  propose de le reconstruire, ni n'expose `rag.indexManuscript`.
+- **Le corpus manuscrit a désormais une interface.** Il atteignait
+  l'assistant sans que rien ne le montre : une section des Préférences
+  expose maintenant le réglage `rag.indexManuscript`, l'état de l'index
+  (pièces, extraits, date de dernière indexation) et un bouton de
+  reconstruction. La date a dû être ajoutée au store — deux compteurs ne
+  disent rien par eux-mêmes, ce que l'auteur veut savoir c'est si l'index
+  reflète ce qu'il vient d'écrire.
 - **`macOS` : signature et notarisation** toujours bloquées sur un certificat
   Apple Developer ID ([#75](https://github.com/cliodeck/cliodeck-app/issues/75)).
 
