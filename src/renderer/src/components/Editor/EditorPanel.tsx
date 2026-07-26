@@ -171,7 +171,15 @@ export const EditorPanel: React.FC = () => {
     // manifeste et selon le réglage d'ouvrage (arbitrage 3). Verrou posé
     // pendant toute l'opération : les chapitres s'écrivent un par un et un
     // export concurrent assemblerait un manuscrit mi-renuméroté (#30).
-    if (useManuscriptStore.getState().renumbering) return;
+    // Symétrie du verrou : un export en cours lit les chapitres pendant
+    // plusieurs secondes. Renuméroter maintenant les réécrirait sous
+    // l'assemblage — le scénario même que #30 prétendait fermer, resté
+    // ouvert parce que le verrou n'était consulté que dans un sens.
+    const busy = useManuscriptStore.getState().manuscriptBusyReason();
+    if (busy) {
+      await useDialogStore.getState().showAlert(t(busy));
+      return;
+    }
     useManuscriptStore.getState().setRenumbering(true);
     try {
       const docs = await useManuscriptStore.getState().readManuscript();
@@ -217,8 +225,17 @@ export const EditorPanel: React.FC = () => {
         for (const key of written) {
           const original = originals.get(key);
           if (original === undefined) continue;
-          if (key === openRel) store.editorFacade?.setValue(original);
-          else {
+          if (key === openRel) {
+            // L'aller a écrit ce chapitre SUR LE DISQUE (via saveFile) :
+            // restaurer le seul tampon de l'éditeur laissait donc le fichier
+            // renuméroté, et ne restaurait rien du tout si la façade était
+            // nulle ou l'autosave désactivé. On réécrit explicitement.
+            store.editorFacade?.setValue(original);
+            await useEditorStore
+              .getState()
+              .saveFile()
+              .catch(() => undefined);
+          } else {
             await window.electron.editor
               .saveFile(`${project.path}/${key}`, original)
               .catch(() => undefined);

@@ -12,12 +12,16 @@ import {
 } from './ExportCitationSection';
 import './PDFExportModal.css';
 
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 interface PDFExportModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
+  // Échap ferme la modale (le piège de focus s'active quand la ref
+  // est attachée au conteneur).
+  useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { filePath, getLiveContent } = useEditorStore();
@@ -128,11 +132,12 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       return;
     }
 
-    // Renumérotation en cours : les chapitres s'écrivent un par un sur le
-    // disque, exporter maintenant assemblerait un manuscrit mi-renuméroté
-    // (#30).
-    if (useManuscriptStore.getState().renumbering) {
-      setError(t('book.renumberInProgress'));
+    // Opération exclusive en cours sur le manuscrit : les chapitres
+    // s'écrivent un par un, exporter maintenant assemblerait un manuscrit
+    // mi-renuméroté (#30).
+    const busy = useManuscriptStore.getState().manuscriptBusyReason();
+    if (busy) {
+      setError(t(busy));
       return;
     }
 
@@ -149,6 +154,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    // Verrou posé pour toute la durée : l'assemblage lit les chapitres
+    // pendant plusieurs secondes, une renumérotation lancée entre-temps
+    // les réécrirait sous lui.
+    useManuscriptStore.getState().setExporting(true);
 
     try {
       // Un livre n'a pas de document unique : son manuscrit est assemblé
@@ -263,6 +272,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       console.error('PDF export threw:', err);
       setError(t('export.pdf.error'));
       setIsExporting(false);
+    } finally {
+      // Libéré ici, et non dans les branches : l'assemblage a fini de lire
+      // les chapitres, la renumérotation peut reprendre. Le `setTimeout`
+      // de la branche de succès ne fait que refermer la modale.
+      useManuscriptStore.getState().setExporting(false);
     }
   };
 
