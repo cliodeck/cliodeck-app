@@ -3,12 +3,17 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    # Une revue coûte ~2 $ et sept minutes : on ne la déclenche pas pour une
+    # PR qui ne touche que de la prose. `paths-ignore` plutôt qu'une liste
+    # blanche `paths`, pour ne jamais laisser passer du code non revu au
+    # prétexte qu'il vit dans un dossier créé après l'écriture de ce filtre.
+    # Une PR mixte (README + code) reste revue : GitHub ne saute le run que
+    # si *tous* les fichiers modifiés correspondent.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
 
 jobs:
   claude-review:
