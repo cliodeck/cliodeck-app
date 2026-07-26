@@ -490,7 +490,8 @@
     },
     "cloudEmbeddings": {
       "label": "Use this provider for embeddings too",
-      "help": "By default embeddings go through Ollama. Tick this if you have no local Ollama. Note: changing this invalidates the vector index — the dimensions differ — and forces a re-index of your PDFs."
+      "help": "By default embeddings go through Ollama. Tick this if you have no local Ollama. Note: changing this invalidates the vector index — the dimensions differ — and forces a re-index of your PDFs.",
+      "consent": "Turning this on will send your ENTIRE corpus to the chosen provider on every indexing pass: the text of your PDFs, your archive transcriptions, your Obsidian notes and your manuscript. That data leaves your machine and falls under the provider's terms. Confirm?"
     },
     "chatModelHints": {
       "fast": "• gemma2:2b — fast, runs on CPU",

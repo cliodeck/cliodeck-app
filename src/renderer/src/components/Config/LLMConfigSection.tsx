@@ -1,6 +1,7 @@
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDialogStore } from '../../stores/dialogStore';
 import type { LLMConfig } from './ConfigPanel';
 
 interface LLMConfigSectionProps {
@@ -23,6 +24,27 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   };
 
   const backend = config.backend ?? 'ollama';
+
+  /**
+   * Cocher cette case fait quitter la machine à l'INTÉGRALITÉ du corpus —
+   * PDF, transcriptions d'archives, notes, manuscrit — pour être embarqué
+   * par un service en ligne. Le garde de consentement du dépôt n'était
+   * câblé que sur le chat : l'indexation, elle, partait sans rien demander.
+   *
+   * Le consentement se demande ICI, au moment de la décision, plutôt que
+   * dans le chemin d'indexation, qui tourne en arrière-plan et ne doit
+   * jamais bloquer sur un dialogue.
+   */
+  const handleCloudEmbeddingsChange = async (enabled: boolean) => {
+    if (!enabled) {
+      handleFieldChange('useCloudEmbeddings', false);
+      return;
+    }
+    const confirmed = await useDialogStore
+      .getState()
+      .showConfirm(t('llm.cloudEmbeddings.consent'));
+    if (confirmed) handleFieldChange('useCloudEmbeddings', true);
+  };
 
   return (
     <CollapsibleSection title={t('llm.title')} defaultExpanded={false}>
@@ -211,7 +233,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 <input
                   type="checkbox"
                   checked={config.useCloudEmbeddings === true}
-                  onChange={(e) => handleFieldChange('useCloudEmbeddings', e.target.checked)}
+                  onChange={(e) => void handleCloudEmbeddingsChange(e.target.checked)}
                   className="config-checkbox"
                 />
                 <span>

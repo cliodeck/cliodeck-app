@@ -490,7 +490,8 @@
     },
     "cloudEmbeddings": {
       "label": "Utiliser aussi ce fournisseur pour les embeddings",
-      "help": "Par défaut, les embeddings passent par Ollama. Cochez si vous n'avez pas d'Ollama local. Attention : changer ce réglage invalide l'index vectoriel — les dimensions diffèrent — et oblige à réindexer les PDF."
+      "help": "Par défaut, les embeddings passent par Ollama. Cochez si vous n'avez pas d'Ollama local. Attention : changer ce réglage invalide l'index vectoriel — les dimensions diffèrent — et oblige à réindexer les PDF.",
+      "consent": "Activer cette option enverra l'INTÉGRALITÉ de votre corpus au fournisseur choisi, à chaque indexation : le texte de vos PDF, les transcriptions de vos archives, vos notes Obsidian et votre manuscrit. Ces envois sortent de votre machine et sont soumis aux conditions du fournisseur. Confirmer ?"
     },
     "chatModelHints": {
       "fast": "• gemma2:2b — rapide, tourne sur processeur",

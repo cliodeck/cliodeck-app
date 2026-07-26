@@ -490,7 +490,8 @@
     },
     "cloudEmbeddings": {
       "label": "Diesen Anbieter auch für Embeddings verwenden",
-      "help": "Standardmäßig laufen Embeddings über Ollama. Aktivieren Sie dies, wenn kein lokales Ollama vorhanden ist. Achtung: Diese Änderung macht den Vektorindex ungültig — die Dimensionen unterscheiden sich — und erzwingt eine Neuindexierung der PDFs."
+      "help": "Standardmäßig laufen Embeddings über Ollama. Aktivieren Sie dies, wenn kein lokales Ollama vorhanden ist. Achtung: Diese Änderung macht den Vektorindex ungültig — die Dimensionen unterscheiden sich — und erzwingt eine Neuindexierung der PDFs.",
+      "consent": "Wird diese Option aktiviert, geht bei jeder Indexierung Ihr GESAMTES Korpus an den gewählten Anbieter: der Text Ihrer PDFs, die Transkriptionen Ihrer Archive, Ihre Obsidian-Notizen und Ihr Manuskript. Diese Daten verlassen Ihren Rechner und unterliegen den Bedingungen des Anbieters. Bestätigen?"
     },
     "chatModelHints": {
       "fast": "• gemma2:2b — schnell, läuft auf der CPU",

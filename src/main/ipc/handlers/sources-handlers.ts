@@ -74,6 +74,17 @@ async function openPdfAtPage(documentId: string, pageNumber?: number): Promise<{
     const uri = pageNumber
       ? `file://${filePath}#page=${pageNumber}`
       : `file://${filePath}`;
+    // Le `fileURL` vient du vector store, donc d'un projet qui peut avoir
+    // été partagé par un tiers. Le handler frère `shell:open-path` passe par
+    // `validateReadPath` ; ici on ne peut pas — les PDF de Zotero vivent
+    // hors du projet — mais confier n'importe quel chemin au gestionnaire de
+    // fichiers du système reviendrait à exécuter ce qu'il désigne
+    // (`.command`, `.desktop`, `.lnk`). On borne donc par l'extension.
+    if (path.extname(filePath).toLowerCase() !== '.pdf') {
+      console.warn('[sources] refus d’ouvrir un non-PDF:', filePath);
+      return { success: false, error: 'not_a_pdf' };
+    }
+
     const openErr = await shell.openPath(filePath);
     if (openErr) {
       console.warn('[sources] shell.openPath returned:', openErr);

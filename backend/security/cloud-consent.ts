@@ -150,7 +150,13 @@ export async function decideCloudConsent(
 ): Promise<CloudConsentDecision> {
   const { isCloud, providerName } = classifyProvider(config);
   if (!isCloud) return { allowed: true, reason: 'local' };
-  if (registry.isGranted()) return { allowed: true, reason: 'already-granted' };
+  // Le consentement vaut pour UN fournisseur, pas pour « le cloud » en
+  // général. `consentedProvider()` existait déjà mais n'était jamais
+  // comparé : accepter un envoi vers Mistral ouvrait silencieusement les
+  // envois vers Anthropic dès que l'utilisateur changeait de backend.
+  if (registry.isGranted() && registry.consentedProvider() === providerName) {
+    return { allowed: true, reason: 'already-granted' };
+  }
   if (!prompt) return { allowed: false, reason: 'no-interface', providerName };
 
   const accepted = await confirmCloudUsage(providerName, prompt);
