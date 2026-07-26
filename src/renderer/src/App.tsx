@@ -10,6 +10,7 @@ import { ErrorFallback } from './components/ErrorFallback';
 import { useMenuShortcuts } from './hooks/useMenuShortcuts';
 import { useUsageModeMirror } from './hooks/useUsageModeMirror';
 import { useSaveOnQuit } from './hooks/useSaveOnQuit';
+import { useDensityStore } from './stores/densityStore';
 import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
 import { useEditorStore } from './stores/editorStore';
@@ -26,6 +27,14 @@ function App() {
 
   // Mirror the active workspace mode into the main-process usage journal
   useUsageModeMirror();
+
+  // Densité d'interface persistée : appliquée avant le premier rendu
+  // visible, sinon l'utilisateur voit l'interface sauter du confortable au
+  // compact.
+  const initializeDensity = useDensityStore((s) => s.initialize);
+  useEffect(() => {
+    initializeDensity();
+  }, [initializeDensity]);
 
   // Vider l'éditeur sur le disque avant que l'application ne se ferme.
   // Monté ici, au-dessus de l'éditeur : un panneau démonté ne doit pas

@@ -2,10 +2,13 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useTheme, type ThemeMode } from '../../hooks/useTheme';
+import { useDensityStore, type Density } from '../../stores/densityStore';
 
 export const UIConfigSection: React.FC = () => {
   const { t } = useTranslation('common');
   const { config, setConfig, currentTheme } = useTheme();
+  const density = useDensityStore((s) => s.density);
+  const setDensity = useDensityStore((s) => s.setDensity);
 
   const handleThemeModeChange = (mode: ThemeMode) => {
     setConfig({ ...config, mode });
@@ -27,6 +30,23 @@ export const UIConfigSection: React.FC = () => {
     <CollapsibleSection title={t('ui.title')} defaultExpanded={false}>
       <div className="config-section">
         <div className="config-section-content">
+          {/* Densité — le barème compact existait dans index.css sans que
+              rien ne puisse l'activer. */}
+          <div className="config-field">
+            <label className="config-label">
+              {t('ui.density.title')}
+              <span className="config-help">{t('ui.density.description')}</span>
+            </label>
+            <select
+              value={density}
+              onChange={(e) => setDensity(e.target.value as Density)}
+              className="config-select"
+            >
+              <option value="comfortable">{t('ui.density.comfortable')}</option>
+              <option value="compact">{t('ui.density.compact')}</option>
+            </select>
+          </div>
+
           {/* Theme Mode */}
           <div className="config-field">
             <label className="config-label">

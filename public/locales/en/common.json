@@ -175,6 +175,12 @@
       "lightModeStartDescription": "Time when light mode begins (default: 06:00)",
       "darkModeStart": "Dark mode starts at",
       "darkModeStartDescription": "Time when dark mode begins (default: 20:00)"
+    },
+    "density": {
+      "title": "Interface density",
+      "description": "Tightens spacing and text sizes",
+      "comfortable": "Comfortable",
+      "compact": "Compact"
     }
   },
   "bibliography": {
@@ -666,8 +672,8 @@
       "duration": "Duration:",
       "cacheHitSuffix": "(cache)",
       "sourceTypeLabel": "Source type:",
-      "sourceTypePrimary": "Archives (Tropy)",
-      "sourceTypeSecondary": "Bibliography (PDFs)",
+      "sourceTypePrimary": "Primary sources (Tropy)",
+      "sourceTypeSecondary": "Secondary sources (PDF)",
       "sourceTypeAll": "All",
       "documentsConsulted": "Documents consulted",
       "chunks": "chunks",
@@ -864,9 +870,9 @@
     "providerEmbeddedDesc": "Uses the embedded Qwen model (requires download in settings)",
     "notDownloaded": "not downloaded",
     "sources": "Sources",
-    "includeBibliography": "Bibliography",
+    "includeBibliography": "Secondary sources (bibliography)",
     "includeBibliographyHint": "Zotero PDFs and references",
-    "includePrimary": "Primary sources",
+    "includePrimary": "Primary sources (Tropy)",
     "includePrimaryHint": "Tropy archives",
     "includeNotes": "Notes",
     "includeNotesHint": "Obsidian notes",
@@ -1326,7 +1332,8 @@
     "explore": "Explore",
     "brainstorm": "Brainstorm",
     "write": "Write",
-    "export": "Export"
+    "export": "Export",
+    "navAria": "Workspace modes"
   },
   "vault": {
     "title": "Obsidian Vault",
