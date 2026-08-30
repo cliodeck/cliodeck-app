@@ -1,6 +1,6 @@
 # Status and remaining work
 
-> Updated: 2026-07-25 — version `1.0.0-rc.3`, licence GPL-3.0-or-later.
+> Updated: 2026-08-30 — version `1.0.0-rc.4`, licence GPL-3.0-or-later.
 > Context: everything below has landed on `main`. The fusion merged at
 > `v1.0.0-rc.2`; the usage journal, the CM6 editor migration, the chat and
 > slides unifications and the book-chapters chantier have all merged since,
@@ -9,9 +9,10 @@
 > (macOS notarization), blocked on an Apple Developer ID certificate.
 > Replaces the archived `plan-post-fusion.md` as the current reference.
 >
-> Health of `main` at that date: `npm run typecheck` clean;
-> `npx vitest run` **1234 passed, 68 skipped, 0 failing**; `npm run lint`
-> 0 errors / ~414 warnings. CI runs all three
+> Health at that date: `npm run typecheck` clean; `npx vitest run`
+> **1334 passed, 75 skipped, 0 failing** (ABI Electron, gardes actives) et
+> `npm run test:integration` **1409 passés, 0 ignoré** (ABI Node) ;
+> `npm run lint` 0 erreur / 418 avertissements. CI exécute les trois
 > (`.github/workflows/tests.yml`).
 
 ## 1. What is done
@@ -180,14 +181,97 @@ justification du workflow, à relire avant toute modification de celui-ci :
 En local, après avoir recompilé pour Node, **restaurer impérativement l'ABI
 Electron** : `npm run rebuild:native`.
 
+### L'OCR de masse écrivait dans le vide — 5 défauts, corpus perdu
+
+> **Résolu (2026-08-30).** Section conservée pour la **leçon**, qui dépasse
+> le cas : un chemin sans test, dont l'échec ne produit aucun message, peut
+> coûter des jours de calcul à un utilisateur sans que personne s'en aperçoive
+> — ni lui, ni la CI.
+
+**Constat.** Sur un projet réel (221 documents d'archives, 4213 pages), un
+historien avait lancé « Lancer l'OCR » plusieurs fois. Résultat en base :
+**1 seule source transcrite sur 221**, et un chatbot qui ne trouvait rien
+dans les archives.
+
+**Cause racine.** `TropySync.processItem` décidait d'écrire ainsi :
+
+```ts
+const isUpdated = existingSource &&
+  (options.forceReindex ||
+   existingSource.lastModified !== sourceItem.lastModified.toISOString());
+```
+
+`sourceItem.lastModified` venait de `reader.getLastModifiedTime()`, c'est-à-dire
+`fs.statSync(tpy).mtime` : **une valeur globale au projet**. Un test « le projet
+a-t-il bougé ? » servait de test « cet item a-t-il bougé ? ». Une fois les
+sources importées, plus rien n'était jamais « modifié ». Signature du bug dans
+la base de l'utilisateur : les 221 lignes portaient la même `last_modified`,
+égale à la mtime du `.tpy`, inchangée depuis quatre mois.
+
+L'OCR, lui, tournait **avant** cette décision. Mesuré : ~20 s/page, soit ~24 h
+par passe complète — intégralement jetées.
+
+**Les cinq défauts et leurs correctifs :**
+
+| Défaut | Correctif |
+|---|---|
+| Fraîcheur testée sur la mtime du `.tpy` (globale) | `subjects.modified`, exposé par Tropy **par item** (`TropyItem.modified`) |
+| Une transcription produite dans la passe pouvait être jetée | elle s'écrit toujours (`transcriptionChanged` dans la disjonction) |
+| L'OCR repartait de zéro à chaque passe, la transcription stockée n'étant jamais consultée | une source déjà transcrite n'est repassée que sur `forceReindex` |
+| Un OCR infructueux écrasait une transcription acquise | report de l'existant avant construction de `sourceItem` |
+| `saveSource` en `INSERT OR REPLACE` → REPLACE supprime la ligne → **quatre tables filles en `ON DELETE CASCADE`** perdaient chunks et mentions d'entités | UPSERT explicite (`ON CONFLICT(id) DO UPDATE`) |
+
+Le cinquième est le plus instructif : **invisible à la lecture du code, et
+invisible aux tests unitaires** (qui utilisaient un store simulé). Il n'est
+apparu qu'en rejouant une synchronisation sur une copie du projet réel — 46
+chunks → 0. Il était latent tant que rien ne se sauvegardait ; corriger les
+quatre premiers l'aurait rendu systématique. Photos et tags, réinsérés juste
+après par `saveSource`, le masquaient.
+
+Défaut connexe : `saveTropyProject` faisait un `INSERT OR REPLACE` dont la clé
+de conflit était un `randomUUID()` neuf à chaque appel — le conflit ne se
+produisait jamais, une ligne s'ajoutait par synchronisation (six pour un seul
+projet). `getTropyProject` lisait ensuite `LIMIT 1` sans `ORDER BY`.
+
+**Retour à l'utilisateur.** `syncTPY` jetait `ocrPerformed` et
+`transcriptionsImported`, et la modale se refermait sans rien dire. Nouveau
+compteur `transcriptionsWritten` — il mesure le **résultat**, là où
+`ocrPerformed` mesure l'effort et pouvait donc annoncer « OCR effectué » sur
+des transcriptions perdues — et un bilan qui reste affiché.
+
+**Ce qu'il faut en retenir :**
+
+1. une date de fichier ne renseigne jamais sur un enregistrement à l'intérieur
+   de ce fichier ;
+2. un travail coûteux ne se calcule pas avant de savoir s'il sera conservé —
+   ou alors son résultat s'écrit inconditionnellement ;
+3. `INSERT OR REPLACE` + `foreign_keys = ON` + `ON DELETE CASCADE` détruit les
+   lignes filles. Utiliser `ON CONFLICT … DO UPDATE` dès qu'une table a des
+   enfants ;
+4. **une vérification sur données réelles trouve ce que les tests unitaires ne
+   peuvent pas voir.** Rejouer l'opération sur une copie du projet d'un
+   utilisateur a coûté quelques minutes et révélé le défaut le plus grave.
+
+12 tests couvrent désormais ce chemin
+(`backend/integrations/tropy/__tests__/TropySyncPersistence.test.ts`,
+`backend/core/vector-store/__tests__/PrimarySourcesPersistence.test.ts`) ;
+11 échouent sur le code d'avant.
+
+---
+
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps
 - **No red suites left**: the 6 Brainstorm jsdom failures were fixed
   (missing `window.electron.config` mock, 2026-07-18) and the 8 sqlite-ABI
-  failures in 2026-07-19. What remains are 68 legitimate **skips** — suites
+  failures in 2026-07-19. What remains are 75 legitimate **skips** — suites
   guarded on the native binding or on a live Ollama
   (`backend/__tests__/helpers/native-guards.ts`)
+- **La synchro Tropy reste le chemin le moins couvert** malgré les 12 tests
+  ajoutés le 2026-08-30 : `sync()` de bout en bout (lecture .tpy → OCR →
+  embeddings) n'a toujours pas de test d'intégration, et `TropyOCRPipeline`
+  (Tesseract, parseurs ALTO / PAGE XML / Transkribus) aucun. C'est là qu'un
+  corpus entier a été perdu en silence — voir §2
 - **`pdf-service.ts`** remains a delegating facade for search — down to 839
   lines from 1084, still mixing indexing and graph building
 - **~414 lint warnings** (`no-explicit-any`, `react-hooks/exhaustive-deps`,
