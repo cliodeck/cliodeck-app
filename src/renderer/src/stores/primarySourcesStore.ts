@@ -44,6 +44,20 @@ export interface SyncProgress {
   currentItem?: string;
 }
 
+/**
+ * Bilan d'une passe de synchronisation. `transcriptionsWritten` était calculé
+ * côté main puis jeté ici : après des heures d'OCR, la modale se refermait
+ * sans rien dire, y compris quand la passe n'avait rien écrit.
+ */
+export interface SyncOutcome {
+  success: boolean;
+  newItems?: number;
+  updatedItems?: number;
+  ocrPerformed?: number;
+  transcriptionsWritten?: number;
+  errors?: string[];
+}
+
 export interface PrimarySourcesStatistics {
   sourceCount: number;
   chunkCount: number;
@@ -98,7 +112,7 @@ interface PrimarySourcesState {
     ocrLanguage: string;
     transcriptionDirectory?: string;
     forceReindex?: boolean;
-  }) => Promise<{ success: boolean; newItems?: number; errors?: string[] }>;
+  }) => Promise<SyncOutcome>;
   checkSyncNeeded: () => Promise<boolean>;
 
   // Actions - Watching
@@ -232,6 +246,9 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
         return {
           success: true,
           newItems: result.newItems,
+          updatedItems: result.updatedItems,
+          ocrPerformed: result.ocrPerformed,
+          transcriptionsWritten: result.transcriptionsWritten,
           errors: result.errors,
         };
       }

@@ -40,6 +40,12 @@ export interface TropySyncResult {
   skippedItems: number;
   ocrPerformed: number;
   transcriptionsImported: number;
+  /**
+   * Sources qui repartent de cette passe avec une transcription qu'elles
+   * n'avaient pas. C'est le seul chiffre qui dise à l'utilisateur si les
+   * heures d'OCR ont servi — `ocrPerformed` mesure l'effort, pas le résultat.
+   */
+  transcriptionsWritten: number;
   errors: string[];
 }
 
@@ -97,6 +103,7 @@ export class TropySync {
       skippedItems: 0,
       ocrPerformed: 0,
       transcriptionsImported: 0,
+      transcriptionsWritten: 0,
       errors: [],
     };
 
@@ -151,7 +158,9 @@ export class TropySync {
       }
 
       // Enregistrer le projet Tropy dans le VectorStore
-      vectorStore.saveTropyProject(tpyPath, result.projectName, false);
+      // Sans troisième argument : la synchro n'a pas à décider de la
+      // surveillance automatique, elle la préserve.
+      vectorStore.saveTropyProject(tpyPath, result.projectName);
 
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
@@ -179,6 +188,7 @@ export class TropySync {
 
           result.ocrPerformed += processResult.ocrCount;
           result.transcriptionsImported += processResult.transcriptionCount;
+          if (processResult.transcriptionWritten) result.transcriptionsWritten++;
         } catch (error) {
           result.errors.push(`Item ${item.id} (${item.title}): ${error}`);
         }
@@ -201,7 +211,10 @@ export class TropySync {
       onProgress?.({ phase: 'done', current: items.length, total: items.length });
 
       result.success = true;
-      console.log(`✅ Sync completed: ${result.newItems} new, ${result.updatedItems} updated`);
+      console.log(
+        `✅ Sync completed: ${result.newItems} new, ${result.updatedItems} updated, ` +
+          `${result.transcriptionsWritten} transcription(s) written (${result.ocrPerformed} page(s) OCR'd)`
+      );
     } catch (error) {
       result.errors.push(`Sync failed: ${error}`);
       console.error('Sync error:', error);
@@ -224,6 +237,8 @@ export class TropySync {
     isUpdated: boolean;
     ocrCount: number;
     transcriptionCount: number;
+    /** Une transcription qui n'existait pas a été écrite pour cette source. */
+    transcriptionWritten: boolean;
   }> {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
@@ -266,8 +281,18 @@ export class TropySync {
       }
     }
 
-    // 3. Si pas de transcription et OCR activé, faire l'OCR
-    if (!transcription && options.performOCR) {
+    // 3. Si pas de transcription et OCR activé, faire l'OCR.
+    //    Une source déjà transcrite n'est PAS repassée à la reconnaissance
+    //    sans demande explicite : c'est ce que la case « relancer l'OCR sur
+    //    toutes les sources » promettait sans le faire. L'OCR repartait de
+    //    zéro à chaque passe — des heures de calcul sur un corpus d'archives —
+    //    pour un résultat que la décision d'écriture jetait ensuite.
+    const existingTranscription = (existingSource?.transcription ?? '').trim();
+    if (
+      !transcription &&
+      options.performOCR &&
+      (existingTranscription.length === 0 || options.forceReindex)
+    ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
       const ocrResult = await this.performOCROnItem(item, options.ocrLanguage);
       if (ocrResult) {
@@ -277,6 +302,23 @@ export class TropySync {
         ocrCount = ocrResult.photoCount;
       }
     }
+
+    // 4. Rien de neuf ne doit effacer l'ancien. `saveSource` réécrit la ligne
+    //    entière : sans ce report, un OCR infructueux (page illisible,
+    //    confiance sous le seuil) faisait perdre une transcription acquise.
+    if (!transcription && existingSource?.transcription) {
+      transcription = existingSource.transcription;
+      transcriptionSource = existingSource.transcriptionSource;
+      ocrConfidence = existingSource.ocrConfidence;
+    }
+
+    // Date de fraîcheur : celle de CET item quand Tropy la fournit
+    // (`subjects.modified`). La mtime du .tpy ne reste qu'un filet de
+    // sécurité — elle vaut pour le projet entier, donc comparer une source
+    // à elle-même revenait à ne jamais voir aucun item changer.
+    const itemModified = item.modified
+      ? new Date(item.modified)
+      : this.reader.getLastModifiedTime();
 
     // Construire la source primaire
     const sourceItem: PrimarySourceItem = {
@@ -293,7 +335,7 @@ export class TropySync {
       transcription: transcription || undefined,
       transcriptionSource,
       ocrConfidence,
-      lastModified: this.reader.getLastModifiedTime(),
+      lastModified: itemModified,
       metadata: this.extractMetadata(item),
       archival: archivalFromTropyMetadata(this.extractMetadata(item), {
         archive: item.archive,
@@ -303,18 +345,48 @@ export class TropySync {
       }),
     };
 
-    // Sauvegarder
+    // Sauvegarder.
     const isNew = !existingSource;
-    const isUpdated =
-      existingSource &&
-      (options.forceReindex ||
-        existingSource.lastModified !== sourceItem.lastModified.toISOString());
 
-    if (isNew || isUpdated) {
+    // Une transcription obtenue dans cette passe s'écrit TOUJOURS. C'est la
+    // seule chose que l'utilisateur a payée en heures de calcul ; la faire
+    // dépendre d'une détection de fraîcheur la jetait silencieusement.
+    const transcriptionChanged =
+      !!existingSource && transcription !== (existingSource.transcription ?? '');
+
+    // Fraîcheur inconnue (Tropy trop ancien pour exposer `modified`) =
+    // « a pu changer » : on réécrit, c'est bon marché.
+    const itemChanged =
+      !!existingSource &&
+      (!item.modified || existingSource.lastModified !== sourceItem.lastModified.toISOString());
+
+    const isUpdated =
+      !!existingSource && (options.forceReindex || itemChanged || transcriptionChanged);
+
+    const saved = isNew || isUpdated;
+    if (saved) {
       vectorStore.saveSource(sourceItem);
+
+      // Les chunks appartiennent au texte qu'ils découpent. La phase
+      // d'embeddings ne traite que les sources sans chunk : sans cette
+      // invalidation, une transcription corrigée resterait invisible au RAG,
+      // qui continuerait de répondre sur l'ancienne.
+      if (transcriptionChanged) {
+        vectorStore.deleteChunks(sourceItem.id);
+      }
     }
 
-    return { isNew, isUpdated: !isNew && isUpdated, ocrCount, transcriptionCount };
+    return {
+      isNew,
+      isUpdated: !isNew && isUpdated,
+      // Ne compter que ce qui a atteint le disque : un compteur qui recense
+      // l'effort plutôt que le résultat annonçait « OCR effectué » sur des
+      // transcriptions perdues.
+      ocrCount: saved ? ocrCount : 0,
+      transcriptionCount: saved ? transcriptionCount : 0,
+      transcriptionWritten:
+        saved && transcription.length > 0 && (isNew || transcriptionChanged),
+    };
   }
 
   /**

@@ -1282,7 +1282,15 @@
     "importing": "Importing…",
     "import": "Import",
     "importSuccess": "Transcription imported.",
-    "importFailed": "The import failed."
+    "importFailed": "The import failed.",
+    "forceOCRHint": "When unchecked, recognition only processes sources that have no transcription yet — transcriptions already obtained are kept.",
+    "ocrSummaryTitle": "Run summary",
+    "ocrSummaryWritten": "{{count}} transcription(s) saved",
+    "ocrSummaryPages": "{{count}} page(s) sent through recognition",
+    "ocrSummaryNothing": "No new transcription. The sources already had one, or recognition produced nothing usable.",
+    "ocrSummaryErrors": "{{count}} error(s) — see console",
+    "ocrSummaryFailed": "Synchronisation failed.",
+    "close": "Close"
   },
   "modes": {
     "selector": {

@@ -565,17 +565,42 @@ export class PrimarySourcesVectorStore {
   // MARK: - Source CRUD
 
   /**
-   * Sauvegarde une source primaire
+   * Sauvegarde une source primaire.
+   *
+   * UPSERT explicite, et non `INSERT OR REPLACE` : dans SQLite, REPLACE
+   * SUPPRIME la ligne en conflit avant de réinsérer. Avec
+   * `foreign_keys = ON` et quatre tables filles en `ON DELETE CASCADE`,
+   * réenregistrer une source détruisait au passage ses chunks et ses
+   * mentions d'entités — photos et tags, eux, sont réinsérés juste après,
+   * ce qui masquait le problème. Une source réindexée sortait donc du RAG
+   * en silence. Mesuré sur un projet réel : 46 chunks → 0 après une
+   * simple resynchronisation.
    */
   saveSource(source: PrimarySourceItem): string {
     const id = source.id || randomUUID();
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO tropy_sources
+      INSERT INTO tropy_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
        transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tropy_id = excluded.tropy_id,
+        title = excluded.title,
+        date = excluded.date,
+        creator = excluded.creator,
+        archive = excluded.archive,
+        collection = excluded.collection,
+        type = excluded.type,
+        transcription = excluded.transcription,
+        transcription_source = excluded.transcription_source,
+        language = excluded.language,
+        last_modified = excluded.last_modified,
+        indexed_at = excluded.indexed_at,
+        metadata = excluded.metadata,
+        archival_metadata = excluded.archival_metadata,
+        ocr_confidence = excluded.ocr_confidence
     `);
 
     stmt.run(
@@ -1359,9 +1384,36 @@ export class PrimarySourcesVectorStore {
   /**
    * Enregistre un projet Tropy lié
    */
-  saveTropyProject(tpyPath: string, name: string, autoSync: boolean = false): string {
-    const id = randomUUID();
+  /**
+   * `INSERT OR REPLACE` résout le conflit sur la clé primaire — ici un
+   * `randomUUID()` neuf à chaque appel, donc jamais en conflit : chaque
+   * synchronisation ajoutait une ligne de plus pour le MÊME projet. On
+   * réutilise l'identifiant déjà enregistré pour ce chemin, et on absorbe
+   * les doublons hérités des versions précédentes.
+   *
+   * `autoSync` omis = « ne touche pas au réglage existant » : la synchro
+   * appelle cette méthode à chaque passe et ne doit pas désactiver au
+   * passage la surveillance que l'utilisateur a activée.
+   */
+  saveTropyProject(tpyPath: string, name: string, autoSync?: boolean): string {
     const now = new Date().toISOString();
+
+    const existing = this.db
+      .prepare('SELECT id, auto_sync FROM tropy_projects WHERE tpy_path = ? ORDER BY last_sync DESC')
+      .all(tpyPath) as Array<{ id: string; auto_sync: number }>;
+
+    const id = existing[0]?.id ?? randomUUID();
+    const effectiveAutoSync = autoSync ?? existing[0]?.auto_sync === 1;
+
+    if (existing.length > 1) {
+      const stale = existing.slice(1).map((r) => r.id);
+      this.db
+        .prepare(
+          `DELETE FROM tropy_projects WHERE id IN (${stale.map(() => '?').join(', ')})`
+        )
+        .run(...stale);
+      console.log(`🧹 [PRIMARY-STORE] Removed ${stale.length} duplicate Tropy project row(s)`);
+    }
 
     this.db
       .prepare(
@@ -1370,7 +1422,7 @@ export class PrimarySourcesVectorStore {
       VALUES (?, ?, ?, ?, ?)
     `
       )
-      .run(id, tpyPath, name, now, autoSync ? 1 : 0);
+      .run(id, tpyPath, name, now, effectiveAutoSync ? 1 : 0);
 
     return id;
   }
@@ -1387,7 +1439,12 @@ export class PrimarySourcesVectorStore {
    * Récupère le projet Tropy enregistré
    */
   getTropyProject(): { id: string; tpyPath: string; name: string; lastSync: string; autoSync: boolean } | null {
-    const row = this.db.prepare('SELECT * FROM tropy_projects LIMIT 1').get() as any;
+    // `LIMIT 1` sans `ORDER BY` rendait une ligne arbitraire — sans
+    // conséquence tant qu'il n'y en a qu'une, mais c'est précisément ce
+    // qu'on ne peut pas garantir sur les bases déjà polluées de doublons.
+    const row = this.db
+      .prepare('SELECT * FROM tropy_projects ORDER BY last_sync DESC LIMIT 1')
+      .get() as any;
     if (!row) return null;
 
     return {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Languages, Play, AlertCircle } from 'lucide-react';
-import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
+import { X, Languages, Play, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { usePrimarySourcesStore, type SyncOutcome } from '../../stores/primarySourcesStore';
 import './OCRSettingsModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -27,7 +27,11 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
   // manuel par source (#23) utilise le même réglage que la synchro.
   const { ocrLanguage: selectedLanguage, setOCRLanguage: setSelectedLanguage } =
     usePrimarySourcesStore();
-  const [performOCROnSync, setPerformOCROnSync] = useState(false);
+  // `forceReindex` côté synchro : relance la reconnaissance sur les sources
+  // DÉJÀ transcrites. Décochée, seules les sources sans transcription sont
+  // traitées.
+  const [forceOCR, setForceOCR] = useState(false);
+  const [outcome, setOutcome] = useState<SyncOutcome | null>(null);
 
   useEffect(() => {
     if (isOpen && availableOCRLanguages.length === 0) {
@@ -35,15 +39,24 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
     }
   }, [isOpen, availableOCRLanguages.length, loadOCRLanguages]);
 
+  // Un bilan de la passe précédente ne doit pas accueillir la suivante.
+  useEffect(() => {
+    if (isOpen) setOutcome(null);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
+  // La modale se refermait ici même : après des heures d'OCR, l'utilisateur
+  // n'apprenait ni combien de transcriptions avaient été écrites, ni qu'il
+  // n'y en avait aucune. On garde la fenêtre ouverte sur le bilan.
   const handleSyncWithOCR = async () => {
-    await syncTPY({
+    setOutcome(null);
+    const result = await syncTPY({
       performOCR: true,
       ocrLanguage: selectedLanguage,
-      forceReindex: performOCROnSync,
+      forceReindex: forceOCR,
     });
-    onClose();
+    setOutcome(result);
   };
 
   return (
@@ -96,13 +109,19 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={performOCROnSync}
-                onChange={(e) => setPerformOCROnSync(e.target.checked)}
+                checked={forceOCR}
+                onChange={(e) => setForceOCR(e.target.checked)}
               />
               <span>
                 {t('primarySources.forceOCR', 'Re-run OCR on all sources (ignore existing transcriptions)')}
               </span>
             </label>
+            <span className="form-hint">
+              {t(
+                'primarySources.forceOCRHint',
+                'When unchecked, recognition only processes sources that have no transcription yet — transcriptions already obtained are kept.'
+              )}
+            </span>
           </div>
 
           {/* Warning */}
@@ -132,11 +151,60 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
               </span>
             </div>
           )}
+
+          {/* Bilan de la passe */}
+          {!isSyncing && outcome && (
+            <div className={`ocr-summary ${outcome.success ? '' : 'ocr-summary--failed'}`}>
+              <div className="ocr-summary__header">
+                {outcome.success ? (
+                  <CheckCircle2 size={16} strokeWidth={1} />
+                ) : (
+                  <AlertCircle size={16} strokeWidth={1} />
+                )}
+                <strong>{t('primarySources.ocrSummaryTitle', 'Run summary')}</strong>
+              </div>
+              {!outcome.success ? (
+                <p>{t('primarySources.ocrSummaryFailed', 'Synchronisation failed.')}</p>
+              ) : (outcome.transcriptionsWritten ?? 0) > 0 ? (
+                <ul>
+                  <li>
+                    {t('primarySources.ocrSummaryWritten', {
+                      count: outcome.transcriptionsWritten ?? 0,
+                      defaultValue: '{{count}} transcription(s) saved',
+                    })}
+                  </li>
+                  <li>
+                    {t('primarySources.ocrSummaryPages', {
+                      count: outcome.ocrPerformed ?? 0,
+                      defaultValue: '{{count}} page(s) sent through recognition',
+                    })}
+                  </li>
+                </ul>
+              ) : (
+                <p>
+                  {t(
+                    'primarySources.ocrSummaryNothing',
+                    'No new transcription. The sources already had one, or recognition produced nothing usable.'
+                  )}
+                </p>
+              )}
+              {(outcome.errors?.length ?? 0) > 0 && (
+                <p className="ocr-summary__errors">
+                  {t('primarySources.ocrSummaryErrors', {
+                    count: outcome.errors?.length ?? 0,
+                    defaultValue: '{{count}} error(s) — see console',
+                  })}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="modal-footer">
           <button className="btn-cancel" onClick={onClose}>
-            {t('common.cancel', 'Cancel')}
+            {outcome && !isSyncing
+              ? t('primarySources.close', 'Close')
+              : t('common.cancel', 'Cancel')}
           </button>
           <button
             className="btn-primary"

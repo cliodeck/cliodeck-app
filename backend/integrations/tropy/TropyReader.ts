@@ -16,6 +16,13 @@ export interface TropyItem {
   tags: string[];
   notes: TropyNote[];
   photos: TropyPhoto[];
+  /**
+   * Date de dernière modification DE CET ITEM (`subjects.modified`), en ISO.
+   * À ne pas confondre avec la mtime du fichier .tpy, qui vaut pour le projet
+   * entier : s'en servir comme test de fraîcheur par item revient à ne jamais
+   * voir aucun item changer tant que Tropy n'a pas réécrit le projet.
+   */
+  modified?: string;
 }
 
 export interface TropyPhoto {
@@ -86,6 +93,21 @@ export interface PrimarySourcePhoto {
   hasTranscription: boolean;
   transcription?: string;
   notes: string[];
+}
+
+// MARK: - Helpers
+
+/**
+ * `subjects.modified` est déclarée `NUMERIC` mais Tropy y écrit une chaîne
+ * ISO ; SQLite laissant passer les deux, on normalise sans jamais inventer
+ * de date : `undefined` signifie « inconnue », ce que l'appelant doit
+ * traiter comme « peut avoir changé », pas comme « n'a pas changé ».
+ */
+export function normalizeTropyTimestamp(value: string | number | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 // MARK: - TropyReader
@@ -301,7 +323,7 @@ export class TropyReader {
       // Join items with subjects to get template info
       const itemRows = this.db
         .prepare(`
-          SELECT i.id, s.template, s.type
+          SELECT i.id, s.template, s.type, s.modified
           FROM items i
           LEFT JOIN subjects s ON i.id = s.id
         `)
@@ -309,6 +331,7 @@ export class TropyReader {
         id: number;
         template: string;
         type: string | null;
+        modified: string | number | null;
       }>;
 
       for (const itemRow of itemRows) {
@@ -316,6 +339,7 @@ export class TropyReader {
           id: itemRow.id,
           template: itemRow.template || 'https://tropy.org/v1/templates/generic',
           type: itemRow.type || undefined,
+          modified: normalizeTropyTimestamp(itemRow.modified),
           tags: [],
           notes: [],
           photos: [],
@@ -353,7 +377,7 @@ export class TropyReader {
     try {
       const itemRow = this.db
         .prepare(`
-          SELECT i.id, s.template, s.type
+          SELECT i.id, s.template, s.type, s.modified
           FROM items i
           LEFT JOIN subjects s ON i.id = s.id
           WHERE i.id = ?
@@ -362,6 +386,7 @@ export class TropyReader {
         id: number;
         template: string;
         type: string | null;
+        modified: string | number | null;
       } | undefined;
 
       if (!itemRow) return null;
@@ -370,6 +395,7 @@ export class TropyReader {
         id: itemRow.id,
         template: itemRow.template || 'https://tropy.org/v1/templates/generic',
         type: itemRow.type || undefined,
+        modified: normalizeTropyTimestamp(itemRow.modified),
         tags: [],
         notes: [],
         photos: [],

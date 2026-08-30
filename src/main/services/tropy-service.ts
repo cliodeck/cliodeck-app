@@ -254,6 +254,7 @@ class TropyService {
         skippedItems: 0,
         ocrPerformed: 0,
         transcriptionsImported: 0,
+        transcriptionsWritten: 0,
         errors: ['Service not initialized or no project opened'],
       };
     }

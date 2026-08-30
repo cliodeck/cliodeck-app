@@ -1282,7 +1282,15 @@
     "importing": "Import en cours…",
     "import": "Importer",
     "importSuccess": "Transcription importée.",
-    "importFailed": "L'import a échoué."
+    "importFailed": "L'import a échoué.",
+    "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources qui n'ont pas encore de transcription — les transcriptions déjà acquises sont conservées.",
+    "ocrSummaryTitle": "Bilan de la passe",
+    "ocrSummaryWritten": "{{count}} transcription(s) enregistrée(s)",
+    "ocrSummaryPages": "{{count}} page(s) passée(s) à la reconnaissance",
+    "ocrSummaryNothing": "Aucune transcription nouvelle. Les sources concernées en avaient déjà une, ou la reconnaissance n'a rien produit d'exploitable.",
+    "ocrSummaryErrors": "{{count}} erreur(s) — voir la console",
+    "ocrSummaryFailed": "La synchronisation a échoué.",
+    "close": "Fermer"
   },
   "modes": {
     "selector": {

@@ -1282,7 +1282,15 @@
     "importing": "Import läuft …",
     "import": "Importieren",
     "importSuccess": "Transkription importiert.",
-    "importFailed": "Der Import ist fehlgeschlagen."
+    "importFailed": "Der Import ist fehlgeschlagen.",
+    "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription — bereits vorhandene Transkriptionen bleiben erhalten.",
+    "ocrSummaryTitle": "Bilanz des Durchlaufs",
+    "ocrSummaryWritten": "{{count}} Transkription(en) gespeichert",
+    "ocrSummaryPages": "{{count}} Seite(n) durch die Erkennung geschickt",
+    "ocrSummaryNothing": "Keine neue Transkription. Die Quellen hatten bereits eine, oder die Erkennung lieferte nichts Verwertbares.",
+    "ocrSummaryErrors": "{{count}} Fehler — siehe Konsole",
+    "ocrSummaryFailed": "Synchronisierung fehlgeschlagen.",
+    "close": "Schließen"
   },
   "modes": {
     "selector": {

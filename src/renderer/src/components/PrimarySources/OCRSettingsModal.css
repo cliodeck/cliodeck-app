@@ -240,3 +240,43 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Bilan de fin de passe : la modale se refermait sans rien dire, y compris
+   quand la passe n'avait écrit aucune transcription. */
+.ocr-summary {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.ocr-summary--failed {
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+
+.ocr-summary__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ocr-summary p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.ocr-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.ocr-summary__errors {
+  margin-top: 8px;
+  color: var(--color-danger);
+}
