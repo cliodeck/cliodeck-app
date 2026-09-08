@@ -30,7 +30,11 @@ const CONTEXT_PRESETS = [8_192, 32_768, 131_072] as const;
 /** Délai avant d'écrire dans la configuration une valeur tapée ou glissée. */
 const PERSIST_DEBOUNCE_MS = 500;
 
-type LLMSettingsPatch = { ollamaChatModel?: string; ollamaNumCtx?: number };
+type LLMSettingsPatch = {
+  ollamaChatModel?: string;
+  ollamaNumCtx?: number;
+  generationProvider?: LLMProvider;
+};
 
 export const RAGSettingsPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -219,15 +223,16 @@ export const RAGSettingsPanel: React.FC = () => {
    * `cliodeck-config-adapter` pour assembler le provider. Tant que cette
    * écriture manquait, sélectionner « embarqué » ici n'avait aucun effet
    * côté main — le symptôme rapporté par l'utilisateur.
+   *
+   * Il passe par la même file d'écriture partielle que le modèle et la
+   * fenêtre : l'ancienne relecture-réécriture de toute la section `llm`
+   * pouvait, dans la fenêtre de 500 ms de l'écriture différée, écraser une
+   * valeur tout juste saisie (revue de la PR #84). `setLLMConfig` fusionne
+   * les champs fournis avec la section existante.
    */
-  const handleProviderChange = async (provider: LLMProvider) => {
+  const handleProviderChange = (provider: LLMProvider) => {
     setParams({ provider });
-    try {
-      const llmConfig = await window.electron.config.get('llm');
-      await window.electron.config.set('llm', { ...llmConfig, generationProvider: provider });
-    } catch (error) {
-      console.error('Could not persist generationProvider', error);
-    }
+    persistLLM({ generationProvider: provider });
   };
 
   const handleRefreshCollections = () => {

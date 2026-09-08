@@ -26,6 +26,7 @@ import {
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
 import { type RAGExplanation } from '../../../backend/types/chat-source.js';
+import type { LLMConfig } from '../../../backend/types/config.js';
 import {
   runChatTurn,
   type ChatEngineRetriever,
@@ -262,6 +263,46 @@ export function resolveRetrievalArgs(options?: ChatEngineRetrievalOptions): {
   return { sourceType, includeVault };
 }
 
+/** Ce qui part au moteur pour un tour, une fois filtré par le fournisseur. */
+export interface TurnOptions {
+  temperature?: number;
+  maxTokens?: number;
+  numCtx?: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+}
+
+/**
+ * Filtre les options d'un tour selon le fournisseur réellement appelé.
+ *
+ * Tout ce qui est propre à Ollama — fenêtre `num_ctx`, top-p, top-k,
+ * pénalité de répétition — ne part que vers la génération Ollama locale.
+ * La fenêtre a la particularité de servir aussi de budget au compacteur :
+ * un fournisseur cloud ignore `num_ctx` dans la requête, mais une fenêtre
+ * d'un million saisie pour Qwen restait appliquée à Claude (200K), la
+ * compaction ne se déclenchait plus et les longues sessions finissaient
+ * en erreur API (revue de la PR #84). Sans fenêtre venue du panneau, c'est
+ * `llm.ollamaNumCtx` des réglages qui s'applique, sinon le défaut du
+ * serveur Ollama (4 096 jetons quel que soit le modèle). Anthropic refuse
+ * par ailleurs `temperature` et `top_p` ensemble sur les Claude récents.
+ * La température, elle, vaut pour tous.
+ */
+export function resolveTurnOptions(
+  cfg: LLMConfig,
+  opts: ChatStartArgs['opts']
+): TurnOptions {
+  const local = isLocalOllamaGeneration(cfg);
+  return {
+    temperature: opts?.temperature,
+    maxTokens: opts?.maxTokens,
+    numCtx: local ? (opts?.numCtx ?? clampNumCtx(cfg.ollamaNumCtx)) : undefined,
+    topP: local ? opts?.topP : undefined,
+    topK: local ? opts?.topK : undefined,
+    repeatPenalty: local ? opts?.repeatPenalty : undefined,
+  };
+}
+
 export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boolean {
   if (!sp) return false;
   if (sp.noPrompt === true) return true;
@@ -396,11 +437,14 @@ class FusionChatService {
     // vient — modèle en chargement sans fin, outil MCP bloqué, connexion
     // morte — après `timeoutMs` sans chunk, statut, source ni événement
     // d'outil. Le curseur existait sans consommateur depuis la fusion.
+    // Créé ici, ARMÉ seulement juste avant `runChatTurn` : entre les deux se
+    // trouve le dialogue de consentement cloud, qui attend l'utilisateur et
+    // non le modèle — armé trop tôt, le watchdog coupait le tour d'un
+    // utilisateur parti réfléchir devant le dialogue (revue de la PR #84).
     const watchdog = createInactivityWatchdog({
       timeoutMs: args.opts?.timeoutMs,
       onTimeout: () => controller.abort(),
     });
-    watchdog.touch();
     const timeoutError = (): { code: string; message: string } => ({
       code: 'timeout',
       message: `Aucune réponse du modèle depuis ${Math.max(
@@ -528,25 +572,11 @@ class FusionChatService {
 
     const llm = registry.getLLM();
 
-    // Fenêtre de contexte du tour : celle demandée par le panneau du chat,
-    // sinon celle des réglages (`llm.ollamaNumCtx`), sinon le défaut du
-    // serveur Ollama — qui plafonne à 4 096 jetons quel que soit le modèle.
-    // Elle est transmise à Ollama en `options.num_ctx` ET sert de budget au
-    // compacteur, pour que les deux parlent de la même fenêtre.
-    const numCtx = args.opts?.numCtx ?? clampNumCtx(cfg.ollamaNumCtx);
-    // top-p / top-k ne partent que vers Ollama : les curseurs du panneau
-    // sont pensés pour lui, et Anthropic refuse `temperature` et `top_p`
-    // ensemble sur les Claude récents — une 400 opaque pour un réglage
-    // que l'utilisateur n'a peut-être jamais touché.
-    const localSampling = isLocalOllamaGeneration(cfg);
-    const turnOpts = {
-      temperature: args.opts?.temperature,
-      maxTokens: args.opts?.maxTokens,
-      numCtx,
-      topP: localSampling ? args.opts?.topP : undefined,
-      topK: localSampling ? args.opts?.topK : undefined,
-      repeatPenalty: localSampling ? args.opts?.repeatPenalty : undefined,
-    };
+    // Options du tour (voir `resolveTurnOptions`). La fenêtre `num_ctx`
+    // est transmise à Ollama ET sert de budget au compacteur, pour que les
+    // deux parlent de la même fenêtre.
+    const turnOpts = resolveTurnOptions(cfg, args.opts);
+    const numCtx = turnOpts.numCtx;
 
     // Build a context compactor (fusion 1.3) sized to the active chat
     // model. Engine runs `compactor.compact(messages)` at the start of
@@ -759,6 +789,7 @@ class FusionChatService {
     }
 
     try {
+      watchdog.touch();
       await runChatTurn<BrainstormSource>({
         provider: llm,
         messages,

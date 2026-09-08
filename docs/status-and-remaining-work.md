@@ -337,9 +337,21 @@ encore après la première passe :
   Curseur étendu à 60 min : l'évaluation d'un très long prompt reste
   silencieuse le temps qu'elle dure.
 
+**Revue de la PR #84, trois corrections (`fix/chat-settings-review-followups`).**
+Le watchdog était armé avant le dialogue de consentement cloud, qui attend
+l'utilisateur et non le modèle : il est désormais armé juste avant
+`runChatTurn`. La fenêtre `num_ctx` du panneau pilotait le compacteur même
+avec un backend cloud (un million saisi pour Qwen restait le budget de
+Claude, 200K) : `resolveTurnOptions` filtre tout ce qui est propre à Ollama
+selon le fournisseur réellement appelé, fenêtre comprise. Enfin le
+changement de fournisseur relisait-réécrivait toute la section `llm` et
+pouvait écraser une valeur tout juste saisie dans la fenêtre de 500 ms de
+l'écriture différée : il passe par la même file d'écriture partielle.
+
 Couverture : `ollama-model-info.test.ts`, `clampNumCtx` dans
 `context-windows.test.ts`, `applyChatModelOverride` dans
-`cliodeck-config-adapter.test.ts`, `inactivity-watchdog.test.ts`,
+`cliodeck-config-adapter.test.ts`, `resolveTurnOptions` dans
+`fusion-chat-service.test.ts`, `inactivity-watchdog.test.ts`,
 `repeat_penalty` dans `ollama-numctx.test.ts`, `useBrainstormChat.test.tsx`,
 `RAGSettingsPanel.test.tsx`, et deux cas dans `AssistantChat.settings.test.tsx`.
 

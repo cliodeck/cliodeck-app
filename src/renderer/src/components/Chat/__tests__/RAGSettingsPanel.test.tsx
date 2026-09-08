@@ -133,6 +133,20 @@ describe('RAGSettingsPanel — fenêtre de contexte et modèle', () => {
     await screen.findByText(/ragPanel\.contextEstimated/);
   });
 
+  it('écrit le fournisseur en mise à jour partielle, sans relire toute la section', async () => {
+    const { configSet } = installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+    const configGet = (window as unknown as { electron: { config: { get: ReturnType<typeof vi.fn> } } })
+      .electron.config.get;
+
+    fireEvent.change(screen.getByLabelText('ragSettings.provider'), { target: { value: 'ollama' } });
+    expect(useRAGQueryStore.getState().params.provider).toBe('ollama');
+    await waitFor(() => {
+      expect(configSet).toHaveBeenCalledWith('llm', { generationProvider: 'ollama' });
+    });
+    expect(configGet).not.toHaveBeenCalled();
+  });
+
   it('écrit le modèle choisi dans la configuration', async () => {
     const { configSet, showModel } = installElectron({ contextLength: 131_072 });
     render(<RAGSettingsPanel />);
