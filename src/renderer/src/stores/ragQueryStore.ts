@@ -114,6 +114,14 @@ interface RAGQueryState {
   // Actions
   setParams: (params: Partial<RAGQueryParams>) => void;
   resetToDefaults: () => Promise<void>;
+  /**
+   * Répercute un enregistrement des réglages LLM (modèle de chat, fenêtre
+   * de contexte) sans toucher au reste de la session — filtres de sources,
+   * collections, échantillonnage. Le panneau du chat et les réglages
+   * éditent le même champ : ce qui vient d'être enregistré d'un côté doit
+   * se voir de l'autre sans redémarrage.
+   */
+  applyLLMConfig: (llm: { ollamaChatModel?: string; ollamaNumCtx?: number }) => void;
   loadAvailableModels: () => Promise<void>;
   loadAvailableCollections: () => Promise<void>;
   setSelectedCollections: (keys: string[]) => void;
@@ -284,6 +292,19 @@ export const useRAGQueryStore = create<RAGQueryState>()(
         }));
       },
 
+      applyLLMConfig: (llm) => {
+        const patch: Partial<RAGQueryParams> = {};
+        if (typeof llm.ollamaChatModel === 'string' && llm.ollamaChatModel.trim()) {
+          patch.model = llm.ollamaChatModel.trim();
+        }
+        // 0 / absent = défaut du serveur : on revient au défaut du panneau.
+        patch.numCtx =
+          typeof llm.ollamaNumCtx === 'number' && llm.ollamaNumCtx > 0
+            ? llm.ollamaNumCtx
+            : DEFAULT_PARAMS.numCtx;
+        set((state) => ({ params: { ...state.params, ...patch } }));
+      },
+
       resetToDefaults: async () => {
         try {
           // Load defaults from global config
@@ -297,7 +318,10 @@ export const useRAGQueryStore = create<RAGQueryState>()(
               model: llmConfig.ollamaChatModel || DEFAULT_PARAMS.model,
               topK: ragConfig.topK || DEFAULT_PARAMS.topK,
               timeout: DEFAULT_PARAMS.timeout,
-              numCtx: ragConfig.numCtx || DEFAULT_PARAMS.numCtx,
+              // `llm.ollamaNumCtx` est le champ que les réglages ET le panneau
+              // du chat écrivent ; `rag.numCtx` est l'ancien emplacement, que
+              // plus aucune interface ne renseigne.
+              numCtx: llmConfig.ollamaNumCtx || ragConfig.numCtx || DEFAULT_PARAMS.numCtx,
               includeBibliography: DEFAULT_PARAMS.includeBibliography,
               includePrimary: DEFAULT_PARAMS.includePrimary,
               includeNotes: DEFAULT_PARAMS.includeNotes,

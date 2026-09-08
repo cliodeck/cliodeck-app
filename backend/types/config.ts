@@ -10,6 +10,16 @@ export interface LLMConfig {
    * default — over-length inputs are truncated server-side, never rejected.
    */
   ollamaEmbeddingNumCtx?: number;
+  /**
+   * Fenêtre de contexte (`num_ctx`) demandée à Ollama pour la génération
+   * (chat, brainstorm, recettes). Sans elle, Ollama applique son propre
+   * défaut (4 096 jetons, `OLLAMA_CONTEXT_LENGTH`) quel que soit le modèle :
+   * un Qwen 3.5 capable d'un million de jetons tournait à 4K. La valeur est
+   * envoyée telle quelle à chaque appel ; le serveur alloue le cache KV en
+   * conséquence, donc la mémoire croît avec elle. Modifiable depuis les
+   * réglages et depuis le panneau du chat, qui écrivent au même endroit.
+   */
+  ollamaNumCtx?: number;
   claudeAPIKey?: string;
   claudeModel?: string;
   openaiAPIKey?: string;

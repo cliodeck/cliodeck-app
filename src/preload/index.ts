@@ -200,6 +200,22 @@ const api = {
   // Ollama
   ollama: {
     listModels: () => ipcRenderer.invoke('ollama:list-models'),
+    /** `/api/show` : longueur de contexte déclarée par le modèle, `num_ctx` du Modelfile, capacités. */
+    showModel: (model: string) =>
+      ipcRenderer.invoke('ollama:show-model', model) as Promise<{
+        success: boolean;
+        info?: {
+          model: string;
+          contextLength?: number;
+          modelfileNumCtx?: number;
+          architecture?: string;
+          family?: string;
+          parameterSize?: string;
+          quantizationLevel?: string;
+          capabilities?: string[];
+        };
+        error?: string;
+      }>,
   },
 
   // Dialogs
@@ -999,14 +1015,21 @@ const api = {
       start: (
         messages: unknown[],
         opts?: {
+          /**
+           * Modèle du panneau de chat. N'est appliqué qu'à la génération
+           * Ollama locale : sa liste vient de `/api/tags`.
+           */
           model?: string;
           temperature?: number;
           maxTokens?: number;
           /**
-           * Override Ollama's `num_ctx` for this turn (512–262_144).
-           * Ignored by cloud providers (fixed model window).
+           * Override Ollama's `num_ctx` for this turn (NUM_CTX_MIN..NUM_CTX_MAX,
+           * cf. `backend/core/llm/context-windows.ts`). Hors bornes → défaut
+           * du modèle. Ignored by cloud providers (fixed model window).
            */
           numCtx?: number;
+          topP?: number;
+          topK?: number;
           retrievalOptions?: {
             documentIds?: string[];
             collectionKeys?: string[];

@@ -46,14 +46,21 @@ export function useChatSettingsProjection(): void {
     };
     let customSystemPrompt: string | undefined;
     const modeIdForPrompt: string | undefined = activeModeId;
-    if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
-      if (activeModeId === 'free-mode') {
-        customSystemPrompt = '';
-      } else {
-        const promptLang =
-          (ragParams.systemPromptLanguage as 'fr' | 'en') || lang;
-        customSystemPrompt = activeMode.systemPrompt[promptLang];
-      }
+    const panelPrompt = ragParams.useCustomSystemPrompt
+      ? ragParams.customSystemPrompt?.trim()
+      : undefined;
+    if (activeModeId === 'free-mode') {
+      // Mode libre : aucun prompt système, pas même celui du panneau.
+      customSystemPrompt = '';
+    } else if (panelPrompt) {
+      // Le prompt personnalisé du panneau de chat remplace celui du mode —
+      // c'est ce que sa case « Utiliser un prompt système personnalisé »
+      // annonce. Il n'était jamais projeté : seul le texte du mode partait.
+      customSystemPrompt = panelPrompt;
+    } else if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
+      const promptLang =
+        (ragParams.systemPromptLanguage as 'fr' | 'en') || lang;
+      customSystemPrompt = activeMode.systemPrompt[promptLang];
     }
     setChatSettings({
       modeId: modeIdForPrompt,

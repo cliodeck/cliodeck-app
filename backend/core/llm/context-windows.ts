@@ -72,6 +72,9 @@ const TABLE: readonly Entry[] = [
   { pattern: /llama-?2/i, window: 4_096 },
 
   // Qwen
+  // Qwen 3.5 : 256K natifs, extensibles vers 1M (YaRN) — 256K est le
+  // budget que le compacteur suppose quand l'utilisateur n'a rien fixé.
+  { pattern: /qwen-?3\.5/i, window: 262_144 },
   { pattern: /qwen-?3/i, window: 131_072 },
   { pattern: /qwen-?2\.5/i, window: 32_768 },
   { pattern: /qwen-?2/i, window: 32_768 },
@@ -112,4 +115,30 @@ export function getContextWindow(
     }
   }
   return DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Bornes de sécurité pour `num_ctx` (fenêtre demandée à Ollama par appel).
+ *
+ * Elles ne décrivent PAS ce qu'un modèle sait faire — c'est la longueur
+ * déclarée par Ollama (`/api/show`, cf. `ollama-model-info.ts`) qui le dit —
+ * mais seulement ce qui est absurde : sous 512 jetons un seul extrait RAG ne
+ * tient plus ; au-delà de 2 M on est hors de tout modèle servi par Ollama.
+ * L'ancien plafond de 262 144 interdisait les fenêtres d'un million de
+ * jetons des Qwen 3.5, alors que le modèle les accepte : la borne doit
+ * rester une garde, jamais une politique.
+ */
+export const NUM_CTX_MIN = 512;
+export const NUM_CTX_MAX = 2_097_152;
+
+/**
+ * Normalise une valeur `num_ctx` venue de l'utilisateur (IPC, config).
+ * Renvoie `undefined` pour « laisser Ollama décider » : absent, non fini,
+ * zéro/négatif (convention « 0 = défaut du modèle » du renderer) ou hors
+ * bornes. Un flottant est tronqué : Ollama attend un entier.
+ */
+export function clampNumCtx(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+  if (raw < NUM_CTX_MIN || raw > NUM_CTX_MAX) return undefined;
+  return Math.floor(raw);
 }

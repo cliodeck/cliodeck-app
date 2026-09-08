@@ -190,6 +190,10 @@ export interface RunChatTurnArgs<TSource = unknown> {
      * ignore it. Omit (or pass 0) to keep the backend default.
      */
     numCtx?: number;
+    /** Échantillonnage par noyau (`top_p`), 0–1. Réglé depuis le panneau du chat. */
+    topP?: number;
+    /** Nombre de jetons candidats (`top_k`). Réglé depuis le panneau du chat. */
+    topK?: number;
   };
   tools?: ToolDescriptor[];
   toolHandler?: ChatEngineToolHandler;
@@ -400,6 +404,8 @@ export async function runChatTurn<TSource = unknown>(
         temperature: args.opts?.temperature,
         maxTokens: args.opts?.maxTokens,
         numCtx: args.opts?.numCtx,
+        topP: args.opts?.topP,
+        topK: args.opts?.topK,
         tools: args.tools && args.tools.length ? args.tools : undefined,
         signal: args.signal,
       })) {

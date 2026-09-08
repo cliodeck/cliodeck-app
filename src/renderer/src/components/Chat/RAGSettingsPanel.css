@@ -263,3 +263,65 @@
   color: var(--text-primary);
   border-color: var(--color-accent);
 }
+
+/* Fenêtre de contexte : curseur + saisie libre. Le curseur est borné par
+   la longueur déclarée du modèle, la saisie ne l'est que par les bornes
+   de sécurité — l'utilisateur fixe lui-même sa limite. */
+.context-window-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.context-window-row input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-window-input {
+  width: 7.5em;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-window-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.context-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.preset-chip {
+  padding: 2px 8px;
+  font-size: 10px;
+  background: var(--surface-variant);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.preset-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--color-accent);
+}
+
+.preset-chip.is-active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.context-warning {
+  color: var(--color-warning);
+  font-style: normal;
+}

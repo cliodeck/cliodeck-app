@@ -1,7 +1,9 @@
 import { CollapsibleSection } from '../common/CollapsibleSection';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../../stores/dialogStore';
+import { NUM_CTX_MAX, NUM_CTX_MIN } from '../../../../../backend/core/llm/context-windows';
+import { formatContextSize } from '../../utils/context-size';
 import type { LLMConfig } from './ConfigPanel';
 
 interface LLMConfigSectionProps {
@@ -24,6 +26,31 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   };
 
   const backend = config.backend ?? 'ollama';
+
+  // Longueur de contexte déclarée par le modèle de chat (`/api/show`), pour
+  // que l'utilisateur sache jusqu'où il peut monter. Différé : le champ
+  // devient une saisie libre quand la liste des modèles n'est pas chargée.
+  const [declaredContext, setDeclaredContext] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const model = config.ollamaChatModel?.trim();
+    if (!model || backend !== 'ollama') {
+      setDeclaredContext(undefined);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await window.electron.ollama.showModel(model);
+        if (!cancelled) setDeclaredContext(res?.success ? res.info?.contextLength : undefined);
+      } catch {
+        if (!cancelled) setDeclaredContext(undefined);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [config.ollamaChatModel, backend]);
 
   /**
    * Cocher cette case fait quitter la machine à l'INTÉGRALITÉ du corpus —
@@ -316,6 +343,47 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 {t('llm.chatModelHints.balanced')}
                 <br />
                 {t('llm.chatModelHints.quality')}
+              </small>
+            </div>
+          </div>
+
+          {/* Fenêtre de contexte du chat (num_ctx). Même champ que celui du
+              panneau du chat : les deux écrivent `llm.ollamaNumCtx`. 0 ou
+              vide = défaut du serveur Ollama (4 096 jetons). */}
+          <div className="config-field">
+            <label className="config-label">
+              {t('llm.chatNumCtx')}
+              <span className="config-help">
+                {t('llm.chatNumCtxHelp')}
+              </span>
+            </label>
+            <input
+              type="number"
+              min={NUM_CTX_MIN}
+              max={NUM_CTX_MAX}
+              step={1024}
+              value={config.ollamaNumCtx || ''}
+              onChange={(e) =>
+                handleFieldChange(
+                  'ollamaNumCtx',
+                  e.target.value === '' ? 0 : Number(e.target.value)
+                )
+              }
+              className="config-input"
+              placeholder={t('llm.chatNumCtxPlaceholder')}
+            />
+            <div className="config-description">
+              <small>
+                {declaredContext !== undefined && (
+                  <>
+                    {t('llm.chatNumCtxDeclared', {
+                      model: config.ollamaChatModel,
+                      size: formatContextSize(declaredContext),
+                    })}
+                    <br />
+                  </>
+                )}
+                {t('llm.chatNumCtxDetails')}
               </small>
             </div>
           </div>

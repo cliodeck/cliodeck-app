@@ -259,6 +259,79 @@ des transcriptions perdues — et un bilan qui reste affiché.
 
 ---
 
+### Les réglages du panneau de chat ne partaient pas, et la fenêtre de contexte était plafonnée par une table
+
+Deux bugs rapportés et corrigés le 2026-09-08.
+
+**Le panneau du chat écrivait dans un store que personne ne relisait.** Le
+panneau `RAGSettingsPanel` alimente `ragQueryStore.params` ; à l'envoi,
+`useBrainstormChat.send` ne transmettait au main que `numCtx`, les filtres de
+sources et le mode. Le modèle, la température, top-p, top-k et le prompt
+système personnalisé restaient dans le renderer, et le main reconstruisait
+le registre depuis `llm.ollamaChatModel` des réglages — d'où « les réglages
+de l'application dominent ». Trois pièces manquaient :
+
+- **Transmission** : `send` envoie désormais `model`, `temperature`, `topP`,
+  `topK` (et toujours `numCtx`). `useChatSettingsProjection` projette le
+  prompt personnalisé du panneau (`useCustomSystemPrompt`) en priorité sur
+  celui du mode ; jusque-là seul le texte du mode partait.
+- **Application côté main** : `applyChatModelOverride`
+  (`cliodeck-config-adapter.ts`) injecte le modèle demandé dans la
+  configuration du tour AVANT la construction du registre, et seulement
+  pour la génération Ollama locale — la liste du panneau vient de
+  `/api/tags`, envoyer `qwen3.5:35b` à Anthropic donnerait une 400 opaque.
+  Top-p / top-k ne partent que vers Ollama aussi : Anthropic refuse
+  `temperature` et `top_p` ensemble sur les Claude récents.
+- **Persistance** : le panneau écrit `llm.ollamaChatModel` et
+  `llm.ollamaNumCtx` (nouveau champ) dans la configuration, comme il le
+  faisait déjà pour `generationProvider`. C'est le choix d'architecture :
+  **un seul réglage, deux éditeurs**. L'alternative — un override de session
+  persistant dans le renderer — reproduisait le bug en miroir (changer le
+  modèle dans les réglages n'aurait plus eu d'effet sur le chat).
+  `ragQueryStore.resetToDefaults`, appelé à chaque lancement, relit donc
+  ce que le panneau a écrit, et `ConfigPanel.handleSaveConfig` répercute
+  dans le panneau (`applyLLMConfig`) ce qui vient d'être enregistré dans
+  les réglages, sans toucher aux filtres de session. L'écriture depuis le
+  panneau est différée de 500 ms : `config:set('llm')` réinitialise
+  `pdfService`.
+
+**La fenêtre de contexte venait d'une table codée en dur dans le panneau.**
+`MODEL_CONTEXT_SIZES` renvoyait 4 096 jetons pour tout modèle absent
+(qwen3.5:35b compris), le curseur ne permettait pas d'aller au-delà, et deux
+plafonds à 262 144 (schéma zod + clamp du handler) interdisaient de toute
+façon les fenêtres d'un million de jetons. Remplacé par :
+
+- `ollama:show-model` (`POST /api/show`, parseur pur dans
+  `backend/core/llm/ollama-model-info.ts`) : la longueur d'entraînement
+  déclarée par le modèle (`model_info["<arch>.context_length"]`) et le
+  `num_ctx` de son Modelfile, affichés comme repère. Repli sur
+  `getContextWindow` (table du compacteur) si Ollama ne répond pas,
+  signalé comme estimation.
+- Une saisie libre à côté du curseur, bornée seulement par
+  `NUM_CTX_MIN`/`NUM_CTX_MAX` (512 … 2 097 152, `context-windows.ts`), avec
+  un avertissement au-delà de la longueur déclarée. Les bornes sont une
+  garde contre l'absurde, jamais une politique.
+- La même valeur dans **Réglages → LLM → « Fenêtre de contexte du chat »**.
+- Côté serveur, rien à faire : `num_ctx` est envoyé par appel dans
+  `options` (`OllamaProvider.chat`) et prime sur `OLLAMA_CONTEXT_LENGTH`
+  et sur le Modelfile. Sans `numCtx` du panneau, `fusion-chat-service`
+  prend désormais `llm.ollamaNumCtx` des réglages. Le compacteur reçoit
+  la même valeur comme budget.
+
+**Restent inertes dans le panneau** : le curseur « Timeout » (aucun
+consommateur depuis la fusion ; l'ancien `chat-service` l'appliquait au
+fetch) et « Repeat penalty » (absent de `ChatOptions` dans
+`providers/base.ts`, contrat qu'on ne modifie pas sans décision — une ligne
+optionnelle `repeatPenalty?: number` suffirait, mappée sur `repeat_penalty`
+dans `OllamaProvider`).
+
+Couverture : `ollama-model-info.test.ts`, `clampNumCtx` dans
+`context-windows.test.ts`, `applyChatModelOverride` dans
+`cliodeck-config-adapter.test.ts`, `useBrainstormChat.test.tsx`,
+`RAGSettingsPanel.test.tsx`, et deux cas dans `AssistantChat.settings.test.tsx`.
+
+---
+
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps

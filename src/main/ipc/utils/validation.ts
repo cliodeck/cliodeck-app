@@ -2,6 +2,7 @@
  * Zod validation schemas for IPC handler inputs
  */
 import { z } from 'zod';
+import { NUM_CTX_MAX, NUM_CTX_MIN } from '../../../../backend/core/llm/context-windows.js';
 
 // Project schemas
 export const ProjectCreateSchema = z.object({
@@ -73,7 +74,7 @@ export const ChatSendSchema = z.object({
       provider: z.enum(['ollama', 'embedded', 'auto']).optional(),
       model: z.string().optional(),
       timeout: z.number().min(1000).optional(),
-      numCtx: z.number().min(512).max(262144).optional(), // Context window size in tokens
+      numCtx: z.number().min(NUM_CTX_MIN).max(NUM_CTX_MAX).optional(), // Context window size in tokens
       temperature: z.number().min(0).max(2).optional(),
       top_p: z.number().min(0).max(1).optional(),
       top_k: z.number().min(1).max(100).optional(),
@@ -372,6 +373,14 @@ export const ConfigSetSchema = z.object({
   key: z.string().min(1, 'Config key is required'),
   value: z.unknown(),
 });
+
+/** Nom de modèle Ollama (`qwen3.5:35b`, `hf.co/org/model:Q4_K_M`). */
+export const OllamaModelNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Model name is required')
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, 'Invalid Ollama model name');
 
 // Bibliography handler schemas
 export const BibliographyExportSchema = z.object({
@@ -699,9 +708,12 @@ export const FusionChatStartSchema = z.object({
       model: z.string().optional(),
       temperature: z.number().min(0).max(2).optional(),
       maxTokens: z.number().int().positive().optional(),
-      // Le clamp métier (512..262144) reste dans le handler : ici on refuse
-      // seulement ce qui n'est pas un nombre fini.
+      // Le clamp métier (`clampNumCtx`, bornes NUM_CTX_MIN..NUM_CTX_MAX)
+      // reste dans le handler : ici on refuse seulement ce qui n'est pas
+      // un nombre fini.
       numCtx: z.number().finite().optional(),
+      topP: z.number().min(0).max(1).optional(),
+      topK: z.number().int().min(1).max(1000).optional(),
       retrievalOptions: z
         .object({
           documentIds: z.array(z.string()).optional(),

@@ -173,11 +173,16 @@ import {
 } from '../../../backend/core/hints/loader.js';
 import { guardWorkspaceHints } from './hints-guard.js';
 import {
+  applyChatModelOverride,
   createRegistryFromClioDeckConfig,
+  isLocalOllamaGeneration,
   resolveActiveChatModel,
 } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { ContextCompactor } from '../../../backend/core/context-mgmt/compactor.js';
-import { getContextWindow } from '../../../backend/core/llm/context-windows.js';
+import {
+  clampNumCtx,
+  getContextWindow,
+} from '../../../backend/core/llm/context-windows.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -269,6 +274,12 @@ export interface ChatStartArgs {
   /** Optional caller-supplied id; otherwise generated. */
   sessionId?: string;
   opts?: {
+    /**
+     * Modèle choisi dans le panneau du chat. Sa liste vient d'Ollama, donc
+     * il n'est appliqué qu'à la génération Ollama locale
+     * (`applyChatModelOverride`) ; un backend cloud ou le modèle embarqué
+     * gardent le modèle des réglages.
+     */
     model?: string;
     temperature?: number;
     maxTokens?: number;
@@ -276,8 +287,11 @@ export interface ChatStartArgs {
      * Override Ollama's `num_ctx` for this call. Useful for models with
      * a 128K/256K window that Ollama otherwise truncates to 2048 by
      * default. Ignored by cloud providers (fixed window per model).
+     * Absent, c'est `llm.ollamaNumCtx` des réglages qui s'applique.
      */
     numCtx?: number;
+    topP?: number;
+    topK?: number;
   };
   /** Filters forwarded to `RetrievalService`. */
   retrievalOptions?: FusionChatRetrievalOptions;
@@ -380,9 +394,17 @@ class FusionChatService {
     let activeModel: string;
     let cfg: ReturnType<typeof configManager.getLLMConfig>;
     try {
-      cfg = configManager.getLLMConfig();
+      // Le modèle du panneau de chat entre dans la configuration du tour
+      // AVANT la construction du registre : c'est le seul chemin par lequel
+      // il atteint le fournisseur. Il ne redescend pas dans `opts.model`
+      // du moteur — le registre le porte déjà, et un fournisseur cloud ne
+      // doit jamais voir un nom de modèle Ollama.
+      cfg = applyChatModelOverride(
+        configManager.getLLMConfig(),
+        args.opts?.model
+      );
       registry = createRegistryFromClioDeckConfig(cfg);
-      activeModel = args.opts?.model ?? resolveActiveChatModel(cfg);
+      activeModel = resolveActiveChatModel(cfg);
     } catch (e) {
       sendChunk(
         { delta: '', done: true, finishReason: 'error' },
@@ -478,6 +500,25 @@ class FusionChatService {
 
     const llm = registry.getLLM();
 
+    // Fenêtre de contexte du tour : celle demandée par le panneau du chat,
+    // sinon celle des réglages (`llm.ollamaNumCtx`), sinon le défaut du
+    // serveur Ollama — qui plafonne à 4 096 jetons quel que soit le modèle.
+    // Elle est transmise à Ollama en `options.num_ctx` ET sert de budget au
+    // compacteur, pour que les deux parlent de la même fenêtre.
+    const numCtx = args.opts?.numCtx ?? clampNumCtx(cfg.ollamaNumCtx);
+    // top-p / top-k ne partent que vers Ollama : les curseurs du panneau
+    // sont pensés pour lui, et Anthropic refuse `temperature` et `top_p`
+    // ensemble sur les Claude récents — une 400 opaque pour un réglage
+    // que l'utilisateur n'a peut-être jamais touché.
+    const localSampling = isLocalOllamaGeneration(cfg);
+    const turnOpts = {
+      temperature: args.opts?.temperature,
+      maxTokens: args.opts?.maxTokens,
+      numCtx,
+      topP: localSampling ? args.opts?.topP : undefined,
+      topK: localSampling ? args.opts?.topK : undefined,
+    };
+
     // Build a context compactor (fusion 1.3) sized to the active chat
     // model. Engine runs `compactor.compact(messages)` at the start of
     // each agent-loop iteration; long brainstorm sessions stop
@@ -492,7 +533,7 @@ class FusionChatService {
       // that as the compaction budget — otherwise the compactor would
       // assume the model's full advertised window and let the prompt
       // overflow the smaller per-call allocation.
-      contextWindow: getContextWindow(activeModel, args.opts?.numCtx),
+      contextWindow: getContextWindow(activeModel, numCtx),
       summarizeOptions: {
         // Lower temperature for the summary call to stay faithful.
         temperature: 0,
@@ -693,7 +734,7 @@ class FusionChatService {
         provider: llm,
         messages,
         signal: controller.signal,
-        opts: args.opts,
+        opts: turnOpts,
         tools,
         toolHandler,
         retriever,

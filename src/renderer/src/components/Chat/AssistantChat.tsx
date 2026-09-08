@@ -32,6 +32,7 @@ import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
+import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { useCloudConsentGuard } from './useCloudConsentGuard';
 import { messageToDraft } from '../Brainstorm/messageToDraft';
 import { ChatSurface } from './ChatSurface';
@@ -85,6 +86,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
   // transmis aux propositions « draft » (source.model, Phase 4b).
   const activeModelRef = useRef<string>('unknown');
+  // Le modèle choisi dans le panneau du chat : c'est lui que le main
+  // applique à la génération Ollama, pas celui lu une fois au montage.
+  const ragModel = useRAGQueryStore((s) => s.params.model);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +104,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         } | null = await window.electron.config.get('llm');
         if (cancelled || !llm) return;
         const byBackend: Record<string, string | undefined> = {
-          ollama: llm.ollamaChatModel,
+          ollama: ragModel?.trim() || llm.ollamaChatModel,
           claude: llm.claudeModel,
           openai: llm.openaiModel,
           mistral: llm.mistralModel,
@@ -114,7 +118,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ragModel]);
 
   // Project RAG params + active mode onto chatStore.chatSettings so every
   // `fusion.chat.start` picks up current filters.

@@ -41,6 +41,8 @@ interface FusionChatApi {
       temperature?: number;
       maxTokens?: number;
       numCtx?: number;
+      topP?: number;
+      topK?: number;
       retrievalOptions?: {
         documentIds?: string[];
         collectionKeys?: string[];
@@ -220,6 +222,25 @@ export function useBrainstormChat(): UseBrainstormChat {
       // field entirely in that case rather than sending 0.
       if (typeof ragParams.numCtx === 'number' && ragParams.numCtx > 0) {
         startOpts.numCtx = ragParams.numCtx;
+      }
+      // Le modèle et l'échantillonnage choisis dans le panneau du chat.
+      // Jusqu'ici seul `numCtx` partait : le modèle, la température, top-p
+      // et top-k restaient dans le store du renderer, et les réglages de
+      // l'application décidaient seuls. Le main n'applique le modèle qu'à
+      // la génération Ollama locale (sa liste vient d'Ollama) et top-p /
+      // top-k qu'à Ollama aussi ; la température vaut pour tous.
+      const model = ragParams.model?.trim();
+      if (model && ragParams.provider !== 'embedded') {
+        startOpts.model = model;
+      }
+      if (Number.isFinite(ragParams.temperature)) {
+        startOpts.temperature = ragParams.temperature;
+      }
+      if (Number.isFinite(ragParams.top_p)) {
+        startOpts.topP = ragParams.top_p;
+      }
+      if (Number.isInteger(ragParams.top_k) && ragParams.top_k > 0) {
+        startOpts.topK = ragParams.top_k;
       }
       // Fusion 2.5 — pass the user-validated MCP tool subset. When no
       // MCP server is registered the list is empty and we send no
