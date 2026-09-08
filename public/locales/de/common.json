@@ -741,6 +741,7 @@
     },
     "notConfigured": "Das Modell antwortet nicht. Prüfen Sie, ob Ollama läuft, oder wählen Sie in den Einstellungen einen anderen Anbieter.",
     "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
+    "timeout": "Seit {{minutes}} Min. keine Antwort vom Modell: Generierung abgebrochen. Erhöhen Sie das Inaktivitäts-Timeout in den Chat-Einstellungen, wenn das Modell nur langsam ist.",
     "openSettings": "Einstellungen öffnen",
     "sourcesLabel": "Quellen",
     "noProjectState": {
@@ -2189,7 +2190,8 @@
     "refreshDocuments": "Dokumente neu laden",
     "allDocuments": "Alle Dokumente (ohne Filter)",
     "topKHelp": "Anzahl der abzurufenden Dokumentauszüge",
-    "timeoutHelp": "Längste Wartezeit auf die Antwort",
+    "timeout": "Inaktivitäts-Timeout",
+    "timeoutHelp": "Bricht die Generierung ab, wenn so lange nichts vom Modell kommt. Eine Antwort, die weiter eintrifft, wird nie abgeschnitten.",
     "advanced": "Erweiterte Einstellungen",
     "tokens": "Token",
     "contextWindow": "Kontextfenster",

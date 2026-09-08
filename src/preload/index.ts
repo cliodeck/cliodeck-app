@@ -1030,6 +1030,13 @@ const api = {
           numCtx?: number;
           topP?: number;
           topK?: number;
+          /** `repeat_penalty` d'Ollama ; ignoré par les fournisseurs cloud. */
+          repeatPenalty?: number;
+          /**
+           * Délai d'inactivité : le tour est interrompu après ce délai
+           * sans chunk, statut ni événement d'outil. Pas une durée totale.
+           */
+          timeoutMs?: number;
           retrievalOptions?: {
             documentIds?: string[];
             collectionKeys?: string[];

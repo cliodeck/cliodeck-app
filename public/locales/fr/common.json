@@ -741,6 +741,7 @@
     },
     "notConfigured": "Le modèle ne répond pas. Vérifiez qu'Ollama est lancé, ou choisissez un autre fournisseur dans les Paramètres.",
     "startFailed": "Le modèle ne répond pas : {{error}}. Vérifiez votre configuration dans les Paramètres.",
+    "timeout": "Aucune réponse du modèle depuis {{minutes}} min : génération interrompue. Augmentez le délai d'inactivité dans les réglages du chat si le modèle est simplement lent.",
     "openSettings": "Ouvrir les paramètres",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2189,7 +2190,8 @@
     "refreshDocuments": "Recharger les documents",
     "allDocuments": "Tous les documents (sans filtre)",
     "topKHelp": "Nombre d'extraits de documents à récupérer",
-    "timeoutHelp": "Délai d'attente maximal de la réponse",
+    "timeout": "Délai d'inactivité",
+    "timeoutHelp": "Interrompt la génération après ce délai sans rien recevoir du modèle. Une réponse qui continue d'arriver n'est jamais coupée.",
     "advanced": "Paramètres avancés",
     "tokens": "jetons",
     "contextWindow": "Fenêtre de contexte",

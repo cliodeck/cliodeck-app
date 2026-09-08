@@ -83,6 +83,13 @@ export interface ChatOptions {
   temperature?: number;
   topP?: number;
   topK?: number;
+  /**
+   * Pénalité de répétition (`repeat_penalty` d'Ollama / llama.cpp, 1.0 =
+   * aucune). Seuls les backends locaux l'exposent ; les fournisseurs cloud
+   * l'ignorent — leurs `frequency_penalty` / `presence_penalty` n'ont pas la
+   * même sémantique et ne doivent pas être dérivés de cette valeur.
+   */
+  repeatPenalty?: number;
   maxTokens?: number;
   stop?: string[];
   /**

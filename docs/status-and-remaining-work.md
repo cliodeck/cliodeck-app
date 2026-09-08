@@ -318,16 +318,29 @@ façon les fenêtres d'un million de jetons. Remplacé par :
   prend désormais `llm.ollamaNumCtx` des réglages. Le compacteur reçoit
   la même valeur comme budget.
 
-**Restent inertes dans le panneau** : le curseur « Timeout » (aucun
-consommateur depuis la fusion ; l'ancien `chat-service` l'appliquait au
-fetch) et « Repeat penalty » (absent de `ChatOptions` dans
-`providers/base.ts`, contrat qu'on ne modifie pas sans décision — une ligne
-optionnelle `repeatPenalty?: number` suffirait, mappée sur `repeat_penalty`
-dans `OllamaProvider`).
+**Plus rien d'inerte dans le panneau** (règle fixée le même jour : un
+réglage affiché a un consommateur, ou il disparaît). Deux curseurs l'étaient
+encore après la première passe :
+
+- **« Repeat penalty »** : `repeatPenalty?: number` ajouté au contrat
+  `ChatOptions` (`providers/base.ts`, décision explicite), mappé sur
+  `repeat_penalty` dans `OllamaProvider` et transmis à la génération Ollama
+  locale seulement — les `frequency_penalty` / `presence_penalty` des
+  fournisseurs cloud n'ont pas la même sémantique.
+- **« Timeout »** : devenu un **délai d'inactivité**
+  (`services/inactivity-watchdog.ts`), pas une durée totale. Une réponse
+  qui continue d'arriver n'est jamais coupée ; un tour dont plus rien ne
+  vient — modèle en chargement sans fin, outil MCP bloqué, connexion morte —
+  est interrompu après le délai sans chunk, statut, source ni événement
+  d'outil. L'abandon remonte comme une erreur `timeout` que le renderer
+  traduit (`chat.timeout`), distincte d'une annulation par l'utilisateur.
+  Curseur étendu à 60 min : l'évaluation d'un très long prompt reste
+  silencieuse le temps qu'elle dure.
 
 Couverture : `ollama-model-info.test.ts`, `clampNumCtx` dans
 `context-windows.test.ts`, `applyChatModelOverride` dans
-`cliodeck-config-adapter.test.ts`, `useBrainstormChat.test.tsx`,
+`cliodeck-config-adapter.test.ts`, `inactivity-watchdog.test.ts`,
+`repeat_penalty` dans `ollama-numctx.test.ts`, `useBrainstormChat.test.tsx`,
 `RAGSettingsPanel.test.tsx`, et deux cas dans `AssistantChat.settings.test.tsx`.
 
 ---

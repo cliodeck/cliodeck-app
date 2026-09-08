@@ -172,6 +172,7 @@ import {
   prependAsSystemMessage,
 } from '../../../backend/core/hints/loader.js';
 import { guardWorkspaceHints } from './hints-guard.js';
+import { createInactivityWatchdog } from './inactivity-watchdog.js';
 import {
   applyChatModelOverride,
   createRegistryFromClioDeckConfig,
@@ -292,6 +293,14 @@ export interface ChatStartArgs {
     numCtx?: number;
     topP?: number;
     topK?: number;
+    /** `repeat_penalty` d'Ollama ; n'est transmis qu'à la génération Ollama locale. */
+    repeatPenalty?: number;
+    /**
+     * Délai d'inactivité du tour (curseur « Timeout » du panneau). Le tour
+     * est interrompu après ce délai sans chunk, statut, source ni événement
+     * d'outil — jamais pendant qu'une réponse continue d'arriver.
+     */
+    timeoutMs?: number;
   };
   /** Filters forwarded to `RetrievalService`. */
   retrievalOptions?: FusionChatRetrievalOptions;
@@ -380,6 +389,25 @@ class FusionChatService {
       if (error) envelope.error = error;
       safeSend('fusion:chat:chunk', envelope);
     };
+
+    // --- Délai d'inactivité (curseur « Timeout » du panneau) -------------
+    // Il ne borne pas la durée d'un tour : une réponse qui continue
+    // d'arriver n'est jamais coupée. Il interrompt un tour dont plus rien ne
+    // vient — modèle en chargement sans fin, outil MCP bloqué, connexion
+    // morte — après `timeoutMs` sans chunk, statut, source ni événement
+    // d'outil. Le curseur existait sans consommateur depuis la fusion.
+    const watchdog = createInactivityWatchdog({
+      timeoutMs: args.opts?.timeoutMs,
+      onTimeout: () => controller.abort(),
+    });
+    watchdog.touch();
+    const timeoutError = (): { code: string; message: string } => ({
+      code: 'timeout',
+      message: `Aucune réponse du modèle depuis ${Math.max(
+        1,
+        Math.round((args.opts?.timeoutMs ?? 0) / 60_000)
+      )} min : génération interrompue.`,
+    });
 
     // --- Research journal accumulation ---------------------------------
     // Ported from legacy chat-service.logMessagesToHistory: record the
@@ -517,6 +545,7 @@ class FusionChatService {
       numCtx,
       topP: localSampling ? args.opts?.topP : undefined,
       topK: localSampling ? args.opts?.topK : undefined,
+      repeatPenalty: localSampling ? args.opts?.repeatPenalty : undefined,
     };
 
     // Build a context compactor (fusion 1.3) sized to the active chat
@@ -743,26 +772,44 @@ class FusionChatService {
         compactor,
         hooks: {
           onStatus: (status) => {
+            watchdog.touch();
             safeSend('fusion:chat:status', { sessionId, status });
           },
           onChunk: (chunk) => {
+            watchdog.touch();
             if (chunk.delta) assistantText += chunk.delta;
             sendChunk(chunk);
           },
           onDone: (chunk) => {
+            watchdog.disarm();
             if (chunk.delta) assistantText += chunk.delta;
+            // L'abandon déclenché par le délai d'inactivité arrive ici
+            // comme un `cancelled` ordinaire : le renderer doit savoir que
+            // ce n'est pas lui qui a annulé.
+            if (watchdog.timedOut) {
+              sendChunk({ delta: '', done: true, finishReason: 'error' }, timeoutError());
+              return;
+            }
             sendChunk(chunk);
           },
-          onError: (err) =>
-            sendChunk({ delta: '', done: true, finishReason: 'error' }, err),
+          onError: (err) => {
+            watchdog.disarm();
+            sendChunk(
+              { delta: '', done: true, finishReason: 'error' },
+              watchdog.timedOut ? timeoutError() : err
+            );
+          },
           onSources: (sources) => {
+            watchdog.touch();
             recordedSources = sources as BrainstormSource[];
             safeSend('fusion:chat:context', { sessionId, sources });
           },
           onExplanation: (explanation: RAGExplanation) => {
+            watchdog.touch();
             safeSend('fusion:chat:explanation', { sessionId, explanation });
           },
           onToolCallStart: (ev) => {
+            watchdog.touch();
             // Preserve the legacy IPC shape (bareTool without client prefix,
             // sessionId-scoped callId) for the renderer.
             const clientName = toolScope.get(ev.name);
@@ -776,6 +823,7 @@ class FusionChatService {
             });
           },
           onToolCallEnd: (ev) => {
+            watchdog.touch();
             const clientName = toolScope.get(ev.name);
             const bareTool = clientName ? ev.name.slice(clientName.length + 2) : ev.name;
             safeSend('fusion:chat:tool-call', {
@@ -791,6 +839,7 @@ class FusionChatService {
         },
       });
     } finally {
+      watchdog.disarm();
       await registry.dispose().catch(() => undefined);
       console.log('[fusion-chat] turn done', {
         sessionId,

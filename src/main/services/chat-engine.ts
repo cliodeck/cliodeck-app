@@ -194,6 +194,8 @@ export interface RunChatTurnArgs<TSource = unknown> {
     topP?: number;
     /** Nombre de jetons candidats (`top_k`). Réglé depuis le panneau du chat. */
     topK?: number;
+    /** Pénalité de répétition (`repeat_penalty`, Ollama). Réglée depuis le panneau du chat. */
+    repeatPenalty?: number;
   };
   tools?: ToolDescriptor[];
   toolHandler?: ChatEngineToolHandler;
@@ -406,6 +408,7 @@ export async function runChatTurn<TSource = unknown>(
         numCtx: args.opts?.numCtx,
         topP: args.opts?.topP,
         topK: args.opts?.topK,
+        repeatPenalty: args.opts?.repeatPenalty,
         tools: args.tools && args.tools.length ? args.tools : undefined,
         signal: args.signal,
       })) {

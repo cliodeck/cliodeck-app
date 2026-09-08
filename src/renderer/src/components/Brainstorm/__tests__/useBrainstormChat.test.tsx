@@ -13,8 +13,16 @@ import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 import { useChatStore } from '../../../stores/chatStore';
 
 type StartOpts = Record<string, unknown> | undefined;
+type ChunkEnvelope = {
+  sessionId: string;
+  chunk: { delta: string; done?: boolean; finishReason?: string };
+  error?: { code: string; message: string };
+};
+
+const chunkListeners: Array<(env: ChunkEnvelope) => void> = [];
 
 function installFusionChat(): ReturnType<typeof vi.fn> {
+  chunkListeners.length = 0;
   const start = vi.fn(async (_messages: unknown[], _opts?: StartOpts) => ({
     success: true,
     sessionId: 's1',
@@ -23,7 +31,10 @@ function installFusionChat(): ReturnType<typeof vi.fn> {
   const chat = {
     start,
     cancel: vi.fn(async () => ({ success: true })),
-    onChunk: () => unsub,
+    onChunk: (cb: (env: ChunkEnvelope) => void) => {
+      chunkListeners.push(cb);
+      return unsub;
+    },
     onContext: () => unsub,
     onToolCall: () => unsub,
     onExplanation: () => unsub,
@@ -56,6 +67,8 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
       temperature: 0.2,
       top_p: 0.9,
       top_k: 50,
+      repeat_penalty: 1.15,
+      timeout: 600_000,
     });
 
     const { result } = renderHook(() => useBrainstormChat());
@@ -69,7 +82,31 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
       temperature: 0.2,
       topP: 0.9,
       topK: 50,
+      repeatPenalty: 1.15,
+      timeoutMs: 600_000,
     });
+  });
+
+  it('traduit le délai d’inactivité dépassé en message d’erreur localisé', async () => {
+    installFusionChat();
+    useRAGQueryStore.getState().setParams({ provider: 'ollama', model: 'gemma3:4b', timeout: 300_000 });
+
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    expect(chunkListeners).toHaveLength(1);
+    act(() => {
+      chunkListeners[0]({
+        sessionId: 's1',
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'timeout', message: 'message côté main' },
+      });
+    });
+    // Le mock de react-i18next renvoie la clé quand des variables sont
+    // passées : c'est la clé localisée qui doit sortir, pas le message brut.
+    expect(result.current.error).toBe('chat.timeout');
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it('n’envoie pas de modèle quand la génération est confiée au modèle embarqué', async () => {

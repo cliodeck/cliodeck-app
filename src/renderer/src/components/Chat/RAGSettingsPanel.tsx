@@ -495,16 +495,16 @@ export const RAGSettingsPanel: React.FC = () => {
             <small className="setting-hint">{t('ragPanel.topKHelp')}</small>
           </div>
 
-          {/* Timeout */}
+          {/* Délai d'inactivité — consommé par fusion-chat-service (watchdog) */}
           <div className="setting-group">
             <label htmlFor="timeout-slider">
-              Timeout: <strong>{Math.floor(params.timeout / 60000)} min</strong>
+              {t('ragPanel.timeout')}: <strong>{Math.floor(params.timeout / 60000)} min</strong>
             </label>
             <input
               id="timeout-slider"
               type="range"
               min="60000"
-              max="900000"
+              max="3600000"
               step="60000"
               value={params.timeout}
               onChange={(e) => setParams({ timeout: parseInt(e.target.value) })}

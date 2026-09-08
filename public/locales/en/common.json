@@ -741,6 +741,7 @@
     },
     "notConfigured": "The model is not responding. Check that Ollama is running, or pick another provider in Settings.",
     "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
+    "timeout": "No response from the model for {{minutes}} min: generation stopped. Raise the inactivity timeout in the chat settings if the model is just slow.",
     "openSettings": "Open Settings",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2189,7 +2190,8 @@
     "refreshDocuments": "Reload the documents",
     "allDocuments": "All documents (no filter)",
     "topKHelp": "How many document chunks to retrieve",
-    "timeoutHelp": "Maximum time to wait for the answer",
+    "timeout": "Inactivity timeout",
+    "timeoutHelp": "Stops the generation after this long without anything from the model. An answer that keeps streaming is never cut.",
     "advanced": "Advanced parameters",
     "tokens": "tokens",
     "contextWindow": "Context window",

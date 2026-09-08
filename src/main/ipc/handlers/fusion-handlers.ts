@@ -323,6 +323,8 @@ export function setupFusionHandlers(): void {
         numCtx: clampNumCtx(rawOptsObj.numCtx),
         topP: rawOptsObj.topP,
         topK: rawOptsObj.topK,
+        repeatPenalty: rawOptsObj.repeatPenalty,
+        timeoutMs: rawOptsObj.timeoutMs,
       };
       const sessionId = fusionChatService.start({
         webContents: event.sender,
