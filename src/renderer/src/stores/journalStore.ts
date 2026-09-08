@@ -43,6 +43,8 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Raisonnement d'un modèle pensant, à part de la réponse. */
+  thinking?: string;
   sources?: unknown[];
   timestamp: Date;
 }

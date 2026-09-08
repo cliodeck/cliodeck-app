@@ -409,6 +409,15 @@ seulement quand Ollama déclare la capacité `thinking`, persisté dans
 `llm.ollamaThink`. Sur une machine lente, couper le raisonnement est le
 premier levier : il multipliait l'attente avant la réponse.
 
+**Le raisonnement entre au journal de recherche** (demande de Frédéric :
+lent mais important, « une vraie belle fonctionnalité »). Schéma `brain.db`
+v5 : colonne `thinking` sur `history_chat_messages`, remplie par
+`fusion-chat-service` avec la réponse, relue par les deux lecteurs, affichée
+repliée dans l'onglet « Chat History » du journal (`message-thinking`), et
+`thinkingLength` dans les métadonnées de l'opération `rag_query`. Test
+guardé `chat-thinking.test.ts` (migration v4 → v5 incluse) : il ne tourne
+que sur l'ABI Node, donc en CI ou via `npm run test:integration`.
+
 ---
 
 ### Une clé d'API indéchiffrable renvoyée telle quelle, avec une trace de pile à chaque lecture

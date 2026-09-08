@@ -42,6 +42,12 @@ export const ChatHistoryView: React.FC<Props> = ({ messages }) => {
                   {formatDateTime(msg.timestamp)}
                 </span>
               </div>
+              {msg.thinking && (
+                <details className="message-thinking">
+                  <summary>{t('chat.thinkingBlock', { chars: msg.thinking.length })}</summary>
+                  <pre>{msg.thinking}</pre>
+                </details>
+              )}
               <div className="message-content">{msg.content}</div>
               {msg.sources && msg.sources.length > 0 && (
                 <div className="message-sources">
