@@ -742,6 +742,8 @@
     "notConfigured": "Das Modell antwortet nicht. Prüfen Sie, ob Ollama läuft, oder wählen Sie in den Einstellungen einen anderen Anbieter.",
     "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
     "timeout": "Seit {{minutes}} Min. keine Antwort vom Modell: Generierung abgebrochen. Erhöhen Sie das Inaktivitäts-Timeout in den Chat-Einstellungen, wenn das Modell nur langsam ist.",
+    "providerError": "Das Modell ist gescheitert: {{message}}",
+    "waitingForModel": "Das Modell liest noch den Prompt · {{elapsed}} Min. vergangen · automatischer Abbruch nach {{limit}} Min.",
     "openSettings": "Einstellungen öffnen",
     "sourcesLabel": "Quellen",
     "noProjectState": {
@@ -2205,6 +2207,9 @@
     "contextModelfile": "Sein Modelfile setzt num_ctx auf {{size}}.",
     "contextAboveDeclared": "Über den {{size}} Trainings-Token: Ollama akzeptiert das, aber die Qualität kann leiden.",
     "contextMemoryHint": "Wird bei jedem Aufruf an Ollama gesendet (num_ctx). Der KV-Cache wächst mit: ein großes Fenster braucht viel Speicher.",
+    "memoryEstimate": "Speicherschätzung: Modell {{model}} GB + Kontext ≈ {{context}} GB = {{total}} GB, bei ≈ {{budget}} GB nutzbar für das Modell (75 % des Arbeitsspeichers).",
+    "memoryWarningModel": "Dieses Modell übersteigt bereits den nutzbaren Speicher: Ollama lagert einen Teil auf die CPU aus, und jedes Kontext-Token verschärft die Verlangsamung.",
+    "memoryWarningContext": "Dieses Fenster sprengt den Speicher: Ollama wird einen Teil des Modells auf die CPU auslagern, und das Lesen des Prompts wird sehr langsam.",
     "promptLanguage": "Sprache des System-Prompts",
     "customPrompt": "Eigenen System-Prompt verwenden",
     "customPromptHelp": "Den voreingestellten System-Prompt durch einen eigenen ersetzen",

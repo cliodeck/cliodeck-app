@@ -10,6 +10,7 @@ import {
   getContextWindow,
 } from '../../../../../backend/core/llm/context-windows';
 import { formatContextSize, normalizeNumCtxInput } from '../../utils/context-size';
+import { estimateModelMemory, formatGiB } from '../../utils/memory-estimate';
 import './RAGSettingsPanel.css';
 
 /**
@@ -23,6 +24,7 @@ import './RAGSettingsPanel.css';
 interface ModelContextInfo {
   declared?: number;
   modelfileNumCtx?: number;
+  kvBytesPerToken?: number;
   source: 'ollama' | 'table' | 'none';
 }
 
@@ -150,6 +152,7 @@ export const RAGSettingsPanel: React.FC = () => {
           setModelInfo({
             declared: res.info.contextLength,
             modelfileNumCtx: res.info.modelfileNumCtx,
+            kvBytesPerToken: res.info.kvBytesPerToken,
             source: 'ollama',
           });
           return;
@@ -165,6 +168,31 @@ export const RAGSettingsPanel: React.FC = () => {
       cancelled = true;
     };
   }, [params.model, params.provider, isSettingsPanelOpen]);
+
+  // Mémoire physique, lue une fois : avec la taille du modèle et le coût
+  // par jeton, le panneau prévient quand modèle + contexte ne tiendront pas.
+  const [totalMemoryBytes, setTotalMemoryBytes] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (!isSettingsPanelOpen || totalMemoryBytes !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electron.system.getMemory();
+        if (!cancelled && res?.success && res.totalBytes) setTotalMemoryBytes(res.totalBytes);
+      } catch (error) {
+        console.warn('Could not read system memory:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSettingsPanelOpen, totalMemoryBytes]);
+  const memoryEstimate = estimateModelMemory({
+    modelBytes: availableModels.find((m) => m.id === params.model)?.sizeBytes,
+    numCtx: params.numCtx,
+    kvBytesPerToken: modelInfo.kvBytesPerToken,
+    totalMemoryBytes,
+  });
 
   const declaredContext = modelInfo.declared;
   // Le curseur couvre au moins 32K, la longueur déclarée, et la valeur
@@ -602,6 +630,23 @@ export const RAGSettingsPanel: React.FC = () => {
                   </small>
                 )}
                 <small className="setting-hint">{t('ragPanel.contextMemoryHint')}</small>
+                {memoryEstimate && (
+                  <small
+                    className={`setting-hint${memoryEstimate.level !== 'ok' ? ' context-warning' : ''}`}
+                    data-testid="memory-estimate"
+                    data-level={memoryEstimate.level}
+                  >
+                    {memoryEstimate.level !== 'ok' && <><AlertTriangle size={12} />{' '}</>}
+                    {t('ragPanel.memoryEstimate', {
+                      model: formatGiB(memoryEstimate.modelBytes),
+                      context: formatGiB(memoryEstimate.contextBytes),
+                      total: formatGiB(memoryEstimate.modelBytes + memoryEstimate.contextBytes),
+                      budget: formatGiB(memoryEstimate.budgetBytes),
+                    })}
+                    {memoryEstimate.level === 'model' && ` ${t('ragPanel.memoryWarningModel')}`}
+                    {memoryEstimate.level === 'context' && ` ${t('ragPanel.memoryWarningContext')}`}
+                  </small>
+                )}
               </div>
 
               {/* System Prompt Language */}

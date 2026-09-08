@@ -357,6 +357,45 @@ Couverture : `ollama-model-info.test.ts`, `clampNumCtx` dans
 
 ---
 
+### Un modèle de 22 Go sur 24 Go : coupure muette à cinq minutes
+
+Constaté le 2026-09-08 sur un vrai tour de chat (qwen3.5:35b, Mac M4 Pro
+24 Go, fenêtre réglée sur le maximum du modèle, 262 144 jetons). Le journal
+d'Ollama montre la cause : les tampons du contexte (5 Go) ne laissent plus
+la place aux poids, 12 Go du modèle passent sur le processeur, la lecture
+du prompt tombe à une dizaine de jetons par seconde — 3 072 lus sur 7 755
+quand, à 5 min 14 s, la requête est coupée. Non par le délai d'inactivité
+de l'utilisateur (10 min), mais par le `fetch` de Node : `headersTimeout`
+d'undici, 300 s, invisible, et sans message côté chat (bulle vide).
+
+Quatre réponses, sur la branche `fix/ollama-long-first-token` :
+
+- **Plus de plafond caché.** `OllamaProvider` passe à `fetch` un `Agent`
+  undici sans `headersTimeout` ni `bodyTimeout` (`ollamaDispatcher()`),
+  pour le chat comme pour les embeddings. Dépendance `undici` ^7, même
+  majeure que celle embarquée par le Node d'Electron 40 — condition pour
+  qu'un dispatcher externe soit accepté par le `fetch` natif. Le seul
+  délai est désormais celui que le panneau affiche.
+- **La cause de l'échec s'affiche.** Un 5xx d'Ollama porte son `error`
+  JSON ; le fournisseur le pose dans son statut, `chat-engine` relaie
+  `lastError` par `onError` quand le chunk terminal est en erreur, le
+  renderer l'habille (`chat.providerError`).
+- **Le panneau prévient avant.** `system:get-memory` + taille brute des
+  modèles (`/api/tags`) + coût KV par jeton (`/api/show`, ou 128 KiB par
+  défaut) → `estimateModelMemory` : « modèle X Go + contexte ≈ Y Go pour
+  Z Go utilisables », deux niveaux d'alerte (le modèle déborde seul ; la
+  fenêtre fait déborder). Ordre de grandeur assumé, budget à 75 % de la
+  mémoire physique.
+- **L'attente est lisible.** Après une minute sans jeton, le bandeau
+  d'état affiche le temps écoulé et le délai d'interruption
+  (`chat.waitingForModel`). Ollama ne transmet pas l'avancement de la
+  lecture du prompt : on ne peut pas faire mieux que le temps.
+
+Sur ce Mac, la fenêtre raisonnable pour qwen3.5:35b est 16K–32K ; les
+250K « conseillés » par la fiche du modèle supposent bien plus de mémoire.
+
+---
+
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps

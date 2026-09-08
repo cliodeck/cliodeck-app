@@ -9,11 +9,13 @@
  * sites keep their existing behaviour).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { OllamaProvider } from '../ollama.js';
+import { Agent } from 'undici';
+import { OllamaProvider, ollamaDispatcher } from '../ollama.js';
 
 interface CapturedRequest {
   url: string;
   body: unknown;
+  dispatcher?: unknown;
 }
 
 const realFetch = globalThis.fetch;
@@ -53,6 +55,7 @@ beforeEach(() => {
     captured = {
       url,
       body: init?.body ? JSON.parse(init.body as string) : undefined,
+      dispatcher: (init as { dispatcher?: unknown } | undefined)?.dispatcher,
     };
     return streamOne();
   }) as typeof fetch;
@@ -122,5 +125,43 @@ describe('OllamaProvider.chat — échantillonnage transmis dans options', () =>
     const body = captured?.body as { options?: Record<string, unknown> };
     // `undefined` disparaît à la sérialisation JSON : la clé est absente.
     expect(body.options && 'repeat_penalty' in body.options).toBe(false);
+  });
+});
+
+describe('OllamaProvider.chat — pas de plafond caché de cinq minutes', () => {
+  it('passe au fetch un dispatcher undici sans délai d’en-têtes ni de corps', async () => {
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    await drain(p, 4096);
+    // Le `fetch` de Node coupe à 300 s sans dispatcher : un modèle de 22 Go
+    // qui charge puis lit 8 000 jetons dépasse ce délai avant le premier jeton.
+    expect(captured?.dispatcher).toBeInstanceOf(Agent);
+    expect(captured?.dispatcher).toBe(ollamaDispatcher());
+  });
+});
+
+describe('OllamaProvider.chat — une erreur HTTP a une cause lisible', () => {
+  it('lit le `error` JSON d’Ollama et le pose dans le statut du fournisseur', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'model requires more system memory (24.1 GiB) than is available (18.2 GiB)' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    const chunks: Array<{ finishReason?: string }> = [];
+    for await (const c of p.chat([{ role: 'user', content: 'q' }])) chunks.push(c);
+    expect(chunks.at(-1)?.finishReason).toBe('error');
+    const status = p.getStatus();
+    expect(status.state).toBe('degraded');
+    expect(status.lastError?.code).toBe('ollama_http_500');
+    expect(status.lastError?.message).toMatch(/more system memory/);
+  });
+
+  it('retombe sur le code HTTP quand le corps n’est pas du JSON', async () => {
+    globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+    const p = new OllamaProvider({ model: 'nope', baseUrl: 'http://mock' });
+    for await (const _ of p.chat([{ role: 'user', content: 'q' }])) {
+      // discard
+    }
+    expect(p.getStatus().lastError?.message).toBe('HTTP 404');
   });
 });

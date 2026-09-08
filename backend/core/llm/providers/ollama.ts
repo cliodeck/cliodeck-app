@@ -18,6 +18,7 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { Agent } from 'undici';
 
 export interface OllamaProviderConfig {
   baseUrl?: string;
@@ -42,6 +43,55 @@ export interface OllamaEmbeddingProviderConfig {
 }
 
 const DEFAULT_BASE = 'http://127.0.0.1:11434';
+
+/**
+ * Le `fetch` de Node abandonne toute requête dont les en-têtes de réponse
+ * n'arrivent pas en 300 s (`headersTimeout` d'undici), puis toute pause de
+ * 300 s dans le corps (`bodyTimeout`). Ollama n'envoie rien avant le premier
+ * jeton : charger un modèle de 22 Go et lire un prompt de 8 000 jetons sur
+ * une machine qui déborde sur le processeur dépasse facilement cinq
+ * minutes — mesuré le 2026-09-08 : coupure à 5 min 14 s, sans message,
+ * avant même le délai d'inactivité réglé par l'utilisateur. Le seul plafond
+ * doit être celui que l'utilisateur voit et règle ; ce dispatcher retire
+ * les deux plafonds cachés. Créé paresseusement : les tests remplacent
+ * `globalThis.fetch` et n'en ont pas besoin. Même majeure d'undici que
+ * celle embarquée par le Node d'Electron (7.x), condition pour qu'un
+ * dispatcher externe soit accepté par le `fetch` natif.
+ */
+let patientDispatcher: Agent | undefined;
+export function ollamaDispatcher(): Agent {
+  patientDispatcher ??= new Agent({
+    headersTimeout: 0,
+    bodyTimeout: 0,
+    connectTimeout: 30_000,
+  });
+  return patientDispatcher;
+}
+
+/** Options `fetch` à étaler dans chaque appel Ollama : `dispatcher` est une extension undici absente du lib DOM de TypeScript. */
+function patience(): RequestInit {
+  return { dispatcher: ollamaDispatcher() } as RequestInit;
+}
+
+/**
+ * Message d'erreur d'une réponse HTTP d'Ollama (`{"error": "..."}`), ou le
+ * texte brut, ou le code HTTP. Sans lui, un 500 « model requires more
+ * system memory » arrivait au chat comme une bulle vide.
+ */
+async function readOllamaError(res: Response): Promise<string> {
+  try {
+    const text = (await res.text()).trim();
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
+    } catch {
+      // texte brut
+    }
+    return text || `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
 
 /**
  * Models known to emit valid `tool_calls` JSON consistently when served by
@@ -85,6 +135,7 @@ async function fetchJson<T>(
   signal?: AbortSignal
 ): Promise<T> {
   const res = await fetch(url, {
+    ...patience(),
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -222,6 +273,7 @@ export class OllamaProvider implements LLMProvider {
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/api/chat`, {
+        ...patience(),
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -241,6 +293,15 @@ export class OllamaProvider implements LLMProvider {
     }
 
     if (!res.ok || !res.body) {
+      const message = res.ok ? 'Réponse sans corps' : await readOllamaError(res);
+      this.status = {
+        state: 'degraded',
+        lastError: {
+          code: `ollama_http_${res.status}`,
+          message,
+          at: now(),
+        },
+      };
       yield { delta: '', done: true, finishReason: 'error' };
       return;
     }

@@ -32,6 +32,14 @@ export interface OllamaModelInfo {
   quantizationLevel?: string;
   /** `capabilities` d'Ollama ≥ 0.7 (`completion`, `tools`, `vision`, `thinking`…). */
   capabilities?: string[];
+  /**
+   * Octets de cache KV par jeton de contexte, f16, d'après les métadonnées
+   * GGUF (`block_count`, `attention.head_count_kv`, dimensions de tête).
+   * Absent quand une métadonnée manque. Surestime les architectures
+   * hybrides (couches récurrentes), sous-estime les tampons de calcul :
+   * c'est un ordre de grandeur pour prévenir, pas une mesure.
+   */
+  kvBytesPerToken?: number;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -45,6 +53,23 @@ function asPositiveInt(value: unknown): number | undefined {
   return typeof n === 'number' && Number.isFinite(n) && n > 0
     ? Math.floor(n)
     : undefined;
+}
+
+function kvBytesPerToken(
+  modelInfo: Record<string, unknown>,
+  arch: string
+): number | undefined {
+  const blocks = asPositiveInt(modelInfo[`${arch}.block_count`]);
+  const kvHeads = asPositiveInt(modelInfo[`${arch}.attention.head_count_kv`]);
+  const heads = asPositiveInt(modelInfo[`${arch}.attention.head_count`]);
+  const embedding = asPositiveInt(modelInfo[`${arch}.embedding_length`]);
+  const keyLen =
+    asPositiveInt(modelInfo[`${arch}.attention.key_length`]) ??
+    (heads && embedding ? Math.floor(embedding / heads) : undefined);
+  const valueLen = asPositiveInt(modelInfo[`${arch}.attention.value_length`]) ?? keyLen;
+  if (!blocks || !kvHeads || !keyLen || !valueLen) return undefined;
+  // K et V, en f16 (2 octets), pour chaque couche et chaque tête KV.
+  return blocks * kvHeads * (keyLen + valueLen) * 2;
 }
 
 /**
@@ -67,6 +92,9 @@ export function parseOllamaShowResponse(
     // cherche d'abord celle de l'architecture déclarée, puis n'importe
     // quelle clé `*.context_length` — certains builds déclarent une
     // architecture générique.
+    if (info.architecture) {
+      info.kvBytesPerToken = kvBytesPerToken(modelInfo, info.architecture);
+    }
     const preferred = info.architecture
       ? asPositiveInt(modelInfo[`${info.architecture}.context_length`])
       : undefined;

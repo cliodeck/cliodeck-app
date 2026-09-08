@@ -2,6 +2,7 @@
  * Configuration and Ollama IPC handlers
  */
 import { ipcMain } from 'electron';
+import os from 'os';
 import { configManager } from '../../services/config-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
@@ -207,6 +208,9 @@ export function setupConfigHandlers() {
         id: m.name,
         name: m.name,
         size: typeof m.size === 'number' ? formatOllamaSize(m.size) : undefined,
+        // Taille brute : le panneau du chat en déduit si modèle + contexte
+        // tiennent en mémoire.
+        sizeBytes: typeof m.size === 'number' ? m.size : undefined,
         description: 'Modèle Ollama',
         recommendedFor: [] as string[],
       }));
@@ -218,6 +222,14 @@ export function setupConfigHandlers() {
       return errorResponse(error);
     }
   });
+
+  // Mémoire de la machine : avec la taille du modèle et le coût par jeton
+  // du contexte, le panneau du chat prévient avant qu'une fenêtre trop
+  // large ne déporte le modèle sur le processeur (2026-09-08 : 256K sur un
+  // Mac de 24 Go avec un modèle de 22 Go, lecture du prompt à 10 jetons/s).
+  ipcMain.handle('system:get-memory', () =>
+    successResponse({ totalBytes: os.totalmem(), freeBytes: os.freemem() })
+  );
 
   // Métadonnées d'un modèle (`/api/show`) : longueur de contexte déclarée,
   // `num_ctx` du Modelfile, capacités. C'est ce qui remplace la table de

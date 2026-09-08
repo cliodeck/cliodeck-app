@@ -66,6 +66,8 @@ export interface AvailableModel {
   id: string;
   name: string;
   size: string;
+  /** Taille du fichier de poids, pour l'estimation mémoire du panneau. */
+  sizeBytes?: number;
   description?: string;
 }
 

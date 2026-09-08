@@ -132,7 +132,10 @@ export function useBrainstormChat(): UseBrainstormChat {
                   Math.round(useRAGQueryStore.getState().params.timeout / 60_000)
                 ),
               })
-            : env.error.message;
+            : /^(ollama_|provider_|stream_)/.test(env.error.code)
+              ? // Échec côté fournisseur : la cause vient du main, on l'habille.
+                tRef.current('chat.providerError', { message: env.error.message })
+              : env.error.message;
         store.finishAssistant(
           aId,
           env.chunk.finishReason ?? 'error',

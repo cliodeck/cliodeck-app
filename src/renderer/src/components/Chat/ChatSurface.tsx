@@ -17,6 +17,12 @@ interface ChatSurfaceProps<M extends UnifiedMessage> {
   onClear?: () => void;
   emptyState?: React.ReactNode;
   banner?: React.ReactNode;
+  /**
+   * `danger` (défaut, compatibilité) pour une erreur ; `info` pour un état
+   * en cours — recherche, attente du premier jeton. Un bandeau rouge dit
+   * « problème » : un compteur d'attente n'en est pas un.
+   */
+  bannerTone?: 'danger' | 'info';
   placeholder?: string;
   renderMessageExtras?: (message: M) => React.ReactNode;
   footer?: React.ReactNode;
@@ -78,6 +84,7 @@ export function ChatSurface<M extends UnifiedMessage>({
   onClear,
   emptyState,
   banner,
+  bannerTone = 'danger',
   placeholder,
   renderMessageExtras,
   footer,
@@ -121,7 +128,13 @@ export function ChatSurface<M extends UnifiedMessage>({
         )}
       </div>
 
-      {banner && <div className="chat-surface__banner">{banner}</div>}
+      {banner && (
+        <div
+          className={`chat-surface__banner${bannerTone === 'info' ? ' chat-surface__banner--info' : ''}`}
+        >
+          {banner}
+        </div>
+      )}
 
       <Composer
         onSend={onSend}

@@ -742,6 +742,8 @@
     "notConfigured": "Le modèle ne répond pas. Vérifiez qu'Ollama est lancé, ou choisissez un autre fournisseur dans les Paramètres.",
     "startFailed": "Le modèle ne répond pas : {{error}}. Vérifiez votre configuration dans les Paramètres.",
     "timeout": "Aucune réponse du modèle depuis {{minutes}} min : génération interrompue. Augmentez le délai d'inactivité dans les réglages du chat si le modèle est simplement lent.",
+    "providerError": "Le modèle a échoué : {{message}}",
+    "waitingForModel": "Le modèle lit encore le prompt · {{elapsed}} min écoulées · interruption automatique à {{limit}} min",
     "openSettings": "Ouvrir les paramètres",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2205,6 +2207,9 @@
     "contextModelfile": "Son Modelfile fixe num_ctx à {{size}}.",
     "contextAboveDeclared": "Au-delà des {{size}} jetons d'entraînement : Ollama accepte, mais la qualité peut se dégrader.",
     "contextMemoryHint": "Envoyée à Ollama à chaque appel (num_ctx). Le cache KV grandit avec elle : une grande fenêtre demande beaucoup de mémoire.",
+    "memoryEstimate": "Estimation mémoire : modèle {{model}} Go + contexte ≈ {{context}} Go = {{total}} Go, pour ≈ {{budget}} Go utilisables par le modèle (75 % de la mémoire de la machine).",
+    "memoryWarningModel": "Ce modèle dépasse déjà la mémoire utilisable : Ollama en déporte une partie sur le processeur, et chaque jeton de contexte aggrave le ralentissement.",
+    "memoryWarningContext": "Cette fenêtre fait déborder la mémoire : Ollama déportera une partie du modèle sur le processeur et la lecture du prompt deviendra très lente.",
     "promptLanguage": "Langue du prompt système",
     "customPrompt": "Utiliser un prompt système personnalisé",
     "customPromptHelp": "Remplacer le prompt système par défaut par le vôtre",

@@ -72,6 +72,24 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nerEnabled, setNerEnabled] = useState(false);
   const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(null);
+  // Attente avant le premier jeton : Ollama ne transmet pas l'avancement de
+  // la lecture du prompt, mais l'utilisateur doit savoir qu'il attend, depuis
+  // combien de temps, et quand le délai d'inactivité coupera.
+  const [waitSeconds, setWaitSeconds] = useState(0);
+  const [firstTokenSeen, setFirstTokenSeen] = useState(false);
+  const timeoutMinutes = useRAGQueryStore((s) => Math.max(1, Math.round(s.params.timeout / 60_000)));
+  useEffect(() => {
+    if (!isStreaming) {
+      setWaitSeconds(0);
+      setFirstTokenSeen(false);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setWaitSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isStreaming]);
   const mcpTools = useMcpToolsList();
 
   // État vide de la variante panel : nombre de PDFs indexés (repris de
@@ -145,6 +163,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     const unsub = onStatus((env) => {
       const phase = env.status.phase;
       const label = env.status.label ?? phase;
+      if (phase === 'generating') setFirstTokenSeen(true);
       setRagStatus({ message: label, isError: phase === 'error' });
     });
     return () => unsub();
@@ -431,19 +450,31 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
 
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 
+  const waitingNotice =
+    isStreaming && !firstTokenSeen && waitSeconds >= 60
+      ? t('chat.waitingForModel', {
+          elapsed: Math.floor(waitSeconds / 60),
+          limit: timeoutMinutes,
+        })
+      : null;
+  const showStatus = ragStatus && (isStreaming || ragStatus.isError);
   const statusBanner =
-    ragStatus && (isStreaming || ragStatus.isError) ? (
+    showStatus || waitingNotice ? (
       <div
-        className={`rag-status-indicator ${ragStatus.isError ? 'rag-status-error' : ''}`}
+        className={`rag-status-indicator ${ragStatus?.isError ? 'rag-status-error' : ''}`}
         role="status"
         aria-live="polite"
       >
-        {ragStatus.message}
+        {showStatus ? ragStatus.message : null}
+        {showStatus && waitingNotice ? ' · ' : null}
+        {waitingNotice}
       </div>
     ) : undefined;
 
   const banner =
     error && !isStreaming ? error : statusBanner;
+  const bannerTone: 'danger' | 'info' =
+    (error && !isStreaming) || ragStatus?.isError ? 'danger' : 'info';
 
   return (
     <div className={`brainstorm-chat__root ${isPanel ? 'brainstorm-chat__root--panel' : ''}`}>
@@ -497,6 +528,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
           onClear={messages.length > 0 ? handleClear : undefined}
           emptyState={emptyState}
           banner={banner}
+          bannerTone={bannerTone}
           placeholder={t('chat.brainstorm.placeholder')}
           renderMessageExtras={renderExtras}
           enableNER={nerEnabled}

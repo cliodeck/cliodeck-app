@@ -197,6 +197,17 @@ const api = {
     getAll: () => ipcRenderer.invoke('config:get-all'),
   },
 
+  system: {
+    /** Mémoire physique de la machine, pour estimer si modèle + contexte tiennent. */
+    getMemory: () =>
+      ipcRenderer.invoke('system:get-memory') as Promise<{
+        success: boolean;
+        totalBytes?: number;
+        freeBytes?: number;
+        error?: string;
+      }>,
+  },
+
   // Ollama
   ollama: {
     listModels: () => ipcRenderer.invoke('ollama:list-models'),
@@ -208,6 +219,7 @@ const api = {
           model: string;
           contextLength?: number;
           modelfileNumCtx?: number;
+          kvBytesPerToken?: number;
           architecture?: string;
           family?: string;
           parameterSize?: string;

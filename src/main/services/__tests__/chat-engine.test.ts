@@ -348,3 +348,48 @@ describe('chat-engine — options d’échantillonnage transmises au fournisseur
     });
   });
 });
+
+describe('chat-engine — un chunk terminal en erreur porte la cause du fournisseur', () => {
+  it('appelle onError avec le lastError du statut, puis onDone en erreur', async () => {
+    const provider = {
+      id: 'ollama',
+      name: 'Ollama',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({
+        state: 'degraded',
+        lastError: { code: 'ollama_http_500', message: 'model requires more system memory', at: 'now' },
+      }),
+      healthCheck: async () => ({ state: 'ready' }) as never,
+      chat: async function* () {
+        yield { delta: '', done: true, finishReason: 'error' };
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+
+    const errors: Array<{ code: string; message: string }> = [];
+    const dones: string[] = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      hooks: {
+        onError: (e) => errors.push(e),
+        onDone: (c) => dones.push(c.finishReason ?? ''),
+      },
+    });
+    expect(errors).toEqual([{ code: 'ollama_http_500', message: 'model requires more system memory' }]);
+    expect(dones).toEqual(['error']);
+  });
+
+  it('donne une cause par défaut quand le fournisseur n’en a pas', async () => {
+    const provider = makeFakeProvider([{ delta: '', done: true, finishReason: 'error' }]);
+    const errors: Array<{ code: string; message: string }> = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      hooks: { onError: (e) => errors.push(e) },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe('provider_error');
+  });
+});
