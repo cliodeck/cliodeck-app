@@ -58,6 +58,8 @@ export interface BrainstormMessage {
   id: string;
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Raisonnement d'un modèle pensant, accumulé à part de la réponse. */
+  thinking?: string;
   pending?: boolean;
   ragCitation?: boolean;
   finishReason?: string;
@@ -138,6 +140,7 @@ interface State {
   appendUser: (content: string) => string;
   beginAssistant: (sessionId: string) => string;
   appendDelta: (assistantId: string, delta: string) => void;
+  appendThinking: (assistantId: string, delta: string) => void;
   setSources: (assistantId: string, sources: BrainstormSource[]) => void;
   setExplanation: (assistantId: string, explanation: RAGExplanationBackend) => void;
   setRagUsed: (assistantId: string, ragUsed: boolean) => void;
@@ -220,6 +223,14 @@ export const useChatStore = create<State>((set) => ({
     return id;
   },
 
+  appendThinking: (assistantId, delta) => {
+    if (!delta) return;
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === assistantId ? { ...m, thinking: (m.thinking ?? '') + delta } : m
+      ),
+    }));
+  },
   appendDelta: (assistantId, delta) => {
     if (!delta) return;
     set((s) => ({

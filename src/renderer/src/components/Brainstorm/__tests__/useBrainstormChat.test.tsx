@@ -15,7 +15,7 @@ import { useChatStore } from '../../../stores/chatStore';
 type StartOpts = Record<string, unknown> | undefined;
 type ChunkEnvelope = {
   sessionId: string;
-  chunk: { delta: string; done?: boolean; finishReason?: string };
+  chunk: { delta: string; thinking?: string; done?: boolean; finishReason?: string };
   error?: { code: string; message: string };
 };
 
@@ -69,6 +69,7 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
       top_k: 50,
       repeat_penalty: 1.15,
       timeout: 600_000,
+      think: false,
     });
 
     const { result } = renderHook(() => useBrainstormChat());
@@ -84,7 +85,25 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
       topK: 50,
       repeatPenalty: 1.15,
       timeoutMs: 600_000,
+      think: false,
     });
+  });
+
+  it('accumule les chunks de raisonnement à part de la réponse', async () => {
+    installFusionChat();
+    useRAGQueryStore.getState().setParams({ provider: 'ollama', model: 'qwen3.5:35b' });
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    act(() => {
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', thinking: 'hmm' } });
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Réponse' } });
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', done: true, finishReason: 'stop' } });
+    });
+    const last = useChatStore.getState().messages.at(-1);
+    expect(last?.thinking).toBe('hmm');
+    expect(last?.content).toBe('Réponse');
   });
 
   it('traduit le délai d’inactivité dépassé en message d’erreur localisé', async () => {

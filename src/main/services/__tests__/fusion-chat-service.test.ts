@@ -194,6 +194,7 @@ describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama',
     topP: 0.85,
     topK: 40,
     repeatPenalty: 1.1,
+    think: false,
   };
 
   it('transmet tout à la génération Ollama locale, fenêtre du panneau en tête', () => {
@@ -214,6 +215,7 @@ describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama',
     expect(r.topP).toBeUndefined();
     expect(r.topK).toBeUndefined();
     expect(r.repeatPenalty).toBeUndefined();
+    expect(r.think).toBeUndefined();
     // La température vaut pour tous.
     expect(r.temperature).toBe(0.1);
     expect(r.maxTokens).toBe(512);

@@ -271,6 +271,7 @@ export interface TurnOptions {
   topP?: number;
   topK?: number;
   repeatPenalty?: number;
+  think?: boolean;
 }
 
 /**
@@ -300,6 +301,7 @@ export function resolveTurnOptions(
     topP: local ? opts?.topP : undefined,
     topK: local ? opts?.topK : undefined,
     repeatPenalty: local ? opts?.repeatPenalty : undefined,
+    think: local ? opts?.think : undefined,
   };
 }
 
@@ -336,6 +338,8 @@ export interface ChatStartArgs {
     topK?: number;
     /** `repeat_penalty` d'Ollama ; n'est transmis qu'à la génération Ollama locale. */
     repeatPenalty?: number;
+    /** `false` coupe le raisonnement d'un modèle pensant ; Ollama local seulement. */
+    think?: boolean;
     /**
      * Délai d'inactivité du tour (curseur « Timeout » du panneau). Le tour
      * est interrompu après ce délai sans chunk, statut, source ni événement

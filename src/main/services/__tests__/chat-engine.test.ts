@@ -393,3 +393,29 @@ describe('chat-engine — un chunk terminal en erreur porte la cause du fourniss
     expect(errors[0].code).toBe('provider_error');
   });
 });
+
+describe('chat-engine — raisonnement d’un modèle pensant', () => {
+  it('relaie les chunks thinking, passe par la phase thinking puis generating', async () => {
+    const provider = makeFakeProvider([
+      { delta: '', thinking: 'hmm' },
+      { delta: '', thinking: ' hmm' },
+      { delta: 'Réponse', done: false },
+      { delta: '', done: true, finishReason: 'stop' },
+    ] as ChatChunk[]);
+    const phases: string[] = [];
+    const seen: ChatChunk[] = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      opts: { think: true },
+      hooks: {
+        onStatus: (s) => phases.push(s.phase),
+        onChunk: (c) => seen.push(c),
+      },
+    });
+    expect(seen.filter((c) => c.thinking).map((c) => c.thinking)).toEqual(['hmm', ' hmm']);
+    expect(seen.filter((c) => c.delta).map((c) => c.delta)).toEqual(['Réponse']);
+    expect(phases.indexOf('thinking')).toBeGreaterThanOrEqual(0);
+    expect(phases.indexOf('thinking')).toBeLessThan(phases.indexOf('generating'));
+  });
+});

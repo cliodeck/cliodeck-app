@@ -35,6 +35,8 @@ export interface RAGQueryParams {
 
   // Context window size (num_ctx for Ollama)
   numCtx: number; // Context window in tokens (0 = use model default)
+  /** Raisonnement d'un modèle pensant : `false` le coupe ; `undefined` = défaut d'Ollama. */
+  think?: boolean;
 
   // Independent source-family toggles:
   //   bibliography = PDFs / Zotero      (retrieval "secondary")
@@ -123,7 +125,7 @@ interface RAGQueryState {
    * éditent le même champ : ce qui vient d'être enregistré d'un côté doit
    * se voir de l'autre sans redémarrage.
    */
-  applyLLMConfig: (llm: { ollamaChatModel?: string; ollamaNumCtx?: number }) => void;
+  applyLLMConfig: (llm: { ollamaChatModel?: string; ollamaNumCtx?: number; ollamaThink?: boolean }) => void;
   loadAvailableModels: () => Promise<void>;
   loadAvailableCollections: () => Promise<void>;
   setSelectedCollections: (keys: string[]) => void;
@@ -304,6 +306,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           typeof llm.ollamaNumCtx === 'number' && llm.ollamaNumCtx > 0
             ? llm.ollamaNumCtx
             : DEFAULT_PARAMS.numCtx;
+        patch.think = typeof llm.ollamaThink === 'boolean' ? llm.ollamaThink : undefined;
         set((state) => ({ params: { ...state.params, ...patch } }));
       },
 
@@ -324,6 +327,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
               // du chat écrivent ; `rag.numCtx` est l'ancien emplacement, que
               // plus aucune interface ne renseigne.
               numCtx: llmConfig.ollamaNumCtx || ragConfig.numCtx || DEFAULT_PARAMS.numCtx,
+              think: typeof llmConfig.ollamaThink === 'boolean' ? llmConfig.ollamaThink : undefined,
               includeBibliography: DEFAULT_PARAMS.includeBibliography,
               includePrimary: DEFAULT_PARAMS.includePrimary,
               includeNotes: DEFAULT_PARAMS.includeNotes,

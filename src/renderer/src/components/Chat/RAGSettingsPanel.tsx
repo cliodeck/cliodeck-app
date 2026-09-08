@@ -25,6 +25,8 @@ interface ModelContextInfo {
   declared?: number;
   modelfileNumCtx?: number;
   kvBytesPerToken?: number;
+  /** `capabilities` d'Ollama : `thinking` fait apparaître le réglage du raisonnement. */
+  capabilities?: string[];
   source: 'ollama' | 'table' | 'none';
 }
 
@@ -35,6 +37,7 @@ const PERSIST_DEBOUNCE_MS = 500;
 type LLMSettingsPatch = {
   ollamaChatModel?: string;
   ollamaNumCtx?: number;
+  ollamaThink?: boolean;
   generationProvider?: LLMProvider;
 };
 
@@ -134,6 +137,11 @@ export const RAGSettingsPanel: React.FC = () => {
     persistLLM({ ollamaChatModel: model });
   };
 
+  const handleThinkChange = (think: boolean) => {
+    setParams({ think });
+    persistLLM({ ollamaThink: think });
+  };
+
   // Longueur de contexte déclarée par le modèle (`/api/show`). Repli sur la
   // table par famille si Ollama ne répond pas — signalé comme estimation.
   useEffect(() => {
@@ -153,6 +161,7 @@ export const RAGSettingsPanel: React.FC = () => {
             declared: res.info.contextLength,
             modelfileNumCtx: res.info.modelfileNumCtx,
             kvBytesPerToken: res.info.kvBytesPerToken,
+            capabilities: res.info.capabilities,
             source: 'ollama',
           });
           return;
@@ -648,6 +657,24 @@ export const RAGSettingsPanel: React.FC = () => {
                   </small>
                 )}
               </div>
+
+              {/* Raisonnement d'un modèle pensant — affiché seulement si
+                  Ollama déclare la capacité `thinking`. Absent du store =
+                  défaut d'Ollama (actif). */}
+              {modelInfo.capabilities?.includes('thinking') && (
+                <div className="setting-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={params.think ?? true}
+                      onChange={(e) => handleThinkChange(e.target.checked)}
+                      aria-label={t('ragPanel.think')}
+                    />
+                    <span>{t('ragPanel.think')}</span>
+                  </label>
+                  <small className="setting-hint">{t('ragPanel.thinkHelp')}</small>
+                </div>
+              )}
 
               {/* System Prompt Language */}
               <div className="setting-group">

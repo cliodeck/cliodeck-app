@@ -744,6 +744,15 @@
     "timeout": "No response from the model for {{minutes}} min: generation stopped. Raise the inactivity timeout in the chat settings if the model is just slow.",
     "providerError": "The model failed: {{message}}",
     "waitingForModel": "The model is still reading the prompt · {{elapsed}} min elapsed · automatic stop at {{limit}} min",
+    "thinking": "The model is thinking · {{chars}} characters of reasoning",
+    "thinkingBlock": "Model reasoning ({{chars}} characters)",
+    "phase": {
+      "retrieving": "Searching the sources…",
+      "compressing": "Compressing the context…",
+      "thinking": "The model is thinking…",
+      "generating": "Writing the answer…",
+      "done": "Done"
+    },
     "openSettings": "Open Settings",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2210,6 +2219,8 @@
     "memoryEstimate": "Memory estimate: model {{model}} GB + context ≈ {{context}} GB = {{total}} GB, against ≈ {{budget}} GB usable by the model (75% of the machine's memory).",
     "memoryWarningModel": "This model already exceeds the usable memory: Ollama offloads part of it to the CPU, and every context token makes the slowdown worse.",
     "memoryWarningContext": "This window overflows the memory: Ollama will offload part of the model to the CPU and prompt reading will become very slow.",
+    "think": "Model reasoning (thinking)",
+    "thinkHelp": "This model can reason before answering. The reasoning is shown separately in the reply. Turning it off makes answers much faster on a slow machine.",
     "promptLanguage": "System prompt language",
     "customPrompt": "Use a custom system prompt",
     "customPromptHelp": "Replace the default system prompt with your own",

@@ -83,7 +83,7 @@ export interface ChatEngineToolEvent {
  *  - `done`         — terminal chunk emitted (also covered by `onDone`).
  */
 export interface ChatEngineStatusEvent {
-  phase: 'retrieving' | 'compressing' | 'generating' | 'done';
+  phase: 'retrieving' | 'compressing' | 'thinking' | 'generating' | 'done';
   /** Optional human-readable label (legacy-parity UI banner text). */
   label?: string;
 }
@@ -196,6 +196,8 @@ export interface RunChatTurnArgs<TSource = unknown> {
     topK?: number;
     /** Pénalité de répétition (`repeat_penalty`, Ollama). Réglée depuis le panneau du chat. */
     repeatPenalty?: number;
+    /** `false` coupe le raisonnement d'un modèle pensant (Ollama `think`). */
+    think?: boolean;
   };
   tools?: ToolDescriptor[];
   toolHandler?: ChatEngineToolHandler;
@@ -371,6 +373,7 @@ export async function runChatTurn<TSource = unknown>(
   try {
     generationStart = Date.now();
     let firstFrameSeen = false;
+    let thinkingSeen = false;
     for (let turn = 0; turn < maxTurns; turn++) {
       turnsUsed = turn + 1;
       const pendingToolCalls: ChatEngineToolCall[] = [];
@@ -409,6 +412,7 @@ export async function runChatTurn<TSource = unknown>(
         topP: args.opts?.topP,
         topK: args.opts?.topK,
         repeatPenalty: args.opts?.repeatPenalty,
+        think: args.opts?.think,
         tools: args.tools && args.tools.length ? args.tools : undefined,
         signal: args.signal,
       })) {
@@ -453,6 +457,17 @@ export async function runChatTurn<TSource = unknown>(
           hooks.onDone?.(chunk);
           logTurnDone();
           break;
+        }
+        // Raisonnement d'un modèle pensant : transmis tel quel (le renderer
+        // l'affiche à part et le compte comme activité), sans compter comme
+        // premier jeton de réponse.
+        if (chunk.thinking && !chunk.delta) {
+          if (!thinkingSeen) {
+            thinkingSeen = true;
+            safeStatus({ phase: 'thinking' });
+          }
+          hooks.onChunk?.(chunk);
+          continue;
         }
         if (!firstFrameSeen) {
           firstFrameSeen = true;

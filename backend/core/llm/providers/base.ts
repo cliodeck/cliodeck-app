@@ -90,6 +90,13 @@ export interface ChatOptions {
    * même sémantique et ne doivent pas être dérivés de cette valeur.
    */
   repeatPenalty?: number;
+  /**
+   * Modèles « pensants » (Qwen 3.x, DeepSeek-R1…) : `false` demande au
+   * backend de répondre sans phase de raisonnement. Ollama seulement
+   * (`think` de `/api/chat`) ; les fournisseurs cloud ont leurs propres
+   * réglages de raisonnement et ignorent ce champ. Absent = défaut du backend.
+   */
+  think?: boolean;
   maxTokens?: number;
   stop?: string[];
   /**
@@ -112,6 +119,13 @@ export interface CompleteOptions extends ChatOptions {}
 export interface ChatChunk {
   /** Incremental delta of assistant text. Empty when only metadata is emitted. */
   delta: string;
+  /**
+   * Fragment de raisonnement d'un modèle « pensant », distinct de la
+   * réponse. Ollama les envoie avant tout `delta` de contenu ; un
+   * consommateur qui les ignore voit un modèle muet pendant des minutes —
+   * c'est ce qui a fait tomber le délai d'inactivité le 2026-09-08.
+   */
+  thinking?: string;
   /** Tool call emitted by the model, if any. */
   toolCall?: {
     id: string;

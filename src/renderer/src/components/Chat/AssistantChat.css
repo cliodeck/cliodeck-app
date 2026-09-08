@@ -157,3 +157,25 @@
 .brainstorm-chat__root--panel .brainstorm-chat__source-snippet {
   -webkit-line-clamp: 2;
 }
+
+/* Raisonnement d'un modèle pensant : replié, à part de la réponse. */
+.brainstorm-chat__thinking {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.brainstorm-chat__thinking summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.brainstorm-chat__thinking pre {
+  margin: var(--spacing-xs) 0 0;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  padding: var(--spacing-sm);
+  border-left: 2px solid var(--border-color);
+}

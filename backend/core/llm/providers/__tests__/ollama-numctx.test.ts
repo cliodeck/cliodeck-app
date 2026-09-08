@@ -165,3 +165,43 @@ describe('OllamaProvider.chat — une erreur HTTP a une cause lisible', () => {
     expect(p.getStatus().lastError?.message).toBe('HTTP 404');
   });
 });
+
+describe('OllamaProvider.chat — modèles pensants', () => {
+  function streamThinking(): Response {
+    const encoder = new TextEncoder();
+    const lines = [
+      { message: { role: 'assistant', content: '', thinking: 'Je réfléchis…' }, done: false },
+      { message: { role: 'assistant', content: 'Réponse.' }, done: false },
+      { message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 1, eval_count: 2 },
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const l of lines) controller.enqueue(encoder.encode(JSON.stringify(l) + '\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+  }
+
+  it('transmet le raisonnement à part, jamais dans le delta de réponse', async () => {
+    globalThis.fetch = (async () => streamThinking()) as typeof fetch;
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    const chunks: Array<{ delta: string; thinking?: string; done?: boolean }> = [];
+    for await (const c of p.chat([{ role: 'user', content: 'q' }])) chunks.push(c);
+    expect(chunks[0]).toEqual({ delta: '', thinking: 'Je réfléchis…' });
+    expect(chunks.map((c) => c.delta).join('')).toBe('Réponse.');
+    expect(chunks.at(-1)?.done).toBe(true);
+  });
+
+  it('envoie think: false quand le raisonnement est coupé, rien sinon', async () => {
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    for await (const _ of p.chat([{ role: 'user', content: 'q' }], { think: false })) {
+      // discard
+    }
+    expect((captured?.body as { think?: boolean }).think).toBe(false);
+    for await (const _ of p.chat([{ role: 'user', content: 'q' }], {})) {
+      // discard
+    }
+    expect('think' in (captured?.body as object)).toBe(false);
+  });
+});

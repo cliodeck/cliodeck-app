@@ -95,6 +95,8 @@ export interface LLMConfig {
   ollamaEmbeddingNumCtx?: number;
   /** Fenêtre de contexte (num_ctx) de la génération ; 0 ou absent = défaut du serveur. */
   ollamaNumCtx?: number;
+  /** Raisonnement des modèles pensants ; absent = défaut d'Ollama. */
+  ollamaThink?: boolean;
   // Cloud providers — keys persisted via secureStorage by config-manager.
   claudeAPIKey?: string;
   claudeModel?: string;
