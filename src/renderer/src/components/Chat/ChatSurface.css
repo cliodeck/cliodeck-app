@@ -243,3 +243,10 @@
   font-size: var(--font-size-sm);
   border-top: 1px solid var(--color-danger);
 }
+
+/* État en cours (recherche, attente du premier jeton) : neutre, pas rouge. */
+.chat-surface__banner--info {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--text-secondary);
+  border-top-color: var(--border-color);
+}

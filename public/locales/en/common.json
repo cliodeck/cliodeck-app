@@ -742,6 +742,8 @@
     "notConfigured": "The model is not responding. Check that Ollama is running, or pick another provider in Settings.",
     "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
     "timeout": "No response from the model for {{minutes}} min: generation stopped. Raise the inactivity timeout in the chat settings if the model is just slow.",
+    "providerError": "The model failed: {{message}}",
+    "waitingForModel": "The model is still reading the prompt · {{elapsed}} min elapsed · automatic stop at {{limit}} min",
     "openSettings": "Open Settings",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2205,6 +2207,9 @@
     "contextModelfile": "Its Modelfile sets num_ctx to {{size}}.",
     "contextAboveDeclared": "Above the {{size}} training tokens: Ollama accepts it, but quality may degrade.",
     "contextMemoryHint": "Sent to Ollama on every call (num_ctx). The KV cache grows with it: a large window needs a lot of memory.",
+    "memoryEstimate": "Memory estimate: model {{model}} GB + context ≈ {{context}} GB = {{total}} GB, against ≈ {{budget}} GB usable by the model (75% of the machine's memory).",
+    "memoryWarningModel": "This model already exceeds the usable memory: Ollama offloads part of it to the CPU, and every context token makes the slowdown worse.",
+    "memoryWarningContext": "This window overflows the memory: Ollama will offload part of the model to the CPU and prompt reading will become very slow.",
     "promptLanguage": "System prompt language",
     "customPrompt": "Use a custom system prompt",
     "customPromptHelp": "Replace the default system prompt with your own",

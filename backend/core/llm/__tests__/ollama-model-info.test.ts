@@ -100,3 +100,43 @@ describe('fetchOllamaModelInfo', () => {
     ).rejects.toThrow(/404/);
   });
 });
+
+describe('parseOllamaShowResponse — coût du cache KV par jeton', () => {
+  it('calcule K+V en f16 depuis block_count, head_count_kv et les dimensions de tête', () => {
+    const info = parseOllamaShowResponse('llama3.1:8b', {
+      model_info: {
+        'general.architecture': 'llama',
+        'llama.block_count': 32,
+        'llama.attention.head_count': 32,
+        'llama.attention.head_count_kv': 8,
+        'llama.embedding_length': 4096,
+        'llama.context_length': 131_072,
+      },
+    });
+    // 32 couches × 8 têtes KV × (128 + 128) × 2 octets = 128 KiB par jeton.
+    expect(info.kvBytesPerToken).toBe(128 * 1024);
+    expect(info.contextLength).toBe(131_072);
+  });
+
+  it('préfère key_length / value_length quand ils sont déclarés', () => {
+    const info = parseOllamaShowResponse('x', {
+      model_info: {
+        'general.architecture': 'qwen3',
+        'qwen3.block_count': 40,
+        'qwen3.attention.head_count': 32,
+        'qwen3.attention.head_count_kv': 8,
+        'qwen3.embedding_length': 5120,
+        'qwen3.attention.key_length': 128,
+        'qwen3.attention.value_length': 128,
+      },
+    });
+    expect(info.kvBytesPerToken).toBe(40 * 8 * 256 * 2);
+  });
+
+  it('reste absent quand une métadonnée manque', () => {
+    const info = parseOllamaShowResponse('x', {
+      model_info: { 'general.architecture': 'qwen3', 'qwen3.block_count': 40 },
+    });
+    expect(info.kvBytesPerToken).toBeUndefined();
+  });
+});

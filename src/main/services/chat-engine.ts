@@ -417,6 +417,23 @@ export async function runChatTurn<TSource = unknown>(
           pendingToolCalls.push(chunk.toolCall);
           sawToolCall = true;
         }
+        // Échec côté fournisseur (requête refusée, flux rompu) : le chunk
+        // terminal ne porte pas la cause, le statut du fournisseur, si.
+        // Sans ce relais, le renderer affichait une bulle vide (2026-09-08,
+        // coupure réseau après 5 min sur un modèle de 22 Go).
+        if (chunk.done && chunk.finishReason === 'error') {
+          terminalDone = true;
+          finalFinishReason = 'error';
+          generationMs = Date.now() - generationStart;
+          const status = args.provider.getStatus();
+          emitError(
+            status.lastError?.code ?? 'provider_error',
+            status.lastError?.message ??
+              'Le fournisseur a interrompu la réponse sans donner de cause.'
+          );
+          logTurnDone();
+          break;
+        }
         // Suppress terminal done chunks while mid-loop so the caller only
         // sees one `done` at the very end.
         if (chunk.done && sawToolCall) {
