@@ -194,3 +194,51 @@ describe('SecureStorage — cycle de vie des clés', () => {
     expect(() => s.getKey('llm.claudeAPIKey')).toThrow(/not initialized/i);
   });
 });
+
+describe('clé indéchiffrable avec le trousseau courant', () => {
+  /** Un chiffré Chromium (préfixe `v10`) que notre déchiffreur factice ne connaît pas. */
+  const foreignCiphertext = Buffer.concat([Buffer.from('v10', 'latin1'), Buffer.alloc(16, 7)]).toString('base64');
+
+  it('est traitée comme absente, listée, et n’avertit qu’une fois', async () => {
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = foreignCiphertext;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(s.getKey('llm.openaiAPIKey')).toBe('');
+    expect(s.getKey('llm.openaiAPIKey')).toBe('');
+    expect(s.unreadableKeys()).toEqual(['llm.openaiAPIKey']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/trousseau/);
+    warn.mockRestore();
+  });
+
+  it('sort de la liste dès qu’on la ressaisit ou qu’on la supprime', async () => {
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = foreignCiphertext;
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    s.getKey('llm.openaiAPIKey');
+    s.setKey('llm.openaiAPIKey', 'sk-nouvelle-cle-valide-0123456789');
+    expect(s.unreadableKeys()).toEqual([]);
+    expect(s.getKey('llm.openaiAPIKey')).toBe('sk-nouvelle-cle-valide-0123456789');
+    stores[0]['llm.mistralAPIKey'] = foreignCiphertext;
+    s.getKey('llm.mistralAPIKey');
+    s.deleteKey('llm.mistralAPIKey');
+    expect(s.unreadableKeys()).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
+  it('une valeur en clair reste lue, et se retrouve rechiffrée', async () => {
+    const s = await freshStorage(true);
+    stores[0]['llm.claudeAPIKey'] = 'sk-ant-en-clair-depuis-avant-le-chiffrement';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(s.getKey('llm.claudeAPIKey')).toBe('sk-ant-en-clair-depuis-avant-le-chiffrement');
+    expect(s.unreadableKeys()).toEqual([]);
+    // Rechiffrée par notre chiffreur factice : `enc:` + valeur, en base64.
+    expect(Buffer.from(stores[0]['llm.claudeAPIKey'] ?? '', 'base64').toString('utf8')).toBe(
+      'enc:sk-ant-en-clair-depuis-avant-le-chiffrement'
+    );
+    // Deuxième lecture : déchiffrement normal, plus d'avertissement.
+    expect(s.getKey('llm.claudeAPIKey')).toBe('sk-ant-en-clair-depuis-avant-le-chiffrement');
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});

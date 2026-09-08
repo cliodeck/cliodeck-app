@@ -292,3 +292,20 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Clés indéchiffrables avec le trousseau courant */
+.security-unreadable-list {
+  list-style: none;
+  margin: var(--spacing-sm) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.security-unreadable-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}

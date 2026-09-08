@@ -1693,6 +1693,12 @@
     "revokeSuccess": "{{count}} key(s) revoked. Reconfigure your API keys in settings.",
     "revokeError": "Error during revocation",
     "revoking": "Revoking...",
+    "unreadable": {
+      "title": "Unreadable keys",
+      "description": "These keys are stored but encrypted with another keychain key: another identity of the application (packaged or development build), or a recreated “Safe Storage” entry. ClioDeck treats them as absent and tells you here. Re-enter them in the settings, or delete them.",
+      "delete": "Delete",
+      "deleted": "Key {{key}} deleted."
+    },
     "inspection": {
       "title": "Source inspection",
       "helpAria": "Understand the inspection modes",

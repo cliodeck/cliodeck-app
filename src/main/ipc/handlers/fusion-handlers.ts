@@ -24,7 +24,7 @@ import { projectManager } from '../../services/project-manager.js';
 import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
-import { secureStorage } from '../../services/secure-storage.js';
+import { secureStorage, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import {
   classifyProvider,
   cloudConsent,
@@ -869,6 +869,19 @@ export function setupFusionHandlers(): void {
   });
 
   // MARK: - credential revocation (ADR 0006)
+  // Clés stockées mais indéchiffrables avec le trousseau courant : le
+  // renderer les affiche dans Réglages → Sécurité, avec de quoi les
+  // supprimer (une clé s'efface par `config:set(clé, '')`).
+  ipcMain.handle('fusion:security:get-unreadable-keys', async () => {
+    try {
+      // Force une lecture : la liste se remplit au premier déchiffrement raté.
+      for (const key of SENSITIVE_KEYS) secureStorage.getKey(key);
+      return successResponse({ keys: secureStorage.unreadableKeys() });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
   ipcMain.handle('fusion:security:revoke-all-keys', async () => {
     try {
       const count = secureStorage.revokeAll();

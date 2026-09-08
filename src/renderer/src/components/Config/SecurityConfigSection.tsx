@@ -46,6 +46,7 @@ interface SecurityApi {
     keysDeleted?: number;
     error?: string;
   }>;
+  getUnreadableKeys?(): Promise<{ success: boolean; keys?: string[]; error?: string }>;
 }
 
 function api(): SecurityApi | null {
@@ -94,6 +95,21 @@ export const SecurityConfigSection: React.FC = () => {
   const [statsError, setStatsError] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [revoking, setRevoking] = useState(false);
+  const [unreadableKeys, setUnreadableKeys] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api()?.getUnreadableKeys?.();
+        if (!cancelled && res?.success) setUnreadableKeys(res.keys ?? []);
+      } catch {
+        // Pas de liste : rien à afficher.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshStats = useCallback(async (): Promise<void> => {
     const s = api();
@@ -409,6 +425,41 @@ export const SecurityConfigSection: React.FC = () => {
           {t('security.help.whereAfter')}
         </p>
       </HelpModal>
+
+      {/* Clés indéchiffrables : chiffrées par une autre clé de trousseau
+          (autre identité de l'application, entrée recréée). Le main les
+          traite comme absentes ; ici on le dit, et on permet de les effacer. */}
+      {unreadableKeys.length > 0 && (
+        <div className="security-revoke-section" data-testid="unreadable-keys">
+          <h4 className="security-revoke-title">
+            <KeyRound size={14} /> {t('security.unreadable.title')}
+          </h4>
+          <p className="config-hint">{t('security.unreadable.description')}</p>
+          <ul className="security-unreadable-list">
+            {unreadableKeys.map((key) => (
+              <li key={key}>
+                <code>{key}</code>
+                <button
+                  type="button"
+                  className="security-revoke-btn"
+                  onClick={async () => {
+                    try {
+                      await window.electron.config.set(key, '');
+                      setUnreadableKeys((prev) => prev.filter((k) => k !== key));
+                      setSavedNotice(t('security.unreadable.deleted', { key }));
+                      window.setTimeout(() => setSavedNotice(null), 4000);
+                    } catch {
+                      setError(t('security.revokeError'));
+                    }
+                  }}
+                >
+                  {t('security.unreadable.delete')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Credential revocation (ADR 0006) */}
       <div className="security-revoke-section">

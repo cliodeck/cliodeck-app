@@ -1693,6 +1693,12 @@
     "revokeSuccess": "{{count}} Schlüssel widerrufen. Konfigurieren Sie Ihre API-Schlüssel in den Einstellungen neu.",
     "revokeError": "Fehler beim Widerruf",
     "revoking": "Widerruf läuft...",
+    "unreadable": {
+      "title": "Unlesbare Schlüssel",
+      "description": "Diese Schlüssel sind gespeichert, aber mit einem anderen Schlüsselbund-Schlüssel verschlüsselt: eine andere Identität der Anwendung (paketierte oder Entwicklungsversion) oder ein neu erstellter „Safe Storage“-Eintrag. ClioDeck behandelt sie als nicht vorhanden und meldet es hier. Geben Sie sie in den Einstellungen neu ein oder löschen Sie sie.",
+      "delete": "Löschen",
+      "deleted": "Schlüssel {{key}} gelöscht."
+    },
     "inspection": {
       "title": "Quellenprüfung",
       "helpAria": "Die Prüfmodi verstehen",
