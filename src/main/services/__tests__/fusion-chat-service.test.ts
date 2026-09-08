@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { hitsToSources, isFreeMode } from '../fusion-chat-service.js';
+import { hitsToSources, isFreeMode, resolveTurnOptions } from '../fusion-chat-service.js';
+import type { LLMConfig } from '../../../../backend/types/config.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
 import { runChatTurn } from '../chat-engine.js';
 import type {
@@ -175,5 +176,55 @@ describe('hitsToSources', () => {
     expect(snippet.length).toBe(400);
     expect(snippet.startsWith('alpha beta gamma delta')).toBe(true);
     expect(snippet).not.toMatch(/\s{2,}/);
+  });
+});
+
+describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama', () => {
+  const ollama: LLMConfig = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:11434',
+    ollamaEmbeddingModel: 'nomic-embed-text',
+    ollamaChatModel: 'qwen3.5:35b',
+    ollamaNumCtx: 262_144,
+  };
+  const opts = {
+    temperature: 0.1,
+    maxTokens: 512,
+    numCtx: 1_000_000,
+    topP: 0.85,
+    topK: 40,
+    repeatPenalty: 1.1,
+  };
+
+  it('transmet tout à la génération Ollama locale, fenêtre du panneau en tête', () => {
+    expect(resolveTurnOptions(ollama, opts)).toEqual(opts);
+  });
+
+  it('retombe sur llm.ollamaNumCtx des réglages quand le panneau ne fixe rien', () => {
+    const { numCtx: _omit, ...rest } = opts;
+    expect(resolveTurnOptions(ollama, rest).numCtx).toBe(262_144);
+    // 0 / hors bornes dans les réglages → défaut du serveur.
+    expect(resolveTurnOptions({ ...ollama, ollamaNumCtx: 0 }, rest).numCtx).toBeUndefined();
+  });
+
+  it('ne laisse pas une fenêtre Ollama piloter le compacteur d’un backend cloud', () => {
+    const claude: LLMConfig = { ...ollama, backend: 'claude', claudeAPIKey: 'k', claudeModel: 'claude-sonnet-4-6' };
+    const r = resolveTurnOptions(claude, opts);
+    expect(r.numCtx).toBeUndefined();
+    expect(r.topP).toBeUndefined();
+    expect(r.topK).toBeUndefined();
+    expect(r.repeatPenalty).toBeUndefined();
+    // La température vaut pour tous.
+    expect(r.temperature).toBe(0.1);
+    expect(r.maxTokens).toBe(512);
+  });
+
+  it('traite le modèle embarqué comme un fournisseur non-Ollama', () => {
+    const embedded: LLMConfig = {
+      ...ollama,
+      generationProvider: 'embedded',
+      embeddedModelPath: '/models/q.gguf',
+    };
+    expect(resolveTurnOptions(embedded, opts).numCtx).toBeUndefined();
   });
 });
