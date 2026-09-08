@@ -411,6 +411,30 @@ premier levier : il multipliait l'attente avant la réponse.
 
 ---
 
+### Une clé d'API indéchiffrable renvoyée telle quelle, avec une trace de pile à chaque lecture
+
+Constaté le 2026-09-08 : `llm.openaiAPIKey` est stockée chiffrée (blob
+Chromium `v10`, 21 octets) mais ne se déchiffre pas avec l'entrée « cliodeck
+Safe Storage » du trousseau. Cause trouvée le même jour : **deux entrées
+« cliodeck Safe Storage » coexistent dans le trousseau de session**. Chromium
+en choisit une au lancement ; une clé chiffrée avec l'autre est illisible —
+tantôt `llm.openaiAPIKey`, tantôt `zotero.apiKey` et `mcp.europeana.apiKey`,
+selon le lancement. Remède côté utilisateur : supprimer les deux entrées
+(`security delete-generic-password -s "cliodeck Safe Storage"`, deux fois),
+relancer, ressaisir les clés une fois. `SecureStorage.getKey`
+renvoyait alors le chiffré *comme si c'était la clé*, avec un `console.warn`
+et sa pile à chaque `getLLMConfig`, soit plusieurs fois par écran.
+
+Désormais : un blob reconnu comme chiffré (`v10`/`v11`, en-tête DPAPI) qui ne
+se déchiffre pas est traité comme absent, listé (`unreadableKeys()`), signalé
+une fois par clé et par lancement ; une valeur en clair (stockée avant que le
+chiffrement soit disponible) est lue puis rechiffrée sur place. Réglages →
+Sécurité affiche les clés illisibles avec un bouton pour les supprimer
+(`fusion:security:get-unreadable-keys`). C'est une partie du point 16 de la
+liste ci-dessus : l'utilisateur est prévenu.
+
+---
+
 ## 3. Known technical debt
 
 - **Electron 40.9.2** is current but will need periodic bumps

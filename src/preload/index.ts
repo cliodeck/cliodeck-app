@@ -996,6 +996,13 @@ const api = {
           };
           error?: string;
         }>,
+      /** Clés stockées mais indéchiffrables avec le trousseau courant. */
+      getUnreadableKeys: () =>
+        ipcRenderer.invoke('fusion:security:get-unreadable-keys') as Promise<{
+          success: boolean;
+          keys?: string[];
+          error?: string;
+        }>,
       revokeAllKeys: () =>
         ipcRenderer.invoke('fusion:security:revoke-all-keys') as Promise<{
           success: boolean;

@@ -50,10 +50,35 @@ interface SecretStoreInstance {
   readonly store: Record<string, string | undefined>;
 }
 
+/**
+ * Une valeur stockée ressemble-t-elle à un chiffré de `safeStorage` ?
+ * Chromium préfixe ses chiffrés par `v10`/`v11` (macOS, Linux) ; DPAPI
+ * (Windows) par un en-tête `01 00 00 00 D0 8C 9D DF`. Un tel blob que l'on
+ * n'arrive pas à déchiffrer ne doit JAMAIS être renvoyé comme s'il était la
+ * clé : il partirait en en-tête d'autorisation vers un fournisseur.
+ */
+function looksLikeCiphertext(raw: string): boolean {
+  if (!/^[A-Za-z0-9+/]+=*$/.test(raw)) return false;
+  const buf = Buffer.from(raw, 'base64');
+  if (buf.length < 4) return false;
+  const head = buf.subarray(0, 3).toString('latin1');
+  if (head === 'v10' || head === 'v11') return true;
+  return buf.readUInt32LE(0) === 1 && buf[4] === 0xd0 && buf[5] === 0x8c;
+}
+
 export class SecureStorage {
   private _store: SecretStoreInstance | null = null;
   private initialized = false;
   private encryptionAvailable = false;
+  /**
+   * Clés dont le chiffré ne se déchiffre pas ici — autre identité de
+   * l'application (build empaqueté vs `npx electron .`, chacun sa propre
+   * entrée « Safe Storage » dans le trousseau), ou entrée recréée. Traitées
+   * comme absentes, listées pour que Réglages → Sécurité puisse le dire.
+   */
+  private readonly unreadable = new Set<string>();
+  /** Un avertissement par clé et par lancement : `getLLMConfig` relit toutes les clés à chaque lecture de la configuration. */
+  private readonly warned = new Set<string>();
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -97,6 +122,8 @@ export class SecureStorage {
    */
   setKey(name: string, value: string): void {
     const store = this.getStore();
+    this.unreadable.delete(name);
+    this.warned.delete(name);
 
     if (!value) {
       // Treat empty/null/undefined as deletion
@@ -136,13 +163,37 @@ export class SecureStorage {
         const buffer = Buffer.from(raw, 'base64');
         return safeStorage.decryptString(buffer);
       } catch (error) {
-        // If decryption fails, the value might have been stored in plain text
-        // before encryption became available (e.g., after a system upgrade).
-        console.warn(
-          `⚠️  [SecureStorage] Failed to decrypt key "${name}", returning raw value. ` +
-            'This can happen if the key was stored before encryption was available.',
-          error,
-        );
+        const detail = error instanceof Error ? error.message : String(error);
+        if (looksLikeCiphertext(raw)) {
+          // Chiffré par une autre clé de trousseau : illisible ici, et
+          // surtout pas une clé d'API. Constaté le 2026-09-08 : une valeur
+          // de 21 octets renvoyée telle quelle, avec une trace de pile à
+          // chaque lecture de la configuration.
+          if (!this.warned.has(name)) {
+            this.warned.add(name);
+            console.warn(
+              `⚠️  [SecureStorage] La clé "${name}" est chiffrée avec une autre clé de trousseau ` +
+                '(autre identité de l’application, ou entrée « Safe Storage » recréée) : ' +
+                'illisible ici, traitée comme absente. Ressaisissez-la, ou supprimez-la dans ' +
+                `Réglages → Sécurité. (${detail})`,
+            );
+          }
+          this.unreadable.add(name);
+          return '';
+        }
+        // Valeur en clair, stockée avant que le chiffrement soit disponible :
+        // utilisée telle quelle, et rechiffrée maintenant pour ne plus y revenir.
+        if (!this.warned.has(name)) {
+          this.warned.add(name);
+          console.warn(
+            `⚠️  [SecureStorage] La clé "${name}" était stockée en clair : rechiffrée avec le trousseau.`,
+          );
+        }
+        try {
+          store.set(name, safeStorage.encryptString(raw).toString('base64'));
+        } catch {
+          // Le rechiffrement est un bonus ; la lecture reste valide.
+        }
         return raw;
       }
     }
@@ -151,11 +202,18 @@ export class SecureStorage {
     return raw;
   }
 
+  /** Clés présentes mais indéchiffrables ici (voir `unreadable`). */
+  unreadableKeys(): string[] {
+    return [...this.unreadable];
+  }
+
   /**
    * Remove a sensitive value from the store.
    */
   deleteKey(name: string): void {
     const store = this.getStore();
+    this.unreadable.delete(name);
+    this.warned.delete(name);
     store.delete(name);
     console.log(`🔒 [SecureStorage] Deleted key: ${name}`);
   }

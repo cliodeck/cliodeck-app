@@ -1693,6 +1693,12 @@
     "revokeSuccess": "{{count}} cle(s) revoquee(s). Reconfigurez vos cles API dans les parametres.",
     "revokeError": "Erreur lors de la revocation",
     "revoking": "Revocation...",
+    "unreadable": {
+      "title": "Clés illisibles",
+      "description": "Ces clés sont stockées mais chiffrées avec une autre clé de trousseau : autre identité de l'application (version empaquetée ou de développement), ou entrée « Safe Storage » recréée. ClioDeck les traite comme absentes et vous le signale ici. Ressaisissez-les dans les réglages, ou supprimez-les.",
+      "delete": "Supprimer",
+      "deleted": "Clé {{key}} supprimée."
+    },
     "inspection": {
       "title": "Inspection des sources",
       "helpAria": "Comprendre les modes d'inspection",
