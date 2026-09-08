@@ -74,6 +74,12 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * Raisonnement d'un modèle pensant, conservé à part de la réponse : ce
+   * n'est pas la même nature de texte, mais c'est bien le journal de
+   * recherche — la trace de la manière dont le modèle est arrivé là.
+   */
+  thinking?: string;
   sources?: any[];
   timestamp: Date;
   modeId?: string;
@@ -220,6 +226,7 @@ export class HistoryManager {
         session_id TEXT NOT NULL,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
+        thinking TEXT,
         sources_json TEXT,
         timestamp TEXT NOT NULL,
         FOREIGN KEY (session_id) REFERENCES history_sessions(id) ON DELETE CASCADE
@@ -415,6 +422,27 @@ export class HistoryManager {
         console.log('📝 History database migrated to schema version 4');
       } catch (error) {
         console.error('❌ Migration v4 error:', error);
+      }
+    }
+
+    // Migration v5 (2026-09-08) : colonne thinking sur history_chat_messages —
+    // le raisonnement d'un modèle pensant, à part de la réponse. Additive :
+    // les bases v4 gagnent la colonne par ALTER, les bases neuves l'ont déjà
+    // via createTables().
+    if (currentVersion < 5) {
+      try {
+        const chatColumns = this.db.pragma('table_info(history_chat_messages)') as any[];
+        if (!chatColumns.some((c: any) => c.name === 'thinking')) {
+          this.db.exec('ALTER TABLE history_chat_messages ADD COLUMN thinking TEXT');
+          console.log('📝 Migration v5: Added thinking to history_chat_messages');
+        }
+
+        this.db
+          .prepare('INSERT OR REPLACE INTO history_metadata (key, value) VALUES (?, ?)')
+          .run('schema_version', '5');
+        console.log('📝 History database migrated to schema version 5');
+      } catch (error) {
+        console.error('❌ Migration v5 error:', error);
       }
     }
   }
@@ -762,8 +790,8 @@ export class HistoryManager {
     const modeId = message.modeId || message.queryParams?.modeId || null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO history_chat_messages (id, session_id, role, content, sources_json, timestamp, mode_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO history_chat_messages (id, session_id, role, content, thinking, sources_json, timestamp, mode_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -771,6 +799,7 @@ export class HistoryManager {
       this.currentSessionId,
       message.role,
       message.content,
+      message.thinking || null,
       message.sources ? JSON.stringify(message.sources) : null,
       now,
       modeId
@@ -841,6 +870,7 @@ export class HistoryManager {
       sessionId: row.session_id,
       role: row.role,
       content: row.content,
+      thinking: row.thinking || undefined,
       sources: row.sources_json ? JSON.parse(row.sources_json) : undefined,
       timestamp: new Date(row.timestamp),
       modeId: row.mode_id || undefined,
@@ -936,6 +966,7 @@ export class HistoryManager {
       sessionId: row.session_id,
       role: row.role,
       content: row.content,
+      thinking: row.thinking || undefined,
       sources: row.sources_json ? JSON.parse(row.sources_json) : undefined,
       timestamp: new Date(row.timestamp),
       modeId: row.mode_id || undefined,

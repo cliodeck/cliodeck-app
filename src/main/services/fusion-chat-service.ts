@@ -464,6 +464,7 @@ class FusionChatService {
     // unified-chat cutover.
     const turnStartedAt = Date.now();
     let assistantText = '';
+    let thinkingText = '';
     let recordedSources: BrainstormSource[] = [];
 
     let registry;
@@ -813,6 +814,7 @@ class FusionChatService {
           onChunk: (chunk) => {
             watchdog.touch();
             if (chunk.delta) assistantText += chunk.delta;
+            if (chunk.thinking) thinkingText += chunk.thinking;
             sendChunk(chunk);
           },
           onDone: (chunk) => {
@@ -884,6 +886,7 @@ class FusionChatService {
       this.recordJournalEntry({
         userMessage: args.messages[args.messages.length - 1],
         assistantText,
+        thinkingText,
         sources: recordedSources,
         durationMs: Date.now() - turnStartedAt,
         modeId: args.systemPrompt?.modeId,
@@ -905,6 +908,8 @@ class FusionChatService {
   private recordJournalEntry(entry: {
     userMessage: ChatMessage | undefined;
     assistantText: string;
+    /** Raisonnement d'un modèle pensant : conservé avec la réponse, à part. */
+    thinkingText?: string;
     sources: BrainstormSource[];
     durationMs: number;
     modeId?: string;
@@ -954,6 +959,7 @@ class FusionChatService {
         hm.logChatMessage({
           role: 'assistant',
           content: entry.assistantText,
+          thinking: entry.thinkingText || undefined,
           sources: serialisedSources,
           queryParams,
         });
@@ -975,6 +981,7 @@ class FusionChatService {
           outputMetadata: {
             sources: serialisedSources ?? [],
             responseLength: entry.assistantText.length,
+            ...(entry.thinkingText ? { thinkingLength: entry.thinkingText.length } : {}),
           },
           success: true,
         });

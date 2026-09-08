@@ -562,3 +562,25 @@
 }
 
 /* Remove old variables - using direct colors instead */
+
+/* Raisonnement d'un modèle pensant, conservé avec la réponse, replié. */
+.message-thinking {
+  font-size: 0.85rem;
+  color: var(--text-tertiary);
+  margin-bottom: 0.5rem;
+}
+
+.message-thinking summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.message-thinking pre {
+  margin: 0.5rem 0 0;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--border-color);
+}

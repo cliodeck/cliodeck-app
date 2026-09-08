@@ -39,7 +39,7 @@ const EVENT = {
 };
 
 describe.skipIf(!sqliteAvailable)('HistoryManager — history_proposal_events', () => {
-  it('une base neuve est en schema_version 4', () => {
+  it('une base neuve est en schema_version 5', () => {
     const hm = new HistoryManager(projectDir);
     hm.close();
     const dbPath = path.join(projectDir, '.cliodeck', 'brain.db');
@@ -48,7 +48,7 @@ describe.skipIf(!sqliteAvailable)('HistoryManager — history_proposal_events', 
       .prepare('SELECT value FROM history_metadata WHERE key = ?')
       .get('schema_version') as { value: string };
     raw.close();
-    expect(row.value).toBe('4');
+    expect(row.value).toBe('5');
   });
 
   it('migre une base v2 vers la version courante sans toucher aux données existantes', () => {
@@ -78,10 +78,10 @@ describe.skipIf(!sqliteAvailable)('HistoryManager — history_proposal_events', 
       .prepare('SELECT value FROM history_metadata WHERE key = ?')
       .get('schema_version') as { value: string };
     check.close();
-    expect(row.value).toBe('4');
+    expect(row.value).toBe('5');
   });
 
-  it('migre une base v3 réelle vers v4 : colonne ajoutée, données intactes', () => {
+  it('migre une base v3 réelle vers la version courante : colonne ajoutée, données intactes', () => {
     // Passe 1 : base réelle, adjudication enregistrée, puis rétrogradation
     // artificielle en v3 (suppression de la colonne v4 par recréation).
     const hm1 = new HistoryManager(projectDir);
@@ -122,7 +122,7 @@ describe.skipIf(!sqliteAvailable)('HistoryManager — history_proposal_events', 
       .get('schema_version') as { value: string };
     check.close();
     expect(cols.some((c) => c.name === 'file_path')).toBe(true);
-    expect(version.value).toBe('4');
+    expect(version.value).toBe('5');
   });
 
   it('rattache une adjudication à son chapitre (file_path)', () => {
