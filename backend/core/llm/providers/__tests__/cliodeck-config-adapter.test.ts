@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  applyChatModelOverride,
   clioDeckConfigToRegistryConfig,
   createRegistryFromClioDeckConfig,
+  isLocalOllamaGeneration,
+  resolveActiveChatModel,
 } from '../cliodeck-config-adapter.js';
 import type { LLMConfig } from '../../../../types/config.js';
 
@@ -136,5 +139,55 @@ describe('ClioDeck LLMConfig → Registry adapter (3.2)', () => {
       useCloudEmbeddings: true,
     });
     expect(r.embedding.provider).toBe('ollama');
+  });
+});
+
+describe('applyChatModelOverride — le modèle du panneau de chat', () => {
+  it('remplace ollamaChatModel pour la génération Ollama locale', () => {
+    const cfg = applyChatModelOverride(base, 'qwen3.5:35b');
+    expect(cfg.ollamaChatModel).toBe('qwen3.5:35b');
+    expect(clioDeckConfigToRegistryConfig(cfg).llm.model).toBe('qwen3.5:35b');
+    expect(resolveActiveChatModel(cfg)).toBe('qwen3.5:35b');
+  });
+
+  it('ignore la demande pour un backend cloud : la liste du panneau vient d’Ollama', () => {
+    const claude = {
+      ...base,
+      backend: 'claude' as const,
+      claudeAPIKey: 'sk-ant-test',
+      claudeModel: 'claude-opus-4-6',
+    };
+    const cfg = applyChatModelOverride(claude, 'qwen3.5:35b');
+    expect(cfg).toBe(claude);
+    expect(clioDeckConfigToRegistryConfig(cfg).llm.model).toBe('claude-opus-4-6');
+  });
+
+  it('ignore la demande quand la génération est confiée au modèle embarqué', () => {
+    const embedded = {
+      ...base,
+      generationProvider: 'embedded' as const,
+      embeddedModelPath: '/models/qwen2.5-0.5b.gguf',
+      embeddedModelId: 'qwen2.5-0.5b',
+    };
+    expect(applyChatModelOverride(embedded, 'qwen3.5:35b')).toBe(embedded);
+    expect(isLocalOllamaGeneration(embedded)).toBe(false);
+  });
+
+  it('« embarqué » sans modèle téléchargé reste de la génération Ollama', () => {
+    const cfg = { ...base, generationProvider: 'embedded' as const };
+    expect(isLocalOllamaGeneration(cfg)).toBe(true);
+    expect(applyChatModelOverride(cfg, 'qwen3.5:35b').ollamaChatModel).toBe('qwen3.5:35b');
+  });
+
+  it('renvoie la configuration telle quelle sans demande, ou pour le même modèle', () => {
+    expect(applyChatModelOverride(base, undefined)).toBe(base);
+    expect(applyChatModelOverride(base, '   ')).toBe(base);
+    expect(applyChatModelOverride(base, 'mistral:7b')).toBe(base);
+  });
+
+  it('ne mute jamais la configuration d’origine', () => {
+    const before = { ...base };
+    applyChatModelOverride(base, 'qwen3.5:35b');
+    expect(base).toEqual(before);
   });
 });

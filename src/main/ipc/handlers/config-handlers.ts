@@ -10,8 +10,10 @@ import {
   validate,
   StringIdSchema,
   ConfigSetSchema,
+  OllamaModelNameSchema,
 } from '../utils/validation.js';
 import type { AppConfig, LLMConfig, ZoteroConfig } from '../../../../backend/types/config.js';
+import { fetchOllamaModelInfo } from '../../../../backend/core/llm/ollama-model-info.js';
 
 /**
  * Return a copy of AppConfig with all sensitive API key values redacted.
@@ -213,6 +215,22 @@ export function setupConfigHandlers() {
       return successResponse({ models });
     } catch (error: unknown) {
       console.error('ollama:list-models error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  // Métadonnées d'un modèle (`/api/show`) : longueur de contexte déclarée,
+  // `num_ctx` du Modelfile, capacités. C'est ce qui remplace la table de
+  // fenêtres codée en dur du panneau de chat — fausse pour tout modèle
+  // absent de la table.
+  ipcMain.handle('ollama:show-model', async (_event, rawModel: unknown) => {
+    try {
+      const model = validate(OllamaModelNameSchema, rawModel);
+      const baseUrl = configManager.getLLMConfig().ollamaURL || 'http://127.0.0.1:11434';
+      const info = await fetchOllamaModelInfo(baseUrl, model);
+      return successResponse({ info });
+    } catch (error: unknown) {
+      console.error('ollama:show-model error:', error);
       return errorResponse(error);
     }
   });

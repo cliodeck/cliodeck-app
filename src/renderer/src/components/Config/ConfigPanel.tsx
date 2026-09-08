@@ -22,6 +22,7 @@ import { ManuscriptCorpusSection } from './ManuscriptCorpusSection';
 import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import './ConfigPanel.css';
 
 export interface RAGConfig {
@@ -92,6 +93,8 @@ export interface LLMConfig {
   ollamaChatModel: string;
   /** Override Ollama's num_ctx for embeddings; only honoured by long-context models. */
   ollamaEmbeddingNumCtx?: number;
+  /** Fenêtre de contexte (num_ctx) de la génération ; 0 ou absent = défaut du serveur. */
+  ollamaNumCtx?: number;
   // Cloud providers — keys persisted via secureStorage by config-manager.
   claudeAPIKey?: string;
   claudeModel?: string;
@@ -255,6 +258,15 @@ export const ConfigPanel: React.FC = () => {
       await window.electron.config.set('llm', llmConfig);
       await window.electron.config.set('editor', editorConfig);
       await window.electron.config.set('zotero', zoteroConfig);
+
+      // Le panneau du chat édite les mêmes champs (modèle, fenêtre de
+      // contexte) : sans cette répercussion, le modèle qu'il tient — et
+      // qu'il envoie désormais au main — l'emporterait sur celui que l'on
+      // vient d'enregistrer ici jusqu'au prochain lancement.
+      useRAGQueryStore.getState().applyLLMConfig({
+        ollamaChatModel: llmConfig.ollamaChatModel,
+        ollamaNumCtx: llmConfig.ollamaNumCtx,
+      });
 
       // Update editorStore with new settings
       updateSettings({

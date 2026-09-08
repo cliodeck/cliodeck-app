@@ -315,3 +315,36 @@ describe('chat-engine compactor wiring (1.3)', () => {
     expect(captured[0]).toHaveLength(2);
   });
 });
+
+describe('chat-engine — options d’échantillonnage transmises au fournisseur', () => {
+  it('transmet temperature, topP, topK, repeatPenalty et numCtx à provider.chat', async () => {
+    let seenOpts: Record<string, unknown> | undefined;
+    const provider = {
+      id: 'fake',
+      name: 'Fake',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'ready' }) as never,
+      healthCheck: async () => ({ state: 'ready' }) as never,
+      chat: async function* (_: ChatMessage[], opts?: Record<string, unknown>) {
+        seenOpts = opts;
+        yield { delta: '', done: true, finishReason: 'stop' };
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'ping' }],
+      opts: { temperature: 0.1, topP: 0.85, topK: 40, repeatPenalty: 1.1, numCtx: 1_048_576 },
+    });
+
+    expect(seenOpts).toMatchObject({
+      temperature: 0.1,
+      topP: 0.85,
+      topK: 40,
+      repeatPenalty: 1.1,
+      numCtx: 1_048_576,
+    });
+  });
+});

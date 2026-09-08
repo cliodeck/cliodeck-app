@@ -247,3 +247,39 @@ export function createRegistryFromClioDeckConfig(
 ): ProviderRegistry {
   return new ProviderRegistry(clioDeckConfigToRegistryConfig(cfg, opts));
 }
+
+/**
+ * Vrai quand la génération part vers le serveur Ollama de l'utilisateur —
+ * ni un fournisseur cloud, ni le modèle embarqué (llama.cpp en processus).
+ * C'est le seul cas où un nom de modèle choisi dans le panneau du chat a un
+ * sens : la liste qu'il propose vient de `/api/tags`.
+ */
+export function isLocalOllamaGeneration(cfg: ClioDeckLLMConfig): boolean {
+  const backend = cfg.backend ?? 'ollama';
+  if (backend !== 'ollama') return false;
+  return !(cfg.generationProvider === 'embedded' && cfg.embeddedModelPath);
+}
+
+/**
+ * Applique le modèle demandé par le panneau du chat à la configuration
+ * d'un tour, en le limitant au cas où il a un sens.
+ *
+ * Le panneau ne liste que des modèles Ollama : envoyer `qwen3.5:35b` à
+ * Anthropic ou à Mistral produirait une erreur 400 opaque. Pour un backend
+ * cloud ou le modèle embarqué, la demande est ignorée et la configuration
+ * revient inchangée — le fournisseur garde le modèle des réglages.
+ *
+ * C'est ce qui manquait : le panneau écrivait son choix dans un store du
+ * renderer que personne ne relisait, et `ollamaChatModel` des réglages
+ * gagnait toujours.
+ */
+export function applyChatModelOverride(
+  cfg: ClioDeckLLMConfig,
+  requestedModel: string | undefined
+): ClioDeckLLMConfig {
+  const model = requestedModel?.trim();
+  if (!model) return cfg;
+  if (!isLocalOllamaGeneration(cfg)) return cfg;
+  if (model === cfg.ollamaChatModel) return cfg;
+  return { ...cfg, ollamaChatModel: model };
+}

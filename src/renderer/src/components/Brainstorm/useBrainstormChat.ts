@@ -41,6 +41,10 @@ interface FusionChatApi {
       temperature?: number;
       maxTokens?: number;
       numCtx?: number;
+      topP?: number;
+      topK?: number;
+      repeatPenalty?: number;
+      timeoutMs?: number;
       retrievalOptions?: {
         documentIds?: string[];
         collectionKeys?: string[];
@@ -88,6 +92,11 @@ export interface UseBrainstormChat {
 export function useBrainstormChat(): UseBrainstormChat {
   const store = useChatStore();
   const { t } = useTranslation('common');
+  // `t` est capturé par l'effet d'abonnement aux chunks, monté une fois : sans
+  // cette référence, il resterait lié à la langue initiale (fr) alors que
+  // l'interface est passée à la langue de la configuration — vu dans l'app.
+  const tRef = useRef(t);
+  tRef.current = t;
   // Track the current MCP tools list in a ref so the `send` callback
   // doesn't get recreated every time the catalogue changes (fusion 2.5).
   const mcpTools = useMcpToolsList();
@@ -113,10 +122,21 @@ export function useBrainstormChat(): UseBrainstormChat {
       const aId = assistantIdBySession.current.get(env.sessionId);
       if (!aId) return;
       if (env.error) {
+        // Le délai d'inactivité est traduit ici : le main n'a pas la langue
+        // de l'interface, le renderer connaît le délai réglé.
+        const message =
+          env.error.code === 'timeout'
+            ? tRef.current('chat.timeout', {
+                minutes: Math.max(
+                  1,
+                  Math.round(useRAGQueryStore.getState().params.timeout / 60_000)
+                ),
+              })
+            : env.error.message;
         store.finishAssistant(
           aId,
           env.chunk.finishReason ?? 'error',
-          env.error.message
+          message
         );
         assistantIdBySession.current.delete(env.sessionId);
         return;
@@ -220,6 +240,33 @@ export function useBrainstormChat(): UseBrainstormChat {
       // field entirely in that case rather than sending 0.
       if (typeof ragParams.numCtx === 'number' && ragParams.numCtx > 0) {
         startOpts.numCtx = ragParams.numCtx;
+      }
+      // Le modèle et l'échantillonnage choisis dans le panneau du chat.
+      // Jusqu'ici seul `numCtx` partait : le modèle, la température, top-p
+      // et top-k restaient dans le store du renderer, et les réglages de
+      // l'application décidaient seuls. Le main n'applique le modèle qu'à
+      // la génération Ollama locale (sa liste vient d'Ollama) et top-p /
+      // top-k qu'à Ollama aussi ; la température vaut pour tous.
+      const model = ragParams.model?.trim();
+      if (model && ragParams.provider !== 'embedded') {
+        startOpts.model = model;
+      }
+      if (Number.isFinite(ragParams.temperature)) {
+        startOpts.temperature = ragParams.temperature;
+      }
+      if (Number.isFinite(ragParams.top_p)) {
+        startOpts.topP = ragParams.top_p;
+      }
+      if (Number.isInteger(ragParams.top_k) && ragParams.top_k > 0) {
+        startOpts.topK = ragParams.top_k;
+      }
+      if (Number.isFinite(ragParams.repeat_penalty) && ragParams.repeat_penalty > 0) {
+        startOpts.repeatPenalty = ragParams.repeat_penalty;
+      }
+      // Délai d'inactivité : le main interrompt le tour après ce délai
+      // sans rien recevoir du modèle. Le curseur existait sans consommateur.
+      if (Number.isFinite(ragParams.timeout) && ragParams.timeout > 0) {
+        startOpts.timeoutMs = Math.round(ragParams.timeout);
       }
       // Fusion 2.5 — pass the user-validated MCP tool subset. When no
       // MCP server is registered the list is empty and we send no

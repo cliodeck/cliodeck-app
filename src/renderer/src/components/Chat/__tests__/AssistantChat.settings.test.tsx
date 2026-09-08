@@ -83,3 +83,46 @@ describe('AssistantChat settings panel', () => {
     expect(settings.retrieval?.includeVault).toBe(true);
   });
 });
+
+describe('AssistantChat — prompt système personnalisé du panneau', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
+  });
+  afterEach(() => {
+    cleanup();
+    useRAGQueryStore.getState().setParams({
+      useCustomSystemPrompt: false,
+      customSystemPrompt: undefined,
+    });
+  });
+
+  it('projette le prompt du panneau quand sa case est cochée, et le retire sinon', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        useCustomSystemPrompt: true,
+        customSystemPrompt: '  Réponds en latin.  ',
+      });
+    });
+    expect(useChatStore.getState().chatSettings.customSystemPrompt).toBe('Réponds en latin.');
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({ useCustomSystemPrompt: false });
+    });
+    expect(useChatStore.getState().chatSettings.customSystemPrompt).toBeUndefined();
+  });
+
+  it('ignore un prompt vide même quand la case est cochée', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        useCustomSystemPrompt: true,
+        customSystemPrompt: '   ',
+      });
+    });
+    expect(useChatStore.getState().chatSettings.customSystemPrompt).toBeUndefined();
+  });
+});

@@ -93,3 +93,34 @@ describe('OllamaProvider.chat — num_ctx forwarding', () => {
     expect(body.options && 'num_ctx' in body.options).toBe(false);
   });
 });
+
+describe('OllamaProvider.chat — échantillonnage transmis dans options', () => {
+  async function drainWith(
+    provider: OllamaProvider,
+    opts: Parameters<OllamaProvider['chat']>[1]
+  ): Promise<void> {
+    for await (const _ of provider.chat([{ role: 'user', content: 'q' }], opts)) {
+      // discard
+    }
+  }
+
+  it('envoie repeat_penalty, top_p et top_k quand ils sont fournis', async () => {
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    await drainWith(p, { repeatPenalty: 1.1, topP: 0.85, topK: 40, temperature: 0.1 });
+    const body = captured?.body as { options?: Record<string, unknown> };
+    expect(body.options).toMatchObject({
+      repeat_penalty: 1.1,
+      top_p: 0.85,
+      top_k: 40,
+      temperature: 0.1,
+    });
+  });
+
+  it('omet repeat_penalty quand il n’est pas fourni (défaut du Modelfile)', async () => {
+    const p = new OllamaProvider({ model: 'qwen3.5:35b', baseUrl: 'http://mock' });
+    await drainWith(p, {});
+    const body = captured?.body as { options?: Record<string, unknown> };
+    // `undefined` disparaît à la sérialisation JSON : la clé est absente.
+    expect(body.options && 'repeat_penalty' in body.options).toBe(false);
+  });
+});

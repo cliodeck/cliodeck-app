@@ -1,69 +1,36 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useRAGQueryStore, type LLMProvider } from '../../stores/ragQueryStore';
 import { CollectionMultiSelect } from './CollectionMultiSelect';
 import { DocumentMultiSelect } from './DocumentMultiSelect';
+import {
+  NUM_CTX_MAX,
+  NUM_CTX_MIN,
+  getContextWindow,
+} from '../../../../../backend/core/llm/context-windows';
+import { formatContextSize, normalizeNumCtxInput } from '../../utils/context-size';
 import './RAGSettingsPanel.css';
 
-// Model context sizes (mirrors backend/core/llm/OllamaClient.ts)
-const MODEL_CONTEXT_SIZES: Record<string, { maxContext: number; recommended: number }> = {
-  'gemma2:2b': { maxContext: 8192, recommended: 4096 },
-  'gemma2:9b': { maxContext: 8192, recommended: 8192 },
-  'gemma:2b': { maxContext: 8192, recommended: 4096 },
-  'gemma:7b': { maxContext: 8192, recommended: 8192 },
-  // Gemma 3 family — 128K window across 4B / 12B / 27B (1B is 32K but rarely picked here).
-  'gemma3:1b': { maxContext: 32768, recommended: 16384 },
-  'gemma3:4b': { maxContext: 131072, recommended: 65536 },
-  'gemma3:12b': { maxContext: 131072, recommended: 65536 },
-  'gemma3:27b': { maxContext: 131072, recommended: 65536 },
-  // Gemma 4 family — MoE, ~4B active per token. The 26B build accepts up
-  // to 256K but Google's own card recommends 128K for stability.
-  'gemma4:26b': { maxContext: 262144, recommended: 131072 },
-  'llama3.2:1b': { maxContext: 131072, recommended: 32768 },
-  'llama3.2:3b': { maxContext: 131072, recommended: 32768 },
-  'llama3.1:8b': { maxContext: 131072, recommended: 32768 },
-  'llama3:8b': { maxContext: 8192, recommended: 8192 },
-  'mistral:7b': { maxContext: 32768, recommended: 16384 },
-  'mistral:7b-instruct': { maxContext: 32768, recommended: 16384 },
-  'mistral:7b-instruct-q4_0': { maxContext: 32768, recommended: 16384 },
-  'ministral:3b': { maxContext: 131072, recommended: 32768 },
-  'ministral:8b': { maxContext: 131072, recommended: 32768 },
-  'phi3:mini': { maxContext: 131072, recommended: 16384 },
-  'phi3:medium': { maxContext: 131072, recommended: 16384 },
-  'phi4:mini': { maxContext: 131072, recommended: 32768 },
-  'qwen2.5:3b': { maxContext: 32768, recommended: 16384 },
-  'qwen2.5:7b': { maxContext: 131072, recommended: 32768 },
-  'smollm2:1.7b': { maxContext: 8192, recommended: 4096 },
-  'deepseek-r1:1.5b': { maxContext: 65536, recommended: 16384 },
-  'deepseek-r1:7b': { maxContext: 65536, recommended: 32768 },
-  'deepseek-r1:8b': { maxContext: 65536, recommended: 32768 },
-};
-
-function getModelContextInfo(modelName: string): { maxContext: number; recommended: number } {
-  if (MODEL_CONTEXT_SIZES[modelName]) {
-    return MODEL_CONTEXT_SIZES[modelName];
-  }
-  // Try base name match
-  const baseName = modelName.split('-')[0];
-  if (MODEL_CONTEXT_SIZES[baseName]) {
-    return MODEL_CONTEXT_SIZES[baseName];
-  }
-  // Try family match
-  const family = modelName.split(':')[0];
-  const familyMatch = Object.entries(MODEL_CONTEXT_SIZES).find(([key]) => key.startsWith(family + ':'));
-  if (familyMatch) {
-    return familyMatch[1];
-  }
-  return { maxContext: 4096, recommended: 2048 };
+/**
+ * Ce que l'on sait de la fenêtre de contexte du modèle sélectionné.
+ * `ollama` : longueur d'entraînement lue sur `/api/show` — la seule source
+ * fiable. `table` : estimation par famille (`context-windows.ts`), quand
+ * Ollama ne répond pas. L'ancienne table codée en dur dans ce fichier
+ * renvoyait 4 096 jetons pour tout modèle qui n'y figurait pas
+ * (qwen3.5:35b compris), et le curseur interdisait d'aller au-delà.
+ */
+interface ModelContextInfo {
+  declared?: number;
+  modelfileNumCtx?: number;
+  source: 'ollama' | 'table' | 'none';
 }
 
-function formatContextSize(tokens: number): string {
-  if (tokens >= 1024) {
-    return `${Math.round(tokens / 1024)}K`;
-  }
-  return tokens.toString();
-}
+const CONTEXT_PRESETS = [8_192, 32_768, 131_072] as const;
+/** Délai avant d'écrire dans la configuration une valeur tapée ou glissée. */
+const PERSIST_DEBOUNCE_MS = 500;
+
+type LLMSettingsPatch = { ollamaChatModel?: string; ollamaNumCtx?: number };
 
 export const RAGSettingsPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -90,10 +57,115 @@ export const RAGSettingsPanel: React.FC = () => {
   const [isEmbeddedModelAvailable, setIsEmbeddedModelAvailable] = useState(false);
   const hasTriedLoading = useRef(false);
 
-  // Get context info for selected model
-  const modelContextInfo = useMemo(() => {
-    return getModelContextInfo(params.model);
-  }, [params.model]);
+  // Fenêtre de contexte du modèle sélectionné, lue sur Ollama.
+  const [modelInfo, setModelInfo] = useState<ModelContextInfo>({ source: 'none' });
+  // Saisie libre de la fenêtre : brouillon local, validé au blur / Entrée.
+  const [numCtxDraft, setNumCtxDraft] = useState<string>(String(params.numCtx));
+  useEffect(() => {
+    setNumCtxDraft(String(params.numCtx));
+  }, [params.numCtx]);
+
+  /**
+   * Le panneau et les réglages de l'application écrivent le MÊME champ
+   * (`llm.ollamaChatModel`, `llm.ollamaNumCtx`) : un choix fait ici survit
+   * au redémarrage et apparaît dans les réglages, et inversement. Sans
+   * cette écriture, le store du renderer était réinitialisé depuis la
+   * configuration à chaque lancement — les réglages « dominaient ».
+   * L'écriture est différée : `config:set('llm')` réinitialise les services
+   * côté main, on ne le déclenche pas à chaque frappe ni à chaque pixel du
+   * curseur.
+   */
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatch = useRef<LLMSettingsPatch>({});
+  const flushPersist = useCallback(() => {
+    if (persistTimer.current) {
+      clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    const patch = pendingPatch.current;
+    pendingPatch.current = {};
+    if (Object.keys(patch).length === 0) return;
+    try {
+      Promise.resolve(window.electron.config.set('llm', patch)).catch(
+        (error: unknown) => {
+          console.error('Could not persist chat LLM settings', error);
+        }
+      );
+    } catch (error) {
+      console.error('Could not persist chat LLM settings', error);
+    }
+  }, []);
+  const persistLLM = useCallback(
+    (patch: LLMSettingsPatch, delayMs = 0) => {
+      pendingPatch.current = { ...pendingPatch.current, ...patch };
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+      persistTimer.current = setTimeout(flushPersist, delayMs);
+    },
+    [flushPersist]
+  );
+  // Un réglage en attente part quand le panneau est démonté.
+  useEffect(() => flushPersist, [flushPersist]);
+
+  const applyNumCtx = useCallback(
+    (value: number, delayMs = 0) => {
+      setParams({ numCtx: value });
+      persistLLM({ ollamaNumCtx: value }, delayMs);
+    },
+    [setParams, persistLLM]
+  );
+
+  const commitNumCtxDraft = () => {
+    const n = normalizeNumCtxInput(numCtxDraft);
+    if (n === null) {
+      setNumCtxDraft(String(params.numCtx));
+      return;
+    }
+    applyNumCtx(n);
+  };
+
+  const handleModelChange = (model: string) => {
+    setParams({ model });
+    persistLLM({ ollamaChatModel: model });
+  };
+
+  // Longueur de contexte déclarée par le modèle (`/api/show`). Repli sur la
+  // table par famille si Ollama ne répond pas — signalé comme estimation.
+  useEffect(() => {
+    if (!isSettingsPanelOpen) return;
+    const model = params.model?.trim();
+    if (!model || params.provider === 'embedded') {
+      setModelInfo({ source: 'none' });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electron.ollama.showModel(model);
+        if (cancelled) return;
+        if (res?.success && res.info?.contextLength) {
+          setModelInfo({
+            declared: res.info.contextLength,
+            modelfileNumCtx: res.info.modelfileNumCtx,
+            source: 'ollama',
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('Could not read model info from Ollama:', error);
+      }
+      if (!cancelled) {
+        setModelInfo({ declared: getContextWindow(model), source: 'table' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params.model, params.provider, isSettingsPanelOpen]);
+
+  const declaredContext = modelInfo.declared;
+  // Le curseur couvre au moins 32K, la longueur déclarée, et la valeur
+  // courante (qui peut venir d'une saisie libre plus haute).
+  const sliderMax = Math.max(32_768, declaredContext ?? 0, params.numCtx);
 
   // Check if embedded model is downloaded
   useEffect(() => {
@@ -243,7 +315,7 @@ export const RAGSettingsPanel: React.FC = () => {
             <select
               id="model-select"
               value={params.model}
-              onChange={(e) => setParams({ model: e.target.value })}
+              onChange={(e) => handleModelChange(e.target.value)}
               disabled={isLoadingModels}
             >
               {availableModels.length === 0 && !isLoadingModels ? (
@@ -423,16 +495,16 @@ export const RAGSettingsPanel: React.FC = () => {
             <small className="setting-hint">{t('ragPanel.topKHelp')}</small>
           </div>
 
-          {/* Timeout */}
+          {/* Délai d'inactivité — consommé par fusion-chat-service (watchdog) */}
           <div className="setting-group">
             <label htmlFor="timeout-slider">
-              Timeout: <strong>{Math.floor(params.timeout / 60000)} min</strong>
+              {t('ragPanel.timeout')}: <strong>{Math.floor(params.timeout / 60000)} min</strong>
             </label>
             <input
               id="timeout-slider"
               type="range"
               min="60000"
-              max="900000"
+              max="3600000"
               step="60000"
               value={params.timeout}
               onChange={(e) => setParams({ timeout: parseInt(e.target.value) })}
@@ -451,42 +523,80 @@ export const RAGSettingsPanel: React.FC = () => {
 
           {showAdvanced && (
             <div className="advanced-settings">
-              {/* Context Window Size */}
+              {/* Fenêtre de contexte (num_ctx) */}
               <div className="setting-group">
-                <label htmlFor="context-slider">
-                  Context Window: <strong>{formatContextSize(params.numCtx)}</strong> {t('ragPanel.tokens')}
+                <label htmlFor="context-input">
+                  {t('ragPanel.contextWindow')}: <strong>{formatContextSize(params.numCtx)}</strong> {t('ragPanel.tokens')}
                 </label>
-                <input
-                  id="context-slider"
-                  type="range"
-                  min="2048"
-                  max={modelContextInfo.maxContext}
-                  step="1024"
-                  value={params.numCtx}
-                  onChange={(e) => setParams({ numCtx: parseInt(e.target.value) })}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
-                  <span>2K</span>
-                  <span>Max: {formatContextSize(modelContextInfo.maxContext)}</span>
+                <div className="context-window-row">
+                  <input
+                    id="context-slider"
+                    type="range"
+                    min={2048}
+                    max={sliderMax}
+                    step={1024}
+                    value={Math.min(params.numCtx, sliderMax)}
+                    onChange={(e) => applyNumCtx(parseInt(e.target.value, 10), PERSIST_DEBOUNCE_MS)}
+                    aria-label={t('ragPanel.contextWindow')}
+                  />
+                  <input
+                    id="context-input"
+                    className="context-window-input"
+                    type="number"
+                    min={NUM_CTX_MIN}
+                    max={NUM_CTX_MAX}
+                    step={1024}
+                    value={numCtxDraft}
+                    onChange={(e) => setNumCtxDraft(e.target.value)}
+                    onBlur={commitNumCtxDraft}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitNumCtxDraft();
+                      }
+                    }}
+                    aria-label={t('ragPanel.contextWindowInput')}
+                  />
+                </div>
+                <div className="context-presets" role="group" aria-label={t('ragPanel.contextPresets')}>
+                  {CONTEXT_PRESETS.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`preset-chip${params.numCtx === v ? ' is-active' : ''}`}
+                      onClick={() => applyNumCtx(v)}
+                    >
+                      {formatContextSize(v)}
+                    </button>
+                  ))}
+                  {declaredContext !== undefined && (
+                    <button
+                      type="button"
+                      className={`preset-chip${params.numCtx === declaredContext ? ' is-active' : ''}`}
+                      onClick={() => applyNumCtx(declaredContext)}
+                      title={t('ragPanel.contextUseModelMaxHelp')}
+                    >
+                      {t('ragPanel.contextUseModelMax', { size: formatContextSize(declaredContext) })}
+                    </button>
+                  )}
                 </div>
                 <small className="setting-hint">
-                  <Lightbulb size={12} /> Recommended for {params.model}: <strong>{formatContextSize(modelContextInfo.recommended)}</strong>
-                  <button
-                    onClick={() => setParams({ numCtx: modelContextInfo.recommended })}
-                    style={{
-                      marginLeft: '8px',
-                      padding: '2px 6px',
-                      fontSize: '10px',
-                      background: 'var(--surface-variant)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '3px',
-                      cursor: 'pointer',
-                      color: 'var(--text-secondary)',
-                    }}
-                  >
-                    {t('ragPanel.useRecommended')}
-                  </button>
+                  <Lightbulb size={12} />{' '}
+                  {modelInfo.source === 'ollama' && declaredContext !== undefined
+                    ? t('ragPanel.contextDeclared', { model: params.model, size: formatContextSize(declaredContext) })
+                    : modelInfo.source === 'table' && declaredContext !== undefined
+                      ? t('ragPanel.contextEstimated', { model: params.model, size: formatContextSize(declaredContext) })
+                      : t('ragPanel.contextUnknown')}
+                  {modelInfo.modelfileNumCtx !== undefined &&
+                    ` ${t('ragPanel.contextModelfile', { size: formatContextSize(modelInfo.modelfileNumCtx) })}`}
                 </small>
+                {declaredContext !== undefined && params.numCtx > declaredContext && (
+                  <small className="setting-hint context-warning" role="status">
+                    <AlertTriangle size={12} />{' '}
+                    {t('ragPanel.contextAboveDeclared', { size: formatContextSize(declaredContext) })}
+                  </small>
+                )}
+                <small className="setting-hint">{t('ragPanel.contextMemoryHint')}</small>
               </div>
 
               {/* System Prompt Language */}

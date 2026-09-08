@@ -43,6 +43,7 @@ import {
   ensureWorkspaceDirectories,
   workspaceFiles,
 } from '../../../../backend/core/workspace/layout.js';
+import { clampNumCtx } from '../../../../backend/core/llm/context-windows.js';
 import {
   defaultWorkspaceConfig,
   readWorkspaceConfig,
@@ -311,23 +312,19 @@ export function setupFusionHandlers(): void {
       }
       const messages = parsed.messages as ChatMessage[];
       const rawOptsObj = parsed.opts ?? {};
-      // Clamp `numCtx` defensively — Ollama silently ignores absurd
-      // values, but the validation here surfaces user-config errors
-      // ("0 = use default" stays as undefined, < 512 is too small for
-      // even a single RAG chunk, > 262144 is past any current model).
-      const rawNumCtx = rawOptsObj.numCtx;
-      const numCtx =
-        typeof rawNumCtx === 'number' &&
-        Number.isFinite(rawNumCtx) &&
-        rawNumCtx >= 512 &&
-        rawNumCtx <= 262_144
-          ? Math.floor(rawNumCtx)
-          : undefined;
+      // `numCtx` hors bornes devient « défaut du modèle » plutôt qu'une
+      // erreur : « 0 » est la convention du renderer pour cela. Les bornes
+      // vivent dans `context-windows.ts` — le plafond de 262 144 codé ici
+      // bloquait les fenêtres d'un million de jetons des Qwen 3.5.
       const opts = {
         model: rawOptsObj.model,
         temperature: rawOptsObj.temperature,
         maxTokens: rawOptsObj.maxTokens,
-        numCtx,
+        numCtx: clampNumCtx(rawOptsObj.numCtx),
+        topP: rawOptsObj.topP,
+        topK: rawOptsObj.topK,
+        repeatPenalty: rawOptsObj.repeatPenalty,
+        timeoutMs: rawOptsObj.timeoutMs,
       };
       const sessionId = fusionChatService.start({
         webContents: event.sender,

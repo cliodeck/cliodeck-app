@@ -9,6 +9,9 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_CONTEXT_WINDOW,
   getContextWindow,
+  clampNumCtx,
+  NUM_CTX_MAX,
+  NUM_CTX_MIN,
 } from '../context-windows';
 
 describe('getContextWindow', () => {
@@ -78,5 +81,33 @@ describe('getContextWindow', () => {
     expect(getContextWindow('mistral-large-2407')).toBe(128_000);
     // claude-3-5-sonnet should match before the broad claude-3 rule.
     expect(getContextWindow('claude-3-5-sonnet-20241022')).toBe(200_000);
+  });
+});
+
+describe('clampNumCtx — bornes de sécurité de num_ctx', () => {
+  it('laisse passer les fenêtres d’un million de jetons (Qwen 3.5)', () => {
+    // L'ancien plafond de 262 144 les refusait alors qu'Ollama les accepte.
+    expect(clampNumCtx(1_048_576)).toBe(1_048_576);
+    expect(clampNumCtx(NUM_CTX_MAX)).toBe(NUM_CTX_MAX);
+  });
+
+  it('renvoie undefined (défaut du modèle) pour 0, négatif, non fini, hors bornes', () => {
+    expect(clampNumCtx(0)).toBeUndefined();
+    expect(clampNumCtx(-1)).toBeUndefined();
+    expect(clampNumCtx(Number.NaN)).toBeUndefined();
+    expect(clampNumCtx(Number.POSITIVE_INFINITY)).toBeUndefined();
+    expect(clampNumCtx(NUM_CTX_MIN - 1)).toBeUndefined();
+    expect(clampNumCtx(NUM_CTX_MAX + 1)).toBeUndefined();
+    expect(clampNumCtx(undefined)).toBeUndefined();
+    expect(clampNumCtx('4096')).toBeUndefined();
+  });
+
+  it('tronque les flottants : Ollama attend un entier', () => {
+    expect(clampNumCtx(4096.9)).toBe(4096);
+  });
+
+  it('connaît la fenêtre native de Qwen 3.5 (256K), avant la règle qwen3 générique', () => {
+    expect(getContextWindow('qwen3.5:35b')).toBe(262_144);
+    expect(getContextWindow('qwen3:8b')).toBe(131_072);
   });
 });

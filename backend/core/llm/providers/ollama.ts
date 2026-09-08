@@ -194,6 +194,7 @@ export class OllamaProvider implements LLMProvider {
         temperature: opts.temperature,
         top_p: opts.topP,
         top_k: opts.topK,
+        repeat_penalty: opts.repeatPenalty,
         num_predict: opts.maxTokens,
         stop: opts.stop,
         // Ollama defaults `num_ctx` to 2048 — far too small for long
