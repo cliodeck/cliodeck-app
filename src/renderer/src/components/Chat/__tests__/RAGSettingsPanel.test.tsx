@@ -22,6 +22,7 @@ import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 interface ShowInfo {
   contextLength?: number;
   modelfileNumCtx?: number;
+  capabilities?: string[];
 }
 
 function installElectron(show: ShowInfo | Error) {
@@ -131,6 +132,27 @@ describe('RAGSettingsPanel — fenêtre de contexte et modèle', () => {
     render(<RAGSettingsPanel />);
     openAdvanced();
     await screen.findByText(/ragPanel\.contextEstimated/);
+  });
+
+  it('propose de couper le raisonnement seulement pour un modèle pensant, et l’écrit en configuration', async () => {
+    const { configSet } = installElectron({ contextLength: 262_144, capabilities: ['completion', 'thinking'] });
+    render(<RAGSettingsPanel />);
+    openAdvanced();
+    const box = (await screen.findByLabelText('ragPanel.think')) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    expect(useRAGQueryStore.getState().params.think).toBe(false);
+    await waitFor(() => {
+      expect(configSet).toHaveBeenCalledWith('llm', { ollamaThink: false });
+    });
+  });
+
+  it('cache le réglage du raisonnement pour un modèle qui ne pense pas', async () => {
+    installElectron({ contextLength: 131_072, capabilities: ['completion', 'tools'] });
+    render(<RAGSettingsPanel />);
+    openAdvanced();
+    await screen.findByText(/ragPanel\.contextDeclared/);
+    expect(screen.queryByLabelText('ragPanel.think')).toBeNull();
   });
 
   it('écrit le fournisseur en mise à jour partielle, sans relire toute la section', async () => {

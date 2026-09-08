@@ -44,6 +44,7 @@ interface FusionChatApi {
       topP?: number;
       topK?: number;
       repeatPenalty?: number;
+      think?: boolean;
       timeoutMs?: number;
       retrievalOptions?: {
         documentIds?: string[];
@@ -62,6 +63,7 @@ interface FusionChatApi {
       sessionId: string;
       chunk: {
         delta: string;
+        thinking?: string;
         done?: boolean;
         finishReason?: string;
       };
@@ -144,6 +146,9 @@ export function useBrainstormChat(): UseBrainstormChat {
         assistantIdBySession.current.delete(env.sessionId);
         return;
       }
+      // Raisonnement d'un modèle pensant : accumulé à part, jamais dans la
+      // réponse. Le compter est ce qui rend l'attente lisible.
+      if (env.chunk.thinking) store.appendThinking(aId, env.chunk.thinking);
       if (env.chunk.delta) store.appendDelta(aId, env.chunk.delta);
       if (env.chunk.done) {
         store.finishAssistant(aId, env.chunk.finishReason);
@@ -265,6 +270,9 @@ export function useBrainstormChat(): UseBrainstormChat {
       }
       if (Number.isFinite(ragParams.repeat_penalty) && ragParams.repeat_penalty > 0) {
         startOpts.repeatPenalty = ragParams.repeat_penalty;
+      }
+      if (typeof ragParams.think === 'boolean' && ragParams.provider !== 'embedded') {
+        startOpts.think = ragParams.think;
       }
       // Délai d'inactivité : le main interrompt le tour après ce délai
       // sans rien recevoir du modèle. Le curseur existait sans consommateur.

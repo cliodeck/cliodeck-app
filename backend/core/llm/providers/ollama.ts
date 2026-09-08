@@ -241,6 +241,10 @@ export class OllamaProvider implements LLMProvider {
         return base;
       }),
       stream: true,
+      // `think: false` coupe la phase de raisonnement d'un modèle pensant ;
+      // absent, Ollama applique son défaut (raisonnement actif si le modèle
+      // le sait faire).
+      ...(typeof opts.think === 'boolean' ? { think: opts.think } : {}),
       options: {
         temperature: opts.temperature,
         top_p: opts.topP,
@@ -325,6 +329,7 @@ export class OllamaProvider implements LLMProvider {
             const obj = JSON.parse(line) as {
               message?: {
                 content?: string;
+                thinking?: string;
                 tool_calls?: Array<{
                   function?: {
                     name?: string;
@@ -338,6 +343,10 @@ export class OllamaProvider implements LLMProvider {
               eval_count?: number;
             };
             const delta = obj.message?.content ?? '';
+            const thinking = obj.message?.thinking ?? '';
+            if (thinking) {
+              yield { delta: '', thinking };
+            }
             const tcs = obj.message?.tool_calls;
             if (tcs?.length) {
               for (const tc of tcs) {

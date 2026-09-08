@@ -20,6 +20,12 @@ export interface LLMConfig {
    * réglages et depuis le panneau du chat, qui écrivent au même endroit.
    */
   ollamaNumCtx?: number;
+  /**
+   * Raisonnement des modèles pensants (Qwen 3.x, DeepSeek-R1) : `false` le
+   * coupe (`think` de `/api/chat`), absent laisse le défaut d'Ollama. Sur
+   * une machine lente, le raisonnement multiplie l'attente avant la réponse.
+   */
+  ollamaThink?: boolean;
   claudeAPIKey?: string;
   claudeModel?: string;
   openaiAPIKey?: string;

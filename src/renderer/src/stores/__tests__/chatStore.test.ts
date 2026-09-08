@@ -76,3 +76,17 @@ describe('chatStore (fusion unified store)', () => {
     expect(s.pendingAssistantId).toBeNull();
   });
 });
+
+describe('chatStore.appendThinking', () => {
+  it('accumule le raisonnement à part du contenu', () => {
+    const s = useChatStore.getState();
+    s.reset();
+    const aId = s.beginAssistant('sess');
+    s.appendThinking(aId, 'Je ');
+    s.appendThinking(aId, 'réfléchis.');
+    s.appendDelta(aId, 'Réponse.');
+    const m = useChatStore.getState().messages.find((x) => x.id === aId);
+    expect(m?.thinking).toBe('Je réfléchis.');
+    expect(m?.content).toBe('Réponse.');
+  });
+});

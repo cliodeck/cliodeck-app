@@ -324,6 +324,7 @@ export function setupFusionHandlers(): void {
         topP: rawOptsObj.topP,
         topK: rawOptsObj.topK,
         repeatPenalty: rawOptsObj.repeatPenalty,
+        think: rawOptsObj.think,
         timeoutMs: rawOptsObj.timeoutMs,
       };
       const sessionId = fusionChatService.start({

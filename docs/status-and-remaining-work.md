@@ -394,6 +394,21 @@ Quatre réponses, sur la branche `fix/ollama-long-first-token` :
 Sur ce Mac, la fenêtre raisonnable pour qwen3.5:35b est 16K–32K ; les
 250K « conseillés » par la fiche du modèle supposent bien plus de mémoire.
 
+**Deuxième tour, même jour, à 16K : coupé par le délai d'inactivité après
+dix minutes sans jeton.** Le journal d'Ollama montre pourtant le prompt
+entièrement lu en 326 s (7 110 jetons à 22/s), puis quatre minutes de
+génération. Qwen 3.5 est un modèle *pensant* : Ollama envoie d'abord des
+morceaux `message.thinking`, que `OllamaProvider` ignorait — rien ne
+sortait, ni pour l'utilisateur ni pour le watchdog. Réponse :
+`ChatChunk.thinking` (contrat, additif), relayé par le moteur (phase
+`thinking`), accumulé à part dans le message et affiché replié
+(`brainstorm-chat__thinking`), compté comme activité et annoncé dans le
+bandeau (`chat.thinking`). Et `ChatOptions.think` → `think: false` de
+`/api/chat` pour couper le raisonnement, réglage du panneau visible
+seulement quand Ollama déclare la capacité `thinking`, persisté dans
+`llm.ollamaThink`. Sur une machine lente, couper le raisonnement est le
+premier levier : il multipliait l'attente avant la réponse.
+
 ---
 
 ## 3. Known technical debt

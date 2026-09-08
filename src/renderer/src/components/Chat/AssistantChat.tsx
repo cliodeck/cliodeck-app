@@ -71,7 +71,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nerEnabled, setNerEnabled] = useState(false);
-  const [ragStatus, setRagStatus] = useState<{ message: string; isError: boolean } | null>(null);
+  const [ragStatus, setRagStatus] = useState<{ phase: string; message: string; isError: boolean } | null>(null);
   // Attente avant le premier jeton : Ollama ne transmet pas l'avancement de
   // la lecture du prompt, mais l'utilisateur doit savoir qu'il attend, depuis
   // combien de temps, et quand le délai d'inactivité coupera.
@@ -164,7 +164,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
       const phase = env.status.phase;
       const label = env.status.label ?? phase;
       if (phase === 'generating') setFirstTokenSeen(true);
-      setRagStatus({ message: label, isError: phase === 'error' });
+      setRagStatus({ phase, message: label, isError: phase === 'error' });
     });
     return () => unsub();
   }, []);
@@ -305,6 +305,12 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     const toolCalls = orig.toolCalls ?? [];
     return (
       <>
+        {m.role === 'assistant' && orig.thinking && (
+          <details className="brainstorm-chat__thinking">
+            <summary>{t('chat.thinkingBlock', { chars: orig.thinking.length })}</summary>
+            <pre>{orig.thinking}</pre>
+          </details>
+        )}
         {orig.error && <div className="brainstorm-chat__error">{orig.error}</div>}
         {m.role === 'assistant' && orig.error && (
           <div className="brainstorm-chat__msg-actions">
@@ -450,14 +456,37 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
 
   const settingsLabel = t('chat.settings.toggle', 'Chat settings');
 
+  // Un modèle pensant produit du raisonnement avant le premier jeton de
+  // réponse : c'est de l'activité, et elle se montre plutôt que le compteur.
+  const pendingThinkingChars = useChatStore((s) => {
+    const m = s.pendingAssistantId
+      ? s.messages.find((x) => x.id === s.pendingAssistantId)
+      : undefined;
+    return m?.thinking?.length ?? 0;
+  });
   const waitingNotice =
-    isStreaming && !firstTokenSeen && waitSeconds >= 60
-      ? t('chat.waitingForModel', {
-          elapsed: Math.floor(waitSeconds / 60),
-          limit: timeoutMinutes,
-        })
+    isStreaming && !firstTokenSeen
+      ? pendingThinkingChars > 0
+        ? t('chat.thinking', { chars: pendingThinkingChars })
+        : waitSeconds >= 60
+          ? t('chat.waitingForModel', {
+              elapsed: Math.floor(waitSeconds / 60),
+              limit: timeoutMinutes,
+            })
+          : null
       : null;
-  const showStatus = ragStatus && (isStreaming || ragStatus.isError);
+  // Les phases arrivent brutes du moteur (`retrieving`, `thinking`…) : on
+  // les traduit ici, et la phase « thinking » s'efface derrière le compteur
+  // de raisonnement, qui dit la même chose avec le chiffre en plus.
+  const phaseLabel = ragStatus
+    ? ragStatus.message === ragStatus.phase
+      ? t(`chat.phase.${ragStatus.phase}`, ragStatus.phase)
+      : ragStatus.message
+    : null;
+  const showStatus =
+    ragStatus &&
+    (isStreaming || ragStatus.isError) &&
+    !(ragStatus.phase === 'thinking' && pendingThinkingChars > 0);
   const statusBanner =
     showStatus || waitingNotice ? (
       <div
@@ -465,7 +494,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         role="status"
         aria-live="polite"
       >
-        {showStatus ? ragStatus.message : null}
+        {showStatus ? phaseLabel : null}
         {showStatus && waitingNotice ? ' · ' : null}
         {waitingNotice}
       </div>

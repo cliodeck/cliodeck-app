@@ -715,6 +715,7 @@ export const FusionChatStartSchema = z.object({
       topP: z.number().min(0).max(1).optional(),
       topK: z.number().int().min(1).max(1000).optional(),
       repeatPenalty: z.number().min(0).max(2).optional(),
+      think: z.boolean().optional(),
       // Délai d'inactivité du tour (curseur « Timeout » du panneau) : 1 s … 1 h.
       timeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
       retrievalOptions: z

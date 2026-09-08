@@ -744,6 +744,15 @@
     "timeout": "Aucune réponse du modèle depuis {{minutes}} min : génération interrompue. Augmentez le délai d'inactivité dans les réglages du chat si le modèle est simplement lent.",
     "providerError": "Le modèle a échoué : {{message}}",
     "waitingForModel": "Le modèle lit encore le prompt · {{elapsed}} min écoulées · interruption automatique à {{limit}} min",
+    "thinking": "Le modèle réfléchit · {{chars}} caractères de raisonnement",
+    "thinkingBlock": "Raisonnement du modèle ({{chars}} caractères)",
+    "phase": {
+      "retrieving": "Recherche dans les sources…",
+      "compressing": "Compression du contexte…",
+      "thinking": "Le modèle réfléchit…",
+      "generating": "Rédaction de la réponse…",
+      "done": "Terminé"
+    },
     "openSettings": "Ouvrir les paramètres",
     "sourcesLabel": "Sources",
     "noProjectState": {
@@ -2210,6 +2219,8 @@
     "memoryEstimate": "Estimation mémoire : modèle {{model}} Go + contexte ≈ {{context}} Go = {{total}} Go, pour ≈ {{budget}} Go utilisables par le modèle (75 % de la mémoire de la machine).",
     "memoryWarningModel": "Ce modèle dépasse déjà la mémoire utilisable : Ollama en déporte une partie sur le processeur, et chaque jeton de contexte aggrave le ralentissement.",
     "memoryWarningContext": "Cette fenêtre fait déborder la mémoire : Ollama déportera une partie du modèle sur le processeur et la lecture du prompt deviendra très lente.",
+    "think": "Raisonnement du modèle (thinking)",
+    "thinkHelp": "Ce modèle sait raisonner avant de répondre. Le raisonnement s'affiche à part dans la réponse. Le désactiver accélère nettement la réponse sur une machine lente.",
     "promptLanguage": "Langue du prompt système",
     "customPrompt": "Utiliser un prompt système personnalisé",
     "customPromptHelp": "Remplacer le prompt système par défaut par le vôtre",

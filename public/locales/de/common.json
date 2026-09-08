@@ -744,6 +744,15 @@
     "timeout": "Seit {{minutes}} Min. keine Antwort vom Modell: Generierung abgebrochen. Erhöhen Sie das Inaktivitäts-Timeout in den Chat-Einstellungen, wenn das Modell nur langsam ist.",
     "providerError": "Das Modell ist gescheitert: {{message}}",
     "waitingForModel": "Das Modell liest noch den Prompt · {{elapsed}} Min. vergangen · automatischer Abbruch nach {{limit}} Min.",
+    "thinking": "Das Modell denkt nach · {{chars}} Zeichen Überlegung",
+    "thinkingBlock": "Überlegung des Modells ({{chars}} Zeichen)",
+    "phase": {
+      "retrieving": "Suche in den Quellen…",
+      "compressing": "Kontext wird komprimiert…",
+      "thinking": "Das Modell denkt nach…",
+      "generating": "Antwort wird geschrieben…",
+      "done": "Fertig"
+    },
     "openSettings": "Einstellungen öffnen",
     "sourcesLabel": "Quellen",
     "noProjectState": {
@@ -2210,6 +2219,8 @@
     "memoryEstimate": "Speicherschätzung: Modell {{model}} GB + Kontext ≈ {{context}} GB = {{total}} GB, bei ≈ {{budget}} GB nutzbar für das Modell (75 % des Arbeitsspeichers).",
     "memoryWarningModel": "Dieses Modell übersteigt bereits den nutzbaren Speicher: Ollama lagert einen Teil auf die CPU aus, und jedes Kontext-Token verschärft die Verlangsamung.",
     "memoryWarningContext": "Dieses Fenster sprengt den Speicher: Ollama wird einen Teil des Modells auf die CPU auslagern, und das Lesen des Prompts wird sehr langsam.",
+    "think": "Modell-Denkphase (thinking)",
+    "thinkHelp": "Dieses Modell kann vor der Antwort nachdenken. Die Denkphase wird getrennt in der Antwort angezeigt. Abschalten beschleunigt Antworten auf einem langsamen Rechner deutlich.",
     "promptLanguage": "Sprache des System-Prompts",
     "customPrompt": "Eigenen System-Prompt verwenden",
     "customPromptHelp": "Den voreingestellten System-Prompt durch einen eigenen ersetzen",

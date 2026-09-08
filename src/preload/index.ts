@@ -1044,6 +1044,8 @@ const api = {
           topK?: number;
           /** `repeat_penalty` d'Ollama ; ignoré par les fournisseurs cloud. */
           repeatPenalty?: number;
+          /** `false` coupe le raisonnement d'un modèle pensant (Ollama). */
+          think?: boolean;
           /**
            * Délai d'inactivité : le tour est interrompu après ce délai
            * sans chunk, statut ni événement d'outil. Pas une durée totale.
@@ -1072,6 +1074,8 @@ const api = {
           sessionId: string;
           chunk: {
             delta: string;
+            /** Fragment de raisonnement d'un modèle pensant, distinct de la réponse. */
+            thinking?: string;
             done?: boolean;
             finishReason?: string;
             usage?: Record<string, number>;
