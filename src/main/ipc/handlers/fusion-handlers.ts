@@ -11,7 +11,7 @@
  * uncaught exception.
  */
 
-import { ipcMain, dialog, app } from 'electron';
+import { ipcMain, dialog, app, shell } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -21,6 +21,12 @@ import {
   appendMcpAudit,
 } from './mcp-add-guard.js';
 import { projectManager } from '../../services/project-manager.js';
+import {
+  claudeDesktopConfigPath,
+  claudeCodeCommand,
+  mergeServerEntry,
+  type ClaudeDesktopPlatform,
+} from '../../../../backend/mcp-server/client-install.js';
 import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
@@ -564,6 +570,130 @@ export function setupFusionHandlers(): void {
       }
     }
   );
+
+  // MARK: - MCP server: déclaration auprès des clients
+
+  /**
+   * Chemin du paquet d'extension embarqué. Il est produit par
+   * `npm run build:mcpb` dans `resources/`, et electron-builder le recopie
+   * sous `resources/resources/` dans l'app installée.
+   */
+  function bundledExtensionPath(): string | null {
+    const devPath = path.join(process.cwd(), 'resources', 'cliodeck.mcpb');
+    const packagedPath = path.join(process.resourcesPath ?? '', 'resources', 'cliodeck.mcpb');
+    if (app.isPackaged && fsSync.existsSync(packagedPath)) return packagedPath;
+    if (fsSync.existsSync(devPath)) return devPath;
+    return null;
+  }
+
+  ipcMain.handle('fusion:mcpServer:clients', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const platform = process.platform as ClaudeDesktopPlatform;
+      const desktopConfig = claudeDesktopConfigPath(platform, {
+        home: app.getPath('home'),
+        appData: process.env.APPDATA,
+      });
+      return successResponse({
+        platform,
+        extensionPath: bundledExtensionPath(),
+        // null sous Linux : Claude Desktop n'y existe pas, et y écrire une
+        // configuration donnerait l'illusion d'avoir branché quelque chose.
+        desktopConfigPath: desktopConfig,
+        desktopConfigExists: desktopConfig ? fsSync.existsSync(desktopConfig) : false,
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  /** Ouvre le .mcpb : Claude Desktop prend la main et affiche son dialogue. */
+  ipcMain.handle('fusion:mcpServer:installExtension', async () => {
+    const file = bundledExtensionPath();
+    if (!file) {
+      return errorResponse(new Error("Paquet d'extension introuvable (npm run build:mcpb)."));
+    }
+    const problem = await shell.openPath(file);
+    if (problem) return errorResponse(new Error(problem));
+    return successResponse({ opened: file });
+  });
+
+  /**
+   * Écrit l'entrée du projet dans `claude_desktop_config.json`.
+   *
+   * Le fichier appartient à Claude Desktop et contient déjà les serveurs de
+   * l'utilisateur : on fusionne, on ne remplace jamais, et on dépose une
+   * copie `.bak` avant d'écrire. Action explicite seulement — jamais au
+   * démarrage.
+   */
+  ipcMain.handle('fusion:mcpServer:configureClaudeDesktop', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const platform = process.platform as ClaudeDesktopPlatform;
+      const target = claudeDesktopConfigPath(platform, {
+        home: app.getPath('home'),
+        appData: process.env.APPDATA,
+      });
+      if (!target) {
+        return errorResponse(
+          new Error("Claude Desktop n'existe pas sur ce système ; utilisez la commande Claude Code.")
+        );
+      }
+
+      const wrapperName = process.platform === 'win32' ? 'cliodeck-mcp.cmd' : 'cliodeck-mcp';
+      const devBin = path.join(process.cwd(), 'bin', wrapperName);
+      const packagedBin = path.join(process.resourcesPath ?? '', 'bin', wrapperName);
+      const command =
+        app.isPackaged && fsSync.existsSync(packagedBin)
+          ? packagedBin
+          : fsSync.existsSync(devBin)
+            ? devBin
+            : null;
+      if (!command) return errorResponse(new Error('Binaire cliodeck-mcp introuvable.'));
+
+      const cfg = await readOrInitWorkspaceConfig(root);
+      const block = (cfg.mcpServer as { serverName?: unknown } | undefined) ?? {};
+      const serverName =
+        typeof block.serverName === 'string' && block.serverName.trim().length > 0
+          ? block.serverName.trim()
+          : path.basename(root);
+
+      let existing: Record<string, unknown> | null = null;
+      if (fsSync.existsSync(target)) {
+        const raw = await fs.readFile(target, 'utf8');
+        try {
+          existing = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          // Un fichier illisible ne doit pas être écrasé en silence : on
+          // s'arrête et l'utilisateur décide.
+          return errorResponse(
+            new Error(`${target} n'est pas un JSON valide ; corrigez-le avant de continuer.`)
+          );
+        }
+        await fs.copyFile(target, `${target}.bak`);
+      } else {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+      }
+
+      const { config, status } = mergeServerEntry(existing, serverName, {
+        command,
+        args: [root],
+      });
+      await fs.writeFile(target, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+      return successResponse({
+        path: target,
+        serverName,
+        status,
+        backedUp: existing !== null,
+        claudeCodeCommand: claudeCodeCommand(serverName, { command, args: [root] }),
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
 
   // MARK: - vault status (read-only — indexing/search land with chat IPC)
 

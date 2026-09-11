@@ -25,6 +25,31 @@ interface MCPServerApi {
     serverName?: string;
     error?: string;
   }>;
+  clients(): Promise<{
+    success: boolean;
+    platform?: string;
+    extensionPath?: string | null;
+    desktopConfigPath?: string | null;
+    desktopConfigExists?: boolean;
+    error?: string;
+  }>;
+  installExtension(): Promise<{ success: boolean; opened?: string; error?: string }>;
+  configureClaudeDesktop(): Promise<{
+    success: boolean;
+    path?: string;
+    serverName?: string;
+    status?: 'added' | 'replaced' | 'unchanged';
+    backedUp?: boolean;
+    claudeCodeCommand?: string;
+    error?: string;
+  }>;
+}
+
+interface ClientsState {
+  platform: string;
+  extensionPath: string | null;
+  /** null sous Linux : Claude Desktop n'y existe pas. */
+  desktopConfigPath: string | null;
 }
 
 function api(): MCPServerApi | null {
@@ -132,6 +157,8 @@ export const MCPServerSection: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [activeSnippet, setActiveSnippet] = useState<SnippetKind>('claudeDesktop');
+  const [clients, setClients] = useState<ClientsState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const a = api();
@@ -151,6 +178,14 @@ export const MCPServerSection: React.FC = () => {
       setError(null);
     } else {
       setError(res.error ?? 'unknown');
+    }
+    const cl = await a.clients();
+    if (cl.success) {
+      setClients({
+        platform: cl.platform ?? 'unknown',
+        extensionPath: cl.extensionPath ?? null,
+        desktopConfigPath: cl.desktopConfigPath ?? null,
+      });
     }
   }, [t]);
 
@@ -188,6 +223,42 @@ export const MCPServerSection: React.FC = () => {
       setBusy(false);
     }
   }, [state, pendingName, refresh]);
+
+  const installExtension = useCallback(async () => {
+    const a = api();
+    if (!a) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await a.installExtension();
+      if (res.success) setNotice(t('mcpServer.clients.extensionOpened'));
+      else setError(res.error ?? 'install_failed');
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
+
+  const configureDesktop = useCallback(async () => {
+    const a = api();
+    if (!a) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await a.configureClaudeDesktop();
+      if (res.success) {
+        setNotice(
+          t(`mcpServer.clients.written.${res.status ?? 'added'}`, {
+            name: res.serverName ?? '',
+            path: res.path ?? '',
+          })
+        );
+      } else {
+        setError(res.error ?? 'configure_failed');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
 
   const snippet = useMemo(() => {
     if (!state || !state.binaryPath) return null;
@@ -310,6 +381,72 @@ export const MCPServerSection: React.FC = () => {
               {t('mcpServer.tools.limits')}
             </p>
           </div>
+
+          {clients && state.enabled && (
+            <div className="config-field">
+              <label className="config-label">{t('mcpServer.clients.title')}</label>
+
+              {/* Claude Desktop : macOS et Windows. Sous Linux le client
+                  n'existe pas, et le chemin de configuration remonte à null —
+                  on le dit au lieu d'offrir un bouton sans effet. */}
+              {clients.desktopConfigPath ? (
+                <div style={{ marginBottom: 10 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 4px' }}>
+                    {t('mcpServer.clients.desktopTitle')}
+                  </p>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      disabled={busy || !clients.extensionPath}
+                      onClick={() => void installExtension()}
+                      style={{ padding: '3px 10px', fontSize: 12 }}
+                    >
+                      {t('mcpServer.clients.install')}
+                    </button>
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      disabled={busy}
+                      onClick={() => void configureDesktop()}
+                      style={{ padding: '3px 10px', fontSize: 12 }}
+                    >
+                      {t('mcpServer.clients.write')}
+                    </button>
+                  </div>
+                  <p className="config-hint" style={{ margin: '4px 0 0' }}>
+                    {clients.extensionPath
+                      ? t('mcpServer.clients.installHint')
+                      : t('mcpServer.clients.extensionMissing')}
+                  </p>
+                  <p className="config-hint" style={{ margin: '2px 0 0' }}>
+                    {t('mcpServer.clients.writeHint')}
+                  </p>
+                </div>
+              ) : (
+                <p className="config-hint" style={{ margin: '0 0 10px' }}>
+                  {t('mcpServer.clients.desktopUnavailable')}
+                </p>
+              )}
+
+              <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 4px' }}>
+                {t('mcpServer.clients.codeTitle')}
+              </p>
+              {state.binaryPath && (
+                <CodeBlock
+                  text={buildSnippet('claudeCode', state.serverName, state.binaryPath, state.workspaceRoot)}
+                  copyLabel={t('mcpServer.snippets.copy')}
+                  copiedLabel={t('mcpServer.snippets.copied')}
+                />
+              )}
+
+              {notice && (
+                <p style={{ fontSize: 12, color: 'var(--color-accent)', margin: '8px 0 0' }}>
+                  {notice}
+                </p>
+              )}
+            </div>
+          )}
 
           {state.binaryPath && (
             <div className="config-field">

@@ -920,11 +920,37 @@ const api = {
           binaryPath?: string | null;
           error?: string;
         }>,
-      set: (patch: { enabled?: boolean; serverName?: string }) =>
+      set: (patch: { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }) =>
         ipcRenderer.invoke('fusion:mcpServer:set', patch) as Promise<{
           success: boolean;
           enabled?: boolean;
           serverName?: string;
+          tools?: Record<string, boolean>;
+          error?: string;
+        }>,
+      clients: () =>
+        ipcRenderer.invoke('fusion:mcpServer:clients') as Promise<{
+          success: boolean;
+          platform?: string;
+          extensionPath?: string | null;
+          desktopConfigPath?: string | null;
+          desktopConfigExists?: boolean;
+          error?: string;
+        }>,
+      installExtension: () =>
+        ipcRenderer.invoke('fusion:mcpServer:installExtension') as Promise<{
+          success: boolean;
+          opened?: string;
+          error?: string;
+        }>,
+      configureClaudeDesktop: () =>
+        ipcRenderer.invoke('fusion:mcpServer:configureClaudeDesktop') as Promise<{
+          success: boolean;
+          path?: string;
+          serverName?: string;
+          status?: 'added' | 'replaced' | 'unchanged';
+          backedUp?: boolean;
+          claudeCodeCommand?: string;
           error?: string;
         }>,
     },

@@ -1566,6 +1566,23 @@
       "genericHint": "For any MCP-compliant client: invoke this command directly. It speaks the MCP protocol over stdin/stdout.",
       "copy": "Copy",
       "copied": "Copied"
+    },
+    "clients": {
+      "title": "Connect a client",
+      "desktopTitle": "Claude Desktop — macOS and Windows",
+      "install": "Install the extension",
+      "installHint": "Opens the extension bundle: Claude Desktop shows its install dialog, where you pick the application and the project. One extension carries one project.",
+      "extensionMissing": "Extension bundle not found — run `npm run build:mcpb` in the repository.",
+      "extensionOpened": "Bundle opened: finish the installation in Claude Desktop.",
+      "write": "Write the configuration",
+      "writeHint": "Adds this project to Claude Desktop’s configuration, keeping the servers already declared and after taking a backup copy. This is the route for wiring several projects at once. Restart Claude Desktop afterwards.",
+      "desktopUnavailable": "Claude Desktop does not exist on this system. Use Claude Code, below.",
+      "codeTitle": "Claude Code — every system, Linux included",
+      "written": {
+        "added": "Project “{{name}}” added to {{path}}. Restart Claude Desktop.",
+        "replaced": "Entry “{{name}}” replaced in {{path}} (a backup copy was left beside it). Restart Claude Desktop.",
+        "unchanged": "Entry “{{name}}” was already up to date in {{path}}."
+      }
     }
   },
   "a11y": {
