@@ -502,10 +502,13 @@ export function setupFusionHandlers(): void {
           ? block.serverName.trim()
           : path.basename(root);
       // Resolve the wrapper script. In dev it lives in <repo>/bin; when
-      // packaged it ships under resources/. The renderer needs an absolute
-      // path so the snippets can be copy-pasted verbatim.
-      const devBin = path.join(process.cwd(), 'bin', 'cliodeck-mcp');
-      const packagedBin = path.join(process.resourcesPath ?? '', 'bin', 'cliodeck-mcp');
+      // packaged it ships under resources/bin (electron-builder
+      // `extraResources`). The renderer needs an absolute path so the
+      // snippets can be copy-pasted verbatim. Windows gets the .cmd: an MCP
+      // client cannot spawn the POSIX script there.
+      const wrapperName = process.platform === 'win32' ? 'cliodeck-mcp.cmd' : 'cliodeck-mcp';
+      const devBin = path.join(process.cwd(), 'bin', wrapperName);
+      const packagedBin = path.join(process.resourcesPath ?? '', 'bin', wrapperName);
       let binaryPath: string | null = null;
       if (!app.isPackaged && fsSync.existsSync(devBin)) {
         binaryPath = devBin;

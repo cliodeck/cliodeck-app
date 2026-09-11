@@ -1,28 +1,66 @@
 #!/bin/sh
 # cliodeck-mcp — stdio MCP server entrypoint.
 #
-# Wraps the CLI so it runs under Electron's embedded Node, matching the
-# ABI of the native bindings compiled by `electron-builder install-app-deps`.
-# Using system Node instead would require a second better-sqlite3 build
-# and fight the postinstall on every `npm install`.
+# Runs the CLI under Electron's embedded Node (ELECTRON_RUN_AS_NODE=1) so the
+# native binding ABI matches the one `electron-builder install-app-deps`
+# produced. System Node would need a second better-sqlite3 build, kept in sync
+# on every `npm install`.
+#
+# Two layouts, because the historian may be running either one:
+#   - git checkout   <repo>/bin/cliodeck-mcp
+#                    → dist/backend/... + node_modules/.bin/electron
+#   - installed app  <resources>/bin/cliodeck-mcp
+#                    → app.asar + the executable shipped in the bundle
+# Until 1.0.0-rc.4 only the first was handled, so Settings offered the packaged
+# user a copy-paste snippet pointing at a file their install does not contain.
+#
+# Windows uses cliodeck-mcp.cmd alongside: no POSIX shell is guaranteed there.
 set -e
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
-CLI_JS="$REPO_ROOT/dist/backend/mcp-server/cli.js"
-ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
+CLI_REL="dist/backend/mcp-server/cli.js"
 
-if [ ! -x "$ELECTRON_BIN" ]; then
-  echo "[cliodeck-mcp] electron not found at $ELECTRON_BIN" >&2
-  echo "  Run 'npm install' in $REPO_ROOT first." >&2
-  exit 2
-fi
+if [ -x "$ROOT/node_modules/.bin/electron" ]; then
+  # Development checkout: $ROOT is the repository.
+  ELECTRON_BIN="$ROOT/node_modules/.bin/electron"
+  CLI_JS="$ROOT/$CLI_REL"
+  if [ ! -f "$CLI_JS" ]; then
+    echo "[cliodeck-mcp] CLI bundle not found at $CLI_JS" >&2
+    echo "  Run 'npm run build' in $ROOT first." >&2
+    exit 2
+  fi
+else
+  # Installed app: $ROOT is the resources directory. Its parent holds the
+  # executable — Contents/ on macOS, the install root on Linux.
+  APP_DIR=$(dirname "$ROOT")
 
-if [ ! -f "$CLI_JS" ]; then
-  echo "[cliodeck-mcp] CLI bundle not found at $CLI_JS" >&2
-  echo "  Run 'npm run build' in $REPO_ROOT first." >&2
-  exit 2
+  if [ -f "$ROOT/app.asar" ]; then
+    # Paths inside an asar cannot be stat'd from the shell; Electron resolves
+    # them once it is running.
+    CLI_JS="$ROOT/app.asar/$CLI_REL"
+  elif [ -f "$ROOT/app/$CLI_REL" ]; then
+    CLI_JS="$ROOT/app/$CLI_REL"
+  else
+    echo "[cliodeck-mcp] no ClioDeck code found under $ROOT" >&2
+    echo "  Expected either a built checkout (run 'npm run build') or an" >&2
+    echo "  installed app (resources/app.asar)." >&2
+    exit 2
+  fi
+
+  ELECTRON_BIN=""
+  for candidate in "$APP_DIR/MacOS"/* "$APP_DIR/cliodeck" "$APP_DIR/ClioDeck"; do
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+      ELECTRON_BIN="$candidate"
+      break
+    fi
+  done
+  if [ -z "$ELECTRON_BIN" ]; then
+    echo "[cliodeck-mcp] ClioDeck executable not found next to $ROOT" >&2
+    echo "  Looked in $APP_DIR (MacOS/, cliodeck, ClioDeck)." >&2
+    exit 2
+  fi
 fi
 
 exec env ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" "$CLI_JS" "$@"
