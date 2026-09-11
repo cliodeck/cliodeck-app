@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { ZoteroItem } from './ZoteroAPI';
 import { createCitation } from '../../types/citation';
 import { BibTeXExporter } from '../../core/bibliography/BibTeXExporter';
+import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
 
 export class ZoteroLocalBibTeX {
   private dataDirectory: string;
@@ -78,9 +79,13 @@ export class ZoteroLocalBibTeX {
 
   /**
    * Generate BibTeX from ZoteroItem array using BibTeXExporter
+   *
+   * Les clés sont attribuées en un seul passage sur la liste : c'est la
+   * seule façon de garantir leur unicité (cf. {@link assignCiteKeys}).
    */
-  generateBibTeX(items: ZoteroItem[]): string {
-    const citations = items.map((item) => this.zoteroItemToCitation(item));
+  generateBibTeX(items: ZoteroItem[], preservedKeys?: Readonly<Record<string, string>>): string {
+    const keys = assignCiteKeys(items, new Set(), preservedKeys);
+    const citations = items.map((item) => this.zoteroItemToCitation(item, keys.get(item.key)!));
     const exporter = new BibTeXExporter();
     return exporter.exportToString(citations);
   }
@@ -89,7 +94,7 @@ export class ZoteroLocalBibTeX {
    * Convert a ZoteroItem to a Citation for BibTeX export
    * Mirrors ZoteroDiffEngine.zoteroItemToCitation logic
    */
-  private zoteroItemToCitation(item: ZoteroItem) {
+  private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string) {
     const data = item.data;
 
     const authors = data.creators
@@ -106,10 +111,7 @@ export class ZoteroLocalBibTeX {
       })
       .join(' and ') || 'Unknown';
 
-    const year = data.date ? this.extractYear(data.date) : '';
-
-    const firstAuthor = authors.split(' and ')[0].split(',')[0].trim();
-    const bibtexKey = `${firstAuthor.replace(/\s+/g, '')}_${year}`;
+    const year = extractYear(data.date);
 
     return createCitation({
       id: bibtexKey,
@@ -124,11 +126,6 @@ export class ZoteroLocalBibTeX {
       zoteroKey: item.key,
       tags: data.tags?.map((t) => t.tag),
     });
-  }
-
-  private extractYear(dateString: string): string {
-    const yearMatch = dateString.match(/\d{4}/);
-    return yearMatch ? yearMatch[0] : '';
   }
 
   private mapZoteroTypeToRef(zoteroType: string): string {

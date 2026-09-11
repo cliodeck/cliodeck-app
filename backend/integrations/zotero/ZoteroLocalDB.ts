@@ -489,7 +489,11 @@ export class ZoteroLocalDB implements IZoteroDataSource {
 
   // MARK: - Export
 
-  async exportCollectionAsBibTeX(collectionKey: string, includeSubcollections: boolean = true): Promise<string> {
+  async exportCollectionAsBibTeX(
+    collectionKey: string,
+    includeSubcollections: boolean = true,
+    preservedKeys?: Readonly<Record<string, string>>
+  ): Promise<string> {
     const bibtexHelper = new ZoteroLocalBibTeX(this.config.dataDirectory);
 
     // Try Better BibTeX first
@@ -539,7 +543,7 @@ export class ZoteroLocalDB implements IZoteroDataSource {
     }
 
     console.log(`📚 Generating BibTeX from ${allItems.length} items`);
-    return bibtexHelper.generateBibTeX(allItems);
+    return bibtexHelper.generateBibTeX(allItems, preservedKeys);
   }
 
   async exportAllAsBibTeX(): Promise<string> {

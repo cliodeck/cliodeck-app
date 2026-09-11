@@ -1,43 +1,12 @@
 import path from 'path';
-import { ZoteroAPI, ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.js';
+import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
 import { ZoteroSync } from '../../../backend/integrations/zotero/ZoteroSync.js';
 import { Citation } from '../../../backend/types/citation.js';
 import { SyncDiff } from '../../../backend/integrations/zotero/ZoteroDiffEngine.js';
 import { ConflictStrategy, SyncResolution } from '../../../backend/integrations/zotero/ZoteroSyncResolver.js';
-
-/**
- * Generate a bibtexKey from a Zotero item (Author_Year format)
- * This matches the logic in ZoteroDiffEngine.zoteroItemToCitation
- */
-function generateBibtexKeyFromZoteroItem(item: ZoteroItem): string {
-  const data = item.data;
-
-  // Extract first author's last name
-  const firstCreator = data.creators?.find((c) => c.creatorType === 'author');
-  let authorName = 'Unknown';
-  if (firstCreator) {
-    if (firstCreator.lastName) {
-      authorName = firstCreator.lastName;
-    } else if (firstCreator.name) {
-      // For single-field names, take the last word as surname
-      const parts = firstCreator.name.split(' ');
-      authorName = parts[parts.length - 1];
-    }
-  }
-
-  // Extract year from date
-  let year = '';
-  if (data.date) {
-    const yearMatch = data.date.match(/\d{4}/);
-    year = yearMatch ? yearMatch[0] : '';
-  }
-
-  // Generate BibTeX key (Author_Year format)
-  const bibtexKey = `${authorName.replace(/\s+/g, '')}_${year}`;
-  return bibtexKey;
-}
+import { assignCiteKeys } from '../../../backend/core/bibliography/citekey.js';
 
 // Common options for Zotero data source selection
 interface ZoteroSourceOptions {
@@ -234,14 +203,25 @@ class ZoteroService {
           (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
         );
 
+        // Les clés viennent du fichier qui vient d'être écrit. Les
+        // refabriquer ici redonnait les homonymes que le .bib avait
+        // désambiguïsés — et, en mode API, des clés qui n'existaient nulle
+        // part, puisque c'est le serveur Zotero qui les fournit.
+        // Repli sur la fabrique quand aucun .bib n'a été écrit.
+        const citeKeys: Record<string, string> =
+          Object.keys(result.citeKeys).length > 0
+            ? result.citeKeys
+            : Object.fromEntries(assignCiteKeys(bibliographicItems));
+
         for (const item of bibliographicItems) {
           if (item.data.collections && item.data.collections.length > 0) {
             // Use zoteroKey (item.key) as the key for itemCollectionMap
             itemCollectionMap[item.key] = item.data.collections;
 
-            // Generate bibtexKey and map to collections
-            const bibtexKey = generateBibtexKeyFromZoteroItem(item);
-            bibtexKeyToCollections[bibtexKey] = item.data.collections;
+            const bibtexKey = citeKeys[item.key];
+            if (bibtexKey) {
+              bibtexKeyToCollections[bibtexKey] = item.data.collections;
+            }
           }
         }
 
@@ -531,10 +511,13 @@ class ZoteroService {
           }
         } else {
           console.log(`⚠️ No local citations provided, falling back to generated bibtexKeys`);
+          const citeKeys = assignCiteKeys(bibliographicItems);
           for (const item of bibliographicItems) {
             if (item.data.collections && item.data.collections.length > 0) {
-              const bibtexKey = generateBibtexKeyFromZoteroItem(item);
-              bibtexKeyToCollections[bibtexKey] = item.data.collections;
+              const bibtexKey = citeKeys.get(item.key);
+              if (bibtexKey) {
+                bibtexKeyToCollections[bibtexKey] = item.data.collections;
+              }
             }
           }
           console.log(`🔄 Refreshed: ${collections.length} collections, ${Object.keys(bibtexKeyToCollections).length} items with collections (fallback)`);
