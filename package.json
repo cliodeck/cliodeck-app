@@ -155,6 +155,14 @@
     ],
     "extraResources": [
       {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "cliodeck-mcp",
+          "cliodeck-mcp.cmd"
+        ]
+      },
+      {
         "from": "resources",
         "to": "resources",
         "filter": [

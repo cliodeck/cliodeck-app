@@ -12,6 +12,10 @@
  *   command: /absolute/path/to/cliodeck-app/bin/cliodeck-mcp
  *   args:    ["/absolute/path/to/workspace"]
  *
+ * From an installed app the same wrapper ships under `resources/bin/` and
+ * resolves the bundle's own Electron; Settings → Serveur MCP prints whichever
+ * absolute path applies.
+ *
  * Inactive by default: the gate lives in `loadMCPConfig`, not here. That
  * way running the binary by accident — say, a stale Claude Desktop config
  * pointing at a deleted workspace — fails loud instead of silently
