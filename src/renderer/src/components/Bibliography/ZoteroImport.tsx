@@ -327,6 +327,39 @@ export const ZoteroImport: React.FC = () => {
       if (result.success && result.finalCitations) {
         // Update bibliography store with new citations
         useBibliographyStore.setState({ citations: result.finalCitations });
+        useBibliographyStore.getState().applyFilters();
+
+        // Réécrire le .bib du projet. Sans cette étape, la mise à jour ne
+        // vivait que dans le store et le sidecar : au lancement suivant,
+        // `loadBibliographyWithMetadata` relisait le fichier — inchangé —,
+        // les entrées ajoutées disparaissaient, et la vérification suivante
+        // les re-proposait à l'identique. Le fichier est la source de
+        // vérité : il doit être écrit ici.
+        let bibError: string | undefined;
+        if (currentProject?.path) {
+          try {
+            const projectJsonPath = `${currentProject.path}/project.json`;
+            const cfg = await window.electron.project.getConfig(projectJsonPath);
+            const configured = cfg?.bibliographySource?.filePath || 'bibliography.bib';
+            const bibPath = configured.startsWith('/')
+              ? configured
+              : `${currentProject.path}/${configured}`;
+
+            const exportResult = await window.electron.bibliography.export({
+              citations: result.finalCitations,
+              filePath: bibPath,
+              format: 'modern',
+            });
+            if (!exportResult.success) {
+              bibError = exportResult.error || 'unknown error';
+            }
+          } catch (writeError) {
+            bibError = writeError instanceof Error ? writeError.message : String(writeError);
+          }
+          if (bibError) {
+            console.error('Failed to write bibliography file after sync:', bibError);
+          }
+        }
 
         // Save metadata to persist zoteroAttachments across restarts
         if (currentProject?.path) {
@@ -346,7 +379,8 @@ export const ZoteroImport: React.FC = () => {
           `Added: ${result.addedCount}\n` +
           `Modified: ${result.modifiedCount}\n` +
           `Deleted: ${result.deletedCount}\n` +
-          (result.skippedCount ? `Skipped: ${result.skippedCount}\n` : '')
+          (result.skippedCount ? `Skipped: ${result.skippedCount}\n` : '') +
+          (bibError ? `\n${t('zotero.sync.bibWriteFailed', { error: bibError })}` : '')
         );
 
         // Clear sync diff
