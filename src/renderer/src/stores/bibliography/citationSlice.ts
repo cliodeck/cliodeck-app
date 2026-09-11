@@ -86,7 +86,13 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
       const { citations: currentCitations } = get();
       const newCitationsFromFile = result.citations;
 
-      // Build a Set of existing citation IDs for fast lookup
+      // Un doublon, c'est le même item Zotero — pas la même clé BibTeX.
+      // Deux œuvres distinctes peuvent partager une clé (trois ouvrages en
+      // `Unknown_2022`, mesuré) : déduire le doublon de l'`id` en écartait
+      // alors une à l'import. Le `zoteroKey` fait foi quand il existe.
+      const existingZoteroKeys = new Set(
+        currentCitations.map(c => c.zoteroKey).filter(Boolean) as string[]
+      );
       const existingIds = new Set(currentCitations.map(c => c.id));
 
       // Separate new citations from duplicates
@@ -94,11 +100,17 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
       let duplicatesCount = 0;
 
       newCitationsFromFile.forEach((citation: Citation) => {
-        if (existingIds.has(citation.id)) {
+        const isDuplicate = citation.zoteroKey
+          ? existingZoteroKeys.has(citation.zoteroKey)
+          : existingIds.has(citation.id);
+
+        if (isDuplicate) {
           duplicatesCount++;
           console.log(`🔄 Duplicate found: ${citation.id} - ${citation.title}`);
         } else {
           newCitations.push(citation);
+          if (citation.zoteroKey) existingZoteroKeys.add(citation.zoteroKey);
+          existingIds.add(citation.id);
         }
       });
 
