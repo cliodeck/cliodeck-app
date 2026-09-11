@@ -67,3 +67,6 @@ e2e/.auth/
 
 # Paquets npm publiables (build à la publication via prepublishOnly)
 packages/*/dist/
+
+# Paquet d'extension Claude Desktop, reconstruit par `npm run build:mcpb`
+resources/cliodeck.mcpb

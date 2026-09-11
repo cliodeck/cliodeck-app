@@ -8,6 +8,8 @@ interface MCPServerState {
   serverName: string;
   workspaceRoot: string;
   binaryPath: string | null;
+  /** Nom d'outil → exposé. Absent = exposé (voir MCPServerSettings.tools). */
+  tools: Record<string, boolean>;
 }
 
 interface MCPServerApi {
@@ -17,14 +19,45 @@ interface MCPServerApi {
     serverName?: string;
     workspaceRoot?: string;
     binaryPath?: string | null;
+    tools?: Record<string, boolean>;
     error?: string;
   }>;
-  set(patch: { enabled?: boolean; serverName?: string }): Promise<{
+  set(patch: {
+    enabled?: boolean;
+    serverName?: string;
+    tools?: Record<string, boolean>;
+  }): Promise<{
     success: boolean;
     enabled?: boolean;
     serverName?: string;
+    tools?: Record<string, boolean>;
     error?: string;
   }>;
+  clients(): Promise<{
+    success: boolean;
+    platform?: string;
+    extensionPath?: string | null;
+    desktopConfigPath?: string | null;
+    desktopConfigExists?: boolean;
+    error?: string;
+  }>;
+  installExtension(): Promise<{ success: boolean; opened?: string; error?: string }>;
+  configureClaudeDesktop(): Promise<{
+    success: boolean;
+    path?: string;
+    serverName?: string;
+    status?: 'added' | 'replaced' | 'unchanged';
+    backedUp?: boolean;
+    claudeCodeCommand?: string;
+    error?: string;
+  }>;
+}
+
+interface ClientsState {
+  platform: string;
+  extensionPath: string | null;
+  /** null sous Linux : Claude Desktop n'y existe pas. */
+  desktopConfigPath: string | null;
 }
 
 function api(): MCPServerApi | null {
@@ -113,16 +146,23 @@ const CodeBlock: React.FC<{
   );
 };
 
-const TOOL_LIST: ReadonlyArray<{ name: string; defaultK: number }> = [
-  { name: 'search_documents', defaultK: 10 },
-  { name: 'search_obsidian', defaultK: 10 },
-  { name: 'search_tropy', defaultK: 10 },
-  { name: 'search_zotero', defaultK: 10 },
-  { name: 'graph_neighbors', defaultK: 10 },
-  { name: 'entity_context', defaultK: 10 },
-  { name: 'search_gallica', defaultK: 10 },
-  { name: 'search_hal', defaultK: 10 },
-  { name: 'search_europeana', defaultK: 10 },
+/**
+ * Une ligne du panneau accorde un ou plusieurs outils d'un seul geste.
+ * `list_manuscript` et `read_manuscript` vont ensemble : lister les titres
+ * des chapitres renseigne déjà sur le travail en cours, les séparer
+ * n'accorderait rien d'utile.
+ */
+const TOOL_LIST: ReadonlyArray<{ key: string; names: string[] }> = [
+  { key: 'search_documents', names: ['search_documents'] },
+  { key: 'search_obsidian', names: ['search_obsidian'] },
+  { key: 'search_tropy', names: ['search_tropy'] },
+  { key: 'search_zotero', names: ['search_zotero'] },
+  { key: 'graph_neighbors', names: ['graph_neighbors'] },
+  { key: 'entity_context', names: ['entity_context'] },
+  { key: 'search_gallica', names: ['search_gallica'] },
+  { key: 'search_hal', names: ['search_hal'] },
+  { key: 'search_europeana', names: ['search_europeana'] },
+  { key: 'manuscript', names: ['list_manuscript', 'read_manuscript'] },
 ];
 
 export const MCPServerSection: React.FC = () => {
@@ -132,6 +172,8 @@ export const MCPServerSection: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [activeSnippet, setActiveSnippet] = useState<SnippetKind>('claudeDesktop');
+  const [clients, setClients] = useState<ClientsState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const a = api();
@@ -146,11 +188,20 @@ export const MCPServerSection: React.FC = () => {
         serverName: res.serverName,
         workspaceRoot: res.workspaceRoot,
         binaryPath: res.binaryPath ?? null,
+        tools: res.tools ?? {},
       });
       setPendingName(res.serverName);
       setError(null);
     } else {
       setError(res.error ?? 'unknown');
+    }
+    const cl = await a.clients();
+    if (cl.success) {
+      setClients({
+        platform: cl.platform ?? 'unknown',
+        extensionPath: cl.extensionPath ?? null,
+        desktopConfigPath: cl.desktopConfigPath ?? null,
+      });
     }
   }, [t]);
 
@@ -188,6 +239,60 @@ export const MCPServerSection: React.FC = () => {
       setBusy(false);
     }
   }, [state, pendingName, refresh]);
+
+  const toggleTool = useCallback(
+    async (names: string[], next: boolean) => {
+      const a = api();
+      if (!a) return;
+      setBusy(true);
+      try {
+        const res = await a.set({
+          tools: Object.fromEntries(names.map((n) => [n, next])),
+        });
+        if (res.success) await refresh();
+        else setError(res.error ?? 'set_failed');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh]
+  );
+
+  const installExtension = useCallback(async () => {
+    const a = api();
+    if (!a) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await a.installExtension();
+      if (res.success) setNotice(t('mcpServer.clients.extensionOpened'));
+      else setError(res.error ?? 'install_failed');
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
+
+  const configureDesktop = useCallback(async () => {
+    const a = api();
+    if (!a) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await a.configureClaudeDesktop();
+      if (res.success) {
+        setNotice(
+          t(`mcpServer.clients.written.${res.status ?? 'added'}`, {
+            name: res.serverName ?? '',
+            path: res.path ?? '',
+          })
+        );
+      } else {
+        setError(res.error ?? 'configure_failed');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [t]);
 
   const snippet = useMemo(() => {
     if (!state || !state.binaryPath) return null;
@@ -298,18 +403,102 @@ export const MCPServerSection: React.FC = () => {
               }}
             >
               {TOOL_LIST.map((tool) => (
-                <li
-                  key={tool.name}
-                  style={{ breakInside: 'avoid', padding: '2px 0' }}
-                >
-                  <code>{tool.name}</code>
+                <li key={tool.key} style={{ breakInside: 'avoid', padding: '2px 0' }}>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.tools[tool.names[0]] === true}
+                      disabled={busy}
+                      onChange={(e) => void toggleTool(tool.names, e.target.checked)}
+                    />
+                    <code>{tool.names.join(' + ')}</code>
+                  </label>
                 </li>
               ))}
             </ul>
             <p className="config-hint" style={{ margin: '4px 0 0' }}>
+              {t('mcpServer.tools.optIn')}
+            </p>
+            <p className="config-hint" style={{ margin: '2px 0 0' }}>
+              {t('mcpServer.tools.manuscriptNote')}
+            </p>
+            <p className="config-hint" style={{ margin: '2px 0 0' }}>
               {t('mcpServer.tools.limits')}
             </p>
           </div>
+
+          {clients && state.enabled && (
+            <div className="config-field">
+              <label className="config-label">{t('mcpServer.clients.title')}</label>
+
+              {/* Claude Desktop : macOS et Windows. Sous Linux le client
+                  n'existe pas, et le chemin de configuration remonte à null —
+                  on le dit au lieu d'offrir un bouton sans effet. */}
+              {clients.desktopConfigPath ? (
+                <div style={{ marginBottom: 10 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 4px' }}>
+                    {t('mcpServer.clients.desktopTitle')}
+                  </p>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      disabled={busy || !clients.extensionPath}
+                      onClick={() => void installExtension()}
+                      style={{ padding: '3px 10px', fontSize: 12 }}
+                    >
+                      {t('mcpServer.clients.install')}
+                    </button>
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      disabled={busy}
+                      onClick={() => void configureDesktop()}
+                      style={{ padding: '3px 10px', fontSize: 12 }}
+                    >
+                      {t('mcpServer.clients.write')}
+                    </button>
+                  </div>
+                  <p className="config-hint" style={{ margin: '4px 0 0' }}>
+                    {clients.extensionPath
+                      ? t('mcpServer.clients.installHint')
+                      : t('mcpServer.clients.extensionMissing')}
+                  </p>
+                  <p className="config-hint" style={{ margin: '2px 0 0' }}>
+                    {t('mcpServer.clients.writeHint')}
+                  </p>
+                </div>
+              ) : (
+                <p className="config-hint" style={{ margin: '0 0 10px' }}>
+                  {t('mcpServer.clients.desktopUnavailable')}
+                </p>
+              )}
+
+              <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 4px' }}>
+                {t('mcpServer.clients.codeTitle')}
+              </p>
+              {state.binaryPath && (
+                <CodeBlock
+                  text={buildSnippet('claudeCode', state.serverName, state.binaryPath, state.workspaceRoot)}
+                  copyLabel={t('mcpServer.snippets.copy')}
+                  copiedLabel={t('mcpServer.snippets.copied')}
+                />
+              )}
+
+              {notice && (
+                <p style={{ fontSize: 12, color: 'var(--color-accent)', margin: '8px 0 0' }}>
+                  {notice}
+                </p>
+              )}
+            </div>
+          )}
 
           {state.binaryPath && (
             <div className="config-field">

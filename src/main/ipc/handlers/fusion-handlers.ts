@@ -11,7 +11,7 @@
  * uncaught exception.
  */
 
-import { ipcMain, dialog, app } from 'electron';
+import { ipcMain, dialog, app, shell } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -21,6 +21,16 @@ import {
   appendMcpAudit,
 } from './mcp-add-guard.js';
 import { projectManager } from '../../services/project-manager.js';
+import {
+  isToolEnabled,
+  MCP_TOOL_NAMES,
+} from '../../../../backend/mcp-server/config.js';
+import {
+  claudeDesktopConfigPath,
+  claudeCodeCommand,
+  mergeServerEntry,
+  type ClaudeDesktopPlatform,
+} from '../../../../backend/mcp-server/client-install.js';
 import { configManager } from '../../services/config-manager.js';
 import { fusionChatService } from '../../services/fusion-chat-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
@@ -495,8 +505,21 @@ export function setupFusionHandlers(): void {
     if (!root) return noProject();
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
-      const block = (cfg.mcpServer as { enabled?: unknown; serverName?: unknown } | undefined) ?? {};
+      const block =
+        (cfg.mcpServer as
+          | { enabled?: unknown; serverName?: unknown; tools?: unknown }
+          | undefined) ?? {};
       const enabled = block.enabled === true;
+      // On renvoie l'état *effectif* de chaque outil, pas le réglage brut :
+      // l'absence ne veut pas dire la même chose pour tous (les outils de
+      // lecture du manuscrit sont refusés sauf accord).
+      const stored =
+        block.tools && typeof block.tools === 'object'
+          ? (block.tools as Record<string, boolean>)
+          : {};
+      const tools = Object.fromEntries(
+        MCP_TOOL_NAMES.map((name) => [name, isToolEnabled({ enabled, tools: stored }, name)])
+      );
       const serverName =
         typeof block.serverName === 'string' && block.serverName.trim().length > 0
           ? block.serverName.trim()
@@ -522,6 +545,7 @@ export function setupFusionHandlers(): void {
         serverName,
         workspaceRoot: root,
         binaryPath,
+        tools,
       });
     } catch (e) {
       return errorResponse(e as Error);
@@ -533,7 +557,7 @@ export function setupFusionHandlers(): void {
     async (_e, rawPatch: unknown) => {
       const root = projectManager.getCurrentProjectPath();
       if (!root) return noProject();
-      let patch: { enabled?: boolean; serverName?: string };
+      let patch: { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> };
       try {
         patch = validate(FusionMcpServerPatchSchema, rawPatch);
       } catch (e) {
@@ -542,11 +566,21 @@ export function setupFusionHandlers(): void {
       try {
         const cfg = await readOrInitWorkspaceConfig(root);
         const current =
-          (cfg.mcpServer as { enabled?: boolean; serverName?: string } | undefined) ?? {};
-        const next: { enabled: boolean; serverName?: string } = {
+          (cfg.mcpServer as
+            | { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }
+            | undefined) ?? {};
+        const next: {
+          enabled: boolean;
+          serverName?: string;
+          tools?: Record<string, boolean>;
+        } = {
           enabled:
             typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled === true,
         };
+        // Fusion et non remplacement : le panneau n'envoie que l'outil qu'on
+        // vient de cocher.
+        const mergedTools = { ...(current.tools ?? {}), ...(patch.tools ?? {}) };
+        if (Object.keys(mergedTools).length > 0) next.tools = mergedTools;
         if (typeof patch.serverName === 'string') {
           const trimmed = patch.serverName.trim();
           if (trimmed.length > 0) next.serverName = trimmed;
@@ -557,6 +591,7 @@ export function setupFusionHandlers(): void {
         await writeWorkspaceConfig(root, cfg);
         return successResponse({
           enabled: next.enabled,
+          tools: next.tools ?? {},
           serverName: next.serverName ?? path.basename(root),
         });
       } catch (e) {
@@ -564,6 +599,130 @@ export function setupFusionHandlers(): void {
       }
     }
   );
+
+  // MARK: - MCP server: déclaration auprès des clients
+
+  /**
+   * Chemin du paquet d'extension embarqué. Il est produit par
+   * `npm run build:mcpb` dans `resources/`, et electron-builder le recopie
+   * sous `resources/resources/` dans l'app installée.
+   */
+  function bundledExtensionPath(): string | null {
+    const devPath = path.join(process.cwd(), 'resources', 'cliodeck.mcpb');
+    const packagedPath = path.join(process.resourcesPath ?? '', 'resources', 'cliodeck.mcpb');
+    if (app.isPackaged && fsSync.existsSync(packagedPath)) return packagedPath;
+    if (fsSync.existsSync(devPath)) return devPath;
+    return null;
+  }
+
+  ipcMain.handle('fusion:mcpServer:clients', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const platform = process.platform as ClaudeDesktopPlatform;
+      const desktopConfig = claudeDesktopConfigPath(platform, {
+        home: app.getPath('home'),
+        appData: process.env.APPDATA,
+      });
+      return successResponse({
+        platform,
+        extensionPath: bundledExtensionPath(),
+        // null sous Linux : Claude Desktop n'y existe pas, et y écrire une
+        // configuration donnerait l'illusion d'avoir branché quelque chose.
+        desktopConfigPath: desktopConfig,
+        desktopConfigExists: desktopConfig ? fsSync.existsSync(desktopConfig) : false,
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
+  /** Ouvre le .mcpb : Claude Desktop prend la main et affiche son dialogue. */
+  ipcMain.handle('fusion:mcpServer:installExtension', async () => {
+    const file = bundledExtensionPath();
+    if (!file) {
+      return errorResponse(new Error("Paquet d'extension introuvable (npm run build:mcpb)."));
+    }
+    const problem = await shell.openPath(file);
+    if (problem) return errorResponse(new Error(problem));
+    return successResponse({ opened: file });
+  });
+
+  /**
+   * Écrit l'entrée du projet dans `claude_desktop_config.json`.
+   *
+   * Le fichier appartient à Claude Desktop et contient déjà les serveurs de
+   * l'utilisateur : on fusionne, on ne remplace jamais, et on dépose une
+   * copie `.bak` avant d'écrire. Action explicite seulement — jamais au
+   * démarrage.
+   */
+  ipcMain.handle('fusion:mcpServer:configureClaudeDesktop', async () => {
+    const root = projectManager.getCurrentProjectPath();
+    if (!root) return noProject();
+    try {
+      const platform = process.platform as ClaudeDesktopPlatform;
+      const target = claudeDesktopConfigPath(platform, {
+        home: app.getPath('home'),
+        appData: process.env.APPDATA,
+      });
+      if (!target) {
+        return errorResponse(
+          new Error("Claude Desktop n'existe pas sur ce système ; utilisez la commande Claude Code.")
+        );
+      }
+
+      const wrapperName = process.platform === 'win32' ? 'cliodeck-mcp.cmd' : 'cliodeck-mcp';
+      const devBin = path.join(process.cwd(), 'bin', wrapperName);
+      const packagedBin = path.join(process.resourcesPath ?? '', 'bin', wrapperName);
+      const command =
+        app.isPackaged && fsSync.existsSync(packagedBin)
+          ? packagedBin
+          : fsSync.existsSync(devBin)
+            ? devBin
+            : null;
+      if (!command) return errorResponse(new Error('Binaire cliodeck-mcp introuvable.'));
+
+      const cfg = await readOrInitWorkspaceConfig(root);
+      const block = (cfg.mcpServer as { serverName?: unknown } | undefined) ?? {};
+      const serverName =
+        typeof block.serverName === 'string' && block.serverName.trim().length > 0
+          ? block.serverName.trim()
+          : path.basename(root);
+
+      let existing: Record<string, unknown> | null = null;
+      if (fsSync.existsSync(target)) {
+        const raw = await fs.readFile(target, 'utf8');
+        try {
+          existing = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          // Un fichier illisible ne doit pas être écrasé en silence : on
+          // s'arrête et l'utilisateur décide.
+          return errorResponse(
+            new Error(`${target} n'est pas un JSON valide ; corrigez-le avant de continuer.`)
+          );
+        }
+        await fs.copyFile(target, `${target}.bak`);
+      } else {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+      }
+
+      const { config, status } = mergeServerEntry(existing, serverName, {
+        command,
+        args: [root],
+      });
+      await fs.writeFile(target, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+      return successResponse({
+        path: target,
+        serverName,
+        status,
+        backedUp: existing !== null,
+        claudeCodeCommand: claudeCodeCommand(serverName, { command, args: [root] }),
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
 
   // MARK: - vault status (read-only — indexing/search land with chat IPC)
 
