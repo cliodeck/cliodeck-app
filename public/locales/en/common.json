@@ -609,6 +609,9 @@
       "allLibraries": "All libraries",
       "personalLibrary": "Personal library",
       "allItems": "All items"
+    },
+    "sync": {
+      "bibWriteFailed": "Warning: the project bibliography file could not be rewritten ({{error}}). The changes will be lost on next launch."
     }
   },
   "suggestions": {

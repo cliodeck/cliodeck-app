@@ -230,7 +230,12 @@ export class ZoteroAPI implements IZoteroDataSource {
    * Exporte une collection en BibTeX (inclut récursivement les sous-collections)
    * Déduplique les entrées pour éviter les doublons quand un item est dans plusieurs collections
    */
-  async exportCollectionAsBibTeX(collectionKey: string, includeSubcollections: boolean = true): Promise<string> {
+  async exportCollectionAsBibTeX(
+    collectionKey: string,
+    includeSubcollections: boolean = true,
+    // Les clés viennent du serveur Zotero en mode API : rien à reconduire.
+    _preservedKeys?: Readonly<Record<string, string>>
+  ): Promise<string> {
     // Use a Map to store unique entries by their BibTeX key
     const uniqueEntries = new Map<string, string>();
 

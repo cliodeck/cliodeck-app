@@ -22,7 +22,47 @@ export interface MergeResult {
   skippedCount: number;
 }
 
+/**
+ * Champs réellement renseignés d'une citation : ni `undefined`, ni chaîne
+ * vide, ni tableau vide. Sert à fusionner sans effacer.
+ */
+function definedFields(citation: Citation): Partial<Citation> {
+  // `createCitation` redéfinit ces propriétés calculées : les recopier ne
+  // sert à rien et brouille la lecture du diff.
+  const computed = new Set(['displayString', 'details', 'hasPDF', 'hasZoteroPDFs']);
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(citation)) {
+    if (computed.has(field)) continue;
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[field] = value;
+  }
+  return out as Partial<Citation>;
+}
+
 export class ZoteroSyncResolver {
+  /**
+   * Retrouve une citation dans la liste courante.
+   *
+   * Le `zoteroKey` fait foi dès que la cible en porte un : la clé BibTeX
+   * n'est qu'un libellé, et rien ne la rend unique. Mesuré sur une
+   * collection réelle : trois œuvres sans rapport partageaient
+   * `Unknown_2022`, deux articles `Hutchinson_2024`. Apparier sur `id`
+   * faisait porter une modification — ou une suppression — à l'homonyme
+   * arrivé en premier dans la liste, donc perdre une référence et en
+   * dupliquer une autre.
+   *
+   * Pas de repli sur `id` quand la cible a un `zoteroKey` inconnu de la
+   * liste : mieux vaut ne rien toucher que toucher la mauvaise entrée.
+   */
+  private indexOfCitation(citations: Citation[], target: Citation): number {
+    if (target.zoteroKey) {
+      return citations.findIndex((c) => c.zoteroKey === target.zoteroKey);
+    }
+    return citations.findIndex((c) => !c.zoteroKey && c.id === target.id);
+  }
+
   /**
    * Resolve conflicts automatically based on strategy
    */
@@ -99,7 +139,7 @@ export class ZoteroSyncResolver {
 
     // 2. Update modified citations
     for (const change of diff.modified) {
-      const index = finalCitations.findIndex((c) => c.id === change.local.id);
+      const index = this.indexOfCitation(finalCitations, change.local);
       if (index !== -1) {
         // Preserve local file path if exists
         const mergedCitation = this.mergeCitations(change.local, change.remote, true);
@@ -110,7 +150,7 @@ export class ZoteroSyncResolver {
 
     // 3. Delete removed citations
     for (const deletedCitation of diff.deleted) {
-      const index = finalCitations.findIndex((c) => c.id === deletedCitation.id);
+      const index = this.indexOfCitation(finalCitations, deletedCitation);
       if (index !== -1) {
         finalCitations.splice(index, 1);
         deletedCount++;
@@ -171,7 +211,7 @@ export class ZoteroSyncResolver {
 
     // 2. Apply selected modifications
     for (const change of resolution.selectedChanges.modified) {
-      const index = finalCitations.findIndex((c) => c.id === change.local.id);
+      const index = this.indexOfCitation(finalCitations, change.local);
       if (index !== -1) {
         if (change.useRemote) {
           const mergedCitation = this.mergeCitations(change.local, change.remote, true);
@@ -186,7 +226,7 @@ export class ZoteroSyncResolver {
 
     // 3. Delete selected citations
     for (const deletedCitation of resolution.selectedChanges.deleted) {
-      const index = finalCitations.findIndex((c) => c.id === deletedCitation.id);
+      const index = this.indexOfCitation(finalCitations, deletedCitation);
       if (index !== -1) {
         finalCitations.splice(index, 1);
         deletedCount++;
@@ -208,9 +248,20 @@ export class ZoteroSyncResolver {
    */
   private mergeCitations(local: Citation, remote: Citation, preferRemote: boolean): Citation {
     if (preferRemote) {
-      // Take remote data but preserve local file path and indexing info
+      // « Le distant gagne » ne vaut que sur ce que Zotero sait : on part de
+      // l'entrée locale et on n'écrase qu'avec des valeurs renseignées.
+      // Sinon, les champs que Zotero n'expose pas (notes, keywords, champs
+      // BibTeX personnalisés, booktitle en mode local) disparaissaient à la
+      // première synchronisation — perte devenue définitive depuis que le
+      // .bib du projet est réécrit derrière.
       return createCitation({
-        ...remote,
+        ...local,
+        ...definedFields(remote),
+        // La clé locale est celle que l'auteur a écrite dans son texte :
+        // une mise à jour de métadonnées ne renomme jamais une citation.
+        id: local.id,
+        key: local.key,
+        zoteroKey: remote.zoteroKey ?? local.zoteroKey,
         file: local.file, // Preserve local PDF path
         // If remote has attachments, merge with local downloaded status
         zoteroAttachments: this.mergeAttachments(

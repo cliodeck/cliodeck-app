@@ -609,6 +609,9 @@
       "allLibraries": "Toutes les bibliotheques",
       "personalLibrary": "Bibliotheque personnelle",
       "allItems": "Tous les items"
+    },
+    "sync": {
+      "bibWriteFailed": "Attention : le fichier de bibliographie du projet n'a pas pu être réécrit ({{error}}). Les modifications seront perdues au prochain lancement."
     }
   },
   "suggestions": {

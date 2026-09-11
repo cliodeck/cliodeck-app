@@ -609,6 +609,9 @@
       "allLibraries": "Alle Bibliotheken",
       "personalLibrary": "Persönliche Bibliothek",
       "allItems": "Alle Einträge"
+    },
+    "sync": {
+      "bibWriteFailed": "Achtung: Die Bibliografiedatei des Projekts konnte nicht neu geschrieben werden ({{error}}). Die Änderungen gehen beim nächsten Start verloren."
     }
   },
   "suggestions": {

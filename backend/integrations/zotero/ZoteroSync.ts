@@ -5,11 +5,19 @@ import { IZoteroDataSource } from './IZoteroDataSource';
 import { Citation, ZoteroAttachmentInfo } from '../../types/citation';
 import { ZoteroDiffEngine, SyncDiff } from './ZoteroDiffEngine';
 import { ZoteroSyncResolver, ConflictStrategy, SyncResolution, MergeResult } from './ZoteroSyncResolver';
+import { BibTeXParser } from '../../core/bibliography/BibTeXParser';
 
 export interface SyncResult {
   collections: ZoteroCollection[];
   items: ZoteroItem[];
   bibtexPath: string;
+  /**
+   * Clés BibTeX réellement écrites dans le fichier, par `zoteroKey`.
+   * Relues depuis le contenu produit : c'est le fichier qui fait foi, et
+   * refabriquer les clés ailleurs redonnait un résultat différent (en mode
+   * API, elles viennent même du serveur Zotero).
+   */
+  citeKeys: Record<string, string>;
   pdfPaths: string[];
   errors: string[];
 }
@@ -33,6 +41,40 @@ export class ZoteroSync {
   }
 
   /**
+   * Clés BibTeX du fichier existant, indexées par `zoteroKey`.
+   *
+   * Lecture best-effort : un fichier absent ou illisible ne doit pas faire
+   * échouer l'import, il fait seulement repartir les clés de zéro.
+   */
+  private readExistingCiteKeys(bibtexPath: string): Record<string, string> {
+    if (!fs.existsSync(bibtexPath)) return {};
+    try {
+      const parser = new BibTeXParser();
+      const keys: Record<string, string> = {};
+      for (const citation of parser.parseFile(bibtexPath)) {
+        if (citation.zoteroKey) keys[citation.zoteroKey] = citation.id;
+      }
+      return keys;
+    } catch (error) {
+      console.warn('⚠️ Clés du .bib existant illisibles, elles seront régénérées:', error);
+      return {};
+    }
+  }
+
+  /** Clés BibTeX d'un contenu .bib, indexées par `zoteroKey`. */
+  private citeKeysOf(bibtexContent: string): Record<string, string> {
+    const keys: Record<string, string> = {};
+    try {
+      for (const citation of new BibTeXParser().parse(bibtexContent)) {
+        if (citation.zoteroKey) keys[citation.zoteroKey] = citation.id;
+      }
+    } catch (error) {
+      console.warn('⚠️ Relecture des clés du .bib impossible:', error);
+    }
+    return keys;
+  }
+
+  /**
    * Synchronise une collection Zotero vers le projet local
    */
   async syncCollection(options: SyncOptions): Promise<SyncResult> {
@@ -40,6 +82,7 @@ export class ZoteroSync {
       collections: [],
       items: [],
       bibtexPath: '',
+      citeKeys: {},
       pdfPaths: [],
       errors: [],
     };
@@ -91,12 +134,18 @@ export class ZoteroSync {
       if (options.exportBibTeX) {
         try {
           const bibtexPath = path.join(options.targetDirectory, 'bibliography.bib');
+          // Les clés du fichier qu'on s'apprête à écraser sont celles que
+          // l'auteur a écrites dans son texte : on les reconduit quand elles
+          // restent valides, sinon un réimport repointe silencieusement une
+          // citation vers une autre œuvre.
+          const preservedKeys = this.readExistingCiteKeys(bibtexPath);
           const bibtexContent = options.collectionKey
-            ? await this.api.exportCollectionAsBibTeX(options.collectionKey)
+            ? await this.api.exportCollectionAsBibTeX(options.collectionKey, true, preservedKeys)
             : await this.api.exportAllAsBibTeX();
 
           fs.writeFileSync(bibtexPath, bibtexContent, 'utf-8');
           result.bibtexPath = bibtexPath;
+          result.citeKeys = this.citeKeysOf(bibtexContent);
           console.log(`✅ BibTeX exporté: ${bibtexPath}`);
         } catch (error) {
           result.errors.push(`Failed to export BibTeX: ${error}`);
