@@ -1554,7 +1554,8 @@
     "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer.",
     "tools": {
       "title": "Outils exposés aux clients connectés",
-      "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL)."
+      "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL).",
+      "optIn": "Un outil décoché n'est pas enregistré : le client ne le voit pas du tout. Le changement prend effet au prochain démarrage du serveur, donc après relance du client."
     },
     "snippets": {
       "title": "Configurer votre client",

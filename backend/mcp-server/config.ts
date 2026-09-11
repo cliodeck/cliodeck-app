@@ -29,6 +29,22 @@ export interface MCPServerSettings {
   enabled: boolean;
   /** Workspace-friendly name surfaced to Claude Desktop on connect. */
   serverName?: string;
+  /**
+   * Opt-in par outil. Absent ou `true` = exposé ; `false` = pas enregistré,
+   * donc invisible du client — pas seulement refusé à l'appel.
+   *
+   * L'absence vaut consentement pour une raison de compatibilité : les
+   * projets qui avaient déjà activé le serveur avant cette garde exposaient
+   * les neuf outils, et la garde ne doit pas les couper en silence à la
+   * mise à jour. Le nouveau réglage sert au cran suivant — la lecture du
+   * manuscrit, que l'historien doit accorder exprès.
+   */
+  tools?: Record<string, boolean>;
+}
+
+/** Un outil est exposé sauf refus explicite. Voir `MCPServerSettings.tools`. */
+export function isToolEnabled(mcp: MCPServerSettings, name: string): boolean {
+  return mcp.tools?.[name] !== false;
 }
 
 export interface MCPRuntimeConfig {

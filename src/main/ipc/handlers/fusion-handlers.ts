@@ -501,8 +501,15 @@ export function setupFusionHandlers(): void {
     if (!root) return noProject();
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
-      const block = (cfg.mcpServer as { enabled?: unknown; serverName?: unknown } | undefined) ?? {};
+      const block =
+        (cfg.mcpServer as
+          | { enabled?: unknown; serverName?: unknown; tools?: unknown }
+          | undefined) ?? {};
       const enabled = block.enabled === true;
+      const tools =
+        block.tools && typeof block.tools === 'object'
+          ? (block.tools as Record<string, boolean>)
+          : {};
       const serverName =
         typeof block.serverName === 'string' && block.serverName.trim().length > 0
           ? block.serverName.trim()
@@ -528,6 +535,7 @@ export function setupFusionHandlers(): void {
         serverName,
         workspaceRoot: root,
         binaryPath,
+        tools,
       });
     } catch (e) {
       return errorResponse(e as Error);
@@ -539,7 +547,7 @@ export function setupFusionHandlers(): void {
     async (_e, rawPatch: unknown) => {
       const root = projectManager.getCurrentProjectPath();
       if (!root) return noProject();
-      let patch: { enabled?: boolean; serverName?: string };
+      let patch: { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> };
       try {
         patch = validate(FusionMcpServerPatchSchema, rawPatch);
       } catch (e) {
@@ -548,11 +556,21 @@ export function setupFusionHandlers(): void {
       try {
         const cfg = await readOrInitWorkspaceConfig(root);
         const current =
-          (cfg.mcpServer as { enabled?: boolean; serverName?: string } | undefined) ?? {};
-        const next: { enabled: boolean; serverName?: string } = {
+          (cfg.mcpServer as
+            | { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }
+            | undefined) ?? {};
+        const next: {
+          enabled: boolean;
+          serverName?: string;
+          tools?: Record<string, boolean>;
+        } = {
           enabled:
             typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled === true,
         };
+        // Fusion et non remplacement : le panneau n'envoie que l'outil qu'on
+        // vient de cocher.
+        const mergedTools = { ...(current.tools ?? {}), ...(patch.tools ?? {}) };
+        if (Object.keys(mergedTools).length > 0) next.tools = mergedTools;
         if (typeof patch.serverName === 'string') {
           const trimmed = patch.serverName.trim();
           if (trimmed.length > 0) next.serverName = trimmed;
@@ -563,6 +581,7 @@ export function setupFusionHandlers(): void {
         await writeWorkspaceConfig(root, cfg);
         return successResponse({
           enabled: next.enabled,
+          tools: next.tools ?? {},
           serverName: next.serverName ?? path.basename(root),
         });
       } catch (e) {

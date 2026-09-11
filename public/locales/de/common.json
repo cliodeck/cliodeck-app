@@ -1554,7 +1554,8 @@
     "disabledNote": "Der Server verweigert den Start, solange dieser Schalter deaktiviert ist, selbst wenn ein Client versucht, ihn zu starten.",
     "tools": {
       "title": "Für verbundene Clients bereitgestellte Tools",
-      "limits": "Jedes Tool akzeptiert topK bis 200 (Standard 10) und liefert Chunks, die auf 4 000 Zeichen gekürzt werden (2 000 für Gallica/HAL-Snippets)."
+      "limits": "Jedes Tool akzeptiert topK bis 200 (Standard 10) und liefert Chunks, die auf 4 000 Zeichen gekürzt werden (2 000 für Gallica/HAL-Snippets).",
+      "optIn": "Ein abgewähltes Werkzeug wird gar nicht registriert: Der Client sieht es nicht. Die Änderung greift beim nächsten Start des Servers, also nach einem Neustart des Clients."
     },
     "snippets": {
       "title": "Konfigurieren Sie Ihren Client",

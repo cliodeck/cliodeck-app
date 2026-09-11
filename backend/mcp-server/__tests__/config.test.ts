@@ -11,7 +11,7 @@ import {
   defaultWorkspaceConfig,
   writeWorkspaceConfig,
 } from '../../core/workspace/config.js';
-import { loadMCPConfig } from '../config.js';
+import { isToolEnabled, loadMCPConfig } from '../config.js';
 
 let tmp = '';
 
@@ -66,5 +66,25 @@ describe('loadMCPConfig (2.5)', () => {
     const p = workspaceFiles(tmp);
     await fs.writeFile(p.config, JSON.stringify({ schema_version: 99 }));
     expect(() => loadMCPConfig(tmp)).toThrow(/schema_version/);
+  });
+});
+
+describe('isToolEnabled', () => {
+  it('exposes a tool that was never mentioned', () => {
+    // L'absence vaut consentement : sinon la mise à jour couperait en silence
+    // les neuf outils des projets qui avaient déjà activé le serveur.
+    expect(isToolEnabled({ enabled: true }, 'search_documents')).toBe(true);
+    expect(isToolEnabled({ enabled: true, tools: {} }, 'search_documents')).toBe(true);
+  });
+
+  it('withholds a tool refused explicitly', () => {
+    expect(
+      isToolEnabled({ enabled: true, tools: { search_documents: false } }, 'search_documents')
+    ).toBe(false);
+  });
+
+  it('leaves the other tools alone', () => {
+    const mcp = { enabled: true, tools: { search_documents: false } };
+    expect(isToolEnabled(mcp, 'search_tropy')).toBe(true);
   });
 });

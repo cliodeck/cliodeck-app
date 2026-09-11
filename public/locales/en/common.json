@@ -1554,7 +1554,8 @@
     "disabledNote": "The server refuses to start until this toggle is on, even if a client tries to launch it.",
     "tools": {
       "title": "Tools exposed to connected clients",
-      "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets)."
+      "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets).",
+      "optIn": "An unchecked tool is not registered at all: the client never sees it. The change takes effect the next time the server starts, so after restarting the client."
     },
     "snippets": {
       "title": "Configure your client",

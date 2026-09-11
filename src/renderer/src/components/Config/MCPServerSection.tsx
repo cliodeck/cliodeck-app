@@ -8,6 +8,8 @@ interface MCPServerState {
   serverName: string;
   workspaceRoot: string;
   binaryPath: string | null;
+  /** Nom d'outil → exposé. Absent = exposé (voir MCPServerSettings.tools). */
+  tools: Record<string, boolean>;
 }
 
 interface MCPServerApi {
@@ -17,12 +19,18 @@ interface MCPServerApi {
     serverName?: string;
     workspaceRoot?: string;
     binaryPath?: string | null;
+    tools?: Record<string, boolean>;
     error?: string;
   }>;
-  set(patch: { enabled?: boolean; serverName?: string }): Promise<{
+  set(patch: {
+    enabled?: boolean;
+    serverName?: string;
+    tools?: Record<string, boolean>;
+  }): Promise<{
     success: boolean;
     enabled?: boolean;
     serverName?: string;
+    tools?: Record<string, boolean>;
     error?: string;
   }>;
   clients(): Promise<{
@@ -173,6 +181,7 @@ export const MCPServerSection: React.FC = () => {
         serverName: res.serverName,
         workspaceRoot: res.workspaceRoot,
         binaryPath: res.binaryPath ?? null,
+        tools: res.tools ?? {},
       });
       setPendingName(res.serverName);
       setError(null);
@@ -223,6 +232,22 @@ export const MCPServerSection: React.FC = () => {
       setBusy(false);
     }
   }, [state, pendingName, refresh]);
+
+  const toggleTool = useCallback(
+    async (name: string, next: boolean) => {
+      const a = api();
+      if (!a) return;
+      setBusy(true);
+      try {
+        const res = await a.set({ tools: { [name]: next } });
+        if (res.success) await refresh();
+        else setError(res.error ?? 'set_failed');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh]
+  );
 
   const installExtension = useCallback(async () => {
     const a = api();
@@ -373,11 +398,29 @@ export const MCPServerSection: React.FC = () => {
                   key={tool.name}
                   style={{ breakInside: 'avoid', padding: '2px 0' }}
                 >
-                  <code>{tool.name}</code>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.tools[tool.name] !== false}
+                      disabled={busy}
+                      onChange={(e) => void toggleTool(tool.name, e.target.checked)}
+                    />
+                    <code>{tool.name}</code>
+                  </label>
                 </li>
               ))}
             </ul>
             <p className="config-hint" style={{ margin: '4px 0 0' }}>
+              {t('mcpServer.tools.optIn')}
+            </p>
+            <p className="config-hint" style={{ margin: '2px 0 0' }}>
               {t('mcpServer.tools.limits')}
             </p>
           </div>

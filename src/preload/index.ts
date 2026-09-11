@@ -918,6 +918,7 @@ const api = {
           serverName?: string;
           workspaceRoot?: string;
           binaryPath?: string | null;
+          tools?: Record<string, boolean>;
           error?: string;
         }>,
       set: (patch: { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }) =>
