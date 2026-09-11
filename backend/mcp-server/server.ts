@@ -26,6 +26,7 @@ import { registerEntityContext } from './tools/entityContext.js';
 import { registerSearchGallica } from './tools/searchGallica.js';
 import { registerSearchHal } from './tools/searchHal.js';
 import { registerSearchEuropeana } from './tools/searchEuropeana.js';
+import { registerManuscriptTools } from './tools/manuscript.js';
 
 const SERVER_NAME = 'cliodeck';
 const SERVER_VERSION = '0.1.0';
@@ -76,6 +77,14 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
       getApiKey: () => process.env.EUROPEANA_API_KEY ?? null,
     })
   );
+
+  // Le manuscrit : deux outils, un seul accord. Les enregistrer séparément
+  // laisserait un client voir la liste des chapitres sans pouvoir les lire —
+  // or la liste des titres est déjà une information sur le travail en cours.
+  if (isToolEnabled(cfg.mcp, 'list_manuscript') && isToolEnabled(cfg.mcp, 'read_manuscript')) {
+    registerManuscriptTools(server, cfg, logger);
+    exposed.push('list_manuscript', 'read_manuscript');
+  }
 
   console.error(`[ClioDeck MCP] Server created for workspace ${cfg.workspaceRoot}`);
   console.error(`[ClioDeck MCP] Audit log: ${cfg.paths.mcpAccessLog}`);

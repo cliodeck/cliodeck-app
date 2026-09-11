@@ -66,6 +66,21 @@ describe('createMcpServer — opt-in par outil', () => {
     expect(tools).toHaveLength(7);
   });
 
+  it('withholds the manuscript tools until they are granted', async () => {
+    // L'inverse de la règle générale, et c'est le point : lire le manuscrit
+    // ne doit pas s'attraper par défaut au fil d'une mise à jour.
+    const tools = await exposedTools({ enabled: true });
+    expect(tools).not.toContain('read_manuscript');
+    expect(tools).not.toContain('list_manuscript');
+
+    const granted = await exposedTools({
+      enabled: true,
+      tools: { list_manuscript: true, read_manuscript: true },
+    });
+    expect(granted).toContain('read_manuscript');
+    expect(granted).toHaveLength(11);
+  });
+
   it('can withhold every tool', async () => {
     const all = Object.fromEntries(
       [

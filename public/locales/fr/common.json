@@ -1555,7 +1555,8 @@
     "tools": {
       "title": "Outils exposés aux clients connectés",
       "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL).",
-      "optIn": "Un outil décoché n'est pas enregistré : le client ne le voit pas du tout. Le changement prend effet au prochain démarrage du serveur, donc après relance du client."
+      "optIn": "Un outil décoché n'est pas enregistré : le client ne le voit pas du tout. Le changement prend effet au prochain démarrage du serveur, donc après relance du client.",
+      "manuscriptNote": "La lecture du manuscrit fait exception : elle est refusée tant que vous ne l'accordez pas. Les outils de recherche exposent des sources déjà rassemblées ; ceux-là donnent votre texte inédit, mot pour mot, à un logiciel tiers. `context.md` et vos règles de maison (`hints.md`) restent exclus dans tous les cas."
     },
     "snippets": {
       "title": "Configurer votre client",

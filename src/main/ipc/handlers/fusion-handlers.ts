@@ -22,6 +22,10 @@ import {
 } from './mcp-add-guard.js';
 import { projectManager } from '../../services/project-manager.js';
 import {
+  isToolEnabled,
+  MCP_TOOL_NAMES,
+} from '../../../../backend/mcp-server/config.js';
+import {
   claudeDesktopConfigPath,
   claudeCodeCommand,
   mergeServerEntry,
@@ -506,10 +510,16 @@ export function setupFusionHandlers(): void {
           | { enabled?: unknown; serverName?: unknown; tools?: unknown }
           | undefined) ?? {};
       const enabled = block.enabled === true;
-      const tools =
+      // On renvoie l'état *effectif* de chaque outil, pas le réglage brut :
+      // l'absence ne veut pas dire la même chose pour tous (les outils de
+      // lecture du manuscrit sont refusés sauf accord).
+      const stored =
         block.tools && typeof block.tools === 'object'
           ? (block.tools as Record<string, boolean>)
           : {};
+      const tools = Object.fromEntries(
+        MCP_TOOL_NAMES.map((name) => [name, isToolEnabled({ enabled, tools: stored }, name)])
+      );
       const serverName =
         typeof block.serverName === 'string' && block.serverName.trim().length > 0
           ? block.serverName.trim()

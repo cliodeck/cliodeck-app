@@ -1555,7 +1555,8 @@
     "tools": {
       "title": "Für verbundene Clients bereitgestellte Tools",
       "limits": "Jedes Tool akzeptiert topK bis 200 (Standard 10) und liefert Chunks, die auf 4 000 Zeichen gekürzt werden (2 000 für Gallica/HAL-Snippets).",
-      "optIn": "Ein abgewähltes Werkzeug wird gar nicht registriert: Der Client sieht es nicht. Die Änderung greift beim nächsten Start des Servers, also nach einem Neustart des Clients."
+      "optIn": "Ein abgewähltes Werkzeug wird gar nicht registriert: Der Client sieht es nicht. Die Änderung greift beim nächsten Start des Servers, also nach einem Neustart des Clients.",
+      "manuscriptNote": "Das Lesen des Manuskripts ist die Ausnahme: Es bleibt gesperrt, bis Sie es freigeben. Die Suchwerkzeuge zeigen bereits gesammelte Quellen; diese geben Ihren unveröffentlichten Text wortwörtlich an ein fremdes Programm. `context.md` und Ihre Hausregeln (`hints.md`) bleiben in jedem Fall ausgeschlossen."
     },
     "snippets": {
       "title": "Konfigurieren Sie Ihren Client",

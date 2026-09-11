@@ -1555,7 +1555,8 @@
     "tools": {
       "title": "Tools exposed to connected clients",
       "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets).",
-      "optIn": "An unchecked tool is not registered at all: the client never sees it. The change takes effect the next time the server starts, so after restarting the client."
+      "optIn": "An unchecked tool is not registered at all: the client never sees it. The change takes effect the next time the server starts, so after restarting the client.",
+      "manuscriptNote": "Reading the manuscript is the exception: it is withheld until you grant it. The search tools expose sources you have already gathered; these hand your unpublished text, word for word, to a third-party program. `context.md` and your house rules (`hints.md`) stay excluded either way."
     },
     "snippets": {
       "title": "Configure your client",
