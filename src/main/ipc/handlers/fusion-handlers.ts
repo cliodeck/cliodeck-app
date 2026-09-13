@@ -28,6 +28,9 @@ import {
 import {
   claudeDesktopConfigPath,
   claudeCodeCommand,
+  launchCommand,
+  mcpServerName,
+  resolveServerName,
   mergeServerEntry,
   type ClaudeDesktopPlatform,
 } from '../../../../backend/mcp-server/client-install.js';
@@ -520,10 +523,7 @@ export function setupFusionHandlers(): void {
       const tools = Object.fromEntries(
         MCP_TOOL_NAMES.map((name) => [name, isToolEnabled({ enabled, tools: stored }, name)])
       );
-      const serverName =
-        typeof block.serverName === 'string' && block.serverName.trim().length > 0
-          ? block.serverName.trim()
-          : path.basename(root);
+      const serverName = resolveServerName(block.serverName, root);
       // Resolve the wrapper script. In dev it lives in <repo>/bin; when
       // packaged it ships under resources/bin (electron-builder
       // `extraResources`). The renderer needs an absolute path so the
@@ -540,11 +540,22 @@ export function setupFusionHandlers(): void {
       } else if (fsSync.existsSync(devBin)) {
         binaryPath = devBin;
       }
+      // Les commandes à copier sont construites ici, où l'on connaît le
+      // système : c'est lui qui décide des guillemets. Le panneau en
+      // fabriquait une copie sans aucun guillemet (cf. `claudeCodeCommand`).
+      const platform = process.platform as ClaudeDesktopPlatform;
+      const entry = binaryPath ? { command: binaryPath, args: [root] } : null;
       return successResponse({
         enabled,
         serverName,
         workspaceRoot: root,
         binaryPath,
+        commands: entry
+          ? {
+              claudeCode: claudeCodeCommand(serverName, entry, platform),
+              launch: launchCommand(entry, platform),
+            }
+          : null,
         tools,
       });
     } catch (e) {
@@ -582,8 +593,10 @@ export function setupFusionHandlers(): void {
         const mergedTools = { ...(current.tools ?? {}), ...(patch.tools ?? {}) };
         if (Object.keys(mergedTools).length > 0) next.tools = mergedTools;
         if (typeof patch.serverName === 'string') {
+          // Enregistré sous sa forme valide : le nom affiché dans le panneau
+          // est celui qu'utiliseront les clients.
           const trimmed = patch.serverName.trim();
-          if (trimmed.length > 0) next.serverName = trimmed;
+          if (trimmed.length > 0) next.serverName = mcpServerName(trimmed);
         } else if (typeof current.serverName === 'string') {
           next.serverName = current.serverName;
         }
@@ -592,7 +605,7 @@ export function setupFusionHandlers(): void {
         return successResponse({
           enabled: next.enabled,
           tools: next.tools ?? {},
-          serverName: next.serverName ?? path.basename(root),
+          serverName: resolveServerName(next.serverName, root),
         });
       } catch (e) {
         return errorResponse(e as Error);
@@ -684,10 +697,7 @@ export function setupFusionHandlers(): void {
 
       const cfg = await readOrInitWorkspaceConfig(root);
       const block = (cfg.mcpServer as { serverName?: unknown } | undefined) ?? {};
-      const serverName =
-        typeof block.serverName === 'string' && block.serverName.trim().length > 0
-          ? block.serverName.trim()
-          : path.basename(root);
+      const serverName = resolveServerName(block.serverName, root);
 
       let existing: Record<string, unknown> | null = null;
       if (fsSync.existsSync(target)) {
@@ -717,7 +727,7 @@ export function setupFusionHandlers(): void {
         serverName,
         status,
         backedUp: existing !== null,
-        claudeCodeCommand: claudeCodeCommand(serverName, { command, args: [root] }),
+        claudeCodeCommand: claudeCodeCommand(serverName, { command, args: [root] }, platform),
       });
     } catch (e) {
       return errorResponse(e as Error);

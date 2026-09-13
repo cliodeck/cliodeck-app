@@ -1554,7 +1554,7 @@
     "toggle": "MCP-Server für dieses Projekt aktivieren",
     "serverName": "Servername",
     "serverNamePlaceholder": "mein-projekt",
-    "serverNameHint": "Anzeigename für verbundene Clients. Standardmäßig der Name des Projektordners.",
+    "serverNameHint": "Anzeigename für verbundene Clients. Standardmäßig der Name des Projektordners. Claude Code akzeptiert nur Buchstaben, Ziffern, „-“ und „_“: andere Zeichen werden angepasst (Leerzeichen werden zu „-“).",
     "binary": "Wrapper-Binärdatei",
     "binaryMissing": "Binärdatei nicht gefunden — führen Sie zuerst `npm run build` im cliodeck-app-Repository aus.",
     "disabledNote": "Der Server verweigert den Start, solange dieser Schalter deaktiviert ist, selbst wenn ein Client versucht, ihn zu starten.",

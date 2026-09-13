@@ -1554,7 +1554,7 @@
     "toggle": "Activer le serveur MCP pour ce projet",
     "serverName": "Nom du serveur",
     "serverNamePlaceholder": "mon-projet",
-    "serverNameHint": "Nom affiché aux clients connectés. Par défaut, le nom du dossier projet.",
+    "serverNameHint": "Nom affiché aux clients connectés. Par défaut, le nom du dossier projet. Seuls les lettres, chiffres, « - » et « _ » sont acceptés par Claude Code : les autres caractères sont adaptés (espaces changées en « - »).",
     "binary": "Binaire wrapper",
     "binaryMissing": "Binaire introuvable — exécutez `npm run build` dans le dépôt cliodeck-app.",
     "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer.",
