@@ -144,12 +144,13 @@ function suffixFor(index: number): string {
 /**
  * Une clé existante peut-elle être reconduite telle quelle ?
  *
- * Non si pandoc la refuse, non si elle porte l'ancien repli `Unknown_` —
- * qui n'a jamais été un nom, seulement le marqueur d'un auteur non trouvé,
- * et que trois œuvres sans rapport pouvaient partager.
+ * Non si pandoc la refuse. Non plus si elle porte une trace de l'ancien
+ * générateur : le repli `Unknown_`, qui n'a jamais été un nom et que trois
+ * œuvres sans rapport pouvaient partager, ou le tiret bas final d'un item
+ * sans date (`Bultmann_`), que la fabrique écrit désormais `Bultmann_nd`.
  */
 export function isPreservableCiteKey(key: string | undefined): key is string {
-  return !!key && SAFE_KEY.test(key) && !key.startsWith('Unknown_');
+  return !!key && SAFE_KEY.test(key) && !key.startsWith('Unknown_') && !key.endsWith('_');
 }
 
 /**

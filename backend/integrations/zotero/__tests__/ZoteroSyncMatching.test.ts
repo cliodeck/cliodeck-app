@@ -176,7 +176,8 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
       notes: 'À relire pour le chapitre 3',
       keywords: 'archives; IA',
       tags: ['mémoire'],
-      customFields: { doi: '10.1000/xyz', pages: '12-34' },
+      // Champs saisis à la main dans le .bib, que Zotero ne connaît pas.
+      customFields: { annote: 'Lu en 2024', crossref: 'Dupont_2020' },
       file: '/PDFs/dupont.pdf',
     });
     const remote = citation({
@@ -197,7 +198,7 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
     expect(merged.notes).toBe('À relire pour le chapitre 3');
     expect(merged.keywords).toBe('archives; IA');
     expect(merged.tags).toEqual(['mémoire']);
-    expect(merged.customFields).toEqual({ doi: '10.1000/xyz', pages: '12-34' });
+    expect(merged.customFields).toEqual({ annote: 'Lu en 2024', crossref: 'Dupont_2020' });
     expect(merged.file).toBe('/PDFs/dupont.pdf');
   });
 
@@ -234,5 +235,35 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
 
     expect(result.finalCitations[0].journal).toBe('History & Theory');
     expect(result.finalCitations[0].tags).toEqual(['neuf']);
+  });
+});
+
+describe('ZoteroSyncResolver — champs BibLaTeX alimentés par Zotero', () => {
+  const resolver = new ZoteroSyncResolver();
+
+  it('suit Zotero sur URL, DOI et pages, sans toucher aux champs manuels', async () => {
+    const local = citation({
+      id: 'Dupont_2022',
+      zoteroKey: 'AAA',
+      customFields: { doi: '10.1000/ancien', pages: '1-2', annote: 'Lu en 2024' },
+    });
+    const remote = citation({
+      id: 'Dupont_2022',
+      zoteroKey: 'AAA',
+      customFields: { url: 'https://example.org/article', pages: '12-34' },
+    });
+
+    const result = await resolver.resolveConflicts(
+      { added: [], modified: [{ local, remote, modifiedFields: ['url'] }], deleted: [], unchanged: [] },
+      [local],
+      'remote'
+    );
+
+    expect(result.finalCitations[0].customFields).toEqual({
+      annote: 'Lu en 2024',
+      url: 'https://example.org/article',
+      pages: '12-34',
+      // `doi` a disparu de Zotero : il disparaît du fichier.
+    });
   });
 });

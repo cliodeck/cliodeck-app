@@ -128,7 +128,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
             <div className="citation-author">
               {citation.author || citation.editor || citation.title}
             </div>
-            <div className="citation-year">({citation.year})</div>
+            {citation.year && <div className="citation-year">({citation.year})</div>}
             {(hasPDF || isIndexedByKey) && (
               <span className="pdf-badge" title={isIndexed ? t('bibliography.indexed') : t('bibliography.notIndexed')}>
                 {isIndexed ? '✅' : '📄'}

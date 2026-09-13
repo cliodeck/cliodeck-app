@@ -2,6 +2,7 @@
 
 import { Citation, createCitation } from '../../types/citation';
 import { SyncDiff, CitationChange } from './ZoteroDiffEngine';
+import { ZOTERO_OWNED_FIELDS } from './toCitation';
 
 export type ConflictStrategy = 'local' | 'remote' | 'manual';
 
@@ -40,6 +41,24 @@ function definedFields(citation: Citation): Partial<Citation> {
     out[field] = value;
   }
   return out as Partial<Citation>;
+}
+
+/**
+ * Fusion des champs BibLaTeX libres. Ceux que Zotero alimente (URL, DOI,
+ * pages…) suivent Zotero, disparition comprise ; les autres — ajoutés à la
+ * main dans le .bib — restent.
+ */
+function mergeCustomFields(
+  local: Record<string, string> | undefined,
+  remote: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  const owned = new Set<string>(ZOTERO_OWNED_FIELDS);
+  const merged: Record<string, string> = {};
+  for (const [name, value] of Object.entries(local ?? {})) {
+    if (!owned.has(name)) merged[name] = value;
+  }
+  Object.assign(merged, remote ?? {});
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 export class ZoteroSyncResolver {
@@ -271,6 +290,7 @@ export class ZoteroSyncResolver {
         publisher: remote.publisher,
         booktitle: remote.booktitle,
         shortTitle: remote.shortTitle,
+        customFields: mergeCustomFields(local.customFields, remote.customFields),
         // La clé locale est celle que l'auteur a écrite dans son texte :
         // une mise à jour de métadonnées ne renomme jamais une citation.
         id: local.id,

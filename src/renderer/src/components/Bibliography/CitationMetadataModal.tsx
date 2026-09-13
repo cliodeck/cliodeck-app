@@ -110,7 +110,8 @@ export const CitationMetadataModal: React.FC<CitationMetadataModalProps> = ({
           <div className="citation-info-section">
             <div className="citation-title">{editedCitation.title}</div>
             <div className="citation-author">
-              {editedCitation.author || editedCitation.editor || editedCitation.title} ({editedCitation.year})
+              {editedCitation.author || editedCitation.editor || editedCitation.title}
+              {editedCitation.year ? ` (${editedCitation.year})` : ''}
             </div>
           </div>
 

@@ -47,6 +47,12 @@ export interface ZoteroItem {
     dateAdded?: string;
     dateModified?: string;
     attachments?: ZoteroAttachment[];
+    /**
+     * Tous les autres champs Zotero, sous leur nom propre au type de notice
+     * (`blogTitle`, `websiteTitle`, `university`, `archiveID`, `pages`…).
+     * L'API web les renvoie ainsi ; la base locale les expose de même.
+     */
+    [field: string]: unknown;
   };
 }
 

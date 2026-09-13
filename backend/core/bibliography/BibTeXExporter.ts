@@ -2,6 +2,23 @@ import type { Citation } from '../../types/citation';
 import * as fs from 'fs/promises';
 
 /**
+ * Champs que BibLaTeX — et pandoc, qui lit les `.bib` en BibLaTeX — prend
+ * tels quels. Les échapper à la LaTeX les corrompt : mesuré avec pandoc 3.9,
+ * `a\_b?x=1\&y=2` reste littéralement `a\_b?x=1\&y=2` dans l'URL
+ * produite. Seules les accolades, qui délimitent la valeur, doivent être
+ * neutralisées — par encodage d'URL, qui ne change pas l'adresse.
+ */
+export const VERBATIM_FIELDS = new Set(['url', 'doi', 'eprint', 'date', 'urldate']);
+
+/**
+ * Valeur verbatim écrivable entre accolades : les accolades, qui
+ * délimiteraient la valeur, sont encodées comme dans une URL.
+ */
+export function verbatimSafe(value: string): string {
+  return value.trim().replaceAll('{', '%7B').replaceAll('}', '%7D');
+}
+
+/**
  * BibTeX Exporter
  *
  * Exports citations to BibTeX format, preserving all metadata including
@@ -50,7 +67,11 @@ export class BibTeXExporter {
       lines.push(this.formatField('editor', citation.editor));
     }
     lines.push(this.formatField('title', citation.title));
-    lines.push(this.formatField('year', citation.year));
+    // Une notice sans date n'écrit pas `year = {}` : pandoc l'afficherait
+    // vide, et la relecture ne saurait qu'en faire.
+    if (citation.year) {
+      lines.push(this.formatField('year', citation.year));
+    }
 
     // Optional standard fields
     if (citation.shortTitle) {
@@ -107,7 +128,7 @@ export class BibTeXExporter {
     // Custom fields (preserve all non-standard fields)
     if (citation.customFields) {
       for (const [key, value] of Object.entries(citation.customFields)) {
-        lines.push(this.formatField(key, value));
+        lines.push(this.formatCustomField(key, value));
       }
     }
 
@@ -120,6 +141,17 @@ export class BibTeXExporter {
     lines.push('}');
 
     return lines.join('\n');
+  }
+
+  /**
+   * Champ libre : verbatim pour ceux que BibLaTeX lit tels quels (cf.
+   * {@link VERBATIM_FIELDS}), échappé pour les autres.
+   */
+  private formatCustomField(name: string, value: string): string {
+    if (VERBATIM_FIELDS.has(name.toLowerCase())) {
+      return `  ${name} = {${verbatimSafe(value)}},`;
+    }
+    return this.formatField(name, value);
   }
 
   /**
@@ -263,7 +295,9 @@ export class BibTeXExporter {
       lines.push(this.formatFieldLegacy('editor', citation.editor));
     }
     lines.push(this.formatFieldLegacy('title', citation.title));
-    lines.push(this.formatFieldLegacy('year', citation.year));
+    if (citation.year) {
+      lines.push(this.formatFieldLegacy('year', citation.year));
+    }
 
     if (citation.shortTitle) {
       lines.push(this.formatFieldLegacy('shorttitle', citation.shortTitle));
@@ -312,7 +346,11 @@ export class BibTeXExporter {
 
     if (citation.customFields) {
       for (const [key, value] of Object.entries(citation.customFields)) {
-        lines.push(this.formatFieldLegacy(key, value));
+        lines.push(
+          VERBATIM_FIELDS.has(key.toLowerCase())
+            ? this.formatCustomField(key, value)
+            : this.formatFieldLegacy(key, value)
+        );
       }
     }
 
