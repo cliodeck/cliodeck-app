@@ -54,7 +54,13 @@ export function citationToCSL(c: Citation): CSLItem {
     type: cslType,
   };
   if (c.title) item.title = c.title;
+  // `title-short` alimente les notes abrégées des styles à notes : sans
+  // lui, citeproc répète le titre entier à chaque rappel.
+  if (c.shortTitle) item['title-short'] = c.shortTitle;
   if (c.author) item.author = parseBibTeXAuthors(c.author);
+  // Un ouvrage dirigé n'a pas d'auteur : c'est `editor` qui porte les
+  // noms, et le style CSL sait en tirer « (dir.) » ou « (ed.) ».
+  if (c.editor) item.editor = parseBibTeXAuthors(c.editor);
   if (c.year && /^\d{3,4}$/.test(c.year)) {
     item.issued = { 'date-parts': [[parseInt(c.year, 10)]] };
   } else if (c.year) {

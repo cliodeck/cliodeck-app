@@ -5,13 +5,39 @@ import { IZoteroDataSource } from './IZoteroDataSource';
 import { Citation, ZoteroAttachmentInfo } from '../../types/citation';
 import { ZoteroDiffEngine, SyncDiff } from './ZoteroDiffEngine';
 import { ZoteroSyncResolver, ConflictStrategy, SyncResolution, MergeResult } from './ZoteroSyncResolver';
+import { BibTeXParser } from '../../core/bibliography/BibTeXParser';
+import { findDuplicateWorks, type DuplicateWork } from '../../core/bibliography/duplicates';
 
 export interface SyncResult {
   collections: ZoteroCollection[];
   items: ZoteroItem[];
   bibtexPath: string;
+  /**
+   * Clés BibTeX réellement écrites dans le fichier, par `zoteroKey`.
+   * Relues depuis le contenu produit : c'est le fichier qui fait foi, et
+   * refabriquer les clés ailleurs redonnait un résultat différent (en mode
+   * API, elles viennent même du serveur Zotero).
+   */
+  citeKeys: Record<string, string>;
+  /** Œuvres présentes plusieurs fois dans la collection Zotero. */
+  duplicates: DuplicateWork[];
+  /**
+   * Anomalies non bloquantes : un fichier a bien été produit, mais il ne
+   * dit pas tout à fait ce que contient la collection. Structurées, pour
+   * que l'interface les traduise au lieu d'afficher une phrase du moteur.
+   */
+  warnings: SyncWarning[];
   pdfPaths: string[];
   errors: string[];
+}
+
+/** Écart constaté entre la collection Zotero et le fichier écrit. */
+export interface SyncWarning {
+  kind: 'count-mismatch';
+  /** Items bibliographiques trouvés dans la collection. */
+  expected: number;
+  /** Entrées effectivement écrites dans le .bib. */
+  written: number;
 }
 
 export interface SyncOptions {
@@ -33,6 +59,40 @@ export class ZoteroSync {
   }
 
   /**
+   * Clés BibTeX du fichier existant, indexées par `zoteroKey`.
+   *
+   * Lecture best-effort : un fichier absent ou illisible ne doit pas faire
+   * échouer l'import, il fait seulement repartir les clés de zéro.
+   */
+  private readExistingCiteKeys(bibtexPath: string): Record<string, string> {
+    if (!fs.existsSync(bibtexPath)) return {};
+    try {
+      const parser = new BibTeXParser();
+      const keys: Record<string, string> = {};
+      for (const citation of parser.parseFile(bibtexPath)) {
+        if (citation.zoteroKey) keys[citation.zoteroKey] = citation.id;
+      }
+      return keys;
+    } catch (error) {
+      console.warn('⚠️ Clés du .bib existant illisibles, elles seront régénérées:', error);
+      return {};
+    }
+  }
+
+  /** Clés BibTeX d'un contenu .bib, indexées par `zoteroKey`. */
+  private citeKeysOf(bibtexContent: string): Record<string, string> {
+    const keys: Record<string, string> = {};
+    try {
+      for (const citation of new BibTeXParser().parse(bibtexContent)) {
+        if (citation.zoteroKey) keys[citation.zoteroKey] = citation.id;
+      }
+    } catch (error) {
+      console.warn('⚠️ Relecture des clés du .bib impossible:', error);
+    }
+    return keys;
+  }
+
+  /**
    * Synchronise une collection Zotero vers le projet local
    */
   async syncCollection(options: SyncOptions): Promise<SyncResult> {
@@ -40,6 +100,9 @@ export class ZoteroSync {
       collections: [],
       items: [],
       bibtexPath: '',
+      citeKeys: {},
+      duplicates: [],
+      warnings: [],
       pdfPaths: [],
       errors: [],
     };
@@ -82,6 +145,13 @@ export class ZoteroSync {
 
         console.log(`📄 ${items.length} items trouvés (${bibliographicItems.length} bibliographiques)`);
         console.log('📊 Types d\'items:', typeCounts);
+
+        // Signalé, jamais fusionné : c'est dans Zotero que la correction a
+        // du sens, et deux notices proches peuvent être deux éditions.
+        result.duplicates = findDuplicateWorks(bibliographicItems);
+        if (result.duplicates.length > 0) {
+          console.log(`👥 ${result.duplicates.length} œuvre(s) en double dans la collection Zotero`);
+        }
       } catch (error) {
         result.errors.push(`Failed to list items: ${error}`);
         return result;
@@ -91,13 +161,35 @@ export class ZoteroSync {
       if (options.exportBibTeX) {
         try {
           const bibtexPath = path.join(options.targetDirectory, 'bibliography.bib');
+          // Les clés du fichier qu'on s'apprête à écraser sont celles que
+          // l'auteur a écrites dans son texte : on les reconduit quand elles
+          // restent valides, sinon un réimport repointe silencieusement une
+          // citation vers une autre œuvre.
+          const preservedKeys = this.readExistingCiteKeys(bibtexPath);
           const bibtexContent = options.collectionKey
-            ? await this.api.exportCollectionAsBibTeX(options.collectionKey)
+            ? await this.api.exportCollectionAsBibTeX(options.collectionKey, true, preservedKeys)
             : await this.api.exportAllAsBibTeX();
 
           fs.writeFileSync(bibtexPath, bibtexContent, 'utf-8');
           result.bibtexPath = bibtexPath;
+          result.citeKeys = this.citeKeysOf(bibtexContent);
           console.log(`✅ BibTeX exporté: ${bibtexPath}`);
+
+          // Un item de la collection qui n'atteint pas le fichier est une
+          // référence perdue en silence — entrée écrasée par une homonyme,
+          // notice écartée au passage. Mesuré sur un projet réel : 70 items
+          // pour 69 entrées, et rien pour le signaler.
+          const expected = result.items.filter(
+            (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
+          ).length;
+          const written = Object.keys(result.citeKeys).length;
+          if (written !== expected) {
+            result.warnings.push({ kind: 'count-mismatch', expected, written });
+            console.warn(
+              `⚠️ ${expected} item(s) dans la collection Zotero, ${written} entrée(s) ` +
+                `écrite(s) dans ${path.basename(bibtexPath)}`
+            );
+          }
         } catch (error) {
           result.errors.push(`Failed to export BibTeX: ${error}`);
         }

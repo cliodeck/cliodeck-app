@@ -13,7 +13,15 @@ export interface Citation {
   id: string; // Clé BibTeX
   key?: string; // Alternative BibTeX key (for compatibility)
   type: string; // @book, @article, @incollection, etc.
+  /**
+   * Auteurs, au format BibTeX (« Nom, Prénom and Nom2, Prénom2 »).
+   * Vide pour un ouvrage dirigé : les directeurs sont dans {@link editor}.
+   * Ne jamais y mettre « Unknown » — l'absence d'auteur est une
+   * information, pas un nom.
+   */
   author: string;
+  /** Directeurs / éditeurs scientifiques, même format que `author`. */
+  editor?: string;
   year: string;
   title: string;
   shortTitle?: string;
@@ -45,10 +53,12 @@ export function createCitation(data: Omit<Citation, 'displayString' | 'details' 
   return {
     ...data,
     get displayString() {
-      // Œuvre anonyme / sans author ni editor : le titre est le seul
+      // Un ouvrage dirigé n'a pas d'auteur : c'est le directeur qui le
+      // désigne. Œuvre anonyme (ni l'un ni l'autre) : le titre est le seul
       // libellé disponible (#32).
-      if (!this.author) return this.title;
-      return `${this.author} (${this.year})`;
+      const name = this.author || this.editor;
+      if (!name) return this.title;
+      return `${name} (${this.year})`;
     },
     get details() {
       const parts: string[] = [];

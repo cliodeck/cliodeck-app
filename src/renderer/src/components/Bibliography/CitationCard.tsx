@@ -122,7 +122,12 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
           setIsExpanded(!isExpanded);
         }}>
           <div className="citation-main">
-            <div className="citation-author">{citation.author}</div>
+            {/* Un ouvrage dirigé n'a pas d'auteur : c'est son directeur
+                qui le désigne, et le titre s'il n'y a ni l'un ni l'autre.
+                Une ligne vide laissait la fiche sans identité. */}
+            <div className="citation-author">
+              {citation.author || citation.editor || citation.title}
+            </div>
             <div className="citation-year">({citation.year})</div>
             {(hasPDF || isIndexedByKey) && (
               <span className="pdf-badge" title={isIndexed ? t('bibliography.indexed') : t('bibliography.notIndexed')}>

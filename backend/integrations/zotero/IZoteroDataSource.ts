@@ -30,7 +30,18 @@ export interface IZoteroDataSource {
   hasAttachments(itemKey: string): Promise<boolean>;
 
   // Export
-  exportCollectionAsBibTeX(collectionKey: string, includeSubcollections?: boolean): Promise<string>;
+  /**
+   * @param preservedKeys clés BibTeX déjà écrites dans le manuscrit, par
+   *   `zoteroKey` : elles sont reconduites quand elles restent valides, pour
+   *   qu'un réimport ne déplace pas une citation en place. Ignoré par les
+   *   sources qui ne fabriquent pas les clés (l'API Zotero les reçoit du
+   *   serveur).
+   */
+  exportCollectionAsBibTeX(
+    collectionKey: string,
+    includeSubcollections?: boolean,
+    preservedKeys?: Readonly<Record<string, string>>
+  ): Promise<string>;
   exportAllAsBibTeX(): Promise<string>;
 
   // Files

@@ -608,7 +608,13 @@
       "close": "Fermer",
       "allLibraries": "Toutes les bibliotheques",
       "personalLibrary": "Bibliotheque personnelle",
-      "allItems": "Tous les items"
+      "allItems": "Tous les items",
+      "countMismatch": "{{expected}} notice(s) dans la collection Zotero, {{written}} entrée(s) écrite(s) dans la bibliographie. Des références manquent : vérifiez les doublons et les notices sans titre.",
+      "duplicatesFound": "{{count}} œuvre(s) figurent plusieurs fois dans la collection Zotero. À fusionner dans Zotero :",
+      "duplicatesMore": "… et {{count}} autre(s)"
+    },
+    "sync": {
+      "bibWriteFailed": "Attention : le fichier de bibliographie du projet n'a pas pu être réécrit ({{error}}). Les modifications seront perdues au prochain lancement."
     }
   },
   "suggestions": {

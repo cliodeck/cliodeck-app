@@ -388,11 +388,11 @@ export class BibTeXParser {
     fields: Record<string, string>,
     bibDir?: string
   ): Citation | null {
-    // Champ obligatoire : title. author retombe sur editor (volumes
-    // dirigés, actes) puis sur vide (œuvres anonymes) : exiger author
-    // rejetait silencieusement des entrées légitimes (#32) —
-    // displayString retombe sur le titre quand author est vide.
-    const author = fields.author || fields.editor || '';
+    // Champ obligatoire : title. `author` peut être vide — volume dirigé
+    // (les noms sont alors dans `editor`) ou œuvre anonyme : l'exiger
+    // rejetait silencieusement des entrées légitimes (#32). displayString
+    // retombe sur l'éditeur, puis sur le titre.
+    const author = fields.author || '';
     const year = fields.year || fields.date || 'n.d.';
     const title = fields.title;
 
@@ -416,7 +416,7 @@ export class BibTeXParser {
 
     // Known BibTeX fields to exclude from custom fields
     const knownFields = new Set([
-      'author', 'year', 'date', 'title', 'shorttitle', 'journal', 'journaltitle',
+      'author', 'editor', 'year', 'date', 'title', 'shorttitle', 'journal', 'journaltitle',
       'publisher', 'booktitle', 'file', 'keywords', 'tags', 'note', 'abstract',
       'zoterokey', 'dateadded', 'datemodified'
     ]);
@@ -434,6 +434,7 @@ export class BibTeXParser {
       key: key,
       type,
       author,
+      editor: fields.editor,
       year: this.extractYear(year),
       title,
       shortTitle: fields.shorttitle,

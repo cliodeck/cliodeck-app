@@ -7,6 +7,8 @@ import Database from 'better-sqlite3';
 import { ZoteroItem } from './ZoteroAPI';
 import { createCitation } from '../../types/citation';
 import { BibTeXExporter } from '../../core/bibliography/BibTeXExporter';
+import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
+import { formatCreators } from './creators';
 
 export class ZoteroLocalBibTeX {
   private dataDirectory: string;
@@ -78,9 +80,13 @@ export class ZoteroLocalBibTeX {
 
   /**
    * Generate BibTeX from ZoteroItem array using BibTeXExporter
+   *
+   * Les clés sont attribuées en un seul passage sur la liste : c'est la
+   * seule façon de garantir leur unicité (cf. {@link assignCiteKeys}).
    */
-  generateBibTeX(items: ZoteroItem[]): string {
-    const citations = items.map((item) => this.zoteroItemToCitation(item));
+  generateBibTeX(items: ZoteroItem[], preservedKeys?: Readonly<Record<string, string>>): string {
+    const keys = assignCiteKeys(items, new Set(), preservedKeys);
+    const citations = items.map((item) => this.zoteroItemToCitation(item, keys.get(item.key)!));
     const exporter = new BibTeXExporter();
     return exporter.exportToString(citations);
   }
@@ -89,46 +95,28 @@ export class ZoteroLocalBibTeX {
    * Convert a ZoteroItem to a Citation for BibTeX export
    * Mirrors ZoteroDiffEngine.zoteroItemToCitation logic
    */
-  private zoteroItemToCitation(item: ZoteroItem) {
+  private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string) {
     const data = item.data;
 
-    const authors = data.creators
-      ?.filter((c) => c.creatorType === 'author')
-      .map((c) => {
-        if (c.lastName && c.firstName) {
-          return `${c.lastName}, ${c.firstName}`;
-        } else if (c.name) {
-          return c.name;
-        } else if (c.lastName) {
-          return c.lastName;
-        }
-        return 'Unknown';
-      })
-      .join(' and ') || 'Unknown';
-
-    const year = data.date ? this.extractYear(data.date) : '';
-
-    const firstAuthor = authors.split(' and ')[0].split(',')[0].trim();
-    const bibtexKey = `${firstAuthor.replace(/\s+/g, '')}_${year}`;
+    const year = extractYear(data.date);
 
     return createCitation({
       id: bibtexKey,
       type: this.mapZoteroTypeToRef(data.itemType),
-      author: authors,
+      author: formatCreators(item, 'author'),
+      editor: formatCreators(item, 'editor') || undefined,
       year,
       title: data.title || 'Untitled',
-      shortTitle: data.title && data.title.length > 50 ? data.title.substring(0, 47) + '...' : undefined,
+      // Le titre court de Zotero, ou rien. Le titre coupé à 47 caractères
+      // qu'on fabriquait ici n'est pas un titre court : les styles à notes
+      // abrégées l'affichaient tel quel, mot tranché compris.
+      shortTitle: data.shortTitle,
       journal: data.publicationTitle,
       publisher: data.publisher,
-      booktitle: (data as any).bookTitle,
+      booktitle: data.bookTitle,
       zoteroKey: item.key,
       tags: data.tags?.map((t) => t.tag),
     });
-  }
-
-  private extractYear(dateString: string): string {
-    const yearMatch = dateString.match(/\d{4}/);
-    return yearMatch ? yearMatch[0] : '';
   }
 
   private mapZoteroTypeToRef(zoteroType: string): string {

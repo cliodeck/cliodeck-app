@@ -159,6 +159,38 @@ export const ZoteroImport: React.FC = () => {
     }
   };
 
+  /**
+   * Un écart entre la collection et le fichier écrit est une référence
+   * perdue : l'import ne peut pas se contenter d'annoncer un succès.
+   */
+  const describeSyncWarnings = (
+    warnings?: Array<{ kind: string; expected: number; written: number }>
+  ): string => {
+    if (!warnings || warnings.length === 0) return '';
+    return warnings
+      .filter((w) => w.kind === 'count-mismatch')
+      .map((w) => `\n\n⚠️ ${t('zotero.import.countMismatch', { expected: w.expected, written: w.written })}`)
+      .join('');
+  };
+
+  /**
+   * Les doublons sont signalés, jamais fusionnés : la correction se fait
+   * dans Zotero, et deux notices proches peuvent être deux éditions.
+   */
+  const describeDuplicates = (
+    duplicates?: Array<{ title: string; keys: string[] }>
+  ): string => {
+    if (!duplicates || duplicates.length === 0) return '';
+    const SHOWN = 5;
+    const lines = duplicates
+      .slice(0, SHOWN)
+      .map((d) => `• ${d.title} (×${d.keys.length})`);
+    if (duplicates.length > SHOWN) {
+      lines.push(t('zotero.import.duplicatesMore', { count: duplicates.length - SHOWN }));
+    }
+    return `\n\n${t('zotero.import.duplicatesFound', { count: duplicates.length })}\n${lines.join('\n')}`;
+  };
+
   const handleImport = async () => {
     if (!isConfigured) {
       await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
@@ -254,7 +286,11 @@ export const ZoteroImport: React.FC = () => {
           }
         }
 
-        await useDialogStore.getState().showAlert(t('zotero.import.success', { count: citationCount }));
+        await useDialogStore.getState().showAlert(
+          t('zotero.import.success', { count: citationCount }) +
+            describeSyncWarnings(syncResult.warnings) +
+            describeDuplicates(syncResult.duplicates)
+        );
 
         // La sélection reste affichée : c'est l'association mémorisée du
         // projet, la remettre à vide faisait croire qu'elle était perdue —
@@ -327,6 +363,39 @@ export const ZoteroImport: React.FC = () => {
       if (result.success && result.finalCitations) {
         // Update bibliography store with new citations
         useBibliographyStore.setState({ citations: result.finalCitations });
+        useBibliographyStore.getState().applyFilters();
+
+        // Réécrire le .bib du projet. Sans cette étape, la mise à jour ne
+        // vivait que dans le store et le sidecar : au lancement suivant,
+        // `loadBibliographyWithMetadata` relisait le fichier — inchangé —,
+        // les entrées ajoutées disparaissaient, et la vérification suivante
+        // les re-proposait à l'identique. Le fichier est la source de
+        // vérité : il doit être écrit ici.
+        let bibError: string | undefined;
+        if (currentProject?.path) {
+          try {
+            const projectJsonPath = `${currentProject.path}/project.json`;
+            const cfg = await window.electron.project.getConfig(projectJsonPath);
+            const configured = cfg?.bibliographySource?.filePath || 'bibliography.bib';
+            const bibPath = configured.startsWith('/')
+              ? configured
+              : `${currentProject.path}/${configured}`;
+
+            const exportResult = await window.electron.bibliography.export({
+              citations: result.finalCitations,
+              filePath: bibPath,
+              format: 'modern',
+            });
+            if (!exportResult.success) {
+              bibError = exportResult.error || 'unknown error';
+            }
+          } catch (writeError) {
+            bibError = writeError instanceof Error ? writeError.message : String(writeError);
+          }
+          if (bibError) {
+            console.error('Failed to write bibliography file after sync:', bibError);
+          }
+        }
 
         // Save metadata to persist zoteroAttachments across restarts
         if (currentProject?.path) {
@@ -346,7 +415,8 @@ export const ZoteroImport: React.FC = () => {
           `Added: ${result.addedCount}\n` +
           `Modified: ${result.modifiedCount}\n` +
           `Deleted: ${result.deletedCount}\n` +
-          (result.skippedCount ? `Skipped: ${result.skippedCount}\n` : '')
+          (result.skippedCount ? `Skipped: ${result.skippedCount}\n` : '') +
+          (bibError ? `\n${t('zotero.sync.bibWriteFailed', { error: bibError })}` : '')
         );
 
         // Clear sync diff

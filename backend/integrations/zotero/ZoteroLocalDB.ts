@@ -316,6 +316,11 @@ export class ZoteroLocalDB implements IZoteroDataSource {
           version: 0,
           itemType: row.itemType,
           title: fields['title'],
+          // Le titre court de Zotero : sans lui, l'export en fabriquait un
+          // en coupant le titre à 47 caractères, que les styles Chicago
+          // affichent tel quel dans les notes abrégées.
+          shortTitle: fields['shortTitle'],
+          bookTitle: fields['bookTitle'],
           creators: creators.map((c: any) => ({
             creatorType: c.creatorType,
             firstName: c.firstName || undefined,
@@ -370,6 +375,8 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         version: 0,
         itemType: row.itemType,
         title: fields['title'],
+        shortTitle: fields['shortTitle'],
+        bookTitle: fields['bookTitle'],
         creators: creators.map((c: any) => ({
           creatorType: c.creatorType,
           firstName: c.firstName || undefined,
@@ -489,7 +496,11 @@ export class ZoteroLocalDB implements IZoteroDataSource {
 
   // MARK: - Export
 
-  async exportCollectionAsBibTeX(collectionKey: string, includeSubcollections: boolean = true): Promise<string> {
+  async exportCollectionAsBibTeX(
+    collectionKey: string,
+    includeSubcollections: boolean = true,
+    preservedKeys?: Readonly<Record<string, string>>
+  ): Promise<string> {
     const bibtexHelper = new ZoteroLocalBibTeX(this.config.dataDirectory);
 
     // Try Better BibTeX first
@@ -539,7 +550,7 @@ export class ZoteroLocalDB implements IZoteroDataSource {
     }
 
     console.log(`📚 Generating BibTeX from ${allItems.length} items`);
-    return bibtexHelper.generateBibTeX(allItems);
+    return bibtexHelper.generateBibTeX(allItems, preservedKeys);
   }
 
   async exportAllAsBibTeX(): Promise<string> {

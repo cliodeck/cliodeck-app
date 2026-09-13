@@ -2,6 +2,8 @@
 
 import { Citation, createCitation } from '../../types/citation';
 import { ZoteroItem, ZoteroAttachment } from './ZoteroAPI';
+import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
+import { formatCreators } from './creators';
 
 export interface CitationChange {
   local: Citation;
@@ -53,11 +55,19 @@ export class ZoteroDiffEngine {
     }
 
     // 1. Find ADDED items (in remote but not in local)
+    // Les clés des nouvelles entrées sont attribuées en bloc, en réservant
+    // d'abord celles déjà prises localement : sans quoi un item arrivant de
+    // Zotero écrase la clé d'une référence déjà citée dans le manuscrit.
+    const addedItems: ZoteroItem[] = [];
     for (const [key, remoteItem] of remoteMap) {
       if (!localMap.has(key)) {
-        const remoteCitation = this.zoteroItemToCitation(remoteItem);
-        diff.added.push(remoteCitation);
+        addedItems.push(remoteItem);
       }
+    }
+    const takenKeys = new Set(localCitations.map((c) => c.id));
+    const addedKeys = assignCiteKeys(addedItems, takenKeys);
+    for (const remoteItem of addedItems) {
+      diff.added.push(this.zoteroItemToCitation(remoteItem, addedKeys.get(remoteItem.key)!));
     }
 
     // 2. Find DELETED items (in local but not in remote)
@@ -76,7 +86,11 @@ export class ZoteroDiffEngine {
       const remoteItem = remoteMap.get(zoteroKey);
       if (!remoteItem) continue; // Already handled in deleted
 
-      const remoteCitation = this.zoteroItemToCitation(remoteItem);
+      // La clé locale est conservée : c'est celle que l'auteur a écrite dans
+      // son texte. Une mise à jour de métadonnées dans Zotero (année
+      // corrigée, prénom complété) ne doit pas renommer une citation en
+      // place — la réparation des clés passe par un réimport complet.
+      const remoteCitation = this.zoteroItemToCitation(remoteItem, localCitation.id);
       const changes = this.compareCitations(localCitation, remoteCitation, options);
 
       if (changes.modifiedFields.length > 0) {
@@ -103,6 +117,7 @@ export class ZoteroDiffEngine {
     const fieldsToCompare = [
       'title',
       'author',
+      'editor',
       'year',
       'type',
       'journal',
@@ -148,51 +163,30 @@ export class ZoteroDiffEngine {
   /**
    * Convert ZoteroItem to Citation format
    */
-  private zoteroItemToCitation(item: ZoteroItem): Citation {
+  private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citation {
     const data = item.data;
 
-    // Extract author(s)
-    const authors = data.creators
-      ?.filter((c) => c.creatorType === 'author')
-      .map((c) => {
-        if (c.lastName && c.firstName) {
-          return `${c.lastName}, ${c.firstName}`;
-        } else if (c.name) {
-          return c.name;
-        } else if (c.lastName) {
-          return c.lastName;
-        }
-        return 'Unknown';
-      })
-      .join(' and ') || 'Unknown';
-
     // Extract year from date
-    const year = data.date ? this.extractYear(data.date) : '';
-
-    // Generate BibTeX key (Author_Year format)
-    const firstAuthor = authors.split(' and ')[0].split(',')[0].trim();
-    const bibtexKey = `${firstAuthor.replace(/\s+/g, '')}_${year}`;
+    const year = extractYear(data.date);
 
     return createCitation({
       id: bibtexKey,
       type: this.mapZoteroTypeToRef(data.itemType),
-      author: authors,
+      author: formatCreators(item, 'author'),
+      editor: formatCreators(item, 'editor') || undefined,
       year,
       title: data.title || 'Untitled',
-      shortTitle: data.title && data.title.length > 50 ? data.title.substring(0, 47) + '...' : undefined,
+      shortTitle: data.shortTitle,
       journal: data.publicationTitle,
       publisher: data.publisher,
+      // Mêmes champs que le chemin d'import (`ZoteroLocalBibTeX`) : depuis
+      // que la synchronisation réécrit le .bib, une entrée reconstruite
+      // ici sans ses mots-clés les perdrait pour de bon.
+      booktitle: data.bookTitle,
+      tags: data.tags?.map((t) => t.tag),
       zoteroKey: item.key,
       zoteroAttachments: [], // Will be populated separately
     });
-  }
-
-  /**
-   * Extract year from Zotero date string
-   */
-  private extractYear(dateString: string): string {
-    const yearMatch = dateString.match(/\d{4}/);
-    return yearMatch ? yearMatch[0] : '';
   }
 
   /**
