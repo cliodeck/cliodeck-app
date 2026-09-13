@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation } from '../../types/citation';
 import { createCitation } from '../../types/citation';
+import { VERBATIM_FIELDS } from './BibTeXExporter';
 
 export class BibTeXParser {
   /**
@@ -174,9 +175,13 @@ export class BibTeXParser {
         currentIndex = endIndex;
       }
 
-      // Nettoyer et stocker la valeur
+      // Nettoyer et stocker la valeur. Les champs verbatim de BibLaTeX
+      // (URL, DOI…) échappent au nettoyage LaTeX : il changerait `~` en
+      // espace et `--` en tiret demi-cadratin, donc l'adresse elle-même.
       if (value) {
-        fields[fieldName] = this.cleanValue(value);
+        fields[fieldName] = VERBATIM_FIELDS.has(fieldName)
+          ? value.trim()
+          : this.cleanValue(value);
       }
 
       // Passer au champ suivant (chercher la virgule)
@@ -393,7 +398,10 @@ export class BibTeXParser {
     // rejetait silencieusement des entrées légitimes (#32). displayString
     // retombe sur l'éditeur, puis sur le titre.
     const author = fields.author || '';
-    const year = fields.year || fields.date || 'n.d.';
+    // Pas d'année inventée : `n.d.` relu ici était réécrit tel quel à
+    // l'export, puis vu « modifié » à chaque synchronisation face à
+    // Zotero, qui n'en a pas. L'affichage se charge de l'absence.
+    const year = fields.year || fields.date || '';
     const title = fields.title;
 
     if (!title) {
@@ -415,8 +423,11 @@ export class BibTeXParser {
     }
 
     // Known BibTeX fields to exclude from custom fields
+    // `date` n'y figure pas : il sert de repli pour l'année, mais porte
+    // souvent davantage (jour et mois d'un article de presse) et doit
+    // survivre à un aller-retour par le fichier.
     const knownFields = new Set([
-      'author', 'editor', 'year', 'date', 'title', 'shorttitle', 'journal', 'journaltitle',
+      'author', 'editor', 'year', 'title', 'shorttitle', 'journal', 'journaltitle',
       'publisher', 'booktitle', 'file', 'keywords', 'tags', 'note', 'abstract',
       'zoterokey', 'dateadded', 'datemodified'
     ]);

@@ -261,7 +261,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                           <div className="citation-info">
                             <div className="citation-title">{citation.title}</div>
                             <div className="citation-meta">
-                              {citation.author || citation.editor || citation.title} ({citation.year})
+                              {citation.author || citation.editor || citation.title}{citation.year ? ` (${citation.year})` : ''}
                             </div>
                           </div>
                         </div>
@@ -351,7 +351,7 @@ export const SyncPreviewModal: React.FC<SyncPreviewModalProps> = ({
                           <div className="citation-info">
                             <div className="citation-title">{citation.title}</div>
                             <div className="citation-meta">
-                              {citation.author || citation.editor || citation.title} ({citation.year})
+                              {citation.author || citation.editor || citation.title}{citation.year ? ` (${citation.year})` : ''}
                             </div>
                           </div>
                         </div>

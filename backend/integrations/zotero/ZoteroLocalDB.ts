@@ -312,6 +312,11 @@ export class ZoteroLocalDB implements IZoteroDataSource {
           name: '',
         },
         data: {
+          // Tous les champs de la notice, sous leur nom Zotero — comme les
+          // renvoie l'API web. N'en retenir qu'une poignée faisait perdre à
+          // l'export l'URL, le DOI, les pages, le titre d'un blog ou d'un
+          // site, le dépôt d'un preprint…
+          ...fields,
           key: row.key,
           version: 0,
           itemType: row.itemType,
@@ -371,6 +376,7 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         name: '',
       },
       data: {
+        ...fields,
         key: row.key,
         version: 0,
         itemType: row.itemType,

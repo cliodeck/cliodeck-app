@@ -58,7 +58,7 @@ export function createCitation(data: Omit<Citation, 'displayString' | 'details' 
       // libellé disponible (#32).
       const name = this.author || this.editor;
       if (!name) return this.title;
-      return `${name} (${this.year})`;
+      return this.year ? `${name} (${this.year})` : name;
     },
     get details() {
       const parts: string[] = [];

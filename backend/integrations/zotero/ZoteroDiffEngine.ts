@@ -1,9 +1,9 @@
 // Zotero Diff Engine - Compares local citations with remote Zotero items
 
-import { Citation, createCitation } from '../../types/citation';
+import { Citation } from '../../types/citation';
 import { ZoteroItem, ZoteroAttachment } from './ZoteroAPI';
-import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
-import { formatCreators } from './creators';
+import { assignCiteKeys } from '../../core/bibliography/citekey';
+import { zoteroItemToCitation, ZOTERO_OWNED_FIELDS } from './toCitation';
 
 export interface CitationChange {
   local: Citation;
@@ -67,7 +67,7 @@ export class ZoteroDiffEngine {
     const takenKeys = new Set(localCitations.map((c) => c.id));
     const addedKeys = assignCiteKeys(addedItems, takenKeys);
     for (const remoteItem of addedItems) {
-      diff.added.push(this.zoteroItemToCitation(remoteItem, addedKeys.get(remoteItem.key)!));
+      diff.added.push(zoteroItemToCitation(remoteItem, addedKeys.get(remoteItem.key)!));
     }
 
     // 2. Find DELETED items (in local but not in remote)
@@ -90,7 +90,7 @@ export class ZoteroDiffEngine {
       // son texte. Une mise à jour de métadonnées dans Zotero (année
       // corrigée, prénom complété) ne doit pas renommer une citation en
       // place — la réparation des clés passe par un réimport complet.
-      const remoteCitation = this.zoteroItemToCitation(remoteItem, localCitation.id);
+      const remoteCitation = zoteroItemToCitation(remoteItem, localCitation.id);
       const changes = this.compareCitations(localCitation, remoteCitation, options);
 
       if (changes.modifiedFields.length > 0) {
@@ -135,6 +135,19 @@ export class ZoteroDiffEngine {
       }
     }
 
+    // Champs BibLaTeX que Zotero alimente (URL, DOI, pages, date complète…).
+    // Sans cette comparaison, une entrée importée avant qu'on les exporte
+    // ne les recevait jamais par la synchronisation : rien n'y paraissait
+    // « modifié ».
+    for (const field of ZOTERO_OWNED_FIELDS) {
+      const localValue = local.customFields?.[field] ?? '';
+      const remoteValue = remote.customFields?.[field] ?? '';
+
+      if (this.normalizeString(localValue) !== this.normalizeString(remoteValue)) {
+        modifiedFields.push(field);
+      }
+    }
+
     // Compare attachments if requested
     if (options.compareAttachments) {
       const localAttachmentCount = local.zoteroAttachments?.length || 0;
@@ -158,54 +171,6 @@ export class ZoteroDiffEngine {
       remote,
       modifiedFields,
     };
-  }
-
-  /**
-   * Convert ZoteroItem to Citation format
-   */
-  private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citation {
-    const data = item.data;
-
-    // Extract year from date
-    const year = extractYear(data.date);
-
-    return createCitation({
-      id: bibtexKey,
-      type: this.mapZoteroTypeToRef(data.itemType),
-      author: formatCreators(item, 'author'),
-      editor: formatCreators(item, 'editor') || undefined,
-      year,
-      title: data.title || 'Untitled',
-      shortTitle: data.shortTitle,
-      journal: data.publicationTitle,
-      publisher: data.publisher,
-      // Mêmes champs que le chemin d'import (`ZoteroLocalBibTeX`) : depuis
-      // que la synchronisation réécrit le .bib, une entrée reconstruite
-      // ici sans ses mots-clés les perdrait pour de bon.
-      booktitle: data.bookTitle,
-      tags: data.tags?.map((t) => t.tag),
-      zoteroKey: item.key,
-      zoteroAttachments: [], // Will be populated separately
-    });
-  }
-
-  /**
-   * Map Zotero item type to BibTeX type
-   */
-  private mapZoteroTypeToRef(zoteroType: string): string {
-    const mapping: Record<string, string> = {
-      journalArticle: 'article',
-      book: 'book',
-      bookSection: 'incollection',
-      conferencePaper: 'inproceedings',
-      thesis: 'phdthesis',
-      report: 'techreport',
-      manuscript: 'unpublished',
-      webpage: 'misc',
-      document: 'misc',
-    };
-
-    return mapping[zoteroType] || 'misc';
   }
 
   /**

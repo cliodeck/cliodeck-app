@@ -5,10 +5,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { ZoteroItem } from './ZoteroAPI';
-import { createCitation } from '../../types/citation';
 import { BibTeXExporter } from '../../core/bibliography/BibTeXExporter';
-import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
-import { formatCreators } from './creators';
+import { assignCiteKeys } from '../../core/bibliography/citekey';
+import { zoteroItemToCitation } from './toCitation';
 
 export class ZoteroLocalBibTeX {
   private dataDirectory: string;
@@ -86,51 +85,8 @@ export class ZoteroLocalBibTeX {
    */
   generateBibTeX(items: ZoteroItem[], preservedKeys?: Readonly<Record<string, string>>): string {
     const keys = assignCiteKeys(items, new Set(), preservedKeys);
-    const citations = items.map((item) => this.zoteroItemToCitation(item, keys.get(item.key)!));
+    const citations = items.map((item) => zoteroItemToCitation(item, keys.get(item.key)!));
     const exporter = new BibTeXExporter();
     return exporter.exportToString(citations);
-  }
-
-  /**
-   * Convert a ZoteroItem to a Citation for BibTeX export
-   * Mirrors ZoteroDiffEngine.zoteroItemToCitation logic
-   */
-  private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string) {
-    const data = item.data;
-
-    const year = extractYear(data.date);
-
-    return createCitation({
-      id: bibtexKey,
-      type: this.mapZoteroTypeToRef(data.itemType),
-      author: formatCreators(item, 'author'),
-      editor: formatCreators(item, 'editor') || undefined,
-      year,
-      title: data.title || 'Untitled',
-      // Le titre court de Zotero, ou rien. Le titre coupé à 47 caractères
-      // qu'on fabriquait ici n'est pas un titre court : les styles à notes
-      // abrégées l'affichaient tel quel, mot tranché compris.
-      shortTitle: data.shortTitle,
-      journal: data.publicationTitle,
-      publisher: data.publisher,
-      booktitle: data.bookTitle,
-      zoteroKey: item.key,
-      tags: data.tags?.map((t) => t.tag),
-    });
-  }
-
-  private mapZoteroTypeToRef(zoteroType: string): string {
-    const mapping: Record<string, string> = {
-      journalArticle: 'article',
-      book: 'book',
-      bookSection: 'incollection',
-      conferencePaper: 'inproceedings',
-      thesis: 'phdthesis',
-      report: 'techreport',
-      manuscript: 'unpublished',
-      webpage: 'misc',
-      document: 'misc',
-    };
-    return mapping[zoteroType] || 'misc';
   }
 }
