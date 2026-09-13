@@ -918,6 +918,8 @@ const api = {
           serverName?: string;
           workspaceRoot?: string;
           binaryPath?: string | null;
+          /** Commandes à copier, guillemets décidés selon le système. */
+          commands?: { claudeCode: string; launch: string } | null;
           tools?: Record<string, boolean>;
           error?: string;
         }>,

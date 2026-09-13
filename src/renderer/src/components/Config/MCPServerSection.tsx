@@ -8,6 +8,13 @@ interface MCPServerState {
   serverName: string;
   workspaceRoot: string;
   binaryPath: string | null;
+  /**
+   * Commandes à copier, construites par le processus principal qui connaît
+   * le système et donc les bons guillemets. Ne jamais les recomposer ici :
+   * la copie locale n'en mettait aucun et découpait le chemin du projet à
+   * chaque espace.
+   */
+  commands: { claudeCode: string; launch: string } | null;
   /** Nom d'outil → exposé. Absent = exposé (voir MCPServerSettings.tools). */
   tools: Record<string, boolean>;
 }
@@ -19,6 +26,7 @@ interface MCPServerApi {
     serverName?: string;
     workspaceRoot?: string;
     binaryPath?: string | null;
+    commands?: { claudeCode: string; launch: string } | null;
     tools?: Record<string, boolean>;
     error?: string;
   }>;
@@ -66,20 +74,17 @@ function api(): MCPServerApi | null {
 
 type SnippetKind = 'claudeDesktop' | 'claudeCode' | 'generic';
 
-function buildSnippet(
-  kind: SnippetKind,
-  serverName: string,
-  binaryPath: string,
-  workspaceRoot: string
-): string {
+function buildSnippet(kind: SnippetKind, state: MCPServerState): string | null {
+  if (!state.binaryPath) return null;
   switch (kind) {
     case 'claudeDesktop':
+      // Du JSON : les espaces du chemin y sont sans conséquence.
       return JSON.stringify(
         {
           mcpServers: {
-            [serverName]: {
-              command: binaryPath,
-              args: [workspaceRoot],
+            [state.serverName]: {
+              command: state.binaryPath,
+              args: [state.workspaceRoot],
             },
           },
         },
@@ -87,9 +92,9 @@ function buildSnippet(
         2
       );
     case 'claudeCode':
-      return `claude mcp add ${serverName} -- ${binaryPath} ${workspaceRoot}`;
+      return state.commands?.claudeCode ?? null;
     case 'generic':
-      return `${binaryPath} ${workspaceRoot}`;
+      return state.commands?.launch ?? null;
   }
 }
 
@@ -188,6 +193,7 @@ export const MCPServerSection: React.FC = () => {
         serverName: res.serverName,
         workspaceRoot: res.workspaceRoot,
         binaryPath: res.binaryPath ?? null,
+        commands: res.commands ?? null,
         tools: res.tools ?? {},
       });
       setPendingName(res.serverName);
@@ -295,8 +301,8 @@ export const MCPServerSection: React.FC = () => {
   }, [t]);
 
   const snippet = useMemo(() => {
-    if (!state || !state.binaryPath) return null;
-    return buildSnippet(activeSnippet, state.serverName, state.binaryPath, state.workspaceRoot);
+    if (!state) return null;
+    return buildSnippet(activeSnippet, state);
   }, [activeSnippet, state]);
 
   return (
@@ -484,9 +490,9 @@ export const MCPServerSection: React.FC = () => {
               <p style={{ fontSize: 12, fontWeight: 600, margin: '0 0 4px' }}>
                 {t('mcpServer.clients.codeTitle')}
               </p>
-              {state.binaryPath && (
+              {state.commands && (
                 <CodeBlock
-                  text={buildSnippet('claudeCode', state.serverName, state.binaryPath, state.workspaceRoot)}
+                  text={state.commands.claudeCode}
                   copyLabel={t('mcpServer.snippets.copy')}
                   copiedLabel={t('mcpServer.snippets.copied')}
                 />
