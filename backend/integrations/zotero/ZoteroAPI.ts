@@ -24,6 +24,10 @@ export interface ZoteroItem {
     version: number;
     itemType: string;
     title?: string;
+    /** Titre court saisi dans Zotero (jamais un titre tronqué à la main). */
+    shortTitle?: string;
+    /** Titre de l'ouvrage pour un chapitre (`bookSection`). */
+    bookTitle?: string;
     creators?: Array<{
       creatorType: string;
       firstName?: string;

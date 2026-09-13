@@ -170,8 +170,9 @@ describe('BibTeXParser', () => {
     });
 
     // Régression #32 : un volume dirigé (editor sans author) était rejeté
-    // silencieusement.
-    it('falls back to editor when author is missing', () => {
+    // silencieusement. Les deux champs restent distincts — les confondre
+    // réécrivait les directeurs dans `author` à l'export.
+    it('keeps editor apart from author, and still displays the names', () => {
       const bibtex = `
 @book{dirige2020,
   editor = {Marc Bloch and Lucien Febvre},
@@ -183,7 +184,8 @@ describe('BibTeXParser', () => {
       const citations = parser.parse(bibtex);
 
       expect(citations).toHaveLength(1);
-      expect(citations[0].author).toBe('Marc Bloch and Lucien Febvre');
+      expect(citations[0].author).toBe('');
+      expect(citations[0].editor).toBe('Marc Bloch and Lucien Febvre');
       expect(citations[0].displayString).toBe('Marc Bloch and Lucien Febvre (2020)');
     });
 

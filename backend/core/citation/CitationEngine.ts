@@ -12,6 +12,8 @@ export interface CSLItem {
   id: string;
   type: string; // 'book' | 'article-journal' | 'chapter' | ...
   title?: string;
+  /** Titre abrégé, utilisé par les styles à notes pour les rappels. */
+  'title-short'?: string;
   author?: Array<{ family?: string; given?: string; literal?: string }>;
   editor?: Array<{ family?: string; given?: string; literal?: string }>;
   issued?: { 'date-parts'?: number[][]; literal?: string; raw?: string };

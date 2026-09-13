@@ -24,7 +24,8 @@ export interface MergeResult {
 
 /**
  * Champs réellement renseignés d'une citation : ni `undefined`, ni chaîne
- * vide, ni tableau vide. Sert à fusionner sans effacer.
+ * vide, ni tableau vide. Sert à fusionner sans effacer ce que Zotero ne
+ * connaît pas (notes, mots-clés, champs BibTeX personnalisés, PDF local).
  */
 function definedFields(citation: Citation): Partial<Citation> {
   // `createCitation` redéfinit ces propriétés calculées : les recopier ne
@@ -257,6 +258,19 @@ export class ZoteroSyncResolver {
       return createCitation({
         ...local,
         ...definedFields(remote),
+        // Champs dont Zotero est propriétaire : la notice distante fait
+        // foi, y compris quand elle est vide. Sans cela, un titre court
+        // fabriqué par une ancienne version, ou un auteur corrigé en
+        // « aucun » dans Zotero, survivaient indéfiniment.
+        type: remote.type,
+        title: remote.title,
+        author: remote.author,
+        editor: remote.editor,
+        year: remote.year,
+        journal: remote.journal,
+        publisher: remote.publisher,
+        booktitle: remote.booktitle,
+        shortTitle: remote.shortTitle,
         // La clé locale est celle que l'auteur a écrite dans son texte :
         // une mise à jour de métadonnées ne renomme jamais une citation.
         id: local.id,
