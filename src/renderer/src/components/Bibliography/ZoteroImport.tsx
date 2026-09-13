@@ -159,6 +159,38 @@ export const ZoteroImport: React.FC = () => {
     }
   };
 
+  /**
+   * Un écart entre la collection et le fichier écrit est une référence
+   * perdue : l'import ne peut pas se contenter d'annoncer un succès.
+   */
+  const describeSyncWarnings = (
+    warnings?: Array<{ kind: string; expected: number; written: number }>
+  ): string => {
+    if (!warnings || warnings.length === 0) return '';
+    return warnings
+      .filter((w) => w.kind === 'count-mismatch')
+      .map((w) => `\n\n⚠️ ${t('zotero.import.countMismatch', { expected: w.expected, written: w.written })}`)
+      .join('');
+  };
+
+  /**
+   * Les doublons sont signalés, jamais fusionnés : la correction se fait
+   * dans Zotero, et deux notices proches peuvent être deux éditions.
+   */
+  const describeDuplicates = (
+    duplicates?: Array<{ title: string; keys: string[] }>
+  ): string => {
+    if (!duplicates || duplicates.length === 0) return '';
+    const SHOWN = 5;
+    const lines = duplicates
+      .slice(0, SHOWN)
+      .map((d) => `• ${d.title} (×${d.keys.length})`);
+    if (duplicates.length > SHOWN) {
+      lines.push(t('zotero.import.duplicatesMore', { count: duplicates.length - SHOWN }));
+    }
+    return `\n\n${t('zotero.import.duplicatesFound', { count: duplicates.length })}\n${lines.join('\n')}`;
+  };
+
   const handleImport = async () => {
     if (!isConfigured) {
       await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
@@ -254,7 +286,11 @@ export const ZoteroImport: React.FC = () => {
           }
         }
 
-        await useDialogStore.getState().showAlert(t('zotero.import.success', { count: citationCount }));
+        await useDialogStore.getState().showAlert(
+          t('zotero.import.success', { count: citationCount }) +
+            describeSyncWarnings(syncResult.warnings) +
+            describeDuplicates(syncResult.duplicates)
+        );
 
         // La sélection reste affichée : c'est l'association mémorisée du
         // projet, la remettre à vide faisait croire qu'elle était perdue —

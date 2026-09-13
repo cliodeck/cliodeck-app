@@ -38,7 +38,7 @@ function item(key: string, lastName: string, date: string, title: string): Zoter
   } as ZoteroItem;
 }
 
-function fakeSource(items: ZoteroItem[]): IZoteroDataSource {
+function fakeSource(items: ZoteroItem[], dropLast = false): IZoteroDataSource {
   const exporter = new BibTeXExporter();
   return {
     listCollections: async () => [],
@@ -52,8 +52,11 @@ function fakeSource(items: ZoteroItem[]): IZoteroDataSource {
     hasAttachments: async () => false,
     exportCollectionAsBibTeX: async (_key, _sub, preservedKeys) => {
       const keys = assignCiteKeys(items, new Set(), preservedKeys);
+      // `dropLast` imite une perte silencieuse : c'est exactement ce que
+      // fait l'export de l'API Zotero, qui déduplique par clé.
+      const exported = dropLast ? items.slice(0, -1) : items;
       return exporter.exportToString(
-        items.map((i) =>
+        exported.map((i) =>
           createCitation({
             id: keys.get(i.key)!,
             type: 'article',
@@ -121,5 +124,58 @@ describe('ZoteroSync — clés du .bib entre deux imports', () => {
     const written = fs.readFileSync(path.join(dir, 'bibliography.bib'), 'utf-8');
     expect(written).toContain('@article{Dupont_2024,');
     expect(result.citeKeys).toEqual({ AAA: 'Dupont_2024' });
+  });
+});
+
+describe('ZoteroSync — ce que l’import a le devoir de dire', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-zotero-warn-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const sync = (items: ZoteroItem[], dropLast = false) =>
+    new ZoteroSync(fakeSource(items, dropLast)).syncCollection({
+      collectionKey: 'COLL',
+      exportBibTeX: true,
+      targetDirectory: dir,
+    });
+
+  it('se tait quand la collection et le fichier concordent', async () => {
+    const result = await sync([
+      item('AAA', 'Dupont', '2024', 'Un titre assez long pour compter'),
+      item('BBB', 'Martin', '2023', 'Un autre titre bien distinct'),
+    ]);
+    expect(result.warnings).toEqual([]);
+    expect(result.duplicates).toEqual([]);
+  });
+
+  it('signale une notice qui n’a pas atteint le fichier', async () => {
+    const result = await sync(
+      [
+        item('AAA', 'Dupont', '2024', 'Un titre assez long pour compter'),
+        item('BBB', 'Martin', '2023', 'Un autre titre bien distinct'),
+      ],
+      true
+    );
+    expect(result.warnings).toEqual([{ kind: 'count-mismatch', expected: 2, written: 1 }]);
+  });
+
+  it('signale les œuvres en double sans les fusionner', async () => {
+    const items = [
+      item('AAA', 'Hutchinson', '2024', 'Mapping the Latent Past: Assessing LLMs'),
+      item('BBB', 'Hutchinson', '2024', 'Mapping the latent past: assessing LLMs'),
+    ];
+    const result = await sync(items);
+
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.duplicates[0].keys).toEqual(['AAA', 'BBB']);
+    // Les deux entrées sont bien écrites : c'est un signalement, pas un tri.
+    expect(Object.keys(result.citeKeys)).toHaveLength(2);
+    expect(result.warnings).toEqual([]);
   });
 });
