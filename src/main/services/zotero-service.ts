@@ -2,11 +2,12 @@ import path from 'path';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
-import { ZoteroSync } from '../../../backend/integrations/zotero/ZoteroSync.js';
+import { ZoteroSync, type SyncWarning } from '../../../backend/integrations/zotero/ZoteroSync.js';
 import { Citation } from '../../../backend/types/citation.js';
 import { SyncDiff } from '../../../backend/integrations/zotero/ZoteroDiffEngine.js';
 import { ConflictStrategy, SyncResolution } from '../../../backend/integrations/zotero/ZoteroSyncResolver.js';
 import { assignCiteKeys } from '../../../backend/core/bibliography/citekey.js';
+import type { DuplicateWork } from '../../../backend/core/bibliography/duplicates.js';
 
 // Common options for Zotero data source selection
 interface ZoteroSourceOptions {
@@ -168,6 +169,10 @@ class ZoteroService {
     collections?: Array<{ key: string; name: string; parentKey?: string }>;
     itemCollectionMap?: Record<string, string[]>;
     bibtexKeyToCollections?: Record<string, string[]>;
+    /** Œuvres en double dans la collection Zotero, à corriger là-bas. */
+    duplicates?: DuplicateWork[];
+    /** Anomalies non bloquantes (écart entre la collection et le fichier). */
+    warnings?: SyncWarning[];
     error?: string;
   }> {
     try {
@@ -237,6 +242,8 @@ class ZoteroService {
           collections: collectionsData,
           itemCollectionMap,
           bibtexKeyToCollections,
+          duplicates: result.duplicates,
+          warnings: result.warnings,
         };
       } finally {
         this.closeDataSource(ds);

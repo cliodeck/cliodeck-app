@@ -176,7 +176,6 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
       notes: 'À relire pour le chapitre 3',
       keywords: 'archives; IA',
       tags: ['mémoire'],
-      booktitle: 'Actes du colloque',
       customFields: { doi: '10.1000/xyz', pages: '12-34' },
       file: '/PDFs/dupont.pdf',
     });
@@ -198,9 +197,29 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
     expect(merged.notes).toBe('À relire pour le chapitre 3');
     expect(merged.keywords).toBe('archives; IA');
     expect(merged.tags).toEqual(['mémoire']);
-    expect(merged.booktitle).toBe('Actes du colloque');
     expect(merged.customFields).toEqual({ doi: '10.1000/xyz', pages: '12-34' });
     expect(merged.file).toBe('/PDFs/dupont.pdf');
+  });
+
+  it('efface un champ que Zotero possède et n’a plus', async () => {
+    // Un titre court fabriqué par une ancienne version (le titre coupé à
+    // 47 caractères) doit disparaître dès que Zotero n'en donne pas.
+    const local = citation({
+      id: 'Dupont_2022',
+      zoteroKey: 'AAA',
+      shortTitle: 'Un titre coupé au milieu d’un m...',
+      booktitle: 'Un ouvrage que Zotero ne connaît plus',
+    });
+    const remote = citation({ id: 'Dupont_2022', zoteroKey: 'AAA', title: 'Titre corrigé' });
+
+    const result = await resolver.resolveConflicts(
+      { added: [], modified: [{ local, remote, modifiedFields: ['title'] }], deleted: [], unchanged: [] },
+      [local],
+      'remote'
+    );
+
+    expect(result.finalCitations[0].shortTitle).toBeUndefined();
+    expect(result.finalCitations[0].booktitle).toBeUndefined();
   });
 
   it('accepte les valeurs renseignées côté Zotero', async () => {

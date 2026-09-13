@@ -3,6 +3,7 @@
 import { Citation, createCitation } from '../../types/citation';
 import { ZoteroItem, ZoteroAttachment } from './ZoteroAPI';
 import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
+import { formatCreators } from './creators';
 
 export interface CitationChange {
   local: Citation;
@@ -116,6 +117,7 @@ export class ZoteroDiffEngine {
     const fieldsToCompare = [
       'title',
       'author',
+      'editor',
       'year',
       'type',
       'journal',
@@ -164,37 +166,23 @@ export class ZoteroDiffEngine {
   private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citation {
     const data = item.data;
 
-    // Extract author(s)
-    const authors = data.creators
-      ?.filter((c) => c.creatorType === 'author')
-      .map((c) => {
-        if (c.lastName && c.firstName) {
-          return `${c.lastName}, ${c.firstName}`;
-        } else if (c.name) {
-          return c.name;
-        } else if (c.lastName) {
-          return c.lastName;
-        }
-        return 'Unknown';
-      })
-      .join(' and ') || 'Unknown';
-
     // Extract year from date
     const year = extractYear(data.date);
 
     return createCitation({
       id: bibtexKey,
       type: this.mapZoteroTypeToRef(data.itemType),
-      author: authors,
+      author: formatCreators(item, 'author'),
+      editor: formatCreators(item, 'editor') || undefined,
       year,
       title: data.title || 'Untitled',
-      shortTitle: data.title && data.title.length > 50 ? data.title.substring(0, 47) + '...' : undefined,
+      shortTitle: data.shortTitle,
       journal: data.publicationTitle,
       publisher: data.publisher,
       // Mêmes champs que le chemin d'import (`ZoteroLocalBibTeX`) : depuis
       // que la synchronisation réécrit le .bib, une entrée reconstruite
       // ici sans ses mots-clés les perdrait pour de bon.
-      booktitle: (data as { bookTitle?: string }).bookTitle,
+      booktitle: data.bookTitle,
       tags: data.tags?.map((t) => t.tag),
       zoteroKey: item.key,
       zoteroAttachments: [], // Will be populated separately

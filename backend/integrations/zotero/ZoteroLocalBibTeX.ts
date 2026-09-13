@@ -8,6 +8,7 @@ import { ZoteroItem } from './ZoteroAPI';
 import { createCitation } from '../../types/citation';
 import { BibTeXExporter } from '../../core/bibliography/BibTeXExporter';
 import { assignCiteKeys, extractYear } from '../../core/bibliography/citekey';
+import { formatCreators } from './creators';
 
 export class ZoteroLocalBibTeX {
   private dataDirectory: string;
@@ -97,32 +98,22 @@ export class ZoteroLocalBibTeX {
   private zoteroItemToCitation(item: ZoteroItem, bibtexKey: string) {
     const data = item.data;
 
-    const authors = data.creators
-      ?.filter((c) => c.creatorType === 'author')
-      .map((c) => {
-        if (c.lastName && c.firstName) {
-          return `${c.lastName}, ${c.firstName}`;
-        } else if (c.name) {
-          return c.name;
-        } else if (c.lastName) {
-          return c.lastName;
-        }
-        return 'Unknown';
-      })
-      .join(' and ') || 'Unknown';
-
     const year = extractYear(data.date);
 
     return createCitation({
       id: bibtexKey,
       type: this.mapZoteroTypeToRef(data.itemType),
-      author: authors,
+      author: formatCreators(item, 'author'),
+      editor: formatCreators(item, 'editor') || undefined,
       year,
       title: data.title || 'Untitled',
-      shortTitle: data.title && data.title.length > 50 ? data.title.substring(0, 47) + '...' : undefined,
+      // Le titre court de Zotero, ou rien. Le titre coupé à 47 caractères
+      // qu'on fabriquait ici n'est pas un titre court : les styles à notes
+      // abrégées l'affichaient tel quel, mot tranché compris.
+      shortTitle: data.shortTitle,
       journal: data.publicationTitle,
       publisher: data.publisher,
-      booktitle: (data as any).bookTitle,
+      booktitle: data.bookTitle,
       zoteroKey: item.key,
       tags: data.tags?.map((t) => t.tag),
     });

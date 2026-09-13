@@ -171,6 +171,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
       filtered = citations.filter(
         (citation) =>
           citation.author.toLowerCase().includes(query) ||
+          (citation.editor?.toLowerCase().includes(query) ?? false) ||
           citation.title.toLowerCase().includes(query) ||
           citation.year.includes(query) ||
           (citation.tags && citation.tags.some(tag => tag.toLowerCase().includes(query))) ||
@@ -192,7 +193,9 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
 
       switch (sortBy) {
         case 'author':
-          comparison = a.author.localeCompare(b.author);
+          // Un ouvrage dirigé n'a pas d'auteur : il se range sous le nom
+          // de son directeur, pas en tête de liste sous une chaîne vide.
+          comparison = (a.author || a.editor || '').localeCompare(b.author || b.editor || '');
           break;
         case 'year':
           comparison = a.year.localeCompare(b.year);

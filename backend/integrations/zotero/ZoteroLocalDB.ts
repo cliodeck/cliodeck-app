@@ -316,6 +316,11 @@ export class ZoteroLocalDB implements IZoteroDataSource {
           version: 0,
           itemType: row.itemType,
           title: fields['title'],
+          // Le titre court de Zotero : sans lui, l'export en fabriquait un
+          // en coupant le titre à 47 caractères, que les styles Chicago
+          // affichent tel quel dans les notes abrégées.
+          shortTitle: fields['shortTitle'],
+          bookTitle: fields['bookTitle'],
           creators: creators.map((c: any) => ({
             creatorType: c.creatorType,
             firstName: c.firstName || undefined,
@@ -370,6 +375,8 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         version: 0,
         itemType: row.itemType,
         title: fields['title'],
+        shortTitle: fields['shortTitle'],
+        bookTitle: fields['bookTitle'],
         creators: creators.map((c: any) => ({
           creatorType: c.creatorType,
           firstName: c.firstName || undefined,

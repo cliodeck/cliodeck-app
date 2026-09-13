@@ -608,7 +608,10 @@
       "close": "Close",
       "allLibraries": "All libraries",
       "personalLibrary": "Personal library",
-      "allItems": "All items"
+      "allItems": "All items",
+      "countMismatch": "{{expected}} record(s) in the Zotero collection, {{written}} entry(ies) written to the bibliography. References are missing: check for duplicates and untitled records.",
+      "duplicatesFound": "{{count}} work(s) appear more than once in the Zotero collection. Merge them in Zotero:",
+      "duplicatesMore": "… and {{count}} more"
     },
     "sync": {
       "bibWriteFailed": "Warning: the project bibliography file could not be rewritten ({{error}}). The changes will be lost on next launch."

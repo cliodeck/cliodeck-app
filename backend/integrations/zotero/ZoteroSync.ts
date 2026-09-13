@@ -6,6 +6,7 @@ import { Citation, ZoteroAttachmentInfo } from '../../types/citation';
 import { ZoteroDiffEngine, SyncDiff } from './ZoteroDiffEngine';
 import { ZoteroSyncResolver, ConflictStrategy, SyncResolution, MergeResult } from './ZoteroSyncResolver';
 import { BibTeXParser } from '../../core/bibliography/BibTeXParser';
+import { findDuplicateWorks, type DuplicateWork } from '../../core/bibliography/duplicates';
 
 export interface SyncResult {
   collections: ZoteroCollection[];
@@ -18,8 +19,25 @@ export interface SyncResult {
    * API, elles viennent même du serveur Zotero).
    */
   citeKeys: Record<string, string>;
+  /** Œuvres présentes plusieurs fois dans la collection Zotero. */
+  duplicates: DuplicateWork[];
+  /**
+   * Anomalies non bloquantes : un fichier a bien été produit, mais il ne
+   * dit pas tout à fait ce que contient la collection. Structurées, pour
+   * que l'interface les traduise au lieu d'afficher une phrase du moteur.
+   */
+  warnings: SyncWarning[];
   pdfPaths: string[];
   errors: string[];
+}
+
+/** Écart constaté entre la collection Zotero et le fichier écrit. */
+export interface SyncWarning {
+  kind: 'count-mismatch';
+  /** Items bibliographiques trouvés dans la collection. */
+  expected: number;
+  /** Entrées effectivement écrites dans le .bib. */
+  written: number;
 }
 
 export interface SyncOptions {
@@ -83,6 +101,8 @@ export class ZoteroSync {
       items: [],
       bibtexPath: '',
       citeKeys: {},
+      duplicates: [],
+      warnings: [],
       pdfPaths: [],
       errors: [],
     };
@@ -125,6 +145,13 @@ export class ZoteroSync {
 
         console.log(`📄 ${items.length} items trouvés (${bibliographicItems.length} bibliographiques)`);
         console.log('📊 Types d\'items:', typeCounts);
+
+        // Signalé, jamais fusionné : c'est dans Zotero que la correction a
+        // du sens, et deux notices proches peuvent être deux éditions.
+        result.duplicates = findDuplicateWorks(bibliographicItems);
+        if (result.duplicates.length > 0) {
+          console.log(`👥 ${result.duplicates.length} œuvre(s) en double dans la collection Zotero`);
+        }
       } catch (error) {
         result.errors.push(`Failed to list items: ${error}`);
         return result;
@@ -147,6 +174,22 @@ export class ZoteroSync {
           result.bibtexPath = bibtexPath;
           result.citeKeys = this.citeKeysOf(bibtexContent);
           console.log(`✅ BibTeX exporté: ${bibtexPath}`);
+
+          // Un item de la collection qui n'atteint pas le fichier est une
+          // référence perdue en silence — entrée écrasée par une homonyme,
+          // notice écartée au passage. Mesuré sur un projet réel : 70 items
+          // pour 69 entrées, et rien pour le signaler.
+          const expected = result.items.filter(
+            (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
+          ).length;
+          const written = Object.keys(result.citeKeys).length;
+          if (written !== expected) {
+            result.warnings.push({ kind: 'count-mismatch', expected, written });
+            console.warn(
+              `⚠️ ${expected} item(s) dans la collection Zotero, ${written} entrée(s) ` +
+                `écrite(s) dans ${path.basename(bibtexPath)}`
+            );
+          }
         } catch (error) {
           result.errors.push(`Failed to export BibTeX: ${error}`);
         }

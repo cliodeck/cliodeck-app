@@ -16,7 +16,10 @@ export interface Citation {
   id: string;
   key?: string; // Alternative BibTeX key
   type: string;
+  /** Vide pour un ouvrage dirigé : les noms sont alors dans `editor`. */
   author: string;
+  /** Directeurs / éditeurs scientifiques, au format BibTeX. */
+  editor?: string;
   year: string;
   title: string;
   shortTitle?: string;

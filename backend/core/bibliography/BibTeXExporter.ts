@@ -40,7 +40,15 @@ export class BibTeXExporter {
     lines.push(`@${citation.type}{${citation.key || citation.id},`);
 
     // Required fields
-    lines.push(this.formatField('author', citation.author));
+    // `author` est omis quand il est vide : un ouvrage dirigé n'a pas
+    // d'auteur, et `author = {}` ferait afficher une parenthèse vide par
+    // pandoc au lieu de laisser la main au champ `editor`.
+    if (citation.author) {
+      lines.push(this.formatField('author', citation.author));
+    }
+    if (citation.editor) {
+      lines.push(this.formatField('editor', citation.editor));
+    }
     lines.push(this.formatField('title', citation.title));
     lines.push(this.formatField('year', citation.year));
 
@@ -248,7 +256,12 @@ export class BibTeXExporter {
     lines.push(`@${citation.type}{${citation.key || citation.id},`);
 
     // Convert all fields to LaTeX
-    lines.push(this.formatFieldLegacy('author', citation.author));
+    if (citation.author) {
+      lines.push(this.formatFieldLegacy('author', citation.author));
+    }
+    if (citation.editor) {
+      lines.push(this.formatFieldLegacy('editor', citation.editor));
+    }
     lines.push(this.formatFieldLegacy('title', citation.title));
     lines.push(this.formatFieldLegacy('year', citation.year));
 
