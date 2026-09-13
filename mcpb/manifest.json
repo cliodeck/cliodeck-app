@@ -1,0 +1,40 @@
+{
+  "manifest_version": "0.2",
+  "name": "cliodeck",
+  "display_name": "ClioDeck",
+  "version": "0.0.0",
+  "description": "Donne à Claude accès au corpus d'un projet ClioDeck : PDF de la bibliographie, archives Tropy, coffre Obsidian, Zotero, Gallica, HAL, Europeana, et le manuscrit en cours.",
+  "author": { "name": "Frédéric Clavert" },
+  "license": "GPL-3.0-or-later",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "cliodeck-mcp",
+    "mcp_config": {
+      "command": "${user_config.app}/Contents/Resources/bin/cliodeck-mcp",
+      "args": ["${user_config.workspace}"],
+      "platform_overrides": {
+        "win32": {
+          "command": "${user_config.app}\\resources\\bin\\cliodeck-mcp.cmd",
+          "args": ["${user_config.workspace}"]
+        }
+      }
+    }
+  },
+  "user_config": {
+    "app": {
+      "type": "directory",
+      "title": "Application ClioDeck",
+      "description": "Le dossier de l'application installée (ClioDeck.app sur macOS, le dossier d'installation sur Windows)",
+      "required": true,
+      "default": "/Applications/ClioDeck.app"
+    },
+    "workspace": {
+      "type": "directory",
+      "title": "Projet",
+      "description": "Le dossier du projet — celui qui contient .cliodeck",
+      "required": true
+    }
+  },
+  "compatibility": { "platforms": ["darwin", "win32"] }
+}

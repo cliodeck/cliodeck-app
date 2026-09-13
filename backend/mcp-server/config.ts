@@ -29,6 +29,58 @@ export interface MCPServerSettings {
   enabled: boolean;
   /** Workspace-friendly name surfaced to Claude Desktop on connect. */
   serverName?: string;
+  /**
+   * Opt-in par outil. Absent ou `true` = exposé ; `false` = pas enregistré,
+   * donc invisible du client — pas seulement refusé à l'appel.
+   *
+   * L'absence vaut consentement pour une raison de compatibilité : les
+   * projets qui avaient déjà activé le serveur avant cette garde exposaient
+   * les neuf outils, et la garde ne doit pas les couper en silence à la
+   * mise à jour. Le nouveau réglage sert au cran suivant — la lecture du
+   * manuscrit, que l'historien doit accorder exprès.
+   */
+  tools?: Record<string, boolean>;
+}
+
+/** Tous les outils que le serveur sait exposer, dans l'ordre du panneau. */
+export const MCP_TOOL_NAMES = [
+  'search_documents',
+  'search_obsidian',
+  'search_tropy',
+  'search_zotero',
+  'graph_neighbors',
+  'entity_context',
+  'search_gallica',
+  'search_hal',
+  'search_europeana',
+  'list_manuscript',
+  'read_manuscript',
+] as const;
+
+export type MCPToolName = (typeof MCP_TOOL_NAMES)[number];
+
+/**
+ * Outils qui exigent un accord explicite : leur absence du réglage vaut
+ * refus, à l'inverse de tous les autres.
+ *
+ * Les outils de recherche exposent un index de sources publiées et des
+ * archives déjà rassemblées ; ces deux-là donnent le texte inédit de
+ * l'historien, mot pour mot, à un logiciel tiers. Ce n'est pas le même
+ * geste, et il ne doit pas s'attraper par défaut au fil d'une mise à jour.
+ */
+export const TOOLS_REQUIRING_CONSENT: ReadonlySet<string> = new Set([
+  'list_manuscript',
+  'read_manuscript',
+]);
+
+/**
+ * Un outil est exposé sauf refus explicite — sauf ceux de
+ * `TOOLS_REQUIRING_CONSENT`, refusés sauf accord explicite.
+ */
+export function isToolEnabled(mcp: MCPServerSettings, name: string): boolean {
+  const explicit = mcp.tools?.[name];
+  if (typeof explicit === 'boolean') return explicit;
+  return !TOOLS_REQUIRING_CONSENT.has(name);
 }
 
 export interface MCPRuntimeConfig {

@@ -753,6 +753,8 @@ export const FusionVaultImportIdeasSchema = z
 export const FusionMcpServerPatchSchema = z.object({
   enabled: z.boolean().optional(),
   serverName: z.string().min(1).optional(),
+  /** Opt-in par outil : nom d'outil → exposé ou non. */
+  tools: z.record(z.string(), z.boolean()).optional(),
 });
 
 export const SlidesGenerateSchema = z.object({
