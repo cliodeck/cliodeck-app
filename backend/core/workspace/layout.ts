@@ -3,9 +3,14 @@
  *
  * Post-flatten layout: `.cliodeck/*` (flat) with `config.json`
  * (schema_version:2), `brain.db`, `hnsw.index`, `hints.md`, `mcp-access.jsonl`,
- * `security-events.jsonl`, `recipes/`, `recipes-runs/`, plus the SQLite stores
- * `vectors.db`, `primary-sources.db`, `history.db`, `obsidian-vectors.db` and
- * the renderer-owned `ideas.json`.
+ * `security-events.jsonl`, `recipes/`, `recipes-runs/`, plus the renderer-owned
+ * `ideas.json`.
+ *
+ * `brain.db` holds every corpus and the research journal, one table prefix per
+ * domain (`pdf_*`, `tropy_*`, `obsidian_*`, `manuscript_*`, `history_*`). The
+ * pre-fusion per-domain stores (`vectors.db`, `primary-sources.db`,
+ * `history.db`, `obsidian-vectors.db`) are no longer part of the layout:
+ * `migrateWorkspaceToFlat` folds them into `brain.db` on workspace open.
  *
  * Two legacy layouts are still recognized for auto-migration on workspace open:
  * - `legacy-subdir`: an in-flight `.cliodeck/v2/*` directory left over from the
