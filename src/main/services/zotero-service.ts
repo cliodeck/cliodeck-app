@@ -1,14 +1,17 @@
 import path from 'path';
+import { existsSync } from 'fs';
+import { readFile, rename, writeFile } from 'fs/promises';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
+import type { ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
-import { ZoteroSync, type SyncWarning } from '../../../backend/integrations/zotero/ZoteroSync.js';
-import { listCollectionItems } from '../../../backend/integrations/zotero/collectionItems.js';
-import { Citation } from '../../../backend/types/citation.js';
-import { SyncDiff } from '../../../backend/integrations/zotero/ZoteroDiffEngine.js';
-import { ConflictStrategy, SyncResolution } from '../../../backend/integrations/zotero/ZoteroSyncResolver.js';
-import { assignCiteKeys } from '../../../backend/core/bibliography/citekey.js';
-import type { DuplicateWork } from '../../../backend/core/bibliography/duplicates.js';
+import {
+  ZoteroSynchronizer,
+  type SyncReport,
+} from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
+import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
+import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
+import type { Citation } from '../../../backend/types/citation.js';
 
 // Common options for Zotero data source selection
 interface ZoteroSourceOptions {
@@ -154,106 +157,6 @@ class ZoteroService {
     return result;
   }
 
-  /**
-   * Sync Zotero collection to local project
-   */
-  async sync(options: ZoteroSourceOptions & {
-    collectionKey?: string;
-    downloadPDFs: boolean;
-    exportBibTeX: boolean;
-    targetDirectory?: string;
-  }): Promise<{
-    success: boolean;
-    itemCount?: number;
-    pdfCount?: number;
-    bibtexPath?: string;
-    collections?: Array<{ key: string; name: string; parentKey?: string }>;
-    itemCollectionMap?: Record<string, string[]>;
-    bibtexKeyToCollections?: Record<string, string[]>;
-    /** Œuvres en double dans la collection Zotero, à corriger là-bas. */
-    duplicates?: DuplicateWork[];
-    /** Anomalies non bloquantes (écart entre la collection et le fichier). */
-    warnings?: SyncWarning[];
-    error?: string;
-  }> {
-    try {
-      const ds = this.createDataSource(options);
-      try {
-        const sync = new ZoteroSync(ds);
-
-        // Use provided target directory or default to zotero-sync
-        const targetDirectory = options.targetDirectory || path.join(process.cwd(), 'zotero-sync');
-
-        const result = await sync.syncCollection({
-          collectionKey: options.collectionKey,
-          downloadPDFs: options.downloadPDFs,
-          exportBibTeX: options.exportBibTeX,
-          targetDirectory,
-        });
-
-        // Fetch all collections for the library/group
-        const allCollections = await ds.listCollections();
-        const collectionsData = allCollections.map((c) => ({
-          key: c.key,
-          name: c.data.name,
-          parentKey: c.data.parentCollection,
-        }));
-
-        // Build item -> collections mapping from synced items
-        // Also build bibtexKey -> collections mapping for linking documents
-        const itemCollectionMap: Record<string, string[]> = {};
-        const bibtexKeyToCollections: Record<string, string[]> = {};
-
-        // Filter to only bibliographic items (not attachments or notes)
-        const bibliographicItems = result.items.filter(
-          (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
-        );
-
-        // Les clés viennent du fichier qui vient d'être écrit. Les
-        // refabriquer ici redonnait les homonymes que le .bib avait
-        // désambiguïsés — et, en mode API, des clés qui n'existaient nulle
-        // part, puisque c'est le serveur Zotero qui les fournit.
-        // Repli sur la fabrique quand aucun .bib n'a été écrit.
-        const citeKeys: Record<string, string> =
-          Object.keys(result.citeKeys).length > 0
-            ? result.citeKeys
-            : Object.fromEntries(assignCiteKeys(bibliographicItems));
-
-        for (const item of bibliographicItems) {
-          if (item.data.collections && item.data.collections.length > 0) {
-            // Use zoteroKey (item.key) as the key for itemCollectionMap
-            itemCollectionMap[item.key] = item.data.collections;
-
-            const bibtexKey = citeKeys[item.key];
-            if (bibtexKey) {
-              bibtexKeyToCollections[bibtexKey] = item.data.collections;
-            }
-          }
-        }
-
-        console.log(`📁 ${collectionsData.length} collections récupérées`);
-        console.log(`📎 ${Object.keys(itemCollectionMap).length} items avec collections (zoteroKey)`);
-        console.log(`📎 ${Object.keys(bibtexKeyToCollections).length} items avec collections (bibtexKey)`);
-
-        return {
-          success: true,
-          itemCount: result.items.length,
-          pdfCount: result.pdfPaths.length,
-          bibtexPath: result.bibtexPath,
-          collections: collectionsData,
-          itemCollectionMap,
-          bibtexKeyToCollections,
-          duplicates: result.duplicates,
-          warnings: result.warnings,
-        };
-      } finally {
-        this.closeDataSource(ds);
-      }
-    } catch (error: unknown) {
-      console.error('Zotero sync failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
-    }
-  }
 
   /**
    * Download a specific PDF attachment from Zotero
@@ -300,239 +203,157 @@ class ZoteroService {
     }
   }
 
+
   /**
-   * Enrich citations with Zotero attachment information
+   * Synchronise la bibliographie du projet avec sa collection Zotero — le
+   * seul bouton « Synchroniser avec Zotero ». Premier import, mise à jour et
+   * changement de collection sont le même geste (cf. `ZoteroSynchronizer`).
+   *
+   * Le fichier `.bib` est la source de vérité : c'est lui qu'on lit, pas
+   * l'état du panneau, et c'est lui qu'on écrit.
+   *
+   * Premier appel sans `confirmed` : si la synchronisation retirerait des
+   * références ou changerait de collection, rien n'est écrit et le rapport
+   * revient pour confirmation.
    */
-  async enrichCitations(options: ZoteroSourceOptions & {
-    citations: Citation[];
-    collectionKey?: string;
+  async synchronizeProject(options: ZoteroSourceOptions & {
+    projectPath: string;
+    collectionKey: string;
+    confirmed?: boolean;
   }): Promise<{
     success: boolean;
-    citations?: Citation[];
+    status?: 'needs-confirmation' | 'applied';
+    report?: SyncReport;
+    /** Faux quand tout était déjà à jour : le fichier n'a pas été touché. */
+    written?: boolean;
+    bibtexPath?: string;
+    collections?: Array<{ key: string; name: string; parentKey?: string }>;
+    /** Clé BibTeX → collections Zotero, pour relier les documents indexés. */
+    bibtexKeyToCollections?: Record<string, string[]>;
     error?: string;
   }> {
     try {
+      const projectJsonPath = path.join(options.projectPath, 'project.json');
+      const project = await readProjectJson(projectJsonPath);
+      const relativeBib = project.bibliographySource?.filePath || 'bibliography.bib';
+      const bibtexPath = path.isAbsolute(relativeBib)
+        ? relativeBib
+        : path.join(options.projectPath, relativeBib);
+      const savedCollectionKey =
+        project.zotero?.collectionKey || project.bibliographySource?.zoteroCollection || undefined;
+
+      const local = await readLocalBibliography(bibtexPath, options.projectPath);
+
       const ds = this.createDataSource(options);
       try {
-        const sync = new ZoteroSync(ds);
+        const result = await new ZoteroSynchronizer(ds).synchronize({
+          local,
+          collectionKey: options.collectionKey,
+          savedCollectionKey,
+          confirmed: options.confirmed,
+        });
 
-        // Notices de la collection, sous-collections comprises
-        const bibliographicItems = await listCollectionItems(ds, options.collectionKey);
+        if (result.status === 'needs-confirmation') {
+          return { success: true, status: result.status, report: result.report, bibtexPath };
+        }
 
-        // Enrich citations with attachment info
-        const enrichedCitations = await sync.enrichCitationsWithAttachments(
-          options.citations,
-          bibliographicItems
-        );
+        const mustWrite = result.changed || !existsSync(bibtexPath);
+        if (mustWrite) {
+          // Écriture atomique : un fichier à moitié écrit (coupure, OneDrive
+          // qui synchronise au mauvais moment) perdrait la bibliographie.
+          const temporary = `${bibtexPath}.tmp`;
+          await writeFile(temporary, result.bibtex, 'utf-8');
+          await rename(temporary, bibtexPath);
+          await BibliographyMetadataService.saveMetadata(options.projectPath, result.citations);
+        }
 
-        console.log(`✅ Enriched ${enrichedCitations.length} citations with Zotero attachments`);
+        await recordProjectCollection(projectJsonPath, relativeBib, options.collectionKey);
 
-        return {
-          success: true,
-          citations: enrichedCitations,
-        };
-      } finally {
-        this.closeDataSource(ds);
-      }
-    } catch (error: unknown) {
-      console.error('Zotero enrich citations failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
-    }
-  }
-
-  /**
-   * Check for updates from Zotero collection
-   */
-  async checkUpdates(options: ZoteroSourceOptions & {
-    localCitations: Citation[];
-    collectionKey?: string;
-  }): Promise<{
-    success: boolean;
-    diff?: SyncDiff;
-    hasChanges?: boolean;
-    summary?: {
-      totalChanges: number;
-      addedCount: number;
-      modifiedCount: number;
-      deletedCount: number;
-      unchangedCount: number;
-    };
-    error?: string;
-  }> {
-    try {
-      const ds = this.createDataSource(options);
-      try {
-        const sync = new ZoteroSync(ds);
-
-        // Check for updates
-        const diff = await sync.checkForUpdates(options.localCitations, options.collectionKey);
-
-        // Get summary
-        const diffEngine = new (await import('../../../backend/integrations/zotero/ZoteroDiffEngine.js')).ZoteroDiffEngine();
-        const summary = diffEngine.getSummary(diff);
-        const hasChanges = diffEngine.hasChanges(diff);
-
-        return {
-          success: true,
-          diff,
-          hasChanges,
-          summary,
-        };
-      } finally {
-        this.closeDataSource(ds);
-      }
-    } catch (error: unknown) {
-      console.error('Zotero check updates failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
-    }
-  }
-
-  /**
-   * Apply updates from Zotero
-   */
-  async applyUpdates(options: ZoteroSourceOptions & {
-    currentCitations: Citation[];
-    diff: SyncDiff;
-    strategy: ConflictStrategy;
-    resolution?: SyncResolution;
-  }): Promise<{
-    success: boolean;
-    finalCitations?: Citation[];
-    addedCount?: number;
-    modifiedCount?: number;
-    deletedCount?: number;
-    skippedCount?: number;
-    error?: string;
-  }> {
-    try {
-      const ds = this.createDataSource(options);
-      try {
-        const sync = new ZoteroSync(ds);
-
-        // Apply updates
-        const result = await sync.applyUpdates(
-          options.currentCitations,
-          options.diff,
-          options.strategy,
-          options.resolution
-        );
-
-        return {
-          success: true,
-          finalCitations: result.finalCitations,
-          addedCount: result.addedCount,
-          modifiedCount: result.modifiedCount,
-          deletedCount: result.deletedCount,
-          skippedCount: result.skippedCount,
-        };
-      } finally {
-        this.closeDataSource(ds);
-      }
-    } catch (error: unknown) {
-      console.error('Zotero apply updates failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
-    }
-  }
-
-  /**
-   * Refresh collection links by fetching current Zotero data
-   * Used after apply-updates to ensure document-collection links are current
-   */
-  async refreshCollectionLinks(options: ZoteroSourceOptions & {
-    collectionKey?: string;
-    localCitations?: Array<{ id: string; zoteroKey?: string; title?: string }>;
-  }): Promise<{
-    collections: Array<{ key: string; name: string; parentKey?: string }>;
-    bibtexKeyToCollections: Record<string, string[]>;
-  }> {
-    try {
-      const ds = this.createDataSource(options);
-      try {
-        // Fetch all collections
-        const allCollections = await ds.listCollections();
-        const collections = allCollections.map((c) => ({
+        const collections = (await ds.listCollections()).map((c) => ({
           key: c.key,
           name: c.data.name,
           parentKey: c.data.parentCollection,
         }));
 
-        // Notices de la collection, sous-collections comprises, pour relier
-        // chaque document à ses collections
-        const bibliographicItems = await listCollectionItems(ds, options.collectionKey);
-
-        // Build zoteroKey -> collections mapping from Zotero items
-        const zoteroKeyToCollections: Record<string, string[]> = {};
-        for (const item of bibliographicItems) {
-          if (item.data.collections && item.data.collections.length > 0) {
-            zoteroKeyToCollections[item.key] = item.data.collections;
-          }
-        }
-
-        // Build bibtexKey -> collections mapping using local citations as the bridge
-        const bibtexKeyToCollections: Record<string, string[]> = {};
-
-        if (options.localCitations && options.localCitations.length > 0) {
-          let linkedViaZoteroKey = 0;
-          for (const citation of options.localCitations) {
-            if (citation.zoteroKey && zoteroKeyToCollections[citation.zoteroKey]) {
-              bibtexKeyToCollections[citation.id] = zoteroKeyToCollections[citation.zoteroKey];
-              linkedViaZoteroKey++;
-            }
-          }
-
-          if (linkedViaZoteroKey === 0 && options.localCitations.length > 0) {
-            console.log(`⚠️ No zoteroKey matches found, trying to match by title...`);
-
-            const titleToZoteroKey: Record<string, string> = {};
-            for (const item of bibliographicItems) {
-              if (item.data.title) {
-                const normalizedTitle = item.data.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-                titleToZoteroKey[normalizedTitle] = item.key;
-              }
-            }
-
-            for (const citation of options.localCitations) {
-              if (citation.title) {
-                const normalizedTitle = citation.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-                const matchedZoteroKey = titleToZoteroKey[normalizedTitle];
-                if (matchedZoteroKey && zoteroKeyToCollections[matchedZoteroKey]) {
-                  bibtexKeyToCollections[citation.id] = zoteroKeyToCollections[matchedZoteroKey];
-                }
-              }
-            }
-            console.log(`🔄 Refreshed: ${collections.length} collections, ${Object.keys(bibtexKeyToCollections).length} citations linked via title matching`);
-          } else {
-            console.log(`🔄 Refreshed: ${collections.length} collections, ${linkedViaZoteroKey} citations linked via zoteroKey`);
-          }
-        } else {
-          console.log(`⚠️ No local citations provided, falling back to generated bibtexKeys`);
-          const citeKeys = assignCiteKeys(bibliographicItems);
-          for (const item of bibliographicItems) {
-            if (item.data.collections && item.data.collections.length > 0) {
-              const bibtexKey = citeKeys.get(item.key);
-              if (bibtexKey) {
-                bibtexKeyToCollections[bibtexKey] = item.data.collections;
-              }
-            }
-          }
-          console.log(`🔄 Refreshed: ${collections.length} collections, ${Object.keys(bibtexKeyToCollections).length} items with collections (fallback)`);
-        }
-
         return {
+          success: true,
+          status: 'applied',
+          report: result.report,
+          written: mustWrite,
+          bibtexPath,
           collections,
-          bibtexKeyToCollections,
+          bibtexKeyToCollections: collectionsByCiteKey(result.citations, result.items),
         };
       } finally {
         this.closeDataSource(ds);
       }
     } catch (error: unknown) {
-      console.error('Failed to refresh collection links:', error);
-      return {
-        collections: [],
-        bibtexKeyToCollections: {},
-      };
+      console.error('Zotero synchronization failed:', error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
+}
+
+interface ProjectJson {
+  bibliographySource?: { type: 'file' | 'zotero'; filePath?: string; zoteroCollection?: string };
+  zotero?: { collectionKey?: string; groupId?: string; libraryID?: number };
+  [key: string]: unknown;
+}
+
+async function readProjectJson(projectJsonPath: string): Promise<ProjectJson> {
+  if (!existsSync(projectJsonPath)) return {};
+  return JSON.parse(await readFile(projectJsonPath, 'utf-8')) as ProjectJson;
+}
+
+/**
+ * Bibliographie actuelle du projet : le fichier, enrichi des métadonnées
+ * (PDF Zotero, téléchargements). Un fichier présent mais illisible arrête
+ * tout : le traiter comme vide ferait tout « ajouter » depuis Zotero et
+ * effacerait à l'écriture les entrées qu'il contenait.
+ */
+async function readLocalBibliography(bibtexPath: string, projectPath: string): Promise<Citation[]> {
+  if (!existsSync(bibtexPath)) return [];
+  const content = await readFile(bibtexPath, 'utf-8');
+  const citations = new BibTeXParser().parse(content, path.dirname(bibtexPath));
+  if (citations.length === 0 && content.includes('@')) {
+    throw new Error(`${path.basename(bibtexPath)} n'a pas pu être lu ; synchronisation interrompue pour ne rien effacer.`);
+  }
+  const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
+  return BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata);
+}
+
+/** Mémorise dans `project.json` la collection que suit la bibliographie. */
+async function recordProjectCollection(
+  projectJsonPath: string,
+  bibFile: string,
+  collectionKey: string
+): Promise<void> {
+  if (!existsSync(projectJsonPath)) return;
+  const project = await readProjectJson(projectJsonPath);
+  const already =
+    project.bibliographySource?.type === 'zotero' &&
+    project.bibliographySource.zoteroCollection === collectionKey &&
+    project.bibliographySource.filePath === bibFile &&
+    project.zotero?.collectionKey === collectionKey;
+  if (already) return;
+
+  project.bibliographySource = { type: 'zotero', filePath: bibFile, zoteroCollection: collectionKey };
+  project.zotero = { ...(project.zotero ?? {}), collectionKey };
+  project.updatedAt = new Date().toISOString();
+  // `path` se déduit de l'emplacement du fichier : ne jamais l'y écrire (#13).
+  const { path: _computed, ...toSave } = project;
+  await writeFile(projectJsonPath, JSON.stringify(toSave, null, 2));
+}
+
+/** Clé BibTeX → collections Zotero de la notice correspondante. */
+function collectionsByCiteKey(citations: Citation[], items: ZoteroItem[]): Record<string, string[]> {
+  const collectionsOf = new Map(items.map((item) => [item.key, item.data.collections ?? []]));
+  const map: Record<string, string[]> = {};
+  for (const c of citations) {
+    const collections = c.zoteroKey ? collectionsOf.get(c.zoteroKey) : undefined;
+    if (collections && collections.length > 0) map[c.id] = collections;
+  }
+  return map;
 }
 
 export const zoteroService = new ZoteroService();

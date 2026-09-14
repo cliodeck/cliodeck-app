@@ -380,8 +380,11 @@ export class BibTeXParser {
     // 7. Enlever les accolades LaTeX restantes
     cleaned = cleaned.replaceAll('{', '').replaceAll('}', '');
 
-    // 8. Nettoyer les espaces multiples
-    cleaned = cleaned.replace(/\s+/g, ' ');
+    // 8. Nettoyer les espaces multiples — ASCII seulement. `\s` couvre aussi
+    // les espaces insécables (U+00A0, U+202F) de la typographie française
+    // (« Lire : un braconnage ») : les fusionner les effaçait du .bib dès
+    // qu'une synchronisation le réécrivait depuis sa relecture.
+    cleaned = cleaned.replace(/[ \t\r\n\f\v]+/g, ' ');
 
     return cleaned.trim();
   }

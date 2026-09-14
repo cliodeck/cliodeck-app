@@ -146,3 +146,28 @@ describe('notice sans date', () => {
     expect(exporter.exportToString([reread])).toBe(bib);
   });
 });
+
+describe('typographie française', () => {
+  it('garde les espaces insécables à l’aller-retour', () => {
+    // Mesuré sur une bibliographie réelle : « Lire : un braconnage »
+    // perdait son espace insécable dès que la synchronisation réécrivait le
+    // fichier depuis sa relecture.
+    const exporter = new BibTeXExporter();
+    const original = createCitation({
+      id: 'Certeau_1990',
+      type: 'incollection',
+      author: 'Certeau, Michel de',
+      year: '1990',
+      title: 'Chapitre XII. Lire : un braconnage ?',
+    });
+
+    const [reread] = new BibTeXParser().parse(exporter.exportToString([original]));
+
+    expect(reread.title).toBe('Chapitre XII. Lire : un braconnage ?');
+  });
+
+  it('continue de réduire les espaces et retours à la ligne ordinaires', () => {
+    const [c] = new BibTeXParser().parse('@book{k,\n  title = {Un   titre\n    sur deux lignes},\n  year = {2020}\n}');
+    expect(c.title).toBe('Un titre sur deux lignes');
+  });
+});

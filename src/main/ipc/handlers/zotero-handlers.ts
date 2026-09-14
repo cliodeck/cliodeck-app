@@ -12,13 +12,11 @@ import {
   validate,
   ZoteroTestConnectionSchema,
   ZoteroListCollectionsSchema,
-  ZoteroSyncSchema,
   ZoteroListLibrariesSchema,
   ZoteroDownloadPDFSchema,
-  ZoteroEnrichCitationsSchema,
-  ZoteroCheckUpdatesSchema,
-  ZoteroApplyUpdatesSchema,
+  ZoteroSynchronizeSchema,
 } from '../utils/validation.js';
+import { projectManager } from '../../services/project-manager.js';
 
 /**
  * The renderer only ever receives masked API keys (config:get redaction), so
@@ -104,73 +102,50 @@ export function setupZoteroHandlers() {
     }
   });
 
-  ipcMain.handle('zotero:sync', async (_event, options: unknown) => {
-    console.log('📞 IPC Call: zotero:sync');
+  ipcMain.handle('zotero:synchronize', async (_event, rawOptions: unknown) => {
+    const options = withResolvedZoteroApiKey(validate(ZoteroSynchronizeSchema, rawOptions));
+    // Le projet vient du processus principal, jamais du renderer : c'est
+    // lui qu'on va réécrire.
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) {
+      return errorResponse(new Error('Aucun projet ouvert.'));
+    }
+    console.log('📞 IPC Call: zotero:synchronize', {
+      mode: options.mode,
+      collectionKey: options.collectionKey,
+      confirmed: options.confirmed === true,
+    });
     try {
-      const validatedData = withResolvedZoteroApiKey(validate(ZoteroSyncSchema, options));
       const vectorStoreBefore = pdfService.getVectorStore();
-      const result = await zoteroService.sync(validatedData);
+      const result = await zoteroService.synchronizeProject({ ...options, projectPath } as any);
 
-      // Save collections to VectorStore if sync was successful
-      if (result.success && result.collections && result.collections.length > 0) {
-        const vectorStore = vectorStoreIfStillCurrent(vectorStoreBefore);
-        if (vectorStore) {
-          vectorStore.saveCollections(result.collections);
-          console.log(`📁 Saved ${result.collections.length} collections to VectorStore`);
-
-          // Link documents to collections using the BibTeX file that was just created
-          if (result.bibtexPath) {
-            try {
-              const { BibTeXParser } = await import('../../../../backend/core/bibliography/BibTeXParser.js');
-              const parser = new BibTeXParser();
-              const citations = parser.parseFile(result.bibtexPath);
-
-              if (citations.length > 0) {
-                const refreshResult = await zoteroService.refreshCollectionLinks({
-                  ...validatedData,
-                  collectionKey: validatedData.collectionKey,
-                  localCitations: citations.map((c: any) => ({
-                    id: c.id,
-                    zoteroKey: c.zoteroKey,
-                    title: c.title,
-                  })),
-                });
-
-                if (refreshResult.bibtexKeyToCollections && Object.keys(refreshResult.bibtexKeyToCollections).length > 0) {
-                  // refreshCollectionLinks est un nouvel await : re-vérifier.
-                  const store = vectorStoreIfStillCurrent(vectorStoreBefore);
-                  if (store) {
-                    const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
-                    console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
-                  }
-                }
-              }
-            } catch (parseError) {
-              console.error('⚠️ Could not parse BibTeX for collection linking:', parseError);
-              if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
-                const store = vectorStoreIfStillCurrent(vectorStoreBefore);
-                if (store) {
-                  const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
-                  console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections (fallback)`);
-                }
-              }
-            }
-          } else if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
-            const linkedCount = vectorStore.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
-            console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections (fallback)`);
+      // Relier les documents indexés à leurs collections Zotero.
+      if (result.success && result.status === 'applied') {
+        const store = vectorStoreIfStillCurrent(vectorStoreBefore);
+        if (store) {
+          if (result.collections && result.collections.length > 0) {
+            store.saveCollections(result.collections);
+          }
+          if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
+            const linked = store.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
+            console.log(`🔗 Linked ${linked} documents to their Zotero collections`);
           }
         }
       }
 
-      console.log('📤 IPC Response: zotero:sync', {
+      console.log('📤 IPC Response: zotero:synchronize', {
         success: result.success,
-        itemCount: result.itemCount,
-        pdfCount: result.pdfCount,
-        collectionCount: result.collections?.length,
+        status: result.status,
+        added: result.report?.added.length,
+        modified: result.report?.modified.length,
+        deleted: result.report?.deleted.length,
+        written: result.written,
       });
-      return result;
+      // Les listes de collections et de liens ne servent qu'ici.
+      const { collections: _c, bibtexKeyToCollections: _l, ...forRenderer } = result;
+      return forRenderer;
     } catch (error: unknown) {
-      console.error('❌ zotero:sync error:', error);
+      console.error('❌ zotero:synchronize error:', error);
       return errorResponse(error);
     }
   });
@@ -190,116 +165,6 @@ export function setupZoteroHandlers() {
       return result;
     } catch (error: unknown) {
       console.error('❌ zotero:download-pdf error:', error);
-      return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('zotero:enrich-citations', async (_event, rawOptions: unknown) => {
-    const options = withResolvedZoteroApiKey(validate(ZoteroEnrichCitationsSchema, rawOptions));
-    console.log('📞 IPC Call: zotero:enrich-citations', {
-      mode: options.mode,
-      citationCount: options.citations?.length,
-      collectionKey: options.collectionKey,
-    });
-    try {
-      const result = await zoteroService.enrichCitations(options as any);
-      console.log('📤 IPC Response: zotero:enrich-citations', {
-        success: result.success,
-        enrichedCount: result.citations?.length,
-      });
-      return result;
-    } catch (error: unknown) {
-      console.error('❌ zotero:enrich-citations error:', error);
-      return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('zotero:check-updates', async (_event, rawOptions: unknown) => {
-    const options = withResolvedZoteroApiKey(validate(ZoteroCheckUpdatesSchema, rawOptions));
-    console.log('📞 IPC Call: zotero:check-updates', {
-      mode: options.mode,
-      citationCount: options.localCitations?.length,
-      collectionKey: options.collectionKey,
-    });
-    try {
-      const result = await zoteroService.checkUpdates(options as any);
-      console.log('📤 IPC Response: zotero:check-updates', {
-        success: result.success,
-        hasChanges: result.hasChanges,
-        summary: result.summary,
-      });
-      return result;
-    } catch (error: unknown) {
-      console.error('❌ zotero:check-updates error:', error);
-      return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('zotero:apply-updates', async (_event, rawOptions: unknown) => {
-    const options = withResolvedZoteroApiKey(validate(ZoteroApplyUpdatesSchema, rawOptions));
-    console.log('📞 IPC Call: zotero:apply-updates', {
-      mode: options.mode,
-      strategy: options.strategy,
-      citationCount: options.currentCitations?.length,
-    });
-    try {
-      const vectorStoreBefore = pdfService.getVectorStore();
-      const result = await zoteroService.applyUpdates(options as any);
-
-      // After applying updates, refresh document-collection links
-      if (result.success) {
-        const vectorStore = vectorStoreIfStillCurrent(vectorStoreBefore);
-        if (vectorStore) {
-          const originalCitations = options.currentCitations || [];
-          const finalCitations = result.finalCitations || [];
-
-          const titleToZoteroKey: Record<string, string> = {};
-          for (const fc of finalCitations) {
-            if (fc.title && fc.zoteroKey) {
-              const normalizedTitle = fc.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-              titleToZoteroKey[normalizedTitle] = fc.zoteroKey;
-            }
-          }
-
-          const localCitations = originalCitations.map((c: any) => {
-            const normalizedTitle = c.title?.toLowerCase().replace(/[^a-z0-9]/g, '') || '';
-            return {
-              id: c.id,
-              zoteroKey: c.zoteroKey || titleToZoteroKey[normalizedTitle],
-              title: c.title,
-            };
-          });
-
-          const refreshResult = await zoteroService.refreshCollectionLinks({
-            ...options,
-            localCitations,
-          } as any);
-
-          // refreshCollectionLinks est un nouvel await : re-vérifier.
-          const store = vectorStoreIfStillCurrent(vectorStoreBefore);
-          if (store) {
-            if (refreshResult.collections && refreshResult.collections.length > 0) {
-              store.saveCollections(refreshResult.collections);
-              console.log(`📁 Updated ${refreshResult.collections.length} collections in VectorStore`);
-            }
-
-            if (refreshResult.bibtexKeyToCollections && Object.keys(refreshResult.bibtexKeyToCollections).length > 0) {
-              const linkedCount = store.linkDocumentsToCollectionsByBibtexKey(refreshResult.bibtexKeyToCollections);
-              console.log(`🔗 Linked ${linkedCount} documents to their Zotero collections`);
-            }
-          }
-        }
-      }
-
-      console.log('📤 IPC Response: zotero:apply-updates', {
-        success: result.success,
-        addedCount: result.addedCount,
-        modifiedCount: result.modifiedCount,
-        deletedCount: result.deletedCount,
-      });
-      return result;
-    } catch (error: unknown) {
-      console.error('❌ zotero:apply-updates error:', error);
       return errorResponse(error);
     }
   });

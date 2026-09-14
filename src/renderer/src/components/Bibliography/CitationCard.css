@@ -112,6 +112,39 @@
   flex: 1;
 }
 
+/* Clé de citation : lisible, mais en retrait du reste de la fiche. */
+.citation-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.citation-key code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-tertiary) 12%, transparent);
+  padding: 0 4px;
+  border-radius: 3px;
+  user-select: all;
+  word-break: break-all;
+}
+
+.citation-key-copy {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.citation-key-copy:hover {
+  color: var(--color-accent);
+}
+
 /* Citation Actions */
 .citation-actions {
   display: flex;

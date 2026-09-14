@@ -1,6 +1,6 @@
 // Zotero Sync Resolver - Resolves conflicts between local and remote citations
 
-import { Citation, createCitation } from '../../types/citation';
+import { Citation, createCitation, type ZoteroAttachmentInfo } from '../../types/citation';
 import { SyncDiff, CitationChange } from './ZoteroDiffEngine';
 import { ZOTERO_OWNED_FIELDS } from './toCitation';
 
@@ -297,20 +297,13 @@ export class ZoteroSyncResolver {
         key: local.key,
         zoteroKey: remote.zoteroKey ?? local.zoteroKey,
         file: local.file, // Preserve local PDF path
-        // If remote has attachments, merge with local downloaded status
-        zoteroAttachments: this.mergeAttachments(
-          local.zoteroAttachments || [],
-          remote.zoteroAttachments || []
-        ),
+        zoteroAttachments: this.mergeAttachments(local.zoteroAttachments, remote.zoteroAttachments),
       });
     } else {
       // Keep local but update Zotero metadata
       return createCitation({
         ...local,
-        zoteroAttachments: this.mergeAttachments(
-          local.zoteroAttachments || [],
-          remote.zoteroAttachments || []
-        ),
+        zoteroAttachments: this.mergeAttachments(local.zoteroAttachments, remote.zoteroAttachments),
       });
     }
   }
@@ -318,28 +311,28 @@ export class ZoteroSyncResolver {
   /**
    * Merge attachment lists, preserving download status from local
    */
+  /**
+   * Pièces jointes : la liste suit Zotero, l'état local (PDF téléchargé et
+   * son chemin) suit la pièce jointe.
+   *
+   * `remote` absent signifie que Zotero n'a pas été interrogé sur les
+   * pièces jointes — pas qu'elles ont disparu : la liste locale reste. Sans
+   * cette distinction, toute entrée modifiée perdait ses PDF, et le chemin
+   * d'un PDF déjà téléchargé (`localPath`) n'était de toute façon jamais
+   * reporté.
+   */
   private mergeAttachments(
-    localAttachments: any[],
-    remoteAttachments: any[]
-  ): any[] {
-    const merged: any[] = [];
-    const localMap = new Map(localAttachments.map((att) => [att.key, att]));
-
-    for (const remoteAtt of remoteAttachments) {
-      const localAtt = localMap.get(remoteAtt.key);
-      if (localAtt) {
-        // Merge: take remote metadata but preserve local download status
-        merged.push({
-          ...remoteAtt,
-          downloaded: localAtt.downloaded,
-        });
-      } else {
-        // New attachment from remote
-        merged.push(remoteAtt);
-      }
-    }
-
-    return merged;
+    localAttachments: ZoteroAttachmentInfo[] | undefined,
+    remoteAttachments: ZoteroAttachmentInfo[] | undefined
+  ): ZoteroAttachmentInfo[] | undefined {
+    if (remoteAttachments === undefined) return localAttachments;
+    const localByKey = new Map((localAttachments ?? []).map((att) => [att.key, att]));
+    return remoteAttachments.map((remoteAtt) => {
+      const localAtt = localByKey.get(remoteAtt.key);
+      return localAtt
+        ? { ...remoteAtt, downloaded: localAtt.downloaded, localPath: localAtt.localPath }
+        : remoteAtt;
+    });
   }
 
   /**

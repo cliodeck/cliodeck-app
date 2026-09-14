@@ -121,25 +121,22 @@ export const ZoteroListCollectionsSchema = z.discriminatedUnion('mode', [
   }),
 ]);
 
-export const ZoteroSyncSchema = z.discriminatedUnion('mode', [
+/** Synchronisation de la bibliographie du projet avec sa collection Zotero. */
+export const ZoteroSynchronizeSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('api'),
     userId: z.string().min(1),
     apiKey: z.string().min(1),
     groupId: z.string().optional(),
-    collectionKey: z.string().optional(),
-    downloadPDFs: z.boolean().default(true),
-    exportBibTeX: z.boolean().default(true),
-    targetDirectory: z.string().optional(),
+    collectionKey: z.string().min(1),
+    confirmed: z.boolean().optional(),
   }),
   z.object({
     mode: z.literal('local'),
     dataDirectory: z.string().min(1),
     libraryID: z.number().optional(),
-    collectionKey: z.string().optional(),
-    downloadPDFs: z.boolean().default(true),
-    exportBibTeX: z.boolean().default(true),
-    targetDirectory: z.string().optional(),
+    collectionKey: z.string().min(1),
+    confirmed: z.boolean().optional(),
   }),
 ]);
 
@@ -449,66 +446,6 @@ export const ZoteroDownloadPDFSchema = z.discriminatedUnion('mode', [
     attachmentKey: z.string().min(1, 'Attachment key is required'),
     filename: z.string().min(1, 'Filename is required'),
     targetDirectory: z.string().min(1, 'Target directory is required'),
-  }),
-]);
-
-export const ZoteroEnrichCitationsSchema = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('api'),
-    userId: z.string().min(1),
-    apiKey: z.string().min(1),
-    groupId: z.string().optional(),
-    citations: z.array(z.record(z.string(), z.unknown())),
-    collectionKey: z.string().optional(),
-  }),
-  z.object({
-    mode: z.literal('local'),
-    dataDirectory: z.string().optional(),
-    libraryID: z.number().optional(),
-    citations: z.array(z.record(z.string(), z.unknown())),
-    collectionKey: z.string().optional(),
-  }),
-]);
-
-export const ZoteroCheckUpdatesSchema = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('api'),
-    userId: z.string().min(1),
-    apiKey: z.string().min(1),
-    groupId: z.string().optional(),
-    localCitations: z.array(z.record(z.string(), z.unknown())),
-    collectionKey: z.string().optional(),
-  }),
-  z.object({
-    mode: z.literal('local'),
-    dataDirectory: z.string().optional(),
-    libraryID: z.number().optional(),
-    localCitations: z.array(z.record(z.string(), z.unknown())),
-    collectionKey: z.string().optional(),
-  }),
-]);
-
-export const ZoteroApplyUpdatesSchema = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('api'),
-    userId: z.string().min(1),
-    apiKey: z.string().min(1),
-    groupId: z.string().optional(),
-    currentCitations: z.array(z.record(z.string(), z.unknown())),
-    diff: z.record(z.string(), z.unknown()),
-    strategy: z.enum(['local', 'remote', 'manual']),
-    resolution: z.record(z.string(), z.unknown()).optional(),
-    collectionKey: z.string().optional(),
-  }),
-  z.object({
-    mode: z.literal('local'),
-    dataDirectory: z.string().optional(),
-    libraryID: z.number().optional(),
-    currentCitations: z.array(z.record(z.string(), z.unknown())),
-    diff: z.record(z.string(), z.unknown()),
-    strategy: z.enum(['local', 'remote', 'manual']),
-    resolution: z.record(z.string(), z.unknown()).optional(),
-    collectionKey: z.string().optional(),
   }),
 ]);
 

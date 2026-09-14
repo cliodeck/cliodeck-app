@@ -7,8 +7,6 @@ import * as os from 'os';
 import Database from 'better-sqlite3';
 import { IZoteroDataSource, ZoteroLibraryInfo } from './IZoteroDataSource';
 import { ZoteroItem, ZoteroAttachment, ZoteroCollection } from './ZoteroAPI';
-import { ZoteroLocalBibTeX } from './ZoteroLocalBibTeX';
-import { listCollectionItems } from './collectionItems';
 
 export interface ZoteroLocalConfig {
   dataDirectory: string;
@@ -505,61 +503,6 @@ export class ZoteroLocalDB implements IZoteroDataSource {
   }
 
   // MARK: - Export
-
-  async exportCollectionAsBibTeX(
-    collectionKey: string,
-    _includeSubcollections: boolean = true,
-    preservedKeys?: Readonly<Record<string, string>>
-  ): Promise<string> {
-    const bibtexHelper = new ZoteroLocalBibTeX(this.config.dataDirectory);
-    // Sous-collections à toute profondeur : l'ancienne boucle ne descendait
-    // que d'un niveau, et les notices d'une sous-sous-collection
-    // manquaient au fichier.
-    const allItems = await listCollectionItems(this, collectionKey);
-
-    // Try Better BibTeX first
-    if (bibtexHelper.hasBetterBibTeX()) {
-      try {
-        const itemKeys = allItems.map((i) => i.key);
-        if (itemKeys.length > 0) {
-          const result = bibtexHelper.exportFromBBT(this.libraryID, itemKeys);
-          if (result && result.trim().length > 0) {
-            console.log(`📚 BibTeX exported via Better BibTeX (${itemKeys.length} items)`);
-            return result;
-          }
-        }
-      } catch (error) {
-        console.warn('Better BibTeX export failed, falling back to generation:', error);
-      }
-    }
-
-    console.log(`📚 Generating BibTeX from ${allItems.length} items`);
-    return bibtexHelper.generateBibTeX(allItems, preservedKeys);
-  }
-
-  async exportAllAsBibTeX(): Promise<string> {
-    const bibtexHelper = new ZoteroLocalBibTeX(this.config.dataDirectory);
-
-    // Try Better BibTeX first
-    if (bibtexHelper.hasBetterBibTeX()) {
-      try {
-        const result = bibtexHelper.exportFromBBT(this.libraryID);
-        if (result && result.trim().length > 0) {
-          console.log(`📚 BibTeX exported via Better BibTeX (all items)`);
-          return result;
-        }
-      } catch (error) {
-        console.warn('Better BibTeX export failed, falling back to generation:', error);
-      }
-    }
-
-    // Fallback
-    const items = await this.listItems();
-    console.log(`📚 Generating BibTeX from ${items.length} items`);
-    return bibtexHelper.generateBibTeX(items);
-  }
-
-  // MARK: - Files
 
   async downloadFile(itemKey: string, savePath: string): Promise<{ filename: string; size: number }> {
     this.ensureOpen();
