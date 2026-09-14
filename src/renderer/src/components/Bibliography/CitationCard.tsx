@@ -3,10 +3,16 @@ import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import { Citation, useBibliographyStore } from '../../stores/bibliographyStore';
 import { PDFSelectionDialog } from './PDFSelectionDialog';
-import { CitationMetadataModal } from './CitationMetadataModal';
 import { TagManager } from './TagManager';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { useEditorStore } from '../../stores/editorStore';
+import {
+  hiddenAutomaticCount,
+  projectTagsOf,
+  readingNoteOf,
+  sourceTagsOf,
+} from '../../stores/bibliography/referenceTags';
 import './CitationCard.css';
 
 interface CitationCardProps {
@@ -18,9 +24,22 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
   const [showPDFSelection, setShowPDFSelection] = useState(false);
-  const [showMetadataModal, setShowMetadataModal] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
-  const { selectCitation, insertCitation, indexPDFFromCitation, reindexPDFFromCitation, downloadAndIndexZoteroPDF, updateCitationMetadata, getAllTags, indexedFilePaths, indexedBibtexKeys } = useBibliographyStore();
+  const {
+    selectCitation,
+    insertCitation,
+    indexPDFFromCitation,
+    reindexPDFFromCitation,
+    downloadAndIndexZoteroPDF,
+    indexedFilePaths,
+    indexedBibtexKeys,
+    readingNotes,
+    showAutomaticZoteroTags,
+    setShowAutomaticZoteroTags,
+    setProjectTags,
+    openReadingNote,
+  } = useBibliographyStore();
+  const loadFile = useEditorStore((state) => state.loadFile);
   const { currentProject } = useProjectStore();
 
   const hasPDF = !!citation.file;
@@ -42,6 +61,36 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
 
   const handleInsert = () => {
     insertCitation(citation.id);
+  };
+
+  // Ce qui appartient à Zotero (lecture seule) et ce qui appartient au projet.
+  const sourceTags = sourceTagsOf(citation, showAutomaticZoteroTags);
+  const hiddenAutomatic = hiddenAutomaticCount(citation, showAutomaticZoteroTags);
+  const hasAutomaticTags = (citation.zoteroTags ?? []).some((tag) => tag.automatic);
+  const projectTags = projectTagsOf(citation, readingNotes);
+  const hasReadingNote = !!readingNoteOf(citation, readingNotes);
+  const allProjectTags = [...new Set(readingNotes.flatMap((note) => note.tags))].sort((a, b) => a.localeCompare(b));
+
+  const handleProjectTagsChange = async (tags: string[]) => {
+    try {
+      await setProjectTags(citation.id, tags);
+    } catch (error) {
+      await useDialogStore.getState().showAlert(
+        t('bibliography.readingNoteError', { error: error instanceof Error ? error.message : String(error) })
+      );
+    }
+  };
+
+  /** Ouvre la note de lecture dans l'éditeur, en la créant au besoin. */
+  const handleOpenReadingNote = async () => {
+    try {
+      const file = await openReadingNote(citation.id);
+      if (file) await loadFile(file);
+    } catch (error) {
+      await useDialogStore.getState().showAlert(
+        t('bibliography.readingNoteError', { error: error instanceof Error ? error.message : String(error) })
+      );
+    }
   };
 
   const handleIndexPDF = async () => {
@@ -197,18 +246,59 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
               </div>
             )}
 
-            {citation.tags && citation.tags.length > 0 && (
+            {/* Tags de Zotero (ou du fichier) : lecture seule. Les
+                automatiques sont masqués par défaut. */}
+            {(sourceTags.length > 0 || hiddenAutomatic > 0) && (
               <div className="detail-item">
-                <span className="detail-label">Tags:</span>
-                <div className="detail-value">
-                  <TagManager tags={citation.tags} onTagsChange={() => {}} allTags={[]} readOnly />
+                <span className="detail-label">
+                  {citation.zoteroTags ? t('bibliography.zoteroTags') : t('bibliography.fileTags')}
+                </span>
+                <div className="detail-value citation-source-tags">
+                  {sourceTags.length > 0 && (
+                    <TagManager tags={sourceTags} onTagsChange={() => {}} allTags={[]} readOnly />
+                  )}
+                  {hasAutomaticTags && (
+                    <button
+                      type="button"
+                      className="automatic-tags-toggle"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAutomaticZoteroTags(!showAutomaticZoteroTags);
+                      }}
+                    >
+                      {showAutomaticZoteroTags
+                        ? t('bibliography.hideAutomaticTags')
+                        : t('bibliography.automaticTagsHidden', { count: hiddenAutomatic })}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Étiquettes du projet : écrites dans la note de lecture. */}
+            <div className="detail-item" onClick={(e) => e.stopPropagation()}>
+              <span className="detail-label">{t('bibliography.projectTags')}</span>
+              <div className="detail-value">
+                <TagManager tags={projectTags} onTagsChange={handleProjectTagsChange} allTags={allProjectTags} />
+              </div>
+            </div>
+
+            {citation.zoteroNotes && citation.zoteroNotes.length > 0 && (
+              <div className="detail-item">
+                <span className="detail-label">{t('bibliography.zoteroNotes')}</span>
+                <div className="detail-value citation-zotero-notes">
+                  {citation.zoteroNotes.map((note) => (
+                    <p key={note.key} className="citation-zotero-note">
+                      {note.text}
+                    </p>
+                  ))}
                 </div>
               </div>
             )}
 
             {citation.notes && (
               <div className="detail-item">
-                <span className="detail-label">Notes:</span>
+                <span className="detail-label">{t('bibliography.bibNote')}</span>
                 <span className="detail-value">{citation.notes}</span>
               </div>
             )}
@@ -235,10 +325,11 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
                 className="action-btn secondary"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setShowMetadataModal(true);
+                  void handleOpenReadingNote();
                 }}
+                title={hasReadingNote ? t('bibliography.openReadingNote') : t('bibliography.createReadingNote')}
               >
-                🏷️ {t('bibliography.editMetadata')}
+                📝 {hasReadingNote ? t('bibliography.openReadingNote') : t('bibliography.createReadingNote')}
               </button>
             </div>
           </div>
@@ -251,18 +342,6 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
           attachments={citation.zoteroAttachments}
           onSelect={handleZoteroPDFSelection}
           onCancel={() => setShowPDFSelection(false)}
-        />
-      )}
-
-      {showMetadataModal && (
-        <CitationMetadataModal
-          isOpen={showMetadataModal}
-          onClose={() => setShowMetadataModal(false)}
-          citation={citation}
-          allTags={getAllTags()}
-          onSave={(updatedCitation) => {
-            updateCitationMetadata(citation.id, updatedCitation);
-          }}
         />
       )}
     </>

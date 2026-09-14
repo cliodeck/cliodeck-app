@@ -12,6 +12,8 @@ import {
   Tag
 } from 'lucide-react';
 import type { Citation } from '../../stores/bibliography/types';
+import { useBibliographyStore } from '../../stores/bibliographyStore';
+import { referenceTags } from '../../stores/bibliography/referenceTags';
 import './BibliographyStats.css';
 
 interface PublicationsByYear {
@@ -86,7 +88,15 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
   const loadStatistics = async () => {
     setLoading(true);
     try {
-      const result = await window.electron.bibliography.getStatistics(citations);
+      // Les statistiques de tags portent sur ce que voit l'utilisateur :
+      // tags Zotero (automatiques selon la préférence), tags du fichier et
+      // étiquettes du projet.
+      const { readingNotes, showAutomaticZoteroTags } = useBibliographyStore.getState();
+      const forStats = citations.map((c) => ({
+        ...c,
+        tags: referenceTags(c, readingNotes, showAutomaticZoteroTags),
+      }));
+      const result = await window.electron.bibliography.getStatistics(forStats);
       if (result.success && result.statistics) {
         setStatistics(result.statistics);
       }

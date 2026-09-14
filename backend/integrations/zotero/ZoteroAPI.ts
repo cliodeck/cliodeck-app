@@ -41,7 +41,8 @@ export interface ZoteroItem {
     ISBN?: string;
     url?: string;
     abstractNote?: string;
-    tags?: Array<{ tag: string }>;
+    /** `type` 1 : tag automatique (posé par Zotero), 0 ou absent : manuel. */
+    tags?: Array<{ tag: string; type?: number }>;
     collections?: string[];
     relations?: Record<string, unknown>;
     dateAdded?: string;
@@ -232,6 +233,13 @@ export class ZoteroAPI implements IZoteroDataSource {
     const url = `${this.getLibraryPrefix()}/items/${itemKey}/children`;
     const response = await this.makeRequest(url);
     return response as ZoteroItem[];
+  }
+
+  async getItemNotes(itemKey: string): Promise<Array<{ key: string; note: string }>> {
+    const children = await this.getItemChildren(itemKey);
+    return children
+      .filter((child) => child.data.itemType === 'note' && typeof child.data.note === 'string')
+      .map((child) => ({ key: child.key, note: child.data.note as string }));
   }
 
   // MARK: - Export

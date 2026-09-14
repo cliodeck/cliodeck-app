@@ -1,8 +1,9 @@
-import { createCitation, type Citation, type ZoteroAttachmentInfo } from '../../types/citation';
+import { createCitation, type Citation, type ZoteroAttachmentInfo, type ZoteroNote, type ZoteroTag } from '../../types/citation';
 import { extractYear } from '../../core/bibliography/citekey';
 import { verbatimSafe } from '../../core/bibliography/BibTeXExporter';
 import type { ZoteroAttachment, ZoteroItem } from './ZoteroAPI';
 import { formatCreators } from './creators';
+import { zoteroNoteToText } from './noteText';
 
 /**
  * Conversion d'un item Zotero en entrée bibliographique — une seule, pour
@@ -146,6 +147,26 @@ function pdfAttachments(data: ZoteroItem['data']): ZoteroAttachmentInfo[] | unde
 }
 
 /**
+ * Tags Zotero de la notice, en distinguant ceux que l'utilisateur a posés
+ * de ceux que Zotero a importés d'un site d'éditeur (type 1).
+ */
+function zoteroTags(data: ZoteroItem['data']): ZoteroTag[] | undefined {
+  if (!Array.isArray(data.tags)) return undefined;
+  return data.tags.map((t) => ({ tag: t.tag, automatic: t.type === 1 }));
+}
+
+/**
+ * Notes Zotero de la notice, quand la source les a lues (`data.notes`) ;
+ * `undefined` sinon — même distinction que pour les pièces jointes.
+ */
+function zoteroNotes(data: ZoteroItem['data']): ZoteroNote[] | undefined {
+  if (!Array.isArray(data.notes)) return undefined;
+  return (data.notes as Array<{ key: string; note: string }>)
+    .map((n) => ({ key: n.key, text: zoteroNoteToText(n.note) }))
+    .filter((n) => n.text.length > 0);
+}
+
+/**
  * Item Zotero → citation, avec la clé BibTeX déjà attribuée
  * (cf. `assignCiteKeys`).
  */
@@ -201,7 +222,10 @@ export function zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citat
     publisher: field(data, 'publisher', 'university', 'institution', 'company', 'repository', 'label', 'distributor', 'studio', 'network'),
     zoteroKey: item.key,
     zoteroAttachments: pdfAttachments(data),
-    tags: data.tags?.map((t) => t.tag),
+    // Les tags Zotero ne vont plus dans le champ `tags` du .bib : ils
+    // appartiennent à Zotero (lecture seule), et le fichier voyage.
+    zoteroTags: zoteroTags(data),
+    zoteroNotes: zoteroNotes(data),
     customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
   });
 }

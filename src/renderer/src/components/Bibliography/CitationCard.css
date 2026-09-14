@@ -112,6 +112,45 @@
   flex: 1;
 }
 
+/* Tags Zotero : lecture seule ; les automatiques se révèlent à la demande. */
+.citation-source-tags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.automatic-tags-toggle {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.automatic-tags-toggle:hover {
+  color: var(--color-accent);
+}
+
+/* Notes Zotero : du texte, contenu et défilant. */
+.citation-zotero-notes {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.citation-zotero-note {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+
+.citation-zotero-note + .citation-zotero-note {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
 /* Clé de citation : lisible, mais en retrait du reste de la fiche. */
 .citation-key {
   display: inline-flex;

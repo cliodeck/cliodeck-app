@@ -63,6 +63,7 @@ function source(): IZoteroDataSource {
     },
     getItemChildren: async () => [],
     getItemAttachments: async () => [],
+    getItemNotes: async () => [],
     hasAttachments: async () => false,
     downloadFile: async () => ({ filename: '', size: 0 }),
     testConnection: async () => true,

@@ -1,4 +1,5 @@
 import type { Citation, CitationSliceState, BibliographySliceCreator } from './types';
+import { referenceTags } from './referenceTags';
 
 export const createCitationSlice: BibliographySliceCreator<CitationSliceState> = (set, get) => ({
   citations: [],
@@ -53,6 +54,9 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
         });
 
         get().applyFilters();
+
+        // Étiquettes du projet : elles vivent dans les notes de lecture.
+        void get().loadReadingNotes();
 
         // Immediately refresh indexed PDFs state to avoid race condition
         // This ensures indexedFilePaths is populated before UI components render
@@ -161,7 +165,8 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
   },
 
   applyFilters: () => {
-    const { citations, searchQuery, sortBy, sortOrder, selectedTags } = get();
+    const { citations, searchQuery, sortBy, sortOrder, selectedTags, readingNotes, showAutomaticZoteroTags } = get();
+    const tagsOf = (citation: Citation) => referenceTags(citation, readingNotes, showAutomaticZoteroTags);
 
     // Filter by search query
     let filtered = citations;
@@ -174,7 +179,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
           (citation.editor?.toLowerCase().includes(query) ?? false) ||
           citation.title.toLowerCase().includes(query) ||
           citation.year.includes(query) ||
-          (citation.tags && citation.tags.some(tag => tag.toLowerCase().includes(query))) ||
+          tagsOf(citation).some(tag => tag.toLowerCase().includes(query)) ||
           (citation.keywords && citation.keywords.toLowerCase().includes(query)) ||
           (citation.notes && citation.notes.toLowerCase().includes(query))
       );
@@ -183,7 +188,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
     // Filter by tags
     if (selectedTags.length > 0) {
       filtered = filtered.filter(citation =>
-        citation.tags && citation.tags.some(tag => selectedTags.includes(tag))
+        tagsOf(citation).some(tag => selectedTags.includes(tag))
       );
     }
 
@@ -230,27 +235,16 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
     window.electron.editor.insertText(citationText);
   },
 
-  // Tags & metadata methods
-  updateCitationMetadata: (citationId: string, updates: Partial<Citation>) => {
-    set((state) => ({
-      citations: state.citations.map((citation) =>
-        citation.id === citationId
-          ? { ...citation, ...updates }
-          : citation
-      ),
-    }));
-    get().applyFilters();
-  },
-
+  // Tags
   getAllTags: () => {
-    const { citations } = get();
+    // Tags Zotero (sans les automatiques, sauf demande), tags du fichier et
+    // étiquettes du projet : ce sur quoi le filtre peut porter.
+    const { citations, readingNotes, showAutomaticZoteroTags } = get();
     const tagsSet = new Set<string>();
     citations.forEach((citation) => {
-      if (citation.tags) {
-        citation.tags.forEach((tag) => tagsSet.add(tag));
-      }
+      referenceTags(citation, readingNotes, showAutomaticZoteroTags).forEach((tag) => tagsSet.add(tag));
     });
-    return Array.from(tagsSet).sort();
+    return Array.from(tagsSet).sort((a, b) => a.localeCompare(b));
   },
 
   setTagsFilter: (tags: string[]) => {

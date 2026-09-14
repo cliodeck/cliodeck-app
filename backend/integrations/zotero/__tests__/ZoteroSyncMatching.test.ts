@@ -197,7 +197,10 @@ describe('ZoteroSyncResolver — fusion « le distant gagne »', () => {
     expect(merged.title).toBe('Titre corrigé');
     expect(merged.notes).toBe('À relire pour le chapitre 3');
     expect(merged.keywords).toBe('archives; IA');
-    expect(merged.tags).toEqual(['mémoire']);
+    // Le champ `tags` d'une notice Zotero est un reste des versions qui y
+    // écrivaient les tags Zotero : il est vidé. Les tags Zotero sont dans
+    // `zoteroTags`, les étiquettes du projet dans les notes de lecture.
+    expect(merged.tags).toBeUndefined();
     expect(merged.customFields).toEqual({ annote: 'Lu en 2024', crossref: 'Dupont_2020' });
     expect(merged.file).toBe('/PDFs/dupont.pdf');
   });

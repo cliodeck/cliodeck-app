@@ -19,7 +19,15 @@ import {
   BibliographySaveMetadataSchema,
   BibliographyLoadWithMetadataSchema,
   BibliographyGetStatisticsSchema,
+  ReadingNoteOpenSchema,
+  ReadingNoteSetTagsSchema,
 } from '../utils/validation.js';
+import { projectManager } from '../../services/project-manager.js';
+import {
+  ensureReadingNote,
+  listReadingNotes,
+  setProjectTags,
+} from '../../../../backend/core/bibliography/readingNotes.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -234,6 +242,49 @@ export function setupBibliographyHandlers() {
     } catch (error: unknown) {
       console.error('❌ bibliography:load-with-metadata error:', error);
       return { ...errorResponse(error), citations: [] };
+    }
+  });
+
+  // MARK: - Notes de lecture et étiquettes du projet
+  //
+  // Le projet vient du processus principal : le renderer ne désigne qu'une
+  // référence, jamais un chemin où écrire.
+
+  ipcMain.handle('bibliography:reading-notes:list', async () => {
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) return successResponse({ notes: [] });
+    try {
+      const notes = await listReadingNotes(projectPath);
+      return successResponse({ notes });
+    } catch (error: unknown) {
+      console.error('❌ bibliography:reading-notes:list error:', error);
+      return { ...errorResponse(error), notes: [] };
+    }
+  });
+
+  ipcMain.handle('bibliography:reading-notes:open', async (_event, rawReference: unknown) => {
+    const reference = validate(ReadingNoteOpenSchema, rawReference);
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) return errorResponse(new Error('Aucun projet ouvert.'));
+    try {
+      const file = await ensureReadingNote(projectPath, reference);
+      return successResponse({ file });
+    } catch (error: unknown) {
+      console.error('❌ bibliography:reading-notes:open error:', error);
+      return errorResponse(error);
+    }
+  });
+
+  ipcMain.handle('bibliography:reading-notes:set-tags', async (_event, rawOptions: unknown) => {
+    const { tags, ...reference } = validate(ReadingNoteSetTagsSchema, rawOptions);
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) return errorResponse(new Error('Aucun projet ouvert.'));
+    try {
+      const note = await setProjectTags(projectPath, reference, tags);
+      return successResponse({ note });
+    } catch (error: unknown) {
+      console.error('❌ bibliography:reading-notes:set-tags error:', error);
+      return errorResponse(error);
     }
   });
 

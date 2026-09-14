@@ -143,6 +143,37 @@ const api = {
       projectPath: string;
       citations: any[];
     }) => ipcRenderer.invoke('bibliography:save-metadata', options),
+    /**
+     * Notes de lecture du projet ouvert : un fichier Markdown par référence
+     * (`reading-notes/`), dont le front matter porte les étiquettes du projet.
+     */
+    readingNotes: {
+      list: () =>
+        ipcRenderer.invoke('bibliography:reading-notes:list') as Promise<{
+          success: boolean;
+          notes?: Array<{ file: string; citekey: string; zoteroKey?: string; tags: string[] }>;
+          error?: string;
+        }>,
+      open: (reference: { citekey: string; zoteroKey?: string; title?: string; author?: string; year?: string }) =>
+        ipcRenderer.invoke('bibliography:reading-notes:open', reference) as Promise<{
+          success: boolean;
+          file?: string;
+          error?: string;
+        }>,
+      setTags: (options: {
+        citekey: string;
+        zoteroKey?: string;
+        title?: string;
+        author?: string;
+        year?: string;
+        tags: string[];
+      }) =>
+        ipcRenderer.invoke('bibliography:reading-notes:set-tags', options) as Promise<{
+          success: boolean;
+          note?: { file: string; citekey: string; zoteroKey?: string; tags: string[] };
+          error?: string;
+        }>,
+    },
   },
 
   // Editor
