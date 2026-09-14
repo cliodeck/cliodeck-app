@@ -20,7 +20,7 @@ Work happens on per-feature branches off `main` (check `git status`). As of 2026
 
 **Key services** (`src/main/services/`):
 - `pdf-service.ts` — vector store, indexing (~839 lines, contains a **delegating facade for search**)
-- `retrieval-service.ts` — multi-source RAG over **four corpora**: PDFs (secondary), Tropy archives (primary), optional Obsidian vault, and the **manuscript being written** (opt-in `includeManuscript`)
+- `retrieval-service.ts` — multi-source RAG over **four corpora**: PDFs (secondary), Tropy archives (primary), optional Obsidian vault, and the **manuscript being written** (opt-in `includeManuscript`). **Path A′** (ADR 0001, amendement 2026-09-14): the corpora keep distinct schemas but share a contract — every hit's `similarity` is on the cosine scale, `max(cosine, lexical-rank relevance)` (`backend/core/rag/relevance.ts`), and each corpus is a `CorpusRetriever` (`backend/core/rag/retrievers/corpus.ts`). **Never publish an RRF score as `similarity`**: it peaks at 1/61 and sinks the corpus below all others in the shared sort (it happened twice — manuscript, then vault)
 - `manuscript-index-service.ts` — the manuscript as a fourth corpus: incremental by content hash, indexed after save, best-effort ([`docs/manuscript-corpus.md`](docs/manuscript-corpus.md))
 - `mcp-clients-service.ts` — lifecycle of external MCP servers (stdio + SSE)
 - `fusion-chat-service.ts` — unified chat transport (IPC `fusion:chat:*`): retrieval injection wiring, MCP tools, journals

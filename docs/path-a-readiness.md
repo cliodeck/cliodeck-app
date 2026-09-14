@@ -111,11 +111,18 @@ The migration PR can land when:
    p95 latency target.
 
 Until those three exist, the parallel-store layout (Path B) stays
-shipping. There is no behavioural cost to Path B for end users — the
-unified `RetrievalService` already routes both stores transparently
-(see [ADR 0002](adr/0002-retrieval-service-extraction.md)). Path A is
-purely an internal cleanup whose value is removing one duplicated
-schema, not a feature unlock.
+shipping.
+
+> **Superseded on 2026-09-14 — see the amendment to
+> [ADR 0001](adr/0001-rag-pipeline-arbitration.md).** Path A is no longer
+> the target: the four corpora keep their own schemas (**Path A′**) and
+> share a relevance contract (`backend/core/rag/relevance.ts`) and a
+> retriever interface (`backend/core/rag/retrievers/corpus.ts`). The claim
+> that Path B had "no behavioural cost" was wrong: the corpora were sorted
+> together on incomparable scores, which kept vault notes out of the
+> results and left Tropy unfiltered. The benchmark below is still worth
+> building, now to calibrate per-corpus thresholds rather than to gate a
+> schema migration.
 
 ## Recent related work (2026-05-07)
 
