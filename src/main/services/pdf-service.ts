@@ -114,6 +114,8 @@ class PDFService {
         await vsInitPromise;
       }
 
+      await this.removeDuplicateDocuments(store, projectPath);
+
       // Post-init: configure search modes on the enhanced store. Any
       // rebuild is deferred until after warmup (see below) so we don't
       // run embedding warmup + a large batched rebuild concurrently.
@@ -281,8 +283,58 @@ class PDFService {
       .catch(() => undefined)
       .finally(() => {
         this.inFlightIndexing.delete(job);
+        // Une réindexation a pu remplacer des copies : leurs vecteurs
+        // restent dans HNSW jusqu'à reconstruction.
+        this.scheduleIndexRebuild();
       });
     return job;
+  }
+
+  /**
+   * Nettoie les documents en double hérités des versions précédentes (un
+   * même PDF indexé à chaque clic sur « Indexer tous les PDFs » ou
+   * « Télécharger depuis Zotero »). Sauvegarde `brain.db` avant d'y toucher.
+   * Best-effort : un échec laisse la base telle quelle et n'empêche pas
+   * l'ouverture du projet.
+   */
+  private async removeDuplicateDocuments(
+    store: VectorStore | EnhancedVectorStore,
+    projectPath: string
+  ): Promise<void> {
+    try {
+      const extra = store.countDuplicateDocuments();
+      if (extra === 0) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backup = path.join(projectPath, '.cliodeck', `brain.db.avant-dedoublonnage-${stamp}`);
+      await store.backupTo(backup);
+      const { files, removed } = store.removeDuplicateDocuments();
+      console.log(
+        `♻️  [PDF-SERVICE] ${removed} document(s) en double retiré(s) pour ${files} fichier(s) ; sauvegarde : ${backup}`
+      );
+    } catch (error: unknown) {
+      console.error('❌ [PDF-SERVICE] Nettoyage des doublons impossible, base inchangée :', error);
+    }
+  }
+
+  private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Reconstruit HNSW/BM25 quand des documents ont quitté SQLite, une fois
+   * les indexations en vol terminées : reconstruire pendant qu'une autre
+   * écrit ses extraits ferait la course sur l'index.
+   */
+  private scheduleIndexRebuild(delayMs = 2000): void {
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      const store = this.vectorStore;
+      if (!store) return;
+      if (this.inFlightIndexing.size > 0) {
+        this.scheduleIndexRebuild(delayMs);
+        return;
+      }
+      void PdfVectorStore.maybeRebuild(store);
+    }, delayMs);
   }
 
   /**
@@ -361,7 +413,9 @@ class PDFService {
 
   async deleteDocument(documentId: string) {
     this.ensureInitialized();
-    return this.vectorStore!.deleteDocument(documentId);
+    const result = this.vectorStore!.deleteDocument(documentId);
+    this.scheduleIndexRebuild();
+    return result;
   }
 
   async getStatistics() {
