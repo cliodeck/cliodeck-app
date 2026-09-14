@@ -3,6 +3,7 @@ import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
 import { ZoteroSync, type SyncWarning } from '../../../backend/integrations/zotero/ZoteroSync.js';
+import { listCollectionItems } from '../../../backend/integrations/zotero/collectionItems.js';
 import { Citation } from '../../../backend/types/citation.js';
 import { SyncDiff } from '../../../backend/integrations/zotero/ZoteroDiffEngine.js';
 import { ConflictStrategy, SyncResolution } from '../../../backend/integrations/zotero/ZoteroSyncResolver.js';
@@ -315,15 +316,8 @@ class ZoteroService {
       try {
         const sync = new ZoteroSync(ds);
 
-        // Get Zotero items from collection
-        const items = await ds.listItems({
-          collectionKey: options.collectionKey,
-        });
-
-        // Filter to bibliographic items only
-        const bibliographicItems = items.filter(
-          (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
-        );
+        // Notices de la collection, sous-collections comprises
+        const bibliographicItems = await listCollectionItems(ds, options.collectionKey);
 
         // Enrich citations with attachment info
         const enrichedCitations = await sync.enrichCitationsWithAttachments(
@@ -462,15 +456,9 @@ class ZoteroService {
           parentKey: c.data.parentCollection,
         }));
 
-        // Fetch items to build zoteroKey -> collections mapping
-        const items = await ds.listItems({
-          collectionKey: options.collectionKey,
-        });
-
-        // Filter to bibliographic items only
-        const bibliographicItems = items.filter(
-          (item) => item.data.itemType !== 'attachment' && item.data.itemType !== 'note'
-        );
+        // Notices de la collection, sous-collections comprises, pour relier
+        // chaque document à ses collections
+        const bibliographicItems = await listCollectionItems(ds, options.collectionKey);
 
         // Build zoteroKey -> collections mapping from Zotero items
         const zoteroKeyToCollections: Record<string, string[]> = {};

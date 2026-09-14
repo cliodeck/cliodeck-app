@@ -7,6 +7,7 @@ import { ZoteroDiffEngine, SyncDiff } from './ZoteroDiffEngine';
 import { ZoteroSyncResolver, ConflictStrategy, SyncResolution, MergeResult } from './ZoteroSyncResolver';
 import { BibTeXParser } from '../../core/bibliography/BibTeXParser';
 import { findDuplicateWorks, type DuplicateWork } from '../../core/bibliography/duplicates';
+import { listCollectionItems } from './collectionItems';
 
 export interface SyncResult {
   collections: ZoteroCollection[];
@@ -126,9 +127,9 @@ export class ZoteroSync {
 
       // 3. Récupérer les items
       try {
-        const items = await this.api.listItems({
-          collectionKey: options.collectionKey,
-        });
+        // Sous-collections comprises : c'est ce que l'export écrit, et ce
+        // que la mise à jour doit retrouver (cf. `listCollectionItems`).
+        const items = await listCollectionItems(this.api, options.collectionKey);
         result.items = items;
 
         // Count item types for debugging
@@ -266,7 +267,7 @@ export class ZoteroSync {
   }> {
     try {
       const collection = await this.api.getCollection(collectionKey);
-      const items = await this.api.listItems({ collectionKey });
+      const items = await listCollectionItems(this.api, collectionKey);
 
       let pdfCount = 0;
       for (const item of items) {
@@ -383,8 +384,10 @@ export class ZoteroSync {
     collectionKey?: string
   ): Promise<SyncDiff> {
     try {
-      // Récupérer les items depuis Zotero
-      const remoteItems = await this.api.listItems({ collectionKey });
+      // Récupérer les items depuis Zotero, sous-collections comprises :
+      // sans elles, la mise à jour proposait de supprimer toutes les notices
+      // qu'un import venait d'y lire.
+      const remoteItems = await listCollectionItems(this.api, collectionKey);
 
       // Filter bibliographic items only
       const bibliographicItems = remoteItems.filter(
