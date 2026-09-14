@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { IZoteroDataSource, ZoteroLibraryInfo } from './IZoteroDataSource';
 import { ZoteroItem, ZoteroAttachment, ZoteroCollection } from './ZoteroAPI';
 import { ZoteroLocalBibTeX } from './ZoteroLocalBibTeX';
+import { listCollectionItems } from './collectionItems';
 
 export interface ZoteroLocalConfig {
   dataDirectory: string;
@@ -234,6 +235,9 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         JOIN collections c ON ci.collectionID = c.collectionID
         WHERE c.key = ?
           AND it.typeName NOT IN ('attachment', 'note')
+          -- Une notice mise à la corbeille reste rattachée à ses
+          -- collections : sans ce filtre, elle revenait dans le .bib.
+          AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
         ORDER BY i.dateAdded DESC
       `;
       params = [options.collectionKey];
@@ -504,55 +508,29 @@ export class ZoteroLocalDB implements IZoteroDataSource {
 
   async exportCollectionAsBibTeX(
     collectionKey: string,
-    includeSubcollections: boolean = true,
+    _includeSubcollections: boolean = true,
     preservedKeys?: Readonly<Record<string, string>>
   ): Promise<string> {
     const bibtexHelper = new ZoteroLocalBibTeX(this.config.dataDirectory);
+    // Sous-collections à toute profondeur : l'ancienne boucle ne descendait
+    // que d'un niveau, et les notices d'une sous-sous-collection
+    // manquaient au fichier.
+    const allItems = await listCollectionItems(this, collectionKey);
 
     // Try Better BibTeX first
     if (bibtexHelper.hasBetterBibTeX()) {
       try {
-        // Get item keys for this collection
-        const items = await this.listItems({ collectionKey });
-        const itemKeys = items.map((i) => i.key);
-
-        if (includeSubcollections) {
-          const subcollections = await this.listSubcollections(collectionKey);
-          for (const sub of subcollections) {
-            const subItems = await this.listItems({ collectionKey: sub.key });
-            itemKeys.push(...subItems.map((i) => i.key));
-          }
-        }
-
-        const uniqueKeys = [...new Set(itemKeys)];
-        if (uniqueKeys.length > 0) {
-          const result = bibtexHelper.exportFromBBT(this.libraryID, uniqueKeys);
+        const itemKeys = allItems.map((i) => i.key);
+        if (itemKeys.length > 0) {
+          const result = bibtexHelper.exportFromBBT(this.libraryID, itemKeys);
           if (result && result.trim().length > 0) {
-            console.log(`📚 BibTeX exported via Better BibTeX (${uniqueKeys.length} items)`);
+            console.log(`📚 BibTeX exported via Better BibTeX (${itemKeys.length} items)`);
             return result;
           }
         }
       } catch (error) {
         console.warn('Better BibTeX export failed, falling back to generation:', error);
       }
-    }
-
-    // Fallback: generate from items
-    let allItems = await this.listItems({ collectionKey });
-
-    if (includeSubcollections) {
-      const subcollections = await this.listSubcollections(collectionKey);
-      for (const sub of subcollections) {
-        const subItems = await this.listItems({ collectionKey: sub.key });
-        allItems.push(...subItems);
-      }
-      // Deduplicate by key
-      const seen = new Set<string>();
-      allItems = allItems.filter((item) => {
-        if (seen.has(item.key)) return false;
-        seen.add(item.key);
-        return true;
-      });
     }
 
     console.log(`📚 Generating BibTeX from ${allItems.length} items`);
