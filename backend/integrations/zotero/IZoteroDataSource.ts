@@ -25,6 +25,9 @@ export interface IZoteroDataSource {
   getItem(itemKey: string): Promise<ZoteroItem>;
   getItemChildren(itemKey: string): Promise<ZoteroItem[]>;
 
+  /** Notes enfants de la notice (HTML Zotero), hors corbeille. */
+  getItemNotes(itemKey: string): Promise<Array<{ key: string; note: string }>>;
+
   // Attachments
   getItemAttachments(itemKey: string): Promise<ZoteroAttachment[]>;
   hasAttachments(itemKey: string): Promise<boolean>;

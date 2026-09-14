@@ -290,6 +290,12 @@ export class ZoteroSyncResolver {
         publisher: remote.publisher,
         booktitle: remote.booktitle,
         shortTitle: remote.shortTitle,
+        // Les tags d'une notice Zotero ne vivent plus dans le champ `tags`
+        // du .bib : on le vide. Tags et notes Zotero suivent Zotero quand
+        // ils ont été lus, restent sinon.
+        tags: remote.tags?.length ? remote.tags : undefined,
+        zoteroTags: remote.zoteroTags ?? local.zoteroTags,
+        zoteroNotes: remote.zoteroNotes ?? local.zoteroNotes,
         customFields: mergeCustomFields(local.customFields, remote.customFields),
         // La clé locale est celle que l'auteur a écrite dans son texte :
         // une mise à jour de métadonnées ne renomme jamais une citation.

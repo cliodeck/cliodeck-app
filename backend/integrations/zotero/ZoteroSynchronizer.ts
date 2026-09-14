@@ -60,7 +60,7 @@ export interface SyncReport {
   /** Entrées sans lien Zotero, laissées telles quelles. */
   localOnlyCount: number;
   /** Clés refaites parce qu'invalides ou portées par deux entrées. */
-  renamedKeys: Array<{ from: string; to: string; title: string }>;
+  renamedKeys: Array<{ from: string; to: string; title: string; zoteroKey: string }>;
   duplicates: DuplicateWork[];
   warnings: SyncWarning[];
 }
@@ -94,7 +94,7 @@ export class ZoteroSynchronizer {
   constructor(private readonly source: IZoteroDataSource) {}
 
   async synchronize(input: SynchronizeInput): Promise<SynchronizeResult> {
-    const items = await this.withAttachments(
+    const items = await this.withChildren(
       await listCollectionItems(this.source, input.collectionKey)
     );
 
@@ -144,20 +144,25 @@ export class ZoteroSynchronizer {
   }
 
   /**
-   * Joint à chaque notice ses pièces jointes. Un échec de lecture laisse la
-   * notice sans `attachments` — « non lues », et non « aucune » : la
-   * fusion garde alors les PDF connus du projet.
+   * Joint à chaque notice ses pièces jointes et ses notes. Un échec de
+   * lecture laisse le champ absent — « non lu », et non « aucun » : la
+   * fusion garde alors ce que le projet connaissait.
    */
-  private async withAttachments(items: ZoteroItem[]): Promise<ZoteroItem[]> {
+  private async withChildren(items: ZoteroItem[]): Promise<ZoteroItem[]> {
     const result: ZoteroItem[] = [];
     for (const item of items) {
+      const data: ZoteroItem['data'] = { ...item.data };
       try {
-        const attachments = await this.source.getItemAttachments(item.key);
-        result.push({ ...item, data: { ...item.data, attachments } });
+        data.attachments = await this.source.getItemAttachments(item.key);
       } catch (error) {
         console.warn(`⚠️ Pièces jointes illisibles pour ${item.key}:`, error);
-        result.push(item);
       }
+      try {
+        data.notes = await this.source.getItemNotes(item.key);
+      } catch (error) {
+        console.warn(`⚠️ Notes illisibles pour ${item.key}:`, error);
+      }
+      result.push({ ...item, data });
     }
     return result;
   }
@@ -211,7 +216,7 @@ function repairKeys(
     const c = citations[index];
     const to = newKeys.get(c.zoteroKey!)!;
     repaired[index] = createCitation({ ...c, id: to, key: to });
-    renamed.push({ from: c.id, to, title: c.title });
+    renamed.push({ from: c.id, to, title: c.title, zoteroKey: c.zoteroKey! });
   }
   return { citations: repaired, renamed };
 }

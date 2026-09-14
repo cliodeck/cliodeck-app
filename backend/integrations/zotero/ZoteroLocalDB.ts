@@ -341,7 +341,7 @@ export class ZoteroLocalDB implements IZoteroDataSource {
           ISBN: fields['ISBN'],
           url: fields['url'],
           abstractNote: fields['abstractNote'],
-          tags: tags.map((t: string) => ({ tag: t })),
+          tags,
           collections,
           dateAdded: row.dateAdded,
           dateModified: row.dateModified,
@@ -397,7 +397,7 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         ISBN: fields['ISBN'],
         url: fields['url'],
         abstractNote: fields['abstractNote'],
-        tags: tags.map((t: string) => ({ tag: t })),
+        tags,
         collections,
         dateAdded: row.dateAdded,
         dateModified: row.dateModified,
@@ -451,6 +451,21 @@ export class ZoteroLocalDB implements IZoteroDataSource {
         },
       } as any;
     });
+  }
+
+  async getItemNotes(itemKey: string): Promise<Array<{ key: string; note: string }>> {
+    this.ensureOpen();
+    // Les notes vivent dans `itemNotes`, pas dans `itemAttachments` :
+    // `getItemChildren` ne les a jamais vues.
+    return this.db!.prepare(`
+      SELECT i.key, n.note
+      FROM itemNotes n
+      JOIN items i ON i.itemID = n.itemID
+      JOIN items parent ON parent.itemID = n.parentItemID
+      WHERE parent.key = ?
+        AND n.itemID NOT IN (SELECT itemID FROM deletedItems)
+        AND n.note IS NOT NULL
+    `).all(itemKey) as Array<{ key: string; note: string }>;
   }
 
   // MARK: - Attachments
@@ -630,15 +645,15 @@ export class ZoteroLocalDB implements IZoteroDataSource {
     `).all(itemID) as any[];
   }
 
-  private fetchItemTags(itemID: number): string[] {
+  private fetchItemTags(itemID: number): Array<{ tag: string; type: number }> {
     const rows = this.db!.prepare(`
-      SELECT t.name
+      SELECT t.name, it.type
       FROM itemTags it
       JOIN tags t ON it.tagID = t.tagID
       WHERE it.itemID = ?
-    `).all(itemID) as any[];
+    `).all(itemID) as Array<{ name: string; type: number }>;
 
-    return rows.map((r) => r.name);
+    return rows.map((r) => ({ tag: r.name, type: r.type }));
   }
 
   private fetchItemCollectionKeys(itemID: number): string[] {
@@ -716,8 +731,8 @@ export class ZoteroLocalDB implements IZoteroDataSource {
     return result;
   }
 
-  private batchFetchTags(itemIDs: number[]): Map<number, string[]> {
-    const result = new Map<number, string[]>();
+  private batchFetchTags(itemIDs: number[]): Map<number, Array<{ tag: string; type: number }>> {
+    const result = new Map<number, Array<{ tag: string; type: number }>>();
     if (itemIDs.length === 0) return result;
 
     const chunkSize = 500;
@@ -725,18 +740,20 @@ export class ZoteroLocalDB implements IZoteroDataSource {
       const chunk = itemIDs.slice(i, i + chunkSize);
       const placeholders = chunk.map(() => '?').join(',');
 
+      // Le type distingue un tag posé par l'utilisateur (0) d'un tag
+      // importé automatiquement des métadonnées d'un éditeur (1).
       const rows = this.db!.prepare(`
-        SELECT it.itemID, t.name
+        SELECT it.itemID, t.name, it.type
         FROM itemTags it
         JOIN tags t ON it.tagID = t.tagID
         WHERE it.itemID IN (${placeholders})
-      `).all(...chunk) as any[];
+      `).all(...chunk) as Array<{ itemID: number; name: string; type: number }>;
 
       for (const row of rows) {
         if (!result.has(row.itemID)) {
           result.set(row.itemID, []);
         }
-        result.get(row.itemID)!.push(row.name);
+        result.get(row.itemID)!.push({ tag: row.name, type: row.type });
       }
     }
 

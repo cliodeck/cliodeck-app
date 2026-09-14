@@ -9,6 +9,23 @@ export interface ZoteroAttachmentInfo {
   md5?: string;
 }
 
+/**
+ * Tag posé dans Zotero. `automatic` : ajouté par Zotero depuis les
+ * métadonnées d'un éditeur (type 1 dans Zotero), et non par l'utilisateur.
+ * Mesuré sur une collection réelle : 77 tags automatiques distincts pour 5
+ * manuels — d'où leur masquage par défaut dans le panneau.
+ */
+export interface ZoteroTag {
+  tag: string;
+  automatic: boolean;
+}
+
+/** Note rattachée à la notice dans Zotero, réduite en texte (lecture seule). */
+export interface ZoteroNote {
+  key: string;
+  text: string;
+}
+
 export interface Citation {
   id: string; // Clé BibTeX
   key?: string; // Alternative BibTeX key (for compatibility)
@@ -35,7 +52,16 @@ export interface Citation {
   zoteroAttachments?: ZoteroAttachmentInfo[]; // PDF attachments from Zotero
 
   // Tags and metadata
-  tags?: string[]; // User-defined tags
+  /**
+   * Tags lus dans le fichier .bib (champ `tags`), pour les références sans
+   * lien Zotero. Ceux d'une notice Zotero sont dans {@link zoteroTags} ;
+   * les étiquettes propres au projet vivent dans les notes de lecture.
+   */
+  tags?: string[];
+  /** Tags Zotero de la notice — propriété de Zotero, lecture seule. */
+  zoteroTags?: ZoteroTag[];
+  /** Notes Zotero rattachées à la notice — lecture seule. */
+  zoteroNotes?: ZoteroNote[];
   keywords?: string; // BibTeX keywords field
   notes?: string; // User notes
   customFields?: Record<string, string>; // Custom metadata fields

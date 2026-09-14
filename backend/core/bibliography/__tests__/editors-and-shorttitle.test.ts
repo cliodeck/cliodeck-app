@@ -173,6 +173,7 @@ describe('export d’une collection Zotero', () => {
       listCollections: async () => [],
       listItems: async () => [item],
       getItemAttachments: async () => [],
+      getItemNotes: async () => [],
     } as unknown as IZoteroDataSource;
     const result = await new ZoteroSynchronizer(source).synchronize({ local: [], collectionKey: 'COLL' });
     if (result.status !== 'applied') throw new Error('import non appliqué');

@@ -1,6 +1,6 @@
 // Zotero Diff Engine - Compares local citations with remote Zotero items
 
-import { Citation } from '../../types/citation';
+import { Citation, type ZoteroNote, type ZoteroTag } from '../../types/citation';
 import { ZoteroItem, ZoteroAttachment } from './ZoteroAPI';
 import { assignCiteKeys } from '../../core/bibliography/citekey';
 import { zoteroItemToCitation, ZOTERO_OWNED_FIELDS } from './toCitation';
@@ -21,6 +21,16 @@ export interface SyncDiff {
 export interface DiffOptions {
   compareAttachments?: boolean; // Compare PDF attachments
   ignoreDateModified?: boolean; // Ignore dateModified field (useful for testing)
+}
+
+/** Empreinte stable d'une liste de tags Zotero (ordre indifférent). */
+function tagSignature(tags: ZoteroTag[] | undefined): string {
+  return (tags ?? []).map((t) => `${t.automatic ? 'a' : 'm'}:${t.tag}`).sort().join('\u0000');
+}
+
+/** Empreinte stable des notes Zotero (ordre indifférent). */
+function noteSignature(notes: ZoteroNote[] | undefined): string {
+  return (notes ?? []).map((n) => `${n.key}:${n.text}`).sort().join('\u0000');
 }
 
 export class ZoteroDiffEngine {
@@ -133,6 +143,19 @@ export class ZoteroDiffEngine {
       if (this.normalizeString(localValue) !== this.normalizeString(remoteValue)) {
         modifiedFields.push(field);
       }
+    }
+
+    // Tags et notes Zotero : comparés seulement s'ils ont été lus. Un
+    // ancien champ `tags` (tags Zotero écrits dans le .bib par une version
+    // précédente) rend l'entrée « modifiée », pour qu'il en sorte.
+    if (remote.zoteroTags !== undefined && tagSignature(local.zoteroTags) !== tagSignature(remote.zoteroTags)) {
+      modifiedFields.push('zoteroTags');
+    }
+    if (remote.zoteroNotes !== undefined && noteSignature(local.zoteroNotes) !== noteSignature(remote.zoteroNotes)) {
+      modifiedFields.push('zoteroNotes');
+    }
+    if (local.zoteroKey && (local.tags?.length ?? 0) > 0) {
+      modifiedFields.push('tags');
     }
 
     // Champs BibLaTeX que Zotero alimente (URL, DOI, pages, date complète…).

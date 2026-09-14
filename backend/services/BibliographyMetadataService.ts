@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Citation, ZoteroAttachmentInfo } from '../types/citation';
+import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 
 /**
  * Metadata stored for each citation (data that can't be stored in BibTeX)
@@ -9,6 +9,10 @@ export interface CitationMetadata {
   id: string; // BibTeX key
   zoteroKey?: string;
   zoteroAttachments?: ZoteroAttachmentInfo[];
+  /** Tags Zotero : données de Zotero, gardées hors du .bib, qui voyage. */
+  zoteroTags?: ZoteroTag[];
+  /** Notes Zotero, en texte. */
+  zoteroNotes?: ZoteroNote[];
   dateAdded?: string;
   dateModified?: string;
 }
@@ -86,6 +90,8 @@ export class BibliographyMetadataService {
           id: citation.id,
           zoteroKey: citation.zoteroKey,
           zoteroAttachments: citation.zoteroAttachments,
+          zoteroTags: citation.zoteroTags,
+          zoteroNotes: citation.zoteroNotes,
           dateAdded: citation.dateAdded,
           dateModified: citation.dateModified,
         };
@@ -176,6 +182,8 @@ export class BibliographyMetadataService {
           ...citation,
           zoteroKey: citationMeta.zoteroKey || citation.zoteroKey,
           zoteroAttachments: attachments,
+          zoteroTags: citationMeta.zoteroTags ?? citation.zoteroTags,
+          zoteroNotes: citationMeta.zoteroNotes ?? citation.zoteroNotes,
           dateAdded: citationMeta.dateAdded || citation.dateAdded,
           dateModified: citationMeta.dateModified || citation.dateModified,
           file: citation.file ?? downloadedAttachment?.localPath,

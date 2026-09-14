@@ -46,6 +46,7 @@ interface Library {
   collections: ZoteroCollection[];
   contents: Record<string, ZoteroItem[]>;
   attachments?: Record<string, ZoteroAttachment[] | 'error'>;
+  notes?: Record<string, Array<{ key: string; note: string }>>;
 }
 
 function source(library: Library): IZoteroDataSource {
@@ -64,6 +65,7 @@ function source(library: Library): IZoteroDataSource {
       if (found === 'error') throw new Error('base verrouillée');
       return found ?? [];
     },
+    getItemNotes: async (key: string) => library.notes?.[key] ?? [],
     hasAttachments: async () => false,
     downloadFile: async () => ({ filename: '', size: 0 }),
     testConnection: async () => true,
@@ -325,8 +327,8 @@ describe('clés', () => {
 
     expect(result.report.renamedKeys).toEqual(
       expect.arrayContaining([
-        { from: 'Certeau(de)_2010', to: 'Certeau_2010', title: 'L’invention du quotidien' },
-        { from: 'Hutchinson_2024', to: 'Hutchinson_2024a', title: 'Mapping (doublon)' },
+        { from: 'Certeau(de)_2010', to: 'Certeau_2010', title: 'L’invention du quotidien', zoteroKey: 'CERT' },
+        { from: 'Hutchinson_2024', to: 'Hutchinson_2024a', title: 'Mapping (doublon)', zoteroKey: 'HUT2' },
       ])
     );
     const keys = Object.fromEntries(reread(result).map((c) => [c.zoteroKey, c.id]));
@@ -363,5 +365,82 @@ describe('doublons', () => {
     expect(result.report.duplicates).toHaveLength(1);
     expect(result.citations).toHaveLength(2);
     expect(result.report.warnings).toEqual([]);
+  });
+});
+
+describe('tags et notes Zotero', () => {
+  const withTags = (): Library => {
+    const notice = item('AAA', { title: 'Digital Doping', lastName: 'Kansteiner' });
+    notice.data.tags = [
+      { tag: 'hermeneutics' },
+      { tag: 'Artificial Intelligence', type: 1 },
+    ];
+    return {
+      collections: [collection('ARTICLE')],
+      contents: { ARTICLE: [notice] },
+      notes: { AAA: [{ key: 'NOTE1', note: '<div><p>À relire&nbsp;: <b>chapitre 3</b></p><p>Voir aussi Hartog</p></div>' }] },
+    };
+  };
+
+  it('sépare tags manuels et automatiques, et lit les notes en texte', async () => {
+    const result = applied(await new ZoteroSynchronizer(source(withTags())).synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const c = result.citations[0];
+
+    expect(c.zoteroTags).toEqual([
+      { tag: 'hermeneutics', automatic: false },
+      { tag: 'Artificial Intelligence', automatic: true },
+    ]);
+    expect(c.zoteroNotes).toEqual([{ key: 'NOTE1', text: 'À relire : chapitre 3\nVoir aussi Hartog' }]);
+    // Données de Zotero : elles ne vont pas dans le .bib, qui voyage.
+    expect(result.bibtex).not.toContain('hermeneutics');
+    expect(result.bibtex).not.toContain('tags =');
+  });
+
+  it('propage un tag ajouté dans Zotero', async () => {
+    const library = withTags();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+    library.contents.ARTICLE[0].data.tags!.push({ tag: 'craft' });
+    const second = applied(
+      await sync.synchronize({ local: first.citations, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+    );
+
+    expect(second.report.modified.map((m) => m.fields)).toEqual([['zoteroTags']]);
+    expect(second.citations[0].zoteroTags?.map((t) => t.tag)).toContain('craft');
+  });
+
+  it('retire du .bib les tags qu’une ancienne version y écrivait', async () => {
+    const library = withTags();
+    const legacy = createCitation({
+      id: 'Kansteiner_2022',
+      type: 'article',
+      author: 'Kansteiner, A.',
+      year: '2022',
+      title: 'Digital Doping',
+      zoteroKey: 'AAA',
+      tags: ['hermeneutics', 'Artificial Intelligence'],
+    });
+
+    const result = applied(await new ZoteroSynchronizer(source(library)).synchronize({ local: [legacy], collectionKey: 'ARTICLE' }));
+
+    expect(result.citations[0].tags).toBeUndefined();
+    expect(result.bibtex).not.toContain('tags =');
+  });
+
+  it('garde les notes connues quand leur lecture échoue', async () => {
+    const library = withTags();
+    const failing = source(library);
+    failing.getItemNotes = async () => {
+      throw new Error('base verrouillée');
+    };
+    const known = createCitation({
+      id: 'Kansteiner_2022', type: 'article', author: 'Kansteiner, A.', year: '2022', title: 'Digital Doping', zoteroKey: 'AAA',
+      zoteroNotes: [{ key: 'NOTE1', text: 'Note connue' }],
+    });
+
+    const result = applied(await new ZoteroSynchronizer(failing).synchronize({ local: [known], collectionKey: 'ARTICLE' }));
+
+    expect(result.citations[0].zoteroNotes).toEqual([{ key: 'NOTE1', text: 'Note connue' }]);
   });
 });
