@@ -5,10 +5,17 @@ Status: scaffolded — 2026-04-14 | updated 2026-07-25
 ## What Path A is
 
 Per [ADR 0001](adr/0001-rag-pipeline-arbitration.md), Path A is the
-unification of the Obsidian vault store (`.cliodeck/obsidian-vectors.db`,
-parallel) into the main `EnhancedVectorStore`
-(`.cliodeck/vectors.db`) using the generalised
+unification of the Obsidian vault store (the parallel `obsidian_*` tables)
+into the main `EnhancedVectorStore` (the `pdf_*` tables) using the generalised
 [`SourceDocument` / `SourceChunk` types](../backend/types/source-document.ts).
+
+> **Not to be confused with the file consolidation, which is done.** Since
+> 2026-05-12 (commits `3260a40`, `c044d42`, `07741ab`, `a1ca0cb`) every store
+> lives in a single `.cliodeck/brain.db`; the former `vectors.db`,
+> `primary-sources.db`, `history.db` and `obsidian-vectors.db` are folded in
+> by `migrateWorkspaceToFlat` on project load. That change put the corpora in
+> one *file*. Path A is about one *schema*: today each corpus still has its
+> own tables, its own store class and its own search implementation.
 
 The migration itself is a schema change + a rewrite of every consumer that
 narrows on `PDFDocument`. ADR 0001 gates the swap on a benchmark that

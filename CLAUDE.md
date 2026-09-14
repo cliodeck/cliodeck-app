@@ -35,10 +35,10 @@ Work happens on per-feature branches off `main` (check `git status`). As of 2026
 
 **Workspace layout** — `<projectRoot>/.cliodeck/` (flat):
 - `config.json` (`schema_version: 2`), `hints.md`, `recipes/`, `recipes-runs/`
-- `brain.db` — research journal (`history_*`) and manuscript corpus (`manuscript_*`)
+- `brain.db` — **the single SQLite file for every corpus and the research journal**, one table prefix per domain: `pdf_*` (secondary sources), `tropy_*` (primary sources), `obsidian_*` (vault), `manuscript_*` (manuscript corpus), `history_*` (research journal)
 - `journal.db` — AI usage journal, deliberately a **separate file** so it can be copied and published on its own (ADR 0007)
-- `obsidian-vectors.db`, `hnsw.index`, `mcp-access.jsonl`, `security-events.jsonl`
-- The pre-fusion SQLite stores (`vectors.db`, `primary-sources.db`, `history.db`) live alongside at the same flat level — consolidating them into `brain.db` is a Path A concern (ADR 0001), still gated on the retrieval benchmark.
+- `hnsw.index` (PDFs), `primary-hnsw.index` (Tropy), `mcp-access.jsonl`, `security-events.jsonl`
+- **The file consolidation is done** (2026-05-12, commits `3260a40`, `c044d42`, `07741ab`, `a1ca0cb`): the pre-fusion stores `vectors.db`, `primary-sources.db`, `history.db` and `obsidian-vectors.db` no longer exist on a current workspace — `migrateWorkspaceToFlat` folds them into `brain.db` on project load. What remains gated on the retrieval benchmark is **Path A** proper (ADR 0001): one *schema* (`SourceDocument` / `SourceChunk`) instead of one set of tables and one store class per corpus. Sharing a file is not sharing a schema. See [`docs/path-a-readiness.md`](docs/path-a-readiness.md).
 - The authoritative map is `workspaceFiles` in `backend/core/workspace/layout.ts` (see §4 — do not change it without asking).
 - Legacy `.cliodeck/v2/*` (pre-flatten) and pre-fusion v1 layouts are auto-migrated to flat on project load via `migrateWorkspaceToFlat`.
 
@@ -112,7 +112,7 @@ Work happens on per-feature branches off `main` (check `git status`). As of 2026
 - **MCP** — Model Context Protocol (Anthropic spec; cliodeck is both a server and a client).
 - **`.cliohints`** — workspace-level system-prompt context, persists across chats (`.cliodeck/hints.md`).
 - **Recipe** — YAML-defined workflow chaining brainstorm / search / graph / write / export steps.
-- **Vault** — an Obsidian markdown notes folder, indexed in `.cliodeck/obsidian-vectors.db`.
+- **Vault** — an Obsidian markdown notes folder, indexed in the `obsidian_*` tables of `.cliodeck/brain.db`.
 - **Note de lecture** — one Markdown file per reference in `reading-notes/` (front matter: `citekey`, `zotero_key`, project `tags`). Project-owned and editable; Zotero tags and notes are Zotero-owned and read-only (automatic Zotero tags hidden by default). Never written to the `.bib`. See [`docs/reading-notes.md`](docs/reading-notes.md).
 - **Primary source** — Tropy archive (archival photos, OCR'd documents).
 - **Secondary source** — PDF in the bibliography (published article, book chapter).
