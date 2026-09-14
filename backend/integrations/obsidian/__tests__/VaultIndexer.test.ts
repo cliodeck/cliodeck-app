@@ -137,6 +137,11 @@ describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer (2.4b)', () => {
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].note.title).toBe('De Gaulle');
     expect(hits[0].signals.dense).toBeGreaterThan(0);
+    // Path A′ : le rang lexical accompagne le cosinus, pour le contrat de
+    // pertinence commun — `score` reste un RRF, non comparable.
+    expect(hits[0].signals.lexicalRank).toBe(1);
+    const unrelated = hits.find((h) => h.note.title !== 'De Gaulle' && h.signals.lexical === 0);
+    if (unrelated) expect(unrelated.signals.lexicalRank).toBeNull();
   });
 
   it('handles a malformed FTS query by falling back to dense-only', async () => {

@@ -50,6 +50,7 @@
 import type { SearchResult } from '../../../types/pdf-document.js';
 import type { VectorStore } from '../../vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../vector-store/EnhancedVectorStore.js';
+import { applyThreshold, CROSS_LANGUAGE_FALLBACK } from '../relevance.js';
 
 export type EmbedQuery = (query: string) => Promise<Float32Array>;
 export type ExpandQuery = (query: string) => string[];
@@ -211,15 +212,11 @@ export class SecondaryRetriever {
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
 
-    let filtered = sorted.filter((r) => r.similarity >= threshold);
-    if (filtered.length === 0 && sorted.length > 0) {
-      // Cross-language fallback — keep the top 3 regardless of the
-      // threshold (or fewer if there aren't 3). Better to surface
-      // borderline hits than to return empty when we *did* find
-      // candidates above the floor.
-      filtered = sorted.slice(0, Math.min(3, sorted.length));
-    }
-    return filtered;
+    // Cross-language fallback — keep the top 3 regardless of the
+    // threshold (or fewer if there aren't 3). Better to surface
+    // borderline hits than to return empty when we *did* find
+    // candidates above the floor. Shared with Tropy (Path A′).
+    return applyThreshold(sorted, threshold, CROSS_LANGUAGE_FALLBACK);
   }
 
   private resolveDocumentFilter(
