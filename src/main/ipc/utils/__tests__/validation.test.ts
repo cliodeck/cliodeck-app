@@ -8,7 +8,7 @@ import {
   PDFSearchSchema,
   ChatSendSchema,
   ZoteroTestConnectionSchema,
-  ZoteroSyncSchema,
+  ZoteroSynchronizeSchema,
   PDFExportSchema,
   RevealJSExportSchema,
   HistoryExportReportSchema,
@@ -218,25 +218,23 @@ describe('ZoteroTestConnectionSchema', () => {
   });
 });
 
-describe('ZoteroSyncSchema', () => {
-  it('accepts API sync with defaults', () => {
-    const result = ZoteroSyncSchema.parse({
-      mode: 'api',
-      userId: '123',
-      apiKey: 'key',
-    });
-    expect(result.downloadPDFs).toBe(true);
-    expect(result.exportBibTeX).toBe(true);
-  });
-
-  it('accepts local sync with collection', () => {
-    const result = ZoteroSyncSchema.parse({
+describe('ZoteroSynchronizeSchema', () => {
+  it('accepts a local synchronization with its collection', () => {
+    const result = ZoteroSynchronizeSchema.parse({
       mode: 'local',
       dataDirectory: '/zotero',
       collectionKey: 'COL123',
-      downloadPDFs: false,
     });
-    expect(result.downloadPDFs).toBe(false);
+    expect(result.collectionKey).toBe('COL123');
+    expect(result.confirmed).toBeUndefined();
+  });
+
+  it('refuses a synchronization without collection', () => {
+    // Un projet suit une collection : « toute la bibliothèque » n'est plus
+    // une bibliographie de projet.
+    expect(() =>
+      ZoteroSynchronizeSchema.parse({ mode: 'api', userId: '123', apiKey: 'key' })
+    ).toThrow();
   });
 });
 

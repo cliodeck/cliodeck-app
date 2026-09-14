@@ -272,18 +272,21 @@ const api = {
       dataDirectory?: string;
       libraryID?: number;
     }) => ipcRenderer.invoke('zotero:list-collections', options),
-    sync: (options: {
+    /**
+     * Synchronise la bibliographie du projet ouvert avec sa collection :
+     * premier import, mise à jour ou changement de collection. Sans
+     * `confirmed`, s'arrête avant toute suppression pour demander accord.
+     */
+    synchronize: (options: {
       mode: 'api' | 'local';
       userId?: string;
       apiKey?: string;
       groupId?: string;
       dataDirectory?: string;
       libraryID?: number;
-      collectionKey?: string;
-      downloadPDFs: boolean;
-      exportBibTeX: boolean;
-      targetDirectory?: string;
-    }) => ipcRenderer.invoke('zotero:sync', options),
+      collectionKey: string;
+      confirmed?: boolean;
+    }) => ipcRenderer.invoke('zotero:synchronize', options),
     downloadPDF: (options: {
       mode: 'api' | 'local';
       userId?: string;
@@ -295,39 +298,6 @@ const api = {
       filename: string;
       targetDirectory: string;
     }) => ipcRenderer.invoke('zotero:download-pdf', options),
-    checkUpdates: (options: {
-      mode: 'api' | 'local';
-      userId?: string;
-      apiKey?: string;
-      groupId?: string;
-      dataDirectory?: string;
-      libraryID?: number;
-      localCitations: any[];
-      collectionKey?: string;
-    }) => ipcRenderer.invoke('zotero:check-updates', options),
-    applyUpdates: (options: {
-      mode: 'api' | 'local';
-      userId?: string;
-      apiKey?: string;
-      groupId?: string;
-      dataDirectory?: string;
-      libraryID?: number;
-      currentCitations: any[];
-      diff: any;
-      strategy: 'local' | 'remote' | 'manual';
-      resolution?: any;
-      collectionKey?: string;
-    }) => ipcRenderer.invoke('zotero:apply-updates', options),
-    enrichCitations: (options: {
-      mode: 'api' | 'local';
-      userId?: string;
-      apiKey?: string;
-      groupId?: string;
-      dataDirectory?: string;
-      libraryID?: number;
-      citations: any[];
-      collectionKey?: string;
-    }) => ipcRenderer.invoke('zotero:enrich-citations', options),
   },
 
   // PDF Export

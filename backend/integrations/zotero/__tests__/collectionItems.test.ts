@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import type { IZoteroDataSource } from '../IZoteroDataSource';
 import type { ZoteroCollection, ZoteroItem } from '../ZoteroAPI';
 import { collectionTree, listCollectionItems } from '../collectionItems';
-import { ZoteroSync } from '../ZoteroSync';
-import { createCitation } from '../../../types/citation';
 
 /**
  * Une collection, pour ClioDeck, c'est la collection et toutes ses
@@ -66,8 +64,6 @@ function source(): IZoteroDataSource {
     getItemChildren: async () => [],
     getItemAttachments: async () => [],
     hasAttachments: async () => false,
-    exportCollectionAsBibTeX: async () => '',
-    exportAllAsBibTeX: async () => '',
     downloadFile: async () => ({ filename: '', size: 0 }),
     testConnection: async () => true,
     getItemMetadata: () => ({ title: '', authors: '', year: '', type: '' }),
@@ -106,28 +102,5 @@ describe('listCollectionItems', () => {
   it('ne déborde pas sur une collection voisine', async () => {
     const keys = (await listCollectionItems(source(), 'THESE')).map((i) => i.key);
     expect(keys).not.toContain('HORS0001');
-  });
-});
-
-describe('ZoteroSync et sous-collections', () => {
-  it('la mise à jour ne propose pas de supprimer les notices des sous-collections', async () => {
-    // Bibliographie telle qu'un import l'a écrite : les trois notices de
-    // l'arbre. Avant correction, la mise à jour ne lisait que « Thèse »,
-    // vide, et proposait de tout supprimer.
-    const local = [
-      createCitation({ id: 'Archives_2024', type: 'article', author: 'Archives, X', year: '2024', title: 'Archives SDN', zoteroKey: 'SDN00001' }),
-      createCitation({ id: 'Temps_2024', type: 'article', author: 'Temps, X', year: '2024', title: 'Temps presse', zoteroKey: 'TEMPS001' }),
-      createCitation({ id: 'Farge_2024', type: 'article', author: 'Farge, X', year: '2024', title: 'Farge archives', zoteroKey: 'FARGE001' }),
-    ];
-
-    const diff = await new ZoteroSync(source()).checkForUpdates(local, 'THESE');
-
-    expect(diff.deleted).toEqual([]);
-    expect(diff.added).toEqual([]);
-  });
-
-  it('l’import compte les notices de tout l’arbre', async () => {
-    const summary = await new ZoteroSync(source()).getCollectionSummary('THESE');
-    expect(summary.itemCount).toBe(3);
   });
 });

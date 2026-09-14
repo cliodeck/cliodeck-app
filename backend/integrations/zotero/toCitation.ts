@@ -1,7 +1,7 @@
-import { createCitation, type Citation } from '../../types/citation';
+import { createCitation, type Citation, type ZoteroAttachmentInfo } from '../../types/citation';
 import { extractYear } from '../../core/bibliography/citekey';
 import { verbatimSafe } from '../../core/bibliography/BibTeXExporter';
-import type { ZoteroItem } from './ZoteroAPI';
+import type { ZoteroAttachment, ZoteroItem } from './ZoteroAPI';
 import { formatCreators } from './creators';
 
 /**
@@ -120,6 +120,32 @@ function accessDate(raw: string | undefined): string | undefined {
 }
 
 /**
+ * PDF joints à la notice, quand la source les a fournis (`data.attachments`).
+ *
+ * `undefined` si la source ne les a pas lus : ce n'est pas la même chose
+ * qu'une notice sans PDF, et la synchronisation ne doit pas en déduire
+ * qu'ils ont disparu. Les autres pièces jointes (instantanés HTML, liens)
+ * sont écartées : le panneau les présente comme des PDF à télécharger.
+ */
+function pdfAttachments(data: ZoteroItem['data']): ZoteroAttachmentInfo[] | undefined {
+  if (!Array.isArray(data.attachments)) return undefined;
+  return (data.attachments as ZoteroAttachment[])
+    .filter((att) => {
+      const type = att.data.contentType;
+      const name = att.data.filename ?? '';
+      return type === 'application/pdf' || (!type && /\.pdf$/i.test(name));
+    })
+    .map((att) => ({
+      key: att.key,
+      filename: att.data.filename || `${att.key}.pdf`,
+      contentType: 'application/pdf',
+      downloaded: false,
+      dateModified: att.data.dateModified,
+      md5: att.data.md5,
+    }));
+}
+
+/**
  * Item Zotero → citation, avec la clé BibTeX déjà attribuée
  * (cf. `assignCiteKeys`).
  */
@@ -174,6 +200,7 @@ export function zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citat
     booktitle: inBook ? (book ?? periodical) : undefined,
     publisher: field(data, 'publisher', 'university', 'institution', 'company', 'repository', 'label', 'distributor', 'studio', 'network'),
     zoteroKey: item.key,
+    zoteroAttachments: pdfAttachments(data),
     tags: data.tags?.map((t) => t.tag),
     customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
   });

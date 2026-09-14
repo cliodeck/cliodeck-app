@@ -1,15 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, RefreshCw, GitCompare } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { SyncPreviewModal } from './SyncPreviewModal';
 
 interface ZoteroCollection {
   key: string;
   name: string;
   parentCollection?: string;
+}
+
+/** Rapport de synchronisation renvoyé par le processus principal. */
+interface SyncEntry {
+  id: string;
+  title: string;
+}
+
+interface SyncReport {
+  collectionChange: { from: string; to: string } | null;
+  added: SyncEntry[];
+  modified: Array<SyncEntry & { fields: string[] }>;
+  deleted: SyncEntry[];
+  unchangedCount: number;
+  localOnlyCount: number;
+  renamedKeys: Array<{ from: string; to: string; title: string }>;
+  duplicates: Array<{ title: string; keys: string[] }>;
+  warnings: Array<{ kind: string; expected: number; written: number }>;
 }
 
 interface ZoteroLibraryInfo {
@@ -32,10 +49,7 @@ export const ZoteroImport: React.FC = () => {
   const [collections, setCollections] = useState<ZoteroCollection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string>('');
   const [isLoadingCollections, setIsLoadingCollections] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
-  const [showSyncModal, setShowSyncModal] = useState(false);
-  const [syncDiff, setSyncDiff] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Calculate depth of a collection in hierarchy
   const getCollectionDepth = (collectionKey: string): number => {
@@ -191,242 +205,126 @@ export const ZoteroImport: React.FC = () => {
     return `\n\n${t('zotero.import.duplicatesFound', { count: duplicates.length })}\n${lines.join('\n')}`;
   };
 
-  const handleImport = async () => {
+  /** Nom lisible d'une collection, sa clé à défaut (liste non chargée). */
+  const collectionName = (key: string): string =>
+    collections.find((c) => c.key === key)?.name ?? key;
+
+  /** Quelques lignes d'une liste, puis « … et N autres ». */
+  const listSome = (lines: string[], shown = 8): string => {
+    const head = lines.slice(0, shown);
+    if (lines.length > shown) {
+      head.push(t('zotero.sync.more', { count: lines.length - shown }));
+    }
+    return head.join('\n');
+  };
+
+  /** Ce qui sera détruit, formulé avant d'agir. */
+  const describeConfirmation = (report: SyncReport): string => {
+    const parts: string[] = [];
+    if (report.collectionChange) {
+      parts.push(
+        t('zotero.sync.confirmCollectionChange', {
+          from: collectionName(report.collectionChange.from),
+          to: collectionName(report.collectionChange.to),
+        })
+      );
+    }
+    if (report.deleted.length > 0) {
+      parts.push(
+        `${t('zotero.sync.confirmDeletions', { count: report.deleted.length })}\n` +
+          listSome(report.deleted.map((d) => `• ${d.title} — @${d.id}`))
+      );
+    }
+    if (report.added.length > 0) {
+      parts.push(t('zotero.sync.confirmAdditions', { count: report.added.length }));
+    }
+    return parts.join('\n\n');
+  };
+
+  /** Compte rendu après écriture. */
+  const describeOutcome = (report: SyncReport): string => {
+    const changed =
+      report.added.length + report.modified.length + report.deleted.length + report.renamedKeys.length > 0 ||
+      report.collectionChange !== null;
+    const parts: string[] = [
+      changed
+        ? t('zotero.sync.summary', {
+            added: report.added.length,
+            modified: report.modified.length,
+            deleted: report.deleted.length,
+          })
+        : t('zotero.sync.upToDate'),
+    ];
+    if (report.renamedKeys.length > 0) {
+      // Une clé refaite peut toucher le texte : l'auteur doit savoir laquelle.
+      parts.push(
+        `${t('zotero.sync.renamedKeys', { count: report.renamedKeys.length })}\n` +
+          listSome(report.renamedKeys.map((r) => `• @${r.from} → @${r.to}`))
+      );
+    }
+    if (report.localOnlyCount > 0) {
+      parts.push(t('zotero.sync.localKept', { count: report.localOnlyCount }));
+    }
+    return parts.join('\n\n') + describeSyncWarnings(report.warnings) + describeDuplicates(report.duplicates);
+  };
+
+  /**
+   * Le seul geste Zotero : premier import, mise à jour ou changement de
+   * collection, selon l'état du projet — c'est le processus principal qui
+   * en décide, en lisant le fichier du projet. Rien de destructeur sans
+   * accord : s'il faut retirer des références ou changer de collection, on
+   * demande d'abord.
+   */
+  const handleSynchronize = async () => {
     if (!isConfigured) {
       await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
       return;
     }
+    if (!currentProject?.path) {
+      await useDialogStore.getState().showAlert(t('zotero.import.projectInfo'));
+      return;
+    }
+    if (!selectedCollection) {
+      await useDialogStore.getState().showAlert(t('zotero.sync.chooseCollection'));
+      return;
+    }
 
-    setIsImporting(true);
-
+    setIsSyncing(true);
     try {
-      // Determine target directory based on current project
-      let targetDirectory: string | undefined;
-      let projectJsonPath: string | undefined;
+      let result = await window.electron.zotero.synchronize(
+        buildOptions({ collectionKey: selectedCollection })
+      );
 
-      if (currentProject) {
-        targetDirectory = currentProject.path;
-        projectJsonPath = `${currentProject.path}/project.json`;
-      }
-
-      // Sync to get BibTeX
-      const syncResult = await window.electron.zotero.sync(buildOptions({
-        collectionKey: selectedCollection || undefined,
-        downloadPDFs: false,
-        exportBibTeX: true,
-        targetDirectory,
-      }));
-
-      if (syncResult.success && syncResult.bibtexPath) {
-        // Load the exported BibTeX into bibliography
-        await useBibliographyStore.getState().loadBibliography(syncResult.bibtexPath);
-
-        // Get the loaded citations
-        const loadedCitations = useBibliographyStore.getState().citations;
-        const citationCount = loadedCitations.length;
-
-        // Enrich citations with Zotero attachment information (for PDF download)
-        console.log('Enriching citations with Zotero attachment info...');
-        const enrichResult = await window.electron.zotero.enrichCitations(buildOptions({
-          citations: loadedCitations,
-          collectionKey: selectedCollection || undefined,
-        }));
-
-        if (enrichResult.success && enrichResult.citations) {
-          // Update store with enriched citations
-          useBibliographyStore.setState({ citations: enrichResult.citations });
-
-          // Count how many have PDF attachments available
-          const withPDFs = enrichResult.citations.filter(
-            (c: { zoteroAttachments?: unknown[] }) => c.zoteroAttachments && c.zoteroAttachments.length > 0
-          ).length;
-          console.log(`${withPDFs} citations have PDF attachments available in Zotero`);
-
-          // Save metadata to persist zoteroAttachments across restarts
-          if (targetDirectory) {
-            try {
-              await window.electron.bibliography.saveMetadata({
-                projectPath: targetDirectory,
-                citations: enrichResult.citations,
-              });
-            } catch (metaError) {
-              console.error('Failed to save bibliography metadata:', metaError);
-            }
-          }
-        } else {
-          console.warn('Failed to enrich citations with attachment info:', enrichResult.error);
-        }
-
-        // If we have a project, save the bibliography source configuration
-        if (projectJsonPath && currentProject) {
-          const bibFileName = syncResult.bibtexPath.split('/').pop() || 'bibliography.bib';
-
-          await window.electron.project.setBibliographySource({
-            projectPath: projectJsonPath,
-            type: 'zotero',
-            filePath: bibFileName,
-            zoteroCollection: selectedCollection || undefined,
-          });
-
-          // Persister AUSSI dans zotero.collectionKey — le champ que
-          // loadZoteroConfig relit au montage. Sans cette écriture, seul le
-          // panneau technique ZoteroProjectSettings (saisie manuelle de la
-          // clé) alimentait la pré-sélection (#9). Merge du bloc existant :
-          // updateConfig remplace la clé zotero entière.
-          try {
-            const cfg = await window.electron.project.getConfig(projectJsonPath);
-            await window.electron.project.updateConfig(projectJsonPath, {
-              zotero: {
-                ...(cfg?.zotero ?? {}),
-                collectionKey: selectedCollection || undefined,
-              },
-            });
-          } catch (cfgError) {
-            console.warn('Failed to persist Zotero collection key:', cfgError);
-          }
-        }
-
-        await useDialogStore.getState().showAlert(
-          t('zotero.import.success', { count: citationCount }) +
-            describeSyncWarnings(syncResult.warnings) +
-            describeDuplicates(syncResult.duplicates)
+      if (result.success && result.status === 'needs-confirmation' && result.report) {
+        const confirmed = await useDialogStore
+          .getState()
+          .showConfirm(describeConfirmation(result.report as SyncReport), t('zotero.sync.confirmTitle'));
+        if (!confirmed) return;
+        result = await window.electron.zotero.synchronize(
+          buildOptions({ collectionKey: selectedCollection, confirmed: true })
         );
-
-        // La sélection reste affichée : c'est l'association mémorisée du
-        // projet, la remettre à vide faisait croire qu'elle était perdue —
-        // et la resync suivante l'écrasait réellement (#20).
-      } else {
-        await useDialogStore.getState().showAlert(t('zotero.import.error', { error: syncResult.error }));
       }
+
+      if (!result.success || result.status !== 'applied' || !result.report) {
+        await useDialogStore
+          .getState()
+          .showAlert(t('zotero.sync.error', { error: result.error ?? 'unknown' }));
+        return;
+      }
+
+      // Le panneau relit le fichier : c'est lui qui fait foi.
+      if (result.bibtexPath) {
+        await useBibliographyStore
+          .getState()
+          .loadBibliographyWithMetadata(result.bibtexPath, currentProject.path);
+      }
+
+      await useDialogStore.getState().showAlert(describeOutcome(result.report as SyncReport));
     } catch (error) {
-      console.error('Import failed:', error);
+      console.error('Zotero synchronization failed:', error);
       await useDialogStore.getState().showAlert(t('zotero.import.genericError'));
     } finally {
-      setIsImporting(false);
-    }
-  };
-
-  const handleCheckUpdates = async () => {
-    if (!isConfigured) {
-      await useDialogStore.getState().showAlert(t('zotero.import.configureFirst'));
-      return;
-    }
-
-    const citations = useBibliographyStore.getState().citations;
-    if (citations.length === 0) {
-      await useDialogStore.getState().showAlert('No citations in bibliography. Please import first.');
-      return;
-    }
-
-    setIsCheckingUpdates(true);
-
-    try {
-      const result = await window.electron.zotero.checkUpdates(buildOptions({
-        localCitations: citations,
-        collectionKey: selectedCollection || undefined,
-      }));
-
-      if (result.success && result.diff) {
-        if (result.hasChanges) {
-          setSyncDiff(result.diff);
-          setShowSyncModal(true);
-        } else {
-          await useDialogStore.getState().showAlert('Your bibliography is up to date! No changes detected.');
-        }
-      } else {
-        await useDialogStore.getState().showAlert(`Failed to check updates: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Failed to check updates:', error);
-      await useDialogStore.getState().showAlert(`Error checking updates: ${error}`);
-    } finally {
-      setIsCheckingUpdates(false);
-    }
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- resolution shape varies by strategy
-  const handleApplySync = async (strategy: 'local' | 'remote' | 'manual', resolution?: any) => {
-    if (!syncDiff) return;
-
-    setShowSyncModal(false);
-
-    try {
-      const currentCitations = useBibliographyStore.getState().citations;
-
-      const result = await window.electron.zotero.applyUpdates(buildOptions({
-        currentCitations,
-        diff: syncDiff,
-        strategy,
-        resolution,
-      }));
-
-      if (result.success && result.finalCitations) {
-        // Update bibliography store with new citations
-        useBibliographyStore.setState({ citations: result.finalCitations });
-        useBibliographyStore.getState().applyFilters();
-
-        // Réécrire le .bib du projet. Sans cette étape, la mise à jour ne
-        // vivait que dans le store et le sidecar : au lancement suivant,
-        // `loadBibliographyWithMetadata` relisait le fichier — inchangé —,
-        // les entrées ajoutées disparaissaient, et la vérification suivante
-        // les re-proposait à l'identique. Le fichier est la source de
-        // vérité : il doit être écrit ici.
-        let bibError: string | undefined;
-        if (currentProject?.path) {
-          try {
-            const projectJsonPath = `${currentProject.path}/project.json`;
-            const cfg = await window.electron.project.getConfig(projectJsonPath);
-            const configured = cfg?.bibliographySource?.filePath || 'bibliography.bib';
-            const bibPath = configured.startsWith('/')
-              ? configured
-              : `${currentProject.path}/${configured}`;
-
-            const exportResult = await window.electron.bibliography.export({
-              citations: result.finalCitations,
-              filePath: bibPath,
-              format: 'modern',
-            });
-            if (!exportResult.success) {
-              bibError = exportResult.error || 'unknown error';
-            }
-          } catch (writeError) {
-            bibError = writeError instanceof Error ? writeError.message : String(writeError);
-          }
-          if (bibError) {
-            console.error('Failed to write bibliography file after sync:', bibError);
-          }
-        }
-
-        // Save metadata to persist zoteroAttachments across restarts
-        if (currentProject?.path) {
-          try {
-            await window.electron.bibliography.saveMetadata({
-              projectPath: currentProject.path,
-              citations: result.finalCitations,
-            });
-          } catch (metaError) {
-            console.error('Failed to save bibliography metadata:', metaError);
-          }
-        }
-
-        // Show summary
-        await useDialogStore.getState().showAlert(
-          `Sync complete!\n\n` +
-          `Added: ${result.addedCount}\n` +
-          `Modified: ${result.modifiedCount}\n` +
-          `Deleted: ${result.deletedCount}\n` +
-          (result.skippedCount ? `Skipped: ${result.skippedCount}\n` : '') +
-          (bibError ? `\n${t('zotero.sync.bibWriteFailed', { error: bibError })}` : '')
-        );
-
-        // Clear sync diff
-        setSyncDiff(null);
-      } else {
-        await useDialogStore.getState().showAlert(`Failed to apply updates: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Failed to apply sync:', error);
-      await useDialogStore.getState().showAlert(`Error applying sync: ${error}`);
+      setIsSyncing(false);
     }
   };
 
@@ -476,8 +374,10 @@ export const ZoteroImport: React.FC = () => {
             disabled={!isConfigured || collections.length === 0}
             className="zotero-select"
           >
-            <option value="">
-              {collections.length === 0 ? t('zotero.import.loadCollections') : t('zotero.import.allItems')}
+            {/* Pas d'option « toute la bibliothèque » : un projet suit une
+                collection, sous-collections comprises. */}
+            <option value="" disabled>
+              {collections.length === 0 ? t('zotero.import.loadCollections') : t('zotero.sync.chooseCollection')}
             </option>
             {/* Collection mémorisée du projet, avant chargement de la liste :
                 sans cette option le select affichait « vide » alors que la
@@ -512,36 +412,14 @@ export const ZoteroImport: React.FC = () => {
 
         <button
           className="zotero-import-btn"
-          onClick={handleImport}
-          disabled={!isConfigured || isImporting}
+          onClick={handleSynchronize}
+          disabled={!isConfigured || isSyncing || !selectedCollection || !currentProject}
+          title={t('zotero.sync.buttonHint')}
         >
           <Download size={16} />
-          {isImporting ? t('zotero.import.importing') : t('zotero.import.importButton')}
-        </button>
-
-        <button
-          className="zotero-update-btn"
-          onClick={handleCheckUpdates}
-          disabled={!isConfigured || isCheckingUpdates}
-          title={t('zotero.import.checkUpdatesButton')}
-        >
-          <GitCompare size={16} />
-          {isCheckingUpdates ? t('zotero.import.checking') : t('zotero.import.updateButton')}
+          {isSyncing ? t('zotero.sync.running') : t('zotero.sync.button')}
         </button>
       </div>
-
-      {/* Sync Preview Modal */}
-      {syncDiff && (
-        <SyncPreviewModal
-          isOpen={showSyncModal}
-          onClose={() => {
-            setShowSyncModal(false);
-            setSyncDiff(null);
-          }}
-          diff={syncDiff}
-          onApplySync={handleApplySync}
-        />
-      )}
     </div>
   );
 };

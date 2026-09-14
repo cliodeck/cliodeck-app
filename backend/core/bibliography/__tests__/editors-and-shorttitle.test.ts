@@ -5,7 +5,8 @@ import { createCitation } from '../../../types/citation';
 import { citationToCSL } from '../../citation/citationFromZotero';
 import type { ZoteroItem } from '../../../integrations/zotero/ZoteroAPI';
 import { formatCreators } from '../../../integrations/zotero/creators';
-import { ZoteroLocalBibTeX } from '../../../integrations/zotero/ZoteroLocalBibTeX';
+import { ZoteroSynchronizer } from '../../../integrations/zotero/ZoteroSynchronizer';
+import type { IZoteroDataSource } from '../../../integrations/zotero/IZoteroDataSource';
 
 /**
  * Deux notions que la chaîne confondait :
@@ -163,15 +164,23 @@ describe('displayString', () => {
 });
 
 /**
- * Le vrai chemin d'export. `ZoteroLocalBibTeX` importe better-sqlite3,
- * mais le binding natif ne se charge qu'à l'ouverture d'une base :
- * `generateBibTeX` n'en ouvre aucune et tourne sur les deux ABI.
+ * Le vrai chemin d'export : un premier import par le moteur de
+ * synchronisation, contre une bibliographie vide.
  */
 describe('export d’une collection Zotero', () => {
-  const bibtex = new ZoteroLocalBibTeX('/inexistant');
+  const exportOf = async (item: ZoteroItem): Promise<string> => {
+    const source = {
+      listCollections: async () => [],
+      listItems: async () => [item],
+      getItemAttachments: async () => [],
+    } as unknown as IZoteroDataSource;
+    const result = await new ZoteroSynchronizer(source).synchronize({ local: [], collectionKey: 'COLL' });
+    if (result.status !== 'applied') throw new Error('import non appliqué');
+    return result.bibtex;
+  };
 
-  it('écrit les directeurs d’un ouvrage dirigé, jamais « Unknown »', () => {
-    const bib = bibtex.generateBibTeX([bookSection()]);
+  it('écrit les directeurs d’un ouvrage dirigé, jamais « Unknown »', async () => {
+    const bib = await exportOf(bookSection());
 
     expect(bib).toContain('@book{Fickers_2022,');
     expect(bib).toContain('editor = {Fickers, Andreas and Tatarinov, Juliane}');
@@ -179,28 +188,28 @@ describe('export d’une collection Zotero', () => {
     expect(bib).not.toContain('author = {}');
   });
 
-  it('reprend le titre court de Zotero sans le fabriquer', () => {
-    const bib = bibtex.generateBibTeX([bookSection()]);
+  it('reprend le titre court de Zotero sans le fabriquer', async () => {
+    const bib = await exportOf(bookSection());
 
     expect(bib).toContain('shorttitle = {Digital History and Hermeneutics}');
     // L'ancien repli coupait le titre à 47 caractères, en plein mot.
     expect(bib).not.toContain('...');
   });
 
-  it('n’invente pas de titre court quand Zotero n’en a pas', () => {
+  it('n’invente pas de titre court quand Zotero n’en a pas', async () => {
     const item = bookSection();
     item.data.shortTitle = undefined;
 
-    expect(bibtex.generateBibTeX([item])).not.toContain('shorttitle');
+    expect(await exportOf(item)).not.toContain('shorttitle');
   });
 
-  it('reprend le titre de l’ouvrage pour un chapitre', () => {
+  it('reprend le titre de l’ouvrage pour un chapitre', async () => {
     const item = bookSection();
     item.data.itemType = 'bookSection';
     item.data.bookTitle = 'Digital History and Hermeneutics';
     item.data.creators = [{ creatorType: 'author', lastName: 'Hiltmann', firstName: 'Torsten' }];
 
-    const bib = bibtex.generateBibTeX([item]);
+    const bib = await exportOf(item);
 
     expect(bib).toContain('@incollection{Hiltmann_2022,');
     expect(bib).toContain('booktitle = {Digital History and Hermeneutics}');

@@ -149,7 +149,8 @@ export class ZoteroDiffEngine {
     }
 
     // Compare attachments if requested
-    if (options.compareAttachments) {
+    // Pièces jointes non lues côté Zotero (`undefined`) : rien à comparer.
+    if (options.compareAttachments && remote.zoteroAttachments !== undefined) {
       const localAttachmentCount = local.zoteroAttachments?.length || 0;
       const remoteAttachmentCount = remote.zoteroAttachments?.length || 0;
 

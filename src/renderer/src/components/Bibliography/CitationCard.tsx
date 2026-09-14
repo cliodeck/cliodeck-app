@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Check, Copy } from 'lucide-react';
 import { Citation, useBibliographyStore } from '../../stores/bibliographyStore';
 import { PDFSelectionDialog } from './PDFSelectionDialog';
 import { CitationMetadataModal } from './CitationMetadataModal';
@@ -18,6 +19,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
   const [isIndexing, setIsIndexing] = useState(false);
   const [showPDFSelection, setShowPDFSelection] = useState(false);
   const [showMetadataModal, setShowMetadataModal] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
   const { selectCitation, insertCitation, indexPDFFromCitation, reindexPDFFromCitation, downloadAndIndexZoteroPDF, updateCitationMetadata, getAllTags, indexedFilePaths, indexedBibtexKeys } = useBibliographyStore();
   const { currentProject } = useProjectStore();
 
@@ -152,6 +154,30 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
 
         {isExpanded && (
           <div className="citation-details">
+            {/* La clé qu'on écrit dans le texte (`[@clé]`). Discrète, mais
+                visible : l'app la fabrique, et elle peut changer quand une
+                clé invalide est refaite à la synchronisation. */}
+            <div className="detail-item">
+              <span className="detail-label">{t('bibliography.citeKey')}</span>
+              <span className="detail-value citation-key">
+                <code>@{citation.id}</code>
+                <button
+                  type="button"
+                  className="citation-key-copy"
+                  title={keyCopied ? t('bibliography.keyCopied') : t('bibliography.copyKey')}
+                  aria-label={t('bibliography.copyKey')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void navigator.clipboard.writeText(citation.id).then(() => {
+                      setKeyCopied(true);
+                      setTimeout(() => setKeyCopied(false), 1500);
+                    });
+                  }}
+                >
+                  {keyCopied ? <Check size={11} /> : <Copy size={11} />}
+                </button>
+              </span>
+            </div>
             {citation.journal && (
               <div className="detail-item">
                 <span className="detail-label">{t('bibliography.journal')}</span>
