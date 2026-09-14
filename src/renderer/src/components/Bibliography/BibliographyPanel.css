@@ -313,3 +313,14 @@
   display: flex;
   gap: var(--spacing-md);
 }
+
+/* Bascule des tags automatiques de Zotero, discrète, au-dessus du filtre. */
+.automatic-tags-setting {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-sm) 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}

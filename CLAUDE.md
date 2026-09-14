@@ -113,5 +113,6 @@ Work happens on per-feature branches off `main` (check `git status`). As of 2026
 - **`.cliohints`** — workspace-level system-prompt context, persists across chats (`.cliodeck/hints.md`).
 - **Recipe** — YAML-defined workflow chaining brainstorm / search / graph / write / export steps.
 - **Vault** — an Obsidian markdown notes folder, indexed in `.cliodeck/obsidian-vectors.db`.
+- **Note de lecture** — one Markdown file per reference in `reading-notes/` (front matter: `citekey`, `zotero_key`, project `tags`). Project-owned and editable; Zotero tags and notes are Zotero-owned and read-only (automatic Zotero tags hidden by default). Never written to the `.bib`. See [`docs/reading-notes.md`](docs/reading-notes.md).
 - **Primary source** — Tropy archive (archival photos, OCR'd documents).
 - **Secondary source** — PDF in the bibliography (published article, book chapter).

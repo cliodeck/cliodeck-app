@@ -33,12 +33,38 @@ export interface Citation {
   zoteroAttachments?: ZoteroAttachmentInfo[]; // PDF attachments from Zotero
 
   // Tags and metadata
+  /** Tags du fichier .bib, pour une référence sans lien Zotero. */
   tags?: string[];
+  /** Tags Zotero de la notice — lecture seule. */
+  zoteroTags?: ZoteroTag[];
+  /** Notes Zotero de la notice — lecture seule. */
+  zoteroNotes?: ZoteroNote[];
   keywords?: string;
   notes?: string;
   customFields?: Record<string, string>;
   dateAdded?: string;
   dateModified?: string;
+}
+
+/** Tag Zotero ; `automatic` : importé par Zotero depuis un site d'éditeur. */
+export interface ZoteroTag {
+  tag: string;
+  automatic: boolean;
+}
+
+/** Note Zotero rattachée à la notice, en texte (lecture seule). */
+export interface ZoteroNote {
+  key: string;
+  text: string;
+}
+
+/** Note de lecture du projet (fichier Markdown dans `reading-notes/`). */
+export interface ReadingNoteSummary {
+  file: string;
+  citekey: string;
+  zoteroKey?: string;
+  /** Étiquettes du projet. */
+  tags: string[];
 }
 
 export interface IndexingProgress {
@@ -79,7 +105,6 @@ export interface CitationSliceState {
   toggleSortOrder: () => void;
   selectCitation: (citationId: string) => void;
   insertCitation: (citationId: string) => void;
-  updateCitationMetadata: (citationId: string, updates: Partial<Citation>) => void;
   getAllTags: () => string[];
   setTagsFilter: (tags: string[]) => void;
   clearTagsFilter: () => void;
@@ -108,8 +133,21 @@ export interface ZoteroSliceState {
   downloadAllMissingPDFs: (projectPath: string) => Promise<{ downloaded: number; skipped: number; errors: string[] }>;
 }
 
+export interface ReadingNotesSliceState {
+  readingNotes: ReadingNoteSummary[];
+  /** Afficher aussi les tags automatiques de Zotero (masqués par défaut). */
+  showAutomaticZoteroTags: boolean;
+
+  loadReadingNotes: () => Promise<void>;
+  /** Remplace les étiquettes du projet d'une référence (crée la note au besoin). */
+  setProjectTags: (citationId: string, tags: string[]) => Promise<void>;
+  /** Chemin de la note de lecture, créée au besoin. */
+  openReadingNote: (citationId: string) => Promise<string | null>;
+  setShowAutomaticZoteroTags: (show: boolean) => void;
+}
+
 // Combined state (all slices merged)
-export type BibliographyState = CitationSliceState & IndexingSliceState & ZoteroSliceState;
+export type BibliographyState = CitationSliceState & IndexingSliceState & ZoteroSliceState & ReadingNotesSliceState;
 
 // Zustand slice creator type - each slice gets set/get for the full combined state
 export type BibliographySliceCreator<T> = StateCreator<BibliographyState, [], [], T>;

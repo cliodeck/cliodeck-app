@@ -117,7 +117,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
             ref={inputRef}
             type="text"
             className="tag-input"
-            placeholder={tags.length === 0 ? 'Add tags...' : ''}
+            placeholder={tags.length === 0 ? `${t('tagManager.add')}…` : ''}
             value={inputValue}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}

@@ -11,6 +11,7 @@ import {
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
+import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
 import type { Citation } from '../../../backend/types/citation.js';
 
 // Common options for Zotero data source selection
@@ -265,6 +266,13 @@ class ZoteroService {
           await writeFile(temporary, result.bibtex, 'utf-8');
           await rename(temporary, bibtexPath);
           await BibliographyMetadataService.saveMetadata(options.projectPath, result.citations);
+          // Une clé refaite ne doit pas couper une note de lecture de sa
+          // référence : la note suit (front matter et nom de fichier).
+          try {
+            await followRenamedCitekeys(options.projectPath, result.report.renamedKeys);
+          } catch (error) {
+            console.warn('⚠️ Notes de lecture non renommées :', error);
+          }
         }
 
         await recordProjectCollection(projectJsonPath, relativeBib, options.collectionKey);

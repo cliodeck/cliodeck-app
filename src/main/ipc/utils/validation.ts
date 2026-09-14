@@ -413,6 +413,21 @@ export const BibliographySaveMetadataSchema = z.object({
   citations: z.array(z.record(z.string(), z.unknown())),
 });
 
+/** Référence visée par une note de lecture (identité, pas de chemin). */
+const ReadingNoteReferenceSchema = z.object({
+  citekey: z.string().min(1).max(512),
+  zoteroKey: z.string().regex(/^[A-Za-z0-9]{1,32}$/).optional(),
+  title: z.string().max(4000).optional(),
+  author: z.string().max(4000).optional(),
+  year: z.string().max(64).optional(),
+});
+
+export const ReadingNoteOpenSchema = ReadingNoteReferenceSchema;
+
+export const ReadingNoteSetTagsSchema = ReadingNoteReferenceSchema.extend({
+  tags: z.array(z.string().max(200)).max(200),
+});
+
 export const BibliographyLoadWithMetadataSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),
   projectPath: z.string().min(1, 'Project path is required'),

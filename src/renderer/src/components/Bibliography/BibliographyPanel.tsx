@@ -60,8 +60,19 @@ export const BibliographyPanel: React.FC = () => {
     [citations]
   );
 
-  // Memoize getAllTags() to avoid recomputing on every render
-  const allTags = useMemo(() => getAllTags(), [citations, getAllTags]);
+  // Tags filtrables : dépendent aussi des notes de lecture (étiquettes du
+  // projet) et de l'affichage des tags automatiques de Zotero.
+  const readingNotes = useBibliographyStore((state) => state.readingNotes);
+  const showAutomaticZoteroTags = useBibliographyStore((state) => state.showAutomaticZoteroTags);
+  const setShowAutomaticZoteroTags = useBibliographyStore((state) => state.setShowAutomaticZoteroTags);
+  const allTags = useMemo(
+    () => getAllTags(),
+    [citations, readingNotes, showAutomaticZoteroTags, getAllTags]
+  );
+  const hasAutomaticZoteroTags = useMemo(
+    () => citations.some((c) => c.zoteroTags?.some((tag) => tag.automatic)),
+    [citations]
+  );
 
   const [showModeModal, setShowModeModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -435,6 +446,18 @@ export const BibliographyPanel: React.FC = () => {
         <div className="citation-count">
           {filteredCitations.length} citation{filteredCitations.length !== 1 ? 's' : ''}
         </div>
+
+        {/* Tags automatiques de Zotero : masqués par défaut, jamais perdus. */}
+        {hasAutomaticZoteroTags && (
+          <label className="automatic-tags-setting">
+            <input
+              type="checkbox"
+              checked={showAutomaticZoteroTags}
+              onChange={(e) => setShowAutomaticZoteroTags(e.target.checked)}
+            />
+            {t('bibliography.showAutomaticTags')}
+          </label>
+        )}
 
         {/* Tag Filter */}
         {allTags.length > 0 && (
