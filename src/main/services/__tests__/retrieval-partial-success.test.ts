@@ -87,15 +87,15 @@ describe('RetrievalService partial-success envelope (1.7)', () => {
     vi.restoreAllMocks();
   });
 
-  it('reports outcomes for all four corpora, marking unattempted ones', async () => {
+  it('reports outcomes for all five corpora, marking unattempted ones', async () => {
     const result = await retrievalService.search({
       query: 'q',
       sourceType: 'secondary',
       includeVault: false,
     });
-    // Quatre corpus depuis l'ajout du manuscrit (item 25 des audits) :
-    // secondaire, primaire, vault, manuscrit.
-    expect(result.outcomes).toHaveLength(4);
+    // Cinq corpus : secondaire, primaire, vault, manuscrit (item 25 des
+    // audits), notes de lecture.
+    expect(result.outcomes).toHaveLength(5);
     const map = Object.fromEntries(result.outcomes.map((o) => [o.source, o]));
     expect(map.secondary.attempted).toBe(true);
     expect(map.secondary.ok).toBe(true);
@@ -103,6 +103,7 @@ describe('RetrievalService partial-success envelope (1.7)', () => {
     expect(map.primary.attempted).toBe(false);
     expect(map.primary.ok).toBe(false);
     expect(map.vault.attempted).toBe(false);
+    expect(map.readingNotes.attempted).toBe(false);
   });
 
   it('preserves successful corpora when one corpus throws (partial success)', async () => {

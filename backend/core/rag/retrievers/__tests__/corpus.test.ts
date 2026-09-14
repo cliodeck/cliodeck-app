@@ -44,6 +44,9 @@ describe('corporaInScope', () => {
       { sourceType: 'both', includeVault: true, includeManuscript: true },
       ['secondary', 'primary', 'vault', 'manuscript'],
     ],
+    // Les notes de lecture n'ont pas de mode « seules » : elles s'ajoutent.
+    [{ sourceType: 'secondary', includeReadingNotes: true }, ['secondary', 'readingNotes']],
+    [{ sourceType: 'manuscript', includeReadingNotes: true }, ['manuscript', 'readingNotes']],
   ];
 
   it.each(cases)('%j → %j', (query, expected) => {

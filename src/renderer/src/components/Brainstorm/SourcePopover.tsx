@@ -10,7 +10,8 @@
  *
  * - **outside ClioDeck** (PDF, Tropy, Obsidian vault) — dispatches one of
  *   three `window.electron.sources.*` IPCs, which hand off to the OS.
- * - **inside the project** (the manuscript) — navigates in-app via
+ * - **inside the project** (the manuscript, and the reading notes in
+ *   `reading-notes/`) — navigates in-app via
  *   `openManuscriptSource`: switch to Write mode, load the chapter, place the
  *   cursor. Routing a chapter through `sources:open-note` would resolve its
  *   path against the *Obsidian vault* and open the wrong file, or nothing.
@@ -62,7 +63,7 @@ export function positionLabel(s: BrainstormSource): string | null {
   if (s.sourceType === 'primary') {
     return s.itemId ? `item #${s.itemId}` : null;
   }
-  if (s.sourceType === 'manuscript') {
+  if (s.sourceType === 'manuscript' || s.sourceType === 'readingNotes') {
     const rel = manuscriptRelativePath(s);
     if (!rel) return null;
     return s.lineNumber != null ? `${rel} · L${s.lineNumber}` : rel;
@@ -79,7 +80,9 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
     // Le manuscrit s'ouvre dans l'éditeur de ClioDeck : ni IPC `sources:*`, ni
     // preload requis. Traité avant la garde ci-dessous, qui ne concerne que
     // les corpus délégués à l'OS.
-    if (source.sourceType === 'manuscript') {
+    // Les notes de lecture vivent aussi dans le projet (`reading-notes/`) :
+    // même route. `sources:open-note` les chercherait dans le vault Obsidian.
+    if (source.sourceType === 'manuscript' || source.sourceType === 'readingNotes') {
       setBusy(true);
       setError(null);
       try {
@@ -141,7 +144,8 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
     (source.sourceType === 'secondary' && !!source.documentId) ||
     (source.sourceType === 'primary' && !!source.itemId) ||
     (source.sourceType === 'vault' && !!(source.notePath ?? source.relativePath)) ||
-    (source.sourceType === 'manuscript' && canOpenManuscriptSource(source));
+    ((source.sourceType === 'manuscript' || source.sourceType === 'readingNotes') &&
+      canOpenManuscriptSource(source));
 
   return (
     <div

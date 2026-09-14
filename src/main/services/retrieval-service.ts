@@ -45,6 +45,7 @@ import {
   manuscriptStorePath,
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
+import { readingNotesIndexService } from './reading-notes-index-service.js';
 import { selectWithManuscriptQuota } from './retrieval-quota.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
@@ -166,6 +167,44 @@ export interface ManuscriptMappedSearchResult {
 }
 
 /**
+ * Un extrait d'une note de lecture de l'auteur (`reading-notes/<clé>.md`).
+ *
+ * Ce n'est ni la source (le PDF) ni le texte de l'auteur (le manuscrit) :
+ * c'est son commentaire d'une référence. Il sort donc par son propre canal,
+ * `RetrievalSearchResult.readingNoteHits`, et reste nommé comme tel jusqu'à
+ * l'affichage — une note de lecture n'est pas une citation de l'ouvrage.
+ */
+export interface ReadingNoteMappedSearchResult {
+  chunk: {
+    id: string;
+    content: string;
+    documentId: string | undefined;
+    chunkIndex: number;
+  };
+  document: {
+    id: string | undefined;
+    /** Titre de la référence commentée, ou chemin de la note à défaut. */
+    title: string | undefined;
+    author: null;
+    /** Clé de citation de la référence commentée. */
+    bibtexKey: string;
+  };
+  source: {
+    kind: 'reading-note';
+    relativePath: string;
+    noteId: string;
+    citekey: string;
+    zoteroKey?: string;
+    tags: string[];
+    sectionTitle?: string;
+    /** Ligne 1-indexée dans le fichier de la note. */
+    line: number;
+  };
+  similarity: number;
+  sourceType: 'readingNotes';
+}
+
+/**
  * Union publique historique : les trois corpus externes. Le manuscrit en
  * est délibérément absent — `hitsToSources` (fusion-chat-service) mappe
  * `sourceType` sur un union plus étroit, et l'élargir touche une couche
@@ -179,7 +218,10 @@ export type MultiSourceSearchResult =
   | VaultMappedSearchResult;
 
 /** Union interne : ce que le pipeline trie et inspecte réellement. */
-type AnySearchResult = MultiSourceSearchResult | ManuscriptMappedSearchResult;
+type AnySearchResult =
+  | MultiSourceSearchResult
+  | ManuscriptMappedSearchResult
+  | ReadingNoteMappedSearchResult;
 
 /**
  * Per-corpus outcome (fusion 1.7 — partial-success first-class). Défini
@@ -197,7 +239,9 @@ export interface RetrievalSearchResult {
    * d'archive ou de bibliographie (item 25 des audits).
    */
   manuscriptHits: ManuscriptMappedSearchResult[];
-  /** Per-corpus outcomes (always 4: secondary, primary, vault, manuscript). */
+  /** Extraits des notes de lecture, séparés pour la même raison. */
+  readingNoteHits: ReadingNoteMappedSearchResult[];
+  /** Per-corpus outcomes (always 5: secondary, primary, vault, manuscript, readingNotes). */
   outcomes: RetrievalSourceOutcome[];
   /**
    * Événements de l'inspecteur de sécurité pour les chunks retournés (#8),
@@ -236,6 +280,8 @@ export interface RetrievalSearchWithStatsResult {
   hits: MultiSourceSearchResult[];
   /** Extraits du manuscrit, séparés (cf. `RetrievalSearchResult`). */
   manuscriptHits: ManuscriptMappedSearchResult[];
+  /** Extraits des notes de lecture, séparés (cf. `RetrievalSearchResult`). */
+  readingNoteHits: ReadingNoteMappedSearchResult[];
   /** Événements de sécurité des chunks retournés (cf. `RetrievalSearchResult`). */
   securityEvents: SecurityEvent[];
   stats: RetrievalSearchStats;
@@ -263,6 +309,12 @@ export interface RetrievalQuery {
    * Opt-in like `includeVault`: legacy callers keep PDF+Tropy behaviour.
    */
   includeManuscript?: boolean;
+  /**
+   * When true, also search the author's reading notes (if indexed).
+   * Opt-in too — and the chat withholds it from cloud providers unless the
+   * author consented (`rag.readingNotesCloudConsent`).
+   */
+  includeReadingNotes?: boolean;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -285,6 +337,8 @@ function toInspectable(r: AnySearchResult): InspectableChunk {
     source = `obsidian:${r.source.noteId}`;
   } else if (r.sourceType === 'manuscript') {
     source = `manuscript:${r.source.relativePath}`;
+  } else if (r.sourceType === 'readingNotes') {
+    source = `reading-note:${r.source.relativePath}`;
   } else {
     source = `pdf:${r.document.id ?? r.document.bibtexKey ?? 'unknown'}`;
   }
@@ -357,6 +411,7 @@ class RetrievalService {
     // Le corpus manuscrit suit le même projet : rattacher ici évite que
     // l'indexeur garde un handle WAL sur le `brain.db` du projet précédent.
     manuscriptIndexService.configure(this.workspaceRoot);
+    readingNotesIndexService.configure(this.workspaceRoot);
 
     // Fire-and-forget warmup: pre-embed frequent FR↔EN translations so the
     // first real query hits a warm cache. Only runs once per process.
@@ -419,6 +474,9 @@ class RetrievalService {
     this.vaultStore = null;
     this.manuscriptStore?.close();
     this.manuscriptStore = null;
+    // Projet fermé : le handle des notes de lecture ne doit pas garder le
+    // `brain.db` de l'ancien projet verrouillé.
+    readingNotesIndexService.clear();
   }
 
   private getProviderId(): string | undefined {
@@ -557,7 +615,7 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const { hits, manuscriptHits, outcomes, securityEvents } = await this.search(q);
+    const { hits, manuscriptHits, readingNoteHits, outcomes, securityEvents } = await this.search(q);
     const searchMs = Date.now() - t0;
 
     const documentMap = new Map<
@@ -589,6 +647,7 @@ class RetrievalService {
     return {
       hits,
       manuscriptHits,
+      readingNoteHits,
       securityEvents,
       outcomes,
       stats: {
@@ -665,17 +724,22 @@ class RetrievalService {
     }
 
     // Séparation au retour : les appelants historiques reçoivent les trois
-    // corpus externes, le manuscrit sort à part.
+    // corpus externes ; le manuscrit et les notes de lecture sortent à part.
     const externalHits = inspectedResults.filter(
-      (r): r is MultiSourceSearchResult => r.sourceType !== 'manuscript'
+      (r): r is MultiSourceSearchResult =>
+        r.sourceType !== 'manuscript' && r.sourceType !== 'readingNotes'
     );
     const manuscriptHits = inspectedResults.filter(
       (r): r is ManuscriptMappedSearchResult => r.sourceType === 'manuscript'
+    );
+    const readingNoteHits = inspectedResults.filter(
+      (r): r is ReadingNoteMappedSearchResult => r.sourceType === 'readingNotes'
     );
 
     return {
       hits: externalHits,
       manuscriptHits,
+      readingNoteHits,
       securityEvents,
       outcomes,
     };
@@ -731,7 +795,7 @@ class RetrievalService {
   }
 
   /**
-   * Les quatre corpus, sous la forme commune (Path A′). Chaque adaptateur
+   * Les cinq corpus, sous la forme commune (Path A′). Chaque adaptateur
    * appelle la méthode du corpus AU MOMENT de la recherche — pas une
    * référence capturée — pour que les tests puissent la remplacer.
    *
@@ -754,7 +818,55 @@ class RetrievalService {
       { corpus: 'primary', search: (query, o) => this.searchPrimary(query, o) },
       { corpus: 'vault', search: (query, o) => this.searchVault(query, o) },
       { corpus: 'manuscript', search: (query, o) => this.searchManuscript(query, o) },
+      { corpus: 'readingNotes', search: (query, o) => this.searchReadingNotes(query, o) },
     ];
+  }
+
+  private async searchReadingNotes(
+    query: string,
+    options: { topK: number; threshold: number }
+  ): Promise<ReadingNoteMappedSearchResult[]> {
+    const store = readingNotesIndexService.getSearchStore();
+    if (!store) return [];
+    const embedding = await this.getQueryEmbedding(query);
+    const hits = store.search(embedding, query, options.topK);
+    const mapped = hits.map(
+      (h): ReadingNoteMappedSearchResult => ({
+        chunk: {
+          id: h.chunk.id,
+          content: h.chunk.content,
+          documentId: h.note.id,
+          chunkIndex: h.chunk.chunkIndex,
+        },
+        document: {
+          id: h.note.id,
+          title: h.note.title || h.note.relativePath,
+          author: null,
+          bibtexKey: h.note.citekey,
+        },
+        source: {
+          kind: 'reading-note',
+          relativePath: h.note.relativePath,
+          noteId: h.note.id,
+          citekey: h.note.citekey,
+          zoteroKey: h.note.zoteroKey,
+          tags: h.note.tags,
+          sectionTitle: h.chunk.sectionTitle,
+          line: h.chunk.line,
+        },
+        // Contrat Path A′ : jamais le RRF, qui plafonne à 1/61.
+        similarity: relevanceScore({
+          dense: h.signals.dense,
+          sparseRank: h.signals.lexicalRank,
+        }),
+        sourceType: 'readingNotes',
+      })
+    );
+    // Pas de repli sous le seuil, comme le vault et le manuscrit : écrites
+    // par l'auteur dans sa langue, les notes n'ont pas l'excuse de l'écart
+    // de langue ; et pas de quota (choix de l'auteur) — elles concourent
+    // à armes égales avec les sources.
+    return applyThreshold(mapped, options.threshold, 0);
   }
 
   private async searchPrimary(

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { hitsToSources, isFreeMode, resolveTurnOptions } from '../fusion-chat-service.js';
+import {
+  formatReadingNotesContext,
+  hitsToSources,
+  isFreeMode,
+  readingNoteHitsToSources,
+  resolveTurnOptions,
+  shouldIncludeReadingNotes,
+} from '../fusion-chat-service.js';
+import type { ReadingNoteMappedSearchResult } from '../retrieval-service.js';
 import type { LLMConfig } from '../../../../backend/types/config.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
 import { runChatTurn } from '../chat-engine.js';
@@ -176,6 +184,55 @@ describe('hitsToSources', () => {
     expect(snippet.length).toBe(400);
     expect(snippet.startsWith('alpha beta gamma delta')).toBe(true);
     expect(snippet).not.toMatch(/\s{2,}/);
+  });
+});
+
+describe('notes de lecture dans le chat', () => {
+  const hit: ReadingNoteMappedSearchResult = {
+    chunk: { id: 'n-0', content: 'La longue  durée\nécrase l’événement.', documentId: 'zotero:ABCD1234', chunkIndex: 0 },
+    document: { id: 'zotero:ABCD1234', title: 'La Méditerranée', author: null, bibtexKey: 'Braudel_1949' },
+    source: {
+      kind: 'reading-note',
+      relativePath: 'reading-notes/Braudel_1949.md',
+      noteId: 'zotero:ABCD1234',
+      citekey: 'Braudel_1949',
+      zoteroKey: 'ABCD1234',
+      tags: ['chapitre-2'],
+      line: 9,
+    },
+    similarity: 0.7,
+    sourceType: 'readingNotes',
+  };
+
+  it('exclut les notes d’un fournisseur distant sans consentement, jamais d’un local', () => {
+    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: false, cloudConsent: false })).toBe(true);
+    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: true, cloudConsent: false })).toBe(false);
+    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: true, cloudConsent: true })).toBe(true);
+    expect(shouldIncludeReadingNotes({ enabled: false, isCloud: false, cloudConsent: true })).toBe(false);
+  });
+
+  it('nomme la référence commentée et garde de quoi rouvrir la note', () => {
+    expect(readingNoteHitsToSources([hit])).toEqual([
+      {
+        kind: 'lecture',
+        sourceType: 'readingNotes',
+        title: '@Braudel_1949 — La Méditerranée',
+        snippet: 'La longue durée écrase l’événement.',
+        similarity: 0.7,
+        relativePath: 'reading-notes/Braudel_1949.md',
+        notePath: 'reading-notes/Braudel_1949.md',
+        lineNumber: 9,
+      },
+    ]);
+  });
+
+  it('présente les notes au modèle comme le commentaire de l’auteur, pas comme la source', () => {
+    const block = formatReadingNotesContext([hit]);
+    expect(block).toContain('NOTES DE LECTURE');
+    expect(block).toContain("N'attribue JAMAIS leur contenu à l'ouvrage commenté");
+    expect(block).toContain('[L1] @Braudel_1949 — La Méditerranée');
+    expect(block).toContain('ÉTIQUETTES : chapitre-2');
+    expect(formatReadingNotesContext([])).toBe('');
   });
 });
 

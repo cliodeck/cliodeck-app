@@ -7,6 +7,8 @@ import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import { projectManager } from '../../services/project-manager.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
+import { readingNotesIndexService } from '../../services/reading-notes-index-service.js';
+import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
 import { historyService } from '../../services/history-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
@@ -96,6 +98,15 @@ export function setupEditorHandlers() {
             console.warn('⚠️ Indexation du manuscrit ignorée:', error);
           }
         })();
+
+        // Une note de lecture sauvegardée rejoint son corpus de la même façon.
+        const projectRoot = projectManager.getCurrentProjectPath();
+        if (projectRoot) {
+          readingNotesIndexService.configure(projectRoot);
+          if (readingNotesIndexService.isReadingNoteFile(filePath)) {
+            indexReadingNotesInBackground('sauvegarde');
+          }
+        }
 
         console.log('📤 IPC Response: editor:save-file - success');
         return successResponse();

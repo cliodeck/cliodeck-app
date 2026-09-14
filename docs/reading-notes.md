@@ -51,11 +51,21 @@ Texte libre.
 - **Jamais supprimée**, même quand la référence sort de la bibliographie.
 - Un front matter illisible est signalé, jamais réécrit, et ne donne pas lieu à une seconde note créée à côté.
 
+## Corpus de l'assistant
+
+Les notes de lecture sont le **cinquième corpus RAG**, à côté de la bibliographie, des archives, du vault et du manuscrit. Code : `backend/core/vector-store/ReadingNotesStore.ts`, `src/main/services/reading-notes-index-service.ts`, `retrieval-service.ts` (`searchReadingNotes`), `fusion-chat-service.ts`.
+
+- **Stockage** : tables `reading_notes*` dans `.cliodeck/brain.db`, recherche hybride cosinus + BM25 comme le manuscrit. Une note est identifiée par sa référence (`zotero:<clé>`, sinon `citekey:<clé>`) : renommer le fichier ne la réembarque pas.
+- **En-tête embarqué** : chaque extrait est embarqué et indexé avec « Note de lecture sur @clé — titre » et les étiquettes du projet, car une note ne répète presque jamais ce qu'elle commente. L'extrait rendu à l'assistant reste le texte de l'auteur.
+- **Indexation** incrémentale par empreinte, best-effort : à l'ouverture du projet (note éditée dans Obsidian), à la sauvegarde d'une note, après une modification d'étiquettes, après une synchronisation Zotero. Une note illisible garde son index ; deux fichiers pour la même référence sont signalés.
+- **Recherche** (contrat Path A′) : pertinence `max(cosinus, rang lexical)`, pas de repli sous le seuil, **pas de quota** — les notes concourent à armes égales. Canal séparé `readingNoteHits`.
+- **Chat** : bloc de contexte à part (« NOTES DE LECTURE de l'auteur, pas la référence »), sources `kind: 'lecture'` titrées `@clé — titre`, ouvertes dans l'éditeur à la bonne ligne.
+- **Réglages** (Paramètres → Expert → *Corpus notes de lecture*) : `rag.indexReadingNotes` (défaut activé) ; `rag.readingNotesCloudConsent` (défaut **refusé**) — sans lui, les notes ne partent jamais vers un fournisseur distant (Claude, OpenAI, Mistral, Gemini, Ollama distant). Le consentement de session (ADR 0005) autorise le tour, pas ce corpus.
+
 ## Pour plus tard : remontée vers Zotero
 
 Non implémentée, volontairement, mais préparée : chaque note connaît la clé Zotero de sa notice, et les étiquettes du projet restent distinctes des tags Zotero. Une remontée passerait par l'**API web de Zotero** avec une clé autorisée en écriture — jamais par la base locale, que Zotero interdit d'écrire. Elle pousserait `tags` comme tags Zotero et le corps de la note comme note enfant. Il faudrait alors décider des conflits (étiquette retirée dans Zotero mais présente dans la note) : c'est ce choix, et non le stockage, qui fera le travail.
 
 ## Pistes
 
-- Proposer les notes de lecture comme corpus de l'assistant, comme le manuscrit.
 - Signaler les notes orphelines (référence sortie de la bibliographie).
