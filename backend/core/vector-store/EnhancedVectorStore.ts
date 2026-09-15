@@ -28,6 +28,11 @@ export class EnhancedVectorStore {
 
   // Rebuild status tracking
   private isRebuilding: boolean = false;
+  /**
+   * Des documents ont quitté SQLite : HNSW et BM25 ne savent pas retirer un
+   * vecteur, ils gardent ceux des extraits supprimés jusqu'à reconstruction.
+   */
+  private indexesStale: boolean = false;
   private rebuildProgress: {
     current: number;
     total: number;
@@ -139,6 +144,7 @@ export class EnhancedVectorStore {
    * Check if indexes need to be rebuilt
    */
   needsRebuild(): boolean {
+    if (this.indexesStale) return true;
     const hnswSize = this.hnswStore.getSize();
     const chunks = this.vectorStore.getAllChunksWithEmbeddings();
     return hnswSize === 0 && chunks.length > 0;
@@ -257,11 +263,17 @@ export class EnhancedVectorStore {
       );
     }
 
-    // Populate document information
+    // Populate document information. Un extrait dont le document a été
+    // supprimé (index pas encore reconstruit) est écarté : sans document, il
+    // ne peut ni être cité ni être affiché.
+    const withDocument: SearchResult[] = [];
     for (const result of results) {
       const doc = await this.vectorStore.getDocument(result.chunk.documentId);
-      result.document = doc!;
+      if (!doc) continue;
+      result.document = doc;
+      withDocument.push(result);
     }
+    results = withDocument;
 
     const duration = Date.now() - startTime;
     console.log(
@@ -280,6 +292,9 @@ export class EnhancedVectorStore {
     }
 
     this.isRebuilding = true;
+    // Levé AVANT de lire SQLite : une suppression pendant la reconstruction
+    // le remet, et la reconstruction suivante la prendra en compte.
+    this.indexesStale = false;
     console.log('🔨 Rebuilding all indexes from SQLite...');
     const startTime = Date.now();
 
@@ -344,6 +359,7 @@ export class EnhancedVectorStore {
       this.rebuildProgress = { current: 100, total: 100, status: 'Rebuild complete' };
       this.notifyProgress();
     } catch (error) {
+      this.indexesStale = true;
       console.error('❌ Failed to rebuild indexes:', error);
       this.rebuildProgress = { current: 0, total: 100, status: `Error: ${error.message}` };
       this.notifyProgress();
@@ -469,6 +485,30 @@ export class EnhancedVectorStore {
 
   deleteDocument(documentId: string): void {
     this.vectorStore.deleteDocument(documentId);
+    this.indexesStale = true;
+  }
+
+  getDocumentIdsByFilePath(filePath: string): string[] {
+    return this.vectorStore.getDocumentIdsByFilePath(filePath);
+  }
+
+  mergeDocumentsInto(keepId: string, replacedIds: string[]): void {
+    this.vectorStore.mergeDocumentsInto(keepId, replacedIds);
+    if (replacedIds.some((id) => id !== keepId)) this.indexesStale = true;
+  }
+
+  removeDuplicateDocuments(): { files: number; removed: number } {
+    const result = this.vectorStore.removeDuplicateDocuments();
+    if (result.removed > 0) this.indexesStale = true;
+    return result;
+  }
+
+  countDuplicateDocuments(): number {
+    return this.vectorStore.countDuplicateDocuments();
+  }
+
+  backupTo(destination: string): Promise<unknown> {
+    return this.vectorStore.backupTo(destination);
   }
 
   saveCitation(citation: any): void {
