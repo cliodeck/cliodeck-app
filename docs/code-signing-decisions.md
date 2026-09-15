@@ -1,20 +1,22 @@
 # Code Signing — decisions pending
 
-> Still open, and still the blocker for v2.0 GA. **macOS is now tracked in
-> issue [#75](https://github.com/cliodeck/cliodeck-app/issues/75)**, which
-> carries the wiring plan (`@electron/notarize` + an `afterSign` hook + CI
-> secrets) and is blocked only on the maintainer's Apple Developer ID
-> certificate. This document keeps the questions that #75 does *not* answer:
-> Windows, Linux, and the CI-versus-local signing choice.
+> Still open, and still the blocker for v2.0 GA. **macOS is tracked in
+> issue [#75](https://github.com/cliodeck/cliodeck-app/issues/75)**: the
+> Apple Developer account exists (team `56789J6QWG`) and notarization is wired
+> through electron-builder's built-in `mac.notarize` — no `afterSign` hook.
+> Procedure: [`macos-notarization.md`](macos-notarization.md). This document
+> keeps the questions that #75 does *not* answer: Windows, Linux, and the
+> CI-versus-local signing choice.
 >
 > See also `docs/installer-strategy.md` for the broader distribution plan.
 
 ## Where the build config already stands
 
-`package.json`'s `mac` block is **prepared but inert**: `hardenedRuntime: true`,
-`entitlements` + `entitlementsInherit`, `gatekeeperAssess: false`. There is no
-`afterSign` hook, no signing identity, and no CI secret — so distributed builds
-still trip Gatekeeper.
+`package.json`'s `mac` block carries `hardenedRuntime: true`,
+`entitlements` + `entitlementsInherit`, `gatekeeperAssess: false` and
+`notarize: { teamId }`. Signing and notarization happen on a maintainer's Mac
+that holds the Developer ID certificate and a `notarytool` keychain profile;
+without them the build silently comes out unsigned. No CI secret yet.
 
 ## Context
 
@@ -27,10 +29,8 @@ Without code signing:
 
 ### 1. Apple Developer Program
 - Required for macOS notarization (99$/year)
-- Do we have an account? If not, when to create one?
-- **This is the one live blocker** — see issue #75 for the prerequisites
-  (Developer ID Application certificate, App Store Connect API key) and the
-  small PR that follows once they exist.
+- Account created (2026-09-15, team `56789J6QWG`); wiring done, see
+  [`macos-notarization.md`](macos-notarization.md).
 
 ### 2. Windows signing
 Options:
