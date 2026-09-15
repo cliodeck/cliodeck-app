@@ -1,110 +1,23 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { createRequire } from 'module';
+import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import type { DocumentPage, PDFMetadata } from '../../types/pdf-document';
+import { openPdfForText, pageStrings } from './pdfjs-loader';
 
-// pdfjs-dist 3.x loaded dynamically for better Node.js/Electron compatibility
-let pdfjsLib: any = null;
-let canvasStubbed = false;
-
-// Mock canvas implementation for pdfjs (we only need text extraction, not rendering)
-const mockCanvas = {
-  createCanvas: (w: number, h: number) => ({
-    getContext: () => ({
-      fillRect: () => {},
-      drawImage: () => {},
-      getImageData: () => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
-      putImageData: () => {},
-      createImageData: (w2: number, h2: number) => ({ data: new Uint8ClampedArray(w2 * h2 * 4), width: w2, height: h2 }),
-      save: () => {},
-      restore: () => {},
-      transform: () => {},
-      setTransform: () => {},
-      resetTransform: () => {},
-      scale: () => {},
-      translate: () => {},
-      rotate: () => {},
-      beginPath: () => {},
-      closePath: () => {},
-      moveTo: () => {},
-      lineTo: () => {},
-      bezierCurveTo: () => {},
-      quadraticCurveTo: () => {},
-      stroke: () => {},
-      fill: () => {},
-      clip: () => {},
-      rect: () => {},
-      arc: () => {},
-      ellipse: () => {},
-      measureText: () => ({ width: 0 }),
-      fillText: () => {},
-      strokeText: () => {},
-      createLinearGradient: () => ({ addColorStop: () => {} }),
-      createRadialGradient: () => ({ addColorStop: () => {} }),
-      createPattern: () => null,
-      clearRect: () => {},
-      canvas: { width: w, height: h },
-    }),
-    width: w,
-    height: h,
-    toBuffer: () => Buffer.alloc(0),
-    toDataURL: () => '',
-  }),
-  Image: class MockImage {
-    width = 0;
-    height = 0;
-    src = '';
-    onload: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-  },
-  loadImage: async () => ({ width: 0, height: 0 }),
-};
-
-// Stub out canvas module to prevent native module crashes
-function stubCanvas(): void {
-  if (canvasStubbed) return;
-
-  try {
-    // Use createRequire to get access to the require.cache
-    const require = createRequire(import.meta.url);
-
-    // Pre-populate the require cache with our mock canvas
-    // This prevents the native canvas from being loaded
-    const canvasPath = require.resolve('canvas');
-    require.cache[canvasPath] = {
-      id: canvasPath,
-      filename: canvasPath,
-      loaded: true,
-      exports: mockCanvas,
-      parent: null,
-      children: [],
-      path: path.dirname(canvasPath),
-      paths: [],
-    } as any;
-
-    canvasStubbed = true;
-    console.log('📄 [EXTRACTOR] Canvas module stubbed (not needed for text extraction)');
-  } catch (e) {
-    console.warn('📄 [EXTRACTOR] Could not stub canvas module:', e);
-  }
+interface PDFInfo {
+  Title?: string;
+  Author?: string;
+  Subject?: string;
+  Keywords?: string;
+  Creator?: string;
+  Producer?: string;
+  CreationDate?: string;
+  ModDate?: string;
 }
 
-async function initPdfjs(): Promise<any> {
-  if (pdfjsLib) return pdfjsLib;
-
-  // Stub canvas before importing pdfjs to prevent native crashes
-  stubCanvas();
-
-  // Use CommonJS require to load pdfjs-dist (works correctly with exports)
-  const require = createRequire(import.meta.url);
-  pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
-
-  // Disable worker for Node.js usage
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-  console.log('📄 [EXTRACTOR] pdfjs loaded, getDocument available:', typeof pdfjsLib.getDocument);
-
-  return pdfjsLib;
+async function readInfo(pdfDocument: PDFDocumentProxy): Promise<PDFInfo> {
+  const metadata = await pdfDocument.getMetadata();
+  return (metadata.info ?? {}) as PDFInfo;
 }
 
 export interface PDFStatistics {
@@ -123,10 +36,6 @@ export class PDFExtractor {
   ): Promise<{ pages: DocumentPage[]; metadata: PDFMetadata; title: string }> {
     console.log('📄 [EXTRACTOR] extractDocument called:', filePath);
 
-    console.log('📄 [EXTRACTOR] Initializing pdfjs...');
-    const pdfjs = await initPdfjs();
-    console.log('📄 [EXTRACTOR] pdfjs initialized');
-
     // Vérifier que le fichier existe
     console.log('📄 [EXTRACTOR] Checking file exists...');
     if (!fs.existsSync(filePath)) {
@@ -143,10 +52,8 @@ export class PDFExtractor {
     const data = new Uint8Array(fileBuffer);
     console.log('📄 [EXTRACTOR] Uint8Array created');
 
-    console.log('📄 [EXTRACTOR] Calling getDocument...');
-    const loadingTask = pdfjs.getDocument({ data });
-    console.log('📄 [EXTRACTOR] getDocument called, awaiting promise...');
-    const pdfDocument = await loadingTask.promise;
+    console.log('📄 [EXTRACTOR] Opening PDF...');
+    const pdfDocument = await openPdfForText(data);
     console.log('📄 [EXTRACTOR] PDF loaded successfully');
 
     console.log(`📄 Extraction de ${pdfDocument.numPages} pages depuis ${path.basename(filePath)}`);
@@ -161,12 +68,8 @@ export class PDFExtractor {
     const pages: DocumentPage[] = [];
 
     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-      const page = await pdfDocument.getPage(pageNum);
-      const textContent = await page.getTextContent();
-
       // Assembler le texte
-      const text = textContent.items
-        .map((item: any) => item.str)
+      const text = (await pageStrings(pdfDocument, pageNum))
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -194,10 +97,9 @@ export class PDFExtractor {
 
   // MARK: - Extraction de métadonnées
 
-  private async extractMetadata(pdfDocument: any): Promise<PDFMetadata> {
+  private async extractMetadata(pdfDocument: PDFDocumentProxy): Promise<PDFMetadata> {
     try {
-      const metadata = await pdfDocument.getMetadata();
-      const info = metadata.info || {};
+      const info = await readInfo(pdfDocument);
 
       // Extraire les métadonnées
       const subject = info.Subject || undefined;
@@ -252,20 +154,17 @@ export class PDFExtractor {
 
   // MARK: - Extraction du titre
 
-  private async extractTitle(pdfDocument: any, filePath: string): Promise<string> {
+  private async extractTitle(pdfDocument: PDFDocumentProxy, filePath: string): Promise<string> {
     try {
       // Essayer d'obtenir le titre depuis les métadonnées
-      const metadata = await pdfDocument.getMetadata();
-      const info = metadata.info || {};
+      const info = await readInfo(pdfDocument);
 
       if (info.Title && info.Title.trim().length > 0) {
         return this.cleanTitle(info.Title);
       }
 
       // Si pas de titre dans les métadonnées, essayer la première page
-      const firstPage = await pdfDocument.getPage(1);
-      const textContent = await firstPage.getTextContent();
-      const pageText = textContent.items.map((item: any) => item.str).join('\n');
+      const pageText = (await pageStrings(pdfDocument, 1)).join('\n');
 
       // Trouver la première ligne substantielle
       const lines = pageText.split('\n').map((l) => l.trim());
@@ -304,13 +203,8 @@ export class PDFExtractor {
 
   async extractAuthor(filePath: string): Promise<string | undefined> {
     try {
-      const pdfjs = await initPdfjs();
-      const data = new Uint8Array(fs.readFileSync(filePath));
-      const loadingTask = pdfjs.getDocument({ data });
-      const pdfDocument = await loadingTask.promise;
-
-      const metadata = await pdfDocument.getMetadata();
-      const info = metadata.info as any || {};
+      const pdfDocument = await openPdfForText(new Uint8Array(fs.readFileSync(filePath)));
+      const info = await readInfo(pdfDocument);
 
       return info.Author?.trim() || undefined;
     } catch {
@@ -322,13 +216,8 @@ export class PDFExtractor {
 
   async extractYear(filePath: string): Promise<string | undefined> {
     try {
-      const pdfjs = await initPdfjs();
-      const data = new Uint8Array(fs.readFileSync(filePath));
-      const loadingTask = pdfjs.getDocument({ data });
-      const pdfDocument = await loadingTask.promise;
-
-      const metadata = await pdfDocument.getMetadata();
-      const info = metadata.info as any || {};
+      const pdfDocument = await openPdfForText(new Uint8Array(fs.readFileSync(filePath)));
+      const info = await readInfo(pdfDocument);
 
       if (info.CreationDate) {
         const date = this.parsePDFDate(info.CreationDate);
@@ -345,10 +234,7 @@ export class PDFExtractor {
 
   async getPageCount(filePath: string): Promise<number | null> {
     try {
-      const pdfjs = await initPdfjs();
-      const data = new Uint8Array(fs.readFileSync(filePath));
-      const loadingTask = pdfjs.getDocument({ data });
-      const pdfDocument = await loadingTask.promise;
+      const pdfDocument = await openPdfForText(new Uint8Array(fs.readFileSync(filePath)));
       return pdfDocument.numPages;
     } catch {
       return null;
@@ -356,19 +242,13 @@ export class PDFExtractor {
   }
 
   async extractText(filePath: string, pageNumber: number): Promise<string> {
-    const pdfjs = await initPdfjs();
-    const data = new Uint8Array(fs.readFileSync(filePath));
-    const loadingTask = pdfjs.getDocument({ data });
-    const pdfDocument = await loadingTask.promise;
+    const pdfDocument = await openPdfForText(new Uint8Array(fs.readFileSync(filePath)));
 
     if (pageNumber < 1 || pageNumber > pdfDocument.numPages) {
       throw new Error('Numéro de page invalide');
     }
 
-    const page = await pdfDocument.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-
-    return textContent.items.map((item: any) => item.str).join(' ');
+    return (await pageStrings(pdfDocument, pageNumber)).join(' ');
   }
 
   // MARK: - Validation
