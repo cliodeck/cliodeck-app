@@ -53,7 +53,10 @@
     "postinstall": "electron-builder install-app-deps",
     "build:mac-intel": "npm run build && npm run rebuild:x64 && electron-builder --mac --x64",
     "build:mac-arm": "npm run build && npm run rebuild:arm64 && electron-builder --mac --arm64",
-    "build:mac-universal": "npm run build && electron-builder --mac --universal"
+    "build:mac-universal": "npm run build && electron-builder --mac --universal",
+    "release:mac": "APPLE_KEYCHAIN_PROFILE=${APPLE_KEYCHAIN_PROFILE:-cliodeck-notary} npm run build:mac",
+    "release:mac-arm": "APPLE_KEYCHAIN_PROFILE=${APPLE_KEYCHAIN_PROFILE:-cliodeck-notary} npm run build:mac-arm",
+    "release:mac-intel": "APPLE_KEYCHAIN_PROFILE=${APPLE_KEYCHAIN_PROFILE:-cliodeck-notary} npm run build:mac-intel"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -232,9 +235,7 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": {
-        "teamId": "56789J6QWG"
-      }
+      "notarize": true
     },
     "win": {
       "target": [

@@ -9,22 +9,32 @@
 
 electron-builder 24.13 embarque `@electron/notarize` : aucun script
 `afterSign` n'est nécessaire. Le bloc `mac` de `package.json` porte
-`hardenedRuntime`, les entitlements et `notarize.teamId` (`56789J6QWG`, public :
-il figure dans toute app signée). Au build :
+`hardenedRuntime`, les entitlements et `"notarize": true`. L'équipe est
+`56789J6QWG` (public : le Team ID figure dans toute app signée). Au build :
 
 1. **Signature** — electron-builder prend dans le trousseau l'identité
    `Developer ID Application: … (56789J6QWG)`. Sans identité, l'app sort non
    signée.
 2. **Notarisation** — seulement si des identifiants sont fournis par
-   l'environnement ; sinon elle est **sautée en silence** (un build local sans
-   identifiants reste possible et ne casse pas).
+   l'environnement ; sinon elle est **sautée** avec un avertissement (un build
+   local sans identifiants reste possible et ne casse pas).
 3. **Agrafage** du ticket sur le `.app`, avant la création du DMG.
 
-## Ne jamais écrire `"notarize": true`
+## Pourquoi `true` et pas `{ "teamId": … }` — et pas d'Apple ID
 
-Avec `APPLE_ID` en environnement, la v24 lit `true` comme l'ancien mode et
-appelle `altool`, qu'Apple a fermé. Garder l'objet `{ "teamId": … }`, qui force
-`notarytool`.
+Deux pièges de la combinaison electron-builder 24.13 + `@electron/notarize`
+2.2.1, mesurés le 2026-09-15 :
+
+- **`{ "teamId": … }` casse le profil trousseau et la clé API.**
+  electron-builder transmet le `teamId` *en plus* de ces identifiants, et
+  `@electron/notarize` range tout `teamId` parmi les identifiants « mot de
+  passe » : « Cannot use password credentials, API key credentials and keychain
+  credentials at once ». Le Team ID est déjà porté par le profil ou la clé.
+- **`true` + `APPLE_ID` bascule sur `altool`**, qu'Apple a fermé.
+
+D'où la règle : `"notarize": true`, et **uniquement** un profil trousseau
+(`APPLE_KEYCHAIN_PROFILE`) ou une clé API (`APPLE_API_KEY*`). Jamais
+`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` dans l'environnement du build.
 
 ## Identifiants
 
@@ -32,39 +42,62 @@ Le compte Apple connecté à la machine ne joue aucun rôle : seuls comptent le
 certificat du trousseau et les identifiants passés à `notarytool`, qui peuvent
 appartenir à un autre compte (celui de l'équipe développeur).
 
-**Poste local (recommandé)** — un profil `notarytool` enregistré une fois dans
-le trousseau, soit avec une clé API App Store Connect :
+**Poste local** — un profil `notarytool` enregistré une fois dans le
+trousseau avec une clé API App Store Connect (*Utilisateurs et accès →
+Intégrations → Clés d'équipe*, rôle Développeur) :
 
 ```
 xcrun notarytool store-credentials cliodeck-notary \
   --key /chemin/AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-uuid>
 ```
 
-soit avec l'Apple ID du compte développeur et un mot de passe d'app (demandé
-par la commande, jamais tapé en argument) :
-
-```
-xcrun notarytool store-credentials cliodeck-notary \
-  --apple-id <compte-developpeur> --team-id 56789J6QWG
-```
+(Un profil créé avec `--apple-id … --team-id …` et un mot de passe d'app
+fonctionne aussi : c'est un profil trousseau, le piège ci-dessus ne concerne
+que les *variables* `APPLE_ID`.)
 
 Contrôle : `xcrun notarytool history --keychain-profile cliodeck-notary`
 (liste vide ou historique, sans erreur d'authentification).
 
-**Variables reconnues par electron-builder**, par ordre de priorité :
-`APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` ; `APPLE_API_KEY` +
-`APPLE_API_KEY_ID` + `APPLE_API_ISSUER` ; `APPLE_KEYCHAIN_PROFILE` (option
-`APPLE_KEYCHAIN`). La première famille présente l'emporte : ne pas en laisser
-traîner une autre dans l'environnement.
+**CI** — la même clé en variables `APPLE_API_KEY` (chemin du `.p8`),
+`APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.
+
+## Prérequis de la machine qui signe
+
+- **L'autorité intermédiaire « Developer ID Certification Authority » G2** dans
+  le trousseau. Sans elle, le certificat est présent mais invalide :
+  `security find-identity -p codesigning` le liste sous *Matching identities*
+  et affiche `0 valid identities found`. Remède :
+  `curl -O https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer`
+  puis `security import DeveloperIDG2CA.cer -k ~/Library/Keychains/login.keychain-db`.
+- **La licence Xcode acceptée** si Xcode est installé
+  (`sudo xcodebuild -license accept`) : sinon la recompilation des modules
+  natifs échoue, et la recompilation ratée **efface** le binaire de
+  `hnswlib-node` — l'app ne démarre plus jusqu'au prochain `npm run rebuild:native`.
+- **Un réseau qui laisse passer `timestamp.apple.com`** : chaque fichier signé
+  est horodaté, un seul échec (« The timestamp service is not available »)
+  arrête le build. Relancer suffit.
+- Sur macOS 15+, *Trousseau d'accès* est caché par *Mots de passe* :
+  `open "/System/Library/CoreServices/Applications/Keychain Access.app"`.
 
 ## Construire
 
-```
-APPLE_KEYCHAIN_PROFILE=cliodeck-notary npm run build:mac-arm
-```
+Deux familles de scripts :
 
-(`build:mac-intel` et `build:mac-universal` de même.) La notarisation ajoute
-quelques minutes ; le journal affiche `notarization successful`.
+| Script | Signé | Notarisé | Usage |
+|---|---|---|---|
+| `npm run build:mac`, `build:mac-arm`, `build:mac-intel` | oui, si le certificat est dans le trousseau | non (avertissement « skipped macOS notarization ») | build de travail |
+| `npm run release:mac`, `release:mac-arm`, `release:mac-intel` | oui | oui, via le profil `cliodeck-notary` | build à publier |
+
+Les `release:*` ne font que poser `APPLE_KEYCHAIN_PROFILE` (surchargeable :
+`APPLE_KEYCHAIN_PROFILE=autre-profil npm run release:mac`). La notarisation
+ajoute quelques minutes par architecture ; le journal affiche
+`notarization successful`.
+
+- La signature a lieu **à chaque build Mac** dès que le certificat est présent,
+  et demande le réseau (horodatage). Pour un build de test hors ligne :
+  `CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac-arm` (app non signée).
+- Le bloc `mac.target` liste `x64` **et** `arm64` : `build:mac-arm` produit
+  aussi la version Intel, et `release:mac-arm` la notarise aussi.
 
 ## Vérifier l'artefact
 

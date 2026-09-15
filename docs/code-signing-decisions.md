@@ -3,7 +3,7 @@
 > Still open, and still the blocker for v2.0 GA. **macOS is tracked in
 > issue [#75](https://github.com/cliodeck/cliodeck-app/issues/75)**: the
 > Apple Developer account exists (team `56789J6QWG`) and notarization is wired
-> through electron-builder's built-in `mac.notarize` — no `afterSign` hook.
+> through electron-builder's built-in `mac.notarize: true` — no `afterSign` hook.
 > Procedure: [`macos-notarization.md`](macos-notarization.md). This document
 > keeps the questions that #75 does *not* answer: Windows, Linux, and the
 > CI-versus-local signing choice.
@@ -14,7 +14,7 @@
 
 `package.json`'s `mac` block carries `hardenedRuntime: true`,
 `entitlements` + `entitlementsInherit`, `gatekeeperAssess: false` and
-`notarize: { teamId }`. Signing and notarization happen on a maintainer's Mac
+`notarize: true`. Signing and notarization happen on a maintainer's Mac
 that holds the Developer ID certificate and a `notarytool` keychain profile;
 without them the build silently comes out unsigned. No CI secret yet.
 
