@@ -355,6 +355,85 @@ export class VectorStore {
     console.log(`✅ Document supprimé: ${id}`);
   }
 
+  // MARK: - Doublons (un fichier, un document)
+
+  /** Documents indexés pour ce fichier, du plus récent au plus ancien. */
+  getDocumentIdsByFilePath(filePath: string): string[] {
+    const rows = this.db
+      .prepare('SELECT id FROM pdf_documents WHERE file_path = ? ORDER BY indexed_at DESC')
+      .all(filePath) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Fond des documents dans `keepId`, puis les supprime.
+   *
+   * Un même PDF indexé N fois donnait N documents et N jeux d'extraits : le
+   * corpus comptait 221 documents pour 55 fichiers, et les copies d'un
+   * extrait prenaient les places des autres sources dans la recherche.
+   * Supprimer ne suffit pas : les citations d'autres documents qui pointent
+   * vers une copie passeraient à NULL (`ON DELETE SET NULL`), et ses
+   * collections Zotero disparaîtraient avec elle (`ON DELETE CASCADE`).
+   * On les rattache d'abord au document gardé.
+   */
+  mergeDocumentsInto(keepId: string, replacedIds: string[]): void {
+    const ids = replacedIds.filter((id) => id !== keepId);
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    this.db.transaction(() => {
+      this.db
+        .prepare(`UPDATE pdf_citations SET target_doc_id = ? WHERE target_doc_id IN (${placeholders})`)
+        .run(keepId, ...ids);
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO pdf_document_collections (document_id, collection_key)
+           SELECT ?, collection_key FROM pdf_document_collections WHERE document_id IN (${placeholders})`
+        )
+        .run(keepId, ...ids);
+      this.db.prepare(`DELETE FROM pdf_documents WHERE id IN (${placeholders})`).run(...ids);
+    })();
+  }
+
+  /**
+   * Retire les documents en double (même fichier) déjà présents en base.
+   *
+   * Garde, pour chaque fichier, la copie la plus récente qui a des extraits :
+   * ses métadonnées sont les plus fraîches (titres corrigés, clés refaites).
+   * Une copie sans extrait (indexation interrompue) n'est gardée que si
+   * aucune autre n'en a.
+   */
+  removeDuplicateDocuments(): { files: number; removed: number } {
+    const groups = this.db
+      .prepare('SELECT file_path FROM pdf_documents GROUP BY file_path HAVING COUNT(*) > 1')
+      .all() as Array<{ file_path: string }>;
+    let removed = 0;
+    const candidates = this.db.prepare(
+      `SELECT d.id, (SELECT COUNT(*) FROM pdf_chunks c WHERE c.document_id = d.id) AS chunks
+       FROM pdf_documents d WHERE d.file_path = ? ORDER BY d.indexed_at DESC`
+    );
+    for (const { file_path } of groups) {
+      const rows = candidates.all(file_path) as Array<{ id: string; chunks: number }>;
+      const keep = rows.find((r) => r.chunks > 0) ?? rows[0];
+      const others = rows.filter((r) => r.id !== keep.id).map((r) => r.id);
+      this.mergeDocumentsInto(keep.id, others);
+      removed += others.length;
+    }
+    return { files: groups.length, removed };
+  }
+
+  /** Nombre de documents en trop (copies d'un fichier déjà indexé). */
+  countDuplicateDocuments(): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) - COUNT(DISTINCT file_path) AS extra FROM pdf_documents')
+      .get() as { extra: number };
+    return row.extra;
+  }
+
+  /** Sauvegarde cohérente de la base (WAL compris), avant une opération destructive. */
+  backupTo(destination: string): Promise<unknown> {
+    return this.db.backup(destination);
+  }
+
   // MARK: - Chunk Operations
 
   saveChunk(chunk: DocumentChunk, embedding: Float32Array, contentHash?: string): void {
