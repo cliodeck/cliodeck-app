@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { retrievalService } from '../retrieval-service.js';
 import { tropyService } from '../tropy-service.js';
 import { configManager } from '../config-manager.js';
+import { readingNotesIndexService } from '../reading-notes-index-service.js';
 
 const THRESHOLD = 0.12;
 
@@ -40,6 +41,22 @@ function manuscriptHit(id: string, signals: Signals) {
   return {
     chunk: { id, chapterId: 'ch1', chunkIndex: 0, content: id, sectionTitle: 'S', line: 1 },
     chapter: { id: 'ch1', title: 'Chapitre 1', relativePath: 'chapters/01.md' },
+    score: 0.016,
+    signals,
+  };
+}
+
+function readingNoteHit(id: string, signals: Signals) {
+  return {
+    chunk: { id, noteId: 'zotero:ABCD1234', chunkIndex: 0, content: id, line: 9 },
+    note: {
+      id: 'zotero:ABCD1234',
+      relativePath: 'reading-notes/Braudel_1949.md',
+      citekey: 'Braudel_1949',
+      zoteroKey: 'ABCD1234',
+      title: 'La Méditerranée',
+      tags: ['chapitre-2'],
+    },
     score: 0.016,
     signals,
   };
@@ -163,6 +180,40 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
 
     expect(manuscriptHits).toHaveLength(1);
     expect(manuscriptHits[0].similarity).toBeCloseTo(0.7);
+  });
+
+  it('une note de lecture pertinente prend sa place, sans quota ni repli', async () => {
+    vi.spyOn(internals, 'searchSecondary').mockResolvedValue(
+      [0.5, 0.45, 0.4, 0.35, 0.3].map((s, i) => secondaryHit(`pdf-${i}`, s))
+    );
+    vi.spyOn(readingNotesIndexService, 'getSearchStore').mockReturnValue({
+      search: () => [
+        readingNoteHit('longue-duree', { dense: 0.2, lexical: 4, lexicalRank: 1 }),
+        readingNoteHit('hors-sujet', { dense: 0.03, lexical: 0, lexicalRank: null }),
+      ],
+    } as unknown as ReturnType<typeof readingNotesIndexService.getSearchStore>);
+
+    const { hits, readingNoteHits, outcomes } = await retrievalService.search({
+      query: 'longue durée',
+      sourceType: 'secondary',
+      includeReadingNotes: true,
+    });
+
+    // Rang lexical 1 → 0,7 : elle devance la bibliographie et prend la
+    // dernière place au mérite ; l'extrait hors sujet ne passe pas le seuil.
+    expect(readingNoteHits).toHaveLength(1);
+    expect(readingNoteHits[0].similarity).toBeCloseTo(0.7);
+    expect(readingNoteHits[0].source).toMatchObject({ kind: 'reading-note', citekey: 'Braudel_1949', line: 9 });
+    expect(hits).toHaveLength(4);
+    expect(hits.every((h) => h.sourceType === 'secondary')).toBe(true);
+    expect(outcomes.find((o) => o.source === 'readingNotes')).toMatchObject({ attempted: true, hitCount: 1 });
+  });
+
+  it('les notes de lecture ne sont jamais interrogées sans opt-in', async () => {
+    const spy = vi.spyOn(readingNotesIndexService, 'getSearchStore');
+    const { readingNoteHits } = await retrievalService.search({ query: 'q', sourceType: 'vault' });
+    expect(readingNoteHits).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

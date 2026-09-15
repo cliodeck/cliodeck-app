@@ -1,8 +1,9 @@
 /**
  * Interface commune des corpus de recherche (Path A′, amendement de l'ADR 0001).
  *
- * ClioDeck interroge quatre corpus de nature différente — bibliographie (PDF),
- * archives (Tropy), notes (vault Obsidian), manuscrit de l'auteur — et le
+ * ClioDeck interroge cinq corpus de nature différente — bibliographie (PDF),
+ * archives (Tropy), notes (vault Obsidian), manuscrit de l'auteur, notes de
+ * lecture de l'auteur sur ses références — et le
  * Path A′ assume cette différence : chaque corpus garde ses tables, son store
  * et sa recherche. Ce qu'ils partagent, c'est un **contrat** :
  *
@@ -16,13 +17,14 @@
  */
 
 /** Les corpus connus, dans l'ordre où leurs résultats sont rapportés. */
-export type CorpusId = 'secondary' | 'primary' | 'vault' | 'manuscript';
+export type CorpusId = 'secondary' | 'primary' | 'vault' | 'manuscript' | 'readingNotes';
 
 export const CORPUS_ORDER: readonly CorpusId[] = [
   'secondary',
   'primary',
   'vault',
   'manuscript',
+  'readingNotes',
 ];
 
 /**
@@ -30,13 +32,15 @@ export const CORPUS_ORDER: readonly CorpusId[] = [
  *
  * `sourceType` : 'secondary' = bibliographie, 'primary' = archives,
  * 'both' = les deux, 'vault' = notes seules, 'manuscript' = manuscrit seul.
- * `includeVault` / `includeManuscript` ajoutent notes et manuscrit aux deux
- * premiers — ce sont des opt-in : un appelant historique ne les voit jamais.
+ * `includeVault` / `includeManuscript` / `includeReadingNotes` ajoutent
+ * notes, manuscrit et notes de lecture aux deux premiers — ce sont des
+ * opt-in : un appelant historique ne les voit jamais.
  */
 export interface CorpusScopeQuery {
   sourceType?: 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript';
   includeVault?: boolean;
   includeManuscript?: boolean;
+  includeReadingNotes?: boolean;
 }
 
 /**
@@ -51,6 +55,7 @@ export function corporaInScope(q: CorpusScopeQuery): Set<CorpusId> {
   // Le mode « notes seules » implique les notes, quel que soit le drapeau.
   if (q.includeVault || sourceType === 'vault') scope.add('vault');
   if (q.includeManuscript || sourceType === 'manuscript') scope.add('manuscript');
+  if (q.includeReadingNotes) scope.add('readingNotes');
   return scope;
 }
 

@@ -10,6 +10,7 @@ import { pdfService } from '../../services/pdf-service.js';
 import { tropyService } from '../../services/tropy-service.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { usageJournalService } from '../../services/usage-journal-service.js';
+import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -123,6 +124,9 @@ export function setupProjectHandlers() {
           await pdfService.init(projectPath, (progress) => {
             event.sender.send('project:rebuild-progress', progress);
           });
+
+          // Une note éditée hors de ClioDeck (Obsidian) entre deux sessions.
+          indexReadingNotesInBackground('ouverture du projet');
 
           console.log('✅ All services initialized successfully');
         }

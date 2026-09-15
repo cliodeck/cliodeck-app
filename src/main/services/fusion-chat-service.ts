@@ -17,11 +17,13 @@ import type { WebContents } from 'electron';
 import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
+import { readingNotesIndexService } from './reading-notes-index-service.js';
 import { projectManager } from './project-manager.js';
 import {
   retrievalService,
   type ManuscriptMappedSearchResult,
   type MultiSourceSearchResult,
+  type ReadingNoteMappedSearchResult,
 } from './retrieval-service.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
@@ -40,6 +42,7 @@ import { historyService } from './history-service.js';
 import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import {
+  classifyProvider,
   decideCloudConsent,
   type ConsentPrompt,
 } from '../../../backend/security/cloud-consent.js';
@@ -47,9 +50,12 @@ import { appendSecurityEvent } from '../../../backend/security/source-inspector.
 import type { SecurityEvent } from '../../../backend/security/events.js';
 
 export interface BrainstormSource {
-  /** `manuscrit` : extrait du texte de l'auteur, pas d'une source. */
-  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
-  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
+  /**
+   * `manuscrit` : extrait du texte de l'auteur, pas d'une source.
+   * `lecture` : note de lecture de l'auteur sur une référence, pas la référence.
+   */
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit' | 'lecture';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript' | 'readingNotes';
   title: string;
   snippet: string;
   similarity: number;
@@ -167,6 +173,48 @@ export function manuscriptHitsToSources(
     lineNumber: h.source.line,
     chapterId: h.source.chapterId,
   }));
+}
+
+/**
+ * Extraits des notes de lecture → sources affichables. Le titre nomme la
+ * référence commentée (`@clé — titre`) : c'est ce que l'auteur reconnaît, et
+ * ce qui empêche de lire l'extrait comme une citation de l'ouvrage.
+ */
+export function readingNoteHitsToSources(
+  hits: ReadingNoteMappedSearchResult[]
+): BrainstormSource[] {
+  return hits.map((h) => ({
+    kind: 'lecture' as const,
+    sourceType: 'readingNotes' as const,
+    title: readingNoteLabel(h),
+    snippet: h.chunk.content.replace(/\s+/g, ' ').slice(0, 400),
+    similarity: h.similarity,
+    relativePath: h.source.relativePath,
+    notePath: h.source.relativePath,
+    lineNumber: h.source.line,
+  }));
+}
+
+function readingNoteLabel(h: ReadingNoteMappedSearchResult): string {
+  const title = h.document.title && h.document.title !== h.source.relativePath ? h.document.title : null;
+  return title ? `@${h.source.citekey} — ${title}` : `@${h.source.citekey}`;
+}
+
+/**
+ * Les notes de lecture entrent-elles dans ce tour ?
+ *
+ * Elles sont le travail personnel de l'historien, plus intime que ses
+ * sources publiées : un fournisseur distant ne les reçoit que si l'auteur
+ * l'a accepté dans les réglages. Le consentement de session (ADR 0005) ne
+ * suffit pas — il autorise l'envoi du tour, pas celui de ce corpus.
+ */
+export function shouldIncludeReadingNotes(opts: {
+  enabled: boolean;
+  isCloud: boolean;
+  cloudConsent: boolean;
+}): boolean {
+  if (!opts.enabled) return false;
+  return !opts.isCloud || opts.cloudConsent;
 }
 import {
   loadWorkspaceHints,
@@ -664,18 +712,28 @@ class FusionChatService {
             // Le manuscrit est un quatrième corpus : ce que l'auteur a déjà
             // écrit. Désactivable par `rag.indexManuscript`.
             const includeManuscript = manuscriptIndexService.isEnabled();
-            const { hits, manuscriptHits, stats, securityEvents } =
+            // Cinquième corpus : les notes de lecture. Désactivable par
+            // `rag.indexReadingNotes`, et hors d'un fournisseur distant sans
+            // `rag.readingNotesCloudConsent`.
+            const includeReadingNotes = shouldIncludeReadingNotes({
+              enabled: readingNotesIndexService.isEnabled(),
+              isCloud: classifyProvider({ backend: cfg.backend, ollamaURL: cfg.ollamaURL }).isCloud,
+              cloudConsent: readingNotesIndexService.cloudConsent(),
+            });
+            const { hits, manuscriptHits, readingNoteHits, stats, securityEvents } =
               await retrievalService.searchWithStats({
               query: lastUser,
               sourceType,
               includeVault,
               includeManuscript,
+              includeReadingNotes,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
               topK: options?.topK,
             });
             const ownHits = manuscriptHits ?? [];
-            if (hits.length === 0 && ownHits.length === 0) return null;
+            const noteHits = readingNoteHits ?? [];
+            if (hits.length === 0 && ownHits.length === 0 && noteHits.length === 0) return null;
 
             // --- Compression du contexte (#28) --------------------------
             // ContextCompressor existait depuis la fusion sans aucun site
@@ -737,10 +795,12 @@ class FusionChatService {
             return {
               systemPrompt:
                 formatContextAsSystemPrompt(effectiveHits) +
-                formatManuscriptContext(ownHits, effectiveHits.length),
+                formatManuscriptContext(ownHits, effectiveHits.length) +
+                formatReadingNotesContext(noteHits),
               sources: [
                 ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
                 ...manuscriptHitsToSources(ownHits),
+                ...readingNoteHitsToSources(noteHits),
               ],
               explanation: {
                 search: stats.search,
@@ -1032,6 +1092,31 @@ function formatManuscriptContext(
       : (h.document.title ?? h.source.relativePath);
     const snippet = h.chunk.content.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHARS);
     lines.push(`[M${offset + i + 1}] ${where}`);
+    lines.push(`EXTRAIT : ${snippet}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+/**
+ * Bloc de contexte pour les notes de lecture. Séparé des sources, comme le
+ * manuscrit : une note dit ce que l'auteur pense d'une référence, pas ce que
+ * la référence dit. Le modèle doit pouvoir rendre la nuance — « d'après tes
+ * notes sur Braudel… » — sans attribuer à l'ouvrage une lecture de l'auteur.
+ */
+export function formatReadingNotesContext(hits: ReadingNoteMappedSearchResult[]): string {
+  if (hits.length === 0) return '';
+  const SNIPPET_CHARS = 1500;
+  const lines: string[] = [
+    '',
+    "Extraits des NOTES DE LECTURE de l'auteur (son commentaire d'une référence, pas la référence elle-même).",
+    "Présente-les comme ses notes (« d'après tes notes sur @clé »). N'attribue JAMAIS leur contenu à l'ouvrage commenté : pour citer l'ouvrage, appuie-toi sur la source.",
+    '',
+  ];
+  hits.forEach((h, i) => {
+    const snippet = h.chunk.content.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHARS);
+    lines.push(`[L${i + 1}] ${readingNoteLabel(h)}`);
+    if (h.source.tags.length > 0) lines.push(`ÉTIQUETTES : ${h.source.tags.join(', ')}`);
     lines.push(`EXTRAIT : ${snippet}`);
     lines.push('');
   });

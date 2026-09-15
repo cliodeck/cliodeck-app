@@ -12,6 +12,7 @@ import {
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
+import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import type { Citation } from '../../../backend/types/citation.js';
 
 // Common options for Zotero data source selection
@@ -270,6 +271,7 @@ class ZoteroService {
           // référence : la note suit (front matter et nom de fichier).
           try {
             await followRenamedCitekeys(options.projectPath, result.report.renamedKeys);
+            indexReadingNotesInBackground('clés de citation refaites');
           } catch (error) {
             console.warn('⚠️ Notes de lecture non renommées :', error);
           }

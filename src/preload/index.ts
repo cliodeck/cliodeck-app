@@ -645,6 +645,16 @@ const api = {
     stats: () => ipcRenderer.invoke('manuscript:stats'),
   },
 
+  /** Notes de lecture — cinquième corpus : état de l'index et reconstruction. */
+  readingNotesCorpus: {
+    /** Indexe les notes du projet courant (incrémental par empreinte). */
+    index: () => ipcRenderer.invoke('reading-notes-corpus:index'),
+    /** Réindexe tout, empreintes ignorées. */
+    reindexAll: () => ipcRenderer.invoke('reading-notes-corpus:reindex-all'),
+    /** État de l'index : notes, extraits, date. */
+    stats: () => ipcRenderer.invoke('reading-notes-corpus:stats'),
+  },
+
   // Modes
   mode: {
     getAll: () => ipcRenderer.invoke('mode:get-all'),

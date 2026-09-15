@@ -140,6 +140,39 @@ export async function listReadingNotes(projectPath: string): Promise<ReadingNote
   return notes;
 }
 
+/** Contenu d'une note de lecture, pour l'indexer. */
+export interface ReadingNoteContent extends ReadingNoteInfo {
+  /** Titre de la référence, tel qu'écrit dans le front matter. */
+  title?: string;
+  /** Corps de la note, sans le front matter. */
+  body: string;
+  /** Ligne (1-indexée) du fichier où commence le corps. */
+  bodyStartLine: number;
+}
+
+/**
+ * Lit une note de lecture. `null` si le fichier n'est pas une note que
+ * ClioDeck sait rattacher (ni `citekey` ni `zotero_key`) ; lève si le front
+ * matter est illisible.
+ */
+export async function readReadingNote(file: string): Promise<ReadingNoteContent | null> {
+  const content = await readFile(file, 'utf-8');
+  const { frontMatter, body } = parseNote(content);
+  const citekey = typeof frontMatter.citekey === 'string' ? frontMatter.citekey : undefined;
+  const zoteroKey = typeof frontMatter.zotero_key === 'string' ? frontMatter.zotero_key : undefined;
+  if (!citekey && !zoteroKey) return null;
+  const headerLines = content.slice(0, content.length - body.length).split('\n').length;
+  return {
+    file,
+    citekey: citekey ?? '',
+    zoteroKey,
+    tags: tagsOf(frontMatter),
+    title: typeof frontMatter.title === 'string' ? frontMatter.title : undefined,
+    body,
+    bodyStartLine: headerLines,
+  };
+}
+
 /** La note d'une référence : par clé Zotero d'abord, par clé de citation ensuite. */
 export function findReadingNote(
   notes: ReadingNoteInfo[],

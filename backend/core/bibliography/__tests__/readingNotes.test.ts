@@ -9,6 +9,7 @@ import {
   followRenamedCitekeys,
   listReadingNotes,
   noteFileName,
+  readReadingNote,
   setProjectTags,
 } from '../readingNotes';
 
@@ -149,5 +150,39 @@ describe('notes de lecture', () => {
   it('donne des noms de fichier valides sous Windows', () => {
     expect(noteFileName('doi:10.1000/xyz')).toBe('doi-10.1000-xyz.md');
     expect(noteFileName('..')).toBe('reference.md');
+  });
+});
+
+describe('lecture d’une note pour l’indexer', () => {
+  let project: string;
+
+  beforeEach(() => {
+    project = mkdtempSync(path.join(tmpdir(), 'cliodeck-notes-read-'));
+  });
+
+  afterEach(() => {
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it('rend identité, étiquettes, corps et ligne de départ du corps', async () => {
+    await setProjectTags(project, braudel, ['chapitre-2']);
+    const file = path.join(project, READING_NOTES_DIR, 'Braudel_1949.md');
+    writeFileSync(file, `${readFileSync(file, 'utf-8')}La longue durée.\n`);
+
+    const note = await readReadingNote(file);
+
+    expect(note).toMatchObject({ citekey: 'Braudel_1949', zoteroKey: 'ABCD1234', tags: ['chapitre-2'] });
+    expect(note?.title).toContain('La Méditerranée');
+    expect(note?.body.trim().endsWith('La longue durée.')).toBe(true);
+    // La ligne indiquée est bien celle du corps dans le fichier.
+    const lines = readFileSync(file, 'utf-8').split('\n');
+    expect(lines.slice(note!.bodyStartLine - 1).join('\n')).toBe(note!.body);
+  });
+
+  it('ignore un fichier qui n’est pas une note de ClioDeck', async () => {
+    mkdirSync(path.join(project, READING_NOTES_DIR), { recursive: true });
+    const file = path.join(project, READING_NOTES_DIR, 'brouillon.md');
+    writeFileSync(file, 'Juste du texte.\n');
+    expect(await readReadingNote(file)).toBeNull();
   });
 });

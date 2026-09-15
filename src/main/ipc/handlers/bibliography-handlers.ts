@@ -23,6 +23,7 @@ import {
   ReadingNoteSetTagsSchema,
 } from '../utils/validation.js';
 import { projectManager } from '../../services/project-manager.js';
+import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
 import {
   ensureReadingNote,
   listReadingNotes,
@@ -281,6 +282,8 @@ export function setupBibliographyHandlers() {
     if (!projectPath) return errorResponse(new Error('Aucun projet ouvert.'));
     try {
       const note = await setProjectTags(projectPath, reference, tags);
+      // Les étiquettes font partie de ce que la recherche retrouve.
+      indexReadingNotesInBackground('étiquettes');
       return successResponse({ note });
     } catch (error: unknown) {
       console.error('❌ bibliography:reading-notes:set-tags error:', error);

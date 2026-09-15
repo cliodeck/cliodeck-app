@@ -19,6 +19,7 @@ import { MCPServerSection } from './MCPServerSection';
 import { ArchivesConfigSection } from './ArchivesConfigSection';
 import { SecurityConfigSection } from './SecurityConfigSection';
 import { ManuscriptCorpusSection } from './ManuscriptCorpusSection';
+import { ReadingNotesCorpusSection } from './ReadingNotesCorpusSection';
 import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -81,6 +82,10 @@ export interface RAGConfig {
    *  corpus RAG. Actif par défaut ; le désactiver arrête l'indexation
    *  ET la recherche. */
   indexManuscript?: boolean;
+  /** Notes de lecture — cinquième corpus RAG. Actif par défaut. */
+  indexReadingNotes?: boolean;
+  /** Envoi des notes de lecture à un fournisseur distant. Refusé par défaut. */
+  readingNotesCloudConsent?: boolean;
 
   // === Obsidian vault as RAG source ===
   includeObsidianVault?: boolean;
@@ -154,6 +159,8 @@ export const ConfigPanel: React.FC = () => {
     // Context compression
     enableContextCompression: true, // Enabled by default for performance
     indexManuscript: true,
+    indexReadingNotes: true,
+    readingNotesCloudConsent: false,
   });
 
   const [llmConfig, setLLMConfig] = useState<LLMConfig>({
@@ -411,6 +418,17 @@ export const ConfigPanel: React.FC = () => {
               enabled={ragConfig.indexManuscript !== false}
               onEnabledChange={(indexManuscript) =>
                 setRagConfig({ ...ragConfig, indexManuscript })
+              }
+            />
+
+            <ReadingNotesCorpusSection
+              enabled={ragConfig.indexReadingNotes !== false}
+              onEnabledChange={(indexReadingNotes) =>
+                setRagConfig({ ...ragConfig, indexReadingNotes })
+              }
+              cloudConsent={ragConfig.readingNotesCloudConsent === true}
+              onCloudConsentChange={(readingNotesCloudConsent) =>
+                setRagConfig({ ...ragConfig, readingNotesCloudConsent })
               }
             />
 

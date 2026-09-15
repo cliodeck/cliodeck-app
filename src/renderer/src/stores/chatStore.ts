@@ -24,9 +24,12 @@ import { useModeStore } from './modeStore';
 // MARK: - Types (brainstorm, canonical)
 
 export interface BrainstormSource {
-  /** `manuscrit` : extrait du texte de l'auteur lui-même. */
-  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
-  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
+  /**
+   * `manuscrit` : extrait du texte de l'auteur lui-même.
+   * `lecture` : extrait d'une note de lecture de l'auteur sur une référence.
+   */
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit' | 'lecture';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript' | 'readingNotes';
   title: string;
   snippet: string;
   similarity: number;

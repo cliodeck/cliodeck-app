@@ -76,7 +76,9 @@ export type UnifiedSourceKind =
   | 'secondary'
   | 'vault'
   // Le manuscrit de l'auteur : quatrième corpus, distingué à dessein.
-  | 'manuscript';
+  | 'manuscript'
+  // Ses notes de lecture : son commentaire d'une référence, pas la référence.
+  | 'readingNotes';
 
 export interface UnifiedSource {
   kind: UnifiedSourceKind;
@@ -121,8 +123,8 @@ export interface UnifiedSource {
 interface BrainstormSourceLike {
   // `manuscrit` : le texte que l'auteur écrit lui-même. Distinct des trois
   // corpus externes — un historien doit voir quand il se cite lui-même.
-  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit';
-  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript';
+  kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit' | 'lecture';
+  sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript' | 'readingNotes';
   title: string;
   snippet: string;
   similarity: number;
@@ -155,7 +157,7 @@ export function brainstormSourceToUnified(src: BrainstormSourceLike): UnifiedSou
   const id =
     src.sourceType === 'primary'
       ? (src.itemId ?? src.documentId ?? src.title)
-      : src.sourceType === 'vault'
+      : src.sourceType === 'vault' || src.sourceType === 'readingNotes'
         ? (src.notePath ?? src.relativePath ?? src.title)
         : (src.documentId ?? src.title);
 

@@ -148,6 +148,19 @@ export interface RAGConfig {
    */
   indexManuscript?: boolean;
 
+  // === Notes de lecture comme corpus RAG ===
+  /**
+   * Indexer les notes de lecture (`reading-notes/*.md`) comme cinquième
+   * corpus. Activé par défaut ; `false` désactive l'indexation ET la recherche.
+   */
+  indexReadingNotes?: boolean;
+  /**
+   * Autoriser l'envoi des notes de lecture à un fournisseur distant
+   * (Claude, OpenAI, Mistral, Gemini, Ollama distant). Refusé par défaut :
+   * sans ce consentement, elles ne servent qu'avec un modèle local.
+   */
+  readingNotesCloudConsent?: boolean;
+
   // === Query expansion (A20) ===
   /** User-defined FR→EN term dictionary merged on top of built-in defaults. */
   queryExpansionDictionary?: Record<string, string[]>;
