@@ -34,9 +34,15 @@ let pdfjsLib: PdfjsModule | null = null;
  *
  * On ne rend jamais : des classes vides suffisent au chargement. Elles
  * n'exposent aucune méthode, si bien qu'un rendu introduit un jour échouerait
- * bruyamment au lieu de calculer faux. Posées avant l'import, elles
- * dispensent pdfjs de chercher `@napi-rs/canvas` : le comportement est le
- * même sur toutes les plateformes.
+ * bruyamment au lieu de calculer faux. Posées avant l'import, elles priment
+ * sur celles de `@napi-rs/canvas` — mais pdfjs **tente quand même** de charger
+ * ce module (`require` inconditionnel, pdf.mjs), et écrit un avertissement
+ * quand il manque. C'est pourquoi il est exclu des apps empaquetées
+ * (`build.files` de package.json) : sinon Apple Silicon chargeait pour rien
+ * 25 Mo de Skia natif dans le worker, et le DMG Intel embarquait ce binaire
+ * arm64 inutilisable. Le comportement est ainsi le même partout : un
+ * avertissement filtré, et un texte identique (vérifié sur 44 PDF, arm64 et
+ * x86_64).
  */
 function installRenderingPlaceholders(): void {
   const scope = globalThis as Record<string, unknown>;
@@ -53,10 +59,28 @@ function installRenderingPlaceholders(): void {
   }
 }
 
+/**
+ * L'avertissement attendu — `@napi-rs/canvas` est exclu exprès — tient sur
+ * plusieurs lignes (« Require stack: », chemins) : le processus principal, qui
+ * ne filtre que les lignes commençant par « Warning: », en aurait versé le
+ * reste dans les journaux à chaque PDF, comme une erreur. On tait ce seul
+ * message, le temps de l'import ; tout autre avertissement passe.
+ */
+const EXPECTED_CANVAS_WARNING = 'Warning: Cannot load "@napi-rs/canvas" package';
+
 export async function loadPdfjs(): Promise<PdfjsModule> {
   if (!pdfjsLib) {
     installRenderingPlaceholders();
-    pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      if (typeof args[0] === 'string' && args[0].startsWith(EXPECTED_CANVAS_WARNING)) return;
+      originalWarn(...args);
+    };
+    try {
+      pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    } finally {
+      console.warn = originalWarn;
+    }
   }
   return pdfjsLib;
 }
