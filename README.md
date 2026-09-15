@@ -8,13 +8,13 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 
 ## Download
 
-**[Download v1.0.0-rc.4](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.4)** — release candidate.
+**[Download v1.0.0-rc.5](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.5)** — release candidate.
 
-- **macOS** — DMG for Apple Silicon and Intel
-- **Linux** — AppImage and `.deb`, for **x86_64 and arm64**; run `uname -m` if unsure which you need
+- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app
+- **Linux** — AppImage and `.deb` for **x86_64**; arm64 files to follow on the release page. Run `uname -m` if unsure which you need
 - **Windows** — no build shipped; the code should work on Windows but is **untested**
 
-The v1.0.0-rc.4 builds are **not code-signed**: macOS will refuse the app on first launch until you allow it explicitly. See the [installation guides](https://github.com/cliodeck/cliodeck-app/wiki/1.-ClioDeck-Installation) for how to get past it. From the next release on, macOS DMGs are **signed and notarized by Apple** and open like any downloaded app.
+On first launch, macOS asks once for your session password so ClioDeck can reach its keychain entry, where it keeps your API keys encrypted — choose *Always Allow*. See the [installation guides](https://github.com/cliodeck/cliodeck-app/wiki/1.-ClioDeck-Installation) for the rest.
 
 ## Three kinds of project
 
