@@ -149,8 +149,12 @@ choses ont changé avec elle :
 - **Plus de module natif pour un rendu qu'on s'interdit.** Sous Node, pdfjs 5
   réclame `DOMMatrix`, `ImageData` et `Path2D` au chargement et les emprunte
   à `@napi-rs/canvas`, précompilé par architecture. Le chargeur pose des
-  classes vides sans méthodes : un rendu échouerait bruyamment. Le module
-  natif `canvas`, que seul pdfjs 3 réclamait, disparaît des dépendances.
+  classes vides sans méthodes : un rendu échouerait bruyamment. pdfjs tente
+  quand même de charger `@napi-rs/canvas` ; il est donc **exclu des apps
+  empaquetées** (25 Mo de Skia natif chargé pour rien sur Apple Silicon, et
+  binaire arm64 inutilisable dans le DMG Intel), et son avertissement attendu
+  est tu. Le module natif `canvas`, que seul pdfjs 3 réclamait, disparaît des
+  dépendances.
 - **Le worker tourne sur le Node d'Electron**, et non plus sur le `node` du
   système, que la plupart des utilisateurs n'ont pas (aucun PDF ne s'indexait
   alors) et qui peut être plus ancien que le Node ≥ 22.13 exigé par pdfjs 5.
@@ -159,6 +163,7 @@ choses ont changé avec elle :
 Vérification : sur 44 PDF réels (1 094 pages), le texte extrait par la 5.7
 est identique caractère pour caractère à celui de la 3.11 une fois les
 espaces retirées — les seules différences sont d'espacement, en mieux
-(« build ing » → « building »). `scripts/pdf-extraction-snapshot.mjs` refait
+(« build ing » → « building »). Les apps empaquetées arm64 et x86_64 (sous
+Rosetta, sans Node système) produisent ce même texte sur les 44 PDF. `scripts/pdf-extraction-snapshot.mjs` refait
 cette comparaison ; `pdfjs-extraction.test.ts` garde l'extraction d'un PDF de
 test en CI.
