@@ -47,7 +47,13 @@ export interface ManuscriptSearchHit {
   chunk: ManuscriptChunkRecord;
   chapter: ManuscriptChapterRecord;
   score: number;
-  signals: { dense: number; lexical: number };
+  /**
+   * Signaux bruts, consommés par le contrat de pertinence commun
+   * (`backend/core/rag/relevance.ts`) : `score` est un RRF, qui choisit les
+   * extraits mais ne se compare pas d'un corpus à l'autre. `lexicalRank` est
+   * le rang FTS5 (1 = meilleur), `null` pour un extrait vu seulement en dense.
+   */
+  signals: { dense: number; lexical: number; lexicalRank: number | null };
 }
 
 export interface ManuscriptStoreConfig {
@@ -346,13 +352,23 @@ export class ManuscriptStore {
 
     const fused = new Map<
       string,
-      { rrf: number; dense: number; lexical: number; row: RawChunkRow }
+      {
+        rrf: number;
+        dense: number;
+        lexical: number;
+        lexicalRank: number | null;
+        row: RawChunkRow;
+      }
     >();
+    // La passe dense note TOUS les extraits : un extrait trouvé seulement en
+    // lexical a donc un vrai cosinus, inutile de le déclarer nul.
+    const cosineById = new Map(dense.map((d) => [d.id, d.score]));
     dense.slice(0, topK * 4).forEach((d, i) => {
       fused.set(d.id, {
         rrf: DENSE_W * (1 / (K + i + 1)),
         dense: d.score,
         lexical: 0,
+        lexicalRank: null,
         row: d.row,
       });
     });
@@ -363,8 +379,15 @@ export class ManuscriptStore {
       if (prev) {
         prev.rrf += add;
         prev.lexical = l.score;
+        prev.lexicalRank = i + 1;
       } else {
-        fused.set(l.id, { rrf: add, dense: 0, lexical: l.score, row: l.row });
+        fused.set(l.id, {
+          rrf: add,
+          dense: cosineById.get(l.id) ?? 0,
+          lexical: l.score,
+          lexicalRank: i + 1,
+          row: l.row,
+        });
       }
     });
 
@@ -385,7 +408,7 @@ export class ManuscriptStore {
         chunk: rowToChunk(r.row),
         chapter: rowToChapter(chapterRow),
         score: r.rrf,
-        signals: { dense: r.dense, lexical: r.lexical },
+        signals: { dense: r.dense, lexical: r.lexical, lexicalRank: r.lexicalRank },
       });
     }
     return hits;
@@ -424,7 +447,7 @@ export class ManuscriptStore {
       'SELECT * FROM manuscript_chapters WHERE id = ?'
     );
     const hits: ManuscriptSearchHit[] = [];
-    for (const r of rows) {
+    for (const [i, r] of rows.entries()) {
       const c = byId.get(r.id);
       if (!c) continue;
       const chapterRow = chapterStmt.get(c.chapter_id) as
@@ -435,7 +458,7 @@ export class ManuscriptStore {
         chunk: rowToChunk(c),
         chapter: rowToChapter(chapterRow),
         score: -r.bm,
-        signals: { dense: 0, lexical: -r.bm },
+        signals: { dense: 0, lexical: -r.bm, lexicalRank: i + 1 },
       });
     }
     return hits;

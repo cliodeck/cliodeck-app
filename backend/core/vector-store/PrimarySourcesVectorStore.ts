@@ -15,6 +15,7 @@ import type {
   ENTITY_TYPE_WEIGHTS,
 } from '../../types/entity';
 import { entityNormalizer } from '../ner/EntityNormalizer';
+import { relevanceScore } from '../rag/relevance';
 
 const { HierarchicalNSW } = hnswlib;
 type HierarchicalNSW = InstanceType<typeof HierarchicalNSW>;
@@ -1148,6 +1149,8 @@ export class PrimarySourcesVectorStore {
       source: PrimarySourceDocument;
       denseScore: number;
       sparseScore: number;
+      /** Rang lexical (1 = meilleur), `null` si l'extrait n'a été vu qu'en dense. */
+      sparseRank: number | null;
       rrfScore: number;
       hasExactMatch: boolean;
     }>();
@@ -1179,6 +1182,7 @@ export class PrimarySourcesVectorStore {
           source: result.source,
           denseScore: result.similarity,
           sparseScore: 0,
+          sparseRank: null,
           rrfScore: 0,
           hasExactMatch: checkExactMatch(result.chunk.content),
         });
@@ -1202,6 +1206,7 @@ export class PrimarySourcesVectorStore {
           source,
           denseScore: 0,
           sparseScore: result.score,
+          sparseRank: null,
           rrfScore: 0,
           hasExactMatch: checkExactMatch(result.chunk.content),
         });
@@ -1210,6 +1215,7 @@ export class PrimarySourcesVectorStore {
       const entry = scores.get(chunkId)!;
       entry.rrfScore += rrfScore;
       entry.sparseScore = result.score;
+      entry.sparseRank = rank + 1;
     });
 
     // Apply exact match boost (2x multiplier for chunks containing keywords)
@@ -1233,13 +1239,22 @@ export class PrimarySourcesVectorStore {
     // peaks near 1/(K+1) ≈ 0.016, far below any cosine threshold, so
     // everything got filtered and the fallback served the same 3 results
     // for every query. See HybridSearch.ts for the sibling fix.
+    //
+    // Path A′ : le cosinus seul ne suffisait pas. Un extrait trouvé
+    // uniquement par BM25 — un nom propre dans un OCR, que le modèle
+    // d'embedding ne connaît pas — portait `denseScore: 0` et se classait
+    // derrière tout extrait sémantiquement voisin. Même contrat que les
+    // PDF désormais : max(cosinus, pertinence du rang lexical).
     return Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
       .map(entry => ({
         chunk: entry.chunk,
         source: entry.source,
-        similarity: entry.denseScore,
+        similarity: relevanceScore({
+          dense: entry.denseScore,
+          sparseRank: entry.sparseRank,
+        }),
         sourceType: 'primary' as const,
       }));
   }

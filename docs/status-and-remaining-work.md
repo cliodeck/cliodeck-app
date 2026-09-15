@@ -40,7 +40,7 @@ Partially done:
 - **4.1** -- ADR 0005 (threat model) + ADR 0006 (credential storage) written and implemented (revoke-all-keys, cloud consent dialog)
 - **4.2** -- Code signing: still the GA blocker. macOS is tracked in issue **#75** (the `mac` build block is prepared but inert; blocked on the Developer ID certificate). Windows / Linux / CI-vs-local questions remain in `docs/code-signing-decisions.md`
 - **4.3** -- Cloud consent banner implemented (per-session, covers remote Ollama). **Renderer-only** — see audit item 17 below
-- **4.4** -- Anti-hallucination system prompts done. OCR quality reports (per-document + corpus) done. Path A benchmark harness exists but gold-standard corpus not yet built.
+- **4.4** -- Anti-hallucination system prompts done. OCR quality reports (per-document + corpus) done. Retrieval benchmark harness exists but gold-standard corpus not yet built (no longer a gate — see Path A′).
 - **4.5** -- **Done 2026-07-18/19**: environmental suites guarded by `skipIf`, the 8 failures those guards were hiding fixed, and a CI job now runs the suite on the Node ABI so the guards cannot hide a regression
 
 ### Additional work done (outside the plan)
@@ -90,7 +90,6 @@ Partially done:
 | # | Type | Description | User action? |
 |---|---|---|---|
 | 4.2 | Security | Code signing. macOS = issue **#75** (wiring plan written; blocked on the Developer ID certificate). Windows Authenticode still undecided | Yes -- Apple Developer account + budget |
-| 4.4 | Backend | Path A benchmark: build a gold-standard corpus (>=30 queries with relevance judgments) to gate the unified vector store migration | Yes -- historian judgment needed |
 | -- | Backend | 144 chunks with missing embeddings (5880 indexed, 5736 with embeddings) -- investigate and repair. *Observed on one corpus in May 2026; not re-measured since* | No |
 | 17 | Security | Cloud-consent guard is **renderer-only** (`cloudConsentStore`, `useCloudConsentGuard`). A main-process caller can reach a cloud provider without passing it. Carried over from the July audits | No |
 | 18 | Security | `fusion-handlers.ts` has 30 `ipcMain.handle` registrations and only a handful of `validate()` calls. Carried over from the July audits | No |
@@ -109,6 +108,7 @@ Partially done:
 
 | Type | Description |
 |---|---|
+| Backend | Retrieval benchmark: build a gold-standard corpus (>=30 queries with relevance judgments). **No longer gates anything** since Path A′ (ADR 0001, amendment 2026-09-14): it will calibrate per-corpus thresholds and relevance constants, which are calibrated on nothing today. Needs historian judgment; not urgent |
 | Design | Installer strategy (`docs/installer-strategy.md`): embedded Ollama, first-run wizard, bundled Pandoc/tectonic. Nothing in its section 7 has been built |
 | Backend | Book: index (`\index{}`) and typed cross-references — same technical family as footnotes/citations (Lezer extension + resolution at assembly) |
 | Backend | Book: Word export ignores `noteStyle`/`noteNumbering` (LaTeX path only) |
@@ -462,9 +462,11 @@ liste ci-dessus : l'utilisateur est prévenu.
 - **~414 lint warnings** (`no-explicit-any`, `react-hooks/exhaustive-deps`,
   unused vars): the stock to work off rule by rule. CI gates errors at 0 and
   lets warnings through deliberately
-- **Path B (parallel stores)** continues to ship; Path A unification is gated
-  on benchmark — and now has **three** parallel stores to absorb (Obsidian
-  vault, primary sources, manuscript) rather than two
+- **Path A′ adopted, Path A dropped** (ADR 0001, amendment 2026-09-14): the
+  four corpora keep their own schemas and share a relevance contract
+  (`backend/core/rag/relevance.ts`) and a `CorpusRetriever` interface. Known
+  limit left: vault and manuscript stores have no exact-match boost, so a
+  keyword-only hit rarely reaches their `topK`
 
 ---
 

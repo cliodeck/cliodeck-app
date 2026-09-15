@@ -21,6 +21,16 @@ import {
   createExpandQueryFrEn,
 } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
+import {
+  corporaInScope,
+  fanOutCorpora,
+  type CorpusRetriever,
+  type RetrievalSourceOutcome,
+} from '../../../backend/core/rag/retrievers/corpus.js';
+import {
+  applyThreshold,
+  relevanceScore,
+} from '../../../backend/core/rag/relevance.js';
 import type {
   SearchResult,
 } from '../../../backend/types/pdf-document.js';
@@ -172,29 +182,11 @@ export type MultiSourceSearchResult =
 type AnySearchResult = MultiSourceSearchResult | ManuscriptMappedSearchResult;
 
 /**
- * Per-corpus outcome (fusion 1.7 — partial-success first-class).
- *
- * Each retrieval call fans out to up to four corpora (secondary PDFs,
- * primary Tropy, Obsidian vault, the author's own manuscript). Any individual corpus may be skipped
- * (not in scope), succeed with N hits, succeed with 0 hits, or throw.
- * The previous shape collapsed all three into a flat list and logged
- * failures via `console.warn` — callers had no way to tell the
- * difference between "Tropy was empty" and "Tropy crashed". This
- * envelope makes the distinction first-class.
+ * Per-corpus outcome (fusion 1.7 — partial-success first-class). Défini
+ * avec l'interface commune des corpus (Path A′) ; réexporté ici pour les
+ * appelants existants.
  */
-export interface RetrievalSourceOutcome {
-  source: 'secondary' | 'primary' | 'vault' | 'manuscript';
-  /** True iff the corpus was in the requested `sourceType` scope. */
-  attempted: boolean;
-  /** True iff the corpus's search ran without throwing. */
-  ok: boolean;
-  /** Hits this corpus contributed *before* sort+slice across the union. */
-  hitCount: number;
-  /** Search duration for this corpus in ms (only when `attempted`). */
-  durationMs?: number;
-  /** Error message when `ok === false`; undefined otherwise. */
-  error?: string;
-}
+export type { RetrievalSourceOutcome };
 
 export interface RetrievalSearchResult {
   /** Combined, sort-and-slice'd hit list (the legacy return value). */
@@ -616,189 +608,39 @@ class RetrievalService {
   async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
     this.ensureReady();
 
-    const sourceType = q.sourceType || 'both';
     const searchStart = Date.now();
     const ragConfig = configManager.getRAGConfig();
     const topK = q.topK || ragConfig.topK;
     const threshold = q.threshold || ragConfig.similarityThreshold;
+    const scope = corporaInScope(q);
 
     if (DEBUG) {
       console.log(
-        `🔍 [PDF-SERVICE] Multi-source search: sourceType=${sourceType}, topK=${topK}`
+        `🔍 [PDF-SERVICE] Multi-source search: corpora=${[...scope].join(',')}, topK=${topK}`
       );
     }
 
-    const allSourceResults: AnySearchResult[] = [];
-
-    // Each corpus is wrapped to produce a typed outcome the union return
-    // can carry. Partial-success first-class (claw-code lesson 6.3): an
-    // error in one corpus must not silently lose the others.
-    const outcomeSecondary: RetrievalSourceOutcome = {
-      source: 'secondary',
-      attempted: false,
-      ok: false,
-      hitCount: 0,
-    };
-    const outcomePrimary: RetrievalSourceOutcome = {
-      source: 'primary',
-      attempted: false,
-      ok: false,
-      hitCount: 0,
-    };
-    const outcomeVault: RetrievalSourceOutcome = {
-      source: 'vault',
-      attempted: false,
-      ok: false,
-      hitCount: 0,
-    };
-    const outcomeManuscript: RetrievalSourceOutcome = {
-      source: 'manuscript',
-      attempted: false,
-      ok: false,
-      hitCount: 0,
-    };
-
-    if (sourceType === 'secondary' || sourceType === 'both') {
-      outcomeSecondary.attempted = true;
-      const t0 = Date.now();
-      try {
-        const secondaryResults = await this.searchSecondary(q.query, {
-          topK,
-          threshold,
-          documentIds: q.documentIds,
-          collectionKeys: q.collectionKeys,
-        });
-        const mapped = secondaryResults.map(
-          (r: SearchResult): SecondarySearchResult => ({
-            ...r,
-            sourceType: 'secondary' as const,
-          })
-        );
-        allSourceResults.push(...mapped);
-        outcomeSecondary.ok = true;
-        outcomeSecondary.hitCount = mapped.length;
-        if (DEBUG) {
-          console.log(
-            `📚 [PDF-SERVICE] Secondary sources: ${secondaryResults.length} results`
-          );
-        }
-      } catch (error: unknown) {
-        outcomeSecondary.ok = false;
-        outcomeSecondary.error =
-          error instanceof Error ? error.message : String(error);
-        console.warn(
-          '⚠️ [PDF-SERVICE] Secondary source search failed:',
-          error
-        );
-      } finally {
-        outcomeSecondary.durationMs = Date.now() - t0;
+    // Partial-success first-class (claw-code lesson 6.3): an error in one
+    // corpus must not silently lose the others — `fanOutCorpora` records
+    // one outcome per corpus and keeps going.
+    const { hits: allSourceResults, outcomes } = await fanOutCorpora(
+      this.corpusRetrievers(),
+      scope,
+      q.query,
+      {
+        topK,
+        threshold,
+        documentIds: q.documentIds,
+        collectionKeys: q.collectionKeys,
+      },
+      (corpus, error) => {
+        console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
       }
-    }
+    );
 
-    if (sourceType === 'primary' || sourceType === 'both') {
-      outcomePrimary.attempted = true;
-      const t0 = Date.now();
-      try {
-        const primaryResults = await tropyService.search(q.query, {
-          topK,
-          threshold,
-        });
-        const mappedPrimaryResults: PrimaryMappedSearchResult[] = primaryResults.map(
-          (
-            r: PrimarySourceSearchResult & { source?: PrimarySourceDocument }
-          ): PrimaryMappedSearchResult => ({
-            chunk: {
-              id: r.chunk.id,
-              content: r.chunk.content,
-              documentId: r.chunk.sourceId,
-              chunkIndex: r.chunk.chunkIndex,
-            },
-            document: {
-              id: r.source?.id,
-              title: r.source?.title,
-              author: r.source?.creator,
-              bibtexKey: null,
-            },
-            source: r.source,
-            similarity: r.similarity,
-            sourceType: 'primary' as const,
-          })
-        );
-        allSourceResults.push(...mappedPrimaryResults);
-        outcomePrimary.ok = true;
-        outcomePrimary.hitCount = mappedPrimaryResults.length;
-        if (DEBUG) {
-          console.log(
-            `📜 [PDF-SERVICE] Primary sources: ${primaryResults.length} results`
-          );
-        }
-      } catch (error: unknown) {
-        outcomePrimary.ok = false;
-        outcomePrimary.error =
-          error instanceof Error ? error.message : String(error);
-        console.warn(
-          '⚠️ [PDF-SERVICE] Primary source search failed (Tropy not initialized?):',
-          error
-        );
-      } finally {
-        outcomePrimary.durationMs = Date.now() - t0;
-      }
-    }
-
-    // Vault-only mode implies vault inclusion regardless of the flag.
-    if (q.includeVault || sourceType === 'vault') {
-      outcomeVault.attempted = true;
-      const t0 = Date.now();
-      try {
-        const vaultResults = await this.searchVault(q.query, {
-          topK,
-        });
-        allSourceResults.push(...vaultResults);
-        outcomeVault.ok = true;
-        outcomeVault.hitCount = vaultResults.length;
-        if (DEBUG) {
-          console.log(
-            `📓 [PDF-SERVICE] Vault (Obsidian): ${vaultResults.length} results`
-          );
-        }
-      } catch (error: unknown) {
-        outcomeVault.ok = false;
-        outcomeVault.error =
-          error instanceof Error ? error.message : String(error);
-        console.warn(
-          '⚠️ [PDF-SERVICE] Vault search failed (not indexed?):',
-          error
-        );
-      } finally {
-        outcomeVault.durationMs = Date.now() - t0;
-      }
-    }
-
-    // Manuscrit : le texte de l'auteur lui-même (item 25 des audits).
-    // Opt-in, comme le vault — un appelant historique ne le voit jamais.
-    if (q.includeManuscript || sourceType === 'manuscript') {
-      outcomeManuscript.attempted = true;
-      const t0 = Date.now();
-      try {
-        const manuscriptResults = await this.searchManuscript(q.query, { topK });
-        allSourceResults.push(...manuscriptResults);
-        outcomeManuscript.ok = true;
-        outcomeManuscript.hitCount = manuscriptResults.length;
-        if (DEBUG) {
-          console.log(
-            `✍️ [PDF-SERVICE] Manuscrit: ${manuscriptResults.length} results`
-          );
-        }
-      } catch (error: unknown) {
-        outcomeManuscript.ok = false;
-        outcomeManuscript.error =
-          error instanceof Error ? error.message : String(error);
-        console.warn(
-          '⚠️ [PDF-SERVICE] Manuscript search failed (not indexed?):',
-          error
-        );
-      } finally {
-        outcomeManuscript.durationMs = Date.now() - t0;
+    if (DEBUG) {
+      for (const o of outcomes.filter((x) => x.attempted)) {
+        console.log(`🔍 [PDF-SERVICE] ${o.source}: ${o.hitCount} results`);
       }
     }
 
@@ -835,12 +677,7 @@ class RetrievalService {
       hits: externalHits,
       manuscriptHits,
       securityEvents,
-      outcomes: [
-        outcomeSecondary,
-        outcomePrimary,
-        outcomeVault,
-        outcomeManuscript,
-      ],
+      outcomes,
     };
   }
 
@@ -893,15 +730,70 @@ class RetrievalService {
     };
   }
 
+  /**
+   * Les quatre corpus, sous la forme commune (Path A′). Chaque adaptateur
+   * appelle la méthode du corpus AU MOMENT de la recherche — pas une
+   * référence capturée — pour que les tests puissent la remplacer.
+   *
+   * Ajouter un corpus : un adaptateur ici, une valeur dans `CorpusId`.
+   */
+  private corpusRetrievers(): CorpusRetriever<AnySearchResult>[] {
+    return [
+      {
+        corpus: 'secondary',
+        search: async (query, o) => {
+          const results = await this.searchSecondary(query, o);
+          return results.map(
+            (r: SearchResult): SecondarySearchResult => ({
+              ...r,
+              sourceType: 'secondary' as const,
+            })
+          );
+        },
+      },
+      { corpus: 'primary', search: (query, o) => this.searchPrimary(query, o) },
+      { corpus: 'vault', search: (query, o) => this.searchVault(query, o) },
+      { corpus: 'manuscript', search: (query, o) => this.searchManuscript(query, o) },
+    ];
+  }
+
+  private async searchPrimary(
+    query: string,
+    options: { topK: number; threshold: number }
+  ): Promise<PrimaryMappedSearchResult[]> {
+    const primaryResults = await tropyService.search(query, options);
+    return primaryResults.map(
+      (
+        r: PrimarySourceSearchResult & { source?: PrimarySourceDocument }
+      ): PrimaryMappedSearchResult => ({
+        chunk: {
+          id: r.chunk.id,
+          content: r.chunk.content,
+          documentId: r.chunk.sourceId,
+          chunkIndex: r.chunk.chunkIndex,
+        },
+        document: {
+          id: r.source?.id,
+          title: r.source?.title,
+          author: r.source?.creator,
+          bibtexKey: null,
+        },
+        source: r.source,
+        similarity: r.similarity,
+        sourceType: 'primary' as const,
+      })
+    );
+  }
+
   private async searchVault(
     query: string,
-    options: { topK: number }
+    options: { topK: number; threshold: number }
   ): Promise<VaultMappedSearchResult[]> {
     const store = this.getVaultStore();
     if (!store) return [];
     const embedding = await this.getQueryEmbedding(query);
     const hits = store.search(embedding, query, options.topK);
-    return hits.map(
+    const mapped = hits.map(
       (h): VaultMappedSearchResult => ({
         chunk: {
           id: h.chunk.id,
@@ -920,21 +812,32 @@ class RetrievalService {
           relativePath: h.note.relativePath,
           noteId: h.note.id,
         },
-        similarity: h.score,
+        // `h.score` est un RRF (maximum 1/61 ≈ 0,016) : publié tel quel, il
+        // classait toute note derrière tout extrait de bibliographie ou
+        // d'archive, et le vault n'obtenait une place que s'il en restait.
+        // C'est le défaut corrigé pour le manuscrit en rc.4, resté ici.
+        similarity: relevanceScore({
+          dense: h.signals.dense,
+          sparseRank: h.signals.lexicalRank,
+        }),
         sourceType: 'vault',
       })
     );
+    // Pas de repli sous le seuil : les notes sont écrites par l'historien,
+    // dans sa langue — une note qui ne franchit pas le seuil n'a rien à dire,
+    // et la montrer quand même prendrait la place d'une source pertinente.
+    return applyThreshold(mapped, options.threshold, 0);
   }
 
   private async searchManuscript(
     query: string,
-    options: { topK: number }
+    options: { topK: number; threshold: number }
   ): Promise<ManuscriptMappedSearchResult[]> {
     const store = this.getManuscriptStore();
     if (!store) return [];
     const embedding = await this.getQueryEmbedding(query);
     const hits = store.search(embedding, query, options.topK);
-    return hits.map(
+    const mapped = hits.map(
       (h): ManuscriptMappedSearchResult => ({
         chunk: {
           id: h.chunk.id,
@@ -961,13 +864,22 @@ class RetrievalService {
         // classait TOUT extrait du manuscrit sous TOUT extrait externe, et
         // le `slice(0, topK)` l'éliminait systématiquement.
         //
-        // On publie donc le cosinus réel, que le store expose déjà dans ses
-        // signaux — comparable d'un corpus à l'autre. Le RRF garde son rôle,
-        // meilleur : il a déjà décidé QUELS extraits le store renvoie.
-        similarity: h.signals?.dense ?? h.score,
+        // On publie donc la pertinence du contrat commun (`relevance.ts`) :
+        // le cosinus réel, relevé par le rang lexical quand le mot-clé est
+        // une meilleure preuve. Le RRF garde son rôle, meilleur : il a déjà
+        // décidé QUELS extraits le store renvoie.
+        similarity: relevanceScore({
+          dense: h.signals.dense,
+          sparseRank: h.signals.lexicalRank,
+        }),
         sourceType: 'manuscript',
       })
     );
+    // Pas de repli sous le seuil : le quota de `selectWithManuscriptQuota`
+    // réserve des places au manuscrit « quand il a quelque chose à dire ».
+    // Sans seuil, il en avait toujours — et prenait ses places même hors
+    // sujet.
+    return applyThreshold(mapped, options.threshold, 0);
   }
 
   /**

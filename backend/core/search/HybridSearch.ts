@@ -2,6 +2,7 @@ import { HNSWVectorStore } from '../vector-store/HNSWVectorStore';
 import { BM25Index } from './BM25Index';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
 import type { BM25Result } from './BM25Index';
+import { relevanceScore } from '../rag/relevance';
 
 /**
  * Hybrid Search combining dense (HNSW) and sparse (BM25) retrieval
@@ -224,23 +225,17 @@ export class HybridSearch {
     // get the synthetic value directly so they pass the cosine threshold
     // they have no business being measured against. `denseScore` is
     // still exposed verbatim for callers that need the real cosine.
-    const SPARSE_BASE = 0.7;
-    const SPARSE_DECAY = 0.02;
-    const SPARSE_FLOOR = 0.15;
-    const SPARSE_BOOST_RANK = 50;
-
+    //
+    // Ce calcul est devenu le contrat des quatre corpus (Path A′) : il vit
+    // désormais dans `backend/core/rag/relevance.ts`, mêmes constantes.
     const fusedResults = Array.from(scores.values())
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, k)
       .map((entry) => {
-        const sparseSynthetic =
-          entry.sparseRank !== null && entry.sparseRank <= SPARSE_BOOST_RANK
-            ? Math.max(
-                SPARSE_FLOOR,
-                SPARSE_BASE - SPARSE_DECAY * (entry.sparseRank - 1),
-              )
-            : 0;
-        const similarity = Math.max(entry.denseScore, sparseSynthetic);
+        const similarity = relevanceScore({
+          dense: entry.denseScore,
+          sparseRank: entry.sparseRank,
+        });
         return {
           chunk: entry.chunk,
           similarity,

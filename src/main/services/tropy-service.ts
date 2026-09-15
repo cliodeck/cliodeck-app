@@ -18,6 +18,7 @@ import { ChunkDeduplicator } from '../../../backend/core/chunking/ChunkDeduplica
 // `pdfService.getOllamaClient() / getLLMProviderManager()` pattern.
 import { configManager } from './config-manager.js';
 import { expandQueryToText } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
+import { applyThreshold, CROSS_LANGUAGE_FALLBACK } from '../../../backend/core/rag/relevance.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { runBatch } from '../../../backend/core/usage-journal/context.js';
 import type {
@@ -661,13 +662,11 @@ class TropyService {
     console.log(`📜 [TROPY-SERVICE] Index stats: HNSW=${indexStats.hnswSize}, BM25=${indexStats.bm25Size}, dimension=${indexStats.hnswDimension}`);
 
     const topK = options?.topK || 10;
-    // RRF (Reciprocal Rank Fusion) scores are much smaller than cosine similarity
-    // Typical RRF scores range from 0.001 to 0.02 due to the formula: weight / (k + rank)
-    // We use a very low threshold (0.005) to allow RRF results through
-    // If the passed threshold is high (>0.05), it's likely meant for cosine similarity
-    // so we convert it to an appropriate RRF threshold
-    const passedThreshold = options?.threshold || 0.2;
-    const threshold = passedThreshold > 0.05 ? 0.005 : passedThreshold;
+    // Le store publie la pertinence du contrat commun (`relevance.ts`, échelle
+    // du cosinus) : le seuil s'applique donc tel quel. Il était auparavant
+    // ramené à 0,005, conversion pensée pour des scores RRF que le store ne
+    // publie plus — ce qui revenait à ne filtrer aucun extrait d'archive.
+    const threshold = options?.threshold ?? configManager.getRAGConfig().similarityThreshold;
 
     try {
       if (!this.embedding) {
@@ -686,23 +685,18 @@ class TropyService {
       // Search using hybrid search (HNSW + BM25) - pass both embedding and text
       const results = this.vectorStore.search(queryEmbedding, topK * 2, expandedQuery);
 
-      // Filter by threshold - results already include source data
-      let enrichedResults = results.filter((r) => r.similarity >= threshold);
+      // Seuil, avec le même repli que la bibliographie : des archives
+      // peuvent être dans une autre langue que la question, et trois extraits
+      // limites valent mieux qu'une réponse vide. Le repli gardait jusqu'ici
+      // `topK` extraits — de quoi remplir toutes les places avec du hors-sujet.
+      const enrichedResults = applyThreshold(results, threshold, CROSS_LANGUAGE_FALLBACK);
 
-      console.log(`📜 [TROPY-SERVICE] Hybrid search found ${enrichedResults.length} results (RRF threshold: ${threshold})`);
-
-      // Fallback: if all results are filtered out but we have results, keep top ones
-      if (enrichedResults.length === 0 && results.length > 0) {
-        const minFallbackResults = Math.min(topK, results.length);
-        console.warn(`⚠️ [TROPY-SERVICE] All results below threshold, applying fallback: keeping top ${minFallbackResults}`);
-        console.warn(`⚠️ [TROPY-SERVICE] Best RRF score: ${results[0].similarity.toFixed(4)}`);
-        enrichedResults = results.slice(0, minFallbackResults);
-      }
+      console.log(`📜 [TROPY-SERVICE] Hybrid search found ${enrichedResults.length} results (threshold: ${threshold})`);
 
       // Debug: Show top result if any
       if (enrichedResults.length > 0) {
         const topResult = enrichedResults[0];
-        console.log(`📜 [TROPY-SERVICE] Top result: "${topResult.source?.title}" (RRF score: ${topResult.similarity.toFixed(4)})`);
+        console.log(`📜 [TROPY-SERVICE] Top result: "${topResult.source?.title}" (relevance: ${topResult.similarity.toFixed(4)})`);
       } else {
         console.log(`📜 [TROPY-SERVICE] No results found. Total results before threshold: ${results.length}`);
       }
@@ -740,9 +734,8 @@ class TropyService {
     }
 
     const topK = options?.topK || 10;
-    // Convert high thresholds (meant for cosine similarity) to RRF-appropriate values
-    const passedThreshold = options?.threshold || 0.2;
-    const threshold = passedThreshold > 0.05 ? 0.005 : passedThreshold;
+    // Échelle du cosinus, comme `search()` — plus de conversion vers le RRF.
+    const threshold = options?.threshold ?? configManager.getRAGConfig().similarityThreshold;
     const useEntities = options?.useEntities ?? true;
 
     try {
@@ -767,12 +760,7 @@ class TropyService {
       // If not using entities, fallback to hybrid search
       if (!useEntities || !this.nerService) {
         const results = this.vectorStore.search(queryEmbedding, topK * 2, expandedQuery);
-        let filtered = results.filter(r => r.similarity >= threshold);
-        // Fallback if all filtered out
-        if (filtered.length === 0 && results.length > 0) {
-          filtered = results.slice(0, Math.min(topK, results.length));
-        }
-        return filtered.slice(0, topK);
+        return applyThreshold(results, threshold, CROSS_LANGUAGE_FALLBACK).slice(0, topK);
       }
 
       // Extract entities from query
@@ -788,11 +776,7 @@ class TropyService {
         expandedQuery
       );
 
-      let filteredResults = results.filter(r => r.similarity >= threshold);
-      // Fallback if all filtered out
-      if (filteredResults.length === 0 && results.length > 0) {
-        filteredResults = results.slice(0, Math.min(topK, results.length));
-      }
+      const filteredResults = applyThreshold(results, threshold, CROSS_LANGUAGE_FALLBACK);
 
       console.log(`🏷️ [TROPY-SERVICE] Entity-boosted search found ${filteredResults.length} results`);
 

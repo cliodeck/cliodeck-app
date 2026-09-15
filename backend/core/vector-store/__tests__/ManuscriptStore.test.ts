@@ -98,6 +98,30 @@ describe.skipIf(!sqliteAvailable)('ManuscriptStore', () => {
     const hits = store.searchLexical('Nations', 5);
     expect(hits).toHaveLength(1);
     expect(hits[0].chunk.content).toContain('Nations');
+    expect(hits[0].signals.lexicalRank).toBe(1);
+  });
+
+  it('expose le rang lexical, seul signal comparable d’un corpus à l’autre (Path A′)', () => {
+    // Le RRF (`score`) choisit les extraits mais plafonne à 1/61 : c'est le
+    // rang lexical et le cosinus que le contrat de pertinence consomme.
+    store.upsertChapter(chapter());
+    store.addChunk(
+      { id: 'c1-0', chapterId: 'c1', chunkIndex: 0, content: 'Le port de Danzig est disputé.', line: 1 },
+      vec([1, 0, 0])
+    );
+    store.addChunk(
+      { id: 'c1-1', chapterId: 'c1', chunkIndex: 1, content: 'Une digression sans rapport.', line: 3 },
+      vec([0.8, 0.6, 0])
+    );
+
+    const hits = store.search(vec([1, 0, 0]), 'Danzig', 5);
+    const byId = Object.fromEntries(hits.map((h) => [h.chunk.id, h]));
+
+    expect(byId['c1-0'].signals.lexicalRank).toBe(1);
+    expect(byId['c1-0'].signals.dense).toBeCloseTo(1);
+    expect(byId['c1-1'].signals.lexicalRank).toBeNull();
+    expect(byId['c1-1'].signals.dense).toBeCloseTo(0.8);
+    expect(byId['c1-0'].score).toBeLessThan(1 / 60);
   });
 
   it('réindexer un chapitre remplace ses chunks sans en laisser d’orphelins', () => {

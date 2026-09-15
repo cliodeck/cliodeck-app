@@ -50,8 +50,14 @@ export interface ObsidianSearchHit {
   chunk: ObsidianChunkRecord;
   note: ObsidianNoteRecord;
   score: number;
-  /** Individual signals for debugging / UI tooltip. */
-  signals: { dense: number; lexical: number };
+  /**
+   * Individual signals for debugging / UI tooltip — and for the shared
+   * relevance contract (`backend/core/rag/relevance.ts`): `score` is RRF,
+   * which picks WHICH hits come back but is not comparable across corpora.
+   * `lexicalRank` is the 1-based FTS5 rank, `null` when the hit came from
+   * the dense side only.
+   */
+  signals: { dense: number; lexical: number; lexicalRank: number | null };
 }
 
 export interface ObsidianVaultStoreConfig {
@@ -331,16 +337,26 @@ export class ObsidianVaultStore {
     // RRF fusion
     const fused = new Map<
       string,
-      { rrf: number; dense: number; lexical: number; row: RawChunkRow }
+      {
+        rrf: number;
+        dense: number;
+        lexical: number;
+        lexicalRank: number | null;
+        row: RawChunkRow;
+      }
     >();
     const DENSE_W = 0.6;
     const LEX_W = 0.4;
+    // The dense pass scores EVERY chunk, so a lexical-only hit still has a
+    // real cosine — keep it rather than reporting 0.
+    const cosineById = new Map(dense.map((d) => [d.id, d.score]));
 
     dense.slice(0, topK * 4).forEach((d, i) => {
       fused.set(d.id, {
         rrf: DENSE_W * (1 / (K + i + 1)),
         dense: d.score,
         lexical: 0,
+        lexicalRank: null,
         row: d.row,
       });
     });
@@ -351,8 +367,15 @@ export class ObsidianVaultStore {
       if (prev) {
         prev.rrf += add;
         prev.lexical = l.score;
+        prev.lexicalRank = i + 1;
       } else {
-        fused.set(l.id, { rrf: add, dense: 0, lexical: l.score, row: l.row });
+        fused.set(l.id, {
+          rrf: add,
+          dense: cosineById.get(l.id) ?? 0,
+          lexical: l.score,
+          lexicalRank: i + 1,
+          row: l.row,
+        });
       }
     });
 
@@ -376,7 +399,7 @@ export class ObsidianVaultStore {
         },
         note: rowToNote(noteRow),
         score: r.rrf,
-        signals: { dense: r.dense, lexical: r.lexical },
+        signals: { dense: r.dense, lexical: r.lexical, lexicalRank: r.lexicalRank },
       });
     }
     return hits;
@@ -416,7 +439,7 @@ export class ObsidianVaultStore {
 
     const noteStmt = this.db.prepare('SELECT * FROM obsidian_notes WHERE id = ?');
     const hits: ObsidianSearchHit[] = [];
-    for (const r of rows) {
+    for (const [i, r] of rows.entries()) {
       const c = byId.get(r.id);
       if (!c) continue;
       const noteRow = noteStmt.get(c.note_id) as RawNoteRow | undefined;
@@ -433,7 +456,7 @@ export class ObsidianVaultStore {
         },
         note: rowToNote(noteRow),
         score: -r.bm,
-        signals: { dense: 0, lexical: -r.bm },
+        signals: { dense: 0, lexical: -r.bm, lexicalRank: i + 1 },
       });
     }
     return hits;
