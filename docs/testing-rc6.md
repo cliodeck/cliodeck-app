@@ -2,7 +2,7 @@
 
 > Plan du cycle rc.6 : **aucune nouvelle fonctionnalité**, des tests humains
 > aussi intenses que le permet un testeur unique (≈ 1 h par jour), et la
-> migration `pdfjs-dist` v4 (#77). Suivi au jour le jour : le ticket
+> migration `pdfjs-dist` (#77, faite : 5.7, PR #110). Suivi au jour le jour : le ticket
 > « Campagne de tests rc.6 » ; chaque défaut trouvé devient un ticket
 > étiqueté `rc6-test`.
 
@@ -21,17 +21,19 @@ défauts-là, et répartit le travail :
 
 ## Périmètre de la rc.6
 
-1. **#77 — `pdfjs-dist` 3.11 → 4.x**, en début de cycle pour que toute la
-   campagne le couvre. Filet : le texte extrait d'un jeu de PDF est figé avec
-   la v3, puis comparé mot pour mot à celui de la v4 ; un test garde
-   l'invariant « jamais de `page.render()` » dont dépend l'inexploitabilité de
-   la CVE.
+1. **#77 — `pdfjs-dist` 3.11 → 5.7 — fait (PR #110)**, en début de cycle pour
+   que toute la campagne le couvre. Sur 44 PDF réels, texte identique
+   caractère pour caractère hors espaces ; un test garde l'invariant « jamais
+   de `page.render()` ». Au passage, le worker d'extraction tourne sur le Node
+   d'Electron : sans Node installé sur la machine, aucun PDF ne s'indexait.
 2. **Dettes de sécurité déjà listées** (`status-and-remaining-work.md` §2) :
    n° 17 (consentement cloud vérifié côté renderer seulement), n° 16 (pas
    d'avertissement quand les clés tombent en clair) ; n° 18 (validation IPC) si
    le temps le permet.
-3. **Restes de la rc.5** : fichiers Linux arm64 ; re-mesure des extraits sans
-   embedding (144 relevés en mai 2026).
+3. **Restes de la rc.5** : re-mesure des extraits sans embedding (144 relevés
+   en mai 2026). Linux arm64 n'est plus fourni (décision du 2026-09-15 : très
+   peu d'utilisateurs, et un binaire construit hors arm64 y embarque un
+   `hnswlib-node` de la mauvaise architecture).
 
 Tout le reste — y compris une idée excellente trouvée en testant — va au
 cycle suivant.
@@ -40,7 +42,7 @@ cycle suivant.
 
 | Semaine | Développement | Testeur (1 h/jour) |
 |---|---|---|
-| 1 | pdfjs v4 + comparaison d'extraction ; bilan de santé ; e2e étendus → build **rc.6-beta** | sur la **rc.5** publiée : missions 1 (Mac et Linux) et 9 ; fichiers Linux arm64 ; recrutement des collègues |
+| 1 | pdfjs 5.7 (fait) ; bilan de santé ; e2e étendus → build **rc.6-beta** | sur la **rc.5** publiée : missions 1 (Mac et Linux) et 9 ; recrutement des collègues |
 | 2–3 | tri et corrections au fil de l'eau, une beta par lot | une mission par jour sur la rc.6-beta : 2 à 8, puis 10 ; mission 3 aussi sur Linux |
 | 4 | corrections finales, build candidat | repasse accélérée (≈ 20 min par mission) ; séances collègues |
 
@@ -126,7 +128,9 @@ titres courts, URL, DOI, types) ?
 
 ### 3. PDF : indexer, réindexer, supprimer
 
-*Mac, puis Linux. Couvre directement la migration pdfjs v4.*
+*Mac, puis Linux x86_64. Couvre directement la migration pdfjs 5.7 et le
+worker sur le Node d'Electron — c'est aussi la première exécution réelle
+d'une app x86_64 depuis ce changement.*
 
 - Indexer une dizaine de PDF variés : scanné, OCRisé, colonnes, notes de bas
   de page, non latin, protégé, très long.
@@ -139,16 +143,44 @@ d'un PDF difficile est-il lisible ?
 
 ### 4. Tropy
 
-*Sur le projet qui a des sources primaires, en copie, avec un sous-ensemble
-d'une dizaine de documents.*
+Le corpus réel ne permet pas de relancer un OCR en une heure : dans
+`AnalyseDDF`, les 25 sources sont des volumes entiers des *Documents
+diplomatiques français* (770 à 1 142 pages, 2 à 3 millions de caractères chacun,
+40 648 extraits). La mission se joue donc en deux temps. ClioDeck n'ouvre le
+`.tpy` qu'en **lecture seule** : une copie du projet ClioDeck peut se
+synchroniser sur le vrai projet Tropy sans rien y écrire.
 
-- Synchroniser avec OCR ; quitter l'app ; relancer ; resynchroniser.
-- Modifier un item dans Tropy (métadonnée ou photo), resynchroniser.
+#### 4a. Le grand corpus ne perd rien
+
+*Copie du dossier `AnalyseDDF` (≈ 410 Mo), liée au vrai `ddf_archives.tropy`,
+sans rien modifier dans Tropy.*
+
+- Bilan de santé avant : noter sources, transcriptions, extraits.
+- Resynchroniser sans rien changer ; quitter l'app ; relancer ; resynchroniser.
+- Poser trois questions dont la réponse est dans un volume précis.
+
+**Doit être vrai** : la resynchronisation ne relance **aucun** OCR (elle doit
+durer des secondes, pas des heures) ; 25 sources, 25 transcriptions, 40 648
+extraits avant comme après ; une seule ligne de projet Tropy à la fin (la
+copie actuelle en a deux, héritées de synchronisations sous la rc.4 — la
+première synchronisation doit les fondre).
+**À juger** : l'assistant cite-t-il le bon volume, la bonne page ?
+
+#### 4b. Le cycle OCR sur un mini-projet
+
+*Un projet Tropy créé pour l'occasion : 3 à 5 documents de quelques pages
+chacun (scans ou photos), et un projet ClioDeck neuf qui le lie.*
+
+- Synchroniser avec OCR ; quitter ; relancer ; resynchroniser.
+- Modifier un item dans Tropy (métadonnée, puis ajout d'une photo),
+  resynchroniser.
 - Relancer l'OCR sur une seule source.
+- **Tuer l'app pendant un OCR**, relancer, resynchroniser.
 
-**Doit être vrai** : chaque transcription survit aux relances ; une
-resynchronisation sans changement ne relance pas l'OCR ; un OCR vide n'écrase
-pas une transcription existante ; les extraits restent présents.
+**Doit être vrai** : chaque transcription survit aux relances ; seule la source
+modifiée est retraitée ; un OCR vide n'écrase pas une transcription existante ;
+après l'arrêt brutal, rien n'est à moitié écrit (une source a sa transcription
+et ses extraits, ou elle est reprise).
 **À juger** : qualité des transcriptions, pertinence des sources retrouvées
 par l'assistant.
 
@@ -252,7 +284,7 @@ trois minutes, on passe à la tâche suivante (et le blocage est le résultat).
 
 ## Critères de sortie de la rc.6
 
-- toutes les missions jouées au moins une fois sur un build contenant pdfjs v4,
+- toutes les missions jouées au moins une fois sur un build contenant pdfjs 5.7,
   et repassées sur le build candidat ;
 - **zéro** ticket `rc6-test` ouvert de type perte de données ou résultat faux
   silencieux ;
