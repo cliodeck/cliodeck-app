@@ -5,6 +5,103 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.5] — 2026-09-15
+
+Cycle d'usage réel : chaque correctif part d'un défaut **mesuré sur un vrai
+projet** — un corpus Tropy de 221 documents, une collection Zotero de 70
+notices, une bibliothèque de 55 PDF. Le fil conducteur reste celui de la rc.4 :
+beaucoup de ces défauts ne plantaient rien, ils **perdaient ou faussaient en
+silence**. C'est aussi la première version dont les builds macOS sont signés
+et notarisés.
+
+### Security
+
+- **Builds macOS signés et notarisés par Apple** (#105, ferme #75). Les DMG
+  s'ouvrent comme n'importe quelle app téléchargée, sans le détour « ouvrir
+  quand même ». Au premier lancement, macOS demande une fois l'accès à
+  « cliodeck Safe Storage » dans le trousseau : l'app signée est une identité
+  nouvelle pour lui.
+- **Les notes de lecture ne partent pas vers un fournisseur cloud sans
+  consentement explicite** (`rag.readingNotesCloudConsent`), comme le reste
+  du corpus personnel.
+- **Serveur MCP : chaque outil est désormais activé un par un** (#91), et la
+  lecture du manuscrit par un client externe est un choix explicite.
+- **Une clé d'API indéchiffrable n'est plus renvoyée telle quelle** (#88).
+  Elle était passée comme clé au fournisseur, avec une trace de pile à chaque
+  lecture de la configuration ; elle est traitée comme absente et listée dans
+  Réglages → Sécurité, avec un bouton pour la supprimer.
+
+### Added
+
+- **Les notes de lecture deviennent un cinquième corpus** (#103). « Qu'avais-je
+  noté sur tel ouvrage ? » obtient enfin une réponse de l'assistant.
+- **Notes de lecture en Markdown** (#98) : un fichier `reading-notes/<clé>.md`
+  par référence, avec les étiquettes du projet en front matter. Les tags et
+  notes Zotero sont lus et affichés **en lecture seule** ; les tags
+  automatiques (77 pour 5 manuels sur la collection mesurée) sont masqués par
+  défaut. La fenêtre « Modifier les métadonnées » éditait tout cela sans rien
+  enregistrer.
+- **Un seul bouton « Synchroniser avec Zotero »** (#97) au lieu de « Importer »
+  et « Mettre à jour », qui divergeaient : l'un effaçait les entrées propres
+  au projet, l'autre effaçait la liste des PDF de toute entrée modifiée. Une
+  référence sortie de la collection demande confirmation.
+- **Serveur MCP installable en un clic** (#91) : extension `.mcpb` pour Claude
+  Desktop, ou fusion dans sa configuration sans jamais l'écraser ; commande
+  Claude Code correcte (#95).
+- **Le raisonnement des modèles pensants est affiché et journalisé** (#87,
+  #89). Les Qwen 3.x envoient leur raisonnement avant toute réponse : l'app
+  restait muette plusieurs minutes et le délai d'inactivité tombait à tort.
+- **Linux x86_64** (#80, #81) : les binaires Linux de la rc.4 n'étaient
+  qu'arm64, sans que rien ne le dise. Un workflow manuel les construit sur
+  x86_64 et vérifie l'architecture réellement produite, AppImage et `.deb`.
+
+### Changed
+
+- **Path A′ : une échelle de pertinence commune aux corpus** (#100, ADR 0001
+  amendé). Chaque corpus publie une similarité sur l'échelle du cosinus ; les
+  scores RRF (≤ 0,016) ne sont plus publiés — ils avaient enfoui le manuscrit,
+  puis la voûte Obsidian, sous les autres corpus. Le schéma unique (Path A)
+  est abandonné.
+- **Réglages du chat : un seul réglage, deux éditeurs** (#84, #85). Le panneau
+  du chat et Réglages → LLM écrivent les mêmes champs ; la fenêtre de contexte
+  se lit sur Ollama, avec une estimation mémoire.
+- **Tags Zotero hors du `.bib`**, dans `bibliography-metadata.json` (#98).
+- **Electron 40.9.2 → 40.10.6** (#104).
+
+### Fixed
+
+- **Un PDF indexé N fois devenait N documents** (#102). Mesuré : 221 documents
+  pour 55 PDF, 5 920 extraits dont 1 264 distincts, les copies occupant les
+  places des bons résultats. Réindexer remplace ; les doublons existants sont
+  retirés au lancement, après une copie `brain.db.avant-dedoublonnage-<date>`.
+- **L'OCR de masse tournait des heures pour un résultat jeté.** Sur 221
+  documents d'archives (~24 h de Tesseract), aucune transcription n'était
+  enregistrée : la fraîcheur se lisait sur la date du `.tpy`, globale au
+  projet, au lieu de celle de chaque item. Réenregistrer une source effaçait
+  aussi ses extraits (`INSERT OR REPLACE` en cascade), et un OCR vide écrasait
+  une transcription acquise.
+- **Un gros modèle local mourait en silence à cinq minutes** (#86) : le `fetch`
+  de Node coupe sans en-têtes au bout de 300 s, avant le premier jeton.
+- **Clés de citation** (#92) : uniques et en ASCII strict. Un seul U+2010
+  faisait rejeter tout le `.bib` par pandoc ; quatre clés désignaient neuf
+  œuvres. Les clés existantes valides sont reconduites.
+- **La synchronisation Zotero visait un homonyme** (#92) : l'appariement se
+  fait par identifiant Zotero, et la mise à jour écrit enfin le `.bib`.
+- **Doublons et pertes signalés, directeurs d'ouvrage, titres courts de
+  Zotero** (#93) ; **URL, DOI, pages, types de notices et créateurs** exportés
+  (#94), URL et DOI écrits à l'identique.
+- **Sous-collections Zotero** (#96) : lues de la même façon à l'import et à la
+  mise à jour, qui proposait de supprimer ce que l'import venait d'ajouter.
+- **Le serveur MCP était inutilisable depuis l'app installée** (#90) : son
+  exécutable n'était pas embarqué.
+
+### Known limitations
+
+- La signature se fait sur le poste du mainteneur (`npm run release:mac`) ;
+  elle n'est pas câblée en CI.
+- #77 (`pdfjs-dist` 3.x → 4.x) reste ouvert.
+- Pas de build Windows.
+
 ## [1.0.0-rc.4] — 2026-07-25
 
 Deuxième cycle d'audit (sécurité, robustesse du code, design), mené sur les

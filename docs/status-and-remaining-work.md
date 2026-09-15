@@ -1,6 +1,6 @@
 # Status and remaining work
 
-> Updated: 2026-08-30 — version `1.0.0-rc.4`, licence GPL-3.0-or-later.
+> Updated: 2026-09-15 — version `1.0.0-rc.5`, licence GPL-3.0-or-later.
 > Context: everything below has landed on `main`. The fusion merged at
 > `v1.0.0-rc.2`; the usage journal, the CM6 editor migration, the chat and
 > slides unifications and the book-chapters chantier have all merged since,
@@ -9,7 +9,7 @@
 > [#75](https://github.com/cliodeck/cliodeck-app/issues/75) closed by PR #105
 > (team `56789J6QWG`, `npm run release:mac`, procedure in
 > [`macos-notarization.md`](macos-notarization.md)). The DMGs already
-> published for `v1.0.0-rc.4` remain unsigned; the next release is the first
+> published for `v1.0.0-rc.4` remain unsigned; `v1.0.0-rc.5` is the first
 > signed one.
 > Replaces the archived `plan-post-fusion.md` as the current reference.
 >
