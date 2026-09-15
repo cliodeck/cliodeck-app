@@ -1,10 +1,12 @@
 /**
  * Tests for the isolated PDF extraction helper.
  *
- * The helper spawns a child process with system Node (not Electron),
- * sends the filePath as a JSON line on stdin, and reads the worker's
- * JSON response from stdout. These tests mock child_process.spawn to
- * verify:
+ * The helper spawns a child process with Electron's own Node
+ * (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`), sends the filePath as a
+ * JSON line on stdin, and reads the worker's JSON response from stdout. These
+ * tests mock child_process.spawn to verify:
+ *  0. The worker runs on Electron's Node, never on a system `node` that most
+ *     users do not have
  *  1. Successful extraction passes through correctly
  *  2. Worker crashes (SIGSEGV) return a clean error, not a throw
  *  3. Non-zero exit codes surface an error
@@ -35,12 +37,6 @@ vi.mock('child_process', () => ({
   }),
 }));
 
-vi.mock('electron', () => ({
-  app: {
-    isPackaged: false,
-  },
-}));
-
 // Dynamic import so the mocks are in place before the module loads.
 const { extractPdfIsolated } = await import('../pdf-extract-isolated.js');
 
@@ -56,6 +52,25 @@ describe('extractPdfIsolated', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('runs the worker on Electron’s own Node, not on a system node', async () => {
+    const { spawn } = await import('child_process');
+    const promise = extractPdfIsolated('/fake/node.pdf');
+    await vi.advanceTimersByTimeAsync(0);
+
+    const [bin, args, options] = vi.mocked(spawn).mock.calls.at(-1) as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ];
+    expect(bin).toBe(process.execPath);
+    expect(args[0]).toMatch(/workers[\\/]pdf-extract-worker\.js$/);
+    expect(options.env.ELECTRON_RUN_AS_NODE).toBe('1');
+
+    emitStdoutJson({ ok: true, pages: [], metadata: { keywords: [] }, title: '' });
+    fakeChild.emit('close', 0, null);
+    await promise;
   });
 
   it('returns extraction result on success', async () => {

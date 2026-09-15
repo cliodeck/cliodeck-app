@@ -136,3 +136,29 @@ prendre un risque réel sur le chemin d'entrée du corpus pour supprimer un
 risque nul. **À faire en rc.5**, avec la vérification qui va avec : [#77](https://github.com/cliodeck/cliodeck-app/issues/77), qui détaille la réécriture de l'amorçage et les contrôles d'extraction à passer.
 
 Cette immunité repose sur un **invariant non gardé** : le jour où un aperçu de PDF rendu est ajouté, la CVE devient exploitable sans que rien ne le signale. L'issue propose un test qui échoue si `page.render(` apparaît dans le code.
+
+**Amendement 2026-09-15 (rc.6) — fait.** `pdfjs-dist` passe en **5.7**
+(#77), où la CVE est corrigée et où il ne reste plus aucun `eval`. Trois
+choses ont changé avec elle :
+
+- **L'invariant est gardé.** Tout chargement de pdfjs passe par
+  `backend/core/pdf/pdfjs-loader.ts`, qui n'ouvre un PDF que pour son texte
+  (`disableFontFace`) ; `backend/core/pdf/__tests__/pdfjs-no-render.test.ts`
+  échoue si un autre fichier charge pdfjs ou si un `.render(` apparaît.
+  Ajouter un aperçu rendu redevient une décision de sécurité explicite.
+- **Plus de module natif pour un rendu qu'on s'interdit.** Sous Node, pdfjs 5
+  réclame `DOMMatrix`, `ImageData` et `Path2D` au chargement et les emprunte
+  à `@napi-rs/canvas`, précompilé par architecture. Le chargeur pose des
+  classes vides sans méthodes : un rendu échouerait bruyamment. Le module
+  natif `canvas`, que seul pdfjs 3 réclamait, disparaît des dépendances.
+- **Le worker tourne sur le Node d'Electron**, et non plus sur le `node` du
+  système, que la plupart des utilisateurs n'ont pas (aucun PDF ne s'indexait
+  alors) et qui peut être plus ancien que le Node ≥ 22.13 exigé par pdfjs 5.
+  Le processus reste isolé : un plantage de pdfjs ne tue que lui.
+
+Vérification : sur 44 PDF réels (1 094 pages), le texte extrait par la 5.7
+est identique caractère pour caractère à celui de la 3.11 une fois les
+espaces retirées — les seules différences sont d'espacement, en mieux
+(« build ing » → « building »). `scripts/pdf-extraction-snapshot.mjs` refait
+cette comparaison ; `pdfjs-extraction.test.ts` garde l'extraction d'un PDF de
+test en CI.

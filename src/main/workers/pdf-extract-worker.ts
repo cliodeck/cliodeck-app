@@ -14,7 +14,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { createRequire } from 'module';
+import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
+import { openPdfForText, pageStrings } from '../../../backend/core/pdf/pdfjs-loader.js';
 
 // Redirect console.log/warn to stderr so stdout stays clean for our JSON.
 // pdfjs-dist emits "Warning: ..." via console.warn which would corrupt the
@@ -56,102 +57,22 @@ interface WorkerErrorResponse {
 }
 
 
-// ── pdfjs-dist bootstrap (same technique as PDFExtractor.ts) ────────────
+// ── pdfjs-dist ──────────────────────────────────────────────────────────
+// Loaded through backend/core/pdf/pdfjs-loader (ESM, text only, never renders).
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let pdfjsLib: any = null;
-let canvasStubbed = false;
-
-const mockCanvas = {
-  createCanvas: (w: number, h: number) => ({
-    getContext: () => ({
-      fillRect: () => {},
-      drawImage: () => {},
-      getImageData: () => ({
-        data: new Uint8ClampedArray(w * h * 4),
-        width: w,
-        height: h,
-      }),
-      putImageData: () => {},
-      createImageData: (w2: number, h2: number) => ({
-        data: new Uint8ClampedArray(w2 * h2 * 4),
-        width: w2,
-        height: h2,
-      }),
-      save: () => {},
-      restore: () => {},
-      transform: () => {},
-      setTransform: () => {},
-      resetTransform: () => {},
-      scale: () => {},
-      translate: () => {},
-      rotate: () => {},
-      beginPath: () => {},
-      closePath: () => {},
-      moveTo: () => {},
-      lineTo: () => {},
-      bezierCurveTo: () => {},
-      quadraticCurveTo: () => {},
-      stroke: () => {},
-      fill: () => {},
-      clip: () => {},
-      rect: () => {},
-      arc: () => {},
-      ellipse: () => {},
-      measureText: () => ({ width: 0 }),
-      fillText: () => {},
-      strokeText: () => {},
-      createLinearGradient: () => ({ addColorStop: () => {} }),
-      createRadialGradient: () => ({ addColorStop: () => {} }),
-      createPattern: () => null,
-      clearRect: () => {},
-      canvas: { width: w, height: h },
-    }),
-    width: w,
-    height: h,
-    toBuffer: () => Buffer.alloc(0),
-    toDataURL: () => '',
-  }),
-  Image: class MockImage {
-    width = 0;
-    height = 0;
-    src = '';
-    onload: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-  },
-  loadImage: async () => ({ width: 0, height: 0 }),
-};
-
-function stubCanvas(): void {
-  if (canvasStubbed) return;
-  try {
-    const req = createRequire(import.meta.url);
-    const canvasPath = req.resolve('canvas');
-    // @ts-expect-error require.cache typing incomplete for ESM createRequire
-    req.cache[canvasPath] = {
-      id: canvasPath,
-      filename: canvasPath,
-      loaded: true,
-      exports: mockCanvas,
-      parent: null,
-      children: [],
-      path: path.dirname(canvasPath),
-      paths: [],
-    };
-    canvasStubbed = true;
-  } catch {
-    // canvas module not installed — nothing to stub
-  }
+interface PDFInfo {
+  Title?: string;
+  Subject?: string;
+  Keywords?: string;
+  Creator?: string;
+  Producer?: string;
+  CreationDate?: string;
+  ModDate?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function initPdfjs(): Promise<any> {
-  if (pdfjsLib) return pdfjsLib;
-  stubCanvas();
-  const req = createRequire(import.meta.url);
-  pdfjsLib = req('pdfjs-dist/legacy/build/pdf.js');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-  return pdfjsLib;
+async function readInfo(pdfDocument: PDFDocumentProxy): Promise<PDFInfo> {
+  const meta = await pdfDocument.getMetadata();
+  return (meta.info ?? {}) as PDFInfo;
 }
 
 // ── PDF date parser ─────────────────────────────────────────────────────
@@ -179,24 +100,18 @@ function parsePDFDate(dateString: string): string | undefined {
 async function extractDocument(
   filePath: string
 ): Promise<{ pages: DocumentPage[]; metadata: PDFMetadata; title: string }> {
-  const pdfjs = await initPdfjs();
-
   if (!fs.existsSync(filePath)) {
     throw new Error(`PDF file not found: ${filePath}`);
   }
 
   const fileBuffer = fs.readFileSync(filePath);
   const data = new Uint8Array(fileBuffer);
-  const loadingTask = pdfjs.getDocument({ data });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfDocument: any = await loadingTask.promise;
+  const pdfDocument = await openPdfForText(data);
 
   // Metadata
   let metadata: PDFMetadata = { keywords: [] };
   try {
-    const meta = await pdfDocument.getMetadata();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const info: any = meta.info || {};
+    const info = await readInfo(pdfDocument);
     metadata = {
       subject: info.Subject || undefined,
       keywords: info.Keywords
@@ -216,16 +131,11 @@ async function extractDocument(
   // Title
   let title = '';
   try {
-    const meta = await pdfDocument.getMetadata();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const info: any = meta.info || {};
+    const info = await readInfo(pdfDocument);
     if (info.Title && info.Title.trim().length > 0) {
       title = info.Title.trim();
     } else {
-      const firstPage = await pdfDocument.getPage(1);
-      const textContent = await firstPage.getTextContent();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pageText = textContent.items.map((item: any) => item.str).join('\n');
+      const pageText = (await pageStrings(pdfDocument, 1)).join('\n');
       const lines = pageText.split('\n').map((l: string) => l.trim());
       for (const line of lines) {
         if (line.length > 10 && line.length < 200) {
@@ -249,11 +159,7 @@ async function extractDocument(
   // Pages
   const pages: DocumentPage[] = [];
   for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-    const page = await pdfDocument.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const text = textContent.items
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((item: any) => item.str)
+    const text = (await pageStrings(pdfDocument, pageNum))
       .join(' ')
       .replace(/\s+/g, ' ')
       .trim();
