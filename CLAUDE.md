@@ -4,7 +4,7 @@
 
 ## 1. Orientation
 
-ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). Licence **GPL-3.0-or-later**; current version **`1.0.0-rc.4`**.
+ClioDeck is an Electron + React + TypeScript **desktop app for historians** covering the full research cycle: **explore → brainstorm → write → export**. Local-first, RAG-powered, with Zotero / Tropy / Obsidian integrations. Users: humanities researchers (history, DH). Licence **GPL-3.0-or-later**; current version **`1.0.0-rc.5`**.
 
 Work happens on per-feature branches off `main` (check `git status`). As of 2026-07-25 `main` is the whole story: the fusion, the usage journal, the CM6 editor migration, the chat and slides unifications, the book-chapters chantier and the July bug campaign have all merged. The fusion cycle (branch `feat/fusion-cliobrain`, merged into `main` at `v1.0.0-rc.2`) **absorbed [ClioBrain](https://github.com/inactinique/cliobrain) into ClioDeck as the *Brainstorm* mode** so historians get one app instead of switching between a note-centric brainstormer and a writing assistant. See [`docs/archive/fusion-cliobrain-strategy.md`](docs/archive/fusion-cliobrain-strategy.md) and [`docs/archive/fusion-cliobrain-implementation-plan.md`](docs/archive/fusion-cliobrain-implementation-plan.md) — commit messages reference the step numbers defined there.
 
