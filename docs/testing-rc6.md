@@ -2,7 +2,7 @@
 
 > Plan du cycle rc.6 : **aucune nouvelle fonctionnalité**, des tests humains
 > aussi intenses que le permet un testeur unique (≈ 1 h par jour), et la
-> migration `pdfjs-dist` v4 (#77). Suivi au jour le jour : le ticket
+> migration `pdfjs-dist` (#77, faite : 5.7, PR #110). Suivi au jour le jour : le ticket
 > « Campagne de tests rc.6 » ; chaque défaut trouvé devient un ticket
 > étiqueté `rc6-test`.
 
@@ -21,11 +21,11 @@ défauts-là, et répartit le travail :
 
 ## Périmètre de la rc.6
 
-1. **#77 — `pdfjs-dist` 3.11 → 4.x**, en début de cycle pour que toute la
-   campagne le couvre. Filet : le texte extrait d'un jeu de PDF est figé avec
-   la v3, puis comparé mot pour mot à celui de la v4 ; un test garde
-   l'invariant « jamais de `page.render()` » dont dépend l'inexploitabilité de
-   la CVE.
+1. **#77 — `pdfjs-dist` 3.11 → 5.7 — fait (PR #110)**, en début de cycle pour
+   que toute la campagne le couvre. Sur 44 PDF réels, texte identique
+   caractère pour caractère hors espaces ; un test garde l'invariant « jamais
+   de `page.render()` ». Au passage, le worker d'extraction tourne sur le Node
+   d'Electron : sans Node installé sur la machine, aucun PDF ne s'indexait.
 2. **Dettes de sécurité déjà listées** (`status-and-remaining-work.md` §2) :
    n° 17 (consentement cloud vérifié côté renderer seulement), n° 16 (pas
    d'avertissement quand les clés tombent en clair) ; n° 18 (validation IPC) si
@@ -42,7 +42,7 @@ cycle suivant.
 
 | Semaine | Développement | Testeur (1 h/jour) |
 |---|---|---|
-| 1 | pdfjs v4 + comparaison d'extraction ; bilan de santé ; e2e étendus → build **rc.6-beta** | sur la **rc.5** publiée : missions 1 (Mac et Linux) et 9 ; recrutement des collègues |
+| 1 | pdfjs 5.7 (fait) ; bilan de santé ; e2e étendus → build **rc.6-beta** | sur la **rc.5** publiée : missions 1 (Mac et Linux) et 9 ; recrutement des collègues |
 | 2–3 | tri et corrections au fil de l'eau, une beta par lot | une mission par jour sur la rc.6-beta : 2 à 8, puis 10 ; mission 3 aussi sur Linux |
 | 4 | corrections finales, build candidat | repasse accélérée (≈ 20 min par mission) ; séances collègues |
 
@@ -128,7 +128,9 @@ titres courts, URL, DOI, types) ?
 
 ### 3. PDF : indexer, réindexer, supprimer
 
-*Mac, puis Linux. Couvre directement la migration pdfjs v4.*
+*Mac, puis Linux x86_64. Couvre directement la migration pdfjs 5.7 et le
+worker sur le Node d'Electron — c'est aussi la première exécution réelle
+d'une app x86_64 depuis ce changement.*
 
 - Indexer une dizaine de PDF variés : scanné, OCRisé, colonnes, notes de bas
   de page, non latin, protégé, très long.
@@ -282,7 +284,7 @@ trois minutes, on passe à la tâche suivante (et le blocage est le résultat).
 
 ## Critères de sortie de la rc.6
 
-- toutes les missions jouées au moins une fois sur un build contenant pdfjs v4,
+- toutes les missions jouées au moins une fois sur un build contenant pdfjs 5.7,
   et repassées sur le build candidat ;
 - **zéro** ticket `rc6-test` ouvert de type perte de données ou résultat faux
   silencieux ;
