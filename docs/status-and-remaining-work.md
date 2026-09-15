@@ -5,8 +5,12 @@
 > `v1.0.0-rc.2`; the usage journal, the CM6 editor migration, the chat and
 > slides unifications and the book-chapters chantier have all merged since,
 > as has the July 2026 bug campaign (PRs #41–#74, 31 issues triaged).
-> **One issue is open: [#75](https://github.com/cliodeck/cliodeck-app/issues/75)**
-> (macOS notarization), blocked on an Apple Developer ID certificate.
+> **2026-09-15: macOS notarization is done** — issue
+> [#75](https://github.com/cliodeck/cliodeck-app/issues/75) closed by PR #105
+> (team `56789J6QWG`, `npm run release:mac`, procedure in
+> [`macos-notarization.md`](macos-notarization.md)). The DMGs already
+> published for `v1.0.0-rc.4` remain unsigned; the next release is the first
+> signed one.
 > Replaces the archived `plan-post-fusion.md` as the current reference.
 >
 > Health at that date: `npm run typecheck` clean; `npx vitest run`
@@ -38,7 +42,7 @@ mode renamed to 'explore' (A10), 'corpus' right view removed (A19):
 ### Phase 4 -- Release readiness
 Partially done:
 - **4.1** -- ADR 0005 (threat model) + ADR 0006 (credential storage) written and implemented (revoke-all-keys, cloud consent dialog)
-- **4.2** -- Code signing: still the GA blocker. macOS is tracked in issue **#75** (the `mac` build block is prepared but inert; blocked on the Developer ID certificate). Windows / Linux / CI-vs-local questions remain in `docs/code-signing-decisions.md`
+- **4.2** -- Code signing: **macOS done** (issue #75, PR #105 — signed and notarized locally via `npm run release:mac`, see `docs/macos-notarization.md`). Windows / Linux / CI signing questions remain in `docs/code-signing-decisions.md`
 - **4.3** -- Cloud consent banner implemented (per-session, covers remote Ollama). **Renderer-only** — see audit item 17 below
 - **4.4** -- Anti-hallucination system prompts done. OCR quality reports (per-document + corpus) done. Retrieval benchmark harness exists but gold-standard corpus not yet built (no longer a gate — see Path A′).
 - **4.5** -- **Done 2026-07-18/19**: environmental suites guarded by `skipIf`, the 8 failures those guards were hiding fixed, and a CI job now runs the suite on the Node ABI so the guards cannot hide a regression
@@ -89,7 +93,7 @@ Partially done:
 
 | # | Type | Description | User action? |
 |---|---|---|---|
-| 4.2 | Security | Code signing. macOS = issue **#75** (wiring plan written; blocked on the Developer ID certificate). Windows Authenticode still undecided | Yes -- Apple Developer account + budget |
+| 4.2 | Security | Code signing. macOS **done** (#75, PR #105; local signing, CI not wired). Windows Authenticode still undecided | Yes -- Windows certificate budget |
 | -- | Backend | 144 chunks with missing embeddings (5880 indexed, 5736 with embeddings) -- investigate and repair. *Observed on one corpus in May 2026; not re-measured since* | No |
 | 17 | Security | Cloud-consent guard is **renderer-only** (`cloudConsentStore`, `useCloudConsentGuard`). A main-process caller can reach a cloud provider without passing it. Carried over from the July audits | No |
 | 18 | Security | `fusion-handlers.ts` has 30 `ipcMain.handle` registrations and only a handful of `validate()` calls. Carried over from the July audits | No |
@@ -484,7 +488,8 @@ Live documents — what is true now:
 | `docs/journal-usage-ia.md` | AI usage journal — two-layer model, schema, philosophy |
 | `docs/source-traceability.md` | Brainstorm citation click-through design |
 | `docs/path-a-readiness.md` | RAG benchmark gate for unified vector store |
-| `docs/code-signing-decisions.md` | Open code-signing questions (macOS = issue #75) |
+| `docs/code-signing-decisions.md` | Open code-signing questions (Windows, Linux, CI) |
+| `docs/macos-notarization.md` | macOS signing + notarization procedure (`release:mac`) |
 | `docs/installer-strategy.md` | Distribution plan (mode B slim installer recommended) — still unbuilt |
 | `docs/linux-sandbox.md` | Linux sandboxing instructions (user-facing) |
 | `docs/archive/` | Dated snapshots: completed plans, closed audits, delivered specs. See its `README.md` |
