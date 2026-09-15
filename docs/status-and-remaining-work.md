@@ -490,6 +490,7 @@ Live documents — what is true now:
 | `docs/path-a-readiness.md` | RAG benchmark gate for unified vector store |
 | `docs/code-signing-decisions.md` | Open code-signing questions (Windows, Linux, CI) |
 | `docs/macos-notarization.md` | macOS signing + notarization procedure (`release:mac`) |
+| `docs/testing-rc6.md` | rc.6 cycle: no new features, human test campaign (missions, project health check, colleague sessions), exit criteria |
 | `docs/installer-strategy.md` | Distribution plan (mode B slim installer recommended) — still unbuilt |
 | `docs/linux-sandbox.md` | Linux sandboxing instructions (user-facing) |
 | `docs/archive/` | Dated snapshots: completed plans, closed audits, delivered specs. See its `README.md` |
