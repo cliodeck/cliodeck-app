@@ -12,7 +12,7 @@
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,9 @@ export type LaunchOutcome =
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..');
 const MAIN_ENTRY = join(REPO_ROOT, 'dist', 'src', 'main', 'index.js');
+
+/** Langue de l'interface pendant les tests : les libellés attendus en dépendent. */
+export const E2E_LANGUAGE = 'fr';
 
 export function shouldSkip(): string | null {
   if (process.env.CI === 'true' && !process.env.DISPLAY) {
@@ -57,6 +60,12 @@ export async function launchApp(): Promise<LaunchOutcome> {
   if (skip) return { kind: 'skip', reason: skip };
 
   const userDataDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-'));
+
+  // Langue fixée avant le premier rendu : sans réglage, l'app suit la langue
+  // du système, et tout test écrit sur un libellé devient dépendant du poste.
+  // On fixe le français, le défaut de l'app. `cliodeck-config.json` est le
+  // fichier electron-store, lu au démarrage dans le userData créé ci-dessus.
+  writeFileSync(join(userDataDir, 'cliodeck-config.json'), JSON.stringify({ language: E2E_LANGUAGE }));
 
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
