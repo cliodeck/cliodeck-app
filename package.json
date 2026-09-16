@@ -41,6 +41,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
+    "project:health": "ELECTRON_RUN_AS_NODE=1 electron scripts/project-health.mjs",
     "test:integration": "npm rebuild better-sqlite3 && vitest run; npm run rebuild:native",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",

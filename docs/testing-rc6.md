@@ -60,23 +60,37 @@ cycle suivant.
 ## Le bilan de santé d'un projet
 
 Script en lecture seule, à lancer **après chaque séance** sur le projet
-utilisé (arrive en semaine 1) :
+utilisé :
 
 ```
-npm run project:health -- /chemin/vers/le/projet
+npm run project:health -- /chemin/vers/le/projet        # lisible
+npm run project:health -- /chemin/vers/le/projet --json # pour joindre à un ticket
 ```
 
 Il vérifie des invariants — ce qui doit être égal l'est-il ?
 
-- items de la collection Zotero = entrées du `.bib` = fiches de métadonnées ;
-- PDF présents sur le disque = documents dans `brain.db`, sans doublon ;
-- aucun extrait sans embedding, dans aucun corpus ;
-- chaque source Tropy déjà OCRisée a encore sa transcription **et** ses extraits ;
-- chaque note de lecture et chaque chapitre (ou `document.md`) est indexé ;
-- les index HNSW correspondent au nombre de vecteurs en base.
+- PDF présents sur le disque = documents dans `brain.db`, **un par fichier**,
+  et le fichier de chaque document existe encore ;
+- aucun extrait sans embedding, dans aucun corpus, aucun extrait orphelin,
+  aucun document sans extrait ;
+- clés du `.bib` uniques et acceptables par pandoc ; fiches de métadonnées
+  rattachées à une entrée existante ;
+- une seule ligne par projet Tropy lié, et chaque source transcrite a
+  **encore** ses extraits ;
+- chaque note de lecture et chaque pièce du manuscrit est indexée, à
+  l'empreinte du texte présent sur le disque ;
+- les index HNSW correspondent aux extraits de la base.
 
-Un écart n'est pas forcément un bug, mais il doit toujours avoir une
-explication.
+Il ne lit pas Zotero : la comparaison « collection Zotero = `.bib` » reste à
+faire à l'œil pendant la mission 2.
+
+Trois niveaux : `✓` l'invariant tient, `⚠` un écart — pas forcément un bug,
+mais il faut une explication, et le script en propose une quand elle est
+connue —, `·` une information. Le code de sortie vaut 1 s'il reste un écart.
+
+**Lecture seule stricte** : la base est ouverte en mode `immutable`, donc sans
+même créer les fichiers `-wal` / `-shm` à côté. On peut le lancer sur le projet
+vivant sans rien risquer.
 
 ## Modèle de note de séance
 
