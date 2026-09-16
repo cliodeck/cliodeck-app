@@ -50,5 +50,6 @@ export async function cloudConsentRefusal(
     undefined,
     surface
   );
-  return decision.allowed ? null : cloudConsentRefusalMessage(decision);
+  if (decision.allowed === false) return cloudConsentRefusalMessage(decision);
+  return null;
 }
