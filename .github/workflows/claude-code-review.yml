@@ -3,9 +3,10 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Une revue coûte ~2 $ et sept minutes : on ne la déclenche pas pour une
-    # PR qui ne touche que de la prose. `paths-ignore` plutôt qu'une liste
-    # blanche `paths`, pour ne jamais laisser passer du code non revu au
+    # Une revue consomme le quota de l'abonnement Claude (jeton OAuth, pas de
+    # clé API ; ~2 $ au tarif de l'API) et quelques minutes : on ne la
+    # déclenche pas pour une PR qui ne touche que de la prose.
+    # `paths-ignore` plutôt qu'une liste blanche `paths`, pour ne jamais laisser passer du code non revu au
     # prétexte qu'il vit dans un dossier créé après l'écriture de ce filtre.
     # Une PR mixte (README + code) reste revue : GitHub ne saute le run que
     # si *tous* les fichiers modifiés correspondent.
@@ -26,7 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      # Écriture : la revue publie ses constats sur la PR (cf. `--comment`).
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -43,7 +45,12 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # `--comment` est indispensable : sans lui, la commande du plugin rédige
+          # sa revue puis s'arrête (« Do not post any GitHub comments »). Les
+          # 50 revues « réussies » d'avril à juillet 2026 n'ont ainsi publié
+          # aucun commentaire sur aucune PR ; leur verdict restait masqué
+          # dans les logs.
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
