@@ -270,7 +270,7 @@ export function runHealthChecks(projectPath, db) {
       const h = byPath.get(rel) ?? byPath.get(n);
       return h !== sha256(readFileSync(path.join(notesDir, n), 'utf8'));
     });
-    add('notes', stale.length ? 'ecart' : 'ok', stale.length ? `${stale.length}/${noteFiles.length} note(s) non indexée(s) ou modifiée(s) depuis : ${sample(stale)}` : `${noteFiles.length} note(s), index à jour`, stale.length ? 'Normal juste après une modification hors de l’app ; sinon, lancer la réindexation des notes.' : undefined);
+    add('notes', stale.length ? 'ecart' : 'ok', stale.length ? `${stale.length}/${noteFiles.length} note(s) non indexée(s) ou modifiée(s) depuis : ${sample(stale)}` : `${noteFiles.length} note(s), index à jour`, stale.length ? 'Normal juste après une modification hors de l’app. Si les embeddings passent par un service en ligne (ou un Ollama distant), les notes ne sont indexées qu’avec l’option « Envoyer les notes de lecture aux modèles en ligne ». Sinon, lancer la réindexation des notes.' : undefined);
     const noEmb = has('reading_notes_chunks') ? count('SELECT COUNT(*) n FROM reading_notes_chunks WHERE embedding IS NULL OR length(embedding) = 0') : 0;
     if (noEmb) add('notes', 'ecart', `${noEmb} extrait(s) de notes sans embedding`);
   }

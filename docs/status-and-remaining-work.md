@@ -43,7 +43,7 @@ mode renamed to 'explore' (A10), 'corpus' right view removed (A19):
 Partially done:
 - **4.1** -- ADR 0005 (threat model) + ADR 0006 (credential storage) written and implemented (revoke-all-keys, cloud consent dialog)
 - **4.2** -- Code signing: **macOS done** (issue #75, PR #105 — signed and notarized locally via `npm run release:mac`, see `docs/macos-notarization.md`). Windows / Linux / CI signing questions remain in `docs/code-signing-decisions.md`
-- **4.3** -- Cloud consent banner implemented (per-session, covers remote Ollama). **Renderer-only** — see audit item 17 below
+- **4.3** -- Cloud consent implemented (per-session, per-provider, covers remote Ollama), enforced in the main process for the chat, recipes, slide generation and similarity reranking (rc.6). Remaining gap: embeddings sent to a remote Ollama — see the row below item 17
 - **4.4** -- Anti-hallucination system prompts done. OCR quality reports (per-document + corpus) done. Retrieval benchmark harness exists but gold-standard corpus not yet built (no longer a gate — see Path A′).
 - **4.5** -- **Done 2026-07-18/19**: environmental suites guarded by `skipIf`, the 8 failures those guards were hiding fixed, and a CI job now runs the suite on the Node ABI so the guards cannot hide a regression
 
@@ -95,7 +95,8 @@ Partially done:
 |---|---|---|---|
 | 4.2 | Security | Code signing. macOS **done** (#75, PR #105; local signing, CI not wired). Windows Authenticode still undecided | Yes -- Windows certificate budget |
 | -- | Backend | 144 chunks with missing embeddings (5880 indexed, 5736 with embeddings) -- investigate and repair. *Observed on one corpus in May 2026; not re-measured since* | No |
-| 17 | Security | Cloud-consent guard is **renderer-only** (`cloudConsentStore`, `useCloudConsentGuard`). A main-process caller can reach a cloud provider without passing it. Carried over from the July audits | No |
+| 17 | Security | **Done in rc.6** (branch `fix/cloud-consent-surfaces`). The row used to say the guard was renderer-only; that was stale — `backend/security/cloud-consent.ts` has guarded the chat in main since July. The real gap: recipes (`fusion:recipes:run`), slide generation (`slides:generate`) and similarity reranking (`similarity:analyze`, on by default) built a registry and sent content with no check anywhere. They now call `cloudConsentRefusal` (`src/main/ipc/utils/cloud-consent-gate.ts`) before building it, with a dialog text per surface. Reading notes were also embedded by a remote embedder without `rag.readingNotesCloudConsent`, contradicting `docs/reading-notes.md`; indexing now withholds them. Not a gap after checking: Tropy NER (`extractEntities` is stripped by `TropySyncSchema`, unreachable) and the `bin/cliodeck` CLI (not shipped; only uses a cloud provider the user wrote by hand into `.cliodeck/config.json`) | No |
+| -- | Security | **Remote (lab) Ollama embeddings get no consent.** ADR 0005 says consent covers remote Ollama, and the chat and the three surfaces above do ask; but PDF, Tropy, Obsidian and manuscript indexing send the corpus to `ollamaURL` with no check, and the `useCloudEmbeddings` confirmation does not cover it. Blocking would stop indexing for anyone using a lab GPU server, so it needs a consent at configuration time (new UI) — deliberately deferred past rc.6; lab Ollama servers will be a topic of their own | No |
 | 18 | Security | `fusion-handlers.ts` has 30 `ipcMain.handle` registrations and only a handful of `validate()` calls. Carried over from the July audits | No |
 | 16 | Security | The user is still **not warned** when `safeStorage` is unavailable and keys fall back to plaintext (ADR 0006 documents the behaviour; the Settings security section does not surface it) | No |
 

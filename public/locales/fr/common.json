@@ -2379,7 +2379,7 @@
     "on": "Activé",
     "off": "Désactivé",
     "cloudConsent": "Envoyer les notes de lecture aux modèles en ligne",
-    "cloudConsentHelp": "Par défaut, vos notes ne servent qu'avec un modèle local (Ollama sur cette machine). Cochez pour qu'elles accompagnent aussi vos questions à Claude, OpenAI, Mistral, Gemini ou un Ollama distant.",
+    "cloudConsentHelp": "Par défaut, vos notes ne servent qu'avec un modèle local (Ollama sur cette machine). Cochez pour qu'elles accompagnent aussi vos questions à Claude, OpenAI, Mistral, Gemini ou un Ollama distant, et pour qu'elles soient indexées quand les embeddings passent par un service en ligne.",
     "cloudLocalOnly": "Modèle local seulement",
     "cloudAllowed": "Autorisé aussi en ligne",
     "state": "État de l'index",
@@ -2397,6 +2397,7 @@
     "indexDone_other": "{{count}} notes indexées.",
     "partialFailure": "{{count}} note(s) n'ont pas pu être indexées ; le reste l'a été.",
     "noProvider": "Aucun fournisseur d'embeddings disponible — Ollama est-il lancé ? L'index reste en l'état.",
+    "withheld": "Notes non indexées : les embeddings passent par {{provider}}, hors de cette machine, et l'envoi des notes de lecture aux modèles en ligne n'est pas autorisé. Cochez l'option ci-dessus pour les indexer ; l'index reste en l'état.",
     "indexError": "L'indexation a échoué.",
     "statsError": "L'état de l'index n'a pas pu être lu."
   }

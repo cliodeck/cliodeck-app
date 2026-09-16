@@ -112,13 +112,52 @@ export interface ConsentPrompt {
 }
 
 /**
+ * Surfaces qui envoient du contenu à un fournisseur. Chacune a son propre
+ * texte de dialogue : consentir sur la foi d'une description fausse (« le
+ * contenu de la conversation » pour une génération de diapositives) n'est
+ * pas consentir.
+ */
+export type CloudSendSurface = 'chat' | 'recipe' | 'slides' | 'similarity';
+
+function consentDetail(surface: CloudSendSurface, providerName: string): string {
+  switch (surface) {
+    case 'chat':
+      return (
+        `Le contenu de la conversation — questions, extraits de vos sources et ` +
+        `de votre manuscrit — sera transmis à ${providerName}, hors de votre ` +
+        `machine.`
+      );
+    case 'recipe':
+      return (
+        `Les instructions de la recette — avec les valeurs que vous avez saisies ` +
+        `et les résultats des étapes précédentes, qui peuvent contenir des ` +
+        `extraits de vos sources — seront transmises à ${providerName}, hors de ` +
+        `votre machine.`
+      );
+    case 'slides':
+      return (
+        `Le texte à transformer en diapositives — le document entier ou la ` +
+        `sélection — sera transmis à ${providerName}, hors de votre machine.`
+      );
+    case 'similarity':
+      return (
+        `Pour classer les sources par pertinence, chaque passage analysé de ` +
+        `votre texte et les extraits des sources candidates seront transmis à ` +
+        `${providerName}, hors de votre machine. Pour rester en local, ` +
+        `désactivez le reclassement par le modèle dans les options.`
+      );
+  }
+}
+
+/**
  * Demande le consentement à l'utilisateur. Suit le patron déjà éprouvé de
  * `confirmMcpAdd` : décision prise dans le main, dialogue natif, refus par
  * défaut (`cancelId`).
  */
 export async function confirmCloudUsage(
   providerName: string,
-  prompt: ConsentPrompt
+  prompt: ConsentPrompt,
+  surface: CloudSendSurface = 'chat'
 ): Promise<boolean> {
   const res = await prompt.showMessageBox({
     type: 'warning',
@@ -127,10 +166,7 @@ export async function confirmCloudUsage(
     cancelId: 0,
     title: 'Envoi vers un service distant',
     message: `Envoyer vos données à ${providerName} ?`,
-    detail:
-      `Le contenu de la conversation — questions, extraits de vos sources et ` +
-      `de votre manuscrit — sera transmis à ${providerName}, hors de votre ` +
-      `machine.\n\nCe choix vaut pour la session en cours.`,
+    detail: `${consentDetail(surface, providerName)}\n\nCe choix vaut pour la session en cours.`,
   });
   return res.response === 1;
 }
@@ -140,13 +176,19 @@ export type CloudConsentDecision =
   | { allowed: false; reason: 'declined' | 'no-interface'; providerName: string };
 
 /**
- * Décision complète pour un tour de chat. `prompt` absent = pas d'interface
- * disponible (headless) : on refuse au lieu de supposer.
+ * Décision complète pour un envoi (tour de chat, recette, diapositives,
+ * reclassement). `prompt` absent = pas d'interface disponible (headless) :
+ * on refuse au lieu de supposer.
+ *
+ * Le consentement est de session et par fournisseur, pas par surface : c'est
+ * la promesse de l'ADR 0005. Accepté dans le chat, il vaut pour une recette
+ * lancée ensuite vers le même fournisseur.
  */
 export async function decideCloudConsent(
   config: { backend?: string; ollamaURL?: string },
   prompt: ConsentPrompt | null,
-  registry: CloudConsentRegistry = cloudConsent
+  registry: CloudConsentRegistry = cloudConsent,
+  surface: CloudSendSurface = 'chat'
 ): Promise<CloudConsentDecision> {
   const { isCloud, providerName } = classifyProvider(config);
   if (!isCloud) return { allowed: true, reason: 'local' };
@@ -159,9 +201,62 @@ export async function decideCloudConsent(
   }
   if (!prompt) return { allowed: false, reason: 'no-interface', providerName };
 
-  const accepted = await confirmCloudUsage(providerName, prompt);
+  const accepted = await confirmCloudUsage(providerName, prompt, surface);
   if (!accepted) return { allowed: false, reason: 'declined', providerName };
 
   registry.grant(providerName);
   return { allowed: true, reason: 'granted-now' };
+}
+
+/** Message de refus lisible, commun à toutes les surfaces. */
+export function cloudConsentRefusalMessage(
+  decision: Extract<CloudConsentDecision, { allowed: false }>
+): string {
+  const { providerName, reason } = decision;
+  return reason === 'no-interface'
+    ? `Envoi vers ${providerName} refusé : aucun consentement accordé pour cette session.`
+    : `Envoi vers ${providerName} annulé.`;
+}
+
+/**
+ * Le fournisseur d'embeddings effectivement construit envoie-t-il le texte
+ * hors de la machine ? Se lit sur la configuration **résolue** du registre
+ * (`clioDeckConfigToRegistryConfig(cfg).embedding`), pas sur le backend de
+ * génération : un backend Claude garde ses embeddings sur Ollama, et un
+ * Ollama distant embarque à distance quel que soit le backend.
+ *
+ * Le repli éventuel n'entre pas en compte : il n'est essayé qu'après le
+ * primaire, qui a donc déjà reçu le texte.
+ */
+export function classifyEmbeddingTarget(embedding: {
+  provider: string;
+  baseUrl?: string;
+}): ProviderClassification {
+  switch (embedding.provider) {
+    case 'embedded':
+      return { isCloud: false, providerName: 'local' };
+    case 'ollama':
+      return classifyProvider({
+        backend: 'ollama',
+        ollamaURL: embedding.baseUrl ?? 'http://127.0.0.1:11434',
+      });
+    case 'openai-compatible':
+      if (embedding.baseUrl) {
+        try {
+          const host = new URL(embedding.baseUrl).hostname.toLowerCase();
+          if (LOCAL_HOSTS.has(host)) return { isCloud: false, providerName: 'local' };
+          return { isCloud: true, providerName: host === 'api.openai.com' ? 'OpenAI' : host };
+        } catch {
+          // URL malformée : on ne sait pas où part le texte, donc distant.
+        }
+      }
+      return { isCloud: true, providerName: 'OpenAI' };
+    case 'mistral':
+      return { isCloud: true, providerName: 'Mistral AI' };
+    case 'gemini':
+      return { isCloud: true, providerName: 'Google Gemini' };
+    default:
+      // Fournisseur inconnu : fail-closed.
+      return { isCloud: true, providerName: embedding.provider };
+  }
 }

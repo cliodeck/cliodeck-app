@@ -135,6 +135,18 @@ function interpolate(
 
 // MARK: - default handlers
 
+/** Étapes dont le gestionnaire par défaut envoie un prompt au LLM. */
+const LLM_STEP_KINDS: ReadonlySet<StepKind> = new Set<StepKind>(['brainstorm', 'write']);
+
+/**
+ * La recette enverra-t-elle quelque chose au LLM ? Sert au consentement
+ * distant : une recette faite seulement de recherche et d'export ne doit pas
+ * ouvrir un dialogue d'envoi qui n'aura pas lieu.
+ */
+export function recipeCallsLLM(recipe: Pick<Recipe, 'steps'>): boolean {
+  return recipe.steps.some((step) => LLM_STEP_KINDS.has(step.kind));
+}
+
 function llmHandler(roleHint: 'brainstorm' | 'write'): StepHandler {
   return async (step, ctx) => {
     const promptTemplate = String(step.with.prompt ?? '');

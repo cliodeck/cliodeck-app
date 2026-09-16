@@ -167,3 +167,40 @@ espaces retirées — les seules différences sont d'espacement, en mieux
 Rosetta, sans Node système) produisent ce même texte sur les 44 PDF. `scripts/pdf-extraction-snapshot.mjs` refait
 cette comparaison ; `pdfjs-extraction.test.ts` garde l'extraction d'un PDF de
 test en CI.
+
+## Amendement du 2026-09-16 — le consentement hors du chat (rc.6)
+
+La dette n° 17 disait le garde « renderer-only ». C'était dépassé : depuis
+juillet, `fusion-chat-service` vérifie dans le main. Mais **seul le chat** le
+faisait. Trois autres surfaces construisaient leur registre et envoyaient au
+LLM sans rien demander, ni dans le renderer ni dans le main : les recettes
+(étapes `brainstorm` / `write`), la génération de diapositives (texte du
+document) et le reclassement de la similarité (actif par défaut, passages du
+texte et extraits des sources). Elles passent maintenant par le même
+`decideCloudConsent`, avant de construire le registre.
+
+- **Un texte par surface.** Le dialogue parlait du « contenu de la
+  conversation ». Consentir sur la foi d'une description fausse n'est pas
+  consentir : chaque surface décrit ce qu'elle envoie.
+- **Le consentement reste de session et par fournisseur**, pas par surface :
+  accepté dans le chat, il vaut pour une recette lancée ensuite vers le même
+  fournisseur. C'est la promesse d'origine.
+- **Les notes de lecture à l'indexation.** `rag.readingNotesCloudConsent`
+  promettait que les notes ne partent jamais vers un fournisseur distant ;
+  seul le chat le vérifiait, et l'indexation les envoyait au fournisseur
+  d'embeddings, fût-il en ligne. La passe s'abstient désormais sans ce
+  consentement (`classifyEmbeddingTarget`, lu sur la configuration résolue
+  du registre), sans rien effacer de l'index.
+
+Écarté après vérification : les entités nommées Tropy (l'option est retirée
+par le schéma IPC, donc inatteignable) et la CLI `bin/cliodeck` (non livrée
+dans les apps ; elle n'appelle un service distant que si l'utilisateur l'a
+écrit lui-même dans `.cliodeck/config.json`).
+
+**Reste ouvert, délibérément : les embeddings vers un Ollama distant.**
+L'indexation des PDF, de Tropy, d'Obsidian et du manuscrit envoie le corpus à
+`ollamaURL` sans consentement, ce que la section *Cloud boundary* ci-dessus
+exclut. Le bloquer arrêterait l'indexation de qui utilise un serveur GPU de
+laboratoire ; il faut un consentement au moment du réglage, donc de
+l'interface nouvelle, hors du périmètre de la rc.6. Les Ollama de laboratoire
+seront un sujet à part entière.

@@ -25,6 +25,8 @@ interface IndexReport {
   chunks: number;
   failures: Array<{ relativePath: string; reason: string }>;
   durationMs: number;
+  /** Fournisseur d'embeddings distant auquel les notes n'ont pas été envoyées. */
+  withheldFrom?: string;
 }
 
 interface IndexResponse {
@@ -99,6 +101,8 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
         setError(t('readingNotesCorpus.indexError'));
       } else if (res.reason === 'embedding_provider_unavailable') {
         setError(t('readingNotesCorpus.noProvider'));
+      } else if (res.report?.withheldFrom) {
+        setError(t('readingNotesCorpus.withheld', { provider: res.report.withheldFrom }));
       } else if (res.report) {
         setNotice(t('readingNotesCorpus.indexDone', { count: res.report.indexed }));
         if (res.report.failures.length > 0) {

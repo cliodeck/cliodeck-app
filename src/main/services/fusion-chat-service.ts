@@ -43,6 +43,7 @@ import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import {
   classifyProvider,
+  cloudConsentRefusalMessage,
   decideCloudConsent,
   type ConsentPrompt,
 } from '../../../backend/security/cloud-consent.js';
@@ -552,11 +553,7 @@ class FusionChatService {
         this.consentPrompt()
       );
       if (decision.allowed === false) {
-        const { providerName, reason } = decision;
-        const message =
-          reason === 'no-interface'
-            ? `Envoi vers ${providerName} refusé : aucun consentement accordé pour cette session.`
-            : `Envoi vers ${providerName} annulé.`;
+        const message = cloudConsentRefusalMessage(decision);
         await registry.dispose().catch(() => undefined);
         sendChunk(
           { delta: '', done: true, finishReason: 'error' },

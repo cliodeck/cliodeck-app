@@ -2379,7 +2379,7 @@
     "on": "Aktiviert",
     "off": "Deaktiviert",
     "cloudConsent": "Lesenotizen an Online-Modelle senden",
-    "cloudConsentHelp": "Standardmäßig werden Ihre Notizen nur mit einem lokalen Modell (Ollama auf diesem Rechner) verwendet. Ankreuzen, um sie auch Fragen an Claude, OpenAI, Mistral, Gemini oder ein entferntes Ollama beizufügen.",
+    "cloudConsentHelp": "Standardmäßig werden Ihre Notizen nur mit einem lokalen Modell (Ollama auf diesem Rechner) verwendet. Ankreuzen, um sie auch Fragen an Claude, OpenAI, Mistral, Gemini oder ein entferntes Ollama beizufügen und sie zu indexieren, wenn die Embeddings über einen Online-Dienst laufen.",
     "cloudLocalOnly": "Nur lokales Modell",
     "cloudAllowed": "Auch online erlaubt",
     "state": "Indexstatus",
@@ -2397,6 +2397,7 @@
     "indexDone_other": "{{count}} Notizen indexiert.",
     "partialFailure": "{{count}} Notiz(en) konnten nicht indexiert werden; der Rest wurde indexiert.",
     "noProvider": "Kein Embedding-Anbieter verfügbar – läuft Ollama? Der Index bleibt unverändert.",
+    "withheld": "Notizen nicht indexiert: Die Embeddings laufen über {{provider}}, außerhalb dieses Rechners, und das Senden von Lesenotizen an Online-Modelle ist nicht erlaubt. Kreuzen Sie die Option oben an, um sie zu indexieren; der Index bleibt unverändert.",
     "indexError": "Die Indexierung ist fehlgeschlagen.",
     "statsError": "Der Indexstatus konnte nicht gelesen werden."
   }

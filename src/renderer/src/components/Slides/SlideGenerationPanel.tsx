@@ -106,7 +106,15 @@ export const SlideGenerationPanel: React.FC = () => {
     // modèle utilisé (pour la proposition d'application, contrat Phase 4).
     window.electron.slides
       .generate({ text, language, citations: citationPayload })
-      .then((res: { success?: boolean; model?: string } | undefined) => {
+      .then((res: { success?: boolean; model?: string; error?: string } | undefined) => {
+        // Un refus arrivé avant tout streaming (consentement distant refusé,
+        // validation) n'émet aucun événement : sans ceci, le panneau restait
+        // bloqué sur « génération en cours ».
+        if (res?.success === false) {
+          setIsGenerating(false);
+          setError(res.error ?? t('slides.generate.unknownError'));
+          return;
+        }
         if (res?.model) setGeneratedModel(res.model);
       })
       .catch((err: unknown) => {
