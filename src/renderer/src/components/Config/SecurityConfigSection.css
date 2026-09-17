@@ -309,3 +309,15 @@
   justify-content: space-between;
   gap: var(--spacing-sm);
 }
+
+/* Repli en clair : même bloc que la révocation, teinté pour attirer l'œil. */
+.security-plaintext-warning {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+
+.security-plaintext-warning .security-revoke-title {
+  color: var(--color-danger);
+}

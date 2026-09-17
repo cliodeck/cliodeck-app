@@ -97,7 +97,7 @@ Partially done:
 | -- | Backend | 144 chunks with missing embeddings (5880 indexed, 5736 with embeddings) -- investigate and repair. *Observed on one corpus in May 2026; not re-measured since* | No |
 | 17 | Security | Cloud-consent guard is **renderer-only** (`cloudConsentStore`, `useCloudConsentGuard`). A main-process caller can reach a cloud provider without passing it. Carried over from the July audits | No |
 | 18 | Security | `fusion-handlers.ts` has 30 `ipcMain.handle` registrations and only a handful of `validate()` calls. Carried over from the July audits | No |
-| 16 | Security | The user is still **not warned** when `safeStorage` is unavailable and keys fall back to plaintext (ADR 0006 documents the behaviour; the Settings security section does not surface it) | No |
+| 16 | Security | **Done in rc.6** (branch `fix/plaintext-keys-warning`). Settings → Security now warns when `safeStorage` is unavailable and lists the keys actually stored in plaintext (`secureStorage.plaintextKeys()`). On the way: without a keychain, a stored *ciphertext* used to be returned verbatim as the API key; it is now treated as unreadable (ADR 0006) | No |
 
 ### Medium priority (quality + completeness)
 

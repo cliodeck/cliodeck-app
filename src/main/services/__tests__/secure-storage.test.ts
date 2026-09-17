@@ -242,3 +242,38 @@ describe('clé indéchiffrable avec le trousseau courant', () => {
     warn.mockRestore();
   });
 });
+
+describe('repli en clair visible (dette n° 16)', () => {
+  const chromiumCiphertext = Buffer.concat([Buffer.from('v10', 'latin1'), Buffer.alloc(16, 3)]).toString('base64');
+
+  it('ne liste aucune clé en clair tant que le trousseau répond', async () => {
+    const s = await freshStorage(true);
+    s.setKey('llm.openaiAPIKey', 'sk-chiffree-0123456789');
+    expect(s.plaintextKeys()).toEqual([]);
+  });
+
+  it('liste les clés stockées en clair quand le trousseau manque, y compris hors SENSITIVE_KEYS', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(false);
+    s.setKey('zotero.apiKey', 'zot-clair');
+    s.setKey('llm.mistralAPIKey', 'ms-clair');
+    s.setKey('mcp.client.github.GITHUB_TOKEN', 'ghp-clair');
+    expect(s.plaintextKeys()).toEqual(['llm.mistralAPIKey', 'mcp.client.github.GITHUB_TOKEN', 'zotero.apiKey']);
+    vi.restoreAllMocks();
+  });
+
+  it('sans trousseau, un chiffré n’est jamais renvoyé comme clé d’API', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(false);
+    // Écrit lors d'un lancement où le trousseau répondait.
+    stores[0]['llm.claudeAPIKey'] = chromiumCiphertext;
+    stores[0]['zotero.apiKey'] = 'zot-clair';
+
+    expect(s.getKey('llm.claudeAPIKey')).toBe('');
+    expect(s.unreadableKeys()).toEqual(['llm.claudeAPIKey']);
+    // Illisible, donc pas « en clair » : seules les vraies valeurs en clair sont listées.
+    expect(s.plaintextKeys()).toEqual(['zotero.apiKey']);
+    expect(warn.mock.calls.some((c) => /aucun trousseau/.test(String(c[0])))).toBe(true);
+    warn.mockRestore();
+  });
+});

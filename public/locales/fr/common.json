@@ -1734,9 +1734,16 @@
     "revokeSuccess": "{{count}} cle(s) revoquee(s). Reconfigurez vos cles API dans les parametres.",
     "revokeError": "Erreur lors de la revocation",
     "revoking": "Revocation...",
+    "plaintext": {
+      "title": "Clés API stockées sans chiffrement",
+      "description": "Aucun trousseau système n'est disponible sur cette machine : les clés API que vous enregistrez sont écrites en clair dans le fichier de réglages de ClioDeck (dans le dossier de l'application, jamais dans le dossier du projet). Toute personne ou tout programme ayant accès à votre session peut les lire.",
+      "keys": "Clés actuellement stockées en clair :",
+      "none": "Aucune clé n'est enregistrée pour l'instant ; celles que vous ajouterez le seront en clair.",
+      "remedy": "Sous Linux, installez et déverrouillez un trousseau (GNOME Keyring ou KWallet), puis relancez ClioDeck : les clés déjà enregistrées seront chiffrées dès leur prochaine lecture."
+    },
     "unreadable": {
       "title": "Clés illisibles",
-      "description": "Ces clés sont stockées mais chiffrées avec une autre clé de trousseau : autre identité de l'application (version empaquetée ou de développement), ou entrée « Safe Storage » recréée. ClioDeck les traite comme absentes et vous le signale ici. Ressaisissez-les dans les réglages, ou supprimez-les.",
+      "description": "Ces clés sont stockées chiffrées, mais ne peuvent pas être déchiffrées ici : autre clé de trousseau (version empaquetée ou de développement de l'application, entrée « Safe Storage » recréée), ou trousseau indisponible pour ce lancement. ClioDeck les traite comme absentes et vous le signale ici. Ressaisissez-les dans les réglages, ou supprimez-les.",
       "delete": "Supprimer",
       "deleted": "Clé {{key}} supprimée."
     },
