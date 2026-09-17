@@ -5,6 +5,48 @@ All notable changes to ClioDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Non publié] — cycle rc.6
+
+Cycle de tests (plan : [`docs/testing-rc6.md`](docs/testing-rc6.md), suivi :
+[#109](https://github.com/cliodeck/cliodeck-app/issues/109)). Aucune
+fonctionnalité nouvelle.
+
+### Security
+
+- **`pdfjs-dist` 3.11 → 5.7** (#77, PR #110) : la CVE-2024-4367 y est corrigée
+  et la bibliothèque ne contient plus aucun `eval`. Un test garde l'invariant
+  dont dépendait l'immunité : ClioDeck lit le texte des PDF, ne les rend
+  jamais. Sur 44 PDF réels (1 094 pages), le texte extrait est identique
+  caractère pour caractère, espaces mises à part — et mieux espacé.
+
+### Fixed
+
+- **Sans Node.js installé, aucun PDF ne s'indexait** (PR #110). Le worker
+  d'extraction était lancé avec le `node` du système, que la plupart des
+  historiens n'ont pas, et rien ne leur disait d'en installer un. Il tourne
+  désormais sur le Node d'Electron, toujours présent, tout en restant un
+  processus isolé.
+- **L'indexation des PDF aurait cassé sur les Mac Intel** (PR #110, #112) :
+  pdfjs 5 exige `DOMMatrix` au chargement et l'emprunte à `@napi-rs/canvas`,
+  précompilé par architecture — le DMG Intel construit sur un Mac Apple
+  Silicon n'en aurait eu que le binaire arm64. ClioDeck ne rend jamais de
+  page : des classes vides suffisent, et ce module natif de 25 Mo est exclu
+  des apps.
+- **Deux des trois tests e2e étaient rouges depuis des mois** (PR #114), la
+  CI ne pouvant les exécuter faute d'affichage : ils suivaient une interface
+  disparue. La langue de l'interface est désormais fixée pendant les tests.
+
+### Added
+
+- **`npm run project:health`** (PR #113) : bilan de santé d'un projet, en
+  lecture seule stricte, qui rend visibles les invariants dont la violation
+  était silencieuse — un document par fichier PDF, aucun extrait sans
+  embedding, clés de citation uniques et acceptables par pandoc, chaque source
+  Tropy transcrite ayant encore ses extraits, index HNSW alignés.
+- **Deux parcours e2e** (PR #114) sur l'application réelle : extraction d'un
+  PDF par le worker isolé, et texte tapé puis enregistré qui atteint
+  `document.md`.
+
 ## [1.0.0-rc.5] — 2026-09-15
 
 Cycle d'usage réel : chaque correctif part d'un défaut **mesuré sur un vrai

@@ -92,6 +92,18 @@ connue —, `·` une information. Le code de sortie vaut 1 s'il reste un écart.
 même créer les fichiers `-wal` / `-shm` à côté. On peut le lancer sur le projet
 vivant sans rien risquer.
 
+## Les tests e2e (machine)
+
+`npm run test:e2e` lance l'application réelle (Playwright + Electron) sur cinq
+parcours, en une dizaine de secondes : démarrage, barre des modes, réglages en
+mode expert, **extraction d'un PDF par le worker isolé** et **texte tapé puis
+enregistré qui atteint `document.md`**. Les deux derniers couvrent les chemins
+où des données ont déjà été perdues.
+
+La CI ne les exécute pas (pas d'affichage) : c'est ainsi que deux d'entre eux
+sont restés rouges des mois. À lancer donc en local après tout changement
+d'interface, et au moins une fois avant chaque beta.
+
 ## Modèle de note de séance
 
 Un commentaire sur le ticket de suivi :

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { rmSync } from 'node:fs';
 import { launchApp } from './_helpers/launch';
 
-const MODES = ['Brainstorm', 'Write', 'Analyze', 'Export'] as const;
+const MODES = ['Explorer', 'Brainstormer', 'Écrire', 'Exporter'] as const;
 
 test('four-mode tab bar switches active mode on click', async () => {
   const outcome = await launchApp();
