@@ -164,6 +164,37 @@ describe('bilan de santé — un même fichier sous deux chemins (#123)', () => 
   });
 });
 
+describe('bilan de santé — PDF non indexés : jamais proposés ou en échec', () => {
+  it('distingue un PDF absent de la bibliographie d’un PDF rattaché mais non indexé', async () => {
+    const indexed = write('PDFs/Indexe.pdf', '%PDF-1.4');
+    write('PDFs/Hors_bibliographie.pdf', '%PDF-1.4');
+    write('PDFs/Rattache_par_bib.pdf', '%PDF-1.4');
+    const viaZotero = write('PDFs/Rattache_par_zotero.pdf', '%PDF-1.4');
+    write(
+      'bibliography.bib',
+      '@article{Bib_2024,\n title={A},\n file={Rattache_par_bib.pdf:PDFs/Rattache_par_bib.pdf:application/pdf}\n}\n@article{Zot_2024,\n title={B}\n}\n'
+    );
+    write(
+      '.cliodeck/bibliography-metadata.json',
+      JSON.stringify({ version: 2, citations: { ZK: { id: 'Zot_2024', zoteroKey: 'ZK', zoteroAttachments: [{ key: 'A1', downloaded: true, localPath: viaZotero }] } } })
+    );
+    createBrain((db) => {
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d1', indexed);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c1', 'd1', vec);
+    });
+
+    const findings = await check();
+    const pdf = findings.filter((f) => f.domaine === 'pdf');
+    const neverAsked = pdf.find((f) => f.message.includes('non rattaché'));
+    expect(neverAsked).toMatchObject({ niveau: 'info' });
+    expect(neverAsked?.message).toMatch(/^1 PDF non rattaché.*Hors_bibliographie\.pdf/);
+    const failed = pdf.find((f) => f.message.includes('rattaché(s) à la bibliographie mais non indexé'));
+    expect(failed).toMatchObject({ niveau: 'ecart' });
+    expect(failed?.message).toContain('Rattache_par_bib.pdf');
+    expect(failed?.message).toContain('Rattache_par_zotero.pdf');
+  });
+});
+
 describe('bilan de santé — lecture seule stricte', () => {
   it('ne crée ni -wal ni -shm et ne modifie pas la base', async () => {
     const dbPath = createBrain((db) => {

@@ -76,6 +76,45 @@ export function bibEntryKeys(bibText) {
   return keys;
 }
 
+/**
+ * Chemins des PDF rattachés à une entrée de la bibliographie — les seuls que
+ * l'app propose à l'indexation : champ `file` du .bib (résolu comme
+ * `BibTeXParser.resolveFilePath`), ou pièce jointe Zotero téléchargée
+ * conservée dans bibliography-metadata.json. Un PDF du dossier absent de cet
+ * ensemble n'est pas un échec d'indexation : rien ne l'a jamais demandée.
+ */
+export function attachedPdfPaths(projectPath, project) {
+  const attached = new Set();
+  const bibRel = project.bibliographySource?.filePath ?? (project.bibliography ? path.relative(projectPath, project.bibliography) : null);
+  const bibPath = bibRel ? path.resolve(projectPath, bibRel) : null;
+  if (bibPath && existsSync(bibPath)) {
+    const re = /^\s*file\s*=\s*[{"](.*)[}"]\s*,?\s*$/gim;
+    const text = readFileSync(bibPath, 'utf8');
+    let m;
+    while ((m = re.exec(text))) {
+      let field = m[1].replace(/[{}]/g, '');
+      const parts = field.split(':');
+      if (parts.length >= 3) field = parts[1];
+      else if (parts.length === 2) field = parts[1].includes('/') ? parts[0] : parts[1];
+      attached.add(fileIdentity(path.isAbsolute(field) ? field : path.resolve(path.dirname(bibPath), field)));
+    }
+  }
+  const metaPath = path.join(projectPath, '.cliodeck', 'bibliography-metadata.json');
+  if (existsSync(metaPath)) {
+    try {
+      const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+      for (const entry of Object.values(meta.citations ?? {})) {
+        for (const att of entry.zoteroAttachments ?? []) {
+          if (att.downloaded && att.localPath) attached.add(fileIdentity(att.localPath));
+        }
+      }
+    } catch {
+      // Illisible : signalé dans la section bibliographie.
+    }
+  }
+  return attached;
+}
+
 function duplicates(values) {
   const seen = new Set();
   const dup = new Set();
@@ -140,7 +179,19 @@ export function runHealthChecks(projectPath, db) {
 
     const onDisk = listFiles(projectPath, (n) => /\.pdf$/i.test(n)).map((p) => fileIdentity(path.resolve(p)));
     const notIndexed = onDisk.filter((p) => !distinct.has(p));
-    add('pdf', 'info', `${onDisk.length} PDF dans le dossier du projet, dont ${notIndexed.length} non indexé(s)${notIndexed.length ? ` : ${sample(notIndexed.map((p) => path.basename(p)))}` : ''}`);
+    add('pdf', 'info', `${onDisk.length} PDF dans le dossier du projet, dont ${notIndexed.length} non indexé(s)`);
+    // Non indexé ne veut pas dire échec : l'app n'indexe que les PDF rattachés
+    // à une entrée. Mesuré sur un projet réel, les 7 « non indexés » d'un
+    // numéro spécial n'étaient tout simplement pas dans la bibliographie.
+    const attached = attachedPdfPaths(projectPath, project);
+    const neverAsked = notIndexed.filter((p) => !attached.has(p));
+    const failed = notIndexed.filter((p) => attached.has(p));
+    if (neverAsked.length) {
+      add('pdf', 'info', `${neverAsked.length} PDF non rattaché(s) à la bibliographie, donc jamais proposé(s) à l’indexation : ${sample(neverAsked.map((p) => path.basename(p)))}`, 'L’app n’indexe que les PDF rattachés à une entrée (champ file du .bib, ou pièce jointe Zotero téléchargée). Pour les citer : ajouter les références à Zotero puis synchroniser ; pour seulement les interroger : les glisser dans le panneau d’index des PDF.');
+    }
+    if (failed.length) {
+      add('pdf', 'ecart', `${failed.length} PDF rattaché(s) à la bibliographie mais non indexé(s) : ${sample(failed.map((p) => path.basename(p)))}`, 'Lancer « Indexer tous les PDFs ». Si l’écart persiste, l’indexation échoue pour ces fichiers : lancer l’app depuis un terminal pour lire l’erreur, ou tester l’extraction avec scripts/pdf-extraction-snapshot.mjs.');
+    }
 
     if (has('pdf_chunks') && docs.length > 0) {
       const chunks = count('SELECT COUNT(*) n FROM pdf_chunks');
