@@ -110,6 +110,26 @@ xcrun stapler validate release/mac-arm64/ClioDeck.app
 Puis ouvrir le `.dmg` sur un Mac qui ne l'a jamais vu (ou après
 `xattr -w com.apple.quarantine …`) : aucune alerte Gatekeeper attendue.
 
+**Architecture des binaires embarqués — surtout pour la version Intel**, construite
+sur Apple Silicon. Chaque module natif chargé doit être de l'architecture de l'app :
+
+```
+APP=release/mac/ClioDeck.app            # version Intel ; release/mac-arm64/… pour Apple Silicon
+file "$APP/Contents/MacOS/ClioDeck"
+file "$APP"/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node \
+     "$APP"/Contents/Resources/app.asar.unpacked/node_modules/hnswlib-node/build/Release/addon.node \
+     "$APP"/Contents/Resources/app.asar.unpacked/node_modules/@node-llama-cpp/mac-x64/bins/mac-x64/llama-addon.node
+```
+
+Attendu pour l'Intel : `x86_64` sur chaque ligne. Le moteur llama.cpp du modèle
+embarqué vit dans un paquet par architecture (`@node-llama-cpp/mac-x64`,
+`@node-llama-cpp/mac-arm64-metal`) que npm n'installe que pour la machine qui
+lance `npm ci` : sans `npm run fetch:llama-mac` (appelé par tous les
+`build:mac*`), le DMG Intel partait sans moteur et le modèle embarqué ne
+démarrait pas sur un Mac Intel (#128, constaté sur la rc.6-beta.2). Les
+`hnswlib-node/bin/darwin-arm64-*` et `better-sqlite3/…/test_extension.node`
+arm64 d'un build Intel sont inertes : jamais chargés.
+
 ## En cas de refus
 
 `notarytool` renvoie un identifiant de soumission. Le journal nomme chaque
