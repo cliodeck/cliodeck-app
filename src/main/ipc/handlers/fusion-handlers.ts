@@ -46,8 +46,12 @@ import {
   validate,
   FusionChatStartSchema,
   FusionVaultIndexSchema,
+  FusionVaultImportIdeasSchema,
   FusionMcpServerPatchSchema,
+  FusionRecipeInputsSchema,
+  FusionSecurityEventsSchema,
 } from '../utils/validation.js';
+import { isConsentedPath } from '../utils/user-consented-paths.js';
 import {
   loadWorkspaceHints,
   writeWorkspaceHints,
@@ -256,7 +260,12 @@ export function setupFusionHandlers(): void {
       if (typeof rawFileName !== 'string' || !/^[\w.-]+\.ya?ml$/i.test(rawFileName)) {
         return errorResponse('invalid recipe fileName');
       }
-      const inputs = (rawInputs ?? {}) as Record<string, unknown>;
+      let inputs: Record<string, unknown>;
+      try {
+        inputs = validate(FusionRecipeInputsSchema, rawInputs ?? undefined) ?? {};
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
       const baseDir =
         rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : workspaceFiles(root).recipesDir;
       let recipe: Recipe;
@@ -775,6 +784,13 @@ export function setupFusionHandlers(): void {
       return errorResponse('vault path must be a non-empty string');
     }
     const vaultPath = rawPath.trim();
+    // Hors projet, seul un dossier choisi dans un dialogue natif est accepté
+    // (cf. user-consented-paths). Sans cela, un renderer compromis pouvait
+    // désigner `~` comme coffre : l'indexation faisait entrer `~/.ssh` dans
+    // un corpus que le chat peut envoyer à un fournisseur distant.
+    if (!(await isConsentedPath(vaultPath))) {
+      return errorResponse('vault path must be chosen in the folder dialog');
+    }
     try {
       const stat = await fs.stat(vaultPath);
       if (!stat.isDirectory()) {
@@ -885,6 +901,12 @@ export function setupFusionHandlers(): void {
   ipcMain.handle('fusion:vault:import-as-ideas', async (_event, rawOpts: unknown) => {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
+    let opts: { maxFiles?: number };
+    try {
+      opts = validate(FusionVaultImportIdeasSchema, rawOpts ?? undefined) ?? {};
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
       const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
@@ -894,7 +916,6 @@ export function setupFusionHandlers(): void {
       if (!fsSync.existsSync(vaultPath)) {
         return errorResponse('vault path no longer exists');
       }
-      const opts = (rawOpts ?? {}) as { maxFiles?: number };
       const imported = await importVaultAsIdeas(vaultPath, { maxFiles: opts.maxFiles ?? 500 });
       return successResponse({
         ideas: imported.map((idea) => ({
@@ -991,11 +1012,12 @@ export function setupFusionHandlers(): void {
   ipcMain.handle('fusion:security:get-events', async (_e, rawOpts: unknown) => {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
-    const opts = (rawOpts ?? {}) as { recentLimit?: unknown };
-    const recentLimit =
-      typeof opts.recentLimit === 'number' && opts.recentLimit >= 0
-        ? Math.floor(opts.recentLimit)
-        : undefined;
+    let recentLimit: number | undefined;
+    try {
+      recentLimit = validate(FusionSecurityEventsSchema, rawOpts ?? undefined)?.recentLimit;
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
     try {
       const { readSecurityEventsLog, aggregateSecurityEvents } = await import(
         '../../../../backend/security/events-reader.js'
@@ -1035,11 +1057,21 @@ export function setupFusionHandlers(): void {
       backend: cfg.backend,
       ollamaURL: cfg.ollamaURL,
     });
-    // Le nom fourni par le renderer n'est qu'un libellé d'affichage : la
-    // classification qui fait foi est celle du main.
-    const label = typeof rawProvider === 'string' && rawProvider ? rawProvider : providerName;
-    cloudConsent.grant(label);
-    return successResponse({ granted: true, consentedProvider: label });
+    // La classification qui fait foi est celle du main. Le renderer dit pour
+    // quel fournisseur l'utilisateur a accepté ; s'il ne s'agit pas de celui
+    // que le main appellera (réglage changé entre le dialogue et l'accord,
+    // classifications divergentes), on n'accorde rien : le main posera sa
+    // propre question au premier envoi. Avant, le libellé du renderer était
+    // enregistré tel quel — alors que c'est lui que la décision compare.
+    if (typeof rawProvider !== 'string' || rawProvider !== providerName) {
+      return successResponse({
+        granted: false,
+        consentedProvider: cloudConsent.consentedProvider(),
+        reason: 'provider_mismatch',
+      });
+    }
+    cloudConsent.grant(providerName);
+    return successResponse({ granted: true, consentedProvider: providerName });
   });
 
   ipcMain.handle('fusion:consent:revoke', async () => {

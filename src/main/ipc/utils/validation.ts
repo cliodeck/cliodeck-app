@@ -695,10 +695,25 @@ export const FusionVaultIndexSchema = z
   .object({ force: z.boolean().optional() })
   .optional();
 
+/**
+ * Options de `fusion:vault:import-as-ideas`. Le schéma existait avec des
+ * champs (`limit`, `tag`) que personne n'envoyait, et le handler ne
+ * l'appelait pas : `maxFiles` passait sans contrôle — une chaîne rendait
+ * la borne inopérante et le parcours du coffre illimité.
+ */
 export const FusionVaultImportIdeasSchema = z
   .object({
-    limit: z.number().int().positive().max(10_000).optional(),
-    tag: z.string().optional(),
+    maxFiles: z.number().int().positive().max(10_000).optional(),
+  })
+  .optional();
+
+/** Valeurs saisies pour une recette : un objet clé → valeur, jamais un tableau ni un scalaire. */
+export const FusionRecipeInputsSchema = z.record(z.string(), z.unknown()).optional();
+
+/** Options de `fusion:security:get-events`. */
+export const FusionSecurityEventsSchema = z
+  .object({
+    recentLimit: z.number().int().min(0).max(1000).optional(),
   })
   .optional();
 
