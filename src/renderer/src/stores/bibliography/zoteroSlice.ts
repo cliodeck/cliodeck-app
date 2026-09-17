@@ -1,4 +1,30 @@
-import type { ZoteroSliceState, BibliographySliceCreator } from './types';
+import type { Citation, ZoteroSliceState, BibliographySliceCreator } from './types';
+
+/**
+ * Rattache un PDF téléchargé à son entrée : `file` pour la session, et la
+ * pièce jointe marquée `downloaded` / `localPath` — c'est elle que
+ * `bibliography-metadata.json` conserve et qui recrée `file` au lancement
+ * suivant (`mergeCitationsWithMetadata`). Sans elle, le lien ne vit qu'en
+ * mémoire.
+ */
+export function withDownloadedAttachment(
+  citations: Citation[],
+  citationId: string,
+  attachmentKey: string,
+  filePath: string
+): Citation[] {
+  return citations.map((c) =>
+    c.id === citationId
+      ? {
+          ...c,
+          file: filePath,
+          zoteroAttachments: c.zoteroAttachments?.map((att) =>
+            att.key === attachmentKey ? { ...att, downloaded: true, localPath: filePath } : att
+          ),
+        }
+      : c
+  );
+}
 
 export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (set, get) => ({
   downloadAndIndexZoteroPDF: async (citationId: string, attachmentKey: string, projectPath: string) => {
@@ -76,18 +102,12 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       console.log(`✅ PDF downloaded to: ${downloadResult.filePath}`);
 
       // Update citation with local file path and mark attachment as downloaded
-      const updatedCitations = citations.map((c) => {
-        if (c.id === citationId) {
-          // Also update the zoteroAttachment to mark it as downloaded with local path
-          const updatedAttachments = c.zoteroAttachments?.map((att) =>
-            att.key === attachmentKey
-              ? { ...att, downloaded: true, localPath: downloadResult.filePath }
-              : att
-          );
-          return { ...c, file: downloadResult.filePath, zoteroAttachments: updatedAttachments };
-        }
-        return c;
-      });
+      const updatedCitations = withDownloadedAttachment(
+        citations,
+        citationId,
+        attachmentKey,
+        downloadResult.filePath
+      );
 
       set({ citations: updatedCitations });
       get().applyFilters();
@@ -250,13 +270,29 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
             continue;
           }
 
-          // Update citation with local file path
-          const updatedCitations = get().citations.map((c) =>
-            c.id === citation.id ? { ...c, file: downloadResult.filePath } : c
+          // Même rattachement que le téléchargement unitaire, et sauvegardé
+          // AVANT l'indexation (#125). Le lot ne posait `file` qu'en mémoire :
+          // si l'indexation échouait ou si l'app était fermée, le PDF restait
+          // dans le dossier mais l'entrée n'avait plus de fichier au lancement
+          // suivant, et « Indexer tous les PDFs » l'écartait sans la compter.
+          const updatedCitations = withDownloadedAttachment(
+            get().citations,
+            citation.id,
+            firstAttachment.key,
+            downloadResult.filePath
           );
 
           set({ citations: updatedCitations });
           get().applyFilters();
+
+          try {
+            await window.electron.bibliography.saveMetadata({
+              projectPath,
+              citations: updatedCitations,
+            });
+          } catch (metaError) {
+            console.warn('⚠️ Métadonnées non sauvegardées après téléchargement :', metaError);
+          }
 
           // Index the downloaded PDF
           set((state) => ({
