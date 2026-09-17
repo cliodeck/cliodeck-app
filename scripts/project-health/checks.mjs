@@ -16,7 +16,7 @@
  */
 
 import { createHash } from 'crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
@@ -37,6 +37,15 @@ export async function openBrainDb(dbPath) {
 
 function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
+}
+
+/** Chemin réel (liens résolus, casse du disque), ou le chemin tel quel s'il n'existe pas. */
+function fileIdentity(p) {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return p;
+  }
 }
 
 function listFiles(root, predicate, dir = root, out = []) {
@@ -105,27 +114,31 @@ export function runHealthChecks(projectPath, db) {
   if (has('pdf_documents')) {
     const docs = db.prepare('SELECT id, file_path FROM pdf_documents').all();
     const paths = docs.map((d) => d.file_path);
-    const distinct = new Set(paths);
+    // Un fichier s'identifie par son chemin réel, pas par la chaîne (#123) :
+    // sur macOS, deux chemins qui ne diffèrent que par la casse désignent le
+    // même fichier, et tous deux « existent ».
+    const identities = paths.map((p) => fileIdentity(p));
+    const distinct = new Set(identities);
     if (docs.length === 0) {
       add('pdf', 'info', 'aucun PDF indexé');
     } else if (distinct.size === docs.length) {
       add('pdf', 'ok', `${docs.length} document(s), un par fichier`);
     } else {
-      const dups = duplicates(paths).map((p) => path.basename(p));
+      const dups = duplicates(identities).map((p) => path.basename(p));
       add(
         'pdf',
         'ecart',
         `${docs.length} documents pour ${distinct.size} fichiers — doublons : ${sample(dups)}`,
-        'Défaut corrigé en rc.5 : ouvrir le projet avec la rc.5 ou plus retire les doublons, après une sauvegarde brain.db.avant-dedoublonnage-<date>.',
+        'Ouvrir le projet avec la rc.5 ou plus retire les doublons (et, depuis la rc.6, ceux dont les chemins ne diffèrent que par la casse), après une sauvegarde brain.db.avant-dedoublonnage-<date>.',
       );
     }
 
-    const missing = [...distinct].filter((p) => p && !existsSync(p));
+    const missing = [...new Set(paths)].filter((p) => p && !existsSync(p));
     if (missing.length) {
       add('pdf', 'ecart', `${missing.length} document(s) indexé(s) dont le fichier n’existe plus : ${sample(missing.map((p) => path.basename(p)))}`, 'Fichier déplacé, renommé ou supprimé après indexation.');
     }
 
-    const onDisk = listFiles(projectPath, (n) => /\.pdf$/i.test(n)).map((p) => path.resolve(p));
+    const onDisk = listFiles(projectPath, (n) => /\.pdf$/i.test(n)).map((p) => fileIdentity(path.resolve(p)));
     const notIndexed = onDisk.filter((p) => !distinct.has(p));
     add('pdf', 'info', `${onDisk.length} PDF dans le dossier du projet, dont ${notIndexed.length} non indexé(s)${notIndexed.length ? ` : ${sample(notIndexed.map((p) => path.basename(p)))}` : ''}`);
 

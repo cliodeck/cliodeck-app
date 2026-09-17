@@ -154,4 +154,65 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
       copy.close();
     }
   });
+
+  describe('un même fichier sous deux chemins (#123)', () => {
+    /** Le disque des tests ignore-t-il la casse (APFS par défaut) ? */
+    function caseInsensitiveDisk(): boolean {
+      const probe = path.join(dir, 'Sonde-Casse');
+      fs.writeFileSync(probe, 'x');
+      try {
+        return fs.existsSync(path.join(dir, 'sonde-casse'));
+      } finally {
+        fs.rmSync(probe, { force: true });
+      }
+    }
+
+    function realPdf(name: string): string {
+      const p = path.join(dir, 'PDFs', name);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, '%PDF-1.4');
+      return p;
+    }
+
+    it('réindexer un fichier renommé en ne changeant que la casse le remplace', async (ctx) => {
+      if (!caseInsensitiveDisk()) ctx.skip();
+      const onDisk = realPdf('Hughes_-_2025_-_ETHICS_FOR_ARTIFICIAL_HISTORIANS.pdf');
+      const renamed = onDisk.replace('ETHICS_FOR_ARTIFICIAL_HISTORIANS', 'Ethics_for_artificial_historians');
+
+      await indexer(store).indexPDF(renamed, 'Hughes_2025', undefined, META);
+      const second = await indexer(store).indexPDF(onDisk, 'Hughes_2025', undefined, META);
+
+      expect(store.getStatistics().documentCount).toBe(1);
+      expect(store.getDocumentIdsByFilePath(onDisk)).toEqual([second.id]);
+      expect(store.getDocumentIdsByFilePath(renamed)).toEqual([second.id]);
+    });
+
+    it('le même PDF atteint par un dossier lié ne crée pas de second document', async () => {
+      // Cas réel : un dossier OneDrive atteint par `~/OneDrive…` (lien) comme
+      // par `~/Library/CloudStorage/…`.
+      const real = realPdf('Kansteiner_2022.pdf');
+      const linkedDir = path.join(dir, 'OneDrive');
+      fs.symlinkSync(path.dirname(real), linkedDir);
+      const viaLink = path.join(linkedDir, 'Kansteiner_2022.pdf');
+
+      await indexer(store).indexPDF(real, 'Kansteiner_2022', undefined, META);
+      await indexer(store).indexPDF(viaLink, 'Kansteiner_2022', undefined, META);
+
+      expect(store.getStatistics().documentCount).toBe(1);
+    });
+
+    it('le nettoyage de démarrage fond les copies héritées sous un autre chemin du même fichier', () => {
+      const real = realPdf('Kansteiner_2022.pdf');
+      const link = path.join(dir, 'lien.pdf');
+      fs.symlinkSync(real, link);
+      store.saveDocument(doc('recente', real, '2026-09-11T09:00:00Z'));
+      store.saveDocument(doc('ancienne', link, '2026-07-22T08:00:00Z'));
+      store.saveDocument(doc('autre', realPdf('Autre.pdf'), '2026-07-22T08:00:00Z'));
+
+      expect(store.countDuplicateDocuments()).toBe(1);
+      expect(store.removeDuplicateDocuments()).toEqual({ files: 1, removed: 1 });
+      expect(store.getDocument('ancienne')).toBeNull();
+      expect(store.getStatistics().documentCount).toBe(2);
+    });
+  });
 });

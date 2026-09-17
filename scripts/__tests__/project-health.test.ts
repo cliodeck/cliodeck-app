@@ -144,6 +144,26 @@ describe('bilan de santé — chaque invariant repère son écart', () => {
   });
 });
 
+describe('bilan de santé — un même fichier sous deux chemins (#123)', () => {
+  it('signale deux documents qui désignent le même fichier, et ne compte pas ce fichier comme non indexé', async () => {
+    const real = write('PDFs/Hughes_2025.pdf', '%PDF-1.4');
+    const link = path.join(root, 'PDFs', 'lien-vers-hughes.pdf');
+    fs.symlinkSync(real, link);
+    createBrain((db) => {
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d1', real);
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d2', link);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c1', 'd1', vec);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c2', 'd2', vec);
+    });
+
+    const findings = await check();
+    const pdf = ecarts(findings, 'pdf');
+    expect(pdf.some((f) => f.message.startsWith('2 documents pour 1 fichiers'))).toBe(true);
+    const listed = findings.find((f) => f.domaine === 'pdf' && f.message.includes('PDF dans le dossier'));
+    expect(listed?.message).toContain('dont 0 non indexé');
+  });
+});
+
 describe('bilan de santé — lecture seule stricte', () => {
   it('ne crée ni -wal ni -shm et ne modifie pas la base', async () => {
     const dbPath = createBrain((db) => {
