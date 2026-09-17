@@ -43,30 +43,46 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          # `--comment` est indispensable : sans lui, la commande du plugin rédige
-          # sa revue puis s'arrête (« Do not post any GitHub comments »). Les
-          # 50 revues « réussies » d'avril à juillet 2026 n'ont ainsi publié
-          # aucun commentaire sur aucune PR ; leur verdict restait masqué
-          # dans les logs.
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
-          # Outils de la commande du plugin (son en-tête `allowed-tools`), plus
-          # les sous-agents qu'elle lance. Sans cette liste, en mode agent,
-          # l'action n'installe pas le serveur `github_inline_comment`
-          # (src/mcp/install-mcp-server.ts : il n'est ajouté que si
-          # --allowedTools le nomme) et les commandes `gh` sont refusées en
-          # non interactif : la revue du 2026-09-17 sur #116 s'arrêtait après
-          # 3 tours avec une permission refusée, sans rien publier.
-          # TEMPORAIRE (diagnostic, 2026-09-17) : la revue s'arrête encore après
-          # 3 à 5 tours sur une permission refusée, et les logs ne disent pas
-          # laquelle. `show_full_output` l'affiche. Dépôt public : ces logs
-          # deviennent lisibles par tous — à retirer dès le diagnostic fait.
-          show_full_output: true
-          # `Agent` : nom actuel de l'outil qui lance les sous-agents (ex-`Task`,
-          # gardé pour les versions antérieures de Claude Code).
+          # Prompt direct, sans le plugin `code-review` (2026-09-17). Le plugin
+          # lance ses relecteurs en sous-agents d'arrière-plan ; en exécution
+          # non interactive, la session s'arrête dès que l'agent principal
+          # rend la main (« Still waiting on the PR-summary agent… »), et rien
+          # n'était jamais publié — diagnostic complet dans #120. Ici, un seul
+          # agent, aucun sous-agent à attendre.
+          prompt: |
+            DÉPÔT : ${{ github.repository }}
+            PR : ${{ github.event.pull_request.number }}
+
+            Relis cette pull request et publie ta revue sur GitHub.
+
+            1. Lis la PR avec `gh pr view ${{ github.event.pull_request.number }} --comments`
+               et `gh pr diff ${{ github.event.pull_request.number }}`. Lance chaque commande
+               seule : pas de redirection (`>`), de tube (`|`) ni d'enchaînement (`;`, `&&`),
+               ils sont refusés. Lis le CLAUDE.md racine et, si utile, les fichiers modifiés
+               (Read, Grep, Glob).
+            2. Ne signale que des défauts **certains** et importants :
+               - le code ne compile pas ou ne se charge pas (erreur de type, import manquant,
+                 référence non résolue) ;
+               - une logique fausse quelles que soient les entrées ;
+               - une perte de données ou un résultat faux silencieux ;
+               - une faille de sécurité introduite par la PR ;
+               - une violation nette d'une règle du CLAUDE.md, que tu cites mot pour mot.
+               Ne signale pas le style, les préférences, les améliorations possibles, ni ce
+               qui dépend d'entrées hypothétiques. Dans le doute, ne signale pas.
+            3. Si un problème que tu relèves figure déjà dans un commentaire existant de la
+               PR, ne le republie pas.
+            4. Publie, en français :
+               - un commentaire en ligne par défaut, avec
+                 `mcp__github_inline_comment__create_inline_comment` (confirmed: true),
+                 expliquant le défaut et sa conséquence concrète ;
+               - puis un commentaire de synthèse avec `gh pr comment` : la liste des défauts
+                 relevés, ou exactement « Aucun défaut relevé (compilation, logique, sécurité,
+                 règles du CLAUDE.md). » s'il n'y en a pas.
+          # Sans cette liste, en mode agent, l'action n'installe pas le serveur
+          # `github_inline_comment` (src/mcp/install-mcp-server.ts) et les
+          # commandes `gh` sont refusées en non interactif.
           claude_args: >-
-            --allowedTools "Agent,Task,Read,Glob,Grep,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
+            --allowedTools "Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),mcp__github_inline_comment__create_inline_comment"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
