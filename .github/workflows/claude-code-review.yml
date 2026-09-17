@@ -51,6 +51,15 @@ jobs:
           # aucun commentaire sur aucune PR ; leur verdict restait masqué
           # dans les logs.
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # Outils de la commande du plugin (son en-tête `allowed-tools`), plus
+          # les sous-agents qu'elle lance. Sans cette liste, en mode agent,
+          # l'action n'installe pas le serveur `github_inline_comment`
+          # (src/mcp/install-mcp-server.ts : il n'est ajouté que si
+          # --allowedTools le nomme) et les commandes `gh` sont refusées en
+          # non interactif : la revue du 2026-09-17 sur #116 s'arrêtait après
+          # 3 tours avec une permission refusée, sans rien publier.
+          claude_args: >-
+            --allowedTools "Task,Read,Glob,Grep,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
