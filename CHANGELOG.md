@@ -18,6 +18,24 @@ fonctionnalité nouvelle.
   dont dépendait l'immunité : ClioDeck lit le texte des PDF, ne les rend
   jamais. Sur 44 PDF réels (1 094 pages), le texte extrait est identique
   caractère pour caractère, espaces mises à part — et mieux espacé.
+- **Consentement avant tout envoi à un service distant, hors du chat aussi**
+  (dette n° 17, PR #116). Les recettes, la génération de diapositives et le
+  reclassement de la similarité (actif par défaut) envoyaient le texte au
+  modèle sans rien demander. Ils posent désormais la même question que le
+  chat, avec un texte qui dit ce qui part. Les **notes de lecture** ne sont
+  plus envoyées à un service d'embeddings en ligne (ni à un Ollama distant)
+  sans l'option « Envoyer les notes de lecture aux modèles en ligne » :
+  jusqu'ici seul le chat respectait cette promesse. ⚠️ Qui calcule ses
+  embeddings sur un Ollama de laboratoire verra ses notes cesser d'être
+  indexées tant que l'option n'est pas cochée.
+- **Clés API stockées en clair : l'utilisateur est prévenu** (dette n° 16,
+  PR #118). Sans trousseau système, Réglages → Sécurité le dit et liste les
+  clés concernées. Une clé chiffrée lors d'un lancement précédent n'est plus
+  envoyée telle quelle comme clé d'API quand le trousseau manque.
+- **Entrées des handlers IPC contrôlées** (dette n° 18, PR #122) : le coffre
+  Obsidian n'accepte plus qu'un dossier choisi dans le dialogue, l'accord de
+  consentement ne vaut que pour le fournisseur réellement appelé, et trois
+  handlers valident enfin leurs options.
 
 ### Fixed
 
@@ -32,6 +50,19 @@ fonctionnalité nouvelle.
   Silicon n'en aurait eu que le binaire arm64. ClioDeck ne rend jamais de
   page : des classes vides suffisent, et ce module natif de 25 Mo est exclu
   des apps.
+- **Un PDF renommé en ne changeant que la casse était indexé deux fois**
+  (#123, PR #124). macOS ignore la casse : `…ETHICS….pdf` et `…Ethics….pdf`
+  sont un seul fichier, mais le dédoublonnage comparait des chaînes. Les
+  extraits du texte étaient en double dans la recherche — mesuré sur un
+  projet réel (55 documents pour 54 fichiers). Un document s'identifie
+  désormais par le chemin réel du fichier ; la copie existante est fondue à
+  la prochaine ouverture du projet, après sauvegarde de `brain.db`.
+- **« Télécharger tous les PDFs manquants » pouvait rendre un PDF orphelin**
+  (#125, PR #126) : le rattachement du fichier à sa référence n'était pas
+  sauvegardé. Si l'indexation échouait ou si l'app était fermée, le PDF
+  restait dans le dossier sans plus jamais être proposé à l'indexation.
+- **Le panneau des diapositives restait bloqué sur « génération en cours »**
+  quand la génération était refusée avant de commencer (PR #116).
 - **Deux des trois tests e2e étaient rouges depuis des mois** (PR #114), la
   CI ne pouvant les exécuter faute d'affichage : ils suivaient une interface
   disparue. La langue de l'interface est désormais fixée pendant les tests.
@@ -42,7 +73,10 @@ fonctionnalité nouvelle.
   lecture seule stricte, qui rend visibles les invariants dont la violation
   était silencieuse — un document par fichier PDF, aucun extrait sans
   embedding, clés de citation uniques et acceptables par pandoc, chaque source
-  Tropy transcrite ayant encore ses extraits, index HNSW alignés.
+  Tropy transcrite ayant encore ses extraits, index HNSW alignés. Depuis
+  la PR #124, il distingue les PDF du dossier **jamais proposés** à
+  l'indexation (non rattachés à la bibliographie) de ceux dont
+  l'indexation échoue.
 - **Deux parcours e2e** (PR #114) sur l'application réelle : extraction d'un
   PDF par le worker isolé, et texte tapé puis enregistré qui atteint
   `document.md`.

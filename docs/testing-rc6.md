@@ -26,12 +26,14 @@ défauts-là, et répartit le travail :
    caractère pour caractère hors espaces ; un test garde l'invariant « jamais
    de `page.render()` ». Au passage, le worker d'extraction tourne sur le Node
    d'Electron : sans Node installé sur la machine, aucun PDF ne s'indexait.
-2. **Dettes de sécurité déjà listées** (`status-and-remaining-work.md` §2) :
-   n° 17 (consentement cloud vérifié côté renderer seulement), n° 16 (pas
-   d'avertissement quand les clés tombent en clair) ; n° 18 (validation IPC) si
-   le temps le permet.
+2. **Dettes de sécurité déjà listées** (`status-and-remaining-work.md` §2) —
+   **faites (PR #116, #118, #122, dans la rc.6-beta.2)** : n° 17 (consentement
+   cloud, en réalité vérifié par le chat seul — recettes, diapositives,
+   similarité et notes de lecture y échappaient), n° 16 (pas d'avertissement
+   quand les clés tombent en clair), n° 18 (validation IPC).
 3. **Restes de la rc.5** : re-mesure des extraits sans embedding (144 relevés
-   en mai 2026). Linux arm64 n'est plus fourni (décision du 2026-09-15 : très
+   en mai 2026) — **faite le 2026-09-17 : 0** sur le projet réel (1 268
+   extraits) ; les 144 venaient du corpus dupliqué que la rc.5 a nettoyé. Linux arm64 n'est plus fourni (décision du 2026-09-15 : très
    peu d'utilisateurs, et un binaire construit hors arm64 y embarque un
    `hnswlib-node` de la mauvaise architecture).
 
