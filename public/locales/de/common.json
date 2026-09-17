@@ -1734,9 +1734,16 @@
     "revokeSuccess": "{{count}} Schlüssel widerrufen. Konfigurieren Sie Ihre API-Schlüssel in den Einstellungen neu.",
     "revokeError": "Fehler beim Widerruf",
     "revoking": "Widerruf läuft...",
+    "plaintext": {
+      "title": "API-Schlüssel ohne Verschlüsselung gespeichert",
+      "description": "Auf diesem Rechner ist kein System-Schlüsselbund verfügbar: Die API-Schlüssel, die Sie speichern, werden im Klartext in die Einstellungsdatei von ClioDeck geschrieben (im Anwendungsordner, nie im Projektordner). Jede Person und jedes Programm mit Zugriff auf Ihre Sitzung kann sie lesen.",
+      "keys": "Derzeit im Klartext gespeicherte Schlüssel:",
+      "none": "Noch kein Schlüssel gespeichert; Schlüssel, die Sie hinzufügen, werden im Klartext gespeichert.",
+      "remedy": "Unter Linux einen Schlüsselbund (GNOME Keyring oder KWallet) installieren und entsperren, dann ClioDeck neu starten: Bereits gespeicherte Schlüssel werden beim nächsten Lesen verschlüsselt."
+    },
     "unreadable": {
       "title": "Unlesbare Schlüssel",
-      "description": "Diese Schlüssel sind gespeichert, aber mit einem anderen Schlüsselbund-Schlüssel verschlüsselt: eine andere Identität der Anwendung (paketierte oder Entwicklungsversion) oder ein neu erstellter „Safe Storage“-Eintrag. ClioDeck behandelt sie als nicht vorhanden und meldet es hier. Geben Sie sie in den Einstellungen neu ein oder löschen Sie sie.",
+      "description": "Diese Schlüssel sind verschlüsselt gespeichert, können hier aber nicht entschlüsselt werden: anderer Schlüsselbund-Schlüssel (gepackte oder Entwicklungsversion der Anwendung, neu erstellter „Safe Storage“-Eintrag) oder für diesen Start kein Schlüsselbund verfügbar. ClioDeck behandelt sie als nicht vorhanden und weist Sie hier darauf hin. Geben Sie sie in den Einstellungen erneut ein oder löschen Sie sie.",
       "delete": "Löschen",
       "deleted": "Schlüssel {{key}} gelöscht."
     },

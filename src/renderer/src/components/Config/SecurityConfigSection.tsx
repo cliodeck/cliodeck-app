@@ -47,6 +47,12 @@ interface SecurityApi {
     error?: string;
   }>;
   getUnreadableKeys?(): Promise<{ success: boolean; keys?: string[]; error?: string }>;
+  getStorageStatus?(): Promise<{
+    success: boolean;
+    encrypted?: boolean;
+    plaintextKeys?: string[];
+    error?: string;
+  }>;
 }
 
 function api(): SecurityApi | null {
@@ -96,10 +102,17 @@ export const SecurityConfigSection: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [unreadableKeys, setUnreadableKeys] = useState<string[]>([]);
+  /** `null` tant qu'on ne sait pas : on n'affiche un avertissement que sur une réponse du main. */
+  const [plaintext, setPlaintext] = useState<{ keys: string[] } | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // Statut d'abord : sa lecture des clés remplit aussi la liste des illisibles.
+        const status = await api()?.getStorageStatus?.();
+        if (!cancelled && status?.success && status.encrypted === false) {
+          setPlaintext({ keys: status.plaintextKeys ?? [] });
+        }
         const res = await api()?.getUnreadableKeys?.();
         if (!cancelled && res?.success) setUnreadableKeys(res.keys ?? []);
       } catch {
@@ -425,6 +438,36 @@ export const SecurityConfigSection: React.FC = () => {
           {t('security.help.whereAfter')}
         </p>
       </HelpModal>
+
+      {/* Repli en clair (ADR 0006, dette n° 16) : sans trousseau système, les
+          clés sont écrites non chiffrées. Seule une ligne de console le disait. */}
+      {plaintext && (
+        <div
+          className="security-revoke-section security-plaintext-warning"
+          role="alert"
+          data-testid="plaintext-keys"
+        >
+          <h4 className="security-revoke-title">
+            <KeyRound size={14} /> {t('security.plaintext.title')}
+          </h4>
+          <p className="config-hint">{t('security.plaintext.description')}</p>
+          {plaintext.keys.length > 0 ? (
+            <>
+              <p className="config-hint">{t('security.plaintext.keys')}</p>
+              <ul className="security-unreadable-list">
+                {plaintext.keys.map((key) => (
+                  <li key={key}>
+                    <code>{key}</code>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="config-hint">{t('security.plaintext.none')}</p>
+          )}
+          <p className="config-hint">{t('security.plaintext.remedy')}</p>
+        </div>
+      )}
 
       {/* Clés indéchiffrables : chiffrées par une autre clé de trousseau
           (autre identité de l'application, entrée recréée). Le main les

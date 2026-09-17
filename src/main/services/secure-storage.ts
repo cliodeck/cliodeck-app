@@ -198,8 +198,41 @@ export class SecureStorage {
       }
     }
 
+    // Pas de trousseau. Un chiffré présent ici a été écrit lors d'un lancement
+    // où le trousseau répondait (session Linux dont le trousseau n'est pas
+    // déverrouillé cette fois, par exemple) : le renvoyer tel quel, c'est
+    // l'envoyer comme clé d'API — refus d'authentification sans explication.
+    if (looksLikeCiphertext(raw)) {
+      if (!this.warned.has(name)) {
+        this.warned.add(name);
+        console.warn(
+          `⚠️  [SecureStorage] La clé "${name}" est chiffrée, mais aucun trousseau n'est disponible ` +
+            'pour ce lancement : illisible, traitée comme absente. Déverrouillez le trousseau ' +
+            'et relancez ClioDeck, ou ressaisissez-la.',
+        );
+      }
+      this.unreadable.add(name);
+      return '';
+    }
+
     // No encryption - return raw value
     return raw;
+  }
+
+  /**
+   * Clés réellement stockées **en clair** : aucune tant que le trousseau
+   * répond ; sinon toutes les clés présentes, sauf celles qui sont des
+   * chiffrés illisibles. Lit chaque clé pour que ce tri soit à jour.
+   *
+   * Jusqu'ici, seule une ligne de console au démarrage signalait le repli
+   * en clair (ADR 0006, dette n° 16).
+   */
+  plaintextKeys(): string[] {
+    if (this.encryptionAvailable) return [];
+    const store = this.getStore();
+    const names = Object.keys(store.store).filter((k) => store.get(k) !== undefined);
+    for (const name of names) this.getKey(name);
+    return names.filter((k) => !this.unreadable.has(k)).sort();
   }
 
   /** Clés présentes mais indéchiffrables ici (voir `unreadable`). */

@@ -1061,6 +1061,20 @@ export function setupFusionHandlers(): void {
     }
   });
 
+  // Repli en clair (ADR 0006, dette n° 16) : sans trousseau système, les clés
+  // sont écrites non chiffrées. Réglages → Sécurité l'affiche ; avant, seule
+  // une ligne de console au démarrage le disait.
+  ipcMain.handle('fusion:security:get-storage-status', async () => {
+    try {
+      return successResponse({
+        encrypted: secureStorage.isEncrypted(),
+        plaintextKeys: secureStorage.plaintextKeys(),
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+  });
+
   ipcMain.handle('fusion:security:revoke-all-keys', async () => {
     try {
       const count = secureStorage.revokeAll();

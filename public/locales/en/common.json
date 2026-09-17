@@ -1734,9 +1734,16 @@
     "revokeSuccess": "{{count}} key(s) revoked. Reconfigure your API keys in settings.",
     "revokeError": "Error during revocation",
     "revoking": "Revoking...",
+    "plaintext": {
+      "title": "API keys stored without encryption",
+      "description": "No system keychain is available on this machine: the API keys you save are written in plain text to ClioDeck's settings file (in the application's folder, never in the project folder). Anyone or any program with access to your session can read them.",
+      "keys": "Keys currently stored in plain text:",
+      "none": "No key is stored yet; any key you add will be stored in plain text.",
+      "remedy": "On Linux, install and unlock a keychain (GNOME Keyring or KWallet), then restart ClioDeck: keys already stored will be encrypted the next time they are read."
+    },
     "unreadable": {
       "title": "Unreadable keys",
-      "description": "These keys are stored but encrypted with another keychain key: another identity of the application (packaged or development build), or a recreated “Safe Storage” entry. ClioDeck treats them as absent and tells you here. Re-enter them in the settings, or delete them.",
+      "description": "These keys are stored encrypted but cannot be decrypted here: a different keychain key (packaged or development build of the app, recreated \"Safe Storage\" entry), or no keychain available for this launch. ClioDeck treats them as missing and tells you here. Re-enter them in the settings, or delete them.",
       "delete": "Delete",
       "deleted": "Key {{key}} deleted."
     },

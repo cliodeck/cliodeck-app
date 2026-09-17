@@ -1043,6 +1043,14 @@ const api = {
           keys?: string[];
           error?: string;
         }>,
+      /** Trousseau système disponible ? Sinon, clés stockées en clair. */
+      getStorageStatus: () =>
+        ipcRenderer.invoke('fusion:security:get-storage-status') as Promise<{
+          success: boolean;
+          encrypted?: boolean;
+          plaintextKeys?: string[];
+          error?: string;
+        }>,
       revokeAllKeys: () =>
         ipcRenderer.invoke('fusion:security:revoke-all-keys') as Promise<{
           success: boolean;

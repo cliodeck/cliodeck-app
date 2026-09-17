@@ -34,10 +34,18 @@ Consequences the rest of this ADR must be read against:
   *workspace* is still clean — the file lives in the Electron userData
   directory, not in the project folder — so the "secrets never travel with
   the project folder" property (see *Workspace portability*) still holds.
-- The user is not currently warned. Surfacing this in the Settings
-  security section is tracked in `docs/status-and-remaining-work.md`
-  (audit item 16); until then the only signal is the startup log line
+- The user is warned (rc.6, audit item 16): Settings → Security shows a
+  « Clés API stockées sans chiffrement » block whenever
+  `safeStorage` is unavailable, listing the keys actually stored in
+  plaintext (`secureStorage.plaintextKeys()`, IPC
+  `fusion:security:get-storage-status`) and how to get a keychain back.
+  Until then the only signal was the startup log line
   `Stored key: … (encrypted: false)`.
+- Without a keychain, a value that **is** a ciphertext (written during a
+  launch where the keychain answered — e.g. a Linux session whose keyring
+  is not unlocked this time) is treated as unreadable, never returned as
+  the API key. It used to be returned verbatim and sent as the
+  authorization header, failing with no explanation.
 - Linux packaging should recommend installing libsecret so the nominal
   path applies (see `docs/linux-sandbox.md` for the neighbouring
   distribution caveats).
