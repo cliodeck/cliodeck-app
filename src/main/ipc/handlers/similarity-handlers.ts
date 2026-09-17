@@ -7,11 +7,16 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { projectManager } from '../../services/project-manager.js';
-import { similarityService, type SimilarityOptions } from '../../services/similarity-service.js';
+import {
+  similarityService,
+  resolveSimilarityOptions,
+  type SimilarityOptions,
+} from '../../services/similarity-service.js';
 import { successResponse, errorResponse, requireProject } from '../utils/error-handler.js';
 import { validate, StringIdSchema } from '../utils/validation.js';
 import { configManager } from '../../services/config-manager.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { cloudConsentRefusal } from '../utils/cloud-consent-gate.js';
 
 // MARK: - Validation Schemas
 
@@ -56,7 +61,20 @@ export function setupSimilarityHandlers() {
 
       const window = BrowserWindow.fromWebContents(event.sender);
 
-      registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      // Le reclassement (actif par défaut) envoie des passages du texte et
+      // des extraits de sources au LLM : consentement distant d'abord. Sans
+      // reclassement, rien ne part vers le LLM et rien n'est demandé.
+      const cfg = configManager.getLLMConfig();
+      if (resolveSimilarityOptions(validatedData.options).useReranking) {
+        const refusal = await cloudConsentRefusal('similarity', cfg, event.sender);
+        if (refusal) {
+          return errorResponse(
+            `${refusal} Pour analyser sans envoi, désactivez le reclassement par le modèle dans les options.`
+          );
+        }
+      }
+
+      registry = createRegistryFromClioDeckConfig(cfg);
       similarityService.setLLMProvider(registry.getLLM());
 
       // Run analysis with progress reporting

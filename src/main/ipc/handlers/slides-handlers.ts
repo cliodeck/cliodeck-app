@@ -13,6 +13,7 @@ import {
 import { logger } from '../../utils/logger.js';
 import { configManager } from '../../services/config-manager.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { cloudConsentRefusal } from '../utils/cloud-consent-gate.js';
 
 export function setupSlidesHandlers() {
   ipcMain.handle('slides:generate', async (event, rawOptions: unknown) => {
@@ -31,10 +32,18 @@ export function setupSlidesHandlers() {
         return errorResponse(new Error('No window found'));
       }
 
+      // Le texte du document part vers le LLM : consentement distant d'abord,
+      // avec la configuration qui construira le registre (ADR 0005).
+      const cfg = configManager.getLLMConfig();
+      const refusal = await cloudConsentRefusal('slides', cfg, event.sender);
+      if (refusal) {
+        return errorResponse(refusal);
+      }
+
       // Build a typed-provider registry for this generation. The service
       // streams through `llm.chat()` instead of the legacy
       // `LLMProviderManager.generateWithoutSources` path.
-      registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
+      registry = createRegistryFromClioDeckConfig(cfg);
       const llm = registry.getLLM();
       slidesGenerationService.setLLMProvider(llm);
 

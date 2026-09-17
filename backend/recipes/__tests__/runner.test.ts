@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { RecipeRunner, type RunEvent } from '../runner.js';
+import { RecipeRunner, recipeCallsLLM, type RunEvent } from '../runner.js';
 import { parseRecipe } from '../schema.js';
 import type { ProviderRegistry } from '../../core/llm/providers/registry.js';
 import type { LLMProvider, ChatChunk } from '../../core/llm/providers/base.js';
@@ -304,5 +304,26 @@ steps:
     // Le gabarit arrive intact au handler : c'est llmHandler qui interpole,
     // et une double passe substituerait des {{ }} venus d'une sortie de step.
     expect(seenPrompt).toBe('parle de {{ inputs.sujet }}');
+  });
+});
+
+describe('recipeCallsLLM — décide du consentement distant', () => {
+  it('repère les étapes brainstorm et write', () => {
+    expect(recipeCallsLLM({ steps: [{ id: 'a', kind: 'search', with: {} }, { id: 'b', kind: 'write', with: {} }] })).toBe(true);
+    expect(recipeCallsLLM({ steps: [{ id: 'a', kind: 'brainstorm', with: {} }] })).toBe(true);
+  });
+
+  it('ne signale rien pour une recette de recherche et d’export', () => {
+    expect(recipeCallsLLM({ steps: [{ id: 'a', kind: 'search', with: {} }, { id: 'b', kind: 'export', with: {} }] })).toBe(false);
+  });
+
+  it('couvre toutes les recettes intégrées qui contiennent une étape LLM', async () => {
+    const dir = path.join(process.cwd(), 'backend', 'recipes', 'builtin');
+    const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.yaml'));
+    for (const f of files) {
+      const recipe = parseRecipe(await fs.readFile(path.join(dir, f), 'utf8'));
+      const hasLLMStep = recipe.steps.some((s) => s.kind === 'brainstorm' || s.kind === 'write');
+      expect(recipeCallsLLM(recipe), f).toBe(hasLLMStep);
+    }
   });
 });

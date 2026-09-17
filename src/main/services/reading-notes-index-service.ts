@@ -18,8 +18,13 @@
  *    ne répète presque jamais l'auteur ni le titre qu'elle commente.
  *
  * Désactivable par `rag.indexReadingNotes` (défaut : activé). L'envoi à un
- * modèle en ligne est une autre question, tranchée dans le chat
- * (`rag.readingNotesCloudConsent`, défaut : refusé).
+ * modèle en ligne est une autre question, tranchée par
+ * `rag.readingNotesCloudConsent` (défaut : refusé) à **deux** endroits : dans
+ * le chat, et ici. Indexer, c'est envoyer le texte des notes au fournisseur
+ * d'embeddings ; quand celui-ci est distant (`useCloudEmbeddings`, Ollama
+ * distant), la passe s'abstient sans ce consentement. Avant, seul le chat le
+ * vérifiait, et la promesse « sans lui, les notes ne partent jamais » était
+ * fausse dès l'indexation.
  */
 
 import crypto from 'crypto';
@@ -35,6 +40,8 @@ import {
 import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
+import { clioDeckConfigToRegistryConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
+import { classifyEmbeddingTarget } from '../../../backend/security/cloud-consent.js';
 import { configManager } from './config-manager.js';
 
 const EMBEDDING_BATCH_SIZE = 16;
@@ -52,6 +59,12 @@ export interface ReadingNotesIndexReport {
   /** Échecs par note — l'indexation continue malgré eux. */
   failures: Array<{ relativePath: string; reason: string }>;
   durationMs: number;
+  /**
+   * Présent quand la passe s'est abstenue : le fournisseur d'embeddings est
+   * distant (son nom est ici) et l'auteur n'a pas consenti à y envoyer ses
+   * notes. L'index est resté tel quel.
+   */
+  withheldFrom?: string;
 }
 
 export interface ReadingNotesIndexStats {
@@ -74,6 +87,23 @@ function ragFlags(): ReadingNotesFlags {
   }
 }
 
+/**
+ * Nom du fournisseur distant qui recevrait le texte des notes sans que
+ * l'auteur y ait consenti ; `null` si l'indexation peut partir (fournisseur
+ * local, ou consentement donné). Configuration illisible : on s'abstient.
+ */
+function notesWithheldFrom(): string | null {
+  if (ragFlags().readingNotesCloudConsent === true) return null;
+  try {
+    const target = classifyEmbeddingTarget(
+      clioDeckConfigToRegistryConfig(configManager.getLLMConfig()).embedding
+    );
+    return target.isCloud ? target.providerName : null;
+  } catch {
+    return 'fournisseur inconnu (configuration illisible)';
+  }
+}
+
 function hashContent(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
@@ -82,6 +112,12 @@ function hashContent(content: string): string {
 export interface ReadingNotesIndexDeps {
   isEnabled: () => boolean;
   openStore: (workspaceRoot: string) => ReadingNotesStore;
+  /**
+   * Fournisseur distant auquel les notes ne doivent pas partir, ou `null`.
+   * Absent = aucune vérification (tests qui ne portent pas sur le
+   * consentement) ; le service de production le fournit toujours.
+   */
+  withheldFrom?: () => string | null;
 }
 
 export class ReadingNotesIndexService {
@@ -95,6 +131,7 @@ export class ReadingNotesIndexService {
     private readonly deps: ReadingNotesIndexDeps = {
       isEnabled: () => ragFlags().indexReadingNotes !== false,
       openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
+      withheldFrom: notesWithheldFrom,
     }
   ) {}
 
@@ -201,6 +238,15 @@ export class ReadingNotesIndexService {
     const done = (): ReadingNotesIndexReport => ({ ...report, durationMs: Date.now() - started });
     const workspaceRoot = this.workspaceRoot;
     if (!workspaceRoot || !this.isEnabled()) return done();
+
+    // Vérifié à chaque passe, relances comprises : le réglage a pu changer.
+    const withheldFrom = this.deps.withheldFrom?.() ?? null;
+    if (withheldFrom) {
+      console.warn(
+        `[reading-notes-index] notes non indexées : le fournisseur d'embeddings (${withheldFrom}) est distant et l'envoi des notes n'est pas autorisé`
+      );
+      return { ...done(), withheldFrom };
+    }
 
     let files: string[];
     try {
@@ -331,6 +377,10 @@ export class ReadingNotesIndexService {
   /** Réindexe tout, empreintes ignorées (changement de modèle d'embedding). */
   async reindexAll(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
     if (this.running) await this.running.catch(() => undefined);
+    // Avant de vider l'index : une réindexation refusée ne doit rien effacer.
+    if (this.workspaceRoot && this.isEnabled() && this.deps.withheldFrom?.()) {
+      return this.index(embedder);
+    }
     const store = this.getStore();
     if (store) {
       store.transaction(() => {

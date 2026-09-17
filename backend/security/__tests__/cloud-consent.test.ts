@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CloudConsentRegistry,
+  classifyEmbeddingTarget,
   classifyProvider,
+  cloudConsentRefusalMessage,
   confirmCloudUsage,
   decideCloudConsent,
   type ConsentPrompt,
@@ -107,6 +109,35 @@ describe('decideCloudConsent', () => {
     expect(d.allowed).toBe(true);
   });
 
+  it('un consentement donné à un fournisseur n’ouvre pas les envois vers un autre', async () => {
+    const registry = new CloudConsentRegistry();
+    registry.grant('Mistral AI');
+    const prompt = promptAnswering(0);
+    const d = await decideCloudConsent({ backend: 'claude' }, prompt, registry);
+    expect(d.allowed).toBe(false);
+    expect(prompt.calls).toBe(1);
+  });
+
+  it('pose la question avec le texte de la surface qui envoie', async () => {
+    const details: string[] = [];
+    const prompt: ConsentPrompt = {
+      showMessageBox: async (options) => {
+        details.push(options.detail);
+        return { response: 0 };
+      },
+    };
+    for (const surface of ['chat', 'recipe', 'slides', 'similarity'] as const) {
+      await decideCloudConsent({ backend: 'openai' }, prompt, new CloudConsentRegistry(), surface);
+    }
+    expect(details[0]).toContain('conversation');
+    expect(details[1]).toContain('recette');
+    expect(details[2]).toContain('diapositives');
+    expect(details[3]).toContain('reclassement');
+    // Aucun texte ne décrit une autre surface que la sienne.
+    for (const d of details.slice(1)) expect(d).not.toContain('conversation');
+    for (const d of details) expect(d).toContain('OpenAI');
+  });
+
   it('redemande après révocation', async () => {
     const registry = new CloudConsentRegistry();
     registry.grant('OpenAI');
@@ -136,5 +167,53 @@ describe('confirmCloudUsage', () => {
     expect(seen[0].message).toContain('Anthropic Claude');
     expect(seen[0].cancelId).toBe(0);
     expect(seen[0].defaultId).toBe(0);
+  });
+});
+
+describe('cloudConsentRefusalMessage', () => {
+  it('distingue l’annulation de l’absence d’interface', () => {
+    expect(
+      cloudConsentRefusalMessage({ allowed: false, reason: 'declined', providerName: 'OpenAI' })
+    ).toBe('Envoi vers OpenAI annulé.');
+    expect(
+      cloudConsentRefusalMessage({ allowed: false, reason: 'no-interface', providerName: 'OpenAI' })
+    ).toContain('aucun consentement');
+  });
+});
+
+describe('classifyEmbeddingTarget', () => {
+  it('garde en local le modèle embarqué et Ollama en loopback', () => {
+    expect(classifyEmbeddingTarget({ provider: 'embedded' }).isCloud).toBe(false);
+    expect(
+      classifyEmbeddingTarget({ provider: 'ollama', baseUrl: 'http://127.0.0.1:11434' }).isCloud
+    ).toBe(false);
+    // Sans URL, le fournisseur Ollama vise la machine locale.
+    expect(classifyEmbeddingTarget({ provider: 'ollama' }).isCloud).toBe(false);
+  });
+
+  it('classe un Ollama distant comme distant, en le nommant', () => {
+    const c = classifyEmbeddingTarget({ provider: 'ollama', baseUrl: 'http://gpu.labo.example:11434' });
+    expect(c).toEqual({ isCloud: true, providerName: 'Ollama (gpu.labo.example)' });
+  });
+
+  it('classe les embeddings des fournisseurs hébergés comme distants', () => {
+    expect(
+      classifyEmbeddingTarget({ provider: 'openai-compatible', baseUrl: 'https://api.openai.com/v1' })
+    ).toEqual({ isCloud: true, providerName: 'OpenAI' });
+    expect(classifyEmbeddingTarget({ provider: 'mistral' }).isCloud).toBe(true);
+    expect(classifyEmbeddingTarget({ provider: 'gemini' }).isCloud).toBe(true);
+  });
+
+  it('distingue un serveur compatible OpenAI local d’un distant', () => {
+    expect(
+      classifyEmbeddingTarget({ provider: 'openai-compatible', baseUrl: 'http://localhost:8080/v1' }).isCloud
+    ).toBe(false);
+    expect(
+      classifyEmbeddingTarget({ provider: 'openai-compatible', baseUrl: 'https://llm.example.org/v1' }).isCloud
+    ).toBe(true);
+  });
+
+  it('ne suppose jamais local un fournisseur inconnu', () => {
+    expect(classifyEmbeddingTarget({ provider: 'nouveau' }).isCloud).toBe(true);
   });
 });

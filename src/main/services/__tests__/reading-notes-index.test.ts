@@ -67,6 +67,25 @@ describe('ReadingNotesIndexService — sans base', () => {
     expect(svc.isReadingNoteFile('/projet/reading-notes-bis/x.md')).toBe(false);
     expect(svc.isReadingNoteFile('/projet/reading-notes/image.png')).toBe(false);
   });
+  it('s’abstient sans consentement quand le fournisseur d’embeddings est distant', async () => {
+    const svc = new ReadingNotesIndexService({
+      isEnabled: () => true,
+      openStore: () => {
+        throw new Error('la base ne doit pas être ouverte');
+      },
+      withheldFrom: () => 'OpenAI',
+    });
+    svc.configure('/projet');
+    const embedder = fakeEmbedder();
+
+    const report = await svc.index(embedder);
+    const all = await svc.reindexAll(embedder);
+
+    expect(report).toMatchObject({ indexed: 0, removed: 0, failures: [], withheldFrom: 'OpenAI' });
+    expect(all.withheldFrom).toBe('OpenAI');
+    // Pas un seul texte de note n'est parti vers le fournisseur.
+    expect(embedder.calls).toBe(0);
+  });
 });
 
 describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService', () => {
@@ -196,5 +215,56 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService', () => {
     await Promise.all([first, second]);
 
     expect(service.getSearchStore()!.searchLexical('corrigée', 5)).toHaveLength(1);
+  });
+});
+
+describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — consentement distant', () => {
+  let withheld: string | null = null;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-consent-'));
+    withheld = null;
+    service = new ReadingNotesIndexService({
+      isEnabled: () => true,
+      openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
+      withheldFrom: () => withheld,
+    });
+    service.configure(tmp);
+  });
+
+  afterEach(() => {
+    service.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('une réindexation refusée n’efface pas l’index existant', async () => {
+    writeNote(tmp, 'Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa longue durée.\n');
+    await service.index(fakeEmbedder());
+    expect(service.stats()?.noteCount).toBe(1);
+
+    withheld = 'Mistral AI';
+    const embedder = fakeEmbedder();
+    const report = await service.reindexAll(embedder);
+
+    expect(report.withheldFrom).toBe('Mistral AI');
+    expect(embedder.calls).toBe(0);
+    expect(service.stats()?.noteCount).toBe(1);
+  });
+
+  it('une note modifiée n’est pas envoyée tant que le consentement manque, puis l’est', async () => {
+    const file = writeNote(tmp, 'Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa longue durée.\n');
+    await service.index(fakeEmbedder());
+
+    fs.writeFileSync(file, `---\n${BRAUDEL}\n---\n\n# Braudel\n\nTexte confidentiel ajouté.\n`);
+    withheld = 'OpenAI';
+    const refused = fakeEmbedder();
+    await service.index(refused);
+    expect(refused.texts.join(' ')).not.toContain('confidentiel');
+
+    withheld = null;
+    const allowed = fakeEmbedder();
+    const report = await service.index(allowed);
+    expect(report.indexed).toBe(1);
+    expect(allowed.texts.join(' ')).toContain('confidentiel');
   });
 });

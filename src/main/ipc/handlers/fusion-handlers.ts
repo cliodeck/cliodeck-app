@@ -64,7 +64,8 @@ import {
   type WorkspaceConfig,
 } from '../../../../backend/core/workspace/config.js';
 import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js';
-import { RecipeRunner } from '../../../../backend/recipes/runner.js';
+import { RecipeRunner, recipeCallsLLM } from '../../../../backend/recipes/runner.js';
+import { cloudConsentRefusal } from '../utils/cloud-consent-gate.js';
 import { recipeStepHandlers } from '../../services/recipe-step-handlers.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { BrowserWindow } from 'electron';
@@ -268,6 +269,12 @@ export function setupFusionHandlers(): void {
 
       const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const cfg = configManager.getLLMConfig();
+      // Les étapes brainstorm / write envoient leurs prompts interpolés au
+      // LLM : consentement distant avant de construire le registre (ADR 0005).
+      if (recipeCallsLLM(recipe)) {
+        const refusal = await cloudConsentRefusal('recipe', cfg, event.sender);
+        if (refusal) return errorResponse(refusal);
+      }
       let registry;
       try {
         registry = createRegistryFromClioDeckConfig(cfg);

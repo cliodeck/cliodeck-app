@@ -97,6 +97,17 @@ const DEFAULT_OPTIONS: SimilarityOptions = {
   sourceType: 'secondary', // Default to secondary sources (PDFs) only
 };
 
+/**
+ * Options effectives d'une analyse : celles du renderer par-dessus les
+ * défauts. Exporté pour que le handler décide du consentement sur les mêmes
+ * options que celles qu'appliquera l'analyse.
+ */
+export function resolveSimilarityOptions(
+  options: Partial<SimilarityOptions> = {}
+): SimilarityOptions {
+  return { ...DEFAULT_OPTIONS, ...options };
+}
+
 // MARK: - Service
 
 class SimilarityService {
@@ -132,7 +143,7 @@ class SimilarityService {
     }
 
     // Merge with defaults
-    const opts: SimilarityOptions = { ...DEFAULT_OPTIONS, ...options };
+    const opts = resolveSimilarityOptions(options);
 
     console.log('🔍 [SIMILARITY] Starting document analysis', {
       granularity: opts.granularity,
