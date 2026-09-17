@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { existsSync, mkdirSync, chmodSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { fileIdentity, groupByFile, mayBeSameFile } from './file-identity';
 import type {
   PDFDocument,
   DocumentChunk,
@@ -357,12 +358,26 @@ export class VectorStore {
 
   // MARK: - Doublons (un fichier, un document)
 
-  /** Documents indexés pour ce fichier, du plus récent au plus ancien. */
+  /**
+   * Documents indexés pour ce fichier, du plus récent au plus ancien.
+   *
+   * « Ce fichier » s'entend sur le disque : un chemin qui n'en diffère que
+   * par la casse, la forme Unicode ou un lien symbolique désigne le même
+   * document (#123, cf. file-identity.ts).
+   */
   getDocumentIdsByFilePath(filePath: string): string[] {
     const rows = this.db
-      .prepare('SELECT id FROM pdf_documents WHERE file_path = ? ORDER BY indexed_at DESC')
-      .all(filePath) as Array<{ id: string }>;
-    return rows.map((r) => r.id);
+      .prepare('SELECT id, file_path FROM pdf_documents ORDER BY indexed_at DESC')
+      .all() as Array<{ id: string; file_path: string }>;
+    let target: string | null = null;
+    return rows
+      .filter((r) => {
+        if (r.file_path === filePath) return true;
+        if (!mayBeSameFile(r.file_path, filePath)) return false;
+        target ??= fileIdentity(filePath);
+        return fileIdentity(r.file_path) === target;
+      })
+      .map((r) => r.id);
   }
 
   /**
@@ -403,16 +418,9 @@ export class VectorStore {
    * aucune autre n'en a.
    */
   removeDuplicateDocuments(): { files: number; removed: number } {
-    const groups = this.db
-      .prepare('SELECT file_path FROM pdf_documents GROUP BY file_path HAVING COUNT(*) > 1')
-      .all() as Array<{ file_path: string }>;
+    const groups = this.duplicateGroups();
     let removed = 0;
-    const candidates = this.db.prepare(
-      `SELECT d.id, (SELECT COUNT(*) FROM pdf_chunks c WHERE c.document_id = d.id) AS chunks
-       FROM pdf_documents d WHERE d.file_path = ? ORDER BY d.indexed_at DESC`
-    );
-    for (const { file_path } of groups) {
-      const rows = candidates.all(file_path) as Array<{ id: string; chunks: number }>;
+    for (const rows of groups) {
       const keep = rows.find((r) => r.chunks > 0) ?? rows[0];
       const others = rows.filter((r) => r.id !== keep.id).map((r) => r.id);
       this.mergeDocumentsInto(keep.id, others);
@@ -423,10 +431,23 @@ export class VectorStore {
 
   /** Nombre de documents en trop (copies d'un fichier déjà indexé). */
   countDuplicateDocuments(): number {
-    const row = this.db
-      .prepare('SELECT COUNT(*) - COUNT(DISTINCT file_path) AS extra FROM pdf_documents')
-      .get() as { extra: number };
-    return row.extra;
+    return this.duplicateGroups().reduce((extra, rows) => extra + rows.length - 1, 0);
+  }
+
+  /**
+   * Groupes de documents qui désignent un même fichier sur le disque, chacun
+   * du plus récent au plus ancien. Regroupés par chemin réel et non par
+   * chaîne (#123) : `GROUP BY file_path` ne voyait pas deux chemins qui ne
+   * diffèrent que par la casse.
+   */
+  private duplicateGroups(): Array<Array<{ id: string; file_path: string; chunks: number }>> {
+    const rows = this.db
+      .prepare(
+        `SELECT d.id, d.file_path, (SELECT COUNT(*) FROM pdf_chunks c WHERE c.document_id = d.id) AS chunks
+         FROM pdf_documents d ORDER BY d.indexed_at DESC`
+      )
+      .all() as Array<{ id: string; file_path: string; chunks: number }>;
+    return groupByFile(rows).filter((group) => group.length > 1);
   }
 
   /** Sauvegarde cohérente de la base (WAL compris), avant une opération destructive. */
