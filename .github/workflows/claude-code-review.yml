@@ -58,8 +58,15 @@ jobs:
           # --allowedTools le nomme) et les commandes `gh` sont refusées en
           # non interactif : la revue du 2026-09-17 sur #116 s'arrêtait après
           # 3 tours avec une permission refusée, sans rien publier.
+          # TEMPORAIRE (diagnostic, 2026-09-17) : la revue s'arrête encore après
+          # 3 à 5 tours sur une permission refusée, et les logs ne disent pas
+          # laquelle. `show_full_output` l'affiche. Dépôt public : ces logs
+          # deviennent lisibles par tous — à retirer dès le diagnostic fait.
+          show_full_output: true
+          # `Agent` : nom actuel de l'outil qui lance les sous-agents (ex-`Task`,
+          # gardé pour les versions antérieures de Claude Code).
           claude_args: >-
-            --allowedTools "Task,Read,Glob,Grep,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
+            --allowedTools "Agent,Task,Read,Glob,Grep,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
