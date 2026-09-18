@@ -55,6 +55,19 @@ export function setupPDFHandlers() {
 
       const durationMs = elapsed();
 
+      // Un PDF image s'indexe sans erreur mais reste introuvable par la
+      // recherche : on le dit, une fois, quel que soit le bouton qui a lancé
+      // l'indexation (#132).
+      const density = document.metadata?.textDensity;
+      if (density?.lowText && window) {
+        window.webContents.send('pdf:low-text', {
+          title: document.title,
+          fileName: path.basename(filePath),
+          pageCount: document.pageCount,
+          charsPerPage: density.charsPerPage,
+        });
+      }
+
       // Log PDF operation to history
       const hm = historyService.getHistoryManager();
       if (hm) {

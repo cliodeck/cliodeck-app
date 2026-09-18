@@ -60,6 +60,13 @@ fonctionnalité nouvelle.
   le second prend un nom suffixé par sa clé Zotero. Le téléchargement passe
   par un fichier temporaire, et le bilan de santé signale un même PDF
   rattaché à plusieurs références.
+- **Un PDF sans couche de texte s'indexait en silence** (#132). Un scan non
+  OCRisé ou un « Imprimer en PDF » d'images ne donne aucun texte : il
+  était compté comme indexé, et la recherche n'y trouvait rien. Mesuré sur un
+  projet réel : deux PDF sur 262, à 0 et 52 caractères par page. L'indexation
+  mesure désormais la densité du texte extrait ; sous 100 caractères par page,
+  l'app prévient et suggère un OCR, et le bilan de santé les liste — y compris
+  ceux indexés avant.
 - **Sans Node.js installé, aucun PDF ne s'indexait** (PR #110). Le worker
   d'extraction était lancé avec le `node` du système, que la plupart des
   historiens n'ont pas, et rien ne leur disait d'en installer un. Il tourne

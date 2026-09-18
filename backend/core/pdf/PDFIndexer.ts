@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { measureTextDensity } from './text-density.js';
 import { PDFExtractor } from './PDFExtractor.js';
 import { TextPreprocessor } from './TextPreprocessor.js';
 import { DocumentChunker, CHUNKING_CONFIGS, type ChunkingConfig } from '../chunking/DocumentChunker.js';
@@ -223,6 +224,16 @@ export class PDFIndexer {
 
       const { pages, metadata, title: extractedTitle } = await this.extractDocumentFn(filePath);
       console.log(`🔍 [INDEXER] Step 1 complete: ${pages.length} pages extracted`);
+
+      // Un PDF sans couche de texte s'indexe sans erreur mais reste
+      // introuvable : on le mesure, pour que l'app puisse le dire (#132).
+      const textDensity = measureTextDensity(pages);
+      metadata.textDensity = textDensity;
+      if (textDensity.lowText) {
+        console.warn(
+          `⚠️ [INDEXER] Presque aucun texte extrait (${textDensity.charsPerPage} car./page) : PDF image sans OCR ? ${filePath}`
+        );
+      }
 
       // Use bibliography metadata if provided, otherwise fall back to PDF extraction
       const title = bibliographyMetadata?.title || extractedTitle;

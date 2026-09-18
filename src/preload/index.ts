@@ -105,6 +105,17 @@ const api = {
       citations: any[];
       projectPath: string;
     }) => ipcRenderer.invoke('pdf:check-modified-pdfs', options),
+    /** Un PDF indexé n'a presque pas de texte : image sans OCR (#132). */
+    onLowText: (
+      callback: (info: { title: string; fileName: string; pageCount: number; charsPerPage: number }) => void
+    ) => {
+      const listener = (
+        _event: unknown,
+        info: { title: string; fileName: string; pageCount: number; charsPerPage: number }
+      ) => callback(info);
+      ipcRenderer.on('pdf:low-text', listener);
+      return () => ipcRenderer.removeListener('pdf:low-text', listener);
+    },
     onIndexingProgress: (callback: (progress: { stage: string; progress: number; message: string }) => void) => {
       const listener = (_event: any, progress: any) => callback(progress);
       ipcRenderer.on('pdf:indexing-progress', listener);

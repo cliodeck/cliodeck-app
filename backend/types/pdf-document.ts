@@ -1,4 +1,6 @@
 export interface PDFMetadata {
+  /** Densité du texte extrait ; `lowText` = PDF très probablement image (#132). */
+  textDensity?: { charsPerPage: number; lowText: boolean };
   subject?: string;
   keywords?: string[];
   creator?: string;

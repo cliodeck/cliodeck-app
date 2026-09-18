@@ -2407,5 +2407,10 @@
     "withheld": "Notes not indexed: embeddings go through {{provider}}, off this machine, and sending reading notes to online models is not allowed. Tick the option above to index them; the index is left as it is.",
     "indexError": "Indexing failed.",
     "statsError": "The index state could not be read."
+  },
+  "pdfLowText": {
+    "title": "PDF without usable text",
+    "message": "“{{title}}” was indexed, but almost no text could be extracted from it: it is probably a scan or an image without OCR. Search and the assistant will find nothing in it.",
+    "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} characters per page on average. Run it through OCR software (for instance ocrmypdf or Adobe Acrobat), then re-index it."
   }
 }
