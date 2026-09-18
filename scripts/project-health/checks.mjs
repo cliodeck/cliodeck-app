@@ -217,6 +217,32 @@ export function runHealthChecks(projectPath, db) {
         }
       }
     }
+
+    // Collections Zotero (#130) : un projet qui suit une collection doit
+    // voir ses documents rattachés, sans quoi le filtre par collection de
+    // l'assistant ne trouve rien.
+    const projectCollection = project.zotero?.collectionKey ?? project.bibliographySource?.zoteroCollection;
+    if (projectCollection && docs.length > 0 && has('pdf_document_collections') && has('pdf_zotero_collections')) {
+      const collections = count('SELECT COUNT(*) n FROM pdf_zotero_collections');
+      const unlinked = count('SELECT COUNT(*) n FROM pdf_documents d WHERE NOT EXISTS (SELECT 1 FROM pdf_document_collections l WHERE l.document_id = d.id)');
+      const used = count('SELECT COUNT(DISTINCT collection_key) n FROM pdf_document_collections');
+      if (unlinked === 0) {
+        add('pdf', 'ok', `chaque document est rattaché à une collection Zotero (${used} collection(s) utilisée(s) sur ${collections})`);
+      } else {
+        add(
+          'pdf',
+          'ecart',
+          `${unlinked}/${docs.length} document(s) rattaché(s) à aucune collection Zotero`,
+          'Le filtre par collection de l’assistant ignore ces documents. Avant la rc.6-beta.3, les PDF indexés après la synchronisation n’étaient jamais rattachés (#130) : relancer « Synchroniser avec Zotero ». Une référence hors de toute collection reste possible.',
+        );
+      }
+      if (has('pdf_zotero_collections')) {
+        const byKey = new Map(db.prepare('SELECT key, parent_key FROM pdf_zotero_collections').all().map((r) => [r.key, r.parent_key]));
+        const dangling = [...byKey.values()].filter((p) => p && !byKey.has(p)).length;
+        if (dangling) add('pdf', 'ecart', `${dangling} collection(s) dont la collection parente est absente`, 'Arbre incomplet : le filtre récursif perd des branches. Relancer « Synchroniser avec Zotero ».');
+        if (!byKey.has(projectCollection)) add('pdf', 'ecart', 'la collection Zotero du projet est absente de la base', 'Relancer « Synchroniser avec Zotero ».');
+      }
+    }
   }
 
   // ── Bibliographie ─────────────────────────────────────────────────────

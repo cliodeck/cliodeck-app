@@ -123,9 +123,11 @@ export function setupZoteroHandlers() {
       if (result.success && result.status === 'applied') {
         const store = vectorStoreIfStillCurrent(vectorStoreBefore);
         if (store) {
-          if (result.collections && result.collections.length > 0) {
-            store.saveCollections(result.collections);
-          }
+          // L'ensemble des collections du projet, et l'appartenance de chaque
+          // référence, font foi : on les remplace. L'appartenance est gardée
+          // pour les PDF indexés APRÈS cette synchronisation (#130).
+          store.replaceCollections(result.collections ?? []);
+          store.replaceCollectionMemberships(result.bibtexKeyToCollections ?? {});
           if (result.bibtexKeyToCollections && Object.keys(result.bibtexKeyToCollections).length > 0) {
             const linked = store.linkDocumentsToCollectionsByBibtexKey(result.bibtexKeyToCollections);
             console.log(`🔗 Linked ${linked} documents to their Zotero collections`);

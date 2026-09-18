@@ -32,6 +32,8 @@ function createBrain(setup: (db: DatabaseSync) => void): string {
   db.exec(`
     CREATE TABLE pdf_documents (id TEXT PRIMARY KEY, file_path TEXT);
     CREATE TABLE pdf_chunks (id TEXT PRIMARY KEY, document_id TEXT, embedding BLOB);
+    CREATE TABLE pdf_zotero_collections (key TEXT PRIMARY KEY, name TEXT, parent_key TEXT);
+    CREATE TABLE pdf_document_collections (document_id TEXT, collection_key TEXT);
     CREATE TABLE tropy_projects (id TEXT PRIMARY KEY, tpy_path TEXT, name TEXT, last_sync TEXT, auto_sync INTEGER);
     CREATE TABLE tropy_sources (id TEXT PRIMARY KEY, transcription TEXT);
     CREATE TABLE tropy_chunks (id TEXT PRIMARY KEY, source_id TEXT, embedding BLOB);
@@ -192,6 +194,26 @@ describe('bilan de santé — PDF non indexés : jamais proposés ou en échec',
     expect(failed).toMatchObject({ niveau: 'ecart' });
     expect(failed?.message).toContain('Rattache_par_bib.pdf');
     expect(failed?.message).toContain('Rattache_par_zotero.pdf');
+  });
+});
+
+describe('bilan de santé — collections Zotero (#130)', () => {
+  it('signale les documents rattachés à aucune collection et un parent absent', async () => {
+    write('project.json', JSON.stringify({ name: 'T', type: 'article', zotero: { collectionKey: 'AI' } }));
+    const a = write('PDFs/a.pdf', '%PDF-1.4');
+    const b = write('PDFs/b.pdf', '%PDF-1.4');
+    createBrain((db) => {
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d1', a);
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d2', b);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c1', 'd1', vec);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c2', 'd2', vec);
+      db.prepare('INSERT INTO pdf_zotero_collections VALUES (?, ?, ?)').run('AI', '07 AI', null);
+      db.prepare('INSERT INTO pdf_zotero_collections VALUES (?, ?, ?)').run('THAU', 'Teaching History AU', 'TEACH');
+      db.prepare('INSERT INTO pdf_document_collections VALUES (?, ?)').run('d1', 'AI');
+    });
+    const messages = ecarts(await check(), 'pdf').map((f) => f.message).join('\n');
+    expect(messages).toMatch(/1\/2 document\(s\) rattaché\(s\) à aucune collection/);
+    expect(messages).toMatch(/1 collection\(s\) dont la collection parente est absente/);
   });
 });
 
