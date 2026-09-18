@@ -2407,5 +2407,10 @@
     "withheld": "Notes non indexées : les embeddings passent par {{provider}}, hors de cette machine, et l'envoi des notes de lecture aux modèles en ligne n'est pas autorisé. Cochez l'option ci-dessus pour les indexer ; l'index reste en l'état.",
     "indexError": "L'indexation a échoué.",
     "statsError": "L'état de l'index n'a pas pu être lu."
+  },
+  "pdfLowText": {
+    "title": "PDF sans texte exploitable",
+    "message": "« {{title}} » a été indexé, mais presque aucun texte n'a pu en être extrait : c'est probablement un scan ou une image sans OCR. La recherche et l'assistant n'y trouveront rien.",
+    "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} caractères par page en moyenne. Passez-le par un logiciel d'OCR (par exemple ocrmypdf ou Adobe Acrobat), puis réindexez-le."
   }
 }

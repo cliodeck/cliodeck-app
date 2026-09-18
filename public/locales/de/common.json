@@ -2407,5 +2407,10 @@
     "withheld": "Notizen nicht indexiert: Die Embeddings laufen über {{provider}}, außerhalb dieses Rechners, und das Senden von Lesenotizen an Online-Modelle ist nicht erlaubt. Kreuzen Sie die Option oben an, um sie zu indexieren; der Index bleibt unverändert.",
     "indexError": "Die Indexierung ist fehlgeschlagen.",
     "statsError": "Der Indexstatus konnte nicht gelesen werden."
+  },
+  "pdfLowText": {
+    "title": "PDF ohne verwertbaren Text",
+    "message": "„{{title}}“ wurde indexiert, aber es ließ sich kaum Text daraus extrahieren: Wahrscheinlich ist es ein Scan oder ein Bild ohne OCR. Suche und Assistent werden darin nichts finden.",
+    "details": "{{fileName}} — {{pageCount}} Seite(n), durchschnittlich {{charsPerPage}} Zeichen pro Seite. Lassen Sie eine Texterkennung (OCR) darüber laufen (zum Beispiel ocrmypdf oder Adobe Acrobat) und indexieren Sie es erneut."
   }
 }

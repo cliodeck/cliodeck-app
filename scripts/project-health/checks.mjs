@@ -218,6 +218,40 @@ export function runHealthChecks(projectPath, db) {
       }
     }
 
+    // PDF sans couche de texte (#132) : indexés sans erreur, introuvables par
+    // la recherche. Même seuil que backend/core/pdf/text-density.ts. Les
+    // documents indexés avant la rc.6-beta.3 n'ont pas la mesure : on la
+    // recalcule sur leurs extraits (préfixe « [Doc: …] » retiré).
+    const columns = (t) => new Set(db.prepare(`PRAGMA table_info("${t}")`).all().map((c) => c.name));
+    const docColumns = columns('pdf_documents');
+    const canMeasure =
+      has('pdf_chunks') && docColumns.has('page_count') && docColumns.has('metadata') && columns('pdf_chunks').has('content');
+    if (docs.length > 0 && canMeasure) {
+      const LOW_TEXT_CHARS_PER_PAGE = 100;
+      const rows = db.prepare('SELECT id, file_path, page_count, metadata FROM pdf_documents').all();
+      const contents = new Map();
+      for (const c of db.prepare('SELECT document_id, content FROM pdf_chunks').all()) {
+        const text = String(c.content ?? '').replace(/^\[Doc:[^\]]*\]\s*/, '').replace(/\s+/g, '');
+        contents.set(c.document_id, (contents.get(c.document_id) ?? 0) + text.length);
+      }
+      const lowText = [];
+      for (const r of rows) {
+        let perPage;
+        try {
+          perPage = JSON.parse(r.metadata || '{}').textDensity?.charsPerPage;
+        } catch {
+          perPage = undefined;
+        }
+        if (perPage === undefined && r.page_count > 0) perPage = Math.round((contents.get(r.id) ?? 0) / r.page_count);
+        if (perPage !== undefined && perPage < LOW_TEXT_CHARS_PER_PAGE) lowText.push(`${path.basename(r.file_path)} (${perPage} car./p.)`);
+      }
+      if (lowText.length) {
+        add('pdf', 'ecart', `${lowText.length} PDF presque sans texte extrait : ${sample(lowText, 4)}`, 'Scans ou images sans OCR : indexés, mais la recherche n’y trouve rien. Les passer par un OCR puis les réindexer.');
+      } else {
+        add('pdf', 'ok', 'chaque PDF a du texte extrait');
+      }
+    }
+
     // Collections Zotero (#130) : un projet qui suit une collection doit
     // voir ses documents rattachés, sans quoi le filtre par collection de
     // l'assistant ne trouve rien.

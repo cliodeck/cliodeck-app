@@ -234,6 +234,30 @@ describe('bilan de santé — un PDF pour deux références (#131)', () => {
   });
 });
 
+describe('bilan de santé — PDF sans texte (#132)', () => {
+  it('signale un PDF image, mesuré en base ou recalculé sur ses extraits', async () => {
+    const a = write('PDFs/Wang_2025.pdf', '%PDF-1.4');
+    const b = write('PDFs/Star_1999.pdf', '%PDF-1.4');
+    const c = write('PDFs/Texte.pdf', '%PDF-1.4');
+    createBrain((db) => {
+      db.exec('ALTER TABLE pdf_documents ADD COLUMN page_count INTEGER');
+      db.exec('ALTER TABLE pdf_documents ADD COLUMN metadata TEXT');
+      db.exec('ALTER TABLE pdf_chunks ADD COLUMN content TEXT');
+      const doc = db.prepare('INSERT INTO pdf_documents (id, file_path, page_count, metadata) VALUES (?, ?, ?, ?)');
+      doc.run('d1', a, 13, JSON.stringify({ textDensity: { charsPerPage: 0, lowText: true } }));
+      doc.run('d2', b, 16, '{}');
+      doc.run('d3', c, 1, '{}');
+      const chunk = db.prepare('INSERT INTO pdf_chunks (id, document_id, embedding, content) VALUES (?, ?, ?, ?)');
+      chunk.run('c1', 'd1', vec, '[Doc: Wang]\n\n');
+      chunk.run('c2', 'd2', vec, '[Doc: Star]\n\nhttp://abs.sagepub.com Downloaded');
+      chunk.run('c3', 'd3', vec, `[Doc: Texte]\n\n${'Une vraie page de texte. '.repeat(40)}`);
+    });
+    const messages = ecarts(await check(), 'pdf').map((f) => f.message).join('\n');
+    expect(messages).toMatch(/2 PDF presque sans texte extrait : Wang_2025\.pdf \(0 car\.\/p\.\), Star_1999\.pdf/);
+    expect(messages).not.toMatch(/Texte\.pdf/);
+  });
+});
+
 describe('bilan de santé — lecture seule stricte', () => {
   it('ne crée ni -wal ni -shm et ne modifie pas la base', async () => {
     const dbPath = createBrain((db) => {
