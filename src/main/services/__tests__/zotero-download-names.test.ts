@@ -126,4 +126,24 @@ describe('téléchargement Zotero : pièces jointes de même nom', () => {
     const pdfDir = path.join(project, 'PDFs');
     expect(fs.existsSync(pdfDir) ? fs.readdirSync(pdfDir) : []).toEqual([]);
   });
+
+  it('n’écrit jamais hors de PDFs/, ni pour une clé hostile, ni pour un nom « .. »', async () => {
+    library['../../evil'] = '%PDF hostile';
+    const byKey = await download('../../evil');
+    expect(byKey.success).toBe(false);
+
+    library.GOODKEY1 = '%PDF nom hostile';
+    const byName = await zoteroService.downloadPDF({
+      mode: 'local',
+      dataDirectory: '/zotero',
+      attachmentKey: 'GOODKEY1',
+      filename: '..',
+      targetDirectory: project,
+    } as Parameters<typeof zoteroService.downloadPDF>[0]);
+    expect(byName.success).toBe(false);
+
+    const outside = fs.readdirSync(project).filter((n) => !['PDFs', '.cliodeck'].includes(n));
+    expect(outside).toEqual([]);
+    expect(fs.existsSync(path.join(project, '..', 'evil'))).toBe(false);
+  });
 });

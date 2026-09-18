@@ -6,6 +6,7 @@ import type { ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { collectionsForProject } from '../../../backend/integrations/zotero/projectCollections.js';
 import {
+  assertInside,
   chooseAttachmentDestination,
   sanitizeAttachmentFilename,
   type AttachmentOwner,
@@ -197,7 +198,12 @@ class ZoteroService {
         // Téléchargement dans un fichier temporaire : un transfert interrompu
         // ne laisse jamais un PDF tronqué à la place d'un bon.
         await mkdir(pdfDir, { recursive: true });
+        // La clé est validée par chooseAttachmentDestination ; les deux
+        // chemins construits avec elle doivent rester dans PDFs/.
         const temporary = path.join(pdfDir, `.${options.attachmentKey}.part`);
+        assertInside(pdfDir, temporary);
+        assertInside(pdfDir, decision.path);
+        if (decision.kind === 'compare') assertInside(pdfDir, decision.fallback);
         let savePath = decision.path;
         try {
           await ds.downloadFile(options.attachmentKey, temporary);

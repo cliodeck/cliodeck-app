@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
 import {
+  assertInside,
   chooseAttachmentDestination,
   sanitizeAttachmentFilename,
   suffixedAttachmentFilename,
@@ -53,5 +54,22 @@ describe('noms de fichier', () => {
     const suffixed = suffixedAttachmentFilename(long, 'ABCD1234');
     expect(suffixed.length).toBeLessThanOrEqual(200);
     expect(suffixed.endsWith('_ABCD1234.pdf')).toBe(true);
+  });
+});
+
+describe('clés et chemins hostiles', () => {
+  it('refuse une clé de pièce jointe qui n’a pas la forme d’une clé Zotero', () => {
+    for (const key of ['../../autre-projet/x', 'a/b', '..', '', 'ABC DEF']) {
+      expect(() => chooseAttachmentDestination({ pdfDir: DIR, filename: NAME, attachmentKey: key, owners: [], exists: () => false, identity })).toThrow(/invalide/);
+      expect(() => suffixedAttachmentFilename(NAME, key)).toThrow(/invalide/);
+    }
+  });
+
+  it('assertInside refuse tout chemin hors du dossier, y compris le dossier lui-même', () => {
+    expect(() => assertInside(DIR, path.join(DIR, 'a.pdf'))).not.toThrow();
+    expect(() => assertInside(DIR, path.join(DIR, '..'))).toThrow();
+    expect(() => assertInside(DIR, path.join(DIR, '..', 'a.pdf'))).toThrow();
+    expect(() => assertInside(DIR, DIR)).toThrow();
+    expect(() => assertInside(DIR, '/etc/passwd')).toThrow();
   });
 });
