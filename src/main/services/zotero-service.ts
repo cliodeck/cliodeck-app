@@ -1,10 +1,15 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { readFile, rename, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import type { ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
 import { collectionsForProject } from '../../../backend/integrations/zotero/projectCollections.js';
+import {
+  chooseAttachmentDestination,
+  sanitizeAttachmentFilename,
+  type AttachmentOwner,
+} from '../../../backend/integrations/zotero/attachmentDestination.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
 import {
   ZoteroSynchronizer,
@@ -176,22 +181,46 @@ class ZoteroService {
     try {
       const ds = this.createDataSource(options);
       try {
-        // Create PDFs directory if it doesn't exist
         const pdfDir = path.join(options.targetDirectory, 'PDFs');
 
-        // Sanitize filename
-        const sanitizedFilename = options.filename
-          .replace(/[<>:"/\\|?*]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/_+/g, '_')
-          .substring(0, 200);
+        // Jamais écraser le fichier d'une autre pièce jointe (#131) : deux
+        // pièces jointes de même nom — « AAAA - Documents sauvegardés.pdf »
+        // d'Europresse — se remplaçaient, et une référence perdait son PDF.
+        const decision = chooseAttachmentDestination({
+          pdfDir,
+          filename: options.filename,
+          attachmentKey: options.attachmentKey,
+          owners: await downloadedAttachmentOwners(options.targetDirectory),
+          exists: existsSync,
+        });
 
-        const savePath = path.join(pdfDir, sanitizedFilename);
+        // Téléchargement dans un fichier temporaire : un transfert interrompu
+        // ne laisse jamais un PDF tronqué à la place d'un bon.
+        await mkdir(pdfDir, { recursive: true });
+        const temporary = path.join(pdfDir, `.${options.attachmentKey}.part`);
+        let savePath = decision.path;
+        try {
+          await ds.downloadFile(options.attachmentKey, temporary);
 
-        // Download/copy the file
-        await ds.downloadFile(options.attachmentKey, savePath);
+          if (decision.kind === 'compare') {
+            // Un fichier de ce nom existe sans propriétaire connu : identique,
+            // on le garde ; différent, on ne le remplace pas.
+            if (await sameContent(temporary, decision.path)) {
+              console.log(`✅ PDF déjà présent, identique : ${path.basename(savePath)}`);
+              return { success: true, filePath: savePath };
+            }
+            savePath = decision.fallback;
+          }
+          await rename(temporary, savePath);
+        } finally {
+          await rm(temporary, { force: true });
+        }
 
-        console.log(`✅ PDF obtained: ${sanitizedFilename}`);
+        if (savePath !== path.join(pdfDir, sanitizeAttachmentFilename(options.filename))) {
+          console.log(`✅ PDF obtained under a unique name (name already taken): ${path.basename(savePath)}`);
+        } else {
+          console.log(`✅ PDF obtained: ${path.basename(savePath)}`);
+        }
 
         return {
           success: true,
@@ -364,6 +393,25 @@ async function recordProjectCollection(
 }
 
 /** Clé BibTeX → collections Zotero de la notice correspondante. */
+/** Pièces jointes déjà téléchargées du projet, et le fichier de chacune. */
+async function downloadedAttachmentOwners(projectPath: string): Promise<AttachmentOwner[]> {
+  const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
+  const owners: AttachmentOwner[] = [];
+  for (const entry of Object.values(metadata?.citations ?? {})) {
+    for (const attachment of entry.zoteroAttachments ?? []) {
+      if (attachment.downloaded && attachment.localPath) {
+        owners.push({ attachmentKey: attachment.key, localPath: attachment.localPath });
+      }
+    }
+  }
+  return owners;
+}
+
+async function sameContent(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([readFile(a), readFile(b)]);
+  return x.equals(y);
+}
+
 function collectionsByCiteKey(citations: Citation[], items: ZoteroItem[]): Record<string, string[]> {
   const collectionsOf = new Map(items.map((item) => [item.key, item.data.collections ?? []]));
   const map: Record<string, string[]> = {};

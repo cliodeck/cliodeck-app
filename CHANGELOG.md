@@ -51,6 +51,15 @@ fonctionnalité nouvelle.
   branches au filtre récursif : c'était encore un `INSERT OR REPLACE` sur
   une table qui a des enfants. Seules les collections du projet sont
   enregistrées, et non plus toute la bibliothèque (152).
+- **Deux pièces jointes Zotero de même nom s'écrasaient** (#131). Le fichier
+  de destination ne dépendait que du nom : « 2023 - Documents sauvegardés.pdf »,
+  nom par défaut des exports Europresse, était porté par quatre pièces
+  jointes de deux références sur un projet réel, et le PDF de l'une avait
+  remplacé celui de l'autre, sa fiche le disant toujours téléchargé. Un
+  fichier qui appartient à une autre pièce jointe n'est plus jamais écrasé :
+  le second prend un nom suffixé par sa clé Zotero. Le téléchargement passe
+  par un fichier temporaire, et le bilan de santé signale un même PDF
+  rattaché à plusieurs références.
 - **Sans Node.js installé, aucun PDF ne s'indexait** (PR #110). Le worker
   d'extraction était lancé avec le `node` du système, que la plupart des
   historiens n'ont pas, et rien ne leur disait d'en installer un. Il tourne

@@ -217,6 +217,23 @@ describe('bilan de santé — collections Zotero (#130)', () => {
   });
 });
 
+describe('bilan de santé — un PDF pour deux références (#131)', () => {
+  it('signale un même fichier rattaché à deux références', async () => {
+    const shared = write('PDFs/2023_-_Documents_sauvegardés.pdf', '%PDF-1.4');
+    write('bibliography.bib', '@article{guerre_2023, title={A}}\n@article{Revue_2023, title={B}}\n');
+    write('.cliodeck/bibliography-metadata.json', JSON.stringify({
+      version: 2,
+      citations: {
+        JDDRM442: { id: 'guerre_2023', zoteroAttachments: [{ key: 'QQBJJVQY', downloaded: true, localPath: shared }] },
+        '6T9EQ588': { id: 'Revue_2023', zoteroAttachments: [{ key: 'GC9BPFL6', downloaded: true, localPath: shared }] },
+      },
+    }));
+    createBrain(() => {});
+    const messages = ecarts(await check(), 'bibliographie').map((f) => f.message).join('\n');
+    expect(messages).toMatch(/1 fichier\(s\) PDF rattaché\(s\) à plusieurs références : 2023_-_Documents_sauvegardés\.pdf ← guerre_2023 \+ Revue_2023/);
+  });
+});
+
 describe('bilan de santé — lecture seule stricte', () => {
   it('ne crée ni -wal ni -shm et ne modifie pas la base', async () => {
     const dbPath = createBrain((db) => {
