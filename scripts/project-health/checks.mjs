@@ -266,6 +266,28 @@ export function runHealthChecks(projectPath, db) {
         const withoutBib = metaIds.filter((id) => !keySet.has(id));
         add('bibliographie', 'info', `${Object.keys(entries).length} fiche(s) de métadonnées (pièces jointes, tags Zotero), schéma v${meta.version ?? '?'}`);
         if (withoutBib.length) add('bibliographie', 'ecart', `${withoutBib.length} fiche(s) sans entrée dans le .bib : ${sample(withoutBib)}`, 'Référence retirée du .bib, ou clé renommée : la fiche est orpheline.');
+
+        // Un même fichier ne peut pas être le PDF de deux références (#131) :
+        // c'est la trace d'une pièce jointe écrasée par une autre de même nom.
+        const referencesByFile = new Map();
+        for (const entry of Object.values(entries)) {
+          for (const att of entry.zoteroAttachments ?? []) {
+            if (!att.downloaded || !att.localPath) continue;
+            const id = fileIdentity(att.localPath);
+            const refs = referencesByFile.get(id) ?? new Set();
+            refs.add(entry.id ?? '?');
+            referencesByFile.set(id, refs);
+          }
+        }
+        const shared = [...referencesByFile].filter(([, refs]) => refs.size > 1);
+        if (shared.length) {
+          add(
+            'bibliographie',
+            'ecart',
+            `${shared.length} fichier(s) PDF rattaché(s) à plusieurs références : ${sample(shared.map(([p, refs]) => `${path.basename(p)} ← ${[...refs].join(' + ')}`), 3)}`,
+            'Pièces jointes Zotero de même nom (exports Europresse…) : avant la rc.6-beta.3, la seconde écrasait la première (#131). Une seule de ces références a son vrai PDF : retélécharger les autres depuis leur fiche.',
+          );
+        }
       } catch {
         add('bibliographie', 'ecart', 'bibliography-metadata.json illisible');
       }
