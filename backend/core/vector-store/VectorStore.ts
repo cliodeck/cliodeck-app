@@ -219,6 +219,19 @@ export class VectorStore {
       );
     `);
 
+    // Appartenance d'une référence (clé BibTeX) à ses collections Zotero,
+    // telle que lue à la dernière synchronisation. Sans elle, un PDF
+    // téléchargé et indexé APRÈS la synchronisation — le cas de tout premier
+    // import — ne pouvait être rattaché à aucune collection (#130). Pas de
+    // clé étrangère : on ne veut aucune cascade depuis pdf_zotero_collections.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS pdf_zotero_memberships (
+        bibtex_key TEXT NOT NULL,
+        collection_key TEXT NOT NULL,
+        PRIMARY KEY (bibtex_key, collection_key)
+      );
+    `);
+
     // Index pour accélérer les recherches
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON pdf_chunks(document_id);
@@ -1203,22 +1216,99 @@ export class VectorStore {
   // MARK: - Zotero Collection Operations
 
   /**
-   * Sauvegarde plusieurs collections Zotero en batch
+   * Enregistre ou met à jour des collections Zotero, sans jamais supprimer
+   * de ligne.
+   *
+   * **Pas d'`INSERT OR REPLACE`** : REPLACE supprime la ligne en conflit, et
+   * cette table a des enfants — `pdf_document_collections` (ON DELETE
+   * CASCADE : tous les liens de la collection partaient) et elle-même via
+   * `parent_key` (ON DELETE SET NULL : réenregistrer un parent après son
+   * enfant détachait l'enfant de l'arbre). Mesuré sur un projet réel : une
+   * seconde synchronisation laissait 67 collections « sans parent » au lieu
+   * d'une vingtaine de racines (#130).
+   *
+   * Clés étrangères différées dans la transaction : un enfant peut arriver
+   * avant son parent, l'ordre de Zotero n'étant pas garanti.
    */
   saveCollections(collections: Array<{ key: string; name: string; parentKey?: string }>): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO pdf_zotero_collections (key, name, parent_key)
+    const upsert = this.db.prepare(`
+      INSERT INTO pdf_zotero_collections (key, name, parent_key)
       VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET name = excluded.name, parent_key = excluded.parent_key
     `);
 
     const transaction = this.db.transaction(() => {
+      this.db.pragma('defer_foreign_keys = ON');
       for (const coll of collections) {
-        stmt.run(coll.key, coll.name, coll.parentKey || null);
+        upsert.run(coll.key, coll.name, coll.parentKey || null);
       }
     });
     transaction();
 
     console.log(`✅ ${collections.length} collections sauvegardées`);
+  }
+
+  /**
+   * Fait de `collections` l'ensemble exact des collections connues : met à
+   * jour celles qui restent, retire les autres (et, par cascade, leurs liens
+   * — elles ne concernent plus le projet).
+   */
+  replaceCollections(collections: Array<{ key: string; name: string; parentKey?: string }>): void {
+    const keep = new Set(collections.map((c) => c.key));
+    const existing = this.db.prepare('SELECT key FROM pdf_zotero_collections').all() as Array<{ key: string }>;
+    const stale = existing.map((r) => r.key).filter((k) => !keep.has(k));
+
+    const transaction = this.db.transaction(() => {
+      this.db.pragma('defer_foreign_keys = ON');
+      const remove = this.db.prepare('DELETE FROM pdf_zotero_collections WHERE key = ?');
+      for (const key of stale) remove.run(key);
+      this.saveCollections(collections);
+    });
+    transaction();
+
+    if (stale.length) console.log(`🧹 ${stale.length} collection(s) hors du projet retirée(s)`);
+  }
+
+  /**
+   * Remplace l'appartenance des références à leurs collections, telle que
+   * lue à la synchronisation. Sert à rattacher les documents indexés plus
+   * tard (`linkDocumentFromMemberships`).
+   */
+  replaceCollectionMemberships(bibtexKeyToCollections: Record<string, string[]>): void {
+    const insert = this.db.prepare(
+      'INSERT OR IGNORE INTO pdf_zotero_memberships (bibtex_key, collection_key) VALUES (?, ?)'
+    );
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM pdf_zotero_memberships').run();
+      for (const [bibtexKey, keys] of Object.entries(bibtexKeyToCollections)) {
+        for (const key of keys) insert.run(bibtexKey, key);
+      }
+    });
+    transaction();
+  }
+
+  /**
+   * Rattache un document aux collections de sa référence, d'après la
+   * dernière synchronisation. Ne touche à rien si la référence n'y figure
+   * pas (PDF hors Zotero, projet sans collection).
+   *
+   * @returns le nombre de collections rattachées
+   */
+  linkDocumentFromMemberships(documentId: string, bibtexKey: string | undefined): number {
+    if (!bibtexKey) return 0;
+    const rows = this.db
+      .prepare(
+        `SELECT m.collection_key FROM pdf_zotero_memberships m
+         JOIN pdf_zotero_collections c ON c.key = m.collection_key
+         WHERE m.bibtex_key = ?`
+      )
+      .all(bibtexKey) as Array<{ collection_key: string }>;
+    if (rows.length === 0) return 0;
+    this.setDocumentCollections(
+      documentId,
+      rows.map((r) => r.collection_key)
+    );
+    return rows.length;
   }
 
   /**

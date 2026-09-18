@@ -39,6 +39,18 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Zotero : les collections ne servaient à rien au premier import** (#130).
+  Les documents n'étaient rattachés à leurs collections qu'à la
+  synchronisation, et seulement s'ils étaient déjà indexés — jamais au
+  premier import. Mesuré sur un projet réel : 262 PDF, **0 lien**, et un
+  filtre par collection de l'assistant qui ne trouvait plus rien, sans le
+  dire. L'appartenance lue à la synchronisation est désormais gardée, et
+  chaque PDF indexé ensuite rejoint ses collections. Une seconde
+  synchronisation détachait en outre des sous-collections de leur parent
+  (67 « racines » au lieu d'une vingtaine), ce qui faisait perdre des
+  branches au filtre récursif : c'était encore un `INSERT OR REPLACE` sur
+  une table qui a des enfants. Seules les collections du projet sont
+  enregistrées, et non plus toute la bibliothèque (152).
 - **Sans Node.js installé, aucun PDF ne s'indexait** (PR #110). Le worker
   d'extraction était lancé avec le `node` du système, que la plupart des
   historiens n'ont pas, et rien ne leur disait d'en installer un. Il tourne

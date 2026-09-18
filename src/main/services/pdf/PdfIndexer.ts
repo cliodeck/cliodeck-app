@@ -97,6 +97,16 @@ export class PdfIndexer {
     if (collectionKeys && collectionKeys.length > 0) {
       this.vectorStore.setDocumentCollections(document.id, collectionKeys);
       console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${collectionKeys.length} collection(s)`);
+    } else {
+      // Aucun appelant ne transmet de collections (pdf:index ne les connaît
+      // pas) : on les prend dans l'appartenance lue à la dernière
+      // synchronisation. Sans cela, tout PDF indexé après l'import — c'est-à-
+      // dire tous, au premier import — restait hors de toute collection, et
+      // le filtre par collection de l'assistant ne trouvait rien (#130).
+      const linked = this.vectorStore.linkDocumentFromMemberships(document.id, document.bibtexKey);
+      if (linked > 0) {
+        console.log(`📁 Linked document ${document.id.substring(0, 8)} to ${linked} collection(s) from the last Zotero sync`);
+      }
     }
     return document;
   }

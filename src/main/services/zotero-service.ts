@@ -4,6 +4,7 @@ import { readFile, rename, writeFile } from 'fs/promises';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import type { ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
+import { collectionsForProject } from '../../../backend/integrations/zotero/projectCollections.js';
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
 import {
   ZoteroSynchronizer,
@@ -279,11 +280,18 @@ class ZoteroService {
 
         await recordProjectCollection(projectJsonPath, relativeBib, options.collectionKey);
 
-        const collections = (await ds.listCollections()).map((c) => ({
+        const bibtexKeyToCollections = collectionsByCiteKey(result.citations, result.items);
+        const allCollections = (await ds.listCollections()).map((c) => ({
           key: c.key,
           name: c.data.name,
-          parentKey: c.data.parentCollection,
+          parentKey: c.data.parentCollection || undefined,
         }));
+        // Seulement les collections du projet, pas toute la bibliothèque (#130).
+        const collections = collectionsForProject(
+          allCollections,
+          options.collectionKey || savedCollectionKey,
+          bibtexKeyToCollections,
+        );
 
         return {
           success: true,
@@ -292,7 +300,7 @@ class ZoteroService {
           written: mustWrite,
           bibtexPath,
           collections,
-          bibtexKeyToCollections: collectionsByCiteKey(result.citations, result.items),
+          bibtexKeyToCollections,
         };
       } finally {
         this.closeDataSource(ds);

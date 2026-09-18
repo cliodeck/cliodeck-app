@@ -631,6 +631,21 @@ export class EnhancedVectorStore {
     this.vectorStore.saveCollections(collections);
   }
 
+  /** Fait de `collections` l'ensemble exact des collections connues. */
+  replaceCollections(collections: Array<{ key: string; name: string; parentKey?: string }>): void {
+    this.vectorStore.replaceCollections(collections);
+  }
+
+  /** Appartenance des références à leurs collections, lue à la synchronisation. */
+  replaceCollectionMemberships(bibtexKeyToCollections: Record<string, string[]>): void {
+    this.vectorStore.replaceCollectionMemberships(bibtexKeyToCollections);
+  }
+
+  /** Rattache un document aux collections de sa référence. */
+  linkDocumentFromMemberships(documentId: string, bibtexKey: string | undefined): number {
+    return this.vectorStore.linkDocumentFromMemberships(documentId, bibtexKey);
+  }
+
   /**
    * Get all Zotero collections
    */
