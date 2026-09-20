@@ -60,6 +60,11 @@ fonctionnalité nouvelle.
   le second prend un nom suffixé par sa clé Zotero. Le téléchargement passe
   par un fichier temporaire, et le bilan de santé signale un même PDF
   rattaché à plusieurs références.
+- **L'app Intel partait sans le moteur du modèle embarqué** (#128, PR #129) :
+  ce moteur vit dans un paquet par architecture que npm n'installe que pour la
+  machine qui construit, et le DMG Intel est construit sur Apple Silicon. Les
+  builds Mac récupèrent désormais les binaires des deux architectures. Reste à
+  vérifier sur un DMG Intel signé.
 - **Un PDF sans couche de texte s'indexait en silence** (#132). Un scan non
   OCRisé ou un « Imprimer en PDF » d'images ne donne aucun texte : il
   était compté comme indexé, et la recherche n'y trouvait rien. Mesuré sur un
