@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
-import { join, dirname, extname } from 'path';
+import { join, dirname, extname, delimiter } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
@@ -459,9 +459,13 @@ export class WordExportService {
       '/opt/local/bin',              // MacPorts
     ];
 
+    // Unix locations only: meaningless on Windows, where joining with ':'
+    // would also break drive letters (`C:\…`) — `delimiter` is ';' there.
+    if (process.platform === 'win32') return currentPath;
+
     // Add paths that aren't already in PATH
     const pathsToAdd = additionalPaths.filter(p => !currentPath.includes(p));
-    return [...pathsToAdd, currentPath].join(':');
+    return [...pathsToAdd, currentPath].join(delimiter);
   }
 
   /**
@@ -470,9 +474,12 @@ export class WordExportService {
   private async checkPandoc(): Promise<boolean> {
     const extendedPath = this.getExtendedPath();
     return new Promise((resolve) => {
-      const proc = spawn('which', ['pandoc'], {
+      // `which` does not exist on Windows; `where` is its equivalent.
+      const finder = process.platform === 'win32' ? 'where' : 'which';
+      const proc = spawn(finder, ['pandoc'], {
         env: { ...process.env, PATH: extendedPath }
       });
+      proc.on('error', () => resolve(false));
       proc.on('close', (code) => resolve(code === 0));
     });
   }
