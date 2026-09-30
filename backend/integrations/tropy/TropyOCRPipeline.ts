@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PDFConverter, createPDFConverter } from './PDFConverter';
+import { PDFConverter, PopplerNotFoundError, createPDFConverter } from './PDFConverter';
 
 // MARK: - Types
 
@@ -161,6 +161,7 @@ export class TropyOCRPipeline {
         dpi: 300, // Bonne qualité pour OCR
       });
     } catch (error) {
+      if (error instanceof PopplerNotFoundError) throw error;
       console.error('PDF conversion failed:', error);
       throw new Error(`Failed to convert PDF ${pdfPath}: ${error}`);
     }
@@ -233,6 +234,10 @@ export class TropyOCRPipeline {
         const result = await this.performOCR(filePath, options);
         results.push(result);
       } catch (error) {
+        // Poppler manquant n'est pas l'échec d'un fichier : c'est un outil
+        // absent pour tout le corpus. On laisse remonter, pour que la
+        // synchronisation le dise au lieu de conclure « pas de texte » (#138).
+        if (error instanceof PopplerNotFoundError) throw error;
         console.warn(`Skipping ${filePath}: ${error}`);
       }
     }
