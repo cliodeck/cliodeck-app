@@ -33,7 +33,6 @@ const dependencies: Dependency[] = [
   { name: 'marked', license: 'MIT', url: 'https://marked.js.org' },
   { name: 'natural', license: 'MIT', url: 'https://github.com/NaturalNode/natural' },
   { name: 'node-llama-cpp', license: 'MIT', url: 'https://node-llama-cpp.withcat.ai' },
-  { name: 'pdf-poppler', license: 'ISC', url: 'https://github.com/kb47/pdf-poppler' },
   { name: 'pdfjs-dist', license: 'Apache-2.0', url: 'https://github.com/mozilla/pdfjs-dist' },
   { name: 'PizZip', license: 'MIT / GPL-3.0', url: 'https://github.com/open-xml-templating/pizzip' },
   { name: 'React', license: 'MIT', url: 'https://reactjs.org' },

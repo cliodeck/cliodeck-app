@@ -3,7 +3,7 @@ import { writeFile, mkdir, readFile, rm } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { extendedToolPath, toolFinderCommand } from './export-tools.js';
+import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
 import { processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
@@ -466,7 +466,7 @@ $body$
 
 export class PDFExportService {
   /**
-   * PATH des outils d'export : voir `export-tools.ts` (emplacements ajoutés
+   * PATH des outils d'export : voir `backend/core/tools/external-tools.ts` (emplacements ajoutés
    * hors Windows, où le PATH part tel quel).
    */
   private getExtendedPath(): string {

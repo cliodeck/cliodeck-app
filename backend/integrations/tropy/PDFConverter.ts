@@ -11,10 +11,36 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFile, execSync } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { findExternalTool } from '../../core/tools/external-tools.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Poppler n'est pas installé : l'OCR des PDF d'archives est impossible.
+ *
+ * Une classe à part pour que la synchronisation puisse le **dire** à
+ * l'historien au lieu de conclure « pas de texte » (#138) : jusqu'ici l'échec
+ * était avalé par un `console.warn`, et sous Windows il était systématique.
+ */
+export class PopplerNotFoundError extends Error {
+  constructor() {
+    super(popplerInstallHint());
+    this.name = 'PopplerNotFoundError';
+  }
+}
+
+/** Marche à suivre, selon le système. */
+export function popplerInstallHint(platform: NodeJS.Platform = process.platform): string {
+  const install =
+    platform === 'win32'
+      ? 'télécharger Poppler pour Windows (https://github.com/oschwartz10612/poppler-windows), puis ajouter son dossier « bin » au PATH'
+      : platform === 'darwin'
+        ? 'installer Poppler : brew install poppler'
+        : 'installer Poppler : apt-get install poppler-utils (ou l\'équivalent de votre distribution)';
+  return `Poppler est introuvable : les PDF de vos archives ne peuvent pas être passés à l'OCR. Pour y remédier, ${install}.`;
+}
 
 // MARK: - Types
 
@@ -51,34 +77,13 @@ export class PDFConverter {
   private isInitialized: boolean = false;
 
   /**
-   * Find Poppler binary in common locations
+   * Trouve un utilitaire Poppler. Les règles — emplacements bien connus,
+   * `where` sous Windows plutôt que `which`, suffixe `.exe` — sont communes
+   * aux outils externes de ClioDeck (#138) : sans elles, la recherche
+   * échouait toujours sous Windows, même Poppler installé et dans le PATH.
    */
   private findBinary(name: string): string | null {
-    const searchPaths = [
-      '/usr/local/bin',       // Intel Mac Homebrew
-      '/opt/homebrew/bin',    // Apple Silicon Homebrew
-      '/usr/bin',             // Linux system
-      '/usr/local/bin',       // Linux local
-    ];
-
-    for (const searchPath of searchPaths) {
-      const fullPath = path.join(searchPath, name);
-      if (fs.existsSync(fullPath)) {
-        return fullPath;
-      }
-    }
-
-    // Try to find via which command (fallback)
-    try {
-      const result = execSync(`which ${name}`, { encoding: 'utf8' }).trim();
-      if (result && fs.existsSync(result)) {
-        return result;
-      }
-    } catch {
-      // which command failed, binary not in PATH
-    }
-
-    return null;
+    return findExternalTool(name);
   }
 
   /**
@@ -93,12 +98,7 @@ export class PDFConverter {
     this.pdfinfoPath = this.findBinary('pdfinfo');
 
     if (!this.pdftoppmPath && !this.pdftocairoPath) {
-      throw new Error(
-        'Poppler utilities not found. Please install Poppler:\n' +
-        '  macOS: brew install poppler\n' +
-        '  Ubuntu: apt-get install poppler-utils\n' +
-        '  Windows: Download from https://github.com/oschwartz10612/poppler-windows'
-      );
+      throw new PopplerNotFoundError();
     }
 
     const tool = this.pdftoppmPath ? 'pdftoppm' : 'pdftocairo';

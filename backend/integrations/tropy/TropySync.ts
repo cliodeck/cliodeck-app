@@ -6,6 +6,7 @@ import {
   PrimarySourcePhoto,
 } from './TropyReader';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
+import { PopplerNotFoundError } from './PDFConverter';
 import {
   PrimarySourcesVectorStore,
   PrimarySourceDocument,
@@ -162,6 +163,9 @@ export class TropySync {
       // surveillance automatique, elle la préserve.
       vectorStore.saveTropyProject(tpyPath, result.projectName);
 
+      // Un outil absent ne se signale qu'une fois (#138).
+      let popplerReported = false;
+
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
 
@@ -190,6 +194,18 @@ export class TropySync {
           result.transcriptionsImported += processResult.transcriptionCount;
           if (processResult.transcriptionWritten) result.transcriptionsWritten++;
         } catch (error) {
+          if (error instanceof PopplerNotFoundError) {
+            // Dit une fois, pas par item : c'est un outil manquant, pas
+            // l'échec d'une source. La synchronisation continue — les
+            // transcriptions déjà présentes et les images, elles, passent.
+            if (!popplerReported) {
+              result.errors.push(error.message);
+              popplerReported = true;
+              console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
+            }
+            result.skippedItems++;
+            continue;
+          }
           result.errors.push(`Item ${item.id} (${item.title}): ${error}`);
         }
       }
@@ -461,6 +477,10 @@ export class TropySync {
         };
       }
     } catch (error) {
+      // Un outil absent concerne tout le corpus : on le remonte à l'appelant,
+      // qui l'inscrit une fois au bilan, plutôt que de conclure « pas de
+      // texte » item après item (#138).
+      if (error instanceof PopplerNotFoundError) throw error;
       console.warn(`OCR failed for item ${item.id}:`, error);
     }
 

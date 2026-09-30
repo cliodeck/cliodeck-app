@@ -39,6 +39,20 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Sous Windows, l'OCR des PDF d'archives ne démarrait jamais, sans le dire**
+  (#138). `PDFConverter` ne cherchait Poppler que dans des emplacements Unix
+  et retombait sur `which`, absent de Windows. L'échec était avalé par la
+  boucle d'OCR : la synchronisation Tropy concluait « pas de texte » et
+  l'historien ne savait pas qu'il manquait un logiciel. La recherche passe
+  désormais par les mêmes règles que les exports — `where` et `.exe` sous
+  Windows —, et un Poppler absent est écrit **une fois** au bilan de
+  synchronisation, avec la marche à suivre du système ; le reste de la
+  synchronisation continue. Les trois copies de ces règles (exports PDF, Word,
+  Tropy) n'en font plus qu'une, dans `backend/core/tools/external-tools.ts`.
+- **86 Mo de binaires inutilisés quittent l'application** : la dépendance
+  `pdf-poppler` était déclarée mais importée nulle part, et electron-builder
+  l'embarquait dans chaque paquet.
+
 - **Sous Windows, les exports PDF et Word ne trouvaient ni pandoc ni xelatex.**
   Le bouton « Exporter » restait grisé alors que les deux étaient installés :
   la vérification lançait `which`, qui n'existe pas sous Windows, et l'échec

@@ -3,7 +3,7 @@ import { join, dirname, extname } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
-import { extendedToolPath, toolFinderCommand } from './export-tools.js';
+import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
 import {
   Document,
   Packer,
@@ -447,7 +447,7 @@ export class WordExportService {
   private parser = new MarkdownToWordParser();
 
   /**
-   * PATH des outils d'export : voir `export-tools.ts` (emplacements ajoutés
+   * PATH des outils d'export : voir `backend/core/tools/external-tools.ts` (emplacements ajoutés
    * hors Windows, où le PATH part tel quel).
    */
   private getExtendedPath(): string {
