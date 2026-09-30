@@ -3,6 +3,7 @@ import { writeFile, mkdir, readFile, rm } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
+import { extendedToolPath, toolFinderCommand } from './export-tools.js';
 import { processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
@@ -465,22 +466,11 @@ $body$
 
 export class PDFExportService {
   /**
-   * Get the extended PATH for macOS that includes Homebrew and MacTeX paths
-   * GUI apps on macOS don't inherit the user's shell PATH
+   * PATH des outils d'export : voir `export-tools.ts` (emplacements ajoutés
+   * hors Windows, où le PATH part tel quel).
    */
   private getExtendedPath(): string {
-    const currentPath = process.env.PATH || '';
-    const additionalPaths = [
-      '/opt/homebrew/bin',           // Homebrew on Apple Silicon
-      '/usr/local/bin',              // Homebrew on Intel Mac
-      '/Library/TeX/texbin',         // MacTeX
-      '/usr/texbin',                 // Older MacTeX location
-      '/opt/local/bin',              // MacPorts
-    ];
-
-    // Add paths that aren't already in PATH
-    const pathsToAdd = additionalPaths.filter(p => !currentPath.includes(p));
-    return [...pathsToAdd, currentPath].join(':');
+    return extendedToolPath(process.env.PATH || '');
   }
 
   /**
@@ -491,9 +481,10 @@ export class PDFExportService {
 
     const checkCommand = async (command: string): Promise<boolean> => {
       return new Promise((resolve) => {
-        const proc = spawn('which', [command], {
+        const proc = spawn(toolFinderCommand(), [command], {
           env: { ...process.env, PATH: extendedPath }
         });
+        proc.on('error', () => resolve(false));
         proc.on('close', (code) => resolve(code === 0));
       });
     };

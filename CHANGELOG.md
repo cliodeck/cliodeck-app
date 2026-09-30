@@ -39,6 +39,15 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Sous Windows, les exports PDF et Word ne trouvaient ni pandoc ni xelatex.**
+  Le bouton « Exporter » restait grisé alors que les deux étaient installés :
+  la vérification lançait `which`, qui n'existe pas sous Windows, et l'échec
+  du lancement — non écouté — levait une exception dans le processus
+  principal. Le PATH étendu était en outre recollé avec « : », qui coupe les
+  lettres de lecteur (`C:\…`). On cherche désormais avec `where` sous
+  Windows, le PATH y part tel quel, et un lancement impossible répond
+  « absent ». Les deux règles, jusque-là écrites en double dans les deux
+  services — d'où le même défaut deux fois —, vivent dans `export-tools.ts`.
 - **Zotero : les collections ne servaient à rien au premier import** (#130).
   Les documents n'étaient rattachés à leurs collections qu'à la
   synchronisation, et seulement s'ils étaient déjà indexés — jamais au
