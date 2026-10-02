@@ -409,10 +409,11 @@
     "exportToPDF": "Als PDF exportieren",
     "exportToWord": "Als Word exportieren",
     "citation": {
-      "toggle": "Zitate mit CSL formatieren (Chicago, MLA…)",
+      "toggle": "Integrierten Zitierstil verwenden (Chicago, MLA…)",
       "style": "Stil",
       "locale": "Sprache",
-      "help": "[@key]-Marker werden zu nummerierten Fußnoten, und am Ende wird eine Bibliographie angefügt.",
+      "helpProjectStyle": "Dieses Projekt hat einen eigenen Zitierstil ({{file}}); er gilt, solange das Kästchen nicht angekreuzt ist. Kreuzen Sie es nur an, um für diesen Export stattdessen einen der integrierten Stile zu verwenden.",
+      "helpNoProjectStyle": "In den Projekteinstellungen ist kein Zitierstil festgelegt: Kreuzen Sie das Kästchen an, um einen zu wählen. Ohne Auswahl werden Zitate im Standardstil (Chicago Autor-Jahr) ausgegeben.",
       "toggleAria": "CSL-Zitations-Engine verwenden",
       "styleAria": "Zitationsstil",
       "localeAria": "Sprache der Zitate"

@@ -351,6 +351,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             value={citation}
             onChange={setCitation}
             disabled={isExporting}
+            projectCslPath={currentProject?.cslPath}
           />
 
           <div className="form-field">

@@ -409,10 +409,11 @@
     "exportToPDF": "Exporter en PDF",
     "exportToWord": "Exporter en Word",
     "citation": {
-      "toggle": "Formater les citations avec CSL (Chicago, MLA…)",
+      "toggle": "Utiliser un style de citation intégré (Chicago, MLA…)",
       "style": "Style",
       "locale": "Langue",
-      "help": "Les marqueurs [@clef] deviendront des notes de bas de page numérotées et la bibliographie sera ajoutée à la fin.",
+      "helpProjectStyle": "Ce projet a son propre style de citation ({{file}}) : il est appliqué tant que la case reste décochée. Cochez-la seulement pour utiliser, le temps de cet export, l’un des styles intégrés.",
+      "helpNoProjectStyle": "Aucun style de citation n’est défini dans les paramètres du projet : cochez la case pour en choisir un. Décochée, les citations sont rendues dans le style par défaut (Chicago auteur-date).",
       "toggleAria": "Utiliser le moteur de citations CSL",
       "styleAria": "Style de citation",
       "localeAria": "Langue des citations"
