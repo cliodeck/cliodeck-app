@@ -4,6 +4,7 @@ import { X, FileText, Edit2, Check } from 'lucide-react';
 import './PDFRenameModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface PDFFile {
   path: string;
   suggestedName: string;
@@ -95,7 +96,7 @@ export const PDFRenameModal: React.FC<PDFRenameModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div className="modal-content pdf-rename-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('pdfRename.title')}</h3>

@@ -5,6 +5,7 @@ import methodologyGuide from '../../../../../backend/data/methodology-guide.json
 import './MethodologyModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -94,7 +95,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
   };
 
   return (
-    <div className="methodology-modal-overlay" onClick={onClose}>
+    <div className="methodology-modal-overlay" {...backdropClose(onClose)}>
       <div
         className="methodology-modal"
         role="dialog"

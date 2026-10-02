@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
+import { backdropClose } from '../../utils/backdropClose'
 import './ConfirmDialog.css'
 
 export function ConfirmDialog() {
@@ -31,7 +32,7 @@ export function ConfirmDialog() {
   if (!confirmOpen) return null
 
   return (
-    <div className="confirm-dialog-overlay" onClick={() => resolveConfirm(false)}>
+    <div className="confirm-dialog-overlay" {...backdropClose(() => resolveConfirm(false))}>
       <div
         ref={dialogRef}
         className="confirm-dialog"

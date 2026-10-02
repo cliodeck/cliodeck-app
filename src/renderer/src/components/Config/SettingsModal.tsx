@@ -5,6 +5,7 @@ import { ConfigPanel } from './ConfigPanel';
 import './SettingsModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -19,7 +20,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="settings-modal" onClick={onClose}>
+    <div ref={trapRef} className="settings-modal" {...backdropClose(onClose)}>
       <div
         className="settings-content"
         role="dialog"

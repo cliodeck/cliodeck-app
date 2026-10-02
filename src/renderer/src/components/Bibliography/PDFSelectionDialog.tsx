@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ZoteroAttachmentInfo } from '../../stores/bibliographyStore';
 import './PDFSelectionDialog.css';
+import { backdropClose } from '../../utils/backdropClose';
 
 interface PDFSelectionDialogProps {
   citationTitle: string;
@@ -19,7 +20,7 @@ export const PDFSelectionDialog: React.FC<PDFSelectionDialogProps> = ({
   const { t } = useTranslation('common');
 
   return (
-    <div className="pdf-selection-overlay" onClick={onCancel}>
+    <div className="pdf-selection-overlay" {...backdropClose(onCancel)}>
       <div className="pdf-selection-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="pdf-selection-header">
           <h3>{t('bibliography.selectPDF')}</h3>

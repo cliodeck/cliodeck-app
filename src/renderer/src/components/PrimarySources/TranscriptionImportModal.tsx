@@ -5,6 +5,7 @@ import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './TranscriptionImportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface TranscriptionImportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -129,7 +130,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
   };
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div
         className="modal-content transcription-import-modal"
         onClick={(e) => e.stopPropagation()}

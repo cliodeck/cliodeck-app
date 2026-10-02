@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
+import { backdropClose } from '../../utils/backdropClose'
 import './AlertDialog.css'
 
 export function AlertDialog() {
@@ -25,7 +26,7 @@ export function AlertDialog() {
   if (!alertOpen) return null
 
   return (
-    <div className="alert-dialog-overlay" onClick={closeAlert}>
+    <div className="alert-dialog-overlay" {...backdropClose(closeAlert)}>
       <div
         ref={dialogRef}
         className="alert-dialog"

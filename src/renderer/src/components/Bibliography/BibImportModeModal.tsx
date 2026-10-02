@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import './BibImportModeModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface BibImportModeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -28,7 +29,7 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   const hasCitations = currentCitationCount > 0;
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div className="modal-content bib-import-mode-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('bibImport.title')}</h3>

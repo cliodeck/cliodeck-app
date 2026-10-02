@@ -4,6 +4,7 @@ import { X, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import './AboutModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface AboutModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -68,7 +69,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div ref={trapRef} className="about-modal" onClick={onClose}>
+    <div ref={trapRef} className="about-modal" {...backdropClose(onClose)}>
       <div
         className="about-content"
         role="dialog"
