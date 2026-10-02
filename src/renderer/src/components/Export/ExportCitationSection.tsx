@@ -34,14 +34,20 @@ const FALLBACK_LOCALE = 'fr-FR';
  * and produces an initial `ExportCitationValue`. `useEngine` defaults to true
  * when a style is configured — historians who bothered to pick a style
  * almost always want their notes formatted.
+ *
+ * Sauf quand le projet a son propre fichier CSL (`projectCslPath`) : ce choix
+ * est plus précis que le réglage général et doit l'emporter. Cocher la case
+ * d'office remplaçait en silence le style du projet par celui des réglages.
  */
-export async function loadDefaultCitationValue(): Promise<ExportCitationValue> {
+export async function loadDefaultCitationValue(
+  projectCslPath?: string
+): Promise<ExportCitationValue> {
   try {
     const saved = await window.electron.config.get('citation');
     if (saved && typeof saved === 'object') {
       const style = typeof saved.style === 'string' ? saved.style : FALLBACK_STYLE;
       const locale = typeof saved.locale === 'string' ? saved.locale : FALLBACK_LOCALE;
-      return { useEngine: typeof saved.style === 'string', style, locale };
+      return { useEngine: typeof saved.style === 'string' && !projectCslPath, style, locale };
     }
   } catch {
     // Non-fatal; fall through.

@@ -1,7 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
+// Module ES : `__dirname` n'existe pas dans le code compilé (il n'existait
+// que sous Vitest, d'où des tests verts et un moteur qui levait
+// « __dirname is not defined » à chaque export dans l'app).
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CSL = require('citeproc');
 
 /**
@@ -38,6 +43,28 @@ type Locale = string;
 type StyleId = string; // filename without .csl
 
 /**
+ * Dossier `resources/csl` par défaut.
+ *
+ * Le chemin relatif à ce fichier n'est pas le même selon qu'on part des
+ * sources (`backend/core/citation`, trois niveaux sous la racine) ou du code
+ * compilé (`dist/backend/core/citation`, quatre niveaux), et dans l'app
+ * empaquetée le dossier vit hors de l'asar, sous `process.resourcesPath`.
+ * N'en essayer qu'un seul — celui des sources, et via `__dirname` — faisait
+ * passer les tests et échouer toute l'app construite : le moteur ne
+ * démarrait pas et les exports gardaient les clés de citation.
+ */
+export function defaultCSLResourcesRoot(): string {
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+  const candidates = [
+    ...(resourcesPath ? [path.join(resourcesPath, 'resources', 'csl')] : []),
+    path.resolve(HERE, '..', '..', '..', 'resources', 'csl'),
+    path.resolve(HERE, '..', '..', '..', '..', 'resources', 'csl'),
+    path.join(process.cwd(), 'resources', 'csl'),
+  ];
+  return candidates.find((c) => fs.existsSync(c)) ?? candidates[candidates.length - 1];
+}
+
+/**
  * CitationEngine — minimal wrapper around citeproc-js.
  *
  * Loads CSL styles from `resources/csl/` and locales (`locales-xx-XX.xml`)
@@ -56,8 +83,23 @@ export class CitationEngine {
   private localeCache = new Map<Locale, string>();
 
   constructor(resourcesRoot?: string) {
-    this.resourcesRoot =
-      resourcesRoot ?? path.resolve(__dirname, '..', '..', '..', 'resources', 'csl');
+    this.resourcesRoot = resourcesRoot ?? defaultCSLResourcesRoot();
+  }
+
+  /** Chemin du fichier d'un style embarqué, ou `undefined` s'il n'existe pas. */
+  stylePath(styleId: StyleId): string | undefined {
+    const p = path.join(this.resourcesRoot, `${styleId}.csl`);
+    return fs.existsSync(p) ? p : undefined;
+  }
+
+  /**
+   * Vrai pour un style à notes (`class="note"`, Chicago notes…), faux pour un
+   * style auteur-date ou auteur-page (`class="in-text"`, MLA, APA). Un rappel
+   * « (Vaswani et al.) » n'a rien à faire dans une note de bas de page : il
+   * se lit dans le fil du texte.
+   */
+  isNoteStyle(styleId: StyleId): boolean {
+    return /<style\b[^>]*\bclass="note"/.test(this.loadStyle(styleId));
   }
 
   /** List available styles (files ending in .csl). */

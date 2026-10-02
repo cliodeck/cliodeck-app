@@ -36,6 +36,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
   const [citation, setCitation] = useState<ExportCitationValue>({
@@ -59,13 +60,13 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    void loadDefaultCitationValue().then((v) => {
+    void loadDefaultCitationValue(currentProject?.cslPath).then((v) => {
       if (!cancelled) setCitation(v);
     });
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, currentProject?.cslPath]);
 
   // Listen for progress updates
   useEffect(() => {
@@ -140,6 +141,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    setUnresolvedCitations([]);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -216,7 +218,16 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         },
       });
 
-      if (result.success) {
+      const unresolved: string[] = Array.isArray(result.unresolvedCitations)
+        ? result.unresolvedCitations
+        : [];
+      if (result.success && unresolved.length > 0) {
+        // Le document est écrit, mais il contient ces clés telles quelles :
+        // la modale reste ouverte pour que l'auteur le lise.
+        setSuccess(true);
+        setUnresolvedCitations(unresolved);
+        setIsExporting(false);
+      } else if (result.success) {
         setSuccess(true);
         setTimeout(() => {
           onClose();
@@ -249,6 +260,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       // Reset state
       setError(null);
       setSuccess(false);
+      setUnresolvedCitations([]);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -381,6 +393,15 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             <div className="export-success">
               <CheckCircle size={16} />
               <span>{t('export.word.success', { path: outputPath })}</span>
+            </div>
+          )}
+
+          {unresolvedCitations.length > 0 && (
+            <div className="export-error" data-testid="word-export-unresolved">
+              <AlertCircle size={16} />
+              <span>
+                {t('export.word.unresolvedCitations', { keys: unresolvedCitations.join(', ') })}
+              </span>
             </div>
           )}
         </div>

@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
-import { join, dirname, extname } from 'path';
+import { join, dirname, extname, isAbsolute } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
@@ -11,20 +11,18 @@ import {
   TextRun,
   HeadingLevel,
   AlignmentType,
-  convertInchesToTwip,
-  Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  BorderStyle,
-  ShadingType,
-  UnderlineType,
   Header,
   Footer,
   PageNumber,
   TableOfContents,
 } from 'docx';
-import { marked } from 'marked';
+import {
+  MarkdownToWordParser,
+  inlineMarkdownRuns,
+  ORDERED_LIST_NUMBERING,
+  type BlockChild,
+} from './word-markdown.js';
+import { CitationEngine } from '../../../backend/core/citation/CitationEngine.js';
 import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
@@ -32,9 +30,6 @@ import { assembleManuscript } from './manuscript-assembler.js';
 import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
-// FootnoteReferenceRun is the inline run; document footnotes are declared
-// via `Document.footnotes` keyed by id.
-import { FootnoteReferenceRun } from 'docx';
 // @ts-ignore - No type definitions available
 import Docxtemplater from 'docxtemplater';
 // @ts-ignore - No type definitions available
@@ -124,322 +119,37 @@ export function splitIntoChapters(markdown: string): string[] {
   return chunks;
 }
 
-// MARK: - Markdown Parser for Word
-
-/**
- * Parse markdown to Word document elements
- */
-class MarkdownToWordParser {
-  private paragraphs: Paragraph[] = [];
-
-  async parse(markdownContent: string): Promise<Paragraph[]> {
-    this.paragraphs = [];
-
-    // Parse markdown using marked
-    const tokens = marked.lexer(markdownContent);
-
-    for (const token of tokens) {
-      await this.processToken(token);
-    }
-
-    return this.paragraphs;
-  }
-
-  private async processToken(token: any): Promise<void> {
-    switch (token.type) {
-      case 'heading':
-        this.addHeading(token.text, token.depth);
-        break;
-
-      case 'paragraph':
-        this.addParagraph(token.text);
-        break;
-
-      case 'list':
-        this.addList(token);
-        break;
-
-      case 'code':
-        this.addCodeBlock(token.text);
-        break;
-
-      case 'blockquote':
-        this.addBlockquote(token.text);
-        break;
-
-      case 'table':
-        this.addTable(token);
-        break;
-
-      case 'hr':
-        this.addHorizontalRule();
-        break;
-
-      case 'space':
-        // Skip empty space
-        break;
-
-      default:
-        // For unsupported types, add as plain text
-        if ('text' in token && typeof token.text === 'string') {
-          this.addParagraph(token.text);
-        }
-    }
-  }
-
-  private addHeading(text: string, level: number): void {
-    const headingLevels: Record<number, typeof HeadingLevel[keyof typeof HeadingLevel]> = {
-      1: HeadingLevel.HEADING_1,
-      2: HeadingLevel.HEADING_2,
-      3: HeadingLevel.HEADING_3,
-      4: HeadingLevel.HEADING_4,
-      5: HeadingLevel.HEADING_5,
-      6: HeadingLevel.HEADING_6,
-    };
-
-    this.paragraphs.push(
-      new Paragraph({
-        text: this.stripMarkdown(text),
-        heading: headingLevels[level] || HeadingLevel.HEADING_1,
-      })
-    );
-  }
-
-  private addParagraph(text: string): void {
-    const runs = this.parseInlineFormatting(text);
-    this.paragraphs.push(
-      new Paragraph({
-        children: runs,
-        spacing: { after: 200 },
-      })
-    );
-  }
-
-  private addList(token: any): void {
-    for (const item of token.items) {
-      const runs = this.parseInlineFormatting(item.text);
-      this.paragraphs.push(
-        new Paragraph({
-          children: runs,
-          bullet: { level: 0 },
-          spacing: { after: 100 },
-        })
-      );
-
-      // Handle nested lists recursively
-      if (item.task !== undefined) {
-        // Task list item
-        const checkbox = item.checked ? '☑' : '☐';
-        runs.unshift(new TextRun({ text: checkbox + ' ' }));
-      }
-    }
-  }
-
-  private addCodeBlock(code: string): void {
-    this.paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: code,
-            font: 'Courier New',
-            size: 20,
-          }),
-        ],
-        shading: {
-          type: ShadingType.SOLID,
-          color: 'F5F5F5',
-        },
-        spacing: { before: 100, after: 100 },
-      })
-    );
-  }
-
-  private addBlockquote(text: string): void {
-    this.paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: this.stripMarkdown(text),
-            italics: true,
-          }),
-        ],
-        indent: { left: convertInchesToTwip(0.5) },
-        spacing: { before: 100, after: 100 },
-      })
-    );
-  }
-
-  private addTable(token: any): void {
-    const rows: TableRow[] = [];
-
-    // Header row
-    if (token.header && token.header.length > 0) {
-      const headerCells = token.header.map(
-        (cell: any) =>
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: this.stripMarkdown(cell.text),
-                    bold: true,
-                  }),
-                ],
-              }),
-            ],
-            shading: {
-              type: ShadingType.SOLID,
-              color: 'CCCCCC',
-            },
-          })
-      );
-      rows.push(new TableRow({ children: headerCells }));
-    }
-
-    // Data rows
-    for (const row of token.rows) {
-      const cells = row.map(
-        (cell: any) =>
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: this.parseInlineFormatting(cell.text),
-              }),
-            ],
-          })
-      );
-      rows.push(new TableRow({ children: cells }));
-    }
-
-    const table = new Table({
-      rows,
-      width: {
-        size: 100,
-        type: WidthType.PERCENTAGE,
-      },
-      borders: {
-        top: { style: BorderStyle.SINGLE, size: 1 },
-        bottom: { style: BorderStyle.SINGLE, size: 1 },
-        left: { style: BorderStyle.SINGLE, size: 1 },
-        right: { style: BorderStyle.SINGLE, size: 1 },
-        insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-        insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-      },
-    });
-
-    // Tables need to be wrapped in a special container
-    this.paragraphs.push(new Paragraph({ children: [] })); // Empty paragraph before table
-    // @ts-ignore - Table is a valid document element
-    this.paragraphs.push(table);
-    this.paragraphs.push(new Paragraph({ children: [] })); // Empty paragraph after table
-  }
-
-  private addHorizontalRule(): void {
-    this.paragraphs.push(
-      new Paragraph({
-        border: {
-          bottom: {
-            color: '000000',
-            space: 1,
-            style: BorderStyle.SINGLE,
-            size: 6,
-          },
-        },
-        spacing: { before: 200, after: 200 },
-      })
-    );
-  }
-
-  private parseInlineFormatting(text: string): Array<TextRun | FootnoteReferenceRun> {
-    const runs: Array<TextRun | FootnoteReferenceRun> = [];
-
-    // Footnote placeholder produced by CitationEngine pipeline:
-    //   {{FN:N}} -> FootnoteReferenceRun(N)
-    const segments = text.split(
-      /(\{\{FN:\d+\}\}|\*\*.*?\*\*|__.*?__|_.*?_|\*.*?\*|`.*?`|\[.*?\]\(.*?\))/g
-    );
-
-    for (const segment of segments) {
-      if (!segment) continue;
-
-      // Footnote reference placeholder
-      const fnMatch = segment.match(/^\{\{FN:(\d+)\}\}$/);
-      if (fnMatch) {
-        runs.push(new FootnoteReferenceRun(parseInt(fnMatch[1], 10)));
-        continue;
-      }
-
-      // Bold: **text** or __text__
-      if (/^\*\*(.*?)\*\*$/.test(segment) || /^__(.*?)__$/.test(segment)) {
-        const match = segment.match(/^\*\*(.*?)\*\*$/) || segment.match(/^__(.*?)__$/);
-        if (match) {
-          runs.push(new TextRun({ text: match[1], bold: true }));
-        }
-      }
-      // Italic: *text* or _text_
-      else if (/^\*(.*?)\*$/.test(segment) || /^_(.*?)_$/.test(segment)) {
-        const match = segment.match(/^\*(.*?)\*$/) || segment.match(/^_(.*?)_$/);
-        if (match) {
-          runs.push(new TextRun({ text: match[1], italics: true }));
-        }
-      }
-      // Code: `text`
-      else if (/^`(.*?)`$/.test(segment)) {
-        const match = segment.match(/^`(.*?)`$/);
-        if (match) {
-          runs.push(
-            new TextRun({
-              text: match[1],
-              font: 'Courier New',
-              shading: { type: ShadingType.SOLID, color: 'F5F5F5' },
-            })
-          );
-        }
-      }
-      // Link: [text](url)
-      else if (/^\[(.*?)\]\((.*?)\)$/.test(segment)) {
-        const match = segment.match(/^\[(.*?)\]\((.*?)\)$/);
-        if (match) {
-          runs.push(
-            new TextRun({
-              text: match[1],
-              color: '0000FF',
-              underline: { type: UnderlineType.SINGLE },
-            })
-          );
-        }
-      }
-      // Plain text
-      else {
-        runs.push(new TextRun({ text: segment }));
-      }
-    }
-
-    return runs.length > 0 ? runs : [new TextRun({ text })];
-  }
-
-  private stripMarkdown(text: string): string {
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/__(.*?)__/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/_(.*?)_/g, '$1')
-      .replace(/`(.*?)`/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1');
-  }
+/** Résultat d'un export Word. */
+export interface WordExportResult {
+  success: boolean;
+  outputPath?: string;
+  error?: string;
+  /**
+   * Clés de citation restées sans référence. L'export aboutit quand même —
+   * mais le document contient ces clés telles quelles, et le dire est la
+   * seule façon que l'auteur l'apprenne avant son relecteur.
+   */
+  unresolvedCitations?: string[];
 }
 
-/** Strip HTML tags / entities from citeproc output for plain-text Word runs. */
-const stripHtml = (s: string): string =>
-  s
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * Sépare le titre éventuel de `abstract.md` de son texte.
+ *
+ * Seul `# Résumé` était reconnu : un article en anglais (`# Abstract`) ou en
+ * allemand gardait son titre, croisillon compris, au milieu du résumé.
+ */
+export function splitAbstract(content: string): { heading?: string; body: string } {
+  const m = content.match(/^\s*#{1,6}[ \t]+([^\n]*?)[ \t]*#*[ \t]*(?:\n|$)/);
+  if (!m) return { body: content.trim() };
+  return { heading: m[1].trim() || undefined, body: content.slice(m[0].length).trim() };
+}
+
+/** Clés que citeproc (pandoc) signale introuvables sur sa sortie d'erreur. */
+export function pandocUnresolvedCitations(stderr: string): string[] {
+  const keys = new Set<string>();
+  for (const m of stderr.matchAll(/citation (\S+) not found/g)) keys.add(m[1]);
+  return [...keys];
+}
 
 // MARK: - Service
 
@@ -475,7 +185,7 @@ export class WordExportService {
     options: WordExportOptions,
     outputPath: string,
     onProgress?: (progress: WordExportProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+  ): Promise<WordExportResult> {
     const tempDir = join(tmpdir(), `cliodeck-word-export-${Date.now()}`);
     await mkdir(tempDir, { recursive: true });
 
@@ -543,10 +253,28 @@ export class WordExportService {
         pandocArgs.push('--citeproc');
         console.log('📚 Using bibliography:', bibPath);
 
-        // Add CSL style if provided
-        if (options.cslPath && existsSync(options.cslPath)) {
-          pandocArgs.push('--csl', options.cslPath);
-          console.log('📚 Using CSL style:', options.cslPath);
+        // Style de citation. Case « moteur CSL » cochée : le style choisi
+        // dans la boîte de dialogue, pris parmi les styles embarqués, et sa
+        // langue. Sinon le CSL du projet. Dans les deux cas c'est pandoc qui
+        // rend : il comprend toute la syntaxe (renvois de page, clés nues,
+        // citations dans une note) là où le moteur interne n'en lit qu'une
+        // partie — et où le générateur docx interne n'interprète pas tout le
+        // markdown.
+        const engineCsl = options.citation?.useEngine
+          ? new CitationEngine().stylePath(options.citation.style ?? 'chicago-note-bibliography')
+          : undefined;
+        // `project.json` enregistre un chemin relatif au projet.
+        const projectCsl =
+          options.cslPath && !isAbsolute(options.cslPath)
+            ? join(options.projectPath, options.cslPath)
+            : options.cslPath;
+        const cslPath = engineCsl ?? projectCsl;
+        if (cslPath && existsSync(cslPath)) {
+          pandocArgs.push('--csl', cslPath);
+          console.log('📚 Using CSL style:', cslPath);
+        }
+        if (engineCsl && options.citation?.locale) {
+          pandocArgs.push('--metadata', `lang=${options.citation.locale}`);
         }
 
         // Add reference section title
@@ -570,7 +298,7 @@ export class WordExportService {
       const extendedPath = this.getExtendedPath();
 
       // Run pandoc
-      await new Promise<void>((resolve, reject) => {
+      const pandocStderr = await new Promise<string>((resolve, reject) => {
         console.log('📄 Running pandoc:', 'pandoc', pandocArgs.join(' '));
 
         const pandoc = spawn('pandoc', pandocArgs, {
@@ -587,7 +315,7 @@ export class WordExportService {
 
         pandoc.on('close', (code) => {
           if (code === 0) {
-            resolve();
+            resolve(stderr);
           } else {
             reject(new Error(`Pandoc failed with code ${code}:\n${stderr}`));
           }
@@ -605,7 +333,12 @@ export class WordExportService {
       });
 
       console.log('✅ Word document exported successfully with pandoc:', outputPath);
-      return { success: true, outputPath };
+      const unresolved = pandocUnresolvedCitations(pandocStderr);
+      return {
+        success: true,
+        outputPath,
+        ...(unresolved.length > 0 ? { unresolvedCitations: unresolved } : {}),
+      };
     } catch (error: unknown) {
       console.error('❌ Pandoc Word export failed:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -625,7 +358,7 @@ export class WordExportService {
   async exportToWord(
     options: WordExportOptions,
     onProgress?: (progress: WordExportProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+  ): Promise<WordExportResult> {
     try {
       onProgress?.({
         stage: 'preparing',
@@ -635,6 +368,7 @@ export class WordExportService {
 
       // Load abstract if needed
       let abstract = options.metadata?.abstract;
+      let abstractTitle = 'Résumé';
       if (
         !abstract &&
         (options.projectType === 'article' || options.projectType === 'book')
@@ -642,7 +376,9 @@ export class WordExportService {
         const abstractPath = join(options.projectPath, 'abstract.md');
         if (existsSync(abstractPath)) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
-          abstract = abstractContent.replace(/^#\s*Résumé\s*\n*/i, '').trim();
+          const parts = splitAbstract(abstractContent);
+          abstract = parts.body;
+          if (parts.heading) abstractTitle = parts.heading;
           options.metadata = { ...options.metadata, abstract };
           console.log('📄 Abstract loaded from file:', abstractPath);
         }
@@ -664,11 +400,16 @@ export class WordExportService {
       // La cible doit être connue AVANT d'assembler : le chemin docx natif
       // ne comprend pas le LaTeX de structure, et rendait `\mainmatter`
       // comme un paragraphe de texte en tête de document.
+      //
+      // La case « moteur CSL » ne détourne plus de pandoc : cochée, elle
+      // choisit le style (voir exportWithPandoc). Elle envoyait auparavant
+      // tout l'export vers le générateur interne, dont le rendu du markdown
+      // et des citations est plus pauvre — et elle est cochée d'office dès
+      // qu'un style est enregistré dans les réglages.
       const willUsePandoc =
         !!options.bibliographyPath &&
         existsSync(options.bibliographyPath) &&
-        (await this.checkPandoc()) &&
-        !options.citation?.useEngine;
+        (await this.checkPandoc());
 
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({
@@ -714,6 +455,7 @@ export class WordExportService {
       let sourceMarkdown = options.content;
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
+      let unresolvedCitations: string[] = [];
       if (useEnginePipeline) {
         try {
           const style = options.citation?.style ?? 'chicago-note-bibliography';
@@ -725,6 +467,7 @@ export class WordExportService {
           });
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
+            unresolvedCitations = processed.missingKeys;
           }
           // Seuls les marqueurs PRODUITS par le moteur deviennent des
           // placeholders : les notes de l'auteur sont traitées plus bas, avec
@@ -758,9 +501,9 @@ export class WordExportService {
       const chapterChunks: string[] = isBook
         ? splitIntoChapters(sourceMarkdown)
         : [sourceMarkdown];
-      const chapterParagraphs: Paragraph[][] = [];
+      const chapterParagraphs: BlockChild[][] = [];
       for (const chunk of chapterChunks) {
-        chapterParagraphs.push(await this.parser.parse(chunk));
+        chapterParagraphs.push(this.parser.parse(chunk));
       }
       const contentParagraphs = chapterParagraphs.flat();
 
@@ -768,7 +511,7 @@ export class WordExportService {
       if (engineBibliography.length > 0) {
         contentParagraphs.push(
           new Paragraph({
-            text: 'Bibliographie',
+            text: referenceSectionTitle(),
             heading: HeadingLevel.HEADING_2,
             spacing: { before: 400, after: 200 },
           })
@@ -776,7 +519,7 @@ export class WordExportService {
         for (const entry of engineBibliography) {
           contentParagraphs.push(
             new Paragraph({
-              children: [new TextRun({ text: stripHtml(entry) })],
+              children: inlineMarkdownRuns(entry),
               spacing: { after: 120 },
             })
           );
@@ -794,7 +537,7 @@ export class WordExportService {
 
       // Title page for articles and books
       if (options.projectType === 'article' || options.projectType === 'book') {
-        const titlePageChildren: Paragraph[] = [];
+        const titlePageChildren: BlockChild[] = [];
 
         // Title
         if (options.metadata?.title) {
@@ -851,7 +594,7 @@ export class WordExportService {
             new Paragraph({
               children: [
                 new TextRun({
-                  text: 'Résumé',
+                  text: abstractTitle,
                   bold: true,
                   size: 28,
                 }),
@@ -860,17 +603,7 @@ export class WordExportService {
             })
           );
 
-          titlePageChildren.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: abstract,
-                  size: 24,
-                }),
-              ],
-              spacing: { after: 400 },
-            })
-          );
+          titlePageChildren.push(...this.parser.parse(abstract, { size: 24 }));
         }
 
         if (isBook) {
@@ -963,23 +696,19 @@ export class WordExportService {
       // Build the footnotes map expected by docx:
       //   { [id]: { children: Paragraph[] } }
       const docxFootnotes: Record<string, { children: Paragraph[] }> = {};
+      // Le texte d'une note est du markdown (notes de l'auteur) ou le HTML
+      // léger de citeproc (notes du moteur) : il passe par le même rendu en
+      // ligne que le corps, sinon italiques, liens et titres d'ouvrages
+      // sortent en `*…*` et `[…](…)` littéraux.
       for (const fn of engineFootnotes) {
         docxFootnotes[String(fn.n)] = {
-          children: [
-            new Paragraph({
-              children: [new TextRun({ text: stripHtml(fn.text) })],
-            }),
-          ],
+          children: [new Paragraph({ children: inlineMarkdownRuns(fn.text) })],
         };
       }
       // Notes de l'auteur : identifiants disjoints de ceux du moteur.
       for (const fn of manual.footnotes) {
         docxFootnotes[String(fn.id)] = {
-          children: [
-            new Paragraph({
-              children: [new TextRun({ text: stripHtml(fn.text) })],
-            }),
-          ],
+          children: [new Paragraph({ children: inlineMarkdownRuns(fn.text) })],
         };
       }
 
@@ -989,6 +718,7 @@ export class WordExportService {
         title: options.metadata?.title || 'Document',
         description: abstract || '',
         sections,
+        numbering: ORDERED_LIST_NUMBERING,
         ...(Object.keys(docxFootnotes).length > 0 ? { footnotes: docxFootnotes } : {}),
       });
 
@@ -1032,7 +762,11 @@ export class WordExportService {
       });
 
       console.log('✅ Word document exported successfully:', outputPath);
-      return { success: true, outputPath };
+      return {
+        success: true,
+        outputPath,
+        ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
+      };
     } catch (error: unknown) {
       console.error('❌ Word export failed:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };

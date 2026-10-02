@@ -96,7 +96,7 @@ describe('numérotation des notes générées', () => {
     });
     expect(res.footnotes[0].n).toBe(2);
     expect(res.md).toContain('Note de l’auteur[^1]');
-    expect(res.md).toContain('citation [^2]');
+    expect(res.md).toContain('citation[^2]');
     // La définition manuelle est intacte et reste seule sur son numéro.
     expect(res.md).toContain('[^1]: MA NOTE.');
     expect((res.md.match(/\[\^1\]/g) ?? []).length).toBe(2); // appel + définition
@@ -125,5 +125,70 @@ describe('numérotation des notes générées', () => {
       resolve: resolveMap({ alice2020: cit, bob2021: bob }),
     });
     expect(res.footnotes.map((f) => f.n)).toEqual([2, 3]);
+  });
+});
+
+/**
+ * Régression (export Word d'un article réel, 2026-10-02) : les clés
+ * restaient telles quelles dans le document. Trois formes n'étaient pas
+ * comprises — citation dans une note de l'auteur, clé nue, renvoi de page.
+ */
+describe('formes de citation au-delà de [@clé] dans le corps', () => {
+  const cit = makeCitation({ id: 'alice2020' });
+  const resolve = resolveMap({ alice2020: cit });
+
+  it('rend en place une citation écrite dans une note de l’auteur', async () => {
+    const src = 'Texte[^a].\n\n[^a]: Voir [@alice2020]. Paru en 2020.\n';
+    const res = await processMarkdownCitations(src, { resolve });
+    // Pas de note dans la note, pas de clé résiduelle, pas de point doublé.
+    expect(res.footnotes).toHaveLength(0);
+    expect(res.md).not.toContain('@alice2020');
+    expect(res.md).not.toMatch(/\[\^\d+\]/);
+    expect(res.md).toContain('*Histoire exemplaire*');
+    expect(res.md).not.toContain('..');
+    expect(res.bibliography).toHaveLength(1);
+  });
+
+  it('comprend une clé nue, dans le corps comme dans une note', async () => {
+    const src = 'Selon @alice2020, c’est établi[^1].\n\n[^1]: @alice2020, p. 8.\n';
+    const res = await processMarkdownCitations(src, { resolve });
+    expect(res.md).toContain('Selon Alice[^2], c’est établi[^1].');
+    expect(res.md).toMatch(/\[\^1\]: .*\*Histoire exemplaire\*.*, p\. 8\./);
+    expect(res.footnotes.map((f) => f.n)).toEqual([2]);
+  });
+
+  it('ne prend ni une adresse ni un identifiant inconnu pour une citation', async () => {
+    const src = 'Écrire à alice2020@example.org ou à @inconnu.';
+    const res = await processMarkdownCitations(src, { resolve });
+    expect(res.md).toBe(src);
+    expect(res.missingKeys).toHaveLength(0);
+  });
+
+  it('garde préfixe et renvoi de page d’un groupe', async () => {
+    const res = await processMarkdownCitations('Fait [voir @alice2020, p. 12].', { resolve });
+    expect(res.md).toBe('Fait[^1].');
+    expect(res.footnotes[0].text).toMatch(/^voir .*, p\. 12\.$/);
+  });
+
+  it('laisse les blocs et extraits de code intacts', async () => {
+    const src = 'Syntaxe : `[@alice2020]`.\n\n```\n[@alice2020]\n```\n';
+    const res = await processMarkdownCitations(src, { resolve });
+    expect(res.md).toBe(src);
+  });
+
+  it('rend dans le fil du texte sous un style auteur-date', async () => {
+    const res = await processMarkdownCitations('Fait [@alice2020].', {
+      resolve,
+      style: 'modern-language-association',
+      locale: 'en-US',
+    });
+    expect(res.footnotes).toHaveLength(0);
+    expect(res.md).toBe('Fait (Alice).');
+    expect(res.bibliography).toHaveLength(1);
+  });
+
+  it('ne signale qu’une fois une clé introuvable répétée', async () => {
+    const res = await processMarkdownCitations('A [@ghost]. B [@ghost].', { resolve });
+    expect(res.missingKeys).toEqual(['ghost']);
   });
 });

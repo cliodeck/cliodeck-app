@@ -400,6 +400,7 @@
       "export": "Exporter",
       "cancel": "Annuler",
       "unknownError": "L'export a échoué pour une raison inconnue.",
+      "unresolvedCitations": "Clés de citation introuvables dans la bibliographie, laissées telles quelles dans le document : {{keys}}",
       "noProject": "Aucun projet ouvert.",
       "enterTitle": "Veuillez saisir un titre.",
       "wordFiles": "Document Word",
