@@ -16,6 +16,7 @@ import { useDialogStore } from '../../stores/dialogStore';
 import './BookSettingsModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface BookSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -41,7 +42,7 @@ export const BookSettingsModal: React.FC<BookSettingsModalProps> = ({ isOpen, on
   };
 
   return (
-    <div ref={trapRef} className="book-settings-overlay" onClick={onClose}>
+    <div ref={trapRef} className="book-settings-overlay" {...backdropClose(onClose)}>
       <div
         className="book-settings-modal"
         role="dialog"

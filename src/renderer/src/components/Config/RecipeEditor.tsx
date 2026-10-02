@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { YamlEditor } from '../common/YamlEditor';
 import yaml from 'js-yaml';
+import { backdropClose } from '../../utils/backdropClose';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -224,7 +225,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   };
 
   return (
-    <div className="settings-modal" onClick={onClose} style={{ zIndex: 1100 }}>
+    <div className="settings-modal" {...backdropClose(onClose)} style={{ zIndex: 1100 }}>
       <div
         className="settings-content"
         role="dialog"

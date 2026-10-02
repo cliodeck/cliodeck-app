@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface PresentationExportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -158,7 +159,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="presentation-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="presentation-export-modal" {...backdropClose(handleClose)}>
       <div className="presentation-export-content" onClick={(e) => e.stopPropagation()}>
         <div className="presentation-export-header">
           <h3>{t('presentation.title')}</h3>

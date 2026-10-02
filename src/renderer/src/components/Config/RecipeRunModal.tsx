@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { X, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { backdropClose } from '../../utils/backdropClose';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -227,7 +228,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   return (
     <div
       className="settings-modal"
-      onClick={onClose}
+      {...backdropClose(onClose)}
       style={{ zIndex: 1100 }}
     >
       <div

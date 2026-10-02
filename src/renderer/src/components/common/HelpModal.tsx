@@ -4,6 +4,7 @@ import { X, HelpCircle } from 'lucide-react';
 import './HelpModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface HelpModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,7 +34,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="help-modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="help-modal-overlay" {...backdropClose(onClose)}>
       <div
         className="help-modal"
         role="dialog"

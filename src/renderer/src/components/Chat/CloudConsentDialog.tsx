@@ -11,6 +11,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { CloudOff, Shield } from 'lucide-react';
 import './CloudConsentDialog.css';
+import { backdropClose } from '../../utils/backdropClose';
 
 interface Props {
   providerName: string;
@@ -26,7 +27,7 @@ export const CloudConsentDialog: React.FC<Props> = ({
   const { t } = useTranslation('common');
 
   return (
-    <div className="cloud-consent-overlay" onClick={onCancel}>
+    <div className="cloud-consent-overlay" {...backdropClose(onCancel)}>
       <div className="cloud-consent-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="cloud-consent-dialog__icon">
           <CloudOff size={32} />

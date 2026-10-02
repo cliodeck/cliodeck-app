@@ -13,6 +13,7 @@ import {
 import './PDFExportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface PDFExportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -297,7 +298,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const partCount = (chapters ?? []).filter((c) => !c.missing).length;
 
   return (
-    <div ref={trapRef} className="pdf-export-modal" onClick={handleClose}>
+    <div ref={trapRef} className="pdf-export-modal" {...backdropClose(handleClose)}>
       <div
         className="pdf-export-content"
         role="dialog"

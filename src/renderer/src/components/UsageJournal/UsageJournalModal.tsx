@@ -5,6 +5,7 @@ import { UsageJournalPanel } from './UsageJournalPanel';
 import './UsageJournalModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface UsageJournalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -22,7 +23,7 @@ export const UsageJournalModal: React.FC<UsageJournalModalProps> = ({ isOpen, on
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="usage-modal" onClick={onClose}>
+    <div ref={trapRef} className="usage-modal" {...backdropClose(onClose)}>
       <div
         className="usage-modal__content"
         role="dialog"

@@ -4,6 +4,7 @@ import { X, ExternalLink } from 'lucide-react';
 import './ReportIssueModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface ReportIssueModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -74,7 +75,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
   };
 
   return (
-    <div ref={trapRef} className="report-issue-modal" onClick={handleClose}>
+    <div ref={trapRef} className="report-issue-modal" {...backdropClose(handleClose)}>
       <div className="report-issue-content" onClick={(e) => e.stopPropagation()}>
         <div className="report-issue-header">
           <h3>{t('report.title')}</h3>

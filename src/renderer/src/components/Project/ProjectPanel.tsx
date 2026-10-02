@@ -11,6 +11,7 @@ import { ActionsSection } from '../Config/ActionsSection';
 import { ZoteroProjectSettings } from './ZoteroProjectSettings';
 import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
+import { backdropClose } from '../../utils/backdropClose';
 
 // Modals are only rendered when opened — keep them off the main chunk.
 const PDFExportModal = lazy(() =>
@@ -394,7 +395,7 @@ export const ProjectPanel: React.FC = () => {
 
       {/* Create Project Modal */}
       {showCreateModal && (
-        <div className="create-project-modal" onClick={() => setShowCreateModal(false)}>
+        <div className="create-project-modal" {...backdropClose(() => setShowCreateModal(false))}>
           <div className="create-project-content" onClick={(e) => e.stopPropagation()}>
             <h3>{t('project.createNewProject')}</h3>
 

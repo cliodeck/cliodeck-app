@@ -4,6 +4,7 @@ import { X, CheckCircle } from 'lucide-react';
 import './BibImportSummaryModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface BibImportSummaryModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -28,7 +29,7 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div className="modal-content bib-import-summary-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('bibImportSummary.title')}</h3>

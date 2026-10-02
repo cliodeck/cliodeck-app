@@ -11,6 +11,7 @@ import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { CollectionMultiSelect } from '../Chat/CollectionMultiSelect';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import './SimilarityOptions.css';
+import { backdropClose } from '../../utils/backdropClose';
 
 interface SimilarityOptionsProps {
   onClose: () => void;
@@ -62,7 +63,7 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
   };
 
   return (
-    <div className="similarity-options-overlay" onClick={onClose}>
+    <div className="similarity-options-overlay" {...backdropClose(onClose)}>
       <div className="similarity-options-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="similarity-options-header">

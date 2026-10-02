@@ -5,6 +5,7 @@ import { usePrimarySourcesStore, type SyncOutcome } from '../../stores/primarySo
 import './OCRSettingsModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface OCRSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -60,7 +61,7 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
   };
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div className="modal-content ocr-settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>

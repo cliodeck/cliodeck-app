@@ -6,6 +6,7 @@ import type { Citation } from '../../stores/bibliography/types';
 import './OrphanPDFModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { backdropClose } from '../../utils/backdropClose';
 interface OrphanPDFInfo {
   filePath: string;
   fileName: string;
@@ -213,7 +214,7 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="modal-overlay" onClick={onClose}>
+    <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
       <div className="modal-content orphan-pdf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t('bibliography.orphanPDFCleanup')}</h3>
