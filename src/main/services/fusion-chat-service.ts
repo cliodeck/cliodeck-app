@@ -24,6 +24,7 @@ import {
   type ManuscriptMappedSearchResult,
   type MultiSourceSearchResult,
   type ReadingNoteMappedSearchResult,
+  type SelectedDocumentLabel,
 } from './retrieval-service.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
@@ -256,11 +257,34 @@ export interface FusionChatRetrievalOptions {
   topK?: number;
 }
 
+/** Langues dans lesquelles l'application sait écrire ses consignes (cf. `ModeLocalizedText`). */
+export type PromptLanguage = 'fr' | 'en';
+
+/**
+ * Langue des consignes du tour : celle demandée par le renderer, sinon
+ * `rag.systemPromptLanguage`, sinon le français. Tout était en français en
+ * dur — texte du mode par défaut et bloc de contexte — quelle que soit la
+ * langue choisie dans le panneau ou les réglages.
+ */
+export function resolvePromptLanguage(
+  requested: string | undefined,
+  configured: string | undefined
+): PromptLanguage {
+  if (requested === 'fr' || requested === 'en') return requested;
+  return configured === 'en' ? 'en' : 'fr';
+}
+
 export interface FusionChatSystemPromptOptions {
   /** Mode id — resolved to text via `modeService.getModeManager()`. */
   modeId?: string;
   /** Free-form override; takes precedence over the resolved mode text. */
   customText?: string;
+  /**
+   * Langue des consignes que l'application écrit elle-même : texte du mode
+   * quand `customText` est absent, et bloc de contexte de la recherche.
+   * Absente, c'est `rag.systemPromptLanguage` des réglages qui s'applique.
+   */
+  language?: PromptLanguage;
   /**
    * Free-mode switch (legacy parity with `chat-service.noSystemPrompt`).
    * When true — or when `modeId === 'free-mode'` — the service injects NO
@@ -576,6 +600,10 @@ class FusionChatService {
     let messages = args.messages;
     const projectPath = projectManager.getCurrentProjectPath();
     const freeMode = isFreeMode(args.systemPrompt);
+    const promptLang = resolvePromptLanguage(
+      args.systemPrompt?.language,
+      configManager.getRAGConfig().systemPromptLanguage
+    );
 
     // Puits d'événements de sécurité, déclaré AVANT ses deux consommateurs
     // — le garde du contexte de projet juste en dessous, et celui des
@@ -791,9 +819,14 @@ class FusionChatService {
 
             return {
               systemPrompt:
-                formatContextAsSystemPrompt(effectiveHits) +
-                formatManuscriptContext(ownHits, effectiveHits.length) +
-                formatReadingNotesContext(noteHits),
+                formatSelectionScope(
+                  options?.documentIds?.length ?? 0,
+                  retrievalService.describeDocuments(options?.documentIds ?? []),
+                  promptLang
+                ) +
+                formatContextAsSystemPrompt(effectiveHits, promptLang) +
+                formatManuscriptContext(ownHits, effectiveHits.length, promptLang) +
+                formatReadingNotesContext(noteHits, promptLang),
               sources: [
                 ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
                 ...manuscriptHitsToSources(ownHits),
@@ -834,9 +867,13 @@ class FusionChatService {
           const mode = await modeService
             .getModeManager()
             .getMode(args.systemPrompt.modeId);
-          // Default to the FR prompt — matches the `chat-service` default.
-          // Renderer can pass `customText` if it wants a different locale.
-          resolvedSystemText = mode?.systemPrompt?.fr || mode?.systemPrompt?.en;
+          // Le mode par défaut arrive sans `customText` : c'est ici que sa
+          // langue se décide. `.fr` en dur rendait le sélecteur de langue
+          // du panneau inerte pour ce mode.
+          resolvedSystemText =
+            mode?.systemPrompt?.[promptLang] ||
+            mode?.systemPrompt?.fr ||
+            mode?.systemPrompt?.en;
         } catch (e) {
           console.warn('[fusion-chat] mode resolution failed:', e);
         }
@@ -1071,18 +1108,17 @@ export const fusionChatService = new FusionChatService();
  * appuyer comme sur une source ferait passer une hypothèse de travail pour
  * une preuve. La numérotation continue celle des sources.
  */
-function formatManuscriptContext(
+export function formatManuscriptContext(
   hits: ManuscriptMappedSearchResult[],
-  offset: number
+  offset: number,
+  lang: PromptLanguage = 'fr'
 ): string {
   if (hits.length === 0) return '';
   const SNIPPET_CHARS = 1500;
-  const lines: string[] = [
-    '',
-    "Extraits du MANUSCRIT EN COURS (texte de l'auteur, pas une source).",
-    "Tu peux t'y référer pour rappeler ce qui a déjà été écrit, signaler une répétition ou une contradiction. Ne le cite JAMAIS comme une preuve : ce n'est pas une source.",
-    '',
-  ];
+  // « L'utilisateur », jamais « l'auteur » : les sources portent un champ
+  // AUTEUR, et un bloc intitulé « texte de l'auteur » se lisait comme le
+  // texte de l'auteur du livre interrogé.
+  const lines: string[] = ['', ...CONTEXT_TEXT[lang].manuscript, ''];
   hits.forEach((h, i) => {
     const where = h.source.sectionTitle
       ? `${h.document.title ?? h.source.relativePath} — ${h.source.sectionTitle}`
@@ -1101,15 +1137,13 @@ function formatManuscriptContext(
  * la référence dit. Le modèle doit pouvoir rendre la nuance — « d'après tes
  * notes sur Braudel… » — sans attribuer à l'ouvrage une lecture de l'auteur.
  */
-export function formatReadingNotesContext(hits: ReadingNoteMappedSearchResult[]): string {
+export function formatReadingNotesContext(
+  hits: ReadingNoteMappedSearchResult[],
+  lang: PromptLanguage = 'fr'
+): string {
   if (hits.length === 0) return '';
   const SNIPPET_CHARS = 1500;
-  const lines: string[] = [
-    '',
-    "Extraits des NOTES DE LECTURE de l'auteur (son commentaire d'une référence, pas la référence elle-même).",
-    "Présente-les comme ses notes (« d'après tes notes sur @clé »). N'attribue JAMAIS leur contenu à l'ouvrage commenté : pour citer l'ouvrage, appuie-toi sur la source.",
-    '',
-  ];
+  const lines: string[] = ['', ...CONTEXT_TEXT[lang].readingNotes, ''];
   hits.forEach((h, i) => {
     const snippet = h.chunk.content.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_CHARS);
     lines.push(`[L${i + 1}] ${readingNoteLabel(h)}`);
@@ -1139,18 +1173,135 @@ async function isCompressionEnabled(modeId?: string): Promise<boolean> {
   return configManager.getRAGConfig().enableContextCompression !== false;
 }
 
-function formatContextAsSystemPrompt(hits: MultiSourceSearchResult[]): string {
+/**
+ * Consignes du bloc de contexte, par langue. Seules les phrases sont
+ * traduites : les étiquettes de champ (`TITRE`, `AUTEUR`, `EXTRAIT`,
+ * `type : bibliographie`) restent telles quelles dans les deux langues —
+ * les prompts système anglais (`SystemPrompts.ts`, modes) les nomment
+ * ainsi, et un mode personnalisé peut en dépendre.
+ */
+interface ContextText {
+  sources: string[];
+  noSources: string;
+  manuscript: string[];
+  readingNotes: string[];
+  colon: string;
+  scopeOne: (named: string) => string[];
+  scopeMany: (count: number, named: string) => string[];
+}
+
+const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
+  fr: {
+    sources: [
+      'Contexte extrait du corpus indexé (sources numérotées ci-dessous).',
+      'RÈGLE : réponds UNIQUEMENT à partir des sources ci-dessous (champs TITRE, AUTEUR et EXTRAIT). Ne complète JAMAIS avec tes connaissances générales.',
+      "Le TITRE d'un document fait partie intégrante de son contenu. Pour une question d'identification (« qu'est-ce que X ? » où X est un nom ou un acronyme), un TITRE qui contient X est une réponse valide que tu dois utiliser.",
+      'Cite le numéro de la source [N] pour chaque affirmation.',
+      "Si après lecture des TITRES et des EXTRAITS l'information est réellement absente, indique-le brièvement et avec tes propres mots (n'utilise aucune formule pré-écrite).",
+    ],
+    noSources:
+      "Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le ; ne présente JAMAIS les extraits qui suivent comme le contenu d'une source.",
+    manuscript: [
+      "Extraits du MANUSCRIT EN COURS : le texte que l'utilisateur est lui-même en train d'écrire. Ce n'est PAS une source, et ce n'est aucun des documents numérotés ci-dessus.",
+      "Tu peux t'y référer pour rappeler ce qu'il a déjà écrit, signaler une répétition ou une contradiction — en disant « dans ton manuscrit ». Ne le cite JAMAIS comme une preuve, et n'attribue JAMAIS son contenu à une source ni à l'auteur d'une source.",
+    ],
+    readingNotes: [
+      "Extraits des NOTES DE LECTURE de l'utilisateur (son commentaire d'une référence, pas la référence elle-même).",
+      "Présente-les comme ses notes (« d'après tes notes sur @clé »). N'attribue JAMAIS leur contenu à l'ouvrage commenté : pour citer l'ouvrage, appuie-toi sur la source.",
+    ],
+    colon: ' : ',
+    scopeOne: (named) => [
+      `PÉRIMÈTRE : l'utilisateur a limité cette recherche à un seul document de sa bibliographie${named}.`,
+      "Quand il parle du « livre », du « texte », de « l'article » ou de « l'auteur » sans autre précision, il s'agit de ce document — jamais de son propre manuscrit.",
+    ],
+    scopeMany: (count, named) => [
+      `PÉRIMÈTRE : l'utilisateur a limité cette recherche à ${count} documents de sa bibliographie${named}.`,
+      "Quand il parle des « livres », des « textes » ou des « auteurs » sans autre précision, il s'agit de ces documents — jamais de son propre manuscrit.",
+    ],
+  },
+  en: {
+    sources: [
+      'Context retrieved from the indexed corpus (numbered sources below).',
+      'RULE: answer ONLY from the sources below (TITRE, AUTEUR and EXTRAIT fields). NEVER supplement with your general knowledge.',
+      'A document\'s TITRE is part of its content. For an identification question ("what is X?" where X is a name or acronym), a TITRE that contains X is a valid answer that you must use.',
+      'Cite the source number [N] for each claim.',
+      'If after reading the TITRE and EXTRAIT fields the information is genuinely absent, say so briefly in your own words (do not use any pre-written formula).',
+    ],
+    noSources:
+      'No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so; NEVER present the excerpts that follow as the content of a source.',
+    manuscript: [
+      'Excerpts from the MANUSCRIPT IN PROGRESS: the text the user is writing themselves. It is NOT a source, and it is none of the numbered documents above.',
+      'You may refer to it to recall what they have already written, or to point out a repetition or a contradiction — saying "in your manuscript". NEVER cite it as evidence, and NEVER attribute its content to a source or to the author of a source.',
+    ],
+    readingNotes: [
+      "Excerpts from the user's READING NOTES (their commentary on a reference, not the reference itself).",
+      'Present them as their notes ("according to your notes on @key"). NEVER attribute their content to the work commented on: to cite the work, rely on the source.',
+    ],
+    colon: ': ',
+    scopeOne: (named) => [
+      `SCOPE: the user has restricted this search to a single document of their bibliography${named}.`,
+      'When they mention "the book", "the text", "the article" or "the author" without further detail, they mean this document — never their own manuscript.',
+    ],
+    scopeMany: (count, named) => [
+      `SCOPE: the user has restricted this search to ${count} documents of their bibliography${named}.`,
+      'When they mention "the books", "the texts" or "the authors" without further detail, they mean these documents — never their own manuscript.',
+    ],
+  },
+};
+
+/** Au-delà, la sélection n'est plus « un livre » : on donne le compte, pas la liste. */
+const SELECTION_SCOPE_MAX_TITLES = 5;
+
+/**
+ * Dit au modèle que l'utilisateur a restreint la recherche à des documents
+ * choisis, et lesquels. Sans cette ligne, « ce livre » ou « l'auteur » n'ont
+ * pas de référent : le manuscrit — toujours interrogé — arrive dans le même
+ * contexte, et le modèle prenait le texte de l'utilisateur pour le livre
+ * sélectionné.
+ *
+ * `selectedCount` vient de la sélection, `documents` de ce qui a pu être
+ * retrouvé en base : les deux peuvent différer (document supprimé depuis).
+ */
+export function formatSelectionScope(
+  selectedCount: number,
+  documents: SelectedDocumentLabel[],
+  lang: PromptLanguage = 'fr'
+): string {
+  if (selectedCount === 0) return '';
+  const text = CONTEXT_TEXT[lang];
+  const complete = documents.length === selectedCount;
+  // Une entrée bibliographique à plusieurs pièces jointes (PDF annoté +
+  // original) est UNE ligne dans la liste du panneau mais plusieurs
+  // identifiants : c'est l'ouvrage que l'on compte et que l'on nomme.
+  const labels = [
+    ...new Set(
+      documents.map((d) => {
+        const by = [d.author, d.year].filter(Boolean).join(', ');
+        return by ? `« ${d.title} » (${by})` : `« ${d.title} »`;
+      })
+    ),
+  ];
+  const count = complete ? labels.length : selectedCount;
+  const named =
+    complete && count <= SELECTION_SCOPE_MAX_TITLES ? `${text.colon}${labels.join(' ; ')}` : '';
+  return [...(count === 1 ? text.scopeOne(named) : text.scopeMany(count, named)), '', ''].join(
+    '\n'
+  );
+}
+
+export function formatContextAsSystemPrompt(
+  hits: MultiSourceSearchResult[],
+  lang: PromptLanguage = 'fr'
+): string {
+  const text = CONTEXT_TEXT[lang];
+  // Aucune source mais des extraits du manuscrit ou des notes de lecture :
+  // l'en-tête « réponds UNIQUEMENT à partir des sources ci-dessous » serait
+  // suivi du seul texte de l'utilisateur, que le modèle prendrait pour elles.
+  if (hits.length === 0) return text.noSources;
   const SNIPPET_CHARS = 1500;
   const DOC_HEADER_RE = /^\[Doc:[^\]]*\]\s*/;
 
-  const lines: string[] = [
-    'Contexte extrait du corpus indexé (sources numérotées ci-dessous).',
-    "RÈGLE : réponds UNIQUEMENT à partir des sources ci-dessous (champs TITRE, AUTEUR et EXTRAIT). Ne complète JAMAIS avec tes connaissances générales.",
-    "Le TITRE d'un document fait partie intégrante de son contenu. Pour une question d'identification (« qu'est-ce que X ? » où X est un nom ou un acronyme), un TITRE qui contient X est une réponse valide que tu dois utiliser.",
-    "Cite le numéro de la source [N] pour chaque affirmation.",
-    "Si après lecture des TITRES et des EXTRAITS l'information est réellement absente, indique-le brièvement et avec tes propres mots (n'utilise aucune formule pré-écrite).",
-    '',
-  ];
+  const lines: string[] = [...text.sources, ''];
   hits.forEach((h, i) => {
     const title = h.document.title || h.document.id || 'Sans titre';
     const kind =

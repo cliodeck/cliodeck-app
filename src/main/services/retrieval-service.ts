@@ -32,6 +32,7 @@ import {
   relevanceScore,
 } from '../../../backend/core/rag/relevance.js';
 import type {
+  PDFDocument,
   SearchResult,
 } from '../../../backend/types/pdf-document.js';
 import type {
@@ -289,6 +290,13 @@ export interface RetrievalSearchWithStatsResult {
    *  use `searchWithStats` can render error banners alongside
    *  explainable-AI stats without a separate retrieval call. */
   outcomes: RetrievalSourceOutcome[];
+}
+
+/** Ce qu'il faut d'un document pour le nommer dans un prompt. */
+export interface SelectedDocumentLabel {
+  title: string;
+  author?: string;
+  year?: string;
 }
 
 export interface RetrievalQuery {
@@ -662,6 +670,27 @@ class RetrievalService {
         timing: { searchMs },
       },
     };
+  }
+
+  /**
+   * Titre, auteur et année des documents de bibliographie désignés. Sert à
+   * nommer à l'assistant la sélection de l'utilisateur ; un identifiant
+   * inconnu est passé sous silence, et rien ne lève — c'est du confort de
+   * prompt, pas de la recherche.
+   */
+  describeDocuments(documentIds: string[]): SelectedDocumentLabel[] {
+    const store = this.vectorStore;
+    if (!store) return [];
+    const labels: SelectedDocumentLabel[] = [];
+    for (const id of documentIds) {
+      try {
+        const doc = store.getDocument(id) as PDFDocument | null;
+        if (doc) labels.push({ title: doc.title, author: doc.author, year: doc.year });
+      } catch (e) {
+        console.warn('[retrieval] failed to describe document', id, e);
+      }
+    }
+    return labels;
   }
 
   async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
