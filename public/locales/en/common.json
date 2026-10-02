@@ -409,10 +409,11 @@
     "exportToPDF": "Export to PDF",
     "exportToWord": "Export to Word",
     "citation": {
-      "toggle": "Format citations with CSL (Chicago, MLA…)",
+      "toggle": "Use a built-in citation style (Chicago, MLA…)",
       "style": "Style",
       "locale": "Language",
-      "help": "[@key] markers become numbered footnotes and a bibliography is appended at the end.",
+      "helpProjectStyle": "This project has its own citation style ({{file}}), applied as long as the box is unticked. Tick it only to use one of the built-in styles for this export instead.",
+      "helpNoProjectStyle": "No citation style is set in the project settings: tick the box to choose one. Unticked, citations are rendered in the default style (Chicago author-date).",
       "toggleAria": "Use the CSL citation engine",
       "styleAria": "Citation style",
       "localeAria": "Citation language"

@@ -19,6 +19,13 @@ interface Props {
   value: ExportCitationValue;
   onChange: (next: ExportCitationValue) => void;
   disabled?: boolean;
+  /**
+   * Fichier CSL propre au projet, s'il y en a un. L'aide en dépend : la case
+   * ne « formate » pas les citations (elles le sont de toute façon), elle
+   * remplace le style du projet par un style embarqué — ce que rien ne
+   * disait, et qui laissait l'auteur deviner quand la cocher.
+   */
+  projectCslPath?: string;
 }
 
 interface StyleEntry {
@@ -55,7 +62,12 @@ export async function loadDefaultCitationValue(
   return { useEngine: false, style: FALLBACK_STYLE, locale: FALLBACK_LOCALE };
 }
 
-export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabled }) => {
+export const ExportCitationSection: React.FC<Props> = ({
+  value,
+  onChange,
+  disabled,
+  projectCslPath,
+}) => {
   const { t } = useTranslation('common');
   const [styles, setStyles] = useState<StyleEntry[]>([]);
   const [locales, setLocales] = useState<string[]>([]);
@@ -164,6 +176,7 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
       )}
 
       <p
+        data-testid="export-citation-help"
         style={{
           marginTop: '0.5rem',
           marginBottom: 0,
@@ -171,7 +184,11 @@ export const ExportCitationSection: React.FC<Props> = ({ value, onChange, disabl
           color: 'var(--text-tertiary)',
         }}
       >
-        {t('export.citation.help')}
+        {projectCslPath
+          ? t('export.citation.helpProjectStyle', {
+              file: projectCslPath.split(/[\\/]/).pop(),
+            })
+          : t('export.citation.helpNoProjectStyle')}
       </p>
     </div>
   );

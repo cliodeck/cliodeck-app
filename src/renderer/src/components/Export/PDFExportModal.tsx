@@ -414,6 +414,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
             value={citation}
             onChange={setCitation}
             disabled={isExporting}
+            projectCslPath={currentProject?.cslPath}
           />
 
           <div className="form-field">
