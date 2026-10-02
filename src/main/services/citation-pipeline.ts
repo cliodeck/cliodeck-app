@@ -28,28 +28,109 @@ export interface ProcessedFootnote {
 }
 
 export interface ProcessedCitations {
-  /** Markdown with `[@key]` markers replaced by `[^N]` (Pandoc footnote syntax). */
+  /**
+   * Markdown with citation markers replaced: by `[^N]` (Pandoc footnote
+   * syntax) in the body under a note style, by the rendered citation itself
+   * inside an author's footnote or under an in-text style.
+   */
   md: string;
   footnotes: ProcessedFootnote[];
   /** Rendered bibliography entries, one string per reference. */
   bibliography: string[];
-  /** Keys that could not be resolved — marker is left as-is. */
+  /** Keys that could not be resolved — marker is left as-is. Deduplicated. */
   missingKeys: string[];
 }
 
-/**
- * Matches a (possibly multi-key) citation cluster:
- *   [@alice2020]
- *   [@alice2020; @bob2021]
- * Key charset follows BibTeX convention (alnum, `_`, `:`, `-`).
- */
-const CLUSTER_RE = /\[@([A-Za-z0-9_:-]+(?:\s*;\s*@[A-Za-z0-9_:-]+)*)\]/g;
+const KEY = '[A-Za-z0-9_](?:[A-Za-z0-9_:-]*[A-Za-z0-9_])?';
 
 /**
- * Scan markdown for `[@key]` / `[@a; @b]` clusters, render them via
- * citeproc-js, and return footnote-annotated markdown plus the rendered
- * footnotes and bibliography. Unknown keys leave the marker intact and
- * are reported in `missingKeys`.
+ * Two shapes, in one pass so they cannot overlap:
+ *   1. a bracketed cluster — `[@alice2020]`, `[@a; @b]`, and pandoc's
+ *      affixes `[see @alice2020, p. 12]` — not followed by `(` (a link whose
+ *      text holds an `@`), with the blanks before it, which a note call drops;
+ *   2. a bare narrative key — `@alice2020` — not glued to a word, so an
+ *      e-mail address is not a citation.
+ * Key charset follows BibTeX convention (alnum, `_`, `:`, `-`).
+ */
+const CITATION_RE = new RegExp(
+  `([ \\t]*)\\[([^\\[\\]\\n]*@[A-Za-z0-9_][^\\[\\]\\n]*)\\](?!\\()|(?<![\\w@\\\\])@(${KEY})`,
+  'g'
+);
+
+/** One `;`-separated member of a cluster: optional prefix, key, optional suffix. */
+const CLUSTER_PART_RE = new RegExp(`^(?:(.*?)\\s)?-?@(${KEY})(.*)$`);
+
+/** Début d'un bloc de définition `[^label]: …` en tête de ligne. */
+const NOTE_DEFINITION_RE = /^\[\^[^\]\s]+\]:/;
+const FENCE_RE = /^\s*(```|~~~)/;
+
+interface ClusterPart {
+  prefix: string;
+  key: string;
+  suffix: string;
+}
+
+function parseCluster(inner: string): ClusterPart[] | null {
+  const parts: ClusterPart[] = [];
+  for (const raw of inner.split(';')) {
+    const m = raw.trim().match(CLUSTER_PART_RE);
+    if (!m) return null;
+    parts.push({
+      prefix: (m[1] ?? '').trim(),
+      key: m[2],
+      suffix: m[3].replace(/^\s*,?\s*/, '').trim(),
+    });
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+/**
+ * citeproc rend du HTML (`<i>Titre</i>`, entités). Quand la citation est
+ * recopiée DANS le markdown (note de l'auteur, style auteur-date), elle doit
+ * redevenir du markdown, sinon l'italique des titres est perdu en route.
+ */
+export function cslHtmlToMarkdown(html: string): string {
+  return html
+    .replace(/<\/?(?:i|em)>/g, '*')
+    .replace(/<\/?(?:b|strong)>/g, '**')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 10)))
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Nom d'auteur pour une citation narrative (« Farge[^1] »). */
+function narrativeName(item: CSLItem, locale: string): string {
+  const names = (item.author?.length ? item.author : item.editor ?? [])
+    .map((a) => a.family ?? a.literal ?? '')
+    .filter(Boolean);
+  if (names.length === 0) return item['title-short'] ?? item.title ?? String(item.id);
+  if (names.length === 1) return names[0];
+  if (names.length === 2) {
+    return `${names[0]} ${locale.toLowerCase().startsWith('fr') ? 'et' : 'and'} ${names[1]}`;
+  }
+  return `${names[0]} et al.`;
+}
+
+/**
+ * Scan markdown for citations — `[@key]`, `[@a; @b]`, `[see @key, p. 12]`
+ * and bare `@key` — render them via citeproc-js, and return the rewritten
+ * markdown plus the rendered footnotes and bibliography.
+ *
+ * Where the rendered citation goes depends on where the marker stands:
+ *   - in the body, under a note style: a numbered footnote `[^N]` (a bare
+ *     `@key` keeps the author's name in the sentence: `Farge[^N]`);
+ *   - inside one of the author's own footnotes: in place — a note cannot
+ *     hold a note, and `[^N]` there came out as literal text;
+ *   - under an in-text style (MLA, APA): in place everywhere.
+ *
+ * Unknown keys leave the marker intact and are reported in `missingKeys`
+ * (bracketed markers only: an unknown bare `@name` is more likely a handle
+ * than a citation). Code blocks and code spans are left alone.
  */
 export async function processMarkdownCitations(
   markdown: string,
@@ -60,7 +141,7 @@ export async function processMarkdownCitations(
   const engine = opts.engine ?? new CitationEngine();
 
   const footnotes: ProcessedFootnote[] = [];
-  const missingKeys: string[] = [];
+  const missingKeys = new Set<string>();
   const bibItems: CSLItem[] = [];
   const bibSeen = new Set<string>();
 
@@ -71,74 +152,93 @@ export async function processMarkdownCitations(
   // Lezer, donc un `[^99]` dans un bloc de code ne décale rien.
   const firstNumber = nextFootnoteNumber(markdown);
 
-  // First pass — collect all clusters, resolve keys, emit footnotes.
-  interface Cluster {
-    match: string;
-    keys: string[];
-    items: CSLItem[];
-    n: number; // 0 if skipped (unresolved)
-  }
-  const clusters: Cluster[] = [];
+  let noteStyle: boolean | null = null;
+  const isNoteStyle = (): boolean => (noteStyle ??= engine.isNoteStyle(style));
 
-  for (const m of markdown.matchAll(CLUSTER_RE)) {
-    const rawKeys = m[1].split(/\s*;\s*/).map((k) => k.replace(/^@/, '').trim()).filter(Boolean);
+  /** Rend un groupe ; `null` si une clé manque ou si le rendu échoue. */
+  const render = (parts: ClusterPart[], report: boolean): { text: string; items: CSLItem[] } | null => {
     const items: CSLItem[] = [];
-    const resolvedKeys: string[] = [];
-    let anyMissing = false;
-    for (const k of rawKeys) {
-      const c = opts.resolve(k);
+    for (const part of parts) {
+      const c = opts.resolve(part.key);
       if (!c) {
-        anyMissing = true;
-        missingKeys.push(k);
-        continue;
+        if (report) for (const p of parts) if (!opts.resolve(p.key)) missingKeys.add(p.key);
+        return null;
       }
       items.push(citationToCSL(c));
-      resolvedKeys.push(k);
     }
-    if (anyMissing || items.length === 0) {
-      clusters.push({ match: m[0], keys: rawKeys, items: [], n: 0 });
-      continue;
-    }
-    clusters.push({ match: m[0], keys: resolvedKeys, items, n: firstNumber + footnotes.length });
-    // Render this cluster as a single footnote.
+    let rendered: string[];
     try {
-      const res = engine.formatCitation(items, style, locale);
-      // formatCitation produces one footnote per item in the current
-      // implementation; join them with '; ' to emulate a cluster.
-      const text = res.footnotes.join('; ');
-      footnotes.push({ n: firstNumber + footnotes.length, text, keys: resolvedKeys });
-      for (const it of items) {
-        const id = String(it.id);
-        if (!bibSeen.has(id)) {
-          bibSeen.add(id);
-          bibItems.push(it);
-        }
-      }
+      // formatCitation produces one entry per item in the current
+      // implementation; they are joined with '; ' to emulate a cluster.
+      rendered = engine.formatCitation(items, style, locale).footnotes;
     } catch (err) {
-      // On rendering failure, treat as missing so caller sees the marker.
-      clusters[clusters.length - 1] = { match: m[0], keys: rawKeys, items: [], n: 0 };
-      for (const k of rawKeys) missingKeys.push(k);
+      console.warn('⚠️ CitationEngine: rendering failed for', parts.map((p) => p.key), err);
+      if (report) for (const p of parts) missingKeys.add(p.key);
+      return null;
     }
-  }
+    const text = rendered
+      .map((r, i) => {
+        const { prefix, suffix } = parts[i];
+        if (!suffix) return prefix ? `${prefix} ${r}` : r;
+        // « Farge, Le goût de l'archive. » + « p. 12 » : le point final
+        // passe après le renvoi de page.
+        const core = r.replace(/\.\s*$/, '');
+        const closed = `${core}, ${suffix}`;
+        return `${prefix ? `${prefix} ` : ''}${closed}${/[.!?]$/.test(closed) ? '' : '.'}`;
+      })
+      .join('; ');
+    for (const it of items) {
+      const id = String(it.id);
+      if (!bibSeen.has(id)) {
+        bibSeen.add(id);
+        bibItems.push(it);
+      }
+    }
+    return { text, items };
+  };
 
-  // Second pass — splice markers into markdown. Build output by scanning
-  // with the same regex to keep offsets stable.
-  let out = '';
-  let lastIdx = 0;
-  let clusterIdx = 0;
-  for (const m of markdown.matchAll(CLUSTER_RE)) {
-    const start = m.index ?? 0;
-    out += markdown.slice(lastIdx, start);
-    const cluster = clusters[clusterIdx++];
-    if (cluster.n > 0) {
-      out += `[^${cluster.n}]`;
-    } else {
-      // Unresolved — keep original marker verbatim.
-      out += cluster.match;
+  const rewrite = (segment: string, inNote: boolean): string =>
+    segment.replace(
+      CITATION_RE,
+      (match: string, space: string | undefined, inner: string | undefined, bareKey: string | undefined) => {
+        const parts =
+          inner !== undefined ? parseCluster(inner) : [{ prefix: '', key: bareKey!, suffix: '' }];
+        if (!parts) return match;
+        const res = render(parts, inner !== undefined);
+        if (!res) return match;
+
+        if (inNote || !isNoteStyle()) {
+          // En place : la phrase de l'auteur porte déjà sa ponctuation.
+          return (space ?? '') + cslHtmlToMarkdown(res.text).replace(/\.$/, '');
+        }
+        const n = firstNumber + footnotes.length;
+        footnotes.push({ n, text: res.text, keys: parts.map((p) => p.key) });
+        // L'appel de note se colle au mot qui précède, comme le fait pandoc :
+        // « Srnicek [@clé] » ne doit pas donner un appel isolé par une espace.
+        return inner !== undefined ? `[^${n}]` : `${narrativeName(res.items[0], locale)}[^${n}]`;
+      }
+    );
+
+  // Ligne à ligne : c'est la position de la ligne (définition de note, bloc
+  // de code) qui décide du traitement, et un marqueur ne franchit jamais une
+  // fin de ligne.
+  let inNote = false;
+  let inFence = false;
+  const out = markdown.split('\n').map((line) => {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      return line;
     }
-    lastIdx = start + m[0].length;
-  }
-  out += markdown.slice(lastIdx);
+    if (inFence) return line;
+    if (NOTE_DEFINITION_RE.test(line)) inNote = true;
+    else if (inNote && line.trim() !== '' && !/^\s+\S/.test(line)) inNote = false;
+    if (!line.includes('@')) return line;
+    // Les segments impairs sont des extraits de code en ligne.
+    return line
+      .split(/(`[^`]*`)/)
+      .map((seg, i) => (i % 2 === 1 ? seg : rewrite(seg, inNote)))
+      .join('');
+  });
 
   // Render a consolidated bibliography for all unique items seen.
   let bibliography: string[] = [];
@@ -151,5 +251,5 @@ export async function processMarkdownCitations(
     }
   }
 
-  return { md: out, footnotes, bibliography, missingKeys };
+  return { md: out.join('\n'), footnotes, bibliography, missingKeys: [...missingKeys] };
 }

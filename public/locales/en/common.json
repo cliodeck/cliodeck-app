@@ -400,6 +400,7 @@
       "export": "Export",
       "cancel": "Cancel",
       "unknownError": "The export failed for an unknown reason.",
+      "unresolvedCitations": "Citation keys not found in the bibliography, left as written in the document: {{keys}}",
       "noProject": "No project is open.",
       "enterTitle": "Please enter a title.",
       "wordFiles": "Word document",

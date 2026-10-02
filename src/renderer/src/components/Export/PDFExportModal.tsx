@@ -65,13 +65,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    void loadDefaultCitationValue().then((v) => {
+    void loadDefaultCitationValue(currentProject?.cslPath).then((v) => {
       if (!cancelled) setCitation(v);
     });
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, currentProject?.cslPath]);
 
   // Listen for progress updates
   useEffect(() => {

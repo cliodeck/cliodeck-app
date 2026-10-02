@@ -400,6 +400,7 @@
       "export": "Exportieren",
       "cancel": "Abbrechen",
       "unknownError": "Der Export ist aus unbekanntem Grund fehlgeschlagen.",
+      "unresolvedCitations": "Zitierschlüssel, die in der Bibliografie fehlen und unverändert im Dokument stehen: {{keys}}",
       "noProject": "Kein Projekt geöffnet.",
       "enterTitle": "Bitte geben Sie einen Titel ein.",
       "wordFiles": "Word-Dokument",
