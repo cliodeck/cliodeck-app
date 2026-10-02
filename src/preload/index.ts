@@ -1124,7 +1124,7 @@ const api = {
             includeVault?: boolean;
             topK?: number;
           };
-          systemPrompt?: { modeId?: string; customText?: string };
+          systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };
           /**
            * Namespaced MCP tool names (`clientName__bareName`) the
            * renderer wants exposed to the model on this turn (fusion

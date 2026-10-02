@@ -683,6 +683,7 @@ export const FusionChatStartSchema = z.object({
         .object({
           modeId: z.string().optional(),
           customText: z.string().optional(),
+          language: z.enum(['fr', 'en']).optional(),
           noPrompt: z.boolean().optional(),
         })
         .optional(),

@@ -1,13 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import {
+  formatContextAsSystemPrompt,
+  formatManuscriptContext,
   formatReadingNotesContext,
+  formatSelectionScope,
   hitsToSources,
   isFreeMode,
   readingNoteHitsToSources,
+  resolvePromptLanguage,
   resolveTurnOptions,
   shouldIncludeReadingNotes,
 } from '../fusion-chat-service.js';
-import type { ReadingNoteMappedSearchResult } from '../retrieval-service.js';
+import type {
+  ManuscriptMappedSearchResult,
+  ReadingNoteMappedSearchResult,
+} from '../retrieval-service.js';
 import type { LLMConfig } from '../../../../backend/types/config.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
 import { runChatTurn } from '../chat-engine.js';
@@ -233,6 +240,86 @@ describe('notes de lecture dans le chat', () => {
     expect(block).toContain('[L1] @Braudel_1949 — La Méditerranée');
     expect(block).toContain('ÉTIQUETTES : chapitre-2');
     expect(formatReadingNotesContext([])).toBe('');
+  });
+});
+
+describe('sélection de documents et manuscrit — ne pas prendre l’un pour l’autre', () => {
+  const own: ManuscriptMappedSearchResult = {
+    chunk: { id: 'm1', content: 'Mon article soutient que…', documentId: 'document.md', chunkIndex: 0 },
+    document: { id: 'document.md', title: 'Mon article', author: null, bibtexKey: null },
+    source: { kind: 'manuscript-chapter', relativePath: 'document.md', chapterId: 'document', line: 3 },
+    similarity: 0.6,
+    sourceType: 'manuscript',
+  };
+
+  it('nomme au modèle le document auquel la recherche est limitée', () => {
+    const scope = formatSelectionScope(1, [
+      { title: 'La Méditerranée', author: 'Braudel', year: '1949' },
+    ]);
+    expect(scope).toContain('un seul document');
+    expect(scope).toContain('« La Méditerranée » (Braudel, 1949)');
+    expect(scope).toContain('jamais de son propre manuscrit');
+  });
+
+  it('ne dit rien sans sélection, et donne le compte quand la liste serait longue ou incomplète', () => {
+    expect(formatSelectionScope(0, [])).toBe('');
+    const many = Array.from({ length: 8 }, (_, i) => ({ title: `Titre ${i}` }));
+    const scope = formatSelectionScope(8, many);
+    expect(scope).toContain('8 documents');
+    expect(scope).not.toContain('Titre 0');
+    // Un document introuvable en base : pas de liste tronquée qui mentirait.
+    expect(formatSelectionScope(2, [{ title: 'Seul retrouvé' }])).not.toContain('Seul retrouvé');
+  });
+
+  it('compte et nomme l’ouvrage une fois quand il a plusieurs pièces jointes', () => {
+    const book = { title: 'La Méditerranée', author: 'Braudel', year: '1949' };
+    const scope = formatSelectionScope(2, [book, { ...book }]);
+    expect(scope).toContain('un seul document');
+    expect(scope.match(/La Méditerranée/g)).toHaveLength(1);
+  });
+
+  it('écrit les consignes dans la langue demandée, pas seulement en français', () => {
+    const scope = formatSelectionScope(1, [{ title: 'La Méditerranée' }], 'en');
+    expect(scope).toContain('SCOPE: the user has restricted this search to a single document');
+    expect(scope).toContain('never their own manuscript');
+    expect(formatManuscriptContext([own], 0, 'en')).toContain('MANUSCRIPT IN PROGRESS');
+    expect(formatContextAsSystemPrompt([], 'en')).toContain('No excerpt from the searched sources');
+    const sources = formatContextAsSystemPrompt(
+      [
+        {
+          sourceType: 'secondary',
+          chunk: { id: 'c1', content: 'Hello', documentId: 'd1', chunkIndex: 0 },
+          document: { id: 'd1', title: 'Some Paper', author: 'X' },
+          similarity: 0.9,
+        } as unknown as MultiSourceSearchResult,
+      ],
+      'en'
+    );
+    expect(sources).toContain('RULE: answer ONLY from the sources below');
+    // Étiquettes de champ inchangées : les prompts système anglais les nomment ainsi.
+    expect(sources).toContain('TITRE : Some Paper');
+    expect(sources).not.toContain('RÈGLE');
+  });
+
+  it('choisit la langue demandée, puis celle des réglages, puis le français', () => {
+    expect(resolvePromptLanguage('en', 'fr')).toBe('en');
+    expect(resolvePromptLanguage(undefined, 'en')).toBe('en');
+    expect(resolvePromptLanguage(undefined, undefined)).toBe('fr');
+    expect(resolvePromptLanguage('de', 'en')).toBe('en');
+  });
+
+  it('présente le manuscrit comme le texte de l’utilisateur, pas « de l’auteur »', () => {
+    const block = formatManuscriptContext([own], 2);
+    expect(block).toContain("le texte que l'utilisateur est lui-même en train d'écrire");
+    expect(block).not.toContain("texte de l'auteur");
+    expect(block).toContain('[M3] Mon article');
+    expect(formatManuscriptContext([], 0)).toBe('');
+  });
+
+  it('sans extrait de source, n’annonce pas des « sources ci-dessous » devant le seul manuscrit', () => {
+    const block = formatContextAsSystemPrompt([]);
+    expect(block).toContain('Aucun extrait des sources');
+    expect(block).not.toContain('UNIQUEMENT');
   });
 });
 

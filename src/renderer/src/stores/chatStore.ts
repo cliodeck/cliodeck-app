@@ -128,6 +128,8 @@ export interface BrainstormChatRetrievalSettings {
 export interface BrainstormChatSettings {
   modeId?: string;
   customSystemPrompt?: string;
+  /** Langue des consignes écrites par l'application (mode par défaut, bloc de contexte). */
+  promptLanguage?: 'fr' | 'en';
   retrieval?: BrainstormChatRetrievalSettings;
 }
 

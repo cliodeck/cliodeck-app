@@ -53,7 +53,7 @@ interface FusionChatApi {
         includeVault?: boolean;
         topK?: number;
       };
-      systemPrompt?: { modeId?: string; customText?: string };
+      systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };
       enabledTools?: string[];
     }
   ): Promise<{ success: boolean; sessionId?: string; error?: string }>;
@@ -237,10 +237,13 @@ export function useBrainstormChat(): UseBrainstormChat {
       const ragParams = useRAGQueryStore.getState().params;
       const startOpts: Parameters<typeof chat.start>[1] = {};
       if (settings.retrieval) startOpts.retrievalOptions = settings.retrieval;
-      if (settings.modeId || settings.customSystemPrompt) {
+      // La langue part toujours : elle décide aussi de celle du bloc de
+      // contexte de la recherche, injecté même sans mode ni prompt.
+      if (settings.modeId || settings.customSystemPrompt || settings.promptLanguage) {
         startOpts.systemPrompt = {
           modeId: settings.modeId,
           customText: settings.customSystemPrompt,
+          language: settings.promptLanguage,
         };
       }
       // Forward the user-chosen context window. 0 means "use Ollama's

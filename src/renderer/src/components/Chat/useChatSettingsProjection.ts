@@ -44,6 +44,15 @@ export function useChatSettingsProjection(): void {
       sourceType: resolved.sourceType,
       includeVault: resolved.includeVault,
     };
+    // Le sélecteur du panneau décide ; à défaut, la langue de l'interface.
+    // Cette langue part au main à chaque tour : elle ne servait qu'aux modes
+    // autres que le mode par défaut, dont le texte restait en français.
+    const promptLanguage: 'fr' | 'en' =
+      ragParams.systemPromptLanguage === 'fr' || ragParams.systemPromptLanguage === 'en'
+        ? ragParams.systemPromptLanguage
+        : lang === 'en'
+          ? 'en'
+          : 'fr';
     let customSystemPrompt: string | undefined;
     const modeIdForPrompt: string | undefined = activeModeId;
     const panelPrompt = ragParams.useCustomSystemPrompt
@@ -58,13 +67,12 @@ export function useChatSettingsProjection(): void {
       // annonce. Il n'était jamais projeté : seul le texte du mode partait.
       customSystemPrompt = panelPrompt;
     } else if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
-      const promptLang =
-        (ragParams.systemPromptLanguage as 'fr' | 'en') || lang;
-      customSystemPrompt = activeMode.systemPrompt[promptLang];
+      customSystemPrompt = activeMode.systemPrompt[promptLanguage];
     }
     setChatSettings({
       modeId: modeIdForPrompt,
       customSystemPrompt,
+      promptLanguage,
       retrieval,
     });
   }, [ragParams, activeMode, activeModeId, lang, setChatSettings]);
