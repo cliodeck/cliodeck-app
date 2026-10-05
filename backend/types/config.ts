@@ -191,6 +191,11 @@ export interface AppConfig {
   editor: EditorConfig;
   recentProjects: string[];
   language?: 'fr' | 'en' | 'de';
+  /**
+   * Dossier du dernier fichier choisi dans un dialogue natif. Electron 43
+   * n'en laisse plus la mémoire au système (`dialog-default-path.ts`).
+   */
+  lastDialogDirectory?: string;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
