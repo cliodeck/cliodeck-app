@@ -11,6 +11,7 @@ import { useMenuShortcuts } from './hooks/useMenuShortcuts';
 import { useUsageModeMirror } from './hooks/useUsageModeMirror';
 import { useSaveOnQuit } from './hooks/useSaveOnQuit';
 import { usePdfLowTextWarnings } from './hooks/usePdfLowTextWarnings';
+import { useSandboxWarning } from './hooks/useSandboxWarning';
 import { useDensityStore } from './stores/densityStore';
 import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
@@ -31,6 +32,9 @@ function App() {
 
   // Un PDF sans couche de texte s'indexe en silence : on le signale (#132).
   usePdfLowTextWarnings();
+
+  // Une AppImage peut démarrer sans le bac à sable de Chromium : on le dit (#151).
+  useSandboxWarning();
 
   // Densité d'interface persistée : appliquée avant le premier rendu
   // visible, sinon l'utilisateur voit l'interface sauter du confortable au

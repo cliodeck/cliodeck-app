@@ -248,6 +248,14 @@ const api = {
         freeBytes?: number;
         error?: string;
       }>,
+    /** L'app tourne-t-elle sans le bac à sable de Chromium (AppImage, #151) ? */
+    getSandboxStatus: () =>
+      ipcRenderer.invoke('system:get-sandbox-status') as Promise<{
+        success: boolean;
+        disabled?: boolean;
+        appImage?: boolean;
+        error?: string;
+      }>,
   },
 
   // Ollama

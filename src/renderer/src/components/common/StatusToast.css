@@ -133,5 +133,6 @@
   max-height: 120px;
   overflow-y: auto;
   white-space: pre-wrap;
-  word-break: break-all;
+  /* Coupe un chemin ou une trace sans espace, mais pas les mots d'une phrase. */
+  overflow-wrap: anywhere;
 }

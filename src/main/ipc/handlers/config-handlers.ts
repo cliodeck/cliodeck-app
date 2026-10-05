@@ -1,12 +1,13 @@
 /**
  * Configuration and Ollama IPC handlers
  */
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import os from 'os';
 import { configManager } from '../../services/config-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
+import { sandboxStatus } from '../../utils/sandbox-status.js';
 import {
   validate,
   StringIdSchema,
@@ -229,6 +230,18 @@ export function setupConfigHandlers() {
   // Mac de 24 Go avec un modèle de 22 Go, lecture du prompt à 10 jetons/s).
   ipcMain.handle('system:get-memory', () =>
     successResponse({ totalBytes: os.totalmem(), freeBytes: os.freemem() })
+  );
+
+  // Bac à sable de Chromium coupé (AppImage sur un système qui ne le permet
+  // pas, #151) : le renderer en avertit l'utilisateur au démarrage.
+  ipcMain.handle('system:get-sandbox-status', () =>
+    successResponse(
+      sandboxStatus({
+        platform: process.platform,
+        noSandboxSwitch: app.commandLine.hasSwitch('no-sandbox'),
+        appImagePath: process.env.APPIMAGE,
+      })
+    )
   );
 
   // Métadonnées d'un modèle (`/api/show`) : longueur de contexte déclarée,

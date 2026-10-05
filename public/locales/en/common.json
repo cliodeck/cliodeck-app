@@ -2414,5 +2414,11 @@
     "title": "PDF without usable text",
     "message": "“{{title}}” was indexed, but almost no text could be extracted from it: it is probably a scan or an image without OCR. Search and the assistant will find nothing in it.",
     "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} characters per page on average. Run it through OCR software (for instance ocrmypdf or Adobe Acrobat), then re-index it."
+  },
+  "sandboxDisabled": {
+    "title": "ClioDeck is running without Chromium's sandbox",
+    "messageAppImage": "On this system the AppImage cannot enable it and started without it. Everything works, but one protection is missing. To get it back, install the .deb package instead of the AppImage.",
+    "detailsAppImage": "The sandbox isolates the display engine from the rest of your computer: if booby-trapped content exploited a Chromium flaw, it would stay contained. It relies on user namespaces, which some systems restrict — Ubuntu 24.04 by default. The .deb package installs the required permissions; an AppImage cannot.",
+    "message": "The application was started with the --no-sandbox option. Everything works, but one protection is missing. Restart it without that option to get it back."
   }
 }

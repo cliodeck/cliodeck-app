@@ -2414,5 +2414,11 @@
     "title": "PDF sans texte exploitable",
     "message": "« {{title}} » a été indexé, mais presque aucun texte n'a pu en être extrait : c'est probablement un scan ou une image sans OCR. La recherche et l'assistant n'y trouveront rien.",
     "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} caractères par page en moyenne. Passez-le par un logiciel d'OCR (par exemple ocrmypdf ou Adobe Acrobat), puis réindexez-le."
+  },
+  "sandboxDisabled": {
+    "title": "ClioDeck tourne sans le bac à sable de Chromium",
+    "messageAppImage": "Sur ce système, l'AppImage ne peut pas l'activer et s'est lancée sans lui. Tout fonctionne, mais une protection manque. Pour la retrouver, installez le paquet .deb à la place de l'AppImage.",
+    "detailsAppImage": "Le bac à sable isole l'affichage du reste de votre ordinateur : si un contenu piégé exploitait une faille de Chromium, il resterait enfermé. Il repose sur les espaces de noms utilisateur, que certains systèmes restreignent — Ubuntu 24.04 par défaut. Le paquet .deb installe les autorisations nécessaires ; une AppImage ne le peut pas.",
+    "message": "L'application a été lancée avec l'option --no-sandbox. Tout fonctionne, mais une protection manque. Relancez-la sans cette option pour la retrouver."
   }
 }
