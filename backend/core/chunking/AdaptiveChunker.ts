@@ -33,12 +33,7 @@ export class AdaptiveChunker {
     documentId: string,
     documentMeta?: { title?: string; abstract?: string }
   ): DocumentChunk[] {
-    // Combine all pages
-    const fullText = pages.map((p) => p.text).join('\n\n');
-    const pageMapping = this.createPageMapping(pages);
-
-    // Detect sections
-    const sections = this.detectSections(fullText);
+    const sections = this.detectSections(this.toLines(pages));
 
     // Chunk each section
     const chunks: DocumentChunk[] = [];
@@ -51,13 +46,7 @@ export class AdaptiveChunker {
         continue;
       }
 
-      const sectionChunks = this.chunkSection(
-        section,
-        documentId,
-        chunkIndex,
-        pageMapping,
-        documentMeta
-      );
+      const sectionChunks = this.chunkSection(section, documentId, chunkIndex, documentMeta);
       chunks.push(...sectionChunks);
       chunkIndex += sectionChunks.length;
     }
@@ -70,64 +59,63 @@ export class AdaptiveChunker {
   }
 
   /**
-   * Detect document sections using common academic patterns
+   * Les lignes du document, chacune avec sa page et sa position dans le texte
+   * complet (les pages jointes par une ligne vide).
+   *
+   * La page voyage avec le texte au lieu d'être recalculée après coup à partir
+   * de longueurs cumulées : c'est ce recalcul qui faisait dériver les numéros
+   * de page, le recouvrement entre extraits y étant compté deux fois (#160).
    */
-  private detectSections(text: string): Section[] {
+  private toLines(pages: DocumentPage[]): SourceLine[] {
+    const lines: SourceLine[] = [];
+    let pageStart = 0;
+
+    for (const page of pages) {
+      let offset = 0;
+      for (const raw of page.text.split('\n')) {
+        const indent = raw.length - raw.trimStart().length;
+        lines.push({
+          text: raw.trim(),
+          position: pageStart + offset + indent,
+          pageNumber: page.pageNumber,
+        });
+        offset += raw.length + 1;
+      }
+      pageStart += page.text.length + 2; // « \n\n » entre deux pages
+    }
+
+    return lines;
+  }
+
+  /**
+   * Detect document sections using common academic patterns.
+   *
+   * Ce qui précède le premier titre reconnu forme une section à part entière :
+   * le jeter, comme c'était le cas, faisait disparaître de l'index la page de
+   * titre, le résumé ou une introduction sans numéro.
+   */
+  private detectSections(lines: SourceLine[]): Section[] {
     const sections: Section[] = [];
-    const lines = text.split('\n');
+    let current: Section = { title: 'Document', level: 1, type: 'content', lines: [] };
+    const hasText = (section: Section) => section.lines.some((line) => line.text.length > 0);
 
-    let currentSection: Section | null = null;
-    let currentContent = '';
-    const currentStart = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-
-      // Check if this line is a section header
-      const headerMatch = this.matchSectionHeader(line);
+    for (const line of lines) {
+      const headerMatch = this.matchSectionHeader(line.text);
 
       if (headerMatch) {
-        // Save previous section
-        if (currentSection && currentContent.trim()) {
-          currentSection.content = currentContent.trim();
-          currentSection.endPosition = currentStart + currentContent.length;
-          sections.push(currentSection);
-        }
-
-        // Start new section
-        currentSection = {
+        if (hasText(current)) sections.push(current);
+        current = {
           title: headerMatch.title,
           level: headerMatch.level,
           type: this.classifySectionType(headerMatch.title),
-          startPosition: currentStart + currentContent.length,
-          endPosition: 0,
-          content: '',
+          lines: [],
         };
-        currentContent = '';
       } else {
-        // Add line to current section content
-        currentContent += line + '\n';
+        current.lines.push(line);
       }
     }
 
-    // Save last section
-    if (currentSection) {
-      currentSection.content = currentContent.trim();
-      currentSection.endPosition = currentStart + currentContent.length;
-      sections.push(currentSection);
-    }
-
-    // If no sections detected, treat entire document as one section
-    if (sections.length === 0) {
-      sections.push({
-        title: 'Document',
-        level: 1,
-        type: 'content',
-        startPosition: 0,
-        endPosition: text.length,
-        content: text,
-      });
-    }
+    if (hasText(current)) sections.push(current);
 
     return sections;
   }
@@ -259,247 +247,107 @@ export class AdaptiveChunker {
   }
 
   /**
-   * Chunk a single section
+   * Chunk a single section.
+   *
+   * Aucun extrait ne dépasse `maxChunkSize` mots, recouvrement compris (#157).
+   * Un paragraphe trop long est recoupé à la fin d'une phrase, et une phrase
+   * trop longue entre deux mots. Sans cela la limite ne valait rien pour un
+   * PDF : le texte extrait d'une page ne contient aucun saut de ligne, donc
+   * chaque page formait un seul « paragraphe » jamais recoupé — 443 mots en
+   * médiane pour une limite de 300, jusqu'à 2 213, mesuré sur 39 PDF réels.
+   *
+   * Rien n'est écarté : ni la fin d'une section trop courte pour faire un
+   * extrait « normal », ni la fin d'un extrait qui ne tombe pas sur un point.
    */
   private chunkSection(
     section: Section,
     documentId: string,
     startingIndex: number,
-    pageMapping: PageMapping[],
     documentMeta?: { title?: string; abstract?: string }
   ): DocumentChunk[] {
-    const words = section.content.split(/\s+/).filter((w) => w.length > 0);
-
-    // If section fits in one chunk, return it as-is
-    if (words.length <= this.config.maxChunkSize) {
-      const pageNumber = this.findPageNumber(section.startPosition, pageMapping);
-      const content = this.enhanceChunkWithContext(
-        this.cleanText(section.content),
-        documentMeta,
-        section.title
-      );
-
-      return [
-        {
-          id: randomUUID(),
-          documentId,
-          content,
-          pageNumber,
-          chunkIndex: startingIndex,
-          startPosition: section.startPosition,
-          endPosition: section.endPosition,
-          metadata: {
-            sectionTitle: section.title,
-            sectionType: section.type,
-            sectionLevel: section.level,
-          },
-        },
-      ];
-    }
-
-    // Section is too large, split by paragraphs
-    const paragraphs = this.splitIntoParagraphs(section.content);
+    const source = sectionSource(section.lines);
+    const max = this.config.maxChunkSize;
     const chunks: DocumentChunk[] = [];
-    let currentChunk = '';
-    let currentStart = section.startPosition;
-    let chunkIndex = startingIndex;
 
-    for (const paragraph of paragraphs) {
-      const paragraphWords = paragraph.split(/\s+/).filter((w) => w.length > 0);
-      const currentWords = currentChunk.split(/\s+/).filter((w) => w.length > 0);
+    let body: TextRange[] = [];
+    let bodyWords = 0;
+    let overlap = '';
+    let overlapWords = 0;
 
-      // Check if adding this paragraph would exceed max size
-      if (
-        currentWords.length + paragraphWords.length > this.config.maxChunkSize &&
-        currentChunk.length > 0
-      ) {
-        // Ensure we end at sentence boundary
-        const finalChunk = this.ensureSentenceBoundary(currentChunk.trim());
-        const pageNumber = this.findPageNumber(currentStart, pageMapping);
-        const content = this.enhanceChunkWithContext(
-          this.cleanText(finalChunk),
+    const flush = () => {
+      const start = body[0].start;
+      const end = body[body.length - 1].end;
+      const ownText = this.cleanText(source.text.slice(start, end));
+      const from = source.locate(start);
+
+      chunks.push({
+        id: randomUUID(),
+        documentId,
+        content: this.enhanceChunkWithContext(
+          overlap ? `${overlap} ${ownText}` : ownText,
           documentMeta,
           section.title
-        );
+        ),
+        // La page et la position sont celles du texte propre à l'extrait,
+        // recouvrement exclu : là où un lecteur doit aller le chercher.
+        pageNumber: from.pageNumber,
+        chunkIndex: startingIndex + chunks.length,
+        startPosition: from.position,
+        endPosition: source.locate(end - 1).position + 1,
+        metadata: {
+          sectionTitle: section.title,
+          sectionType: section.type,
+          sectionLevel: section.level,
+        },
+      });
 
-        chunks.push({
-          id: randomUUID(),
-          documentId,
-          content,
-          pageNumber,
-          chunkIndex,
-          startPosition: currentStart,
-          endPosition: currentStart + finalChunk.length,
-          metadata: {
-            sectionTitle: section.title,
-            sectionType: section.type,
-            sectionLevel: section.level,
-          },
-        });
+      // Start next chunk with smart overlap (sentence boundaries)
+      overlap = this.createSmartOverlap(ownText, this.config.overlapSize);
+      overlapWords = countWords(overlap);
+      body = [];
+      bodyWords = 0;
+    };
 
-        // Start new chunk with smart overlap (sentence boundaries)
-        const overlap = this.createSmartOverlap(finalChunk, this.config.overlapSize);
-        currentChunk = overlap + ' ';
-        currentStart += finalChunk.length;
-        chunkIndex++;
+    for (const unit of this.splitIntoUnits(source.text)) {
+      if (body.length > 0 && overlapWords + bodyWords + unit.words > max) flush();
+
+      // Le recouvrement est un confort : il cède devant la limite.
+      if (body.length === 0 && overlapWords + unit.words > max) {
+        overlap = '';
+        overlapWords = 0;
       }
 
-      // Add paragraph to current chunk
-      currentChunk += paragraph + '\n\n';
+      body.push(unit);
+      bodyWords += unit.words;
     }
 
-    // Save last chunk
-    if (currentChunk.trim().length > 0) {
-      const chunkWords = currentChunk.split(/\s+/).filter((w) => w.length > 0);
-      if (chunkWords.length >= this.config.minChunkSize) {
-        const finalChunk = this.ensureSentenceBoundary(currentChunk.trim());
-        const pageNumber = this.findPageNumber(currentStart, pageMapping);
-        const content = this.enhanceChunkWithContext(
-          this.cleanText(finalChunk),
-          documentMeta,
-          section.title
-        );
-
-        chunks.push({
-          id: randomUUID(),
-          documentId,
-          content,
-          pageNumber,
-          chunkIndex,
-          startPosition: currentStart,
-          endPosition: currentStart + finalChunk.length,
-          metadata: {
-            sectionTitle: section.title,
-            sectionType: section.type,
-            sectionLevel: section.level,
-          },
-        });
-      }
-    }
+    if (body.length > 0) flush();
 
     return chunks;
   }
 
   /**
-   * Create page mapping for position lookup
+   * Les morceaux qu'on ne recoupe pas : un paragraphe s'il tient dans un
+   * extrait, sinon ses phrases, et pour une phrase démesurée (tableau, liste
+   * sans ponctuation) des tranches de mots.
    */
-  private createPageMapping(pages: DocumentPage[]): PageMapping[] {
-    const mapping: PageMapping[] = [];
-    let position = 0;
+  private splitIntoUnits(text: string): TextRange[] {
+    const max = this.config.maxChunkSize;
+    const whole: TextRange = { start: 0, end: text.length, words: 0 };
+    const units: TextRange[] = [];
 
-    for (const page of pages) {
-      const startPosition = position;
-      const endPosition = position + page.text.length + 2; // +2 for \n\n
-      mapping.push({
-        pageNumber: page.pageNumber,
-        startPosition,
-        endPosition,
-      });
-      position = endPosition;
-    }
-
-    return mapping;
-  }
-
-  /**
-   * Find page number for a given position
-   */
-  private findPageNumber(position: number, mapping: PageMapping[]): number {
-    for (const { pageNumber, startPosition, endPosition } of mapping) {
-      if (position >= startPosition && position < endPosition) {
-        return pageNumber;
+    for (const paragraph of splitRange(text, whole, PARAGRAPH_BREAK)) {
+      if (paragraph.words <= max) {
+        units.push(paragraph);
+        continue;
       }
-    }
-    return mapping[mapping.length - 1]?.pageNumber ?? 1;
-  }
-
-  /**
-   * Split text into paragraphs while preserving lists and tables
-   */
-  private splitIntoParagraphs(text: string): string[] {
-    // Detect structured content (lists, tables)
-    const structuredRanges = this.detectStructuredContent(text);
-
-    // Split by double newlines but preserve structured content
-    const rawParagraphs = text.split(/\n\n+/);
-    const paragraphs: string[] = [];
-
-    for (const para of rawParagraphs) {
-      // Check if this paragraph is part of a list or table
-      const isList = /^(\d+\.|[-*•])\s+/.test(para.trim());
-      const isTable = /^\|.+\|$/.test(para.trim());
-
-      if (isList || isTable) {
-        // Keep structured content together
-        paragraphs.push(para);
-      } else {
-        paragraphs.push(para);
+      for (const sentence of splitRange(text, paragraph, SENTENCE_BREAK)) {
+        if (sentence.words <= max) units.push(sentence);
+        else units.push(...sliceByWords(text, sentence, max));
       }
     }
 
-    return paragraphs;
-  }
-
-  /**
-   * Detect structured content (lists, tables) to keep together
-   */
-  private detectStructuredContent(
-    text: string
-  ): Array<{ start: number; end: number; type: 'list' | 'table' }> {
-    const ranges: Array<{ start: number; end: number; type: 'list' | 'table' }> = [];
-
-    // Detect numbered/bullet lists
-    const listPattern = /^(\d+\.|[-*•])\s+.+(\n(\d+\.|[-*•])\s+.+)+/gm;
-    let match;
-    while ((match = listPattern.exec(text)) !== null) {
-      ranges.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        type: 'list',
-      });
-    }
-
-    // Detect markdown tables
-    const tablePattern = /^\|.+\|(\n\|.+\|)+/gm;
-    while ((match = tablePattern.exec(text)) !== null) {
-      ranges.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        type: 'table',
-      });
-    }
-
-    return ranges;
-  }
-
-  /**
-   * Ensure chunk ends at a sentence boundary
-   */
-  private ensureSentenceBoundary(text: string): string {
-    // If text already ends with sentence punctuation, return as-is
-    if (/[.!?;]\s*$/.test(text)) {
-      return text;
-    }
-
-    // Find last sentence ending, looking backward up to 100 chars
-    const searchStart = Math.max(0, text.length - 100);
-    const searchText = text.substring(searchStart);
-    const sentenceEndings = /[.!?;](?=\s|$)/g;
-    let lastMatch = null;
-    let match;
-
-    while ((match = sentenceEndings.exec(searchText)) !== null) {
-      lastMatch = match;
-    }
-
-    if (lastMatch) {
-      // Cut at last sentence boundary
-      const cutPoint = searchStart + lastMatch.index + 1;
-      return text.substring(0, cutPoint).trim();
-    }
-
-    // No sentence boundary found, return as-is
-    return text;
+    return units;
   }
 
   /**
@@ -564,11 +412,17 @@ export class AdaptiveChunker {
    * Clean chunk text
    */
   private cleanText(text: string): string {
-    return text
-      .replace(/\n{3,}/g, '\n\n')
-      .replace(/ {2,}/g, ' ')
-      .replace(/[\x00-\x1F\x7F-\x9F]/g, '')
-      .trim();
+    return (
+      text
+        // Les sauts de ligne sont des blancs comme les autres, pas des
+        // caractères de contrôle à retirer : les supprimer collait le dernier
+        // mot d'une page au premier de la suivante.
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+        .replace(/[ \t\r]*\n[ \t\r]*\n\s*/g, '\n\n')
+        .replace(/(?<!\n)\n(?!\n)/g, ' ')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim()
+    );
   }
 
   /**
@@ -599,13 +453,26 @@ export class AdaptiveChunker {
 
 // Types
 
+/** Une ligne du document, avec de quoi la resituer. */
+interface SourceLine {
+  text: string;
+  /** Position de son premier caractère dans le texte complet. */
+  position: number;
+  pageNumber: number;
+}
+
 interface Section {
   title: string;
   level: number;
   type: SectionType;
-  startPosition: number;
-  endPosition: number;
-  content: string;
+  lines: SourceLine[];
+}
+
+/** Un morceau du texte d'une section : `[start, end)`, et son nombre de mots. */
+interface TextRange {
+  start: number;
+  end: number;
+  words: number;
 }
 
 type SectionType =
@@ -618,8 +485,82 @@ type SectionType =
   | 'references'
   | 'content';
 
-interface PageMapping {
-  pageNumber: number;
-  startPosition: number;
-  endPosition: number;
+/** Une ligne vide, ou davantage. */
+const PARAGRAPH_BREAK = /\n[ \t]*\n\s*/g;
+
+/** Les blancs qui suivent une fin de phrase, guillemet ou parenthèse fermante compris. */
+const SENTENCE_BREAK = /(?<=[.!?…][)\]"'’»]*)\s+/g;
+
+function countWords(text: string): number {
+  return text.match(/\S+/g)?.length ?? 0;
+}
+
+/** Les morceaux non vides de `range` que sépare `separator`. */
+function splitRange(text: string, range: TextRange, separator: RegExp): TextRange[] {
+  const parts: TextRange[] = [];
+  const push = (start: number, end: number) => {
+    const piece = text.slice(start, end);
+    const words = countWords(piece);
+    if (words === 0) return;
+    const lead = piece.length - piece.trimStart().length;
+    parts.push({ start: start + lead, end: start + piece.trimEnd().length, words });
+  };
+
+  let cursor = range.start;
+  separator.lastIndex = range.start;
+  let match: RegExpExecArray | null;
+  while ((match = separator.exec(text)) !== null && match.index < range.end) {
+    push(cursor, match.index);
+    cursor = Math.min(match.index + match[0].length, range.end);
+    if (match[0].length === 0) separator.lastIndex++;
+  }
+  push(cursor, range.end);
+
+  return parts;
+}
+
+/** `range` en tranches d'au plus `size` mots. */
+function sliceByWords(text: string, range: TextRange, size: number): TextRange[] {
+  const words = [...text.slice(range.start, range.end).matchAll(/\S+/g)];
+  const slices: TextRange[] = [];
+  for (let i = 0; i < words.length; i += size) {
+    const last = words[Math.min(i + size, words.length) - 1];
+    slices.push({
+      start: range.start + words[i].index,
+      end: range.start + last.index + last[0].length,
+      words: Math.min(size, words.length - i),
+    });
+  }
+  return slices;
+}
+
+/**
+ * Le texte d'une section d'un seul tenant, et de quoi retrouver pour chacun
+ * de ses caractères sa page et sa position dans le document.
+ */
+function sectionSource(lines: SourceLine[]): {
+  text: string;
+  locate: (offset: number) => { position: number; pageNumber: number };
+} {
+  const starts: number[] = [];
+  let text = '';
+  for (const line of lines) {
+    starts.push(text.length);
+    text += line.text + '\n';
+  }
+
+  const locate = (offset: number) => {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (starts[middle] <= offset) low = middle;
+      else high = middle - 1;
+    }
+    const line = lines[low];
+    const column = Math.min(offset - starts[low], line.text.length);
+    return { position: line.position + column, pageNumber: line.pageNumber };
+  };
+
+  return { text, locate };
 }
