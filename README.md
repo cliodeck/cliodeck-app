@@ -10,7 +10,7 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 
 **[Download v1.0.0-rc.5](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.5)** — release candidate.
 
-- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app. ClioDeck starts on macOS 12, but **running the AI locally needs macOS 14 (Sonoma) or later**: Ollama requires it, and the engine behind the embedded models is built for it (untested below). On an older macOS, only a cloud provider can index your sources and answer
+- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app. ClioDeck starts on macOS 12, but **running the AI locally needs macOS 14 (Sonoma) or later**: Ollama requires it, and the engine behind the embedded models is built for it — tried on macOS 12, an embedded model answered but could not search the sources. On an older macOS, only a cloud provider can index your sources and answer
 - **Linux** — AppImage and `.deb` for **x86_64** (`uname -m` prints `x86_64`); no arm64 build. On Ubuntu 24.04 and later, prefer the `.deb`: the AppImage cannot use Chromium's sandbox there
 - **Windows** — no build shipped; the code should work on Windows but is **untested**
 
