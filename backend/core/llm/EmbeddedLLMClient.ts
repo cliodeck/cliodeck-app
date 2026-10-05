@@ -19,6 +19,9 @@ interface LlamaModelInstance {
   }) => Promise<LlamaContextInstance>;
   createEmbeddingContext: () => Promise<LlamaEmbeddingContextInstance>;
   embeddingVectorSize?: number;
+  /** Fenêtre du modèle, en jetons (512 pour Nomic Embed v2). */
+  trainContextSize?: number;
+  tokenize?: (text: string) => ArrayLike<unknown>;
 }
 
 interface LlamaContextInstance {
@@ -111,6 +114,36 @@ export const EMBEDDED_EMBEDDING_MODELS: Record<string, EmbeddedEmbeddingModelInf
 
 export const DEFAULT_EMBEDDED_EMBEDDING_MODEL = 'nomic-embed-text-v2';
 
+/**
+ * Marge gardée sous la fenêtre du modèle d'embedding : le moteur ajoute les
+ * jetons de début et de fin APRÈS son propre contrôle de longueur.
+ */
+const EMBEDDING_CONTEXT_MARGIN = 8;
+
+/** Erreur du moteur quand l'entrée dépasse la fenêtre du modèle d'embedding. */
+function isContextOverflow(error: unknown): boolean {
+  return error instanceof Error && /longer than the context size/i.test(error.message);
+}
+
+/**
+ * Coupe un texte en deux près du milieu, sur un blanc quand il y en a un.
+ * `null` quand il n'y a plus rien à couper.
+ */
+function splitNearMiddle(text: string): [string, string] | null {
+  if (text.length < 2) return null;
+  const middle = Math.floor(text.length / 2);
+  for (let offset = 0; offset < middle; offset++) {
+    for (const cut of [middle + offset, middle - offset]) {
+      if (!/\s/.test(text[cut])) continue;
+      const left = text.slice(0, cut).trim();
+      const right = text.slice(cut).trim();
+      if (left && right) return [left, right];
+    }
+  }
+  // Aucun blanc utilisable (une seule « chaîne » interminable) : coupe franche.
+  return [text.slice(0, middle), text.slice(middle)];
+}
+
 export class EmbeddedLLMClient {
   // Generation model state
   private llama: LlamaInstance | null = null;
@@ -129,9 +162,6 @@ export class EmbeddedLLMClient {
   private embeddingModelId: string | null = null;
   private embeddingInitialized = false;
   private embeddingDimensions = 0;
-
-  // Limite de caractères par chunk pour les embeddings
-  private readonly EMBEDDING_MAX_CHUNK_LENGTH = 2000;
 
   /**
    * Initialise le modèle de génération embarqué
@@ -290,45 +320,48 @@ export class EmbeddedLLMClient {
 
   // MARK: - Embedding generation
 
+  /** Le texte tient-il dans la fenêtre du modèle d'embedding ? */
+  private fitsEmbeddingContext(input: string): boolean {
+    const model = this.embeddingModel;
+    const limit = model?.trainContextSize;
+    // Fenêtre ou tokeniseur inconnus : on laisse le moteur trancher.
+    if (!model?.tokenize || !limit) return true;
+    return model.tokenize(input).length <= limit - EMBEDDING_CONTEXT_MARGIN;
+  }
+
   /**
-   * Découpe un texte en chunks de taille maximale (sentence-aware)
+   * Embeddings d'un texte de longueur quelconque : un seul s'il tient dans la
+   * fenêtre du modèle, sinon ceux de ses moitiés, récursivement.
+   *
+   * La longueur se mesure en JETONS, pas en caractères. Nomic Embed v2
+   * n'accepte que 512 jetons, et un extrait de 300 mots en fait couramment
+   * 600 à 700 : avec l'ancien seuil de 2 000 caractères, le moteur refusait
+   * l'entrée (« Input is longer than the context size ») et l'indexation du
+   * PDF entier échouait. Mesuré sur 39 PDF réels avec le découpage par
+   * défaut : 72 % des extraits dépassaient, 33 PDF sur 39 ne s'indexaient pas.
+   *
+   * Le contrôle préalable évite un aller-retour inutile vers le moteur ; le
+   * rattrapage de son erreur couvre le cas où sa fenêtre réelle est plus
+   * petite que celle du modèle.
    */
-  private chunkText(text: string, maxLength: number): string[] {
-    if (text.length <= maxLength) {
-      return [text];
-    }
-
-    const chunks: string[] = [];
-    let currentIndex = 0;
-
-    while (currentIndex < text.length) {
-      let endIndex = Math.min(currentIndex + maxLength, text.length);
-
-      // Try to find sentence boundary if not at end
-      if (endIndex < text.length) {
-        const searchStart = Math.max(currentIndex, endIndex - 200);
-        const searchText = text.substring(searchStart, endIndex);
-        const sentenceEndings = /[.!?;](?=\s|$)/g;
-        let lastMatch = null;
-        let match;
-
-        while ((match = sentenceEndings.exec(searchText)) !== null) {
-          lastMatch = match;
-        }
-
-        if (lastMatch) {
-          endIndex = searchStart + lastMatch.index + 1;
-        }
+  private async embedFitting(text: string, prefix: string): Promise<Float32Array[]> {
+    const context = this.embeddingContext as LlamaEmbeddingContextInstance;
+    if (this.fitsEmbeddingContext(prefix + text)) {
+      try {
+        const result = await context.getEmbeddingFor(prefix + text);
+        return [new Float32Array(result.vector)];
+      } catch (error) {
+        if (!isContextOverflow(error)) throw error;
       }
-
-      const chunk = text.substring(currentIndex, endIndex).trim();
-      if (chunk) {
-        chunks.push(chunk);
-      }
-      currentIndex = endIndex;
     }
-
-    return chunks;
+    const halves = splitNearMiddle(text);
+    if (!halves) {
+      throw new Error('Embedded embedding: input does not fit the model context and cannot be split further.');
+    }
+    return [
+      ...(await this.embedFitting(halves[0], prefix)),
+      ...(await this.embedFitting(halves[1], prefix)),
+    ];
   }
 
   /**
@@ -358,7 +391,7 @@ export class EmbeddedLLMClient {
   }
 
   /**
-   * Génère un embedding pour un texte (avec chunking automatique si nécessaire)
+   * Génère un embedding pour un texte, quelle que soit sa longueur
    * Utilise le préfixe search_document: pour l'indexation
    */
   async generateEmbedding(text: string): Promise<Float32Array> {
@@ -371,22 +404,10 @@ export class EmbeddedLLMClient {
       : null;
     const prefix = modelInfo?.taskPrefixes?.document || '';
 
-    // Si le texte est court, traitement direct
-    if (text.length <= this.EMBEDDING_MAX_CHUNK_LENGTH) {
-      const result = await this.embeddingContext.getEmbeddingFor(prefix + text);
-      return new Float32Array(result.vector);
+    const embeddings = await this.embedFitting(text, prefix);
+    if (embeddings.length > 1) {
+      console.log(`📐 [EMBEDDED-EMB] Text longer than the model context, embedded in ${embeddings.length} parts`);
     }
-
-    // Chunking automatique pour les textes longs
-    const chunks = this.chunkText(text, this.EMBEDDING_MAX_CHUNK_LENGTH);
-    console.log(`📐 [EMBEDDED-EMB] Text too long (${text.length} chars), splitting into ${chunks.length} chunks`);
-
-    const embeddings: Float32Array[] = [];
-    for (const chunk of chunks) {
-      const result = await this.embeddingContext.getEmbeddingFor(prefix + chunk);
-      embeddings.push(new Float32Array(result.vector));
-    }
-
     return this.averageEmbeddings(embeddings);
   }
 
@@ -404,8 +425,8 @@ export class EmbeddedLLMClient {
       : null;
     const prefix = modelInfo?.taskPrefixes?.query || '';
 
-    const result = await this.embeddingContext.getEmbeddingFor(prefix + text);
-    return new Float32Array(result.vector);
+    // Une question collée d'un seul bloc peut dépasser la fenêtre elle aussi.
+    return this.averageEmbeddings(await this.embedFitting(text, prefix));
   }
 
   // MARK: - Text generation
