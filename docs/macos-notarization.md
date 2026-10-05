@@ -7,7 +7,7 @@
 
 ## Principe
 
-electron-builder 24.13 embarque `@electron/notarize` : aucun script
+electron-builder embarque `@electron/notarize` : aucun script
 `afterSign` n'est nécessaire. Le bloc `mac` de `package.json` porte
 `hardenedRuntime`, les entitlements et `"notarize": true`. L'équipe est
 `56789J6QWG` (public : le Team ID figure dans toute app signée). Au build :
@@ -35,6 +35,22 @@ Deux pièges de la combinaison electron-builder 24.13 + `@electron/notarize`
 D'où la règle : `"notarize": true`, et **uniquement** un profil trousseau
 (`APPLE_KEYCHAIN_PROFILE`) ou une clé API (`APPLE_API_KEY*`). Jamais
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` dans l'environnement du build.
+
+### Depuis electron-builder 26 (2026-10-05, #147)
+
+La règle ne change pas, mais ses raisons ont bougé. Lu dans le code de la
+26.15.3 (`MacTargetHelper.getNotarizeOptions`), **pas encore éprouvé par une
+vraie notarisation** — le premier `npm run release:mac*` fait avec cette
+version tiendra lieu de test :
+
+- `"notarize"` n'accepte plus qu'un booléen : la forme `{ "teamId": … }` est
+  refusée dès le chargement de la configuration.
+- `APPLE_KEYCHAIN_PROFILE` seul suffit toujours, et donne `notarytool`.
+- `APPLE_ID` ne mène plus à `altool` : il passe par `notarytool`, mais exige
+  alors `APPLE_APP_SPECIFIC_PASSWORD` **et** `APPLE_TEAM_ID`, faute de quoi le
+  build s'arrête. Raison de plus pour ne pas le définir.
+- Sans identifiants, la notarisation est toujours sautée avec un
+  avertissement : `build:mac*` signe sans notariser.
 
 ## Identifiants
 
