@@ -2420,5 +2420,10 @@
     "messageAppImage": "On this system the AppImage cannot enable it and started without it. Everything works, but one protection is missing. To get it back, install the .deb package instead of the AppImage.",
     "detailsAppImage": "The sandbox isolates the display engine from the rest of your computer: if booby-trapped content exploited a Chromium flaw, it would stay contained. It relies on user namespaces, which some systems restrict — Ubuntu 24.04 by default. The .deb package installs the required permissions; an AppImage cannot.",
     "message": "The application was started with the --no-sandbox option. Everything works, but one protection is missing. Restart it without that option to get it back."
+  },
+  "localAiUnsupported": {
+    "title": "Local AI needs macOS 14",
+    "message": "You are running macOS {{version}}. Ollama cannot be installed on it and the embedded models are not supported: neither indexing your sources nor the assistant will work locally. Update macOS, or choose a cloud provider in Settings → LLM Configuration.",
+    "details": "The rest of ClioDeck — writing, bibliography, exports — is not affected. An embedded model may load and answer on this version, but searching your sources did not work in our tests. This message will not come back once closed."
   }
 }

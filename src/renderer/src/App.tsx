@@ -12,6 +12,7 @@ import { useUsageModeMirror } from './hooks/useUsageModeMirror';
 import { useSaveOnQuit } from './hooks/useSaveOnQuit';
 import { usePdfLowTextWarnings } from './hooks/usePdfLowTextWarnings';
 import { useSandboxWarning } from './hooks/useSandboxWarning';
+import { useLocalAiSupportWarning } from './hooks/useLocalAiSupportWarning';
 import { useDensityStore } from './stores/densityStore';
 import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
@@ -35,6 +36,9 @@ function App() {
 
   // Une AppImage peut démarrer sans le bac à sable de Chromium : on le dit (#151).
   useSandboxWarning();
+
+  // Sous macOS 12 ou 13, l'IA locale ne fonctionne pas : on le dit, une fois.
+  useLocalAiSupportWarning();
 
   // Densité d'interface persistée : appliquée avant le premier rendu
   // visible, sinon l'utilisateur voit l'interface sauter du confortable au

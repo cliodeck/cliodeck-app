@@ -2420,5 +2420,10 @@
     "messageAppImage": "Auf diesem System kann das AppImage sie nicht aktivieren und wurde ohne sie gestartet. Alles funktioniert, aber ein Schutz fehlt. Installieren Sie statt des AppImage das .deb-Paket, um ihn zurückzubekommen.",
     "detailsAppImage": "Die Sandbox trennt die Anzeige vom Rest Ihres Computers: Würde ein präparierter Inhalt eine Chromium-Lücke ausnutzen, bliebe er eingeschlossen. Sie beruht auf Benutzer-Namensräumen, die manche Systeme einschränken – Ubuntu 24.04 standardmäßig. Das .deb-Paket installiert die nötigen Berechtigungen; ein AppImage kann das nicht.",
     "message": "Die Anwendung wurde mit der Option --no-sandbox gestartet. Alles funktioniert, aber ein Schutz fehlt. Starten Sie sie ohne diese Option neu, um ihn zurückzubekommen."
+  },
+  "localAiUnsupported": {
+    "title": "Lokale KI erfordert macOS 14",
+    "message": "Sie verwenden macOS {{version}}. Ollama lässt sich darauf nicht installieren, und die eingebetteten Modelle werden nicht unterstützt: Weder die Indexierung Ihrer Quellen noch der Assistent funktionieren lokal. Aktualisieren Sie macOS oder wählen Sie unter Einstellungen → LLM-Konfiguration einen Online-Anbieter.",
+    "details": "Der Rest von ClioDeck – Schreiben, Bibliografie, Exporte – ist nicht betroffen. Ein eingebettetes Modell kann unter dieser Version geladen werden und antworten, aber die Suche in Ihren Quellen hat in unseren Tests nicht funktioniert. Diese Meldung erscheint nach dem Schließen nicht wieder."
   }
 }

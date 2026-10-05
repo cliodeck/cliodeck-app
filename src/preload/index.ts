@@ -256,6 +256,15 @@ const api = {
         appImage?: boolean;
         error?: string;
       }>,
+    /** Ce macOS est-il trop ancien pour l'IA locale (Ollama, modèles embarqués) ? */
+    getLocalAiSupport: () =>
+      ipcRenderer.invoke('system:get-local-ai-support') as Promise<{
+        success: boolean;
+        limited?: boolean;
+        macosVersion?: string;
+        noticeDismissed?: boolean;
+        error?: string;
+      }>,
   },
 
   // Ollama

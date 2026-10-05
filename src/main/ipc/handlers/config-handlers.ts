@@ -8,6 +8,7 @@ import { pdfService } from '../../services/pdf-service.js';
 import { isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { sandboxStatus } from '../../utils/sandbox-status.js';
+import { localAiSupport } from '../../utils/local-ai-support.js';
 import {
   validate,
   StringIdSchema,
@@ -242,6 +243,15 @@ export function setupConfigHandlers() {
         appImagePath: process.env.APPIMAGE,
       })
     )
+  );
+
+  // macOS 12 ou 13 : ni Ollama ni le moteur embarqué n'y sont pris en charge.
+  // Le renderer le dit une fois, puis s'en souvient (`localAiNoticeDismissed`).
+  ipcMain.handle('system:get-local-ai-support', () =>
+    successResponse({
+      ...localAiSupport({ platform: process.platform, systemVersion: process.getSystemVersion() }),
+      noticeDismissed: configManager.get('localAiNoticeDismissed') === true,
+    })
   );
 
   // Métadonnées d'un modèle (`/api/show`) : longueur de contexte déclarée,
