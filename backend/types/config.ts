@@ -197,7 +197,7 @@ export interface AppConfig {
    */
   lastDialogDirectory?: string;
   /**
-   * L'avertissement « l'IA locale demande macOS 14 » a été fermé : il ne
+   * L'avertissement « Ollama demande macOS 14 » a été fermé : il ne
    * revient pas aux lancements suivants (`useLocalAiSupportWarning`).
    */
   localAiNoticeDismissed?: boolean;

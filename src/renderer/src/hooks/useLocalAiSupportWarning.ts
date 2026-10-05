@@ -3,12 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { useStickyWarning } from './useStickyWarning';
 
 /**
- * Prévient, sous macOS 12 ou 13, que l'IA locale n'y fonctionnera pas.
+ * Prévient, sous macOS 12 ou 13, qu'Ollama ne peut pas y être installé, et
+ * dit ce qui reste pour une IA locale.
  *
- * ClioDeck y démarre, mais Ollama exige macOS 14 et le moteur des modèles
- * embarqués est construit pour macOS 14 : on ne l'apprenait qu'en cherchant
- * pourquoi rien ne s'indexait. Reste un fournisseur en ligne, ou une mise à
- * jour du système.
+ * ClioDeck y démarre, mais Ollama exige macOS 14 : on ne l'apprenait qu'en
+ * cherchant pourquoi rien ne s'indexait. Restent les modèles embarqués —
+ * génération ET embeddings, tous deux rangés dans le mode Expert des
+ * paramètres, donc faciles à ne jamais trouver — ou un fournisseur en ligne.
  *
  * C'est une limite du système, sans remède dans l'app, et bien des Mac ne
  * peuvent pas dépasser macOS 13 : la redire à chaque lancement n'apprendrait
@@ -38,9 +39,9 @@ export function useLocalAiSupportWarning(): void {
     macosVersion === null
       ? null
       : {
-          title: t('localAiUnsupported.title'),
-          message: t('localAiUnsupported.message', { version: macosVersion }),
-          details: t('localAiUnsupported.details'),
+          title: t('localAiLimited.title'),
+          message: t('localAiLimited.message', { version: macosVersion }),
+          details: t('localAiLimited.details'),
         },
     () => {
       void window.electron?.config?.set('localAiNoticeDismissed', true);

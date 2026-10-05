@@ -37,7 +37,7 @@ function App() {
   // Une AppImage peut démarrer sans le bac à sable de Chromium : on le dit (#151).
   useSandboxWarning();
 
-  // Sous macOS 12 ou 13, l'IA locale ne fonctionne pas : on le dit, une fois.
+  // Sous macOS 12 ou 13, Ollama ne s'installe pas : on le dit, une fois.
   useLocalAiSupportWarning();
 
   // Densité d'interface persistée : appliquée avant le premier rendu

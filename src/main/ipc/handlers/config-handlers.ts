@@ -245,7 +245,7 @@ export function setupConfigHandlers() {
     )
   );
 
-  // macOS 12 ou 13 : ni Ollama ni le moteur embarqué n'y sont pris en charge.
+  // macOS 12 ou 13 : Ollama ne s'y installe pas ; restent les modèles embarqués.
   // Le renderer le dit une fois, puis s'en souvient (`localAiNoticeDismissed`).
   ipcMain.handle('system:get-local-ai-support', () =>
     successResponse({

@@ -1,9 +1,9 @@
 /**
- * Prise en charge de l'IA locale selon la version de macOS.
+ * Limites de l'IA locale selon la version de macOS.
  *
- * L'enjeu : sous macOS 12 ou 13, ni Ollama ni le moteur embarqué ne sont pris
- * en charge, et l'utilisateur ne l'apprenait qu'en cherchant pourquoi rien ne
- * s'indexait. L'avertissement ne doit pas manquer là, ni apparaître ailleurs.
+ * L'enjeu : sous macOS 12 ou 13, Ollama ne s'installe pas, et l'utilisateur
+ * ne l'apprenait qu'en cherchant pourquoi rien ne s'indexait. L'avertissement
+ * ne doit pas manquer là, ni apparaître ailleurs.
  */
 import { describe, it, expect } from 'vitest';
 import { localAiSupport } from '../local-ai-support.js';

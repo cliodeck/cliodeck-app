@@ -2421,9 +2421,9 @@
     "detailsAppImage": "Le bac à sable isole l'affichage du reste de votre ordinateur : si un contenu piégé exploitait une faille de Chromium, il resterait enfermé. Il repose sur les espaces de noms utilisateur, que certains systèmes restreignent — Ubuntu 24.04 par défaut. Le paquet .deb installe les autorisations nécessaires ; une AppImage ne le peut pas.",
     "message": "L'application a été lancée avec l'option --no-sandbox. Tout fonctionne, mais une protection manque. Relancez-la sans cette option pour la retrouver."
   },
-  "localAiUnsupported": {
-    "title": "L'IA locale demande macOS 14",
-    "message": "Vous utilisez macOS {{version}}. Ollama ne s'y installe pas et les modèles embarqués n'y sont pas pris en charge : ni l'indexation de vos sources ni l'assistant ne fonctionneront en local. Mettez macOS à jour, ou choisissez un fournisseur en ligne dans Paramètres → Configuration LLM.",
-    "details": "Le reste de ClioDeck — écriture, bibliographie, exports — n'est pas concerné. Un modèle embarqué peut se charger et répondre sous cette version, mais la recherche dans vos sources n'y a pas fonctionné lors de nos essais. Ce message ne reviendra pas une fois fermé."
+  "localAiLimited": {
+    "title": "Ollama demande macOS 14",
+    "message": "Vous utilisez macOS {{version}} : Ollama ne peut pas y être installé. Pour une IA locale, il reste les modèles embarqués, plus modestes : dans Paramètres, mode Expert, téléchargez un modèle de génération et le modèle d'embeddings. Sinon, choisissez un fournisseur en ligne.",
+    "details": "Sans modèle d'embeddings, vos sources ne peuvent être ni indexées ni interrogées. Le moteur des modèles embarqués est prévu pour macOS 14 : il a répondu sous macOS 12 lors d'un essai, mais rien n'est garanti en dessous. Ce message ne reviendra pas une fois fermé."
   }
 }

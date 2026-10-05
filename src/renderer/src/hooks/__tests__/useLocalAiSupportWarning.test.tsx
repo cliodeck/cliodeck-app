@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Sous macOS 12 ou 13, l'IA locale ne fonctionne pas : l'app doit le dire,
- * une fois, plutôt que de laisser chercher pourquoi rien ne s'indexe.
+ * Sous macOS 12 ou 13, Ollama ne s'installe pas : l'app doit le dire, une
+ * fois, plutôt que de laisser chercher pourquoi rien ne s'indexe.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { renderHook, waitFor, cleanup, act } from '@testing-library/react';
@@ -38,14 +38,14 @@ afterEach(() => {
 });
 
 describe('useLocalAiSupportWarning', () => {
-  it('avertit sous un macOS trop ancien, sans disparaître seul', async () => {
+  it('avertit sous un macOS trop ancien pour Ollama, sans disparaître seul', async () => {
     const bridge = installBridge({ success: true, limited: true, macosVersion: '12.7.6', noticeDismissed: false });
     renderHook(() => useLocalAiSupportWarning());
 
     await waitFor(() => expect(notifications()).toHaveLength(1));
     const [notification] = notifications();
     expect(notification.level).toBe('warning');
-    expect(notification.title).toBe('localAiUnsupported.title');
+    expect(notification.title).toBe('localAiLimited.title');
     expect(notification.duration).toBe(0);
     // Afficher n'est pas fermer : rien n'est retenu tant que l'utilisateur n'a rien fait.
     expect(bridge.saved).toEqual([]);
