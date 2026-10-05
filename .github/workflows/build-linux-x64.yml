@@ -53,7 +53,7 @@ jobs:
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
       - name: Installer les dépendances
-        # Le `postinstall` (electron-builder install-app-deps) compile les
+        # Le `postinstall` (electron-rebuild) compile les
         # modules natifs pour l'ABI d'Electron, ici en x86_64.
         run: npm ci
 
@@ -86,6 +86,26 @@ jobs:
             verifier_elf "$f"
           done
           [ "$appimages" -eq 1 ] || { echo "::error::aucun AppImage produit"; exit 1; }
+
+          # GHSA-7g7r-gx96-252g : jusqu'a electron-builder 26.15, le lanceur
+          # de l'AppImage ecrivait LD_LIBRARY_PATH="…/usr/lib:${LD_LIBRARY_PATH}".
+          # Variable non definie, la valeur finissait par « : » — un segment
+          # vide, que l'editeur de liens lit comme « le dossier courant » :
+          # une bibliotheque deposee la etait chargee dans l'application.
+          # On execute la ligne du lanceur reellement produit, variable non
+          # definie, et on refuse tout segment vide.
+          for f in release/*.AppImage; do
+            chmod +x "$f"
+            rm -rf squashfs-root
+            "$f" --appimage-extract AppRun >/dev/null
+            ligne=$(grep -E '^export LD_LIBRARY_PATH=' squashfs-root/AppRun) \
+              || { echo "::error::LD_LIBRARY_PATH introuvable dans le lanceur de $f"; exit 1; }
+            valeur=$(env -u LD_LIBRARY_PATH APPDIR=/tmp/appdir bash -c "$ligne"'; printf %s "$LD_LIBRARY_PATH"')
+            echo "  $f → LD_LIBRARY_PATH=« $valeur »"
+            case ":$valeur:" in
+              *::*) echo "::error::$f : LD_LIBRARY_PATH contient un segment vide (dossier courant)"; exit 1 ;;
+            esac
+          done
 
           # Le .deb, lui, est une archive : son en-tete declare une
           # architecture, et son contenu la respecte ou non. On verifie les
