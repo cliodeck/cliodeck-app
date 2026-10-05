@@ -334,11 +334,12 @@ export class EmbeddedLLMClient {
    * fenêtre du modèle, sinon ceux de ses moitiés, récursivement.
    *
    * La longueur se mesure en JETONS, pas en caractères. Nomic Embed v2
-   * n'accepte que 512 jetons, et un extrait de 300 mots en fait couramment
-   * 600 à 700 : avec l'ancien seuil de 2 000 caractères, le moteur refusait
-   * l'entrée (« Input is longer than the context size ») et l'indexation du
-   * PDF entier échouait. Mesuré sur 39 PDF réels avec le découpage par
-   * défaut : 72 % des extraits dépassaient, 33 PDF sur 39 ne s'indexaient pas.
+   * n'accepte que 512 jetons, et le découpage par défaut produit des
+   * extraits de 674 jetons en médiane (443 mots : le découpage adaptatif
+   * dépasse largement les 300 mots de son réglage). Avec l'ancien seuil de
+   * 2 000 caractères, le moteur refusait l'entrée (« Input is longer than
+   * the context size ») et l'indexation du PDF entier échouait. Mesuré sur
+   * 39 PDF réels : 72 % des extraits dépassaient, 33 PDF ne s'indexaient pas.
    *
    * Le contrôle préalable évite un aller-retour inutile vers le moteur ; le
    * rattrapage de son erreur couvre le cas où sa fenêtre réelle est plus

@@ -2,11 +2,12 @@
  * Embeddings embarqués : un extrait plus long que la fenêtre du modèle doit
  * être vectorisé quand même.
  *
- * Nomic Embed v2 n'accepte que 512 jetons, et un extrait de 300 mots en fait
- * couramment 600 à 700. Le client mesurait la longueur en caractères (seuil
- * de 2 000) : le moteur refusait l'entrée, et l'indexation du PDF entier
- * échouait. Mesuré sur 39 PDF réels : 33 ne s'indexaient pas. Le défaut ne se
- * voyait pas tant qu'Ollama, qui tronque en silence, était là.
+ * Nomic Embed v2 n'accepte que 512 jetons, et le découpage par défaut
+ * produit des extraits de 674 jetons en médiane. Le client mesurait la
+ * longueur en caractères (seuil de 2 000) : le moteur refusait l'entrée, et
+ * l'indexation du PDF entier échouait. Mesuré sur 39 PDF réels : 33 ne
+ * s'indexaient pas. Le défaut ne se voyait pas tant qu'Ollama, qui tronque en
+ * silence, était là.
  *
  * Aucun GGUF n'est chargé : `node-llama-cpp` est remplacé par un double dont
  * le moteur refuse, comme le vrai, toute entrée plus longue que sa fenêtre.
