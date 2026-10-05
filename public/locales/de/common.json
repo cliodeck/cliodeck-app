@@ -2414,5 +2414,11 @@
     "title": "PDF ohne verwertbaren Text",
     "message": "„{{title}}“ wurde indexiert, aber es ließ sich kaum Text daraus extrahieren: Wahrscheinlich ist es ein Scan oder ein Bild ohne OCR. Suche und Assistent werden darin nichts finden.",
     "details": "{{fileName}} — {{pageCount}} Seite(n), durchschnittlich {{charsPerPage}} Zeichen pro Seite. Lassen Sie eine Texterkennung (OCR) darüber laufen (zum Beispiel ocrmypdf oder Adobe Acrobat) und indexieren Sie es erneut."
+  },
+  "sandboxDisabled": {
+    "title": "ClioDeck läuft ohne die Chromium-Sandbox",
+    "messageAppImage": "Auf diesem System kann das AppImage sie nicht aktivieren und wurde ohne sie gestartet. Alles funktioniert, aber ein Schutz fehlt. Installieren Sie statt des AppImage das .deb-Paket, um ihn zurückzubekommen.",
+    "detailsAppImage": "Die Sandbox trennt die Anzeige vom Rest Ihres Computers: Würde ein präparierter Inhalt eine Chromium-Lücke ausnutzen, bliebe er eingeschlossen. Sie beruht auf Benutzer-Namensräumen, die manche Systeme einschränken – Ubuntu 24.04 standardmäßig. Das .deb-Paket installiert die nötigen Berechtigungen; ein AppImage kann das nicht.",
+    "message": "Die Anwendung wurde mit der Option --no-sandbox gestartet. Alles funktioniert, aber ein Schutz fehlt. Starten Sie sie ohne diese Option neu, um ihn zurückzubekommen."
   }
 }

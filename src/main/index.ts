@@ -34,6 +34,7 @@ import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
 import { setupApplicationMenu } from './menu.js';
 import { loadMenuTranslations, setLanguage } from './i18n.js';
+import { sandboxStatus } from './utils/sandbox-status.js';
 
 // Obtenir __dirname en ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -125,6 +126,20 @@ app.whenReady().then(async () => {
     }
   } catch (e) {
     console.warn('[Secrets] Failed to propagate connector keys:', e);
+  }
+
+  // Le lanceur de l'AppImage coupe le bac à sable de lui-même quand le
+  // système ne le permet pas (#151). Le renderer en avertit l'utilisateur ;
+  // la trace, elle, doit figurer au journal d'un rapport de bogue.
+  const sandbox = sandboxStatus({
+    platform: process.platform,
+    noSandboxSwitch: app.commandLine.hasSwitch('no-sandbox'),
+    appImagePath: process.env.APPIMAGE,
+  });
+  if (sandbox.disabled) {
+    console.warn(
+      `⚠️ [Security] Bac à sable de Chromium désactivé (--no-sandbox)${sandbox.appImage ? ', lancement depuis une AppImage' : ''}.`
+    );
   }
 
   // Charger les traductions des menus
