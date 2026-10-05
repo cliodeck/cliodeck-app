@@ -57,6 +57,13 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Avec le modèle d'embeddings embarqué, la plupart des PDF ne s'indexaient
+  pas.** Ce modèle (Nomic Embed v2) n'accepte que 512 jetons, et le découpage
+  par défaut produit des extraits de 674 jetons en médiane : le moteur
+  refusait l'entrée et l'indexation du PDF entier échouait. Sur 39 PDF réels,
+  33 échouaient. Un
+  extrait trop long est maintenant découpé, et ses morceaux moyennés. Le
+  défaut ne se voyait pas avec Ollama, qui tronque en silence.
 - **L'export PDF d'une présentation ne contenait que la première diapositive**
   (#148, PR #149), sur des pages de plusieurs kilomètres, en annonçant un
   succès. Deux causes : une taille de page donnée en microns là où des pouces
