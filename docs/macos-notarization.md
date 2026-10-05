@@ -38,10 +38,13 @@ D'où la règle : `"notarize": true`, et **uniquement** un profil trousseau
 
 ### Depuis electron-builder 26 (2026-10-05, #147)
 
-La règle ne change pas, mais ses raisons ont bougé. Lu dans le code de la
-26.15.3 (`MacTargetHelper.getNotarizeOptions`), **pas encore éprouvé par une
-vraie notarisation** — le premier `npm run release:mac*` mené à son terme
-avec cette version tiendra lieu de test :
+La règle ne change pas, mais ses raisons ont bougé.
+
+**Éprouvé le 2026-10-05** avec la 26.15.3 : `npm run release:mac` a signé,
+notarisé et agrafé les deux apps, arm64 et Intel. `xcrun stapler validate`
+réussit sur chacune et Gatekeeper répond « accepted, source=Notarized
+Developer ID ». C'est la voie du profil trousseau qui a tourné ; le reste de
+cette liste est lu dans le code (`MacTargetHelper.getNotarizeOptions`) :
 
 - `"notarize"` n'accepte plus qu'un booléen : la forme `{ "teamId": … }` est
   refusée dès le chargement de la configuration.
