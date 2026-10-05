@@ -31,7 +31,7 @@ jobs:
           cache: npm
 
       - name: Installer les dépendances
-        # Le `postinstall` du dépôt (electron-builder install-app-deps)
+        # Le `postinstall` du dépôt (electron-rebuild)
         # compile les modules natifs pour l'ABI d'Electron : c'est ce qu'il
         # faut pour lancer l'app, pas pour lancer les tests.
         run: npm ci

@@ -51,6 +51,19 @@ function vitest(args) {
   return result.status ?? 1;
 }
 
+/**
+ * Ouvre une base avec le Node d'Electron. Charger le module ne prouverait
+ * rien : better-sqlite3 ne lie son binaire natif qu'à l'ouverture.
+ */
+function electronOpensDatabase() {
+  const result = spawnSync(
+    require('electron'),
+    ['-e', "new (require('better-sqlite3'))(':memory:')"],
+    { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore' }
+  );
+  return result.status === 0;
+}
+
 const rebuilt = npm(['rebuild', 'better-sqlite3']);
 let testsStatus = 1;
 try {
@@ -58,9 +71,11 @@ try {
 } finally {
   // Toujours : une ABI Node laissée en place empêche l'application de démarrer.
   const restored = npm(['run', 'rebuild:native']);
-  if (restored !== 0) {
+  // Un code de sortie nul ne suffit pas : la recompilation peut se croire
+  // inutile et ne rien faire (c'est arrivé au passage à electron-builder 26).
+  if (restored !== 0 || !electronOpensDatabase()) {
     console.error('⚠️  ABI Electron NON restaurée : lancer `npm run rebuild:native`.');
-    process.exit(restored);
+    process.exit(restored || 1);
   }
 }
 
