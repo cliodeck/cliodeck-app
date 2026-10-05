@@ -40,8 +40,8 @@ D'où la règle : `"notarize": true`, et **uniquement** un profil trousseau
 
 La règle ne change pas, mais ses raisons ont bougé. Lu dans le code de la
 26.15.3 (`MacTargetHelper.getNotarizeOptions`), **pas encore éprouvé par une
-vraie notarisation** — le premier `npm run release:mac*` fait avec cette
-version tiendra lieu de test :
+vraie notarisation** — le premier `npm run release:mac*` mené à son terme
+avec cette version tiendra lieu de test :
 
 - `"notarize"` n'accepte plus qu'un booléen : la forme `{ "teamId": … }` est
   refusée dès le chargement de la configuration.
@@ -51,6 +51,31 @@ version tiendra lieu de test :
   build s'arrête. Raison de plus pour ne pas le définir.
 - Sans identifiants, la notarisation est toujours sautée avec un
   avertissement : `build:mac*` signe sans notariser.
+
+### La signature passe par un crochet (`scripts/mac-sign.cjs`)
+
+Le premier build signé sous la 26 s'est arrêté à la signature :
+
+```
+Developer ID Application: Frédéric Clavert (56789J6QWG): no identity found
+```
+
+Le certificat était pourtant dans le trousseau. electron-builder 26 prépare
+la signature avec l'**empreinte** SHA-1 du certificat, puis la remplace par
+son **nom** au moment d'appeler `codesign` — et `codesign` ne retrouve pas une
+identité par un nom accentué. Mesuré à blanc (`codesign --dryrun`) : par le
+nom, échec ; par l'empreinte ou par un fragment sans accent, succès. La 24
+passait l'empreinte.
+
+`mac.sign` désigne donc `scripts/mac-sign.cjs`, qui reçoit les options avant
+ce remplacement et signe avec elles, par la fonction qu'electron-builder
+aurait appelée. Les 952 appels à `codesign` d'un build arm64 sont les mêmes
+qu'avant, à l'identité près.
+
+Le défaut est corrigé en amont
+([electron-builder@56d2d746](https://github.com/electron-userland/electron-builder/commit/56d2d746),
+2026-09-27), mais dans aucune version publiée de la série 26 (vérifié jusqu'à
+la 26.17.0). Le crochet est à retirer quand ce sera le cas.
 
 ## Identifiants
 
