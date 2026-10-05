@@ -146,7 +146,7 @@ Full documentation lives in the **[ClioDeck Wiki](https://github.com/cliodeck/cl
 
 | Layer | Technologies |
 |-------|--------------|
-| **Frontend** | Electron 40, React 18, TypeScript, CodeMirror 6 / Lezer, Zustand, Vite |
+| **Frontend** | Electron 43, React 18, TypeScript, CodeMirror 6 / Lezer, Zustand, Vite |
 | **Backend** | Node.js, better-sqlite3, hnswlib-node, pdfjs-dist, chokidar |
 | **LLM layer** | Embedded (`node-llama-cpp`), Ollama, OpenAI-compatible, Anthropic, Mistral, Gemini (typed provider registry) |
 | **Embeddings** | nomic-embed-text, mxbai-embed-large, Nomic Embed v2 (embedded), OpenAI / Mistral / Gemini embeddings |

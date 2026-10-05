@@ -451,7 +451,7 @@ liste ci-dessus : l'utilisateur est prévenu.
 
 ## 3. Known technical debt
 
-- **Electron 40.9.2** is current but will need periodic bumps
+- **Electron 43.7.7** since 2026-10-05 ([#146](https://github.com/cliodeck/cliodeck-app/issues/146)); the 40 series had been unmaintained since 2026-07-01. Series 43 is maintained until **2027-01-05**. The next bump (Electron ≥ 44) is gated on `better-sqlite3` 13, the N-API rewrite: the 12.x line has no binary for Electron 44's ABI, and is already compiled from source for Electron 43. After each bump, rerun `npm run test:e2e` — `journey-presentation-pdf` is the only check of the Chromium print path ([#148](https://github.com/cliodeck/cliodeck-app/issues/148)).
 - **No red suites left**: the 6 Brainstorm jsdom failures were fixed
   (missing `window.electron.config` mock, 2026-07-18) and the 8 sqlite-ABI
   failures in 2026-07-19. What remains are 75 legitimate **skips** — suites
