@@ -10,7 +10,7 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 
 **[Download v1.0.0-rc.5](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.5)** — release candidate.
 
-- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app
+- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app. ClioDeck starts on macOS 12, but **Ollama needs macOS 14 (Sonoma) or later**. On an older macOS, local AI means the embedded models (their engine is built for macOS 14 too; the generation model did answer on macOS 12 when tried, with no guarantee below), or use a cloud provider
 - **Linux** — AppImage and `.deb` for **x86_64** (`uname -m` prints `x86_64`); no arm64 build. On Ubuntu 24.04 and later, prefer the `.deb`: the AppImage cannot use Chromium's sandbox there
 - **Windows** — no build shipped; the code should work on Windows but is **untested**
 
@@ -65,9 +65,9 @@ Two layers of durable context, both local-only and never leaked to MCP clients u
 
 ### 1. Pick how the AI runs
 
-**Fully local, nothing to install** — download one of the small embedded models from Settings → LLM (Qwen2.5-0.5B, ~470 MB, or Qwen2.5-1.5B, ~1 GB), plus the embedded embedding model (Nomic Embed Text v2, ~344 MB) if you want RAG. Modest quality, but no dependency and no network.
+**Fully local, nothing to install** — in Settings, switch to **Expert** mode and download one of the small embedded models (Qwen2.5-0.5B, ~470 MB, or Qwen2.5-1.5B, ~1 GB), plus the embedded embedding model (Nomic Embed Text v2, ~344 MB) if you want RAG. Modest quality, but no dependency and no network.
 
-**Local with Ollama** — better quality, still offline:
+**Local with Ollama** — better quality, still offline. On a Mac, Ollama itself requires macOS 14 (Sonoma) or later:
 
 ```bash
 # macOS
