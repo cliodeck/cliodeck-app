@@ -67,7 +67,14 @@ export class DocumentChunker {
     }
 
     // Découper en chunks
-    const words = fullText.split(/\s+/).filter((w) => w.length > 0);
+    // Chaque mot avec sa position dans le texte complet : c'est elle qui donne
+    // la page d'un extrait.
+    const words: string[] = [];
+    const wordStarts: number[] = [];
+    for (const match of fullText.matchAll(/\S+/g)) {
+      words.push(match[0]);
+      wordStarts.push(match.index);
+    }
 
     let i = 0;
     while (i < words.length) {
@@ -87,12 +94,12 @@ export class DocumentChunker {
       const chunkWords = words.slice(i, endIndex);
       const chunkText = chunkWords.join(' ');
 
-      // Trouver la position dans le texte complet
-      // Pour simplifier, on cherche la première occurrence du premier mot
-      const searchStart = i > 0 ? chunks[chunks.length - 1]?.endPosition || 0 : 0;
-      const firstWordIndex = fullText.indexOf(chunkWords[0], searchStart);
-      const chunkStart = firstWordIndex >= 0 ? firstWordIndex : searchStart;
-      const chunkEnd = chunkStart + chunkText.length;
+      // Chercher le premier mot de l'extrait après la fin du précédent, comme
+      // c'était fait, le trouvait trop loin — les extraits se recouvrent — et
+      // la position bondissait à chaque extrait : sur un article de 28 pages,
+      // tous annonçaient la dernière page à partir du sixième (#160).
+      const chunkStart = wordStarts[i];
+      const chunkEnd = wordStarts[endIndex - 1] + words[endIndex - 1].length;
 
       const pageNumber = this.findPageNumber(chunkStart, pageMapping);
 

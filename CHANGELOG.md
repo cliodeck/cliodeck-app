@@ -57,6 +57,24 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Le numéro de page des extraits dérivait** (#160). La page annoncée était
+  après celle où se trouve le texte, et de plus en plus au fil du document :
+  le recouvrement entre deux extraits était compté deux fois. Sur 39 PDF
+  réels, 21 % seulement des extraits d'un document de plus de 40 pages
+  portaient la bonne page, et un quart des extraits de fin de document
+  avaient cinq pages d'avance ou plus. C'est ce numéro que l'assistant cite,
+  qui s'affiche sous ses réponses et qui sert à ouvrir le PDF. La page voyage
+  maintenant avec le texte. ⚠️ **Réindexer les PDF** pour corriger les extraits
+  déjà enregistrés.
+- **Les extraits dépassaient largement leur taille maximale** (#157) : 443 mots
+  en médiane pour une limite de 300, jusqu'à 2 213. Le texte extrait d'une
+  page de PDF ne contient aucun saut de ligne, donc chaque page formait un
+  bloc que le découpage refusait de recouper. Un bloc trop long est
+  maintenant recoupé à la fin d'une phrase. Les extraits sont plus précis,
+  Ollama n'en tronque plus, et 88 % tiennent d'un seul tenant dans le modèle
+  d'embeddings embarqué (28 % avant). Le découpage ne jette plus rien non
+  plus : ni le texte qui précède le premier titre, ni la fin d'un extrait qui
+  ne tombait pas sur un point. ⚠️ Même remède : réindexer.
 - **Avec le modèle d'embeddings embarqué, la plupart des PDF ne s'indexaient
   pas.** Ce modèle (Nomic Embed v2) n'accepte que 512 jetons, et le découpage
   par défaut produit des extraits de 674 jetons en médiane : le moteur

@@ -105,4 +105,40 @@ describe('DocumentChunker', () => {
       expect(stats.maxWordCount).toBeGreaterThan(0);
     });
   });
+
+  describe('page et position d’un extrait (#160)', () => {
+    // Le premier mot d'un extrait était cherché après la fin du précédent,
+    // donc trop loin puisque les extraits se recouvrent : la position
+    // bondissait, et tous les extraits finissaient par annoncer la dernière page.
+    const PER_PAGE = 34;
+    const pages = Array.from({ length: 20 }, (_, p) => ({
+      pageNumber: p + 1,
+      text: Array.from({ length: PER_PAGE }, (_, s) => `Phrase s${p * PER_PAGE + s + 1} alpha beta gamma delta epsilon zeta eta theta iota fin.`).join(' '),
+    }));
+    const fullText = pages.map((page) => page.text + '\n\n').join('');
+    const firstId = (text: string) => Number(/\bs(\d+)\b/.exec(text)?.[1]);
+
+    it('enregistre la position réelle du début de l’extrait', () => {
+      const chunks = new DocumentChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(pages, 'doc');
+
+      for (const chunk of chunks) {
+        const firstWord = chunk.content.split(/\s+/)[0];
+        expect(fullText.slice(chunk.startPosition).startsWith(firstWord)).toBe(true);
+      }
+    });
+
+    it('annonce la page où l’extrait commence, jusqu’à la fin du document', () => {
+      const chunks = new DocumentChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(pages, 'doc');
+
+      for (const chunk of chunks) {
+        // La page du premier mot : celle de la phrase en cours à cette position.
+        const before = fullText.slice(0, chunk.startPosition + 1);
+        const expectedPage = (before.match(/\n\n/g)?.length ?? 0) + 1;
+        expect(chunk.pageNumber).toBe(expectedPage);
+      }
+      expect(chunks[chunks.length - 1].pageNumber).toBe(20);
+      expect(new Set(chunks.map((chunk) => chunk.pageNumber)).size).toBe(20);
+      expect(firstId(chunks[0].content)).toBe(1);
+    });
+  });
 });
