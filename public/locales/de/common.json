@@ -2420,5 +2420,10 @@
     "messageAppImage": "Auf diesem System kann das AppImage sie nicht aktivieren und wurde ohne sie gestartet. Alles funktioniert, aber ein Schutz fehlt. Installieren Sie statt des AppImage das .deb-Paket, um ihn zurückzubekommen.",
     "detailsAppImage": "Die Sandbox trennt die Anzeige vom Rest Ihres Computers: Würde ein präparierter Inhalt eine Chromium-Lücke ausnutzen, bliebe er eingeschlossen. Sie beruht auf Benutzer-Namensräumen, die manche Systeme einschränken – Ubuntu 24.04 standardmäßig. Das .deb-Paket installiert die nötigen Berechtigungen; ein AppImage kann das nicht.",
     "message": "Die Anwendung wurde mit der Option --no-sandbox gestartet. Alles funktioniert, aber ein Schutz fehlt. Starten Sie sie ohne diese Option neu, um ihn zurückzubekommen."
+  },
+  "localAiLimited": {
+    "title": "Ollama erfordert macOS 14",
+    "message": "Sie verwenden macOS {{version}}: Ollama lässt sich darauf nicht installieren. Für lokale KI bleiben die eingebetteten, bescheideneren Modelle: Laden Sie in den Einstellungen im Modus „Experte“ ein Generierungsmodell und das Embedding-Modell herunter. Andernfalls wählen Sie einen Online-Anbieter.",
+    "details": "Ohne Embedding-Modell können Ihre Quellen weder indexiert noch durchsucht werden. Die Engine der eingebetteten Modelle ist für macOS 14 gebaut: In einem Test hat sie unter macOS 12 geantwortet, darunter ist aber nichts garantiert. Diese Meldung erscheint nach dem Schließen nicht wieder."
   }
 }

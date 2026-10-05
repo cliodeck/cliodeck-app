@@ -148,6 +148,12 @@ fonctionnalité nouvelle.
 
 ### Added
 
+- **Sous macOS 12 ou 13, ClioDeck dit qu'Ollama ne peut pas y être installé**,
+  et ce qui reste pour une IA locale : les modèles embarqués — génération et
+  embeddings —, rangés dans le mode Expert des paramètres et faciles à ne
+  jamais trouver, ou un fournisseur en ligne. Ollama exige macOS 14 ; on ne
+  l'apprenait qu'en cherchant pourquoi rien ne s'indexait. L'avertissement
+  s'affiche au lancement et ne revient pas une fois fermé.
 - **`npm run project:health`** (PR #113) : bilan de santé d'un projet, en
   lecture seule stricte, qui rend visibles les invariants dont la violation
   était silencieuse — un document par fichier PDF, aucun extrait sans

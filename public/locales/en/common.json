@@ -2420,5 +2420,10 @@
     "messageAppImage": "On this system the AppImage cannot enable it and started without it. Everything works, but one protection is missing. To get it back, install the .deb package instead of the AppImage.",
     "detailsAppImage": "The sandbox isolates the display engine from the rest of your computer: if booby-trapped content exploited a Chromium flaw, it would stay contained. It relies on user namespaces, which some systems restrict — Ubuntu 24.04 by default. The .deb package installs the required permissions; an AppImage cannot.",
     "message": "The application was started with the --no-sandbox option. Everything works, but one protection is missing. Restart it without that option to get it back."
+  },
+  "localAiLimited": {
+    "title": "Ollama needs macOS 14",
+    "message": "You are running macOS {{version}}: Ollama cannot be installed on it. For local AI, the embedded models remain, more modest: in Settings, Expert mode, download a generation model and the embedding model. Otherwise, choose a cloud provider.",
+    "details": "Without an embedding model, your sources can be neither indexed nor searched. The engine behind the embedded models is built for macOS 14: it answered on macOS 12 in one test, but nothing is guaranteed below. This message will not come back once closed."
   }
 }

@@ -2420,5 +2420,10 @@
     "messageAppImage": "Sur ce système, l'AppImage ne peut pas l'activer et s'est lancée sans lui. Tout fonctionne, mais une protection manque. Pour la retrouver, installez le paquet .deb à la place de l'AppImage.",
     "detailsAppImage": "Le bac à sable isole l'affichage du reste de votre ordinateur : si un contenu piégé exploitait une faille de Chromium, il resterait enfermé. Il repose sur les espaces de noms utilisateur, que certains systèmes restreignent — Ubuntu 24.04 par défaut. Le paquet .deb installe les autorisations nécessaires ; une AppImage ne le peut pas.",
     "message": "L'application a été lancée avec l'option --no-sandbox. Tout fonctionne, mais une protection manque. Relancez-la sans cette option pour la retrouver."
+  },
+  "localAiLimited": {
+    "title": "Ollama demande macOS 14",
+    "message": "Vous utilisez macOS {{version}} : Ollama ne peut pas y être installé. Pour une IA locale, il reste les modèles embarqués, plus modestes : dans Paramètres, mode Expert, téléchargez un modèle de génération et le modèle d'embeddings. Sinon, choisissez un fournisseur en ligne.",
+    "details": "Sans modèle d'embeddings, vos sources ne peuvent être ni indexées ni interrogées. Le moteur des modèles embarqués est prévu pour macOS 14 : il a répondu sous macOS 12 lors d'un essai, mais rien n'est garanti en dessous. Ce message ne reviendra pas une fois fermé."
   }
 }

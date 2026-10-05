@@ -196,6 +196,11 @@ export interface AppConfig {
    * n'en laisse plus la mémoire au système (`dialog-default-path.ts`).
    */
   lastDialogDirectory?: string;
+  /**
+   * L'avertissement « Ollama demande macOS 14 » a été fermé : il ne
+   * revient pas aux lancements suivants (`useLocalAiSupportWarning`).
+   */
+  localAiNoticeDismissed?: boolean;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
