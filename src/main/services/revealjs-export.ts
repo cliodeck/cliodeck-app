@@ -636,15 +636,10 @@ export class RevealJsExportService {
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation HTML pour impression...', progress: 15 });
 
-      // Inject print-pdf class so reveal.js renders all slides
       const html = getRevealJsHTML(options.content, options)
         .replace('<body>', '<body class="reveal-viewport">');
-      const pdfHtml = html.replace(
-        'Reveal.initialize(',
-        'document.querySelector(".reveal").classList.add("print-pdf"); Reveal.initialize('
-      );
 
-      await writeFile(tmpHtml, pdfHtml, 'utf-8');
+      await writeFile(tmpHtml, html, 'utf-8');
 
       onProgress?.({ stage: 'converting', message: 'Rendu de la présentation...', progress: 40 });
 
@@ -655,17 +650,23 @@ export class RevealJsExportService {
         webPreferences: { nodeIntegration: false, contextIsolation: true },
       });
 
-      await win.loadFile(tmpHtml);
+      // Le mode impression de reveal.js se déclenche par l'URL, pas par une
+      // classe posée sur `.reveal` : sans `?print-pdf`, seule la diapositive
+      // courante est rendue et le PDF n'en contient qu'une.
+      await win.loadFile(tmpHtml, { search: 'print-pdf' });
 
       // Wait for reveal.js to finish rendering
       await new Promise<void>((resolve) => setTimeout(resolve, 2500));
 
       onProgress?.({ stage: 'converting', message: 'Génération du PDF...', progress: 70 });
 
+      // La taille de page vient de reveal.js, qui déclare en CSS (`@page`)
+      // celle de ses diapositives. Ne pas la redonner ici : `pageSize` se
+      // compte en pouces, et les 254000 × 190500 d'origine (des microns)
+      // donnaient des pages de plusieurs kilomètres, qu'Electron 43 refuse.
       const pdfData = await win.webContents.printToPDF({
         printBackground: true,
-        pageSize: { width: 254000, height: 190500 }, // 254mm × 190.5mm (16:12 ≈ 16:9)
-        landscape: true,
+        preferCSSPageSize: true,
       });
 
       const outputPath = options.outputPath || join(
