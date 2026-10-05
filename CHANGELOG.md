@@ -36,9 +36,32 @@ fonctionnalité nouvelle.
   Obsidian n'accepte plus qu'un dossier choisi dans le dialogue, l'accord de
   consentement ne vaut que pour le fournisseur réellement appelé, et trois
   handlers valident enfin leurs options.
+- **Electron 40 → 43** (#146, PR #149). La série 40 n'était plus maintenue
+  depuis le 1ᵉʳ juillet 2026 : plus aucun correctif d'Electron, de Chromium ni
+  de Node. La série 43 l'est jusqu'au 5 janvier 2027. Sur 39 PDF réels, le
+  texte extrait est identique avant et après.
+- **AppImage : des bibliothèques pouvaient être chargées depuis le dossier
+  courant** (GHSA-7g7r-gx96-252g, #147, PR #150). Le lanceur produit par
+  electron-builder 24 laissait un segment vide dans `LD_LIBRARY_PATH` : une
+  bibliothèque `.so` déposée dans le dossier d'où l'AppImage était lancée
+  s'exécutait dans ClioDeck. ⚠️ **Les AppImage des versions précédentes sont
+  concernées** : ne pas les lancer depuis un dossier partagé. Corrigé par
+  electron-builder 26, et contrôlé sur l'AppImage produite à chaque
+  construction.
+- **L'AppImage prévient quand elle tourne sans le bac à sable de Chromium**
+  (#151). Là où le système restreint les espaces de noms utilisateur — Ubuntu
+  24.04 par défaut —, l'AppImage ne peut pas l'activer : elle refusait de
+  démarrer, elle démarre désormais sans lui. Un avertissement le dit au
+  lancement, reste affiché jusqu'à ce qu'on le ferme, et renvoie au paquet
+  `.deb`, qui l'active. ⚠️ Sous Ubuntu, préférer le `.deb`.
 
 ### Fixed
 
+- **L'export PDF d'une présentation ne contenait que la première diapositive**
+  (#148, PR #149), sur des pages de plusieurs kilomètres, en annonçant un
+  succès. Deux causes : une taille de page donnée en microns là où des pouces
+  sont attendus, et le mode impression de reveal.js jamais déclenché. Une page
+  par diapositive désormais, vérifiée par un parcours e2e.
 - **Sous Windows, l'OCR des PDF d'archives ne démarrait jamais, sans le dire**
   (#138). `PDFConverter` ne cherchait Poppler que dans des emplacements Unix
   et retombait sur `which`, absent de Windows. L'échec était avalé par la
