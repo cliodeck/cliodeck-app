@@ -2,9 +2,12 @@
  * Filesystem and Dialog IPC handlers
  */
 import { ipcMain, dialog, shell } from 'electron';
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
 import { rememberConsentedPath } from '../utils/user-consented-paths.js';
+import { resolveDialogDefaultPath, directoryToRemember } from '../utils/dialog-default-path.js';
+import { configManager } from '../../services/config-manager.js';
 import {
   validate,
   FsReadDirectorySchema,
@@ -17,6 +20,20 @@ import {
   DialogSaveFileSchema,
 } from '../utils/validation.js';
 import { logger } from '../../utils/logger.js';
+
+/**
+ * Retient le dossier du dernier choix pour le prochain dialogue. Au mieux :
+ * un réglage de confort ne doit jamais faire échouer une ouverture de fichier.
+ */
+function rememberDialogDirectory(chosenPath: string): void {
+  try {
+    configManager.set('lastDialogDirectory', directoryToRemember(chosenPath));
+  } catch (error: unknown) {
+    logger.warn('ipc', 'dialog:remember-directory-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 export function setupFilesystemHandlers() {
   // Filesystem handlers
@@ -132,7 +149,11 @@ export function setupFilesystemHandlers() {
   ipcMain.handle('dialog:open-file', async (_event, rawOptions: unknown) => {
     const options = validate(DialogOpenFileSchema, rawOptions);
     console.log('📞 IPC Call: dialog:open-file', options);
-    const result = await dialog.showOpenDialog(options as any);
+    const defaultPath = await resolveDialogDefaultPath(
+      options.defaultPath,
+      configManager.get('lastDialogDirectory')
+    );
+    const result = await dialog.showOpenDialog({ ...options, defaultPath } as OpenDialogOptions);
     // Le choix vient de l'utilisateur, pas du renderer : c'est le
     // consentement explicite que `path-validator` exige pour autoriser un
     // accès hors projet (ouvrir un document rangé ailleurs).
@@ -140,6 +161,8 @@ export function setupFilesystemHandlers() {
       for (const p of result.filePaths ?? []) {
         await rememberConsentedPath(p);
       }
+      const first = result.filePaths?.[0];
+      if (first) rememberDialogDirectory(first);
     }
     console.log('📤 IPC Response: dialog:open-file', {
       canceled: result.canceled,
@@ -151,11 +174,16 @@ export function setupFilesystemHandlers() {
   ipcMain.handle('dialog:save-file', async (_event, rawOptions: unknown) => {
     const options = validate(DialogSaveFileSchema, rawOptions);
     console.log('📞 IPC Call: dialog:save-file', options);
-    const result = await dialog.showSaveDialog(options as any);
+    const defaultPath = await resolveDialogDefaultPath(
+      options.defaultPath,
+      configManager.get('lastDialogDirectory')
+    );
+    const result = await dialog.showSaveDialog({ ...options, defaultPath } as SaveDialogOptions);
     // Même raisonnement qu'à l'ouverture : « Enregistrer sous » hors projet
     // est légitime dès lors que l'utilisateur a désigné la destination.
     if (!result.canceled && result.filePath) {
       await rememberConsentedPath(result.filePath);
+      rememberDialogDirectory(result.filePath);
     }
     console.log('📤 IPC Response: dialog:save-file', {
       canceled: result.canceled,
