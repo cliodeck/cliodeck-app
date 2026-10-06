@@ -1,4 +1,5 @@
 import type { Citation, ZoteroSliceState, BibliographySliceCreator } from './types';
+import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 
 /**
  * Rattache un PDF téléchargé à son entrée : `file` pour la session, et la
@@ -195,9 +196,10 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
         console.warn('Could not load project config:', configError);
       }
 
-      // Find citations with Zotero PDFs but no local file
+      // Find citations with Zotero PDFs but no local PDF — a notice whose
+      // file is an HTML snapshot still needs its PDF.
       const citationsNeedingPDFs = citations.filter(
-        (c) => !c.file && c.zoteroAttachments && c.zoteroAttachments.length > 0
+        (c) => !isPdfPath(c.file) && c.zoteroAttachments && c.zoteroAttachments.length > 0
       );
 
       if (citationsNeedingPDFs.length === 0) {
