@@ -111,6 +111,43 @@ describe('BibliographyMetadataService', () => {
       expect(merged[0].zoteroAttachments?.[0].filename).toBe('jan.pdf');
       expect(merged[1].zoteroAttachments?.[0].filename).toBe('feb.pdf');
     });
+
+    // Avant le 2026-09-14, la synchronisation rattachait aussi les instantanés
+    // HTML de Zotero : le .bib désigne alors une page web, pas un PDF.
+    const downloadedPdf = [
+      {
+        key: 'att-pdf',
+        filename: 'Vaswani.pdf',
+        contentType: 'application/pdf',
+        downloaded: true,
+        localPath: '/projet/PDFs/Vaswani.pdf',
+      },
+    ] as Citation['zoteroAttachments'];
+
+    const reloaded = async (file: string, attachments: Citation['zoteroAttachments']) => {
+      await BibliographyMetadataService.saveMetadata(tmpDir, [
+        makeCitation({ zoteroKey: 'S84VK4DC', file, zoteroAttachments: attachments }),
+      ]);
+      const metadata = await BibliographyMetadataService.loadMetadata(tmpDir);
+      const fresh = [makeCitation({ zoteroKey: 'S84VK4DC', file })];
+      return BibliographyMetadataService.mergeCitationsWithMetadata(fresh, metadata)[0];
+    };
+
+    it('préfère le PDF téléchargé quand le .bib désigne un instantané HTML', async () => {
+      const merged = await reloaded('/projet/PDFs/1706.html', downloadedPdf);
+      expect(merged.file).toBe('/projet/PDFs/Vaswani.pdf');
+    });
+
+    it('garde le PDF du .bib quand il en désigne un', async () => {
+      const merged = await reloaded('/projet/PDFs/choisi-a-la-main.pdf', downloadedPdf);
+      expect(merged.file).toBe('/projet/PDFs/choisi-a-la-main.pdf');
+    });
+
+    it('garde l’instantané tant qu’aucun PDF n’a été téléchargé', async () => {
+      const pending = [{ key: 'att-pdf', filename: 'Vaswani.pdf', contentType: 'application/pdf', downloaded: false }];
+      const merged = await reloaded('/projet/PDFs/1706.html', pending as Citation['zoteroAttachments']);
+      expect(merged.file).toBe('/projet/PDFs/1706.html');
+    });
   });
 
   describe('v1 → v2 migration', () => {

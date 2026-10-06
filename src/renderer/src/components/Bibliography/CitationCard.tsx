@@ -7,6 +7,7 @@ import { TagManager } from './TagManager';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import {
   hiddenAutomaticCount,
   projectTagsOf,
@@ -42,7 +43,9 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
   const loadFile = useEditorStore((state) => state.loadFile);
   const { currentProject } = useProjectStore();
 
-  const hasPDF = !!citation.file;
+  // Un instantané HTML rattaché à la notice n'est pas un PDF : la carte
+  // propose alors le PDF de Zotero au lieu d'indexer une page web.
+  const hasPDF = isPdfPath(citation.file);
   const hasZoteroPDFs = !!citation.zoteroAttachments && citation.zoteroAttachments.length > 0;
   const zoteroCount = citation.zoteroAttachments?.length || 0;
   // Check if indexed by file path OR by bibtexKey (for cases where PDFs were indexed separately)

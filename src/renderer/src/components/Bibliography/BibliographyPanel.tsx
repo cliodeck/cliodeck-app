@@ -4,6 +4,7 @@ import { Plus, FileStack, Download, BarChart3, Trash2, FileDown } from 'lucide-r
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
+import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
@@ -51,12 +52,12 @@ export const BibliographyPanel: React.FC = () => {
 
   // Count citations with PDFs and citations needing PDFs
   const citationsWithPDFs = useMemo(
-    () => citations.filter((c) => c.file).length,
+    () => citations.filter((c) => isPdfPath(c.file)).length,
     [citations]
   );
   const citationsNeedingPDFs = useMemo(
     () => citations.filter(
-      (c) => !c.file && c.zoteroAttachments && c.zoteroAttachments.length > 0
+      (c) => !isPdfPath(c.file) && c.zoteroAttachments && c.zoteroAttachments.length > 0
     ).length,
     [citations]
   );

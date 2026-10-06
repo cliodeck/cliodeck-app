@@ -57,6 +57,14 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **Quatre « erreurs » à chaque indexation groupée : des pages web prises
+  pour des PDF.** Avant le 14 septembre, la synchronisation Zotero rapatriait
+  aussi les instantanés HTML et les rattachait aux notices. L'app les envoyait
+  à l'indexation comme des PDF (« Invalid PDF structure ») et, la notice ayant
+  « déjà un fichier », ne proposait plus jamais de télécharger son vrai PDF.
+  Une pièce jointe qui n'est pas un PDF n'est plus comptée comme telle : elle
+  sort du lot, et le PDF de Zotero redevient téléchargeable — et le reste
+  après un redémarrage.
 - **« Indexation terminée : 55 indexés, 4 erreurs » — mais lesquelles ?** Le
   bilan d'une indexation ou d'un téléchargement groupé ne donnait que le
   nombre d'échecs ; les messages existaient et n'étaient jamais affichés ni

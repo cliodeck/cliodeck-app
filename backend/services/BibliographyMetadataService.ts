@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
+import { isPdfPath } from '../core/bibliography/pdf-attachment';
 
 /**
  * Metadata stored for each citation (data that can't be stored in BibTeX)
@@ -174,7 +175,10 @@ export class BibliographyMetadataService {
         // citation that was first indexed via the Zotero download flow comes
         // back without a `file` after a reload — the renderer sees
         // `hasPDF === false`, and the re-index button throws "No PDF file
-        // associated with this citation". BibTeX-provided paths always win.
+        // associated with this citation". A PDF path given by the BibTeX entry
+        // always wins; a path that is not a PDF (an HTML snapshot attached by
+        // an older Zotero sync) yields to the downloaded PDF — otherwise the
+        // download would be forgotten at every reload.
         const downloadedAttachment = attachments?.find(
           (a) => a.downloaded && a.localPath,
         );
@@ -186,7 +190,9 @@ export class BibliographyMetadataService {
           zoteroNotes: citationMeta.zoteroNotes ?? citation.zoteroNotes,
           dateAdded: citationMeta.dateAdded || citation.dateAdded,
           dateModified: citationMeta.dateModified || citation.dateModified,
-          file: citation.file ?? downloadedAttachment?.localPath,
+          file: isPdfPath(citation.file)
+            ? citation.file
+            : downloadedAttachment?.localPath ?? citation.file,
         };
       }
 

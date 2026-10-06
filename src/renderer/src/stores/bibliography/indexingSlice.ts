@@ -1,4 +1,5 @@
 import type { IndexingSliceState, BibliographySliceCreator } from './types';
+import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 
 export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> = (set, get) => ({
   indexedFilePaths: new Set<string>(),
@@ -17,7 +18,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       const { citations, indexedFilePaths } = get();
       const citation = citations.find((c) => c.id === citationId);
 
-      if (!citation || !citation.file) {
+      if (!citation || !isPdfPath(citation.file)) {
         throw new Error('No PDF file associated with this citation');
       }
 
@@ -198,7 +199,9 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     const alreadyIndexed = get().indexedFilePaths;
     const seenInBatch = new Set<string>();
     const citationsWithPDFs = citations.filter((c) => {
-      if (!c.file) return false;
+      // Un fichier rattaché qui n'est pas un PDF (instantané HTML) n'est pas
+      // à indexer : ce n'est pas une erreur, c'est hors lot.
+      if (!isPdfPath(c.file)) return false;
       if (alreadyIndexed.has(c.file)) return false;
       if (seenInBatch.has(c.file)) return false;
       seenInBatch.add(c.file);
@@ -209,7 +212,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       return { indexed: 0, skipped: 0, errors: [] };
     }
 
-    const itemsWithFile = citations.filter((c) => c.file).length;
+    const itemsWithFile = citations.filter((c) => isPdfPath(c.file)).length;
     if (itemsWithFile > citationsWithPDFs.length) {
       const duplicates = itemsWithFile - citationsWithPDFs.length;
       console.log(
