@@ -57,6 +57,10 @@ fonctionnalité nouvelle.
 
 ### Fixed
 
+- **« Indexation terminée : 55 indexés, 4 erreurs » — mais lesquelles ?** Le
+  bilan d'une indexation ou d'un téléchargement groupé ne donnait que le
+  nombre d'échecs ; les messages existaient et n'étaient jamais affichés ni
+  journalisés. Le bilan les liste maintenant, PDF par PDF, avec la cause.
 - **Le numéro de page des extraits dérivait** (#160). La page annoncée était
   après celle où se trouve le texte, et de plus en plus au fil du document :
   le recouvrement entre deux extraits était compté deux fois. Sur 39 PDF

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Plus, FileStack, Download, BarChart3, Trash2, FileDown } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { withErrorDetails } from './errorDetails';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
@@ -193,11 +194,14 @@ export const BibliographyPanel: React.FC = () => {
     try {
       const result = await indexAllPDFs();
       await useDialogStore.getState().showAlert(
-        t('bibliography.indexAllComplete', {
-          indexed: result.indexed,
-          skipped: result.skipped,
-          errors: result.errors.length,
-        })
+        withErrorDetails(
+          t('bibliography.indexAllComplete', {
+            indexed: result.indexed,
+            skipped: result.skipped,
+            errors: result.errors.length,
+          }),
+          result.errors
+        )
       );
     } catch (error) {
       console.error('Failed to index all PDFs:', error);
@@ -226,11 +230,14 @@ export const BibliographyPanel: React.FC = () => {
     try {
       const result = await downloadAllMissingPDFs(currentProject.path);
       await useDialogStore.getState().showAlert(
-        t('bibliography.downloadAllComplete', {
-          downloaded: result.downloaded,
-          skipped: result.skipped,
-          errors: result.errors.length,
-        })
+        withErrorDetails(
+          t('bibliography.downloadAllComplete', {
+            downloaded: result.downloaded,
+            skipped: result.skipped,
+            errors: result.errors.length,
+          }),
+          result.errors
+        )
       );
     } catch (error) {
       console.error('Failed to download all PDFs:', error);

@@ -280,6 +280,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
             batchIndexing: { ...state.batchIndexing, indexed }
           }));
         } else {
+          console.error('❌ [indexing] Échec:', citation.title, result.error);
           errors.push(`${citation.title}: ${result.error}`);
         }
 
@@ -288,6 +289,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         }));
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('❌ [indexing] Échec:', citation.title, errorMsg);
         errors.push(`${citation.title}: ${errorMsg}`);
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
           detail: { citationId: citation.id, success: false, error: errorMsg }
