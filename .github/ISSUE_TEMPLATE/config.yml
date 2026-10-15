@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feedback and questions about using ClioDeck
+    url: https://github.com/cliodeck/cliodeck-app/discussions/categories/feedback
+    about: What was confusing, where you hesitated, how to do something.
+  - name: Ideas and needs
+    url: https://github.com/cliodeck/cliodeck-app/discussions/categories/ideas
+    about: Describe a need. There is no promise it will be implemented.
+  - name: Share a mode or a recipe
+    url: https://github.com/cliodeck/cliodeck-app/discussions/categories/modes-and-recipes
+    about: Post a mode (JSON) or a recipe (YAML). Shared under CC0.
+  - name: Security vulnerability
+    url: https://github.com/cliodeck/cliodeck-app/security/advisories/new
+    about: Please report it privately, not in a public issue.
