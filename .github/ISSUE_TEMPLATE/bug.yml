@@ -1,0 +1,148 @@
+name: Bug report
+description: Something is broken, or a result is wrong (even without an error message).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this. *Vous pouvez écrire en français, in English, oder auf Deutsch.*
+
+        Silent problems matter as much as crashes: a missing source, a wrong page number, a bibliography entry that disappeared. Please report those too.
+
+        **Do not attach** private, unpublished or sensitive archival material, nor a project's `.cliodeck/` folder: it holds the full text of your sources and your chat history.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Wrong or missing result, without any error message
+        - Data lost or overwritten
+        - Error message
+        - Crash or freeze
+        - Display or interface problem
+        - Installation or startup
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Part of ClioDeck
+      multiple: true
+      options:
+        - Zotero / bibliography
+        - PDFs (secondary sources)
+        - Tropy (primary sources, OCR)
+        - Obsidian vault
+        - Reading notes
+        - Assistant / chat
+        - Brainstorm
+        - Editor
+        - Book chapters
+        - Presentations
+        - Export (PDF, Word…)
+        - Modes or recipes
+        - MCP server or MCP clients
+        - Settings
+        - Installation / update
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, and what happened instead of what you expected.
+      placeholder: |
+        1. I opened…
+        2. I clicked…
+        3. I expected… but…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: Can you make it happen again?
+      options:
+        - Every time
+        - Sometimes
+        - It happened once
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ClioDeck version
+      description: Help → About ClioDeck
+      placeholder: 1.0.0-rc.6
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: macOS 15.3, Windows 11, Ubuntu 24.04…
+
+  - type: dropdown
+    id: ai-setup
+    attributes:
+      label: How the AI runs
+      options:
+        - Ollama (local)
+        - Embedded model (local, no Ollama)
+        - Cloud provider (Anthropic, OpenAI-compatible, Mistral, Gemini…)
+        - Not relevant to this problem
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The generation model, and the embedding model if you know it.
+      placeholder: qwen3:14b, nomic-embed-text…
+
+  - type: textarea
+    id: corpus
+    attributes:
+      label: Corpus
+      description: Describe it, do not attach it. Number of documents, languages, OCR quality, where it comes from (Zotero, Tropy, Obsidian…).
+      placeholder: About 200 PDFs in French and German from Zotero; a Tropy project of 1,500 photographs with OCR…
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If ClioDeck crashed: the end of `~/.cliodeck-crash.log`. Otherwise, any red messages from View → Toggle Developer Tools → Console.
+        Logs often contain file names and paths: check them before posting.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have not attached private, unpublished or sensitive material, nor a `.cliodeck/` folder.
+          required: true
+        - label: I have checked that the logs I pasted contain no personal or sensitive information.
+          required: true
+        - label: I can reproduce the problem on a public-domain corpus (tell us which one above).
