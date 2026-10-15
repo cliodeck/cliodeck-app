@@ -158,4 +158,4 @@ The Markdown extensions written for the editor are kept as standalone packages u
 
 ## Contributing
 
-Issues and contributions are welcome on [GitHub](https://github.com/cliodeck/cliodeck-app/issues).
+See our [policy](CONTRIBUTING.md).
