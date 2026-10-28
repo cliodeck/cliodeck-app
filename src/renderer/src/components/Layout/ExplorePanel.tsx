@@ -1,17 +1,21 @@
 /**
  * ExplorePanel — center surface for the `explore` workspace mode.
  *
- * Aggregates analytical components (CorpusExplorer, Similarity,
- * Textometrics) behind simple tabs so historians have one place to go when
- * they want to know their corpus before brainstorming. No new analytics
- * are introduced here — this is pure routing / composition.
+ * Aggregates analytical components (CorpusExplorer, Textometrics) behind
+ * simple tabs so historians have one place to go when they want to know
+ * their corpus before brainstorming. No new analytics are introduced here —
+ * this is pure routing / composition.
+ *
+ * Similarity is NOT here: it compares the text being written with the
+ * corpus, so it belongs to the Write workspace (editor toolbar), where it
+ * already lives. A second entry point under Explore showed an empty panel
+ * without an open document (removed 2026-10-28).
  */
 
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Network, GitCompareArrows, BarChart3 } from 'lucide-react';
+import { Network, BarChart3 } from 'lucide-react';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
-import { useSimilarityStore } from '../../stores/similarityStore';
 import './ExplorePanel.css';
 
 const CorpusExplorerPanel = lazy(() =>
@@ -20,29 +24,14 @@ const CorpusExplorerPanel = lazy(() =>
 const TextometricsPanel = lazy(() =>
   import('../Corpus/TextometricsPanel').then((m) => ({ default: m.TextometricsPanel })),
 );
-const SimilarityPanel = lazy(() =>
-  import('../Similarity/SimilarityPanel').then((m) => ({ default: m.SimilarityPanel })),
-);
-
-type ExploreTab = 'corpus' | 'similarity' | 'textometrics';
+type ExploreTab = 'corpus' | 'textometrics';
 
 export const ExplorePanel: React.FC = () => {
   const { t } = useTranslation('common');
   const [tab, setTab] = useState<ExploreTab>('corpus');
-  const openSimilarity = useSimilarityStore((s) => s.openPanel);
-  const isSimilarityOpen = useSimilarityStore((s) => s.isPanelOpen);
-
-  // SimilarityPanel returns null unless `isPanelOpen` is true — nudge the
-  // store open whenever the user lands on that tab so the surface is visible.
-  useEffect(() => {
-    if (tab === 'similarity' && !isSimilarityOpen) {
-      openSimilarity();
-    }
-  }, [tab, isSimilarityOpen, openSimilarity]);
 
   const tabs: { id: ExploreTab; icon: React.ReactNode; label: string }[] = [
     { id: 'corpus', icon: <Network size={16} />, label: t('explore.tabs.corpus') },
-    { id: 'similarity', icon: <GitCompareArrows size={16} />, label: t('explore.tabs.similarity') },
     { id: 'textometrics', icon: <BarChart3 size={16} />, label: t('explore.tabs.textometrics') },
   ];
 
@@ -72,7 +61,6 @@ export const ExplorePanel: React.FC = () => {
       <div className="explore-panel__body" role="tabpanel">
         <Suspense fallback={<PanelLoadingFallback />}>
           {tab === 'corpus' && <CorpusExplorerPanel />}
-          {tab === 'similarity' && <SimilarityPanel />}
           {tab === 'textometrics' && <TextometricsPanel />}
         </Suspense>
       </div>
