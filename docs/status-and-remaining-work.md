@@ -486,6 +486,7 @@ Live documents — what is true now:
 | `docs/editor-proposals.md` | AI proposal contract — no AI writing feature bypasses it |
 | `docs/book-architecture.md` | The `book` project type: manifest, assembly, exports |
 | `docs/manuscript-corpus.md` | The manuscript as a fourth RAG corpus |
+| `docs/poids-du-manuscrit.md` | Why the manuscript outweighs the sources in chat answers (2026-10-28): verified causes, decisions, the three remedy tiers |
 | `docs/journal-usage-ia.md` | AI usage journal — two-layer model, schema, philosophy |
 | `docs/source-traceability.md` | Brainstorm citation click-through design |
 | `docs/path-a-readiness.md` | RAG benchmark gate for unified vector store |
