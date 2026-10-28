@@ -79,20 +79,25 @@ L'union `BrainstormSource` (`fusion-chat-service.ts`, reflétée dans
 `sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript'` et
 `kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit'`.
 
+## Le poids du manuscrit dans les réponses
+
+Rattaché pour ne jamais manquer, le corpus s'est mis à toujours arriver :
+places réservées sans plafond, inclusion inconditionnelle, prompt dont le
+format contredit la prose. Le constat, les décisions du 2026-10-28 et les
+trois paliers de remède sont dans [`poids-du-manuscrit.md`](poids-du-manuscrit.md).
+
 ## Reste à faire
 
-- **Exposition UI** : état de l'index, bouton de réindexation, et le
-  réglage `rag.indexManuscript` (déjà lu par le service, défaut activé)
-  dans les préférences. L'utilisateur n'a aujourd'hui aucun moyen de voir
-  ni de piloter ce corpus depuis l'interface.
 - **Coût réel non mesuré** : l'incrémental est vérifié par comptage
   d'appels, mais la durée d'une indexation complète avec un vrai modèle
   d'embedding sur un manuscrit long reste à mesurer.
 - Changer de modèle d'embedding invalide l'index (dimensions et espaces
-  différents) : `reindexAll()` existe pour ça, aucun déclencheur ne
-  l'appelle encore.
+  différents) : `reindexAll()` n'est appelé que par le bouton
+  « Réindexer » de la section des réglages, jamais au changement de modèle.
 
 **Livré depuis la rédaction de cette note** : le déclenchement automatique
-après sauvegarde (`editor-handlers.ts`, best-effort et silencieux) et le
+après sauvegarde (`editor-handlers.ts`, best-effort et silencieux), le
 câblage complet jusqu'à l'assistant (`includeManuscript` posé par
-`fusion-chat-service` quand le corpus est activé).
+`fusion-chat-service` quand le corpus est activé), et l'exposition dans
+l'interface — `ManuscriptCorpusSection` (Réglages → expert) montre l'état
+de l'index, offre la réindexation et le réglage `rag.indexManuscript`.
