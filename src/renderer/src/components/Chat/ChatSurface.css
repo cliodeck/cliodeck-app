@@ -147,11 +147,21 @@
 }
 
 .brainstorm-chat__source--vault .brainstorm-chat__source-kind {
-  background: color-mix(in srgb, #22c55e 25%, transparent);
+  background: color-mix(in srgb, var(--color-success) 25%, transparent);
 }
 
 .brainstorm-chat__source--primary .brainstorm-chat__source-kind {
-  background: color-mix(in srgb, #f59e0b 25%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 25%, transparent);
+}
+
+/* Le texte de l'auteur (manuscrit, notes de lecture) n'est pas une preuve :
+   teinte neutre et bord en pointillé, pour qu'il ne se lise jamais comme une
+   source de plus (docs/poids-du-manuscrit.md). */
+.brainstorm-chat__source--manuscript .brainstorm-chat__source-kind,
+.brainstorm-chat__source--readingNotes .brainstorm-chat__source-kind {
+  background: color-mix(in srgb, var(--text-tertiary) 25%, transparent);
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
 }
 
 .brainstorm-chat__source-score {

@@ -9,6 +9,7 @@ import {
   readingNoteHitsToSources,
   resolvePromptLanguage,
   resolveTurnOptions,
+  shouldIncludeManuscript,
   shouldIncludeReadingNotes,
 } from '../fusion-chat-service.js';
 import type {
@@ -239,7 +240,29 @@ describe('notes de lecture dans le chat', () => {
     expect(block).toContain("N'attribue JAMAIS leur contenu à l'ouvrage commenté");
     expect(block).toContain('[L1] @Braudel_1949 — La Méditerranée');
     expect(block).toContain('ÉTIQUETTES : chapitre-2');
+    // `NOTE :`, pas le champ `EXTRAIT` réservé aux sources.
+    expect(block).toContain('NOTE : La longue durée écrase l’événement.');
+    expect(block).not.toContain('EXTRAIT');
     expect(formatReadingNotesContext([])).toBe('');
+  });
+});
+
+describe('shouldIncludeManuscript — le manuscrit sort d’une recherche restreinte', () => {
+  it('entre dans une recherche ouverte, sort quand l’utilisateur a dit de quoi il parle', () => {
+    expect(shouldIncludeManuscript({ enabled: true, sourceType: 'both' })).toBe(true);
+    expect(shouldIncludeManuscript({ enabled: true, sourceType: 'secondary' })).toBe(true);
+    expect(shouldIncludeManuscript({ enabled: true, sourceType: 'both', documentIds: [] })).toBe(
+      true
+    );
+    expect(shouldIncludeManuscript({ enabled: false, sourceType: 'both' })).toBe(false);
+    // Notes seules, documents choisis, collection : la portée est dite.
+    expect(shouldIncludeManuscript({ enabled: true, sourceType: 'vault' })).toBe(false);
+    expect(
+      shouldIncludeManuscript({ enabled: true, sourceType: 'both', documentIds: ['d1'] })
+    ).toBe(false);
+    expect(
+      shouldIncludeManuscript({ enabled: true, sourceType: 'both', collectionKeys: ['ABC'] })
+    ).toBe(false);
   });
 });
 
@@ -282,7 +305,7 @@ describe('sélection de documents et manuscrit — ne pas prendre l’un pour l�
     const scope = formatSelectionScope(1, [{ title: 'La Méditerranée' }], 'en');
     expect(scope).toContain('SCOPE: the user has restricted this search to a single document');
     expect(scope).toContain('never their own manuscript');
-    expect(formatManuscriptContext([own], 0, 'en')).toContain('MANUSCRIPT IN PROGRESS');
+    expect(formatManuscriptContext([own], 'en')).toContain('MANUSCRIPT IN PROGRESS');
     expect(formatContextAsSystemPrompt([], 'en')).toContain('No excerpt from the searched sources');
     const sources = formatContextAsSystemPrompt(
       [
@@ -309,16 +332,48 @@ describe('sélection de documents et manuscrit — ne pas prendre l’un pour l�
   });
 
   it('présente le manuscrit comme le texte de l’utilisateur, pas « de l’auteur »', () => {
-    const block = formatManuscriptContext([own], 2);
+    const block = formatManuscriptContext([own]);
     expect(block).toContain("le texte que l'utilisateur est lui-même en train d'écrire");
     expect(block).not.toContain("texte de l'auteur");
-    expect(block).toContain('[M3] Mon article');
-    expect(formatManuscriptContext([], 0)).toBe('');
+    expect(formatManuscriptContext([])).toBe('');
+  });
+
+  it('dit par sa forme ce que dit sa prose : séparateur, numéros [M1]… à part, libellé PASSAGE', () => {
+    // Avant 2026-10 le bloc continuait la numérotation des sources ([M3]
+    // après [1] et [2]) et réutilisait le champ EXTRAIT que la règle des
+    // sources désigne comme seule matière citable : pour un petit modèle,
+    // deux indices de forme plus forts que deux phrases de négation.
+    const second: ManuscriptMappedSearchResult = { ...own, chunk: { ...own.chunk, id: 'm2' } };
+    const block = formatManuscriptContext([own, second]);
+    expect(block).toContain("--- MANUSCRIT DE L'UTILISATEUR (hors sources) ---");
+    expect(block).toContain('[M1] Mon article');
+    expect(block).toContain('[M2] Mon article');
+    expect(block).toContain('PASSAGE : Mon article soutient que…');
+    expect(block).not.toContain('EXTRAIT');
+    expect(block).toContain('jamais sur un passage [M]');
+  });
+
+  it('la règle des sources nomme les blocs du manuscrit et des notes seulement quand ils suivent', () => {
+    const hit = {
+      sourceType: 'secondary',
+      chunk: { id: 'c1', content: 'Bonjour', documentId: 'd1', chunkIndex: 0 },
+      document: { id: 'd1', title: 'Un article', author: 'X' },
+      similarity: 0.9,
+    } as unknown as MultiSourceSearchResult;
+    expect(formatContextAsSystemPrompt([hit], 'fr', { ownBlocksFollow: true })).toContain(
+      'ne sont PAS des sources'
+    );
+    // Annoncer un bloc absent serait un bruit qu'un petit modèle peut suivre.
+    expect(formatContextAsSystemPrompt([hit], 'fr')).not.toContain('ne sont PAS des sources');
+    expect(formatContextAsSystemPrompt([hit], 'en', { ownBlocksFollow: true })).toContain(
+      'are NOT sources'
+    );
   });
 
   it('sans extrait de source, n’annonce pas des « sources ci-dessous » devant le seul manuscrit', () => {
     const block = formatContextAsSystemPrompt([]);
     expect(block).toContain('Aucun extrait des sources');
+    expect(block).toContain('ne les présente JAMAIS comme le contenu d\'une source');
     expect(block).not.toContain('UNIQUEMENT');
   });
 });

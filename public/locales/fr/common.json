@@ -685,6 +685,13 @@
         "high": "sévérité haute"
       }
     },
+    "sourceKind": {
+      "archive": "Archive",
+      "bibliographie": "Bibliographie",
+      "note": "Note",
+      "manuscrit": "Manuscrit",
+      "lecture": "Note de lecture"
+    },
     "source": "Source",
     "page": "Page",
     "similarity": "Similarité",
@@ -707,6 +714,18 @@
       "sourceTypePrimary": "Sources primaires (Tropy)",
       "sourceTypeSecondary": "Sources secondaires (PDF)",
       "sourceTypeAll": "Toutes",
+      "corporaLabel": "Par corpus:",
+      "corpus": {
+        "secondary": "Bibliographie",
+        "primary": "Archives",
+        "vault": "Notes (vault)",
+        "manuscript": "Manuscrit",
+        "readingNotes": "Notes de lecture"
+      },
+      "corpusNotSearched": "non interrogé",
+      "corpusFailed": "échec",
+      "contextLabel": "Contexte:",
+      "contextManuscriptShare": "dont manuscrit",
       "documentsConsulted": "Documents consultés",
       "chunks": "chunks",
       "score": "score",
@@ -746,6 +765,8 @@
       "graphCitation": "Citation",
       "graphSimilarity": "Similarité",
       "sourcesLabel": "Sources",
+      "manuscriptLabel": "Manuscrit",
+      "readingNotesLabel": "Notes de lecture",
       "openProjectNotice": "Ouvrez un projet pour commencer le brainstorming.",
       "projectContext": "Contexte du projet",
       "recipesCount": "{{count}} recettes",

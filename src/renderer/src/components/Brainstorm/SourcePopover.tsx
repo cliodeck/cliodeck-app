@@ -31,6 +31,24 @@ import {
 } from '../../services/open-manuscript-source';
 import { eventDetail, eventSeverity, securityBadgeColor } from './security-badge';
 
+/**
+ * Le `kind` d'une source est un identifiant français (`manuscrit`,
+ * `lecture`…) qui s'affichait tel quel dans les interfaces anglaise et
+ * allemande : le badge passe par ces clés.
+ */
+const SOURCE_KIND_LABEL_KEYS: Record<BrainstormSource['kind'], string> = {
+  archive: 'chat.sourceKind.archive',
+  bibliographie: 'chat.sourceKind.bibliographie',
+  note: 'chat.sourceKind.note',
+  manuscrit: 'chat.sourceKind.manuscrit',
+  lecture: 'chat.sourceKind.lecture',
+};
+
+/** Clé i18n du badge de famille ; un `kind` inconnu (historique ancien) reste lisible tel quel. */
+export function sourceKindLabelKey(kind: BrainstormSource['kind']): string {
+  return SOURCE_KIND_LABEL_KEYS[kind] ?? kind;
+}
+
 interface Props {
   source: BrainstormSource;
   onClose: () => void;
@@ -164,7 +182,9 @@ export const SourcePopover: React.FC<Props> = ({ source, onClose }) => {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 8 }}>
         <div>
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{source.kind}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {t(sourceKindLabelKey(source.kind))}
+          </div>
           <strong>{source.title}</strong>
           {position && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>

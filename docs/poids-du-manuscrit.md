@@ -199,6 +199,24 @@ qu'il change des comptes et des places, pas des consignes.
   des caractères du contexte dans le panneau d'explication, et dans
   l'entrée du journal de recherche.
 
+**État (2026-10-28) : livré.** Constantes posées faute de mesure :
+`MANUSCRIPT_QUOTA_RATIO = 0,2`, soit 2 places sur 10, 4 sur 20, 1 dès que
+deux places existent, 0 quand topK vaut 1 ; `RetrievalQuery.manuscriptSlots`
+permet à l'appelant d'imposer la largeur (le palier 2 s'en sert). Mesure :
+`npm run rag:manuscript-share -- /chemin/du/projet [--since AAAA-MM-JJ]
+[--json]`, qui lit la base en lecture seule (`immutable`) et imprime la part
+par réponse et par mode de chat, puis l'histogramme de similarité par corpus
+— tronqué par le bas, puisque seuls les extraits retenus pour le prompt sont
+journalisés. Le panneau d'explication montre « Par corpus : Bibliographie 5 ·
+Archives 2 · Notes (vault) non interrogé · Manuscrit 2 · Notes de lecture 0 »
+et « Contexte : 12.4k caractères, dont manuscrit 3.0k (24 %) » ; l'en-tête
+de la liste sépare « Sources (N) · Manuscrit (N) » ; le badge est traduit et
+neutre. Le journal de recherche enregistre `includeManuscript`, les comptes
+par corpus et les caractères du contexte dans `inputMetadata` de l'opération
+`rag_query`. Limite assumée jusqu'au palier 2 : en mode Écrire, « qu'ai-je
+déjà écrit sur X ? » n'obtient que la bande (2 passages sur 10) tant que
+l'intention de rappel n'est pas détectée.
+
 ### Palier 2 — l'utilisateur décide
 
 - **Une quatrième case « Mon manuscrit »** à côté des trois autres, à

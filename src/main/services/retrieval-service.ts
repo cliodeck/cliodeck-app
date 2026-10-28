@@ -271,6 +271,25 @@ export interface RetrievalSearchStats {
       sourceType: string;
       chunkCount: number;
     }>;
+    /**
+     * Un compte par corpus, manuscrit et notes de lecture compris : ce que
+     * `totalResults` (sources externes seules) ne dit pas. `hitCount` après
+     * le seuil du corpus, `selectedCount` après la bande et l'inspecteur.
+     */
+    corpora: Array<{
+      source: RetrievalSourceOutcome['source'];
+      attempted: boolean;
+      ok: boolean;
+      hitCount: number;
+      selectedCount: number;
+    }>;
+    /** Posé par l'appelant qui construit le prompt (`fusion-chat-service`). */
+    contextChars?: {
+      total: number;
+      sources: number;
+      manuscript: number;
+      readingNotes: number;
+    };
   };
   timing: {
     searchMs: number;
@@ -323,6 +342,13 @@ export interface RetrievalQuery {
    * author consented (`rag.readingNotesCloudConsent`).
    */
   includeReadingNotes?: boolean;
+  /**
+   * Largeur de la bande du manuscrit (`retrieval-quota.ts`), en places.
+   * Omise : la part par défaut de `topK`. L'appelant l'élargit pour une
+   * question de rappel ou la portée « manuscrit seul », ou la réduit à zéro
+   * pour écarter le manuscrit du tri sans cesser de l'interroger.
+   */
+  manuscriptSlots?: number;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -652,6 +678,22 @@ class RetrievalService {
     const sourceType: 'primary' | 'secondary' | 'both' =
       q.sourceType === 'primary' || q.sourceType === 'secondary' ? q.sourceType : 'both';
 
+    // Ce qui a vraiment atteint le prompt, par corpus. `outcomes` dit ce que
+    // chaque corpus a rendu ; la bande du manuscrit et l'inspecteur passent
+    // ensuite, et l'écart entre les deux est précisément la part invisible
+    // que l'utilisateur ne pouvait pas voir (docs/poids-du-manuscrit.md).
+    const selectedBySource = new Map<string, number>();
+    for (const r of [...hits, ...manuscriptHits, ...readingNoteHits]) {
+      selectedBySource.set(r.sourceType, (selectedBySource.get(r.sourceType) ?? 0) + 1);
+    }
+    const corpora = outcomes.map((o) => ({
+      source: o.source,
+      attempted: o.attempted,
+      ok: o.ok,
+      hitCount: o.hitCount,
+      selectedCount: selectedBySource.get(o.source) ?? 0,
+    }));
+
     return {
       hits,
       manuscriptHits,
@@ -666,6 +708,7 @@ class RetrievalService {
           cacheHit: false,
           sourceType,
           documents: Array.from(documentMap.values()).slice(0, 10),
+          corpora,
         },
         timing: { searchMs },
       },
@@ -732,10 +775,15 @@ class RetrievalService {
       }
     }
 
-    // Places réservées au manuscrit : sans elles, la bibliographie prend
-    // tout le `topK` et le corpus manuscrit — indexé à chaque sauvegarde —
-    // n'atteint jamais l'assistant.
-    const sortedResults = selectWithManuscriptQuota(allSourceResults, topK);
+    // Bande du manuscrit (`retrieval-quota.ts`) : sans réserve, la
+    // bibliographie prenait tout le `topK` (rc.4) ; sans plafond, le
+    // manuscrit prenait tout le reste au mérite (2026-10). L'appelant peut
+    // fixer la largeur ; omise, elle découle de `topK`.
+    const sortedResults = selectWithManuscriptQuota(
+      allSourceResults,
+      topK,
+      q.manuscriptSlots
+    );
 
     // Run the inspector before returning chunks to the caller. In `warn`
     // mode this is a logging side-effect; in `audit`/`block` it filters

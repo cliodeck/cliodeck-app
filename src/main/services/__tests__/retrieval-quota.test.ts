@@ -1,18 +1,23 @@
 /**
- * Régression : le corpus manuscrit était indexé à chaque sauvegarde mais
- * n'atteignait jamais l'assistant. Deux causes cumulées —
+ * Deux régressions encadrent cette sélection.
  *
- *  1. les extraits du manuscrit portaient un score RRF (max ≈ 0,016) là où
- *     les autres corpus portent un cosinus filtré à 0,12 ;
- *  2. le `slice(0, topK)` s'appliquait au tri global.
+ * rc.4 : le manuscrit était indexé à chaque sauvegarde mais n'atteignait
+ * jamais l'assistant — ses extraits portaient un score RRF (max ≈ 0,016) là
+ * où les autres corpus portent un cosinus, et le `slice(0, topK)` du tri
+ * global l'éliminait dès que la bibliographie saturait. Le premier point est
+ * corrigé à la source (on publie le cosinus réel) ; la réserve de places
+ * couvre le second.
  *
- * Résultat : dès que la bibliographie rendait `topK` extraits, « qu'ai-je
- * déjà écrit sur X ? » restait sans réponse. Le point 1 est corrigé à la
- * source (on publie le cosinus réel) ; ces tests couvrent le point 2.
+ * 2026-10 : la réserve était un plancher sans plafond, et le manuscrit —
+ * écrit dans la langue de la question — gagnait les autres places au mérite
+ * jusqu'à être seul dans le prompt (`docs/poids-du-manuscrit.md`). La
+ * réserve est désormais une bande : au plus `slots` places, jamais une de
+ * plus.
  */
 import { describe, expect, it } from 'vitest';
 import {
   MANUSCRIPT_QUOTA_RATIO,
+  manuscriptSlots,
   selectWithManuscriptQuota,
 } from '../retrieval-quota.js';
 
@@ -37,23 +42,54 @@ const manuscrit = (n: number, base = 0.4): Hit[] =>
   }));
 
 const kinds = (hits: Hit[]) => hits.map((h) => h.sourceType);
+const ownCount = (hits: Hit[]) => kinds(hits).filter((k) => k === 'manuscript').length;
+
+describe('manuscriptSlots', () => {
+  it('accorde une part des places, au moins une, jamais toutes', () => {
+    expect(manuscriptSlots(10)).toBe(Math.round(10 * MANUSCRIPT_QUOTA_RATIO));
+    expect(manuscriptSlots(20)).toBe(4);
+    expect(manuscriptSlots(2)).toBe(1);
+    expect(manuscriptSlots(3)).toBe(1);
+  });
+
+  it('ne donne rien quand il n’y a qu’une place, ou quand le ratio est nul', () => {
+    // Une seule place : elle va aux sources. Avant, `max(1, …)` la donnait
+    // au manuscrit — 100 % du contexte.
+    expect(manuscriptSlots(1)).toBe(0);
+    expect(manuscriptSlots(0)).toBe(0);
+    expect(manuscriptSlots(10, 0)).toBe(0);
+  });
+});
 
 describe('selectWithManuscriptQuota', () => {
-  it('réserve des places au manuscrit malgré une bibliographie qui sature', () => {
-    // LE scénario du bug : 10 places, 20 extraits de bibliographie tous
-    // mieux notés. Avant, le manuscrit n'en obtenait aucune.
+  it('réserve des places au manuscrit malgré une bibliographie qui sature (garde-fou rc.4)', () => {
+    // LE scénario du bug d'origine : 10 places, 20 extraits de bibliographie
+    // tous mieux notés. Avant rc.4, le manuscrit n'en obtenait aucune.
     const out = selectWithManuscriptQuota([...biblio(20), ...manuscrit(5)], 10);
 
     expect(out).toHaveLength(10);
-    expect(kinds(out).filter((k) => k === 'manuscript').length).toBeGreaterThan(0);
+    expect(ownCount(out)).toBe(manuscriptSlots(10));
   });
 
-  it('ne dépasse jamais le quota', () => {
-    const out = selectWithManuscriptQuota([...biblio(20), ...manuscrit(20)], 10);
-    const n = kinds(out).filter((k) => k === 'manuscript').length;
+  it('ne dépasse jamais sa bande, même quand il gagnerait au mérite', () => {
+    // Manuscrit très pertinent, bibliographie moyenne : avant, le manuscrit
+    // prenait la réserve PUIS les autres places au mérite.
+    const out = selectWithManuscriptQuota([...biblio(20, 0.5), ...manuscrit(20, 0.95)], 10);
 
-    expect(n).toBeLessThanOrEqual(Math.round(10 * MANUSCRIPT_QUOTA_RATIO));
     expect(out).toHaveLength(10);
+    expect(ownCount(out)).toBe(manuscriptSlots(10));
+  });
+
+  it('ne remplit pas les places que des sources faibles laissent vides', () => {
+    // Le pire cas réel : trois extraits de repli cross-langue sous le seuil
+    // contre dix passages du manuscrit dans la langue de la question. Avant :
+    // dix passages du manuscrit, zéro source, en-tête « aucun extrait des
+    // sources ». Maintenant : les trois sources et la bande, rien de plus.
+    const out = selectWithManuscriptQuota([...biblio(3, 0.1), ...manuscrit(10, 0.45)], 10);
+
+    expect(kinds(out).filter((k) => k === 'secondary')).toHaveLength(3);
+    expect(ownCount(out)).toBe(manuscriptSlots(10));
+    expect(out).toHaveLength(3 + manuscriptSlots(10));
   });
 
   it('ne prend aucune place quand le manuscrit ne renvoie rien', () => {
@@ -63,15 +99,11 @@ describe('selectWithManuscriptQuota', () => {
     expect(kinds(out).every((k) => k === 'secondary')).toBe(true);
   });
 
-  it('laisse le manuscrit prendre plus que son quota s’il gagne au mérite', () => {
-    // Manuscrit très pertinent, bibliographie faible : le quota est un
-    // plancher, pas un plafond déguisé.
-    const out = selectWithManuscriptQuota(
-      [...biblio(3, 0.2), ...manuscrit(10, 0.95)],
-      10
-    );
+  it('laisse la seule place aux sources quand topK vaut 1', () => {
+    const out = selectWithManuscriptQuota([...biblio(5), ...manuscrit(5, 0.99)], 1);
 
-    expect(kinds(out).filter((k) => k === 'manuscript').length).toBeGreaterThan(3);
+    expect(out).toHaveLength(1);
+    expect(kinds(out)).toEqual(['secondary']);
   });
 
   it('n’occupe pas toutes les places, même avec un topK minuscule', () => {
@@ -84,7 +116,7 @@ describe('selectWithManuscriptQuota', () => {
   it('ne rend pas plus d’extraits que le manuscrit n’en a produit', () => {
     const out = selectWithManuscriptQuota([...biblio(20), ...manuscrit(1)], 10);
 
-    expect(kinds(out).filter((k) => k === 'manuscript')).toHaveLength(1);
+    expect(ownCount(out)).toBe(1);
     expect(out).toHaveLength(10);
   });
 
@@ -95,10 +127,16 @@ describe('selectWithManuscriptQuota', () => {
     expect(scores).toEqual([...scores].sort((a, b) => b - a));
   });
 
-  it('retrouve le comportement d’avant quand le ratio est nul', () => {
-    const out = selectWithManuscriptQuota([...biblio(20), ...manuscrit(5)], 10, 0);
+  it('suit la bande que l’appelant impose : élargie pour une question de rappel, nulle pour l’écarter', () => {
+    const pool = [...biblio(20), ...manuscrit(20)];
 
-    expect(kinds(out).every((k) => k === 'secondary')).toBe(true);
+    expect(ownCount(selectWithManuscriptQuota(pool, 10, 6))).toBe(6);
+    // Portée « manuscrit seul » : toute la place, s'il y a de quoi.
+    expect(kinds(selectWithManuscriptQuota(pool, 10, 10)).every((k) => k === 'manuscript')).toBe(
+      true
+    );
+    expect(ownCount(selectWithManuscriptQuota(pool, 10, 0))).toBe(0);
+    expect(selectWithManuscriptQuota(pool, 10, 0)).toHaveLength(10);
   });
 
   it('ne rend rien pour un topK nul ou négatif', () => {

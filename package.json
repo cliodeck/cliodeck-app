@@ -43,6 +43,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest",
     "project:health": "node scripts/electron-node.mjs scripts/project-health.mjs",
+    "rag:manuscript-share": "node scripts/electron-node.mjs scripts/manuscript-share.mjs",
     "test:integration": "node scripts/test-integration.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",

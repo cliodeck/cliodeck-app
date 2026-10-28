@@ -20,9 +20,10 @@ vi.mock('../useChatSettingsProjection', () => ({
 }));
 
 import { AssistantChat } from '../AssistantChat';
-import { useChatStore } from '../../../stores/chatStore';
+import { useChatStore, type BrainstormSource } from '../../../stores/chatStore';
 
 type ChunkCb = (env: { sessionId: string; chunk: { delta: string; done?: boolean; finishReason?: string } }) => void;
+type CtxCb = (env: { sessionId: string; sources: BrainstormSource[] }) => void;
 type ToolCb = (env: {
   sessionId: string;
   callId: string;
@@ -44,12 +45,14 @@ interface MockApi {
   onExplanation: ReturnType<typeof vi.fn>;
   onStatus: ReturnType<typeof vi.fn>;
   _emitChunk: ChunkCb;
+  _emitContext: CtxCb;
   _emitTool: ToolCb;
   _emitExplanation: ExplCb;
 }
 
 function installFusionMock(): MockApi {
   let chunkCb: ChunkCb = () => {};
+  let ctxCb: CtxCb = () => {};
   let toolCb: ToolCb = () => {};
   let explCb: ExplCb = () => {};
   const api = {
@@ -59,7 +62,10 @@ function installFusionMock(): MockApi {
       chunkCb = cb;
       return () => undefined;
     }),
-    onContext: vi.fn(() => () => undefined),
+    onContext: vi.fn((cb: CtxCb) => {
+      ctxCb = cb;
+      return () => undefined;
+    }),
     onToolCall: vi.fn((cb: ToolCb) => {
       toolCb = cb;
       return () => undefined;
@@ -77,6 +83,7 @@ function installFusionMock(): MockApi {
     config: { get: vi.fn(async () => null) },
   } as never;
   Object.defineProperty(api, '_emitChunk', { get: () => chunkCb });
+  Object.defineProperty(api, '_emitContext', { get: () => ctxCb });
   Object.defineProperty(api, '_emitTool', { get: () => toolCb });
   Object.defineProperty(api, '_emitExplanation', { get: () => explCb });
   return api as unknown as MockApi;
@@ -201,5 +208,58 @@ describe('AssistantChat full (fusion step 6)', () => {
       expect(screen.getByTestId('explanation-content').textContent).toContain('7');
       expect(screen.getByTestId('explanation-content').textContent).toContain('123ms');
     });
+  });
+
+  /** Un tour complet dont le contexte porte `sources`, jusqu'au rendu de la liste. */
+  async function roundTripWithSources(api: MockApi, sources: BrainstormSource[]): Promise<HTMLElement> {
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'q' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(api.start).toHaveBeenCalled());
+    await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
+    act(() => {
+      api._emitContext({ sessionId: 'sess-b-1', sources });
+    });
+    act(() => {
+      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: 'x', done: true, finishReason: 'stop' } });
+    });
+    return screen.findByTestId('sources-summary');
+  }
+
+  // Le manuscrit n'est pas une source : le prompt le dit au modèle, l'en-tête
+  // doit le dire à l'auteur (docs/poids-du-manuscrit.md). Le mock de
+  // react-i18next (vitest.setup.ts) rend la clé : un badge traduit se
+  // reconnaît à sa clé, un badge brut au mot français.
+  it('compte le manuscrit à part des sources et traduit le badge', async () => {
+    const api = installFusionMock();
+    render(<AssistantChat variant="full" />);
+
+    const summary = await roundTripWithSources(api, [
+      { kind: 'bibliographie', sourceType: 'secondary', title: 'Papert 1980', snippet: 'p', similarity: 0.8 },
+      { kind: 'manuscrit', sourceType: 'manuscript', title: 'Chapitre 2', snippet: 'm', similarity: 0.9 },
+    ]);
+    expect(summary.textContent).toContain('chat.brainstorm.sourcesLabel (1)');
+    expect(summary.textContent).toContain('chat.brainstorm.manuscriptLabel (1)');
+    expect(summary.textContent).not.toContain('readingNotesLabel');
+
+    const badge = screen.getByTestId('source-badge-1').querySelector('.brainstorm-chat__source-kind');
+    expect(badge?.textContent).toBe('chat.sourceKind.manuscrit');
+    expect(screen.queryByText('manuscrit')).not.toBeInTheDocument();
+    // La teinte neutre du CSS est accrochée au sourceType, pas au kind.
+    expect(screen.getByTestId('source-badge-1').closest('li')?.className).toContain(
+      'brainstorm-chat__source--manuscript'
+    );
+  });
+
+  it('affiche « Sources (0) » quand seul le texte de l’auteur a été retenu', async () => {
+    const api = installFusionMock();
+    render(<AssistantChat variant="full" />);
+
+    const summary = await roundTripWithSources(api, [
+      { kind: 'manuscrit', sourceType: 'manuscript', title: 'Chapitre 2', snippet: 'm', similarity: 0.9 },
+      { kind: 'lecture', sourceType: 'readingNotes', title: 'Note Papert', snippet: 'n', similarity: 0.7 },
+    ]);
+    expect(summary.textContent).toContain('chat.brainstorm.sourcesLabel (0)');
+    expect(summary.textContent).toContain('chat.brainstorm.manuscriptLabel (1)');
+    expect(summary.textContent).toContain('chat.brainstorm.readingNotesLabel (1)');
   });
 });

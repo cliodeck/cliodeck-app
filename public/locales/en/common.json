@@ -685,6 +685,13 @@
         "high": "high severity"
       }
     },
+    "sourceKind": {
+      "archive": "Archive",
+      "bibliographie": "Bibliography",
+      "note": "Note",
+      "manuscrit": "Manuscript",
+      "lecture": "Reading note"
+    },
     "source": "Source",
     "page": "Page",
     "similarity": "Similarity",
@@ -707,6 +714,18 @@
       "sourceTypePrimary": "Primary sources (Tropy)",
       "sourceTypeSecondary": "Secondary sources (PDF)",
       "sourceTypeAll": "All",
+      "corporaLabel": "Per corpus:",
+      "corpus": {
+        "secondary": "Bibliography",
+        "primary": "Archives",
+        "vault": "Notes (vault)",
+        "manuscript": "Manuscript",
+        "readingNotes": "Reading notes"
+      },
+      "corpusNotSearched": "not searched",
+      "corpusFailed": "failed",
+      "contextLabel": "Context:",
+      "contextManuscriptShare": "of which manuscript",
       "documentsConsulted": "Documents consulted",
       "chunks": "chunks",
       "score": "score",
@@ -746,6 +765,8 @@
       "graphCitation": "Citation",
       "graphSimilarity": "Similarity",
       "sourcesLabel": "Sources",
+      "manuscriptLabel": "Manuscript",
+      "readingNotesLabel": "Reading notes",
       "openProjectNotice": "Open a project to start brainstorming.",
       "projectContext": "Project context",
       "recipesCount": "{{count}} recipes",

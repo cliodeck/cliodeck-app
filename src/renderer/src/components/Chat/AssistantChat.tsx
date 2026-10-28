@@ -26,7 +26,7 @@ import { useDraftsStore } from '../../stores/draftsStore';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
-import { SourcePopover } from '../Brainstorm/SourcePopover';
+import { SourcePopover, sourceKindLabelKey } from '../Brainstorm/SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
@@ -56,6 +56,23 @@ interface AssistantUnifiedMessage extends UnifiedMessage {
 
 export interface AssistantChatProps {
   variant: 'full' | 'panel';
+}
+
+/**
+ * Compte les extraits par famille. Le manuscrit et les notes de lecture ne
+ * sont pas des sources — le prompt le dit au modèle, l'en-tête de la liste
+ * doit le dire à l'auteur (docs/poids-du-manuscrit.md).
+ */
+function countSourceFamilies(
+  sources: readonly BrainstormSource[]
+): { sources: number; manuscript: number; readingNotes: number } {
+  const counts = { sources: 0, manuscript: 0, readingNotes: 0 };
+  for (const s of sources) {
+    if (s.sourceType === 'manuscript') counts.manuscript += 1;
+    else if (s.sourceType === 'readingNotes') counts.readingNotes += 1;
+    else counts.sources += 1;
+  }
+  return counts;
 }
 
 export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
@@ -302,6 +319,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const renderExtras = useCallback((m: AssistantUnifiedMessage): React.ReactNode => {
     const orig = m.original;
     const sources = orig.sources ?? [];
+    const families = countSourceFamilies(sources);
     const toolCalls = orig.toolCalls ?? [];
     return (
       <>
@@ -327,8 +345,12 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         )}
         {m.role === 'assistant' && sources.length > 0 && (
           <details className="brainstorm-chat__sources">
-            <summary>
-              📚 {t('chat.brainstorm.sourcesLabel')} ({sources.length})
+            <summary data-testid="sources-summary">
+              📚 {t('chat.brainstorm.sourcesLabel')} ({families.sources})
+              {families.manuscript > 0 &&
+                ` · ${t('chat.brainstorm.manuscriptLabel')} (${families.manuscript})`}
+              {families.readingNotes > 0 &&
+                ` · ${t('chat.brainstorm.readingNotesLabel')} (${families.readingNotes})`}
             </summary>
             <ul>
               {sources.map((s: BrainstormSource, i: number) => {
@@ -356,7 +378,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
                       }}
                     >
                       <div className="brainstorm-chat__source-head">
-                        <span className="brainstorm-chat__source-kind">{s.kind}</span>
+                        <span className="brainstorm-chat__source-kind">
+                          {t(sourceKindLabelKey(s.kind))}
+                        </span>
                         <strong>{s.title}</strong>
                         {(s.securityEvents?.length ?? 0) > 0 && (
                           <ShieldAlert

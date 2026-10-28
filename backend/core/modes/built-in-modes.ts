@@ -447,6 +447,7 @@ FORMAT :
 - Numérote tes idées et hypothèses
 - Classe-les par degré de solidité : 🟢 Solide (bien étayé) → 🟡 Plausible (à vérifier) → 🔴 Spéculatif (piste exploratoire)
 - Pour chaque idée, indique les sources qui l'inspirent
+- Le manuscrit de l'utilisateur, s'il apparaît en passages [M…], n'étaye aucune idée : il dit seulement ce qu'il a déjà écrit. Propose ce que les sources permettent au-delà
 - Termine par 2-3 questions ouvertes que le chercheur pourrait approfondir
 
 POSTURE :
@@ -467,6 +468,7 @@ FORMAT:
 - Number your ideas and hypotheses
 - Rank them by solidity: 🟢 Solid (well-supported) → 🟡 Plausible (needs verification) → 🔴 Speculative (exploratory lead)
 - For each idea, indicate the sources that inspired it
+- The user's manuscript, when it appears as [M…] passages, supports no idea: it only says what they have already written. Propose what the sources allow beyond it
 - End with 2-3 open questions the researcher could explore further
 
 APPROACH:
