@@ -310,8 +310,13 @@ avant la prochaine version.
   case « Notes de lecture » avec une portée « notes seules », question de
   rappel détectée (« qu'ai-je noté sur… »), et — la différence voulue — une
   sélection de documents ou de collection les **cadre** sur ces références
-  au lieu de les écarter. Bande par corpus (`selectWithOwnTextBands`),
-  politique commune (`resolveReadingNotesPolicy`), trois consignes. Détail
+  au lieu de les écarter. **Une seule bande pour la voix de l'auteur**
+  (`selectWithOwnTextBands`) : 20 % des places pour le manuscrit et les notes
+  ensemble — deux bandes de 20 % faisaient quatre places sur dix, trop —, au
+  moins une chacun quand les deux ont quelque chose à dire, le reste à la
+  pertinence ; une question de rappel ou une portée « seul » élargit la
+  bande pour le corpus nommé. Politique commune
+  (`resolveReadingNotesPolicy`), trois consignes. Détail
   dans [`reading-notes.md`](reading-notes.md). Reste le vault Obsidian, qui a
   sa case depuis longtemps et un seuil, mais pas de bande : à traiter quand
   la mesure le demandera.

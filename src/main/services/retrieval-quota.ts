@@ -24,9 +24,17 @@
  * langue, même cosinus exhaustif, et jusqu'au chantier de 2026-10 ni plancher
  * ni plafond — « à armes égales », c'est-à-dire capables de rafler toutes les
  * places exactement comme le manuscrit, ou d'être invisibles dès que la
- * bibliographie sature. Elles ont désormais leur bande, du même calibre.
- * Les bandes se décident par corpus (`OwnTextBands`) ; l'appelant les élargit
- * pour une question de rappel ou une portée « seul », ou les réduit à zéro.
+ * bibliographie sature.
+ *
+ * **Une seule bande pour les deux** (décision de l'auteur du projet, le
+ * 2026-10-28 : deux bandes de 20 % faisaient quatre places sur dix pour son
+ * propre texte, trop). La voix de l'auteur, manuscrit et notes confondus,
+ * obtient au plus la bande par défaut ; quand les deux corpus ont quelque
+ * chose à dire et que la bande le permet, chacun garde au moins une place,
+ * le reste se départage à la pertinence. Les largeurs par corpus
+ * (`OwnTextBands`) restent les plafonds de chacun ; une largeur élargie par
+ * l'appelant — question de rappel, portée « seul » — élargit d'autant la
+ * bande commune, pour le corpus qu'on a nommé.
  */
 
 /** Part des places accordée à un corpus à la voix de l'auteur quand il renvoie des extraits. */
@@ -59,15 +67,25 @@ function isOwnText(sourceType: string | undefined): sourceType is OwnTextCorpus 
 }
 
 /**
- * Combine les résultats en accordant à chaque corpus à la voix de l'auteur
- * une bande de places au plus ; les autres places vont aux extraits externes,
- * par pertinence décroissante. Quand les bandes à elles seules dépassent
- * `topK` (portée « seul » sur deux corpus), les passages les plus pertinents
- * l'emportent entre eux.
+ * Largeur de la bande commune : la bande par défaut, élargie à la plus large
+ * des bandes que l'appelant a lui-même élargies (une question de rappel sur
+ * les notes porte la bande à six ; une portée « seul », à `topK`).
+ */
+export function sharedOwnTextSlots(topK: number, bands: OwnTextBands = {}): number {
+  const base = manuscriptSlots(topK);
+  const widened = OWN_TEXT_CORPORA.map((c) => bands[c] ?? 0).filter((b) => b > base);
+  return Math.min(topK, Math.max(base, ...widened));
+}
+
+/**
+ * Combine les résultats en accordant à la voix de l'auteur — manuscrit et
+ * notes de lecture ensemble — une bande de places au plus, chaque corpus
+ * restant sous son propre plafond ; les autres places vont aux extraits
+ * externes, par pertinence décroissante.
  *
  * @param results Tous les extraits, tous corpus confondus.
  * @param topK Nombre de places disponibles.
- * @param bands Largeur de bande par corpus (défaut : `manuscriptSlots(topK)` chacun).
+ * @param bands Plafond par corpus (défaut : `manuscriptSlots(topK)` chacun).
  */
 export function selectWithOwnTextBands<T extends Scored>(
   results: T[],
@@ -77,12 +95,26 @@ export function selectWithOwnTextBands<T extends Scored>(
   if (topK <= 0) return [];
 
   const byScore = (a: T, b: T): number => b.similarity - a.similarity;
-  const own: T[] = [];
-  for (const corpus of OWN_TEXT_CORPORA) {
-    const slots = Math.max(0, Math.min(bands[corpus] ?? manuscriptSlots(topK), topK));
-    own.push(...results.filter((r) => r.sourceType === corpus).sort(byScore).slice(0, slots));
+  const sharedCap = sharedOwnTextSlots(topK, bands);
+
+  // Chaque corpus, sous son plafond, par pertinence.
+  const pools = OWN_TEXT_CORPORA.map((corpus) => {
+    const cap = Math.max(0, Math.min(bands[corpus] ?? manuscriptSlots(topK), topK));
+    return results.filter((r) => r.sourceType === corpus).sort(byScore).slice(0, cap);
+  }).filter((pool) => pool.length > 0);
+
+  // Au moins une place par corpus présent quand la bande le permet, puis le
+  // reste à la pertinence, tous corpus de l'auteur confondus.
+  const picked: T[] = [];
+  const floors = sharedCap >= pools.length;
+  if (floors) for (const pool of pools) picked.push(pool[0]);
+  const remaining = pools.flatMap((pool) => pool.slice(floors ? 1 : 0)).sort(byScore);
+  for (const r of remaining) {
+    if (picked.length >= sharedCap) break;
+    picked.push(r);
   }
-  const kept = own.sort(byScore).slice(0, topK);
+  const kept = picked.slice(0, sharedCap);
+
   const external = results.filter((r) => !isOwnText(r.sourceType)).sort(byScore);
   const rest = external.slice(0, Math.max(0, topK - kept.length));
 
