@@ -12,6 +12,17 @@
 > published for `v1.0.0-rc.4` remain unsigned; `v1.0.0-rc.5` is the first
 > signed one.
 > Replaces the archived `plan-post-fusion.md` as the current reference.
+> **2026-10-28: the author's own text no longer crowds the sources.** Five
+> stacked PRs, #168 → #172 (not merged at the time of writing): the
+> manuscript and the reading notes share one band of slots, enter a turn
+> through a main-side policy (recall question > "seul" scope > restricted
+> scope > panel toggle > chat-mode stance), are off by default in the
+> Brainstorm workspace, and the index no longer embeds quotations or
+> reference footnotes. Causes, decisions and remedies in
+> [`poids-du-manuscrit.md`](poids-du-manuscrit.md); the reading-notes side
+> in [`reading-notes.md`](reading-notes.md). Health on that branch:
+> typecheck clean, lint 0 errors, `npx vitest run` 2381 passed,
+> `npm run test:integration` 0 skipped.
 >
 > Health at that date: `npm run typecheck` clean; `npx vitest run`
 > **1334 passed, 75 skipped, 0 failing** (ABI Electron, gardes actives) et
@@ -75,6 +86,26 @@ Partially done:
 - **Manuscript as a fourth RAG corpus** (merged): `manuscript_*` tables in
   `brain.db`, incremental by content hash, indexed after save, surfaced to the
   assistant with its own `manuscrit` source kind. See `docs/manuscript-corpus.md`
+- **The author's own text kept in its place** (PRs #168–#172, 2026-10-28,
+  stacked, pending merge): the rc.4 quota was a floor without a ceiling and
+  the manuscript — written in the question's language — took the rest "au
+  mérite", down to prompts made of nothing else. Now: one shared band of
+  slots for manuscript + reading notes (`selectWithOwnTextBands`, 20 % of
+  `topK`, at least one each when both answer); a pure main-side policy per
+  corpus (`manuscript-policy.ts`): explicit recall question
+  (`manuscript-intent.ts`, fr/en/de, deterministic) > "seul" scope >
+  user-restricted scope > panel toggle (tri-state, off by default in the
+  Brainstorm workspace) > chat-mode stance (`ragOverrides.manuscript` /
+  `readingNotes`: off | background | recall); a document or collection
+  selection excludes the manuscript but **scopes** the reading notes by
+  citation key; prompt blocks relabelled (`PASSAGE :` / `NOTE :`, `[M1]…`,
+  `[L1]…`, three wordings), context block placed after the mode prompt;
+  per-corpus counts and context share in the explanation panel and the
+  research journal; `scripts/manuscript-share.mjs` to measure; blockquotes
+  and reference footnotes out of the embedded text (`CHUNKER_VERSION` in the
+  content hash). Four inert `ModeRAGOverrides` fields removed
+  (`sourceType`, `useGraphContext`, `similarityThreshold`,
+  `summaryGeneration`). See `docs/poids-du-manuscrit.md`
 - **Manuscript-wide search** (merged): `src/renderer/src/services/manuscript-search.ts`
   + `components/Book/ManuscriptSearch.tsx` — the item deferred from book phase 3
 - **ESLint configuration** (merged, #36): `npm run lint` works and gates CI at
@@ -117,8 +148,10 @@ Partially done:
 | Design | Installer strategy (`docs/installer-strategy.md`): embedded Ollama, first-run wizard, bundled Pandoc/tectonic. Nothing in its section 7 has been built |
 | Backend | Book: index (`\index{}`) and typed cross-references — same technical family as footnotes/citations (Lezer extension + resolution at assembly) |
 | Backend | Book: Word export ignores `noteStyle`/`noteNumbering` (LaTeX path only) |
-| Frontend | Manuscript corpus: no UI at all — no index state, no re-index button, no `rag.indexManuscript` toggle in preferences (the service reads the setting; nothing writes it) |
-| Backend | Manuscript corpus: changing the embedding model invalidates the index; `reindexAll()` exists but no trigger calls it |
+| Backend | Manuscript corpus: changing the embedding model invalidates the index; `reindexAll()` is called only by the « Réindexer » button (`ManuscriptCorpusSection`, Settings → expert). A chunker change now re-embeds by itself (`CHUNKER_VERSION` in the content hash), a model change still does not |
+| Backend | Own-text policy, measurements still owed (2026-10-28): run `npm run rag:manuscript-share -- <project>` on a real project before touching any constant (band 20 %, recall 6 slots, background 2); time the full re-embed forced by `CHUNKER_VERSION` on the embedded provider for a long book; a real chat turn with the « Mon manuscrit » / « Notes de lecture » toggles was not exercised in the session that built them |
+| Backend | Obsidian vault: has its toggle and the shared threshold but no own-text band; the next "too loud" corpus if the measurement says so. The manuscript's and notes' FTS leg is an AND of all query tokens (vs BM25's OR for PDFs/Tropy): align before comparing scores across corpora |
+| Frontend | Mode overrides: `topK` / `numCtx` are still copied into `ragQueryStore` when a mode is selected and lost at relaunch (`modeStore.setActiveMode`); the stance fields are resolved main-side and do not have that flaw. Resolving `topK` main-side changes what the panel slider means — decide before doing it |
 | Backend | MCP tool-use: the 6-turn agent-loop cap is hardcoded and untuned (ADR 0003) |
 | Frontend | Book: pending AI proposals expire on chapter switch (accepted limit, book phase 2) |
 | Backend | `pdf-service.ts` is 839 lines and still a delegating facade for search |

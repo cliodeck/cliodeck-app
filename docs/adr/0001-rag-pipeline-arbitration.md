@@ -85,3 +85,48 @@ On adopte à la place le **Path A′** : chaque corpus garde ses tables, son sto
 - Ajouter un corpus : un adaptateur `CorpusRetriever` et une valeur de `CorpusId`, sans toucher au tri, au quota ni à l'inspecteur de sécurité. C'est aussi le préalable à des corpus fournis par des extensions.
 - **Le benchmark reste utile, mais change de rôle** : il ne conditionne plus une unification ; il servira à calibrer le seuil et les constantes de pertinence **par corpus**, qui ne sont aujourd'hui calibrés sur aucun jeu de référence. Il n'est pas urgent.
 - Limite connue, non traitée ici : dans le vault et le manuscrit, la fusion RRF sans bonus de correspondance exacte (que PDF et Tropy appliquent) empêche un extrait trouvé seulement par mot-clé d'entrer dans les `topK` du store dès que le corpus compte plus de `topK` extraits : son RRF (0,4/61) reste inférieur à celui des 31 premiers rangs denses (0,6/(60+r)).
+
+---
+
+## Amendement du 2026-10-28 — Les corpus à la voix de l'auteur dans le tri commun
+
+### Constat
+
+Le contrat de score (amendement précédent) rendait le tri commun légitime,
+pas équitable. Le manuscrit, puis les notes de lecture, sont écrits dans la
+langue de la question et notés par un cosinus exhaustif : ils franchissent le
+seuil global par construction. La réserve posée en rc.4 pour que le manuscrit
+*arrive* était un plancher sans plafond — le reste se gagnait « au mérite »,
+et il le gagnait, jusqu'à des prompts faits du seul texte de l'auteur sous un
+en-tête « aucune source ». Les notes, « à armes égales », pouvaient en faire
+autant. Détail dans [`../poids-du-manuscrit.md`](../poids-du-manuscrit.md).
+
+### Décision
+
+1. **Une bande, pas un quota.** Les corpus à la voix de l'auteur — manuscrit,
+   notes de lecture — partagent une bande de places dans le tri commun
+   (`selectWithOwnTextBands`, 20 % de `topK`, au moins une place chacun quand
+   les deux répondent), plancher et plafond. Ils ne remplissent jamais les
+   places que des sources faibles laissent vides.
+2. **Une politique par tour, côté main.** Leur entrée dans un tour n'est plus
+   une ligne inconditionnelle mais une fonction pure (`manuscript-policy.ts`)
+   : question de rappel explicite > portée « seul » > portée restreinte par
+   l'utilisateur > case du panneau (défaut selon l'espace de travail) >
+   posture du mode de chat > bande. Même tronc pour les deux corpus ; seule la
+   lecture de la portée diffère — une sélection de documents écarte le
+   manuscrit et **cadre** les notes sur ces références.
+3. **Le repli sous le seuil suit la portée, pas le corpus.** Un corpus à la
+   voix de l'auteur se tait sous le seuil aux côtés des sources ; interrogé
+   sans aucune source, il garde ses trois passages les plus proches
+   (`CorpusSearchOptions.sole`).
+
+### Conséquences
+
+- La règle « jamais un RRF comme `similarity` » reste entière ; la bande
+  agit sur les places, pas sur les scores.
+- Le benchmark garde son rôle de calibration ; les constantes de la bande
+  (20 %, six places pour un rappel, deux en arrière-plan) sont posées sans
+  mesure et `scripts/manuscript-share.mjs` existe pour les relire sur un
+  projet réel.
+- Le vault Obsidian, écrit par l'historien lui aussi, n'a pas de bande : il
+  a sa case et le seuil commun. À revoir si la mesure le demande.
