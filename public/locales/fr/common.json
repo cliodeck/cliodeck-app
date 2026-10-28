@@ -654,6 +654,11 @@
     "scope": {
       "prefix": "Recherche :",
       "manuscriptOff": "Manuscrit non consulté",
+      "reason": {
+        "scope": "recherche restreinte",
+        "stance": "mode de chat",
+        "disabled": "index désactivé"
+      },
       "title": "Modifier les sources consultées"
     },
     "placeholder": "Posez une question sur vos documents...",
@@ -951,6 +956,7 @@
     "manuscriptDefaultHint": "Selon l'espace : non consulté en Brainstorm, consulté ailleurs",
     "manuscriptPinnedHint": "Choix fixé pour cette session.",
     "manuscriptResetDefault": "rétablir le défaut",
+    "manuscriptExcludedHint": "Coché, mais non consulté : {{reason}}",
     "searchIn": "Recherche dans : {{list}}",
     "noSourceWarning": "Sélectionnez au moins une source."
   },

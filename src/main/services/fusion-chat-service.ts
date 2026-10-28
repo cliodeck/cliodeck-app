@@ -799,6 +799,10 @@ class FusionChatService {
                   .isCloud,
                 cloudConsent: readingNotesIndexService.cloudConsent(),
               });
+            // Manuscrit seul demandé mais écarté (index désactivé) : rien à
+            // chercher ailleurs, et chercher quand même embarquerait la
+            // question pour jeter les résultats sous une bande nulle.
+            if (manuscriptOnly && !manuscript.include) return null;
             const { hits, manuscriptHits, readingNoteHits, stats, securityEvents } =
               await retrievalService.searchWithStats({
               query: lastUser,
@@ -875,11 +879,17 @@ class FusionChatService {
             // Les blocs sont construits séparément pour que leur taille soit
             // mesurée sur ce qui part vraiment : la part du manuscrit dans le
             // contexte se lit dans le panneau d'explication et le journal.
-            const scopeBlock = formatSelectionScope(
-              options?.documentIds?.length ?? 0,
-              retrievalService.describeDocuments(options?.documentIds ?? []),
-              promptLang
-            );
+            // Une sélection de documents n'a pas de sens pour le manuscrit
+            // seul : le renderer la garde quand la bibliographie est décochée,
+            // et la ligne « recherche limitée à N documents » suivrait
+            // « aucune source n'a été interrogée ».
+            const scopeBlock = manuscriptOnly
+              ? ''
+              : formatSelectionScope(
+                  options?.documentIds?.length ?? 0,
+                  retrievalService.describeDocuments(options?.documentIds ?? []),
+                  promptLang
+                );
             // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
             // modèle que bibliographie et archives ont été interrogées en vain
             // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
