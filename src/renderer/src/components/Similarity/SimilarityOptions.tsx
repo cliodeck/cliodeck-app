@@ -5,7 +5,7 @@
  */
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X } from 'lucide-react';
+import { BookOpen, Heading, Layers, Pilcrow, Scroll, Type, X } from 'lucide-react';
 import { useSimilarityStore, type Granularity, type SourceType } from '../../stores/similarityStore';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { CollectionMultiSelect } from '../Chat/CollectionMultiSelect';
@@ -91,21 +91,21 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
                 className={`similarity-option-btn ${options.granularity === 'section' ? 'active' : ''}`}
                 onClick={() => handleGranularityChange('section')}
               >
-                <span className="similarity-option-btn-icon">📑</span>
+                <span className="similarity-option-btn-icon"><Heading size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.granularity.section')}</span>
               </button>
               <button
                 className={`similarity-option-btn ${options.granularity === 'paragraph' ? 'active' : ''}`}
                 onClick={() => handleGranularityChange('paragraph')}
               >
-                <span className="similarity-option-btn-icon">📝</span>
+                <span className="similarity-option-btn-icon"><Pilcrow size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.granularity.paragraph')}</span>
               </button>
               <button
                 className={`similarity-option-btn ${options.granularity === 'sentence' ? 'active' : ''}`}
                 onClick={() => handleGranularityChange('sentence')}
               >
-                <span className="similarity-option-btn-icon">💬</span>
+                <span className="similarity-option-btn-icon"><Type size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.granularity.sentence')}</span>
               </button>
             </div>
@@ -127,21 +127,21 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
                 className={`similarity-option-btn ${options.sourceType === 'secondary' ? 'active' : ''}`}
                 onClick={() => handleSourceTypeChange('secondary')}
               >
-                <span className="similarity-option-btn-icon">📚</span>
+                <span className="similarity-option-btn-icon"><BookOpen size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.sourceType.secondary', 'Secondary')}</span>
               </button>
               <button
                 className={`similarity-option-btn ${options.sourceType === 'primary' ? 'active' : ''}`}
                 onClick={() => handleSourceTypeChange('primary')}
               >
-                <span className="similarity-option-btn-icon">📜</span>
+                <span className="similarity-option-btn-icon"><Scroll size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.sourceType.primary', 'Primary')}</span>
               </button>
               <button
                 className={`similarity-option-btn ${options.sourceType === 'both' ? 'active' : ''}`}
                 onClick={() => handleSourceTypeChange('both')}
               >
-                <span className="similarity-option-btn-icon">🔄</span>
+                <span className="similarity-option-btn-icon"><Layers size={20} /></span>
                 <span className="similarity-option-btn-label">{t('similarity.sourceType.both', 'Both')}</span>
               </button>
             </div>

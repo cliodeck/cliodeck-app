@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { GraphData, GraphNode, TopicAnalysisResult } from './corpus-types';
 
@@ -164,9 +165,11 @@ export const CorpusTopicsSection: React.FC<Props> = ({
                 setExpandedTopic(isExpanded ? null : topic.id);
               }}
             >
-              {isExpanded
-                ? `▼ ${t('corpus.hideDocuments')}`
-                : `▶ ${t('corpus.showDocuments', { count: topicDocs.length })}`}
+              {isExpanded ? (
+                <><ChevronDown size={12} /> {t('corpus.hideDocuments')}</>
+              ) : (
+                <><ChevronRight size={12} /> {t('corpus.showDocuments', { count: topicDocs.length })}</>
+              )}
             </button>
 
             {isExpanded && (

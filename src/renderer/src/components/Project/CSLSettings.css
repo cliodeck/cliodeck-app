@@ -39,7 +39,8 @@
 }
 
 .csl-file-icon {
-  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
 }
 

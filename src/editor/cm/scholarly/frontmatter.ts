@@ -11,6 +11,7 @@ import {
   EditorView,
   WidgetType,
 } from '@codemirror/view';
+import { ChevronUp, createElement as createIcon } from 'lucide';
 import { detectFrontmatterLines } from '../../slides';
 import type { ScholarlyLabels } from './types';
 
@@ -96,8 +97,9 @@ class FoldButtonWidget extends WidgetType {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'cm-scholarly-frontmatter-fold-btn';
-    btn.textContent = '⌃';
+    btn.appendChild(createIcon(ChevronUp, { width: 12, height: 12 }));
     btn.title = this.label;
+    btn.setAttribute('aria-label', this.label);
     btn.addEventListener('mousedown', (e) => {
       e.preventDefault();
       view.dispatch({ effects: setFrontmatterFolded.of(true) });

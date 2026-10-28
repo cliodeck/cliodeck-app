@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { X } from 'lucide-react';
+import { Plus, RefreshCw, X } from 'lucide-react';
 import './BibImportModeModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -50,7 +50,7 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
 
               <div className="import-options">
                 <button className="import-option-btn replace-btn" onClick={onReplace}>
-                  <div className="option-icon">🔄</div>
+                  <div className="option-icon"><RefreshCw size={32} strokeWidth={1.5} /></div>
                   <div className="option-content">
                     <h4>{t('bibImport.replace')}</h4>
                     <p>{t('bibImport.replaceHint')}</p>
@@ -58,7 +58,7 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
                 </button>
 
                 <button className="import-option-btn merge-btn" onClick={onMerge}>
-                  <div className="option-icon">➕</div>
+                  <div className="option-icon"><Plus size={32} strokeWidth={1.5} /></div>
                   <div className="option-content">
                     <h4>{t('bibImport.merge')}</h4>
                     <p>Add new citations to the existing ones (duplicates will be detected)</p>

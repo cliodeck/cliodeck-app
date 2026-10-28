@@ -24,7 +24,8 @@
 }
 
 .message-avatar {
-  font-size: var(--icon-sm);
+  display: inline-flex;
+  align-items: center;
 }
 
 .message-role {
@@ -38,8 +39,9 @@
 }
 
 .streaming-indicator {
+  display: inline-flex;
+  align-items: center;
   color: var(--color-accent);
-  font-size: var(--icon-sm);
   animation: pulse 1.5s infinite;
 }
 
@@ -221,7 +223,8 @@
 }
 
 .explanation-icon {
-  font-size: var(--icon-xs);
+  display: inline-flex;
+  align-items: center;
 }
 
 .explanation-title {
@@ -231,7 +234,8 @@
 }
 
 .explanation-chevron {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
   transition: transform var(--transition-fast);
 }
 
@@ -255,6 +259,9 @@
 }
 
 .explanation-section h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   margin: 0 0 var(--spacing-xs) 0;
   font-size: var(--font-size-sm);
   font-weight: 600;

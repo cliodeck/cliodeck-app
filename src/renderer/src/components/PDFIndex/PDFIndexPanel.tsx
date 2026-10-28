@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, Brush, FolderOpen, Loader2, Plus, Search, SearchX } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PDFList } from './PDFList';
 import { IndexingProgress } from './IndexingProgress';
@@ -339,9 +339,17 @@ export const PDFIndexPanel: React.FC = () => {
               borderRadius: '4px',
               cursor: isCleaning ? 'not-allowed' : 'pointer',
               fontSize: '13px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
             }}
           >
-            {isCleaning ? `⏳ ${t('pdfIndex.cleaning')}` : `🧹 ${t('pdfIndex.cleanOrphanedChunks')}`}
+            {isCleaning ? (
+              <><Loader2 size={14} /> {t('pdfIndex.cleaning')}</>
+            ) : (
+              <><Brush size={14} /> {t('pdfIndex.cleanOrphanedChunks')}</>
+            )}
           </button>
         </div>
       </CollapsibleSection>
@@ -359,7 +367,7 @@ export const PDFIndexPanel: React.FC = () => {
       <CollapsibleSection title={t('pdfIndex.searchAndFilters')} defaultExpanded={true}>
         <div className="pdf-controls">
           <div className="search-box">
-            <span className="search-icon">🔍</span>
+            <span className="search-icon"><Search size={14} /></span>
             <input
               type="text"
               className="search-input"
@@ -381,7 +389,7 @@ export const PDFIndexPanel: React.FC = () => {
               <option value="title">{t('bibliography.titleField')}</option>
             </select>
             <button className="sort-order-btn" onClick={toggleSortOrder} title={t('bibliography.sortBy')}>
-              {sortOrder === 'asc' ? '↑' : '↓'}
+              {sortOrder === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
             </button>
           </div>
         </div>
@@ -404,13 +412,13 @@ export const PDFIndexPanel: React.FC = () => {
         >
           {documents.length === 0 ? (
             <div className="pdf-empty">
-              <div className="empty-icon">📂</div>
+              <div className="empty-icon"><FolderOpen size={48} strokeWidth={1} /></div>
               <h4>{t('pdfIndex.noDocuments')}</h4>
               <p>{t('pdfIndex.dropzone')}</p>
             </div>
           ) : filteredDocuments.length === 0 ? (
             <div className="pdf-empty">
-              <div className="empty-icon">🔍</div>
+              <div className="empty-icon"><SearchX size={48} strokeWidth={1} /></div>
               <h4>{t('pdfIndex.noResults')}</h4>
               <p>{t('pdfIndex.tryDifferentSearch')}</p>
             </div>

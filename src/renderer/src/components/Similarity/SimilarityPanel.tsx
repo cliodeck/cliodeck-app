@@ -6,7 +6,7 @@
  */
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Settings, Trash2, RefreshCw } from 'lucide-react';
+import { X, Settings, Trash2, RefreshCw, AlertTriangle, Search } from 'lucide-react';
 import { useSimilarityStore, useAllSegments, useHasResults, useTotalRecommendations } from '../../stores/similarityStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { SimilarityProgress } from './SimilarityProgress';
@@ -104,7 +104,7 @@ export const SimilarityPanel: React.FC = () => {
         {/* Error display */}
         {error && (
           <div className="similarity-error">
-            <span className="similarity-error-icon">⚠️</span>
+            <span className="similarity-error-icon"><AlertTriangle size={16} /></span>
             <span className="similarity-error-message">{error}</span>
           </div>
         )}
@@ -140,7 +140,7 @@ export const SimilarityPanel: React.FC = () => {
             ) : (
               /* Empty state */
               <div className="similarity-empty">
-                <div className="similarity-empty-icon">🔍</div>
+                <div className="similarity-empty-icon"><Search size={48} strokeWidth={1} /></div>
                 <p className="similarity-empty-text">{t('similarity.emptyState')}</p>
                 <button
                   className="similarity-analyze-btn"

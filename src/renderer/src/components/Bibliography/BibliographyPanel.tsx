@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FileStack, Download, BarChart3, Trash2, FileDown } from 'lucide-react';
+import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
@@ -404,7 +404,8 @@ export const BibliographyPanel: React.FC = () => {
             />
           </div>
           <div className="batch-progress-stats">
-            ✅ {batchIndexing.indexed} | ⏭️ {batchIndexing.skipped}
+            <span><CheckCircle size={12} /> {batchIndexing.indexed}</span>
+            <span><SkipForward size={12} /> {batchIndexing.skipped}</span>
           </div>
         </div>
       )}
@@ -423,7 +424,7 @@ export const BibliographyPanel: React.FC = () => {
       <CollapsibleSection title={t('bibliography.searchAndFilters')} defaultExpanded={true}>
         <div className="bibliography-controls">
           <div className="search-box">
-            <span className="search-icon">🔍</span>
+            <span className="search-icon"><Search size={14} /></span>
             <input
               type="text"
               className="search-input"
@@ -445,7 +446,7 @@ export const BibliographyPanel: React.FC = () => {
               <option value="title">{t('bibliography.titleField')}</option>
             </select>
             <button className="sort-order-btn" onClick={toggleSortOrder} title={t('bibliography.sortBy')}>
-              {sortOrder === 'asc' ? '↑' : '↓'}
+              {sortOrder === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
             </button>
           </div>
         </div>

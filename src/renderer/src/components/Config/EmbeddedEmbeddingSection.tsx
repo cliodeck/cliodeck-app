@@ -15,7 +15,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Trash2, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Download, Trash2, Check, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useDialogStore } from '../../stores/dialogStore';
 
@@ -214,7 +214,7 @@ export const EmbeddedEmbeddingSection: React.FC = () => {
                   marginTop: '8px',
                 }}
               >
-                <small>{t('embeddedEmbedding.reindexWarning')}</small>
+                <small><AlertTriangle size={12} /> {t('embeddedEmbedding.reindexWarning')}</small>
               </div>
             </div>
           </div>

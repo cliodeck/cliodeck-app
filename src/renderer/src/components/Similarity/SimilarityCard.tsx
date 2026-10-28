@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Quote, ChevronDown, ChevronUp, BookOpen, Archive } from 'lucide-react';
+import { ExternalLink, Quote, ChevronDown, ChevronUp, BookOpen, Archive, Calendar } from 'lucide-react';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
@@ -151,8 +151,8 @@ export const SimilarityCard: React.FC<SimilarityCardProps> = ({ recommendation }
           {/* Primary source specific info */}
           {isPrimarySource && (archive || date) && (
             <div className="similarity-card-meta">
-              {archive && <span className="similarity-card-archive">{archive}</span>}
-              {date && <span className="similarity-card-date">{date}</span>}
+              {archive && <span className="similarity-card-archive"><Archive size={10} /> {archive}</span>}
+              {date && <span className="similarity-card-date"><Calendar size={10} /> {date}</span>}
             </div>
           )}
         </div>

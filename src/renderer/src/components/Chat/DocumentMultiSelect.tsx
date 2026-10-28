@@ -3,6 +3,7 @@
  * Allows users to filter RAG searches by specific documents
  */
 import React, { useState, useRef, useEffect } from 'react';
+import { Check, ChevronDown, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AvailableDocument } from '../../stores/ragQueryStore';
 import './CollectionMultiSelect.css'; // Reuse same styles
@@ -118,30 +119,10 @@ export const DocumentMultiSelect: React.FC<Props> = ({
             title={t('multiSelect.clear')}
             type="button"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <X size={14} />
           </button>
         )}
-        <svg
-          className={`chevron ${isOpen ? 'rotated' : ''}`}
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+        <ChevronDown size={16} className={`chevron ${isOpen ? 'rotated' : ''}`} />
       </div>
 
       {isOpen && !disabled && (
@@ -210,17 +191,7 @@ export const DocumentMultiSelect: React.FC<Props> = ({
                     )}
                   </div>
                   {isDocSelected(doc) && (
-                    <svg
-                      className="check-icon"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
+                    <Check size={14} className="check-icon" />
                   )}
                 </div>
               ))

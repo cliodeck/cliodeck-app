@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { FileDown, X, AlertCircle, CheckCircle, Clapperboard, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { currentRelativePath, useManuscriptStore } from '../../stores/manuscriptStore';
@@ -386,14 +386,14 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
             <div className="export-hint">
-              💡 {t('export.pdf.abstractNote', { file: 'abstract.md' })}
+              <Lightbulb size={14} /> {t('export.pdf.abstractNote', { file: 'abstract.md' })}
             </div>
           )}
 
           {/* Info about presentations */}
           {currentProject?.type === 'presentation' && (
             <div className="export-hint">
-              🎬 {t('export.pdf.beamer', { file: 'slides.md' })}
+              <Clapperboard size={14} /> {t('export.pdf.beamer', { file: 'slides.md' })}
               <br />
               <br />
               <strong>{t('export.pdf.beamerSyntax')}</strong>

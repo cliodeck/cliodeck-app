@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import './TextometricsPanel.css';
 
@@ -157,7 +158,7 @@ export const TextometricsPanel: React.FC = () => {
       {/* Controls */}
       <div className="textometrics-controls">
         <button onClick={handleRefresh} className="btn-refresh">
-          🔄 {t('textometrics.refresh')}
+          <RefreshCw size={14} /> {t('textometrics.refresh')}
         </button>
       </div>
 

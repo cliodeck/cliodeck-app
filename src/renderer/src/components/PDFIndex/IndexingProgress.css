@@ -13,7 +13,8 @@
 }
 
 .progress-icon {
-  font-size: var(--icon-md);
+  display: inline-flex;
+  align-items: center;
   animation: spin 2s linear infinite;
 }
 

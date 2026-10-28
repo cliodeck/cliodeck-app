@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { SendHorizontal, Square } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import './MessageInput.css';
 
@@ -58,7 +59,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         <div className="input-actions">
           {isProcessing ? (
             <button className="input-btn cancel-btn" onClick={onCancel} title={t('chat.cancel')} aria-label={t('chat.cancel')}>
-              ⏹️
+              <Square size={14} fill="currentColor" />
             </button>
           ) : (
             <button
@@ -68,7 +69,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
               title={t('chat.send')}
               aria-label={t('chat.send')}
             >
-              ➤
+              <SendHorizontal size={18} />
             </button>
           )}
         </div>

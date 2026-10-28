@@ -574,3 +574,10 @@ code {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
+
+/* Icônes lucide posées dans un flux de texte (titre, phrase, badge) : la
+   ligne de base les laissait flotter au-dessus des lettres. Sans effet sur
+   les enfants d'un conteneur flex, où l'alignement se règle autrement. */
+svg.lucide {
+  vertical-align: -0.125em;
+}

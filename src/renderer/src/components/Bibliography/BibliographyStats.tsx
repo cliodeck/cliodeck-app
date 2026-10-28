@@ -9,7 +9,8 @@ import {
   FileText,
   Award,
   PieChart,
-  Tag
+  Tag,
+  X
 } from 'lucide-react';
 import type { Citation } from '../../stores/bibliography/types';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
@@ -129,7 +130,7 @@ export const BibliographyStats: React.FC<BibliographyStatsProps> = ({ citations,
       <div className="stats-header">
         <h2>{t('biblioStats.title')}</h2>
         {onClose && (
-          <button className="close-button" onClick={onClose}>×</button>
+          <button className="close-button" onClick={onClose}><X size={18} /></button>
         )}
       </div>
 

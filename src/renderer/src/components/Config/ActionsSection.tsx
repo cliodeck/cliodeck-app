@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -203,7 +204,7 @@ export const ActionsSection: React.FC = () => {
               <small>
                 {t('actions.purgeDatabase.description')}
                 <br />
-                {t('actions.purgeDatabase.warning')}
+                <AlertTriangle size={12} /> {t('actions.purgeDatabase.warning')}
               </small>
             </div>
             <button
@@ -227,7 +228,7 @@ export const ActionsSection: React.FC = () => {
               <small>
                 {t('actions.purgePrimaryDatabase.description', 'This will delete all indexed Tropy sources and their embeddings.')}
                 <br />
-                {t('actions.purgePrimaryDatabase.warning', 'You will need to re-sync your Tropy project.')}
+                <AlertTriangle size={12} /> {t('actions.purgePrimaryDatabase.warning', 'You will need to re-sync your Tropy project.')}
               </small>
             </div>
             <button
