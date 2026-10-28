@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { FolderOpen, RefreshCw } from 'lucide-react';
+import { useProjectStore } from '../../stores/projectStore';
 import './TextometricsPanel.css';
 
 interface WordFrequency {
@@ -37,8 +38,9 @@ export const TextometricsPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'words' | 'bigrams' | 'trigrams'>('words');
+  const currentProject = useProjectStore((s) => s.currentProject);
 
-  const loadTextStatistics = async () => {
+  const loadTextStatistics = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -60,15 +62,33 @@ export const TextometricsPanel: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadTextStatistics();
   }, []);
+
+  // Sans projet, rien à mesurer : même état vide que l'explorateur de corpus.
+  // Interroger le main dans ce cas lui faisait répondre une erreur brute, en
+  // anglais, affichée en rouge avec un bouton « Réessayer » sans objet.
+  useEffect(() => {
+    if (!currentProject) {
+      setStatistics(null);
+      setError(null);
+      return;
+    }
+    void loadTextStatistics();
+  }, [currentProject, loadTextStatistics]);
 
   const handleRefresh = () => {
     loadTextStatistics();
   };
+
+  if (!currentProject) {
+    return (
+      <div className="textometrics-empty textometrics-empty--no-project">
+        <div className="textometrics-empty__icon"><FolderOpen size={48} strokeWidth={1} /></div>
+        <h3>{t('corpus.noProject')}</h3>
+        <p>{t('textometrics.noProjectHint')}</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
