@@ -9,7 +9,7 @@
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDownToLine, GripVertical, Inbox, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, Check, GripVertical, Inbox, Trash2, X } from 'lucide-react';
 import { useDraftsStore, draftTitle, type BrainstormDraft } from '../../stores/draftsStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -64,7 +64,7 @@ const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
           disabled={inserted}
           title={t('drafts.insertTitle')}
         >
-          <ArrowDownToLine size={12} />{' '}
+          {inserted ? <Check size={12} /> : <ArrowDownToLine size={12} />}{' '}
           {inserted ? t('drafts.inserted') : t('drafts.insert')}
         </button>
         <button

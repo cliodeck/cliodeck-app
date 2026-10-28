@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle, Target, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { RAGConfig } from './ConfigPanel';
 
@@ -87,7 +88,9 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
     <>
           {/* === CHUNK QUALITY OPTIMIZATION === */}
           <div className="config-field" style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)' }}>🎯 {t('ragChunk.heading')}</h4>
+            <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Target size={14} /> {t('ragChunk.heading')}
+            </h4>
           </div>
 
           {/* Custom Chunking */}
@@ -392,7 +395,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚡ {t('ragChunk.semantic.infoTitle')}</strong>{' '}
+                <strong><Zap size={14} /> {t('ragChunk.semantic.infoTitle')}</strong>{' '}
                 {t('ragChunk.semantic.info')}
               </div>
             </div>
@@ -473,7 +476,7 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚠️ {t('ragChunk.compression.noteTitle')}</strong>{' '}
+                <strong><AlertTriangle size={14} /> {t('ragChunk.compression.noteTitle')}</strong>{' '}
                 {t('ragChunk.compression.note')}
               </div>
             </div>

@@ -24,7 +24,7 @@
       "title": "Datenbank bereinigen",
       "description": "Löscht alle Vektor-Chunks und setzt die Indizes zurück. PDFs müssen neu indexiert werden.",
       "button": "Datenbank bereinigen",
-      "confirmTitle": "⚠️ WARNUNG - Unwiderrufliche Aktion",
+      "confirmTitle": "WARNUNG - Unwiderrufliche Aktion",
       "confirmMessage": "Diese Aktion wird:\n\n• ALLE Vektor-Embeddings löschen\n• ALLE Text-Chunks löschen\n• HNSW- und BM25-Indizes zerstören\n• Die Vektordatenbank vollständig zurücksetzen\n\nSie müssen ALLE Ihre PDFs neu indexieren.\n\nGeben Sie 'LÖSCHEN' ein, um zu bestätigen:",
       "finalConfirm": "Letzte Bestätigung: Diese Aktion ist UNWIDERRUFLICH. Fortfahren?",
       "purging": "Bereinigung läuft...",
@@ -32,7 +32,7 @@
       "error": "Fehler bei der Bereinigung",
       "cancelledNoMatch": "Bereinigung abgebrochen (falscher Bestätigungstext)",
       "cancelled": "Bereinigung abgebrochen",
-      "warning": "⚠️ Diese Aktion ist unwiderruflich!",
+      "warning": "Diese Aktion ist unwiderruflich!",
       "inProgress": "Bereinigung läuft..."
     },
     "rebuildIndexes": {
@@ -89,7 +89,7 @@
       "success": "Primärquellen-Datenbank erfolgreich bereinigt",
       "error": "Fehler beim Bereinigen: {{error}}",
       "inProgress": "Bereinigung läuft...",
-      "warning": "⚠️ Diese Aktion ist unwiderruflich!"
+      "warning": "Diese Aktion ist unwiderruflich!"
     }
   },
   "settings": {
@@ -479,12 +479,12 @@
     "chatNumCtxDetails": "Ohne diesen Wert wendet Ollama unabhängig vom Modell 4.096 Token an — ein Qwen 3.5, das eine Million Token verarbeiten kann, lief mit 4K. Der Wert wird bei jedem Aufruf gesendet, und der KV-Cache wächst mit: ein großes Fenster braucht viel Speicher. Auch im Chat-Panel änderbar, das an dieselbe Stelle schreibt.",
     "chatModel": "Chat-Modell",
     "chatModelHelp": "Modell für Textgenerierung",
-    "embeddingStrategyWarning": "⚠️ Warnung: Das Ändern dieses Modells erfordert eine Neuindizierung aller PDFs.",
+    "embeddingStrategyWarning": "Warnung: Das Ändern dieses Modells erfordert eine Neuindizierung aller PDFs.",
     "embeddingStrategyWarningDetails": "Embeddings sind zwischen verschiedenen Modellen nicht kompatibel. Sie müssen alle indizierten PDFs löschen und nach der Änderung neu indizieren.",
     "embeddingStrategyRecommended": "Empfohlene Modelle:",
     "availableModels": "Verfügbare Modelle",
     "modelsAvailable": "Modelle verfügbar",
-    "noModelsLoaded": "Klicken Sie auf 🔄, um Modelle von Ollama zu laden",
+    "noModelsLoaded": "Klicken Sie auf „Modelle aktualisieren“, um sie von Ollama zu laden",
     "refreshModels": "Modelle aktualisieren",
     "testConnection": "Verbindung testen",
     "connectionSuccess": "Verbindung erfolgreich!",
@@ -549,7 +549,7 @@
     "providerOllama": "Ollama (Modell aus dem LLM-Abschnitt)",
     "providerEmbedded": "Eingebettetes Modell (offline, kein Server nötig)",
     "providerSaveError": "Embeddings-Provider konnte nicht gespeichert werden",
-    "reindexWarning": "⚠️ Ein Wechsel des Embeddings-Providers oder -Modells macht den bestehenden Vektorindex unbrauchbar: Ihre PDFs müssen neu indexiert werden (Einstellungen → Aktionen).",
+    "reindexWarning": "Ein Wechsel des Embeddings-Providers oder -Modells macht den bestehenden Vektorindex unbrauchbar: Ihre PDFs müssen neu indexiert werden (Einstellungen → Aktionen).",
     "modelsLabel": "Eingebettetes Embeddings-Modell",
     "modelsHelp": "Einmal herunterladen für vollständig offline RAG",
     "providerChangeConfirm": "Ein Wechsel des Embedding-Anbieters macht sämtliche vorhandenen Indizes unbrauchbar — PDFs, Tropy-Archive, Obsidian-Vault und Manuskript. Vektoren eines Modells lassen sich nicht mit denen eines anderen vergleichen, und im Betrieb weist nichts darauf hin: die Suche wird schlicht schlecht. Alles muss neu indexiert werden. Fortfahren?",
@@ -607,10 +607,10 @@
       "fetchingMetadata": "Metadaten werden abgerufen ({{current}}/{{total}})",
       "downloadingPDFs": "PDFs werden heruntergeladen ({{current}}/{{total}})",
       "indexingPDFs": "PDFs werden indexiert ({{current}}/{{total}})",
-      "successTitle": "✅ Import erfolgreich!",
+      "successTitle": "Import erfolgreich!",
       "successMessage": "**{{items}} Referenzen** importiert\n**{{pdfs}} PDFs** heruntergeladen\n**{{indexed}} Dokumente** indexiert",
       "genericError": "Beim Import ist ein Fehler aufgetreten",
-      "errorTitle": "❌ Import-Fehler",
+      "errorTitle": "Import-Fehler",
       "close": "Schließen",
       "allLibraries": "Alle Bibliotheken",
       "personalLibrary": "Persönliche Bibliothek",
@@ -722,7 +722,7 @@
       "message": "{{count}} indexierte(s) Dokument(e) verfügbar.\n\nStellen Sie eine Frage, um zu beginnen."
     },
     "explanation": {
-      "searchHeading": "🔎 Suche",
+      "searchHeading": "Suche",
       "resultsFound": "Gefundene Ergebnisse:",
       "duration": "Dauer:",
       "cacheHitSuffix": "(Cache)",
@@ -745,7 +745,7 @@
       "documentsConsulted": "Konsultierte Dokumente",
       "chunks": "Chunks",
       "score": "Score",
-      "compressionHeading": "🗜️ Kompression",
+      "compressionHeading": "Kompression",
       "state": "Status:",
       "enabled": "Aktiviert",
       "disabled": "Deaktiviert",
@@ -754,16 +754,16 @@
       "chars": "Zeichen",
       "reduction": "Reduktion:",
       "strategy": "Strategie:",
-      "graphHeading": "🔗 Wissensgraph",
+      "graphHeading": "Wissensgraph",
       "relatedDocs": "Verwandte Dokumente:",
       "titles": "Titel:",
-      "generationHeading": "🤖 Generierung",
+      "generationHeading": "Generierung",
       "provider": "Anbieter:",
       "model": "Modell:",
       "contextWindow": "Kontextfenster:",
       "temperature": "Temperatur:",
       "promptSize": "Prompt-Größe:",
-      "timingHeading": "⏱️ Ausführungszeit",
+      "timingHeading": "Ausführungszeit",
       "searchTime": "Suche:",
       "compressionTime": "Kompression:",
       "generationTime": "Generierung:",
@@ -1038,6 +1038,7 @@
     "glossaryTitle": "Glossar",
     "noResults": "Keine Ergebnisse für",
     "capabilities": "Fähigkeiten",
+    "learnMore": "Mehr erfahren",
     "limitations": "Einschränkungen",
     "bestPractices": "Best Practices",
     "academicContext": "Akademischer Kontext"
@@ -1484,7 +1485,7 @@
       "saveTitle": "Projektkontext speichern"
     },
     "status": {
-      "saved": "✓ gespeichert"
+      "saved": "gespeichert"
     },
     "placeholder": "# Kontext\n\n- Korpus: Artikel auf DE über …\n- Wikipedia nicht zitieren\n- Strikte Chronologie verwenden\n",
     "legacyNotice": "Eine ältere Hinweisdatei ({{path}}) wird ebenfalls gelesen und an die Assistenz übermittelt. Kopieren Sie deren Inhalt hierher, wenn Sie alles in einer Datei bündeln möchten."
@@ -1690,13 +1691,13 @@
       "failed": "Fehlgeschlagen:"
     },
     "log": {
-      "runStarted": "▶ Ausführung gestartet — {{recipe}}",
+      "runStarted": "Ausführung gestartet — {{recipe}}",
       "stepInProgress": "… Schritt {{stepId}} ({{kind}})",
-      "stepOk": "✓ Schritt {{stepId}}",
-      "stepOkStub": "✓ Schritt {{stepId}} (Entwurf)",
-      "stepFailed": "✗ Schritt {{stepId}} — {{message}}",
-      "runCompleted": "✓ Ausführung abgeschlossen",
-      "runFailed": "✗ Ausführung fehlgeschlagen — {{message}}"
+      "stepOk": "Schritt {{stepId}}",
+      "stepOkStub": "Schritt {{stepId}} (Entwurf)",
+      "stepFailed": "Schritt {{stepId}} — {{message}}",
+      "runCompleted": "Ausführung abgeschlossen",
+      "runFailed": "Ausführung fehlgeschlagen — {{message}}"
     },
     "placeholder": {
       "path": "/absolute/path/…"
@@ -1704,10 +1705,9 @@
   },
   "explore": {
     "title": "Erkunden",
-    "subtitle": "Erkunden Sie Ihr Korpus, messen Sie Ähnlichkeiten und lassen Sie Themen sichtbar werden.",
+    "subtitle": "Erkunden Sie Ihr Korpus und lassen Sie Themen sichtbar werden.",
     "tabs": {
       "corpus": "Korpus-Explorer",
-      "similarity": "Ähnlichkeit",
       "textometrics": "Textometrie"
     },
     "placeholder": {
@@ -1948,7 +1948,7 @@
     "uncovered": "nicht annotiert",
     "saving": "Wird gespeichert…",
     "save": "Entscheidung speichern",
-    "saved": "✓ Gespeichert",
+    "saved": "Gespeichert",
     "todayDecisions": "Entscheidungen des Tages",
     "adjudications": {
       "title": "KI-Vorschläge",
@@ -2044,13 +2044,13 @@
     "dragHint": "Ziehen Sie eine Karte in den Editor, um sie an der Abwurfstelle einzufügen (Cmd+Z zum Rückgängigmachen).",
     "insert": "Am Cursor einfügen",
     "insertTitle": "Diesen Entwurf an der Cursorposition einfügen (adjudizierbarer Vorschlag)",
-    "inserted": "Eingefügt ✓",
+    "inserted": "Eingefügt",
     "discard": "Verwerfen",
     "discardTitle": "Diesen Entwurf aus der Warteschlange entfernen (der Chat bleibt unverändert)",
     "clearAll": "Warteschlange leeren",
     "enqueue": "Als Entwurf speichern",
     "enqueueTitle": "Diese Antwort der Entwurfs-Warteschlange des Schreibmodus hinzufügen, ohne sie einzufügen",
-    "enqueued": "Als Entwurf ✓",
+    "enqueued": "Als Entwurf",
     "clearConfirm_one": "Den ausstehenden Entwurf verwerfen?",
     "clearConfirm_other": "Die {{count}} ausstehenden Entwürfe verwerfen?"
   },

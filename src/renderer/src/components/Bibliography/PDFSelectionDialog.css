@@ -88,7 +88,8 @@
 }
 
 .pdf-item-icon {
-  font-size: 24px;
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
 }
 
@@ -113,7 +114,8 @@
 }
 
 .pdf-item-action {
-  font-size: 20px;
+  display: flex;
+  align-items: center;
   color: var(--text-tertiary);
   flex-shrink: 0;
   transition: transform var(--transition-normal);

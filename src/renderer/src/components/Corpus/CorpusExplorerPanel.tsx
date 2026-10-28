@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from 'react';
+import { BarChart3, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
@@ -25,7 +26,7 @@ export const CorpusExplorerPanel: React.FC = () => {
     return (
       <div className="corpus-explorer-panel">
         <div className="corpus-empty">
-          <div className="empty-icon">📁</div>
+          <div className="empty-icon"><FolderOpen size={48} strokeWidth={1} /></div>
           <h3>{t('corpus.noProject')}</h3>
           <p>{t('corpus.openOrCreateProject')}</p>
         </div>
@@ -60,7 +61,7 @@ export const CorpusExplorerPanel: React.FC = () => {
     return (
       <div className="corpus-explorer-panel">
         <div className="corpus-empty">
-          <div className="empty-icon">📊</div>
+          <div className="empty-icon"><BarChart3 size={48} strokeWidth={1} /></div>
           <h3>{t('corpus.emptyCorpus')}</h3>
           <p>{t('corpus.indexDocuments')}</p>
         </div>

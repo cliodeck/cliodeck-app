@@ -24,7 +24,7 @@
       "title": "Purge database",
       "description": "Deletes all vector chunks and resets indexes. PDFs will need to be reindexed.",
       "button": "Purge database",
-      "confirmTitle": "⚠️ WARNING - Irreversible action",
+      "confirmTitle": "WARNING - Irreversible action",
       "confirmMessage": "This action will:\n\n• Delete ALL vector embeddings\n• Delete ALL text chunks\n• Destroy HNSW and BM25 indexes\n• Completely reset the vector database\n\nYou will need to reindex ALL your PDFs.\n\nType 'PURGE' to confirm:",
       "finalConfirm": "Final confirmation: This action is IRREVERSIBLE. Continue?",
       "purging": "Purging...",
@@ -32,7 +32,7 @@
       "error": "Error during purge",
       "cancelledNoMatch": "Purge cancelled (incorrect confirmation text)",
       "cancelled": "Purge cancelled",
-      "warning": "⚠️ This action is irreversible!",
+      "warning": "This action is irreversible!",
       "inProgress": "Purging..."
     },
     "rebuildIndexes": {
@@ -89,7 +89,7 @@
       "success": "Primary sources database purged successfully",
       "error": "Error during purge: {{error}}",
       "inProgress": "Purging...",
-      "warning": "⚠️ This action is irreversible!"
+      "warning": "This action is irreversible!"
     }
   },
   "settings": {
@@ -479,12 +479,12 @@
     "chatNumCtxDetails": "Without this value Ollama applies 4,096 tokens whatever the model — a Qwen 3.5 able to handle a million tokens ran at 4K. It is sent on every call and the KV cache grows with it: a large window needs a lot of memory. Also editable from the chat panel, which writes to the same place.",
     "chatModel": "Chat model",
     "chatModelHelp": "Model for text generation",
-    "embeddingStrategyWarning": "⚠️ Warning: Changing this model requires re-indexing all PDFs.",
+    "embeddingStrategyWarning": "Warning: Changing this model requires re-indexing all PDFs.",
     "embeddingStrategyWarningDetails": "Embeddings are not compatible between different models. You will need to delete all indexed PDFs and re-index them after the change.",
     "embeddingStrategyRecommended": "Recommended models:",
     "availableModels": "Available models",
     "modelsAvailable": "models available",
-    "noModelsLoaded": "Click 🔄 to load models from Ollama",
+    "noModelsLoaded": "Click “Refresh models” to load them from Ollama",
     "refreshModels": "Refresh models",
     "testConnection": "Test connection",
     "connectionSuccess": "Connection successful!",
@@ -549,7 +549,7 @@
     "providerOllama": "Ollama (model chosen in the LLM section)",
     "providerEmbedded": "Embedded model (offline, no server required)",
     "providerSaveError": "Could not save the embeddings provider",
-    "reindexWarning": "⚠️ Changing the embeddings provider or model invalidates the existing vector index: you will need to re-index your PDFs (Settings → Actions).",
+    "reindexWarning": "Changing the embeddings provider or model invalidates the existing vector index: you will need to re-index your PDFs (Settings → Actions).",
     "modelsLabel": "Embedded embeddings model",
     "modelsHelp": "Download once for fully offline RAG",
     "providerChangeConfirm": "Changing the embedding provider makes every existing index unusable — PDFs, Tropy archives, Obsidian vault and manuscript. Vectors from one model cannot be compared with another's, and nothing will flag it in use: searches will simply become poor. Everything will need re-indexing. Continue?",
@@ -607,10 +607,10 @@
       "fetchingMetadata": "Fetching metadata ({{current}}/{{total}})",
       "downloadingPDFs": "Downloading PDFs ({{current}}/{{total}})",
       "indexingPDFs": "Indexing PDFs ({{current}}/{{total}})",
-      "successTitle": "✅ Import successful!",
+      "successTitle": "Import successful!",
       "successMessage": "**{{items}} references** imported\n**{{pdfs}} PDFs** downloaded\n**{{indexed}} documents** indexed",
       "genericError": "An error occurred during import",
-      "errorTitle": "❌ Import error",
+      "errorTitle": "Import error",
       "close": "Close",
       "allLibraries": "All libraries",
       "personalLibrary": "Personal library",
@@ -722,7 +722,7 @@
       "message": "{{count}} indexed document(s) available.\n\nAsk a question to get started."
     },
     "explanation": {
-      "searchHeading": "🔎 Search",
+      "searchHeading": "Search",
       "resultsFound": "Results found:",
       "duration": "Duration:",
       "cacheHitSuffix": "(cache)",
@@ -745,7 +745,7 @@
       "documentsConsulted": "Documents consulted",
       "chunks": "chunks",
       "score": "score",
-      "compressionHeading": "🗜️ Compression",
+      "compressionHeading": "Compression",
       "state": "State:",
       "enabled": "Enabled",
       "disabled": "Disabled",
@@ -754,16 +754,16 @@
       "chars": "chars",
       "reduction": "Reduction:",
       "strategy": "Strategy:",
-      "graphHeading": "🔗 Knowledge graph",
+      "graphHeading": "Knowledge graph",
       "relatedDocs": "Related documents:",
       "titles": "Titles:",
-      "generationHeading": "🤖 Generation",
+      "generationHeading": "Generation",
       "provider": "Provider:",
       "model": "Model:",
       "contextWindow": "Context window:",
       "temperature": "Temperature:",
       "promptSize": "Prompt size:",
-      "timingHeading": "⏱️ Execution time",
+      "timingHeading": "Execution time",
       "searchTime": "Search:",
       "compressionTime": "Compression:",
       "generationTime": "Generation:",
@@ -1038,6 +1038,7 @@
     "glossaryTitle": "Glossary",
     "noResults": "No results for",
     "capabilities": "Capabilities",
+    "learnMore": "Learn more",
     "limitations": "Limitations",
     "bestPractices": "Best Practices",
     "academicContext": "Academic Context"
@@ -1484,7 +1485,7 @@
       "saveTitle": "Save project context"
     },
     "status": {
-      "saved": "✓ saved"
+      "saved": "saved"
     },
     "placeholder": "# Context\n\n- Corpus: articles in EN about …\n- Avoid citing Wikipedia\n- Use strict chronology\n",
     "legacyNotice": "An earlier hints file ({{path}}) is also read and sent to the assistant. Copy its content here if you would rather keep everything in one file."
@@ -1690,13 +1691,13 @@
       "failed": "Failed:"
     },
     "log": {
-      "runStarted": "▶ Run started — {{recipe}}",
+      "runStarted": "Run started — {{recipe}}",
       "stepInProgress": "… step {{stepId}} ({{kind}})",
-      "stepOk": "✓ step {{stepId}}",
-      "stepOkStub": "✓ step {{stepId}} (stub)",
-      "stepFailed": "✗ step {{stepId}} — {{message}}",
-      "runCompleted": "✓ Run completed",
-      "runFailed": "✗ Run failed — {{message}}"
+      "stepOk": "step {{stepId}}",
+      "stepOkStub": "step {{stepId}} (stub)",
+      "stepFailed": "step {{stepId}} — {{message}}",
+      "runCompleted": "Run completed",
+      "runFailed": "Run failed — {{message}}"
     },
     "placeholder": {
       "path": "/absolute/path/…"
@@ -1704,10 +1705,9 @@
   },
   "explore": {
     "title": "Explore",
-    "subtitle": "Explore your corpus, measure similarity, and surface themes.",
+    "subtitle": "Explore your corpus and surface themes.",
     "tabs": {
       "corpus": "Corpus Explorer",
-      "similarity": "Similarity",
       "textometrics": "Textometrics"
     },
     "placeholder": {
@@ -1948,7 +1948,7 @@
     "uncovered": "not annotated",
     "saving": "Saving…",
     "save": "Save decision",
-    "saved": "✓ Saved",
+    "saved": "Saved",
     "todayDecisions": "Today's decisions",
     "adjudications": {
       "title": "AI proposals",
@@ -2044,13 +2044,13 @@
     "dragHint": "Drag a card into the editor to insert it at the exact drop position (Cmd+Z to undo).",
     "insert": "Insert at cursor",
     "insertTitle": "Insert this draft at the cursor position (adjudicable proposal)",
-    "inserted": "Inserted ✓",
+    "inserted": "Inserted",
     "discard": "Discard",
     "discardTitle": "Remove this draft from the queue (the chat is not modified)",
     "clearAll": "Clear the queue",
     "enqueue": "Save as draft",
     "enqueueTitle": "Add this reply to the Write mode draft queue without inserting it",
-    "enqueued": "Drafted ✓",
+    "enqueued": "Drafted",
     "clearConfirm_one": "Discard the pending draft?",
     "clearConfirm_other": "Discard the {{count}} pending drafts?"
   },

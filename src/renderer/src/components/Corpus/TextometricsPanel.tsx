@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, RefreshCw } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import './TextometricsPanel.css';
 
@@ -178,7 +178,7 @@ export const TextometricsPanel: React.FC = () => {
       {/* Controls */}
       <div className="textometrics-controls">
         <button onClick={handleRefresh} className="btn-refresh">
-          🔄 {t('textometrics.refresh')}
+          <RefreshCw size={14} /> {t('textometrics.refresh')}
         </button>
       </div>
 

@@ -75,10 +75,11 @@
 }
 
 .expand-btn {
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
   color: var(--text-tertiary);
-  font-size: 10px;
   cursor: pointer;
   padding: 4px;
   transition: color var(--transition-normal);

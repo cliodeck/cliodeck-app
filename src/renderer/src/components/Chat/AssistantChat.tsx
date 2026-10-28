@@ -20,7 +20,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Check, Highlighter, Inbox, Loader2, Settings, ShieldAlert, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, Check, Highlighter, Inbox, Library, Loader2, Settings, ShieldAlert, SlidersHorizontal, X } from 'lucide-react';
 import { securityBadgeColor } from '../Brainstorm/security-badge';
 import { useDraftsStore } from '../../stores/draftsStore';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
@@ -402,7 +402,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         {m.role === 'assistant' && sources.length > 0 && (
           <details className="brainstorm-chat__sources">
             <summary data-testid="sources-summary">
-              📚 {t('chat.brainstorm.sourcesLabel')} ({families.sources})
+              <Library size={12} /> {t('chat.brainstorm.sourcesLabel')} ({families.sources})
               {families.manuscript > 0 &&
                 ` · ${t('chat.brainstorm.manuscriptLabel')} (${families.manuscript})`}
               {families.readingNotes > 0 &&
@@ -487,7 +487,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
                     {failed && <X size={11} />}
                   </span>
                   <span className="brainstorm-chat__tool-call-arrow">
-                    {isDone ? '' : '→'}
+                    {!isDone && <ArrowRight size={11} />}
                   </span>
                   <code className="brainstorm-chat__tool-call-name">{tc.name}</code>
                   {!isDone && <span className="brainstorm-chat__tool-call-ellipsis">…</span>}
@@ -525,7 +525,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
               onClick={() => sendToDrafts(orig)}
               title={t('drafts.enqueueTitle')}
             >
-              <Inbox size={12} />{' '}
+              {draftedId === orig.id ? <Check size={12} /> : <Inbox size={12} />}{' '}
               {draftedId === orig.id ? t('drafts.enqueued') : t('drafts.enqueue')}
             </button>
           </div>

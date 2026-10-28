@@ -24,7 +24,7 @@
       "title": "Purger la base de données",
       "description": "Supprime tous les chunks vectoriels et réinitialise les index. Les PDFs devront être réindexés.",
       "button": "Purger la base",
-      "confirmTitle": "⚠️ ATTENTION - Action irréversible",
+      "confirmTitle": "ATTENTION - Action irréversible",
       "confirmMessage": "Cette action va :\n\n• Supprimer TOUS les embeddings vectoriels\n• Supprimer TOUS les chunks de texte\n• Détruire les index HNSW et BM25\n• Réinitialiser complètement la base vectorielle\n\nVous devrez réindexer TOUS vos PDFs.\n\nTapez 'PURGER' pour confirmer :",
       "finalConfirm": "Dernière confirmation: Cette action est IRRÉVERSIBLE. Continuer ?",
       "purging": "Purge en cours...",
@@ -32,7 +32,7 @@
       "error": "Erreur lors de la purge",
       "cancelledNoMatch": "Purge annulée (texte de confirmation incorrect)",
       "cancelled": "Purge annulée",
-      "warning": "⚠️ Cette action est irréversible !",
+      "warning": "Cette action est irréversible !",
       "inProgress": "Purge en cours..."
     },
     "rebuildIndexes": {
@@ -89,7 +89,7 @@
       "success": "Base de données des sources primaires purgée avec succès",
       "error": "Erreur lors de la purge: {{error}}",
       "inProgress": "Purge en cours...",
-      "warning": "⚠️ Cette action est irréversible !"
+      "warning": "Cette action est irréversible !"
     }
   },
   "settings": {
@@ -479,12 +479,12 @@
     "chatNumCtxDetails": "Sans cette valeur, Ollama applique 4 096 jetons quel que soit le modèle — un Qwen 3.5 capable d'un million de jetons tournait à 4K. Elle est envoyée à chaque appel et le cache KV grandit avec elle : une grande fenêtre demande beaucoup de mémoire. Modifiable aussi depuis le panneau du chat, qui écrit au même endroit.",
     "chatModel": "Modèle de chat",
     "chatModelHelp": "Modèle pour la génération de texte",
-    "embeddingStrategyWarning": "⚠️ Attention : Changer ce modèle nécessite de ré-indexer tous les PDFs.",
+    "embeddingStrategyWarning": "Attention : Changer ce modèle nécessite de ré-indexer tous les PDFs.",
     "embeddingStrategyWarningDetails": "Les embeddings ne sont pas compatibles entre modèles différents. Vous devrez supprimer tous les PDFs indexés et les ré-indexer après le changement.",
     "embeddingStrategyRecommended": "Modèles recommandés :",
     "availableModels": "Modèles disponibles",
     "modelsAvailable": "modèles disponibles",
-    "noModelsLoaded": "Cliquez 🔄 pour charger les modèles depuis Ollama",
+    "noModelsLoaded": "Cliquez sur « Rafraîchir les modèles » pour les charger depuis Ollama",
     "refreshModels": "Rafraîchir les modèles",
     "testConnection": "Tester la connexion",
     "connectionSuccess": "Connexion réussie !",
@@ -549,7 +549,7 @@
     "providerOllama": "Ollama (modèle choisi dans la section LLM)",
     "providerEmbedded": "Modèle embarqué (hors ligne, aucun serveur requis)",
     "providerSaveError": "Impossible d'enregistrer le provider d'embeddings",
-    "reindexWarning": "⚠️ Changer de provider ou de modèle d'embeddings rend l'index vectoriel existant inutilisable : il faudra ré-indexer vos PDFs (Réglages → Actions).",
+    "reindexWarning": "Changer de provider ou de modèle d'embeddings rend l'index vectoriel existant inutilisable : il faudra ré-indexer vos PDFs (Réglages → Actions).",
     "modelsLabel": "Modèle d'embeddings embarqué",
     "modelsHelp": "À télécharger une fois pour un RAG entièrement hors ligne",
     "providerChangeConfirm": "Changer de fournisseur d'embeddings rend inutilisables tous les index existants — PDF, archives Tropy, vault Obsidian et manuscrit. Les vecteurs d'un modèle ne se comparent pas à ceux d'un autre, et rien ne le signalera à l'usage : les recherches deviendront simplement mauvaises. Il faudra tout réindexer. Continuer ?",
@@ -607,10 +607,10 @@
       "fetchingMetadata": "Récupération des métadonnées ({{current}}/{{total}})",
       "downloadingPDFs": "Téléchargement des PDFs ({{current}}/{{total}})",
       "indexingPDFs": "Indexation des PDFs ({{current}}/{{total}})",
-      "successTitle": "✅ Import réussi!",
+      "successTitle": "Import réussi!",
       "successMessage": "**{{items}} références** importées\n**{{pdfs}} PDFs** téléchargés\n**{{indexed}} documents** indexés",
       "genericError": "Une erreur s'est produite lors de l'import",
-      "errorTitle": "❌ Erreur lors de l'import",
+      "errorTitle": "Erreur lors de l'import",
       "close": "Fermer",
       "allLibraries": "Toutes les bibliotheques",
       "personalLibrary": "Bibliotheque personnelle",
@@ -722,7 +722,7 @@
       "message": "{{count}} document(s) indexé(s) disponible(s).\n\nPosez une question pour commencer."
     },
     "explanation": {
-      "searchHeading": "🔎 Recherche",
+      "searchHeading": "Recherche",
       "resultsFound": "Résultats trouvés:",
       "duration": "Durée:",
       "cacheHitSuffix": "(cache)",
@@ -745,7 +745,7 @@
       "documentsConsulted": "Documents consultés",
       "chunks": "chunks",
       "score": "score",
-      "compressionHeading": "🗜️ Compression",
+      "compressionHeading": "Compression",
       "state": "État:",
       "enabled": "Activée",
       "disabled": "Désactivée",
@@ -754,16 +754,16 @@
       "chars": "caractères",
       "reduction": "Réduction:",
       "strategy": "Stratégie:",
-      "graphHeading": "🔗 Graphe de connaissances",
+      "graphHeading": "Graphe de connaissances",
       "relatedDocs": "Documents liés:",
       "titles": "Titres:",
-      "generationHeading": "🤖 Génération",
+      "generationHeading": "Génération",
       "provider": "Fournisseur:",
       "model": "Modèle:",
       "contextWindow": "Fenêtre de contexte:",
       "temperature": "Température:",
       "promptSize": "Taille du prompt:",
-      "timingHeading": "⏱️ Temps d'exécution",
+      "timingHeading": "Temps d'exécution",
       "searchTime": "Recherche:",
       "compressionTime": "Compression:",
       "generationTime": "Génération:",
@@ -1038,6 +1038,7 @@
     "glossaryTitle": "Glossaire",
     "noResults": "Aucun résultat pour",
     "capabilities": "Capacités",
+    "learnMore": "En savoir plus",
     "limitations": "Limitations",
     "bestPractices": "Bonnes Pratiques",
     "academicContext": "Contexte Académique"
@@ -1484,7 +1485,7 @@
       "saveTitle": "Enregistrer le contexte du projet"
     },
     "status": {
-      "saved": "✓ enregistré"
+      "saved": "enregistré"
     },
     "placeholder": "# Contexte\n\n- Corpus : articles en FR sur …\n- Évite de citer Wikipedia\n- Utilise la chronologie stricte\n",
     "legacyNotice": "Un fichier de consignes antérieur ({{path}}) est également lu et transmis à l'assistant. Recopiez son contenu ici si vous souhaitez tout réunir dans un seul fichier."
@@ -1690,13 +1691,13 @@
       "failed": "Échec :"
     },
     "log": {
-      "runStarted": "▶ Exécution lancée — {{recipe}}",
+      "runStarted": "Exécution lancée — {{recipe}}",
       "stepInProgress": "… étape {{stepId}} ({{kind}})",
-      "stepOk": "✓ étape {{stepId}}",
-      "stepOkStub": "✓ étape {{stepId}} (ébauche)",
-      "stepFailed": "✗ étape {{stepId}} — {{message}}",
-      "runCompleted": "✓ Exécution terminée",
-      "runFailed": "✗ Exécution échouée — {{message}}"
+      "stepOk": "étape {{stepId}}",
+      "stepOkStub": "étape {{stepId}} (ébauche)",
+      "stepFailed": "étape {{stepId}} — {{message}}",
+      "runCompleted": "Exécution terminée",
+      "runFailed": "Exécution échouée — {{message}}"
     },
     "placeholder": {
       "path": "/absolute/path/…"
@@ -1704,10 +1705,9 @@
   },
   "explore": {
     "title": "Explorer",
-    "subtitle": "Explorez votre corpus, mesurez la similarité et faites émerger les thèmes.",
+    "subtitle": "Explorez votre corpus et faites émerger les thèmes.",
     "tabs": {
       "corpus": "Explorateur de corpus",
-      "similarity": "Similarité",
       "textometrics": "Textométrie"
     },
     "placeholder": {
@@ -1948,7 +1948,7 @@
     "uncovered": "non annotée",
     "saving": "Enregistrement…",
     "save": "Enregistrer la décision",
-    "saved": "✓ Enregistré",
+    "saved": "Enregistré",
     "todayDecisions": "Décisions du jour",
     "adjudications": {
       "title": "Propositions IA",
@@ -2044,13 +2044,13 @@
     "dragHint": "Glissez une carte dans l'éditeur pour l'insérer à l'endroit exact du dépôt (Cmd+Z pour annuler).",
     "insert": "Insérer au curseur",
     "insertTitle": "Insérer ce brouillon à la position du curseur (proposition adjudicable)",
-    "inserted": "Inséré ✓",
+    "inserted": "Inséré",
     "discard": "Jeter",
     "discardTitle": "Retirer ce brouillon de la file (le chat n'est pas modifié)",
     "clearAll": "Vider la file",
     "enqueue": "Mettre en brouillon",
     "enqueueTitle": "Ajouter cette réponse à la file de brouillons du mode Écriture, sans l'insérer",
-    "enqueued": "En brouillon ✓",
+    "enqueued": "En brouillon",
     "clearConfirm_one": "Jeter le brouillon en attente ?",
     "clearConfirm_other": "Jeter les {{count}} brouillons en attente ?"
   },

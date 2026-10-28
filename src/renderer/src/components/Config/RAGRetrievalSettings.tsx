@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { RAGConfig } from './ConfigPanel';
 
@@ -170,7 +171,7 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>⚠️ {t('ragRetrieval.chunking.warningTitle')}</strong>{' '}
+                <strong><AlertTriangle size={14} /> {t('ragRetrieval.chunking.warningTitle')}</strong>{' '}
                 {t('ragRetrieval.chunking.warning')}
                 <br />
                 <small>
@@ -353,7 +354,7 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
               <small>
                 {t('ragRetrieval.useSummaries.hint')}
                 <br />
-                ⚠️ {t('ragRetrieval.useSummaries.requires')}
+                <AlertTriangle size={12} /> {t('ragRetrieval.useSummaries.requires')}
               </small>
             </div>
           </div>

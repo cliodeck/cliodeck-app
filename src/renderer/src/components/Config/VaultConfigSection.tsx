@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FolderOpen, Link2Off, Play } from 'lucide-react';
+import { Check, FolderOpen, Link2Off, Play } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -267,7 +267,7 @@ export const VaultConfigSection: React.FC = () => {
 
       {lastReport && (
         <p style={{ marginTop: 8, fontSize: 12 }}>
-          ✓ {t('vault.report.indexed')} : <strong>{lastReport.indexed}</strong> ·{' '}
+          <Check size={12} /> {t('vault.report.indexed')} : <strong>{lastReport.indexed}</strong> ·{' '}
           {t('vault.report.skipped')} : {lastReport.skipped} ·{' '}
           {t('vault.report.failed')} : {lastReport.failed}
           {lastReport.vaultName ? ` · ${lastReport.vaultName}` : ''}

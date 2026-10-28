@@ -110,7 +110,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       {cslPath ? (
         <div className="csl-selected">
           <div className="csl-file-info">
-            <span className="csl-file-icon">📄</span>
+            <span className="csl-file-icon"><FileText size={18} /></span>
             <span className="csl-file-name">{getCSLFileName(cslPath)}</span>
           </div>
           <button

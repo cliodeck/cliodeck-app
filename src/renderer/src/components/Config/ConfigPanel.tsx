@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RotateCcw, Save } from 'lucide-react';
+import { AlertCircle, Check, RotateCcw, Save } from 'lucide-react';
 import { RAGConfigSection } from './RAGConfigSection';
 import { LLMConfigSection } from './LLMConfigSection';
 import { EmbeddedLLMSection } from './EmbeddedLLMSection';
@@ -298,11 +298,11 @@ export const ConfigPanel: React.FC = () => {
       });
 
       setSaveMessageType('success');
-      setSaveMessage('✅ ' + t('settings.saved'));
+      setSaveMessage(t('settings.saved'));
     } catch (error) {
       console.error('Failed to save config:', error);
       setSaveMessageType('error');
-      setSaveMessage('❌ ' + t('settings.saveError'));
+      setSaveMessage(t('settings.saveError'));
     } finally {
       setIsSaving(false);
     }
@@ -373,7 +373,10 @@ export const ConfigPanel: React.FC = () => {
         </div>
         <div className="config-actions">
           {saveMessage && (
-            <span className={`save-message ${saveMessageType}`}>{saveMessage}</span>
+            <span className={`save-message ${saveMessageType}`}>
+              {saveMessageType === 'success' ? <Check size={14} /> : <AlertCircle size={14} />}
+              {saveMessage}
+            </span>
           )}
           <button
             className="toolbar-btn"

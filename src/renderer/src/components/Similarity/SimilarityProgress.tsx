@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { X } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import './SimilarityProgress.css';
 
@@ -16,7 +16,7 @@ export const SimilarityProgress: React.FC = () => {
   return (
     <div className="similarity-progress">
       <div className="similarity-progress-header">
-        <span className="similarity-progress-icon">⚙️</span>
+        <span className="similarity-progress-icon"><Loader2 size={20} /></span>
         <div className="similarity-progress-info">
           <div className="similarity-progress-status">{progress.status}</div>
           {progress.currentSegment && (

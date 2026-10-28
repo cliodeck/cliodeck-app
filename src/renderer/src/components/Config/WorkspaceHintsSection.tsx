@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Save } from 'lucide-react';
+import { Check, Save } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 
 interface HintsPayload {
@@ -117,7 +117,7 @@ export const WorkspaceHintsSection: React.FC = () => {
           <Save size={16} strokeWidth={1} /> {t('hints.buttons.save')}
         </button>
         {status.kind === 'ok' && (
-          <span style={{ color: 'var(--color-accent)' }}>{t('hints.status.saved')}</span>
+          <span style={{ color: 'var(--color-accent)' }}><Check size={14} /> {t('hints.status.saved')}</span>
         )}
         {status.kind === 'saving' && <span>…</span>}
         {status.kind === 'error' && (

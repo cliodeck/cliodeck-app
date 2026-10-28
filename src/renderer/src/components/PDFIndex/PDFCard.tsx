@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ChevronDown, ChevronRight, Link, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import './PDFCard.css';
 
@@ -49,12 +50,12 @@ export const PDFCard: React.FC<PDFCardProps> = React.memo(({ document, onDelete 
             {document.year && <span className="pdf-year">({document.year})</span>}
             {document.bibtexKey && (
               <span className="pdf-bibtex-badge" title={t('pdfIndex.bibtexKey')}>
-                🔗 {document.bibtexKey}
+                <Link size={12} /> {document.bibtexKey}
               </span>
             )}
           </div>
           <button className="expand-btn">
-            {isExpanded ? '▼' : '▶'}
+            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
         </div>
       </div>
@@ -81,7 +82,7 @@ export const PDFCard: React.FC<PDFCardProps> = React.memo(({ document, onDelete 
 
           <div className="pdf-actions">
             <button className="pdf-action-btn danger" onClick={() => onDelete(document.id)}>
-              🗑️ {t('pdfIndex.delete')}
+              <Trash2 size={14} /> {t('pdfIndex.delete')}
             </button>
           </div>
         </div>

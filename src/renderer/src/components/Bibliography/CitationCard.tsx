@@ -1,6 +1,19 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FileCheck,
+  FileText,
+  Loader2,
+  NotebookPen,
+  Paperclip,
+  PenLine,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import { Citation, useBibliographyStore } from '../../stores/bibliographyStore';
 import { PDFSelectionDialog } from './PDFSelectionDialog';
 import { TagManager } from './TagManager';
@@ -185,7 +198,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
             {citation.year && <div className="citation-year">({citation.year})</div>}
             {(hasPDF || isIndexedByKey) && (
               <span className="pdf-badge" title={isIndexed ? t('bibliography.indexed') : t('bibliography.notIndexed')}>
-                {isIndexed ? '✅' : '📄'}
+                {isIndexed ? <FileCheck size={14} /> : <FileText size={14} />}
               </span>
             )}
             {hasZoteroPDFs && (
@@ -193,12 +206,12 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
                 className="zotero-pdf-badge"
                 title={`${zoteroCount} PDF${zoteroCount > 1 ? 's' : ''} ${t('bibliography.availableInZotero')}`}
               >
-                📎 {zoteroCount}
+                <Paperclip size={12} /> {zoteroCount}
               </span>
             )}
           </div>
           <button className="expand-btn">
-            {isExpanded ? '▼' : '▶'}
+            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
         </div>
 
@@ -308,7 +321,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
 
             <div className="citation-actions">
               <button className="action-btn primary" onClick={handleInsert}>
-                ✍️ {t('bibliography.insertCitation')}
+                <PenLine size={14} /> {t('bibliography.insertCitation')}
               </button>
               {(hasPDF || hasZoteroPDFs || isIndexedByKey) && (
                 <button
@@ -316,7 +329,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
                   onClick={handleIndexPDF}
                   disabled={isIndexing}
                 >
-                  {isIndexing ? '⏳' : isIndexed ? '🔄' : '🔍'}{' '}
+                  {isIndexing ? <Loader2 size={14} /> : isIndexed ? <RefreshCw size={14} /> : <Search size={14} />}{' '}
                   {isIndexing
                     ? t('bibliography.indexing')
                     : isIndexed
@@ -332,7 +345,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
                 }}
                 title={hasReadingNote ? t('bibliography.openReadingNote') : t('bibliography.createReadingNote')}
               >
-                📝 {hasReadingNote ? t('bibliography.openReadingNote') : t('bibliography.createReadingNote')}
+                <NotebookPen size={14} /> {hasReadingNote ? t('bibliography.openReadingNote') : t('bibliography.createReadingNote')}
               </button>
             </div>
           </div>

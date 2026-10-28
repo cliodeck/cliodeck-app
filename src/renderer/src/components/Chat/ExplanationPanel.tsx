@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Bot, ChevronDown, Search, Shrink, Timer, Waypoints } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { RAGExplanation } from '../../stores/chatStore';
 
@@ -47,19 +48,19 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
         className="explanation-toggle"
         onClick={() => setShowExplanation(!showExplanation)}
       >
-        <span className="explanation-icon">🔍</span>
+        <span className="explanation-icon"><Search size={14} /></span>
         <span className="explanation-title">
           {showExplanation
             ? t('chat.hideExplanation', 'Masquer les détails')
             : t('chat.showExplanation', 'Comment cette réponse a été générée')}
         </span>
-        <span className={`explanation-chevron ${showExplanation ? 'open' : ''}`}>▼</span>
+        <span className={`explanation-chevron ${showExplanation ? 'open' : ''}`}><ChevronDown size={12} /></span>
       </button>
 
       {showExplanation && (
         <div className="explanation-content" data-testid="explanation-content">
           <div className="explanation-section">
-            <h4>{t('chat.explanation.searchHeading', '🔎 Recherche')}</h4>
+            <h4><Search size={14} /> {t('chat.explanation.searchHeading', 'Recherche')}</h4>
             <ul>
               <li><strong>{t('chat.explanation.resultsFound', 'Résultats trouvés:')}</strong> {explanation.search.totalResults} {t('chat.explanation.chunks', 'chunks')}</li>
               <li><strong>{t('chat.explanation.duration', 'Durée:')}</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && t('chat.explanation.cacheHitSuffix', '(cache)')}</li>
@@ -123,7 +124,7 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 
           {explanation.compression && (
             <div className="explanation-section">
-              <h4>{t('chat.explanation.compressionHeading', '🗜️ Compression')}</h4>
+              <h4><Shrink size={14} /> {t('chat.explanation.compressionHeading', 'Compression')}</h4>
               <ul>
                 <li><strong>{t('chat.explanation.state', 'État:')}</strong> {explanation.compression.enabled ? t('chat.explanation.enabled', 'Activée') : t('chat.explanation.disabled', 'Désactivée')}</li>
                 {explanation.compression.enabled && (
@@ -142,7 +143,7 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 
           {explanation.graph?.enabled && (
             <div className="explanation-section">
-              <h4>{t('chat.explanation.graphHeading', '🔗 Graphe de connaissances')}</h4>
+              <h4><Waypoints size={14} /> {t('chat.explanation.graphHeading', 'Graphe de connaissances')}</h4>
               <ul>
                 <li><strong>{t('chat.explanation.relatedDocs', 'Documents liés:')}</strong> {explanation.graph.relatedDocsFound}</li>
                 {explanation.graph.documentTitles.length > 0 && (
@@ -153,7 +154,7 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
           )}
 
           <div className="explanation-section">
-            <h4>{t('chat.explanation.generationHeading', '🤖 Génération')}</h4>
+            <h4><Bot size={14} /> {t('chat.explanation.generationHeading', 'Génération')}</h4>
             <ul>
               <li><strong>{t('chat.explanation.provider', 'Fournisseur:')}</strong> {explanation.llm.provider}</li>
               <li><strong>{t('chat.explanation.model', 'Modèle:')}</strong> {explanation.llm.model}</li>
@@ -164,7 +165,7 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
           </div>
 
           <div className="explanation-section">
-            <h4>{t('chat.explanation.timingHeading', '⏱️ Temps d\'exécution')}</h4>
+            <h4><Timer size={14} /> {t('chat.explanation.timingHeading', 'Temps d\'exécution')}</h4>
             <ul>
               <li><strong>{t('chat.explanation.searchTime', 'Recherche:')}</strong> {explanation.timing.searchMs}ms</li>
               {explanation.timing.compressionMs && (

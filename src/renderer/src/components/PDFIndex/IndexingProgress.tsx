@@ -1,4 +1,5 @@
 import React from 'react';
+import { Loader2 } from 'lucide-react';
 import './IndexingProgress.css';
 
 interface IndexingProgressProps {
@@ -19,7 +20,7 @@ export const IndexingProgress: React.FC<IndexingProgressProps> = ({
   return (
     <div className="indexing-progress">
       <div className="progress-header">
-        <span className="progress-icon">⚙️</span>
+        <span className="progress-icon"><Loader2 size={20} /></span>
         <div className="progress-info">
           <div className="progress-file">{getFileName(fileName)}</div>
           <div className="progress-stage">{stage}</div>

@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Inbox } from 'lucide-react';
 import { useSimilarityStore, useAllSegments, type SimilarityResult } from '../../stores/similarityStore';
 import { SimilarityCard } from './SimilarityCard';
 import './SimilarityResults.css';
@@ -95,7 +95,7 @@ const SegmentItem: React.FC<SegmentItemProps> = ({ result, isSelected, onSelect 
             </div>
           ) : (
             <div className="similarity-no-recommendations">
-              <span className="similarity-no-recommendations-icon">📭</span>
+              <span className="similarity-no-recommendations-icon"><Inbox size={24} strokeWidth={1.5} /></span>
               <span className="similarity-no-recommendations-text">
                 {t('similarity.noRecommendations')}
               </span>

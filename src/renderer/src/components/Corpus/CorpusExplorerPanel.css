@@ -62,7 +62,9 @@
 }
 
 .corpus-empty .empty-icon {
-  font-size: 64px;
+  display: flex;
+  justify-content: center;
+  color: var(--text-tertiary);
   margin-bottom: var(--spacing-lg);
 }
 
@@ -464,6 +466,10 @@
 }
 
 .topic-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   margin-top: var(--spacing-md);
   padding: 6px var(--spacing-md);
   background: var(--bg-card-hover);

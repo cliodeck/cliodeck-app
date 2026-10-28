@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileDown, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { FileDown, X, AlertCircle, CheckCircle, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
@@ -344,7 +344,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           {/* Info about abstract for articles and books */}
           {(currentProject?.type === 'article' || currentProject?.type === 'book') && (
             <div className="export-hint">
-              💡 {t('export.word.abstractNote', { file: 'abstract.md' })}
+              <Lightbulb size={14} /> {t('export.word.abstractNote', { file: 'abstract.md' })}
             </div>
           )}
 

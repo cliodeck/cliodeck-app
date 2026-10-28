@@ -79,7 +79,8 @@
 }
 
 .search-icon {
-  font-size: var(--icon-xs);
+  display: inline-flex;
+  align-items: center;
   color: var(--text-tertiary);
 }
 
@@ -311,7 +312,14 @@
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);
   display: flex;
+  align-items: center;
   gap: var(--spacing-md);
+}
+
+.batch-progress-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* Bascule des tags automatiques de Zotero, discrète, au-dessus du filtre. */
