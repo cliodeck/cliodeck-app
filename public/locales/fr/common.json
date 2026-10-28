@@ -1704,10 +1704,9 @@
   },
   "explore": {
     "title": "Explorer",
-    "subtitle": "Explorez votre corpus, mesurez la similarité et faites émerger les thèmes.",
+    "subtitle": "Explorez votre corpus et faites émerger les thèmes.",
     "tabs": {
       "corpus": "Explorateur de corpus",
-      "similarity": "Similarité",
       "textometrics": "Textométrie"
     },
     "placeholder": {

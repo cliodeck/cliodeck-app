@@ -1704,10 +1704,9 @@
   },
   "explore": {
     "title": "Erkunden",
-    "subtitle": "Erkunden Sie Ihr Korpus, messen Sie Ähnlichkeiten und lassen Sie Themen sichtbar werden.",
+    "subtitle": "Erkunden Sie Ihr Korpus und lassen Sie Themen sichtbar werden.",
     "tabs": {
       "corpus": "Korpus-Explorer",
-      "similarity": "Ähnlichkeit",
       "textometrics": "Textometrie"
     },
     "placeholder": {
