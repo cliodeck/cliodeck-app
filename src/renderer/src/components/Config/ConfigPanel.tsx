@@ -267,6 +267,9 @@ export const ConfigPanel: React.FC = () => {
       await window.electron.config.set('llm', llmConfig);
       await window.electron.config.set('editor', editorConfig);
       await window.electron.config.set('zotero', zoteroConfig);
+      // La ligne « Recherche : … » du chat prédit si le manuscrit sera
+      // consulté ; sans l'index, il ne l'est jamais, quoi que dise la case.
+      useRAGQueryStore.getState().setManuscriptIndexEnabled(ragConfig.indexManuscript !== false);
 
       // Le panneau du chat édite les mêmes champs (modèle, fenêtre de
       // contexte) : sans cette répercussion, le modèle qu'il tient — et

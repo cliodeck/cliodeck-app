@@ -17,6 +17,7 @@ import {
   resolveManuscriptToggle,
   effectiveSourceFamilies,
   type RAGQueryParams,
+  manuscriptExclusionReason,
 } from '../ragQueryStore';
 
 function make(b: boolean, p: boolean, n: boolean, includeManuscript?: boolean): RAGQueryParams {
@@ -138,5 +139,84 @@ describe('effectiveSourceFamilies — display order shared by panel and scope li
   it('manuscript alone → [manuscript] ; nothing effective → []', () => {
     expect(effectiveSourceFamilies(make(false, false, false), true)).toEqual(['manuscript']);
     expect(effectiveSourceFamilies(make(false, false, false), false)).toEqual([]);
+  });
+});
+
+describe('manuscriptExclusionReason — la ligne de portée ne promet pas un manuscrit que le main écarte', () => {
+  const base = {
+    includeBibliography: true,
+    includePrimary: true,
+    includeNotes: true,
+    selectedDocumentIds: [] as string[],
+    selectedCollectionKeys: [] as string[],
+  } as unknown as Parameters<typeof manuscriptExclusionReason>[0]['params'];
+  const open = (over: Partial<typeof base> = {}) => ({ ...base, ...over });
+
+  it('consulté dans une recherche ouverte, case effective', () => {
+    expect(
+      manuscriptExclusionReason({ params: open(), manuscriptEffective: true, indexEnabled: true })
+    ).toBeNull();
+  });
+
+  it('écarté sans index, quoi que dise la case', () => {
+    expect(
+      manuscriptExclusionReason({ params: open(), manuscriptEffective: true, indexEnabled: false })
+    ).toBe('disabled');
+  });
+
+  it('écarté par une recherche restreinte : notes seules, documents choisis, collection', () => {
+    expect(
+      manuscriptExclusionReason({
+        params: open({ includeBibliography: false, includePrimary: false }),
+        manuscriptEffective: true,
+        indexEnabled: true,
+      })
+    ).toBe('scope');
+    expect(
+      manuscriptExclusionReason({
+        params: open({ selectedDocumentIds: ['d1'] }),
+        manuscriptEffective: true,
+        indexEnabled: true,
+      })
+    ).toBe('scope');
+    expect(
+      manuscriptExclusionReason({
+        params: open({ selectedCollectionKeys: ['K'] }),
+        manuscriptEffective: true,
+        indexEnabled: true,
+      })
+    ).toBe('scope');
+  });
+
+  it('manuscrit seul : consulté, c’est la portée demandée', () => {
+    expect(
+      manuscriptExclusionReason({
+        params: open({ includeBibliography: false, includePrimary: false, includeNotes: false }),
+        manuscriptEffective: true,
+        indexEnabled: true,
+      })
+    ).toBeNull();
+  });
+
+  it('écarté par la case, puis par la posture « off » du mode', () => {
+    expect(
+      manuscriptExclusionReason({ params: open(), manuscriptEffective: false, indexEnabled: true })
+    ).toBe('toggle');
+    expect(
+      manuscriptExclusionReason({
+        params: open(),
+        manuscriptEffective: true,
+        stance: 'off',
+        indexEnabled: true,
+      })
+    ).toBe('stance');
+    expect(
+      manuscriptExclusionReason({
+        params: open(),
+        manuscriptEffective: true,
+        stance: 'background',
+        indexEnabled: true,
+      })
+    ).toBeNull();
   });
 });

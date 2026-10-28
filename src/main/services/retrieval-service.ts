@@ -1075,7 +1075,11 @@ class RetrievalService {
     // les trois passages les plus proches : mieux vaut trois passages limites
     // qu'une réponse de culture générale sous un prompt qui dit « aucune
     // source ».
-    return applyThreshold(mapped, options.threshold, options.sole ? CROSS_LANGUAGE_FALLBACK : 0);
+    // `applyThreshold` attend une liste triée : le store rend l'ordre RRF, qui
+    // n'est pas celui de la pertinence publiée — le repli garderait sinon
+    // trois extraits d'après leur rang RRF, pas les trois plus proches.
+    const sorted = [...mapped].sort((a, b) => b.similarity - a.similarity);
+    return applyThreshold(sorted, options.threshold, options.sole ? CROSS_LANGUAGE_FALLBACK : 0);
   }
 
   /**

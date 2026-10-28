@@ -11,7 +11,7 @@ export type LLMProvider = 'ollama' | 'embedded' | 'auto';
  * includePrimary / includeNotes); the resolved effective `sourceType` is
  * derived via `getResolvedSourceType()`.
  */
-export type SourceType = 'secondary' | 'primary' | 'both' | 'vault';
+export type SourceType = 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript';
 
 /**
  * Resolved filter bag for the retrieval pipeline. Derived from the three
@@ -149,9 +149,16 @@ interface RAGQueryState {
 
   // UI state (not persisted)
   isSettingsPanelOpen: boolean;
+  /**
+   * `rag.indexManuscript` tel que lu au lancement et à chaque enregistrement
+   * des réglages : sans index, la case « Mon manuscrit » ne consulte rien, et
+   * la ligne de portée doit le dire (`manuscriptExclusionReason`).
+   */
+  manuscriptIndexEnabled: boolean;
 
   // Actions
   setParams: (params: Partial<RAGQueryParams>) => void;
+  setManuscriptIndexEnabled: (enabled: boolean) => void;
   resetToDefaults: () => Promise<void>;
   /**
    * Répercute un enregistrement des réglages LLM (modèle de chat, fenêtre
@@ -287,18 +294,56 @@ export function resolveManuscriptToggle(
 }
 
 /**
+ * Why the manuscript will NOT be consulted on the next turn, or `null` when
+ * it will. A renderer-side mirror of main's `resolveManuscriptPolicy`
+ * (everything but the recall-question detection, which only main sees), so
+ * the scope line and the panel hint never promise a manuscript that main
+ * then leaves out: a restricted search (notes only, selected documents or
+ * collection), a chat mode whose stance is `off`, or a disabled index all
+ * exclude it whatever the toggle says.
+ */
+export type ManuscriptExclusionReason = 'disabled' | 'scope' | 'toggle' | 'stance';
+
+export function manuscriptExclusionReason(input: {
+  params: RAGQueryParams;
+  manuscriptEffective: boolean;
+  /** `activeMode.ragOverrides.manuscript`, raw. */
+  stance?: unknown;
+  /** `rag.indexManuscript` as last known (`manuscriptIndexEnabled`). */
+  indexEnabled: boolean;
+}): ManuscriptExclusionReason | null {
+  const { params, manuscriptEffective, stance, indexEnabled } = input;
+  if (!indexEnabled) return 'disabled';
+  const b = params.includeBibliography;
+  const p = params.includePrimary;
+  const n = params.includeNotes;
+  // Manuscript-only: an explicit scope, consulted whatever the mode says.
+  if (!b && !p && !n && manuscriptEffective) return null;
+  const restricted =
+    (!b && !p && n) ||
+    params.selectedDocumentIds.length > 0 ||
+    params.selectedCollectionKeys.length > 0;
+  if (restricted) return 'scope';
+  if (!manuscriptEffective) return 'toggle';
+  if (stance === 'off') return 'stance';
+  return null;
+}
+
+/**
  * Families effectively consulted, in display order. Shared by the panel's
  * « Recherche dans : » hint and the chat's scope line so both say the same.
+ * `manuscriptConsulted` is `manuscriptExclusionReason(…) === null`, not the
+ * raw toggle.
  */
 export function effectiveSourceFamilies(
   params: RAGQueryParams,
-  manuscriptEffective: boolean
+  manuscriptConsulted: boolean
 ): SourceFamily[] {
   const families: SourceFamily[] = [];
   if (params.includeBibliography) families.push('bibliography');
   if (params.includePrimary) families.push('primary');
   if (params.includeNotes) families.push('notes');
-  if (manuscriptEffective) families.push('manuscript');
+  if (manuscriptConsulted) families.push('manuscript');
   return families;
 }
 
@@ -367,12 +412,17 @@ export const useRAGQueryStore = create<RAGQueryState>()(
       availableDocuments: [], // Issue #16
       isLoadingDocuments: false, // Issue #16
       isSettingsPanelOpen: false,
+      manuscriptIndexEnabled: true,
 
       // Actions
       setParams: (newParams: Partial<RAGQueryParams>) => {
         set((state) => ({
           params: { ...state.params, ...newParams },
         }));
+      },
+
+      setManuscriptIndexEnabled: (enabled: boolean) => {
+        set({ manuscriptIndexEnabled: enabled });
       },
 
       applyLLMConfig: (llm) => {
@@ -397,6 +447,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           const ragConfig = config.rag;
 
           set({
+            manuscriptIndexEnabled: ragConfig.indexManuscript !== false,
             params: {
               provider: (llmConfig.generationProvider as LLMProvider) || DEFAULT_PARAMS.provider,
               model: llmConfig.ollamaChatModel || DEFAULT_PARAMS.model,

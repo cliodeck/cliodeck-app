@@ -257,6 +257,24 @@ describe('AssistantChat — « Mon manuscrit » : projection et ligne de portée
     expect(screen.getByTestId('rag-settings-stub')).toBeTruthy();
   });
 
+  it('la ligne de portée dit pourquoi le manuscrit est écarté quand la case est cochée mais la recherche restreinte', () => {
+    // Espace Écrire, manuscrit au défaut (oui), mais « Notes » seule cochée :
+    // le main l'écarte (portée restreinte) et la ligne doit le dire.
+    useWorkspaceModeStore.getState().setActive('write');
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: true,
+      });
+    });
+    const line = screen.getByTestId('chat-scope-line');
+    expect(line.textContent).not.toContain('ragSettings.includeManuscript');
+    expect(line.textContent).toContain('Manuscript not consulted');
+    expect(line.textContent).toContain('chat.scope.reason.scope');
+  });
+
   it('la ligne de portée existe aussi dans la variante panel', () => {
     useWorkspaceModeStore.getState().setActive('brainstorm');
     render(<AssistantChat variant="panel" />);

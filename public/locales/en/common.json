@@ -654,6 +654,11 @@
     "scope": {
       "prefix": "Searching:",
       "manuscriptOff": "Manuscript not consulted",
+      "reason": {
+        "scope": "search restricted",
+        "stance": "chat mode",
+        "disabled": "index disabled"
+      },
       "title": "Change which sources are searched"
     },
     "placeholder": "Ask a question about your documents...",
@@ -951,6 +956,7 @@
     "manuscriptDefaultHint": "Depends on the workspace: not consulted in Brainstorm, consulted elsewhere",
     "manuscriptPinnedHint": "Pinned for this session.",
     "manuscriptResetDefault": "restore the default",
+    "manuscriptExcludedHint": "Ticked, but not consulted: {{reason}}",
     "searchIn": "Searching in: {{list}}",
     "noSourceWarning": "Select at least one source."
   },

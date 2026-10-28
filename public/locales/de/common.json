@@ -654,6 +654,11 @@
     "scope": {
       "prefix": "Suche:",
       "manuscriptOff": "Manuskript nicht abgefragt",
+      "reason": {
+        "scope": "Suche eingeschränkt",
+        "stance": "Chat-Modus",
+        "disabled": "Index deaktiviert"
+      },
       "title": "Abgefragte Quellen ändern"
     },
     "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten...",
@@ -951,6 +956,7 @@
     "manuscriptDefaultHint": "Je nach Arbeitsbereich: im Brainstorm nicht abgefragt, sonst abgefragt",
     "manuscriptPinnedHint": "Für diese Sitzung festgelegt.",
     "manuscriptResetDefault": "Standard wiederherstellen",
+    "manuscriptExcludedHint": "Angekreuzt, aber nicht abgefragt: {{reason}}",
     "searchIn": "Suche in: {{list}}",
     "noSourceWarning": "Wählen Sie mindestens eine Quelle aus."
   },

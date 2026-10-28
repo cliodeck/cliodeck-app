@@ -4,11 +4,13 @@ import { useTranslation } from 'react-i18next';
 import {
   useRAGQueryStore,
   effectiveSourceFamilies,
+  manuscriptExclusionReason,
   resolveManuscriptToggle,
   SOURCE_FAMILY_LABEL_KEY,
   type LLMProvider,
 } from '../../stores/ragQueryStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { useModeStore } from '../../stores/modeStore';
 import { CollectionMultiSelect } from './CollectionMultiSelect';
 import { DocumentMultiSelect } from './DocumentMultiSelect';
 import {
@@ -78,6 +80,17 @@ export const RAGSettingsPanel: React.FC = () => {
   const workspace = useWorkspaceModeStore((s) => s.active);
   const manuscriptPinned = params.includeManuscript !== undefined;
   const manuscriptEffective = resolveManuscriptToggle(params.includeManuscript, workspace);
+  // Cochée ne veut pas dire consultée : une recherche restreinte, un mode
+  // dont la posture est « off » ou un index désactivé l'écartent (même
+  // raisonnement que le main, hors question de rappel).
+  const manuscriptIndexEnabled = useRAGQueryStore((s) => s.manuscriptIndexEnabled);
+  const activeMode = useModeStore((s) => s.activeMode);
+  const manuscriptExclusion = manuscriptExclusionReason({
+    params,
+    manuscriptEffective,
+    stance: activeMode?.ragOverrides?.manuscript,
+    indexEnabled: manuscriptIndexEnabled,
+  });
 
   // Fenêtre de contexte du modèle sélectionné, lue sur Ollama.
   const [modelInfo, setModelInfo] = useState<ModelContextInfo>({ source: 'none' });
@@ -442,6 +455,14 @@ export const RAGSettingsPanel: React.FC = () => {
                 <span>{t('ragSettings.includeManuscript', 'My manuscript')}</span>
               </label>
               <small className="setting-hint source-toggle-subhint" data-testid="manuscript-toggle-hint">
+                {manuscriptEffective && manuscriptExclusion !== null && (
+                  <>
+                    {t('ragSettings.manuscriptExcludedHint', {
+                      reason: t(`chat.scope.reason.${manuscriptExclusion}`),
+                    })}
+                    <br />
+                  </>
+                )}
                 {manuscriptPinned ? (
                   <>
                     {t('ragSettings.manuscriptPinnedHint', 'Pinned for this session.')}{' '}
@@ -464,8 +485,8 @@ export const RAGSettingsPanel: React.FC = () => {
             </div>
             <small className="setting-hint" data-testid="search-in-hint">
               {(() => {
-                const parts = effectiveSourceFamilies(params, manuscriptEffective).map((f) =>
-                  t(SOURCE_FAMILY_LABEL_KEY[f])
+                const parts = effectiveSourceFamilies(params, manuscriptExclusion === null).map(
+                  (f) => t(SOURCE_FAMILY_LABEL_KEY[f])
                 );
                 if (parts.length === 0) {
                   return (

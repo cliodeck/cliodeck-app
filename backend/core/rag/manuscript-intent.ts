@@ -159,24 +159,46 @@ const EN_BASE =
 /** Adverbes admis entre le sujet et le verbe. */
 const EN_ADV = '(?:(?:already|previously|ever|actually|even|also|somewhere|anywhere|explicitly|really) )*';
 
+/** Adverbes qui font d'une question au présent une question de rappel. */
+const EN_RECALL_ADV = '(?:already|previously|ever|somewhere|anywhere)';
+
 export const EN_RECALL_PATTERNS: readonly RecallPattern[] = [
   {
-    pattern: rx(`\\b(?:have|had|did|do)(?:n't)? i ${EN_ADV}(?:${EN_PAST}|${EN_BASE})`),
+    pattern: rx(`\\b(?:have|had|did)(?:n't)? i ${EN_ADV}(?:${EN_PAST}|${EN_BASE})`),
     why:
-      'Inversion with a first-person auxiliary: « what have I written », « did I mention », ' +
-      '« where did I discuss », « haven\'t I already covered ». « do I need to cite » fails on the verb; ' +
-      '« what has been written » has no first person.',
+      'Inversion with a first-person PAST auxiliary: « what have I written », « did I mention », ' +
+      '« where did I discuss », « haven\'t I already covered ». The present « do I » is deliberately ' +
+      'absent here: « how do I cite », « where do I state my hypothesis » are how-to questions.',
     example: 'What have I already written about Danzig?',
   },
   {
     pattern: rx(
-      `\\b(?:what|where|whether|if|everything|anything|all|something) (?:that )?i(?:'ve| have|'d| had)? ${EN_ADV}${EN_PAST}`
+      `\\bdo(?:n't)? i (?:${EN_RECALL_ADV} (?:${EN_BASE}|${EN_PAST})|${EN_BASE}[^.?!]*\\b(?:already|somewhere|anywhere|previously|yet)\\b)`
     ),
     why:
-      'Nominal or locative relative, past forms only: « what I\'ve written about », « check whether I ' +
-      'already mentioned », « the passages where I discussed ». « if I write about » (base form) is a plan, ' +
-      'not a recall, and is left out.',
+      'The present auxiliary only with a recall adverb in the same clause, before or after the verb: ' +
+      '« do I already mention Lester », « do I mention Lester anywhere ». Without it, « how do I cite », ' +
+      '« where do I state my hypothesis » ask for advice, and « do I need to cite » fails on the verb.',
+    example: 'Do I mention Lester anywhere?',
+  },
+  {
+    pattern: rx(
+      `\\b(?:what|where|everything|anything|all|something) (?:that )?i(?:'ve| have|'d| had)? ${EN_ADV}${EN_PAST}`
+    ),
+    why:
+      'Nominal or locative relative, past forms only: « what I\'ve written about », « the passages ' +
+      'where I discussed ». « if I write about » (base form) is a plan, and « what if I argued » ' +
+      'is a hypothesis — neither starts with « what I » / « where I ».',
     example: "Show me what I've written about the League.",
+  },
+  {
+    pattern: rx(
+      `\\b(?:whether|if) i(?:(?:'ve| have|'d| had) ${EN_ADV}|(?: ${EN_RECALL_ADV})+ )${EN_PAST}`
+    ),
+    why:
+      'Conditional or indirect: « check whether I\'ve covered », « see if I already mentioned ». ' +
+      'Needs the perfect or a recall adverb: « what if I argued that… » is a hypothesis, not a recall.',
+    example: 'Check whether I already mentioned the harbour.',
   },
   {
     pattern: rx(`\\bi(?:'ve| have|'d| had) (?:already|previously) ${EN_PAST}[^.?!]*\\?`),
@@ -205,17 +227,22 @@ const DE_PP =
 /**
  * En allemand l'objet se glisse entre l'auxiliaire et le participe (« habe ich
  * das Thema bereits behandelt »). On tolère une fenêtre courte, sans
- * ponctuation de phrase, plutôt qu'une liste d'adverbes.
+ * ponctuation de phrase NI virgule : une virgule ouvre une subordonnée, et
+ * « habe ich richtig verstanden, dass Lester das Thema behandelt » n'est pas
+ * une question de rappel même si « behandelt » clôt la phrase.
  */
-const DE_GAP = '[^.?!;:]{0,60}?';
+const DE_GAP = '[^.?!;:,]{0,60}?';
+/** Le participe clôt la proposition : rien d'autre qu'une ponctuation ou la fin. */
+const DE_CLAUSE_END = '(?=\\s*(?:[?.!,;:]|$))';
 
 export const DE_RECALL_PATTERNS: readonly RecallPattern[] = [
   {
-    pattern: rx(`\\bha(?:be|tte) ich\\b${DE_GAP}\\b${DE_PP}`),
+    pattern: rx(`\\bha(?:be|tte) ich\\b${DE_GAP}\\b${DE_PP}${DE_CLAUSE_END}`),
     why:
-      'Inversion mit Auxiliar in der ersten Person: « was habe ich über Danzig geschrieben », ' +
-      '« habe ich das Thema bereits behandelt », « wo hatte ich Lester erwähnt ». ' +
-      '« habe ich das richtig verstanden » scheitert am Partizip; « welche Quellen behandeln » hat kein « habe ich ».',
+      'Inversion mit Auxiliar in der ersten Person, Partizip am Satzende, keine Nebensatz-Kommas dazwischen: ' +
+      '« was habe ich über Danzig geschrieben », « habe ich das Thema bereits behandelt », ' +
+      '« wo hatte ich Lester erwähnt ». « Habe ich Zugang zu den Quellen, die Lester zitiert » ' +
+      'scheitert am Komma; « welche Quellen behandeln » hat kein « habe ich ».',
     example: 'Was habe ich schon über Danzig geschrieben?',
   },
   {

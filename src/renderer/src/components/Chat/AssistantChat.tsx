@@ -35,6 +35,7 @@ import { useModeStore } from '../../stores/modeStore';
 import {
   useRAGQueryStore,
   effectiveSourceFamilies,
+  manuscriptExclusionReason,
   resolveManuscriptToggle,
   SOURCE_FAMILY_LABEL_KEY,
 } from '../../stores/ragQueryStore';
@@ -91,15 +92,31 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   // Nom du mode de chat actif : jusqu'ici visible seulement derrière le
   // bouton de réglages (ModeSelector). Repli sur l'identifiant tant que
   // la liste des modes n'est pas chargée.
-  const activeModeName = activeMode?.metadata.name[lang] || activeModeId;
+  // Les modes ne sont nommés qu'en français et en anglais : sous l'interface
+  // allemande, on retombe sur l'anglais plutôt que sur l'identifiant brut.
+  const activeModeName =
+    activeMode?.metadata.name[lang] ||
+    activeMode?.metadata.name.en ||
+    activeMode?.metadata.name.fr ||
+    activeModeId;
   // Portée réellement interrogée, affichée hors du panneau de réglages :
   // le manuscrit est un tri-état résolu contre l'espace de travail
   // (Brainstorm : non consulté par défaut), et l'utilisateur doit le voir
   // sans ouvrir le panneau pour comprendre pourquoi son texte n'apparaît pas.
   const ragParams = useRAGQueryStore((s) => s.params);
+  const manuscriptIndexEnabled = useRAGQueryStore((s) => s.manuscriptIndexEnabled);
   const workspace = useWorkspaceModeStore((s) => s.active);
   const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
-  const scopeFamilies = effectiveSourceFamilies(ragParams, manuscriptEffective);
+  // Le même raisonnement que le main (hors question de rappel) : la ligne ne
+  // doit jamais annoncer un manuscrit que la portée, le mode ou l'index
+  // écartent ensuite.
+  const manuscriptExclusion = manuscriptExclusionReason({
+    params: ragParams,
+    manuscriptEffective,
+    stance: activeMode?.ragOverrides?.manuscript,
+    indexEnabled: manuscriptIndexEnabled,
+  });
+  const scopeFamilies = effectiveSourceFamilies(ragParams, manuscriptExclusion === null);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [draftedId, setDraftedId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
@@ -600,9 +617,11 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         ) : (
           <span>{scopeFamilies.map((f) => t(SOURCE_FAMILY_LABEL_KEY[f])).join(' · ')}</span>
         )}
-        {!manuscriptEffective && (
+        {manuscriptExclusion !== null && (
           <span className="brainstorm-chat__scope-off">
             · {t('chat.scope.manuscriptOff', 'Manuscript not consulted')}
+            {manuscriptExclusion !== 'toggle' &&
+              ` (${t(`chat.scope.reason.${manuscriptExclusion}`)})`}
           </span>
         )}
       </button>

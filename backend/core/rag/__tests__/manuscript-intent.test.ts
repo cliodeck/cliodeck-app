@@ -21,6 +21,9 @@ import {
 
 /** Questions de rappel explicites : le manuscrit doit revenir. */
 const RECALL_QUESTIONS: readonly string[] = [
+  'Do I already mention Lester anywhere?',
+  'Check whether I already mentioned the harbour.',
+  "See if I've covered the 1933 crisis.",
   // Français — exigées par le cahier des charges
   "qu'ai-je déjà écrit sur Danzig ?",
   'Qu’ai-je écrit à propos de Memel',
@@ -78,6 +81,14 @@ const PASTED_PROSE =
 
 /** Questions qui ne portent PAS sur ce que l'auteur a déjà écrit. */
 const OTHER_QUESTIONS: readonly string[] = [
+  // Revue 2026-10-28 : « do I » + verbe et « if I » + prétérit tiraient le
+  // manuscrit dans des questions de méthode ou des hypothèses.
+  'How do I cite an archival document in Chicago style?',
+  'Where do I state my hypothesis in an article?',
+  'What if I argued that the League was powerless in Danzig?',
+  'Do I need to cite the archival reference?',
+  'Habe ich richtig verstanden, dass Lester das Thema behandelt?',
+  'Habe ich Zugang zu den Quellen, die Lester zitiert?',
   // Exigées par le cahier des charges
   'propose des angles pour mon chapitre sur Danzig',
   "dans mon article, je cite Braudel ; que dit-il de la longue durée ?",
