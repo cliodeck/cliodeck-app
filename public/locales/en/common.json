@@ -900,6 +900,7 @@
     "loading": "Textometric analysis in progress...",
     "retry": "Retry",
     "noStatistics": "No textometric statistics available.",
+    "noProjectHint": "Open or create a project to analyse its vocabulary.",
     "analyze": "Run analysis",
     "totalWordsNoStopwords": "Total words (without stopwords)",
     "totalWordsWithStopwords": "Total words (with stopwords)",

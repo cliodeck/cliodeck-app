@@ -900,6 +900,7 @@
     "loading": "Textometrische Analyse läuft...",
     "retry": "Erneut versuchen",
     "noStatistics": "Keine textometrischen Statistiken verfügbar.",
+    "noProjectHint": "Öffnen oder erstellen Sie ein Projekt, um seinen Wortschatz zu analysieren.",
     "analyze": "Analyse starten",
     "totalWordsNoStopwords": "Gesamtwörter (ohne Stoppwörter)",
     "totalWordsWithStopwords": "Gesamtwörter (mit Stoppwörtern)",

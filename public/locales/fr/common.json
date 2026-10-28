@@ -900,6 +900,7 @@
     "loading": "Analyse textométrique en cours...",
     "retry": "Réessayer",
     "noStatistics": "Aucune statistique textométrique disponible.",
+    "noProjectHint": "Ouvrez ou créez un projet pour analyser son vocabulaire.",
     "analyze": "Lancer l'analyse",
     "totalWordsNoStopwords": "Mots totaux (sans stopwords)",
     "totalWordsWithStopwords": "Mots totaux (avec stopwords)",

@@ -248,3 +248,25 @@
     white-space: nowrap;
   }
 }
+
+/* Sans projet : même état vide que l'explorateur de corpus (icône lucide,
+   titre, consigne), centré dans la hauteur du panneau. */
+.textometrics-empty--no-project {
+  height: 100%;
+}
+
+.textometrics-empty__icon {
+  display: flex;
+  justify-content: center;
+  color: var(--text-tertiary);
+  margin-bottom: var(--spacing-lg);
+}
+
+.textometrics-empty h3 {
+  margin: 0 0 var(--spacing-xs) 0;
+}
+
+.textometrics-empty p {
+  margin: 0;
+  color: var(--text-secondary);
+}
