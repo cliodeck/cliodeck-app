@@ -243,10 +243,24 @@ class ManuscriptIndexService {
   async index(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
     if (this.running) return this.running;
     this.running = this.runIndex(embedder)
-      .then((report) => {
-        this.lastReport = report;
-        return report;
-      })
+      .then(
+        (report) => {
+          this.lastReport = report;
+          return report;
+        },
+        (error: unknown) => {
+          // `runIndex` ne jette pas en principe ; si une passe se perd quand
+          // même, la section des réglages ne doit pas continuer d'afficher
+          // la dernière passe réussie comme si rien ne s'était passé.
+          const failed = emptyReport();
+          failed.failures.push({
+            relativePath: '(passe)',
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          this.lastReport = failed;
+          throw error;
+        }
+      )
       .finally(() => {
         this.running = null;
       });
