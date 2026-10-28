@@ -271,7 +271,12 @@ politique hors intention — portée restreinte, posture « off », index
 désactivé — et nomme la raison. Revue de la pile le jour même : les motifs
 d'intention anglais et allemands ont été resserrés (« how do I cite »,
 « what if I argued », « habe ich richtig verstanden, dass… » ne sont pas des
-rappels) ; le doute vaut toujours « non ».
+rappels) ; le doute vaut toujours « non ». Des cases cochées dont aucune ne
+sera consultée — le texte de l'auteur seul, écarté par un fournisseur distant
+sans consentement, un index coupé ou la posture du mode — **bloquent
+l'envoi** avec la raison : ni élargissement silencieux vers toutes les
+sources, ni tour sans aucun contexte. Le repli permissif reste réservé à
+« rien de coché ».
 
 ### Palier 3 — n'indexer que ce que l'auteur a écrit
 

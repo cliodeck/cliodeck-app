@@ -57,23 +57,39 @@ export function useChatSettingsProjection(): void {
     // notes-only selection whose notes are excluded (cloud provider without
     // consent, index off) must become « nothing selected » — warning and
     // permissive fallback — rather than a turn with no context at all.
-    const manuscriptConsulted =
-      manuscriptExclusionReason({
-        params: ragParams,
-        manuscriptEffective,
-        stance: activeMode?.ragOverrides?.manuscript,
-        indexEnabled: manuscriptIndexEnabled,
-      }) === null;
-    const readingNotesConsulted =
-      readingNotesExclusionReason({
-        params: ragParams,
-        readingNotesEffective,
-        stance: readingNotesStance(activeMode?.ragOverrides),
-        indexEnabled: readingNotesIndexEnabled,
-        cloudConsent: readingNotesCloudConsent,
-        generationIsCloud,
-      }) === null;
+    const manuscriptReason = manuscriptExclusionReason({
+      params: ragParams,
+      manuscriptEffective,
+      stance: activeMode?.ragOverrides?.manuscript,
+      indexEnabled: manuscriptIndexEnabled,
+    });
+    const readingNotesReason = readingNotesExclusionReason({
+      params: ragParams,
+      readingNotesEffective,
+      stance: readingNotesStance(activeMode?.ragOverrides),
+      indexEnabled: readingNotesIndexEnabled,
+      cloudConsent: readingNotesCloudConsent,
+      generationIsCloud,
+    });
+    const manuscriptConsulted = manuscriptReason === null;
+    const readingNotesConsulted = readingNotesReason === null;
     const resolved = getResolvedSourceType(ragParams, manuscriptConsulted, readingNotesConsulted);
+    // Des cases cochées dont aucune ne sera consultée : le tour ne part pas.
+    // Le repli permissif de `isEmpty` est pour « rien de coché » (un clic
+    // malheureux ne tue pas le tour) ; ici l'utilisateur a nommé son texte,
+    // et l'envoyer chercher ailleurs serait l'élargissement silencieux que
+    // l'interface promet de ne jamais faire.
+    const ownTicked = manuscriptEffective || readingNotesEffective;
+    const sendBlockedReasons =
+      resolved.isEmpty && ownTicked
+        ? [
+            ...new Set(
+              [manuscriptReason, readingNotesReason]
+                .filter((r): r is NonNullable<typeof r> => r !== null && r !== 'toggle')
+                .map((r) => `chat.scope.reason.${r}`)
+            ),
+          ]
+        : undefined;
     const retrieval: BrainstormChatRetrievalSettings = {
       topK: ragParams.topK,
       documentIds:
@@ -119,6 +135,7 @@ export function useChatSettingsProjection(): void {
       customSystemPrompt,
       promptLanguage,
       retrieval,
+      sendBlockedReasons,
     });
   }, [
     ragParams,

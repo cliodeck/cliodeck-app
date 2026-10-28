@@ -147,6 +147,14 @@ export interface BrainstormChatSettings {
   /** Langue des consignes écrites par l'application (mode par défaut, bloc de contexte). */
   promptLanguage?: 'fr' | 'en';
   retrieval?: BrainstormChatRetrievalSettings;
+  /**
+   * Posé quand l'utilisateur a coché des cases dont AUCUNE ne sera consultée
+   * — son texte seul, écarté pour ce tour (fournisseur distant sans
+   * consentement, index coupé, posture du mode). Le tour ne part pas : on
+   * n'élargit jamais la portée en silence, et un tour sans aucun contexte
+   * sous une case cochée tromperait autant. Clés i18n des raisons.
+   */
+  sendBlockedReasons?: string[];
 }
 
 // MARK: - Store

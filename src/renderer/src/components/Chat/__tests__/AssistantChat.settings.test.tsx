@@ -451,3 +451,74 @@ describe('AssistantChat — « Notes de lecture » : projection et ligne de port
     expect(line()).toContain('chat.scope.reason.disabled');
   });
 });
+
+describe('AssistantChat — la projection bloque l’envoi quand les cases cochées ne seront pas consultées', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
+  });
+  afterEach(() => {
+    cleanup();
+    useRAGQueryStore.getState().setReadingNotesFlags({
+      indexEnabled: true,
+      cloudConsent: false,
+      generationIsCloud: false,
+    });
+    useRAGQueryStore.getState().setParams({
+      includeBibliography: true,
+      includePrimary: true,
+      includeNotes: true,
+      includeManuscript: undefined,
+      includeReadingNotes: undefined,
+    });
+  });
+
+  it('notes de lecture seules, fournisseur distant sans consentement → envoi bloqué avec la raison', () => {
+    useWorkspaceModeStore.getState().setActive('write');
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setReadingNotesFlags({
+        indexEnabled: true,
+        cloudConsent: false,
+        generationIsCloud: true,
+      });
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+        includeReadingNotes: true,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toEqual(['chat.scope.reason.cloud']);
+
+    // Le consentement accordé : les notes seules, portée « notes seules », rien ne bloque.
+    act(() => {
+      useRAGQueryStore.getState().setReadingNotesFlags({
+        indexEnabled: true,
+        cloudConsent: true,
+        generationIsCloud: true,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toBeUndefined();
+    expect(useChatStore.getState().chatSettings.retrieval?.sourceType).toBe('readingNotes');
+  });
+
+  it('rien de coché du tout : le repli permissif d’avant, pas de blocage', () => {
+    useWorkspaceModeStore.getState().setActive('write');
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+        includeReadingNotes: false,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toBeUndefined();
+    expect(useChatStore.getState().chatSettings.retrieval?.sourceType).toBe('both');
+  });
+});

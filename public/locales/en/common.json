@@ -655,7 +655,10 @@
       "prefix": "Searching:",
       "manuscriptOff": "Manuscript not consulted",
       "readingNotesOff": "Reading notes not consulted",
+      "nothingConsultedTitle": "No source will be consulted",
+      "nothingConsulted": "The ticked boxes are excluded for this turn ({{reasons}}). Tick another source, or grant the consent in Settings → expert.",
       "reason": {
+        "toggle": "box unticked",
         "scope": "search restricted",
         "stance": "chat mode",
         "disabled": "index disabled",

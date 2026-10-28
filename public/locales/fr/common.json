@@ -655,7 +655,10 @@
       "prefix": "Recherche :",
       "manuscriptOff": "Manuscrit non consulté",
       "readingNotesOff": "Notes de lecture non consultées",
+      "nothingConsultedTitle": "Aucune source ne sera consultée",
+      "nothingConsulted": "Les cases cochées sont écartées pour ce tour ({{reasons}}). Cochez une autre source, ou accordez le consentement dans Réglages → expert.",
       "reason": {
+        "toggle": "case décochée",
         "scope": "recherche restreinte",
         "stance": "mode de chat",
         "disabled": "index désactivé",

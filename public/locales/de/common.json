@@ -655,7 +655,10 @@
       "prefix": "Suche:",
       "manuscriptOff": "Manuskript nicht abgefragt",
       "readingNotesOff": "Lesenotizen nicht abgefragt",
+      "nothingConsultedTitle": "Keine Quelle wird abgefragt",
+      "nothingConsulted": "Die angekreuzten Kästchen sind für diesen Zug ausgeschlossen ({{reasons}}). Kreuzen Sie eine andere Quelle an oder erteilen Sie die Zustimmung unter Einstellungen → Experte.",
       "reason": {
+        "toggle": "Kästchen nicht angekreuzt",
         "scope": "Suche eingeschränkt",
         "stance": "Chat-Modus",
         "disabled": "Index deaktiviert",
