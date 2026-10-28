@@ -24,6 +24,7 @@ import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { isCloudProvider } from '../../stores/cloudConsentStore';
 import './ConfigPanel.css';
 
 export interface RAGConfig {
@@ -270,6 +271,14 @@ export const ConfigPanel: React.FC = () => {
       // La ligne « Recherche : … » du chat prédit si le manuscrit sera
       // consulté ; sans l'index, il ne l'est jamais, quoi que dise la case.
       useRAGQueryStore.getState().setManuscriptIndexEnabled(ragConfig.indexManuscript !== false);
+      // Même chose pour les notes de lecture, que le main retire aussi du
+      // prompt quand le fournisseur de génération est distant sans
+      // consentement (docs/reading-notes.md).
+      useRAGQueryStore.getState().setReadingNotesFlags({
+        indexEnabled: ragConfig.indexReadingNotes !== false,
+        cloudConsent: ragConfig.readingNotesCloudConsent === true,
+        generationIsCloud: isCloudProvider(llmConfig).isCloud,
+      });
 
       // Le panneau du chat édite les mêmes champs (modèle, fenêtre de
       // contexte) : sans cette répercussion, le modèle qu'il tient — et

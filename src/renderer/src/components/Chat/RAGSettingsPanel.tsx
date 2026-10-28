@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText, PenLine } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText, PenLine, NotebookPen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   useRAGQueryStore,
   effectiveSourceFamilies,
   manuscriptExclusionReason,
+  readingNotesExclusionReason,
+  readingNotesStance,
   resolveManuscriptToggle,
+  resolveReadingNotesToggle,
   SOURCE_FAMILY_LABEL_KEY,
   type LLMProvider,
 } from '../../stores/ragQueryStore';
@@ -90,6 +93,23 @@ export const RAGSettingsPanel: React.FC = () => {
     manuscriptEffective,
     stance: activeMode?.ragOverrides?.manuscript,
     indexEnabled: manuscriptIndexEnabled,
+  });
+  // « Notes de lecture » : même tri-état, même défaut d'espace. Pas de
+  // raison « portée » : une sélection de documents ou de collection les
+  // restreint à ces références côté main au lieu de les écarter. En
+  // revanche, un fournisseur distant sans consentement les retire du prompt.
+  const readingNotesPinned = params.includeReadingNotes !== undefined;
+  const readingNotesEffective = resolveReadingNotesToggle(params.includeReadingNotes, workspace);
+  const readingNotesIndexEnabled = useRAGQueryStore((s) => s.readingNotesIndexEnabled);
+  const readingNotesCloudConsent = useRAGQueryStore((s) => s.readingNotesCloudConsent);
+  const generationIsCloud = useRAGQueryStore((s) => s.generationIsCloud);
+  const readingNotesExclusion = readingNotesExclusionReason({
+    params,
+    readingNotesEffective,
+    stance: readingNotesStance(activeMode?.ragOverrides),
+    indexEnabled: readingNotesIndexEnabled,
+    cloudConsent: readingNotesCloudConsent,
+    generationIsCloud,
   });
 
   // Fenêtre de contexte du modèle sélectionné, lue sur Ollama.
@@ -405,11 +425,13 @@ export const RAGSettingsPanel: React.FC = () => {
           )}
 
           {/* Source Family Toggles — three independent checkboxes covering
-              the three families of ClioDeck sources, plus « Mon manuscrit »
-              (tri-state: pinned on/off, or « selon l'espace »). Any
-              combination is valid, manuscript alone included; selecting
-              none at all surfaces a warning but still projects a permissive
-              fallback so the turn doesn't silently die. */}
+              the three families of ClioDeck sources, plus the two corpora in
+              the author's own voice, « Mon manuscrit » and « Notes de
+              lecture » (tri-state: pinned on/off, or « selon l'espace »).
+              Any combination is valid, manuscript alone or notes alone
+              included; selecting none at all surfaces a warning but still
+              projects a permissive fallback so the turn doesn't silently
+              die. */}
           <div className="setting-group">
             <label>{t('ragSettings.sources', 'Sources')}</label>
             <div className="source-toggle-list" role="group" aria-label={t('ragPanel.sources')}>
@@ -482,12 +504,53 @@ export const RAGSettingsPanel: React.FC = () => {
                   )
                 )}
               </small>
+              <label className="source-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={readingNotesEffective}
+                  onChange={(e) => setParams({ includeReadingNotes: e.target.checked })}
+                  aria-label={t('ragSettings.includeReadingNotes', 'Reading notes')}
+                  data-testid="include-reading-notes-toggle"
+                />
+                <NotebookPen size={14} />
+                <span>{t('ragSettings.includeReadingNotes', 'Reading notes')}</span>
+              </label>
+              <small className="setting-hint source-toggle-subhint" data-testid="reading-notes-toggle-hint">
+                {readingNotesEffective && readingNotesExclusion !== null && (
+                  <>
+                    {t('ragSettings.readingNotesExcludedHint', {
+                      reason: t(`chat.scope.reason.${readingNotesExclusion}`),
+                    })}
+                    <br />
+                  </>
+                )}
+                {readingNotesPinned ? (
+                  <>
+                    {t('ragSettings.manuscriptPinnedHint', 'Pinned for this session.')}{' '}
+                    <button
+                      type="button"
+                      className="source-toggle-reset"
+                      onClick={() => setParams({ includeReadingNotes: undefined })}
+                      data-testid="reading-notes-toggle-reset"
+                    >
+                      {t('ragSettings.manuscriptResetDefault', 'restore the default')}
+                    </button>
+                  </>
+                ) : (
+                  t(
+                    'ragSettings.readingNotesDefaultHint',
+                    'Depends on the workspace: not consulted in Brainstorm, consulted elsewhere'
+                  )
+                )}
+              </small>
             </div>
             <small className="setting-hint" data-testid="search-in-hint">
               {(() => {
-                const parts = effectiveSourceFamilies(params, manuscriptExclusion === null).map(
-                  (f) => t(SOURCE_FAMILY_LABEL_KEY[f])
-                );
+                const parts = effectiveSourceFamilies(
+                  params,
+                  manuscriptExclusion === null,
+                  readingNotesExclusion === null
+                ).map((f) => t(SOURCE_FAMILY_LABEL_KEY[f]));
                 if (parts.length === 0) {
                   return (
                     <span style={{ color: 'var(--color-danger)' }}>

@@ -19,6 +19,7 @@ import {
   MANUSCRIPT_QUOTA_RATIO,
   manuscriptSlots,
   selectWithManuscriptQuota,
+  selectWithOwnTextBands,
 } from '../retrieval-quota.js';
 
 interface Hit {
@@ -142,5 +143,52 @@ describe('selectWithManuscriptQuota', () => {
   it('ne rend rien pour un topK nul ou négatif', () => {
     expect(selectWithManuscriptQuota([...biblio(5), ...manuscrit(5)], 0)).toEqual([]);
     expect(selectWithManuscriptQuota([...biblio(5)], -3)).toEqual([]);
+  });
+});
+
+describe('selectWithOwnTextBands — les notes de lecture ont leur bande, comme le manuscrit', () => {
+  const notes = (n: number, base = 0.95): Hit[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `note-${i}`,
+      similarity: base - i * 0.01,
+      sourceType: 'readingNotes',
+    }));
+  const count = (hits: Hit[], type: string) => kinds(hits).filter((k) => k === type).length;
+
+  it('ne laisse plus les notes rafler les places au mérite', () => {
+    // Avant : « à armes égales » — dix notes mieux notées que la bibliographie
+    // prenaient les dix places.
+    const out = selectWithOwnTextBands([...biblio(20, 0.5), ...notes(20)], 10);
+    expect(count(out, 'readingNotes')).toBe(manuscriptSlots(10));
+    expect(count(out, 'secondary')).toBe(10 - manuscriptSlots(10));
+  });
+
+  it('leur garantit leur bande quand la bibliographie sature (le défaut rc.4, côté notes)', () => {
+    const out = selectWithOwnTextBands([...biblio(20), ...notes(5, 0.4)], 10);
+    expect(count(out, 'readingNotes')).toBe(manuscriptSlots(10));
+  });
+
+  it('bande par corpus : manuscrit et notes chacun la leur, le reste aux sources', () => {
+    const out = selectWithOwnTextBands([...biblio(20), ...manuscrit(5), ...notes(5)], 10, {
+      manuscript: 3,
+      readingNotes: 1,
+    });
+    expect(count(out, 'manuscript')).toBe(3);
+    expect(count(out, 'readingNotes')).toBe(1);
+    expect(count(out, 'secondary')).toBe(6);
+  });
+
+  it('deux portées « seul » qui débordent : les plus pertinents l’emportent entre eux', () => {
+    const out = selectWithOwnTextBands([...manuscrit(10, 0.5), ...notes(10, 0.9)], 10, {
+      manuscript: 10,
+      readingNotes: 10,
+    });
+    expect(out).toHaveLength(10);
+    expect(count(out, 'readingNotes')).toBe(10);
+  });
+
+  it('une bande nulle écarte le corpus', () => {
+    const out = selectWithOwnTextBands([...biblio(5), ...notes(5)], 10, { readingNotes: 0 });
+    expect(count(out, 'readingNotes')).toBe(0);
   });
 });

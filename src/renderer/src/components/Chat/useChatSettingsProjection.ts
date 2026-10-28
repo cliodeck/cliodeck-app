@@ -20,6 +20,7 @@ import {
   useRAGQueryStore,
   getResolvedSourceType,
   resolveManuscriptToggle,
+  resolveReadingNotesToggle,
 } from '../../stores/ragQueryStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 
@@ -29,20 +30,23 @@ export function useChatSettingsProjection(): void {
   const setChatSettings = useChatStore((s) => s.setChatSettings);
   const { activeMode, activeModeId } = useModeStore();
   const ragParams = useRAGQueryStore((s) => s.params);
-  // The manuscript toggle is a tri-state resolved against the workspace
-  // (brainstorm → off by default): the effect must re-run when the user
-  // switches workspace, not only when a toggle changes.
+  // The manuscript and reading-notes toggles are tri-states resolved against
+  // the workspace (brainstorm → off by default): the effect must re-run when
+  // the user switches workspace, not only when a toggle changes.
   const workspace = useWorkspaceModeStore((s) => s.active);
 
   useEffect(() => {
     // Resolve the three independent source toggles plus the EFFECTIVE
-    // manuscript toggle into the (sourceType, includeVault,
-    // includeManuscript) bag understood by the retrieval pipeline. When
-    // everything is off we still project a permissive fallback so retrieval
-    // never silently breaks — the UI surfaces the warning. Manuscript-only
-    // is a valid selection (`sourceType: 'manuscript'`), never widened.
+    // manuscript and reading-notes toggles into the (sourceType,
+    // includeVault, includeManuscript, includeReadingNotes) bag understood by
+    // the retrieval pipeline. When everything is off we still project a
+    // permissive fallback so retrieval never silently breaks — the UI
+    // surfaces the warning. Manuscript-only and notes-only are valid
+    // selections (`sourceType: 'manuscript'` / `'readingNotes'`), never
+    // widened.
     const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
-    const resolved = getResolvedSourceType(ragParams, manuscriptEffective);
+    const readingNotesEffective = resolveReadingNotesToggle(ragParams.includeReadingNotes, workspace);
+    const resolved = getResolvedSourceType(ragParams, manuscriptEffective, readingNotesEffective);
     const retrieval: BrainstormChatRetrievalSettings = {
       topK: ragParams.topK,
       documentIds:
@@ -56,6 +60,7 @@ export function useChatSettingsProjection(): void {
       sourceType: resolved.sourceType,
       includeVault: resolved.includeVault,
       includeManuscript: resolved.includeManuscript,
+      includeReadingNotes: resolved.includeReadingNotes,
     };
     // Le sélecteur du panneau décide ; à défaut, la langue de l'interface.
     // Cette langue part au main à chaque tour : elle ne servait qu'aux modes

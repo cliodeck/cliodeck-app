@@ -654,10 +654,12 @@
     "scope": {
       "prefix": "Suche:",
       "manuscriptOff": "Manuskript nicht abgefragt",
+      "readingNotesOff": "Lesenotizen nicht abgefragt",
       "reason": {
         "scope": "Suche eingeschränkt",
         "stance": "Chat-Modus",
-        "disabled": "Index deaktiviert"
+        "disabled": "Index deaktiviert",
+        "cloud": "Cloud-Anbieter ohne Zustimmung"
       },
       "title": "Abgefragte Quellen ändern"
     },
@@ -957,6 +959,9 @@
     "manuscriptPinnedHint": "Für diese Sitzung festgelegt.",
     "manuscriptResetDefault": "Standard wiederherstellen",
     "manuscriptExcludedHint": "Angekreuzt, aber nicht abgefragt: {{reason}}",
+    "includeReadingNotes": "Lesenotizen",
+    "readingNotesDefaultHint": "Je nach Arbeitsbereich: im Brainstorm nicht abgefragt, sonst abgefragt",
+    "readingNotesExcludedHint": "Angekreuzt, aber nicht abgefragt: {{reason}}",
     "searchIn": "Suche in: {{list}}",
     "noSourceWarning": "Wählen Sie mindestens eine Quelle aus."
   },
@@ -2427,7 +2432,7 @@
     "title": "Korpus Lesenotizen",
     "hint": "Ihre Lesenotizen (Ordner reading-notes des Projekts) werden als fünftes Korpus indexiert. So kann der Assistent die Frage „Was hatte ich zu diesem Werk notiert?“ beantworten. Auszüge erscheinen immer als Ihre Notizen zu einer Referenz, nie als die Referenz selbst.",
     "enabled": "Lesenotizen indexieren",
-    "enabledHelp": "Deaktivieren beendet die Indexierung und entfernt die Notizen aus der Suche",
+    "enabledHelp": "Deaktivieren beendet die Indexierung und entfernt die Notizen aus der Suche. Ob sie in einem Gespräch abgefragt werden, legen Sie mit dem Kästchen „Lesenotizen“ im Chat-Panel fest.",
     "on": "Aktiviert",
     "off": "Deaktiviert",
     "cloudConsent": "Lesenotizen an Online-Modelle senden",

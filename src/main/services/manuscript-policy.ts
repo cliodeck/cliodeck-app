@@ -39,6 +39,9 @@ export type ManuscriptPolicyReason =
   | 'background'
   | 'default';
 
+/** Les portées que le chat peut demander, « seul » compris. */
+export type OwnTextScope = 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
+
 export interface ManuscriptPolicyInput {
   /** `rag.indexManuscript` : sans index, rien à interroger. */
   enabled: boolean;
@@ -47,7 +50,7 @@ export interface ManuscriptPolicyInput {
    * l'espace). `undefined` = appelant historique : admis.
    */
   requested?: boolean;
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+  sourceType: OwnTextScope;
   documentIds?: string[];
   collectionKeys?: string[];
   /** Posture du mode de chat, telle que lue dans son fichier (non validée). */
@@ -105,12 +108,14 @@ export function backgroundSlots(topK: number): number {
  */
 export function shouldIncludeManuscript(opts: {
   enabled: boolean;
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
+  sourceType: Exclude<OwnTextScope, 'manuscript'>;
   documentIds?: string[];
   collectionKeys?: string[];
 }): boolean {
   if (!opts.enabled) return false;
-  if (opts.sourceType === 'vault') return false;
+  // Notes seules — Obsidian ou notes de lecture — : l'utilisateur a nommé
+  // ce qu'il interroge.
+  if (opts.sourceType === 'vault' || opts.sourceType === 'readingNotes') return false;
   if ((opts.documentIds?.length ?? 0) > 0) return false;
   if ((opts.collectionKeys?.length ?? 0) > 0) return false;
   return true;
@@ -157,6 +162,99 @@ export function resolveManuscriptPolicy(input: ManuscriptPolicyInput): Manuscrip
     })
   ) {
     return excluded('scope-restricted');
+  }
+
+  if (input.requested === false) return excluded('toggle-off');
+  if (stance === 'off') return excluded('stance-off');
+
+  if (stance === 'background') {
+    return {
+      include: true,
+      slots: backgroundSlots(input.topK),
+      wording: 'background',
+      stance,
+      reason: 'background',
+    };
+  }
+
+  return {
+    include: true,
+    slots: manuscriptSlots(input.topK),
+    wording: 'recall',
+    stance,
+    reason: 'default',
+  };
+}
+
+export interface ReadingNotesPolicyInput {
+  /**
+   * `rag.indexReadingNotes`, ET le consentement d'envoi quand le fournisseur
+   * de génération est distant (`shouldIncludeReadingNotes`) : les deux
+   * conditions d'existence du corpus pour ce tour, décidées par l'appelant.
+   */
+  enabled: boolean;
+  /** Valeur effective de la case « Notes de lecture » ; `undefined` = admis. */
+  requested?: boolean;
+  sourceType: OwnTextScope;
+  /** Posture du mode, celle des notes ou, à défaut, celle du manuscrit. */
+  stance?: unknown;
+  /** Question de rappel sur les notes (« qu'ai-je noté sur… »). */
+  recallIntent: boolean;
+  topK: number;
+}
+
+/**
+ * Les notes de lecture suivent la même préséance que le manuscrit, à une
+ * différence près, voulue par l'auteur du projet : une recherche restreinte
+ * à des documents ou à une collection ne les écarte pas, elle les **cadre**
+ * (`CorpusSearchOptions.readingNoteCitekeys`) — « d'après tes notes sur
+ * Braudel » garde son sens quand Braudel est sélectionné. Notes seules
+ * (`readingNotes`) ou manuscrit seul avec les notes demandées : pas de
+ * source, les notes entrent.
+ */
+export function resolveReadingNotesPolicy(input: ReadingNotesPolicyInput): ManuscriptPolicy {
+  const stance = normalizeStance(input.stance);
+  const excluded = (reason: ManuscriptPolicyReason): ManuscriptPolicy => ({
+    include: false,
+    slots: 0,
+    wording: 'recall',
+    stance,
+    reason,
+  });
+
+  if (!input.enabled) return excluded('disabled');
+
+  if (input.sourceType === 'readingNotes') {
+    return {
+      include: true,
+      slots: Math.max(0, input.topK),
+      wording: 'only',
+      stance,
+      reason: 'scope-only',
+    };
+  }
+
+  // Manuscrit seul avec les notes demandées : l'utilisateur n'a coché que
+  // son propre texte. Cette portée explicite l'emporte sur la posture du
+  // mode, comme « notes seules » — et comme le prédit la ligne de portée.
+  if (input.sourceType === 'manuscript' && input.requested !== false) {
+    return {
+      include: true,
+      slots: manuscriptSlots(input.topK),
+      wording: 'recall',
+      stance,
+      reason: 'scope-only',
+    };
+  }
+
+  if (input.recallIntent) {
+    return {
+      include: true,
+      slots: recallSlots(input.topK),
+      wording: 'recall',
+      stance,
+      reason: 'recall-intent',
+    };
   }
 
   if (input.requested === false) return excluded('toggle-off');

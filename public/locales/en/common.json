@@ -654,10 +654,12 @@
     "scope": {
       "prefix": "Searching:",
       "manuscriptOff": "Manuscript not consulted",
+      "readingNotesOff": "Reading notes not consulted",
       "reason": {
         "scope": "search restricted",
         "stance": "chat mode",
-        "disabled": "index disabled"
+        "disabled": "index disabled",
+        "cloud": "cloud provider without consent"
       },
       "title": "Change which sources are searched"
     },
@@ -957,6 +959,9 @@
     "manuscriptPinnedHint": "Pinned for this session.",
     "manuscriptResetDefault": "restore the default",
     "manuscriptExcludedHint": "Ticked, but not consulted: {{reason}}",
+    "includeReadingNotes": "Reading notes",
+    "readingNotesDefaultHint": "Depends on the workspace: not consulted in Brainstorm, consulted elsewhere",
+    "readingNotesExcludedHint": "Ticked, but not consulted: {{reason}}",
     "searchIn": "Searching in: {{list}}",
     "noSourceWarning": "Select at least one source."
   },
@@ -2427,7 +2432,7 @@
     "title": "Reading notes corpus",
     "hint": "Your reading notes (the project's reading-notes folder) are indexed as a fifth corpus, so the assistant can answer \"what did I note about this book?\". Extracts are always presented as your notes on a reference, never as the reference itself.",
     "enabled": "Index reading notes",
-    "enabledHelp": "Turning this off stops indexing and removes the notes from searches",
+    "enabledHelp": "Turning this off stops indexing and removes the notes from searches. To consult them or not in a conversation, use the “Reading notes” box in the chat panel.",
     "on": "On",
     "off": "Off",
     "cloudConsent": "Send reading notes to online models",

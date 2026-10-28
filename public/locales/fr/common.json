@@ -654,10 +654,12 @@
     "scope": {
       "prefix": "Recherche :",
       "manuscriptOff": "Manuscrit non consulté",
+      "readingNotesOff": "Notes de lecture non consultées",
       "reason": {
         "scope": "recherche restreinte",
         "stance": "mode de chat",
-        "disabled": "index désactivé"
+        "disabled": "index désactivé",
+        "cloud": "fournisseur distant sans consentement"
       },
       "title": "Modifier les sources consultées"
     },
@@ -957,6 +959,9 @@
     "manuscriptPinnedHint": "Choix fixé pour cette session.",
     "manuscriptResetDefault": "rétablir le défaut",
     "manuscriptExcludedHint": "Coché, mais non consulté : {{reason}}",
+    "includeReadingNotes": "Notes de lecture",
+    "readingNotesDefaultHint": "Selon l'espace : non consultées en Brainstorm, consultées ailleurs",
+    "readingNotesExcludedHint": "Cochées, mais non consultées : {{reason}}",
     "searchIn": "Recherche dans : {{list}}",
     "noSourceWarning": "Sélectionnez au moins une source."
   },
@@ -2427,7 +2432,7 @@
     "title": "Corpus notes de lecture",
     "hint": "Vos notes de lecture (dossier reading-notes du projet) sont indexées comme cinquième corpus. L'assistant peut ainsi répondre à « qu'avais-je noté sur cet ouvrage ? ». Les extraits sont toujours présentés comme vos notes sur une référence, jamais comme la référence elle-même.",
     "enabled": "Indexer les notes de lecture",
-    "enabledHelp": "Désactiver arrête l'indexation et retire les notes des recherches",
+    "enabledHelp": "Désactiver arrête l'indexation et retire les notes des recherches. Pour les consulter ou non dans une conversation, utilisez la case « Notes de lecture » du panneau du chat.",
     "on": "Activé",
     "off": "Désactivé",
     "cloudConsent": "Envoyer les notes de lecture aux modèles en ligne",

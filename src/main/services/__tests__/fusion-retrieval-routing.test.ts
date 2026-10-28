@@ -82,6 +82,13 @@ describe('resolveRetrievalArgs (7-case truth table)', () => {
     });
   });
 
+  it('notes de lecture seules : accepté tel quel, jamais élargi, sans le vault', () => {
+    expect(resolveRetrievalArgs({ sourceType: 'readingNotes', includeVault: true })).toEqual({
+      sourceType: 'readingNotes',
+      includeVault: false,
+    });
+  });
+
   it('manuscrit seul (palier 2) : accepté tel quel, jamais élargi, sans le vault', () => {
     // Avant, une valeur inconnue retombait sur `both` : « Mon manuscrit »
     // seule cochée aurait interrogé toutes les sources — l'inverse de la
@@ -233,6 +240,58 @@ describe('RetrievalService.search — branch dispatch', () => {
     expect(secondarySpy).toHaveBeenCalledTimes(1);
     expect(tropySpy).toHaveBeenCalledTimes(1);
     expect(vaultSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('notes de lecture : seules, elles sont seules ; avec une sélection, elles sont cadrées sur ses références', async () => {
+    type WithNotes = {
+      searchReadingNotes: (
+        q: string,
+        o: { topK: number; sole?: boolean; readingNoteCitekeys?: readonly string[] }
+      ) => Promise<unknown[]>;
+      vectorStore: unknown;
+    };
+    const svc = retrievalService as unknown as WithNotes;
+    const originalSearch = svc.searchReadingNotes;
+    const originalStore = svc.vectorStore;
+    const notesSpy = vi.fn().mockResolvedValue([]);
+    svc.searchReadingNotes = notesSpy as unknown as WithNotes['searchReadingNotes'];
+    // Un store minimal : deux documents de bibliographie avec leur clé, dont
+    // l'un dans une collection.
+    svc.vectorStore = {
+      getDocument: (id: string) =>
+        id === 'd1' ? { bibtexKey: 'Braudel_1949' } : id === 'd2' ? { bibtexKey: 'Lester_1932' } : null,
+      getDocumentIdsInCollections: (keys: string[]) => (keys.includes('COLL') ? ['d2'] : []),
+    };
+    try {
+      await retrievalService.search({ query: 'q', sourceType: 'readingNotes', topK: 5 });
+      expect(notesSpy).toHaveBeenCalledTimes(1);
+      expect(notesSpy.mock.calls[0][1]).toMatchObject({ sole: true, readingNoteCitekeys: undefined });
+      expect(secondarySpy).not.toHaveBeenCalled();
+      expect(tropySpy).not.toHaveBeenCalled();
+      expect(vaultSpy).not.toHaveBeenCalled();
+
+      // Sélection de documents + collection : les notes de ces références.
+      notesSpy.mockClear();
+      await retrievalService.search({
+        query: 'q',
+        sourceType: 'secondary',
+        includeReadingNotes: true,
+        documentIds: ['d1'],
+        collectionKeys: ['COLL'],
+        topK: 5,
+      });
+      const opts = notesSpy.mock.calls[0][1];
+      expect(opts.sole).toBe(false);
+      expect([...(opts.readingNoteCitekeys ?? [])].sort()).toEqual(['Braudel_1949', 'Lester_1932']);
+
+      // Sans sélection : aucun cadrage.
+      notesSpy.mockClear();
+      await retrievalService.search({ query: 'q', sourceType: 'both', includeReadingNotes: true, topK: 5 });
+      expect(notesSpy.mock.calls[0][1].readingNoteCitekeys).toBeUndefined();
+    } finally {
+      svc.searchReadingNotes = originalSearch;
+      svc.vectorStore = originalStore;
+    }
   });
 
   it('manuscrit seul : n’interroge que le manuscrit, et le dit seul (repli garanti)', async () => {

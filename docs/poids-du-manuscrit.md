@@ -302,12 +302,19 @@ avant la prochaine version.
 
 ## Au-delà du manuscrit
 
-- **Les notes de lecture ont la même structure** : toujours actives, dans
-  la langue de l'auteur, cosinus exhaustif, sans quota, sans case. Une fois
-  le manuscrit borné, elles deviennent le corpus suivant « trop fort ». La
-  bonne unité de conception est « les corpus à la voix de l'auteur »
-  (manuscrit, notes de lecture, vault) face aux corpus de sources. Chantier
-  suivant.
+- **Les notes de lecture avaient la même structure** : toujours actives,
+  dans la langue de l'auteur, cosinus exhaustif, sans quota, sans case. Une
+  fois le manuscrit borné, elles devenaient le corpus suivant « trop fort ».
+  **Fait le 2026-10-28, le jour même**, avec les décisions de l'auteur :
+  absentes par défaut dans l'espace Brainstorm comme le manuscrit, cinquième
+  case « Notes de lecture » avec une portée « notes seules », question de
+  rappel détectée (« qu'ai-je noté sur… »), et — la différence voulue — une
+  sélection de documents ou de collection les **cadre** sur ces références
+  au lieu de les écarter. Bande par corpus (`selectWithOwnTextBands`),
+  politique commune (`resolveReadingNotesPolicy`), trois consignes. Détail
+  dans [`reading-notes.md`](reading-notes.md). Reste le vault Obsidian, qui a
+  sa case depuis longtemps et un seuil, mais pas de bande : à traiter quand
+  la mesure le demandera.
 - **Le mode libre** (`free-mode`) injecte le bloc manuscrit sans aucun
   prompt système : la pire posture pour se citer soi-même. Toute politique
   par mode doit le couvrir.

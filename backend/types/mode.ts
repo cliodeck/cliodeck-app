@@ -65,6 +65,11 @@ export interface ModeRAGOverrides {
   numCtx?: number;
   enableContextCompression?: boolean;
   manuscript?: ManuscriptStance;
+  /**
+   * Posture envers les notes de lecture — l'autre corpus à la voix de
+   * l'auteur. Absente, elle suit celle du manuscrit.
+   */
+  readingNotes?: ManuscriptStance;
 }
 
 /** Model recommendation (advisory, not enforced) */

@@ -1,11 +1,24 @@
 /**
- * Intention de rappel : l'utilisateur demande-t-il ce qu'IL a déjà écrit
- * dans SON manuscrit ? (palier 2 de `docs/poids-du-manuscrit.md`)
+ * Intentions de rappel : l'utilisateur demande-t-il ce qu'IL a déjà écrit
+ * dans SON manuscrit (palier 2 de `docs/poids-du-manuscrit.md`), ou ce qu'il
+ * a consigné dans SES notes de lecture (« Au-delà du manuscrit ») ?
  *
- * Quand c'est le cas, la bande du manuscrit s'élargit à `min(topK, 6)` et
- * le manuscrit revient même dans l'espace Brainstorm, où il est absent par
- * défaut. Le détecteur tourne côté main à chaque tour de chat : il doit être
- * pur, déterministe et bon marché — aucun modèle, aucune E/S.
+ * Quand c'est le cas, la bande du corpus concerné s'élargit à `min(topK, 6)`
+ * et ce corpus revient même dans l'espace Brainstorm, où il est absent par
+ * défaut. Les détecteurs tournent côté main à chaque tour de chat : ils
+ * doivent être purs, déterministes et bon marché — aucun modèle, aucune E/S.
+ *
+ * Deux détecteurs, deux familles de verbes. `detectManuscriptIntent` s'ancre
+ * sur les verbes d'écriture (écrit / written / geschrieben…) ;
+ * `detectReadingNotesIntent` sur les verbes de prise de notes (noté / noted /
+ * notiert, « pris des notes ») et sur les constructions qui nomment les notes
+ * de l'auteur (« mes notes (de lecture) », « my (reading) notes », « meine
+ * Notizen »). Ils sont indépendants — mêmes briques, tables séparées — et ne
+ * se déclenchent pas tous deux sur la même phrase : la PHRASE est l'unité
+ * d'analyse, et le manuscrit se tait dans une phrase qui nomme les notes de
+ * lecture (`NOTES_ANCHOR`) — « dans mes notes, ai-je cité Lester ? » porte sur
+ * les notes, même avec un verbe d'écriture. Les notes de bas de page restent
+ * le manuscrit : « mes notes de bas de page » n'est pas une ancre.
  *
  * Trois règles issues de la revue contradictoire du document :
  *
@@ -36,7 +49,7 @@ export interface ManuscriptIntentResult {
 
 /** Un motif de rappel, avec sa justification et un exemple qui le déclenche. */
 export interface RecallPattern {
-  /** Appliqué au texte NORMALISÉ (voir `normaliseForIntent`). Sans drapeau `g`. */
+  /** Appliqué à chaque PHRASE du texte NORMALISÉ (voir `normaliseForIntent`). Sans drapeau `g`. */
   pattern: RegExp;
   /** Pourquoi ce motif existe — ce qu'il reconnaît, et ce qu'il laisse passer. */
   why: string;
@@ -89,10 +102,13 @@ function rx(source: string): RegExp {
 /* Français                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Participes passés des verbes de rappel ; l'accord (e, s, es) est admis. */
+/**
+ * Participes passés des verbes de rappel ; l'accord (e, s, es) est admis.
+ * « noté » n'y est pas : c'est un verbe de prise de notes (`FR_NOTE_PP`).
+ */
 const FR_PP =
   '(?:ecrit|redige|dit|traite|aborde|mentionne|evoque|cite|parle|developpe|' +
-  'note|montre|demontre|explique|analyse|souligne|discute|avance|affirme|' +
+  'montre|demontre|explique|analyse|souligne|discute|avance|affirme|' +
   'soutenu|couvert|defini|decrit|presente|formule|argumente|examine|etudie|' +
   'propose|signale|rappele|precise)(?:e|s|es)?\\b';
 /** Adverbes qui peuvent s'intercaler entre l'auxiliaire et le participe. */
@@ -145,15 +161,18 @@ export const FR_RECALL_PATTERNS: readonly RecallPattern[] = [
 /* Anglais                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Formes passées (prétérit, participe) des verbes de rappel. */
+/**
+ * Formes passées (prétérit, participe) des verbes de rappel. « noted » n'y
+ * est pas : c'est un verbe de prise de notes (`EN_NOTE_PAST`).
+ */
 const EN_PAST =
   '(?:written|wrote|said|covered|mentioned|discussed|argued|addressed|dealt with|' +
-  'talked about|noted|claimed|cited|developed|treated|described|shown|showed|' +
+  'talked about|claimed|cited|developed|treated|described|shown|showed|' +
   'explained|stated|touched on|brought up|raised|examined|analysed|analyzed|' +
   'defined|introduced|established|put forward)\\b';
-/** Formes de base, après « did I » / « do I ». */
+/** Formes de base, après « did I » / « do I » ; « note » est aux notes (`EN_NOTE_BASE`). */
 const EN_BASE =
-  '(?:write|say|cover|mention|discuss|argue|address|deal with|talk about|note|' +
+  '(?:write|say|cover|mention|discuss|argue|address|deal with|talk about|' +
   'claim|cite|develop|treat|describe|show|explain|state|touch on|bring up|raise|' +
   'examine|analyse|analyze|define|introduce|establish|put forward)\\b';
 /** Adverbes admis entre le sujet et le verbe. */
@@ -218,11 +237,14 @@ export const EN_RECALL_PATTERNS: readonly RecallPattern[] = [
 /* Allemand                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Participes passés des verbes de rappel (umlauts déjà retirés). */
+/**
+ * Participes passés des verbes de rappel (umlauts déjà retirés). « notiert »
+ * n'y est pas : c'est un verbe de prise de notes (`DE_NOTE_PP`).
+ */
 const DE_PP =
   '(?:geschrieben|gesagt|behandelt|erwahnt|angesprochen|besprochen|diskutiert|' +
   'zitiert|dargelegt|ausgefuhrt|entwickelt|beschrieben|gezeigt|erklart|erlautert|' +
-  'festgehalten|argumentiert|thematisiert|notiert|formuliert|untersucht|' +
+  'festgehalten|argumentiert|thematisiert|formuliert|untersucht|' +
   'analysiert|erortert|angefuhrt|wiederholt)\\b';
 /**
  * En allemand l'objet se glisse entre l'auxiliaire et le participe (« habe ich
@@ -260,34 +282,291 @@ export const DE_RECALL_PATTERNS: readonly RecallPattern[] = [
 ];
 
 /* -------------------------------------------------------------------------- */
-/* Détecteur                                                                   */
+/* Notes de lecture — ancres                                                   */
 /* -------------------------------------------------------------------------- */
 
-/** Toutes les tables, par langue ; l'ordre est celui de la recherche. */
+/**
+ * « Mes notes (de lecture) », « mes fiches (de lecture) », « ma note de lecture
+ * sur… ». Les notes de bas de page et de fin sont le manuscrit, pas les notes
+ * de lecture : elles sont écartées par anticipation négative. Le singulier
+ * « ma note » seul est ambigu (note de bas de page, note de service) et exige
+ * « de lecture ».
+ */
+const FR_NOTES =
+  '(?:mes (?:notes(?! (?:de bas de page|de fin|infrapaginales|en bas de page)\\b)(?: de lecture)?|' +
+  'fiches(?: de lecture)?)|ma (?:note|fiche) de lecture)\\b';
+/** « my notes », « my reading notes », « my reading note ». « my footnotes » is another word. */
+const EN_NOTES = '(?:my (?:reading )?notes|my reading note)\\b';
+/**
+ * « meine / meinen / meiner (Lese)Notizen », « meine Exzerpte ». « Fußnoten »
+ * und « Anmerkungen » (im Deutschen meist die Fußnoten) bleiben draußen.
+ */
+const DE_NOTES = '(?:meine[nr]? (?:(?:lese)?notizen|exzerpten?))\\b';
+
+/**
+ * Ce qui désigne les notes de lecture de l'auteur, toutes langues confondues.
+ * Brique des motifs de notes — et garde du détecteur de manuscrit, qui se tait
+ * dans une phrase où elle apparaît : « dans mes notes, ai-je cité Lester ? »
+ * est une question sur les notes, pas sur le manuscrit.
+ */
+export const NOTES_ANCHOR: RegExp = rx(`\\b(?:${FR_NOTES}|${EN_NOTES}|${DE_NOTES})`);
+
+/* -------------------------------------------------------------------------- */
+/* Notes de lecture — français                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Participes des verbes de prise de notes ; l'accord (e, s, es) est admis. */
+const FR_NOTE_PP = '(?:note|consigne)(?:e|s|es)?\\b';
+/** « pris des notes », « pris note de », « pris en note ». */
+const FR_PRIS_NOTES = 'pris (?:des |quelques |mes |en )?notes?\\b';
+const FR_NOTE_V = `(?:${FR_NOTE_PP}|${FR_PRIS_NOTES})`;
+/** Présent de la première personne : « je parle de », « je cite », « j'évoque », « je n'en parle ». */
+const FR_JE_PRESENT =
+  `(?:je (?:n${EL}|ne )?|j${EL})(?:en |y )?` +
+  '(?:parle|cite|mentionne|evoque|aborde|traite|dis|discute|signale|note|releve)s?\\b';
+/** Une interrogation à la première personne : inversion ou périphrase. */
+const FR_Q = `(?:(?:ai|avais)[-\\s]je|est-ce que (?:${FR_J_AI}|${FR_JE_PRESENT}))`;
+
+export const FR_NOTES_RECALL_PATTERNS: readonly RecallPattern[] = [
+  {
+    pattern: rx(`\\b(?:ai|avais)[-\\s]je (?:pas )?${FR_ADV}${FR_NOTE_V}`),
+    why:
+      "Inversion interrogative avec un verbe de prise de notes : « qu'ai-je noté sur », « où avais-je noté », " +
+      "« ai-je pris des notes sur », « n'ai-je pas déjà pris note de ». « qu'ai-je écrit » est au manuscrit ; " +
+      "« ai-je raison » n'a pas de verbe.",
+    example: "Qu'ai-je noté sur Braudel ?",
+  },
+  {
+    pattern: rx(`\\b(?:est-ce que|ce que|ou) ${FR_J_AI} (?:pas )?${FR_ADV}${FR_NOTE_V}`),
+    why:
+      "Périphrase et relative : « qu'est-ce que j'ai noté sur », « ce que j'ai consigné », « la fiche où j'ai " +
+      "noté ». Pas de « si » : « si j'ai bien noté, Braudel… » est une incise de précaution, pas un rappel.",
+    example: "Qu'est-ce que j'ai noté sur la crise de 1933 ?",
+  },
+  {
+    pattern: rx(`\\b${FR_J_AI} (?:pas )?deja ${FR_NOTE_V}[^.?!]*\\?`),
+    why:
+      "Déclarative interrogative : « j'ai déjà pris des notes sur cet article ? ». « déjà » ET un point " +
+      "d'interrogation dans la même phrase, comme pour le manuscrit.",
+    example: "J'ai déjà pris des notes sur cet article ?",
+  },
+  {
+    pattern: rx(
+      `\\b(?:disent|contiennent|mentionnent|racontent) ${FR_NOTES}|` +
+        `\\b${FR_NOTES} (?:disent|contiennent|mentionnent|parlent|evoquent|racontent)\\b`
+    ),
+    why:
+      'Les notes comme sujet : « que disent mes notes sur », « que contiennent mes fiches de lecture », ' +
+      "« mes notes parlent-elles de ». « range mes notes » n'a pas de verbe de contenu.",
+    example: 'Que disent mes notes sur Braudel ?',
+  },
+  {
+    pattern: rx(
+      `\\b(?:dans|parmi|d${EL}apres|selon) ${FR_NOTES}[^.?!]*\\b${FR_Q}|` +
+        `\\b${FR_Q}\\b[^.?!]*\\b(?:dans|parmi) ${FR_NOTES}|` +
+        `\\b(?:qu${EL})?y a[-\\s]t[-\\s]il\\b[^.?!]*\\b(?:dans|parmi) ${FR_NOTES}`
+    ),
+    why:
+      "Les notes comme lieu d'une question à la première personne, dans la même phrase et dans les deux ordres : " +
+      '« dans mes notes de lecture, est-ce que je parle de », « ai-je cité Lester dans mes notes », ' +
+      "« y a-t-il quelque chose dans mes notes sur ». Le verbe peut être d'écriture : le lieu l'emporte. " +
+      "« est-ce que je peux chercher dans mes notes » n'a pas de verbe de rappel ; « dans mes notes de bas " +
+      "de page » n'est pas une ancre.",
+    example: 'Dans mes notes de lecture, est-ce que je parle de Lester ?',
+  },
+];
+
+/* -------------------------------------------------------------------------- */
+/* Notes de lecture — anglais                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** The notes as an object: « notes », « any notes », « a note », « reading notes ». */
+const EN_NOTES_NP = '(?:(?:any|some|a few|a|my|detailed) )?(?:reading )?notes?\\b';
+/** Base forms, after « did I » / « have I ». */
+const EN_NOTE_BASE = `(?:note(?: down)?|jot(?: down)?|(?:take|make|keep) (?:down )?${EN_NOTES_NP})\\b`;
+/** Past forms (preterite, participle). */
+const EN_NOTE_PAST = `(?:noted(?: down)?|jotted(?: down)?|(?:taken|took|made|kept) (?:down )?${EN_NOTES_NP})\\b`;
+/** A first-person auxiliary that is not a how-to: « did I », « have I », never « how do I ». */
+const EN_AUX_I = "(?<!\\bhow )(?:do|did|have|had)(?:n't)? i\\b";
+
+export const EN_NOTES_RECALL_PATTERNS: readonly RecallPattern[] = [
+  {
+    pattern: rx(`\\b(?:have|had|did)(?:n't)? i ${EN_ADV}(?:${EN_NOTE_PAST}|${EN_NOTE_BASE})`),
+    why:
+      'Inversion with a first-person past auxiliary and a note-taking verb: « what did I note about », ' +
+      '« have I taken notes on », « did I make a note of », « what have I jotted down ». « did I write » ' +
+      'belongs to the manuscript; « what did Braudel note » has no « I ».',
+    example: 'What did I note about Braudel?',
+  },
+  {
+    pattern: rx(`\\bdo(?:n't)? i ${EN_ADV}(?:have|keep) (?:any |some )?(?:reading )?notes\\b`),
+    why:
+      'The present only with the notes as possession: « do I have any notes on this article », ' +
+      '« do I already keep notes on ». « do I need to cite » fails on the verb.',
+    example: 'Do I have any notes on this article?',
+  },
+  {
+    pattern: rx(
+      `\\b(?:what|where|everything|anything|all|something) (?:that )?i(?:'ve| have|'d| had)? ${EN_ADV}${EN_NOTE_PAST}`
+    ),
+    why:
+      'Nominal or locative relative, past forms only: « everything I\'ve noted about », « what I jotted ' +
+      'down on ». « what I note here is » (present, declarative) stays out.',
+    example: "Show me everything I've noted about the League.",
+  },
+  {
+    pattern: rx(
+      `\\b(?:whether|if) i(?:(?:'ve| have|'d| had) ${EN_ADV}|(?: ${EN_RECALL_ADV})+ )${EN_NOTE_PAST}`
+    ),
+    why:
+      'Conditional or indirect: « check whether I already took notes on », « see if I\'ve jotted down ». ' +
+      'Needs the perfect or a recall adverb: « if I take notes » is a plan.',
+    example: 'Check whether I already took notes on this article.',
+  },
+  {
+    pattern: rx(`\\bi(?:'ve| have|'d| had) (?:already|previously) ${EN_NOTE_PAST}[^.?!]*\\?`),
+    why:
+      'Declarative question: « I\'ve already taken notes on this somewhere? ». Needs the recall adverb AND ' +
+      'a question mark in the same sentence, so pasted prose stays prose.',
+    example: "I've already taken notes on this article somewhere?",
+  },
+  {
+    pattern: rx(
+      `\\b${EN_NOTES} (?:say|said|mention|contain|cover|record|include|tell)\\b|` +
+        `\\bwhat(?:'s| is| was) in ${EN_NOTES}|` +
+        `\\b(?:is|was) there (?:anything|something|nothing|any (?:note|mention)|a note)\\b[^.?!]*\\bin ${EN_NOTES}`
+    ),
+    why:
+      'The notes as subject or container: « what do my notes say about », « what\'s in my notes about », ' +
+      '« is there anything in my notes about ». « is there a way to export my notes » asks for a feature.',
+    example: 'What do my notes say about the League?',
+  },
+  {
+    pattern: rx(`\\b(?:in|from|according to|among) ${EN_NOTES}[^.?!]*\\b${EN_AUX_I}|\\b${EN_AUX_I}[^.?!]*\\bin ${EN_NOTES}`),
+    why:
+      'The notes as the place of a first-person question, same sentence, either order: « where in my notes ' +
+      'do I mention Lester », « in my reading notes, did I mention », « have I cited Braudel in my notes ». ' +
+      'The verb may be a writing verb: the place wins. « how do I search in my notes » is a how-to and is ' +
+      'excluded by the « how » guard; « put this in my notes » has no first-person auxiliary.',
+    example: 'Where in my notes do I mention Lester?',
+  },
+];
+
+/* -------------------------------------------------------------------------- */
+/* Notes de lecture — allemand                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Partizipien der Notizverben. « aufgeschrieben » gehört hierher, nicht zum
+ * Manuskript: `\bgeschrieben\b` greift darin nicht (kein Wortrand nach « auf »).
+ */
+const DE_NOTE_PP =
+  '(?:notiert|exzerpiert|aufgeschrieben|(?:notizen|exzerpte|eine notiz) (?:gemacht|angefertigt|angelegt))\\b';
+
+export const DE_NOTES_RECALL_PATTERNS: readonly RecallPattern[] = [
+  {
+    pattern: rx(`\\bha(?:be|tte) ich\\b${DE_GAP}\\b${DE_NOTE_PP}${DE_CLAUSE_END}`),
+    why:
+      'Inversion mit Auxiliar in der ersten Person, Notizverb am Satzende: « was habe ich zu Braudel notiert », ' +
+      '« habe ich mir zu diesem Aufsatz Notizen gemacht », « was hatte ich mir dazu aufgeschrieben ». ' +
+      '« was habe ich über Danzig geschrieben » ist das Manuskript.',
+    example: 'Was habe ich zu Braudel notiert?',
+  },
+  {
+    pattern: rx(`\\b(?:was|wo|ob|wie) ich\\b${DE_GAP}\\b${DE_NOTE_PP} ha(?:be|tte)\\b`),
+    why:
+      'Nebensatz mit Auxiliar am Ende: « was ich zu Braudel notiert habe », « ob ich mir zu Lester Notizen ' +
+      'gemacht habe ».',
+    example: 'Zeig mir, was ich zu Braudel notiert habe.',
+  },
+  {
+    pattern: rx(
+      `\\bsteht in ${DE_NOTES}|\\b(?:sagen|besagen|enthalten|erwahnen) ${DE_NOTES}|` +
+        `\\b${DE_NOTES} (?:sagen|besagen|enthalten|erwahnen)\\b|\\bgibt es\\b[^.?!]*\\bin ${DE_NOTES}`
+    ),
+    why:
+      'Die Notizen als Subjekt oder Behälter: « was steht in meinen Notizen zu », « was sagen meine Notizen », ' +
+      '« gibt es in meinen Notizen etwas zu ». « wie suche ich in meinen Notizen » fragt nach der Bedienung.',
+    example: 'Was steht in meinen Notizen zu Danzig?',
+  },
+  {
+    pattern: rx(`\\bin ${DE_NOTES}[^.?!]*\\bha(?:be|tte) ich\\b|\\bha(?:be|tte) ich\\b[^.?!]*\\bin ${DE_NOTES}`),
+    why:
+      'Die Notizen als Ort einer Frage in der ersten Person, gleicher Satz, beide Reihenfolgen: « habe ich ' +
+      'Lester in meinen Notizen erwähnt ». Das Verb darf ein Schreibverb sein: der Ort gewinnt. « Habe ich ' +
+      'Zugang zu meinen Notizen » hat kein « in ».',
+    example: 'Habe ich Lester in meinen Notizen erwähnt?',
+  },
+];
+
+/* -------------------------------------------------------------------------- */
+/* Détecteurs                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Toutes les tables du manuscrit, par langue ; l'ordre est celui de la recherche. */
 export const RECALL_PATTERNS: Readonly<Record<IntentLanguage, readonly RecallPattern[]>> = {
   fr: FR_RECALL_PATTERNS,
   en: EN_RECALL_PATTERNS,
   de: DE_RECALL_PATTERNS,
 };
 
+/** Toutes les tables des notes de lecture, par langue ; même ordre. */
+export const NOTES_RECALL_PATTERNS: Readonly<Record<IntentLanguage, readonly RecallPattern[]>> = {
+  fr: FR_NOTES_RECALL_PATTERNS,
+  en: EN_NOTES_RECALL_PATTERNS,
+  de: DE_NOTES_RECALL_PATTERNS,
+};
+
 /**
- * L'utilisateur demande-t-il ce qu'il a déjà écrit dans son manuscrit ?
- *
- * Pur, déterministe, sans E/S. Renvoie le premier fragment reconnu dans le
- * texte normalisé — c'est ce que le journal enregistre.
+ * Les phrases du texte normalisé, ponctuation forte comprise — c'est l'unité
+ * sur laquelle les motifs s'appliquent et sur laquelle la garde du manuscrit
+ * joue. Un point final coupe donc toujours une fenêtre, comme avant.
  */
-export function detectManuscriptIntent(text: string): ManuscriptIntentResult {
-  const normalised = normaliseForIntent(text);
-  if (normalised.length === 0) {
-    return { intent: false };
-  }
-  for (const table of Object.values(RECALL_PATTERNS)) {
-    for (const { pattern } of table) {
-      const found = pattern.exec(normalised);
-      if (found !== null && found[0].length > 0) {
-        return { intent: true, match: found[0] };
+function sentencesOf(normalised: string): string[] {
+  return normalised.match(/[^.?!]+[.?!]*/g) ?? [];
+}
+
+/**
+ * Première phrase qu'un motif reconnaît, hors celles que `veto` écarte.
+ * Renvoie le fragment reconnu — c'est ce que le journal enregistre.
+ */
+function detectRecall(
+  normalised: string,
+  tables: Readonly<Record<IntentLanguage, readonly RecallPattern[]>>,
+  veto?: RegExp
+): ManuscriptIntentResult {
+  for (const sentence of sentencesOf(normalised)) {
+    if (veto !== undefined && veto.test(sentence)) {
+      continue;
+    }
+    for (const table of Object.values(tables)) {
+      for (const { pattern } of table) {
+        const found = pattern.exec(sentence);
+        if (found !== null && found[0].length > 0) {
+          return { intent: true, match: found[0] };
+        }
       }
     }
   }
   return { intent: false };
+}
+
+/**
+ * L'utilisateur demande-t-il ce qu'il a déjà écrit dans son manuscrit ?
+ *
+ * Pur, déterministe, sans E/S. Se tait dans une phrase qui nomme les notes de
+ * lecture de l'auteur (`NOTES_ANCHOR`) : celle-là revient aux notes.
+ */
+export function detectManuscriptIntent(text: string): ManuscriptIntentResult {
+  return detectRecall(normaliseForIntent(text), RECALL_PATTERNS, NOTES_ANCHOR);
+}
+
+/**
+ * L'utilisateur demande-t-il ce qu'il a consigné dans ses notes de lecture ?
+ *
+ * Pur, déterministe, sans E/S. Même contrat que `detectManuscriptIntent` ;
+ * les deux ne se déclenchent pas sur la même phrase.
+ */
+export function detectReadingNotesIntent(text: string): ManuscriptIntentResult {
+  return detectRecall(normaliseForIntent(text), NOTES_RECALL_PATTERNS);
 }

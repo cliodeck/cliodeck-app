@@ -48,7 +48,7 @@ import {
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
 import { readingNotesIndexService } from './reading-notes-index-service.js';
-import { selectWithManuscriptQuota } from './retrieval-quota.js';
+import { selectWithOwnTextBands } from './retrieval-quota.js';
 import { configManager } from './config-manager.js';
 import { tropyService } from './tropy-service.js';
 import {
@@ -91,7 +91,7 @@ const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
  * `includeManuscript` opt-ins to mix notes / own text in alongside
  * primary/secondary.
  */
-export type SourceType = 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript';
+export type SourceType = 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
 
 export interface SecondarySearchResult extends SearchResult {
   sourceType: 'secondary';
@@ -350,6 +350,8 @@ export interface RetrievalQuery {
    * pour écarter le manuscrit du tri sans cesser de l'interroger.
    */
   manuscriptSlots?: number;
+  /** Même chose pour les notes de lecture, l'autre corpus à la voix de l'auteur. */
+  readingNoteSlots?: number;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -765,8 +767,13 @@ class RetrievalService {
         documentIds: q.documentIds,
         collectionKeys: q.collectionKeys,
         // Un corpus seul dans la portée garde un repli : personne d'autre
-        // ne répondra (le manuscrit interrogé seul, palier 2).
+        // ne répondra (le manuscrit ou les notes interrogés seuls).
         sole: scope.size === 1,
+        // Une sélection de documents ou de collection cadre les notes de
+        // lecture sur ces références au lieu de les écarter.
+        readingNoteCitekeys: scope.has('readingNotes')
+          ? this.citekeysForSelection(q.documentIds, q.collectionKeys)
+          : undefined,
       },
       (corpus, error) => {
         console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
@@ -779,15 +786,15 @@ class RetrievalService {
       }
     }
 
-    // Bande du manuscrit (`retrieval-quota.ts`) : sans réserve, la
-    // bibliographie prenait tout le `topK` (rc.4) ; sans plafond, le
-    // manuscrit prenait tout le reste au mérite (2026-10). L'appelant peut
-    // fixer la largeur ; omise, elle découle de `topK`.
-    const sortedResults = selectWithManuscriptQuota(
-      allSourceResults,
-      topK,
-      q.manuscriptSlots
-    );
+    // Bandes des corpus à la voix de l'auteur (`retrieval-quota.ts`) : sans
+    // réserve, la bibliographie prenait tout le `topK` (rc.4) ; sans plafond,
+    // le manuscrit prenait tout le reste au mérite, et les notes de lecture,
+    // « à armes égales », pouvaient en faire autant (2026-10). L'appelant peut
+    // fixer chaque largeur ; omise, elle découle de `topK`.
+    const sortedResults = selectWithOwnTextBands(allSourceResults, topK, {
+      manuscript: q.manuscriptSlots,
+      readingNotes: q.readingNoteSlots,
+    });
 
     // Run the inspector before returning chunks to the caller. In `warn`
     // mode this is a logging side-effect; in `audit`/`block` it filters
@@ -903,14 +910,60 @@ class RetrievalService {
     ];
   }
 
+  /**
+   * Clés de citation des références que l'utilisateur a sélectionnées
+   * (documents choisis, collections Zotero, sous-collections comprises) ;
+   * `undefined` sans sélection. Sert à cadrer les notes de lecture : ses
+   * notes sur Braudel restent pertinentes quand Braudel est sélectionné, les
+   * autres non. Une référence sans clé ne retient aucune note.
+   */
+  private citekeysForSelection(
+    documentIds?: string[],
+    collectionKeys?: string[]
+  ): readonly string[] | undefined {
+    const selected = documentIds?.length ?? 0;
+    const inCollections = collectionKeys?.length ?? 0;
+    if (selected === 0 && inCollections === 0) return undefined;
+    const store = this.vectorStore;
+    if (!store) return [];
+    const ids = new Set<string>(documentIds ?? []);
+    if (inCollections > 0) {
+      try {
+        for (const id of store.getDocumentIdsInCollections(collectionKeys ?? [], true)) ids.add(id);
+      } catch (e) {
+        console.warn('[retrieval] collections → documents lookup failed', e);
+      }
+    }
+    const citekeys = new Set<string>();
+    for (const id of ids) {
+      try {
+        const doc = store.getDocument(id) as { bibtexKey?: string | null } | null;
+        if (doc?.bibtexKey) citekeys.add(doc.bibtexKey);
+      } catch (e) {
+        console.warn('[retrieval] failed to read document for citekey', id, e);
+      }
+    }
+    return [...citekeys];
+  }
+
   private async searchReadingNotes(
     query: string,
-    options: { topK: number; threshold: number }
+    options: {
+      topK: number;
+      threshold: number;
+      sole?: boolean;
+      readingNoteCitekeys?: readonly string[];
+    }
   ): Promise<ReadingNoteMappedSearchResult[]> {
     const store = readingNotesIndexService.getSearchStore();
     if (!store) return [];
+    // Cadrage sur une sélection : aucune clé, aucune note — inutile d'embarquer.
+    const scoped = options.readingNoteCitekeys ? new Set(options.readingNoteCitekeys) : null;
+    if (scoped && scoped.size === 0) return [];
     const embedding = await this.getQueryEmbedding(query);
-    const hits = store.search(embedding, query, options.topK);
+    // Le store rend `topK` extraits avant cadrage : on en demande davantage
+    // quand un filtre suit, pour ne pas rendre deux notes là où dix passent.
+    const hits = store.search(embedding, query, scoped ? options.topK * 4 : options.topK);
     const mapped = hits.map(
       (h): ReadingNoteMappedSearchResult => ({
         chunk: {
@@ -943,11 +996,14 @@ class RetrievalService {
         sourceType: 'readingNotes',
       })
     );
-    // Pas de repli sous le seuil, comme le vault et le manuscrit : écrites
-    // par l'auteur dans sa langue, les notes n'ont pas l'excuse de l'écart
-    // de langue ; et pas de quota (choix de l'auteur) — elles concourent
-    // à armes égales avec les sources.
-    return applyThreshold(mapped, options.threshold, 0);
+    // Écrites par l'auteur dans sa langue, les notes n'ont pas l'excuse de
+    // l'écart de langue : pas de repli sous le seuil aux côtés des sources.
+    // Interrogées seules, elles gardent leurs trois passages les plus
+    // proches, comme le manuscrit. « À armes égales » a cessé : elles ont
+    // leur bande dans `selectWithOwnTextBands` (docs/poids-du-manuscrit.md).
+    const kept = scoped ? mapped.filter((h) => scoped.has(h.source.citekey)) : mapped;
+    const sorted = [...kept].sort((a, b) => b.similarity - a.similarity).slice(0, options.topK);
+    return applyThreshold(sorted, options.threshold, options.sole ? CROSS_LANGUAGE_FALLBACK : 0);
   }
 
   private async searchPrimary(
