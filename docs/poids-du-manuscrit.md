@@ -265,7 +265,13 @@ manuscript-intent.ts`) est journalisée avec la politique retenue dans
 interface : la case « Mon manuscrit » (tri-état, défaut selon l'espace) et la
 ligne « Recherche : … » toujours visible, la portée « manuscrit seul » quand
 elle est la seule cochée, la bannière de l'espace Brainstorm et le nom du mode
-de chat dans l'en-tête.
+de chat dans l'en-tête. La ligne de portée ne promet jamais un manuscrit que
+le main écartera : `manuscriptExclusionReason` (renderer) reproduit la
+politique hors intention — portée restreinte, posture « off », index
+désactivé — et nomme la raison. Revue de la pile le jour même : les motifs
+d'intention anglais et allemands ont été resserrés (« how do I cite »,
+« what if I argued », « habe ich richtig verstanden, dass… » ne sont pas des
+rappels) ; le doute vaut toujours « non ».
 
 ### Palier 3 — n'indexer que ce que l'auteur a écrit
 
