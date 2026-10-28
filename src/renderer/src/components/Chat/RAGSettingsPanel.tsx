@@ -813,8 +813,8 @@ export const RAGSettingsPanel: React.FC = () => {
                   value={params.systemPromptLanguage}
                   onChange={(e) => setParams({ systemPromptLanguage: e.target.value as 'fr' | 'en' })}
                 >
-                  <option value="fr">🇫🇷 French (Français)</option>
-                  <option value="en">🇬🇧 English</option>
+                  <option value="fr">Français</option>
+                  <option value="en">English</option>
                 </select>
                 <small className="setting-hint">
                   Language for the default system prompt (instructs the AI how to respond)

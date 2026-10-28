@@ -63,6 +63,9 @@
 }
 
 .save-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 16px;
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -423,8 +426,19 @@
 }
 
 .topic-progress-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--font-size-xs);
   font-family: 'Consolas', 'Monaco', monospace;
   color: var(--text-tertiary);
   line-height: 1.4;
+}
+
+.topic-progress-message--success {
+  color: var(--color-success);
+}
+
+.topic-progress-message--error {
+  color: var(--color-danger);
 }

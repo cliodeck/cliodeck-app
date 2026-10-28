@@ -183,7 +183,7 @@ export const ZoteroImport: React.FC = () => {
     if (!warnings || warnings.length === 0) return '';
     return warnings
       .filter((w) => w.kind === 'count-mismatch')
-      .map((w) => `\n\n⚠️ ${t('zotero.import.countMismatch', { expected: w.expected, written: w.written })}`)
+      .map((w) => `\n\n${t('zotero.import.countMismatch', { expected: w.expected, written: w.written })}`)
       .join('');
   };
 

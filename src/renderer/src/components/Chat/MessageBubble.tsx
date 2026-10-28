@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Bot, Circle, Info, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { marked } from 'marked';
 import { UnifiedMessage } from './types';
@@ -43,14 +44,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     return (
       <div className={`message-bubble ${isUser ? 'user' : isSystem ? 'system' : 'assistant'}`}>
         <div className="message-header">
-          <span className="message-avatar">{isUser ? '👤' : isSystem ? 'ℹ️' : '🤖'}</span>
+          <span className="message-avatar">
+            {isUser ? <User size={16} /> : isSystem ? <Info size={16} /> : <Bot size={16} />}
+          </span>
           <span className="message-role">
             {isUser ? t('chat.you') : isSystem ? t('chat.system', 'Système') : t('chat.assistant')}
           </span>
           {message.timestamp && (
             <span className="message-time">{formatTime(message.timestamp)}</span>
           )}
-          {(isStreaming || message.pending) && <span className="streaming-indicator">●</span>}
+          {(isStreaming || message.pending) && (
+            <span className="streaming-indicator"><Circle size={10} fill="currentColor" /></span>
+          )}
           {message.badge && <span className="message-mode-badge">{message.badge}</span>}
         </div>
 

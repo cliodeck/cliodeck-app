@@ -1,4 +1,5 @@
 import { WidgetType } from '@codemirror/view';
+import { ImageOff, createElement as createIcon } from 'lucide';
 
 /**
  * Widgets DOM du rendu live. Construction DOM directe exclusivement —
@@ -104,7 +105,8 @@ export class ImageWidget extends WidgetType {
   private placeholder(): HTMLElement {
     const box = document.createElement('span');
     box.className = 'cm-live-image-missing';
-    box.textContent = `🖼 ${this.alt || this.src}`;
+    box.appendChild(createIcon(ImageOff, { width: 14, height: 14 }));
+    box.appendChild(document.createTextNode(` ${this.alt || this.src}`));
     box.title = this.src;
     return box;
   }

@@ -7,14 +7,16 @@ import {
   keymap,
   type DecorationSet,
 } from '@codemirror/view';
+import { Check, Pencil, X, createElement as createIcon, type IconNode } from 'lucide';
 import type { PendingProposal, ProposalsField } from './state';
 import type { ProposalLabels } from './types';
 
 /**
  * Affichage des propositions : l'original marqué (barré, teinte danger),
  * le texte proposé en regard dans un encart (teinte accent) avec les
- * actions ✓ / ✗ / ✎. DOM construit à la main — jamais d'innerHTML avec du
- * contenu du document.
+ * actions accepter / rejeter / modifier (icônes lucide, les mêmes que le
+ * reste de l'interface). DOM construit à la main — jamais d'innerHTML avec
+ * du contenu du document.
  */
 
 export interface ProposalUiHandlers {
@@ -67,28 +69,29 @@ class ProposalWidget extends WidgetType {
       box.appendChild(text);
     }
     const btn = (
-      symbol: string,
+      icon: IconNode,
       title: string,
       onClick: () => void
     ): void => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'cm-proposal-btn';
-      b.textContent = symbol;
+      b.appendChild(createIcon(icon, { width: 14, height: 14 }));
       b.title = title;
+      b.setAttribute('aria-label', title);
       b.addEventListener('mousedown', (e) => {
         e.preventDefault();
         onClick();
       });
       box.appendChild(b);
     };
-    btn('✓', this.labels.accept, () =>
+    btn(Check, this.labels.accept, () =>
       this.handlers.accept(view, this.proposal.id)
     );
-    btn('✗', this.labels.reject, () =>
+    btn(X, this.labels.reject, () =>
       this.handlers.reject(view, this.proposal.id)
     );
-    btn('✎', this.labels.modify, () =>
+    btn(Pencil, this.labels.modify, () =>
       this.handlers.startModify(view, this.proposal.id)
     );
   }
@@ -255,6 +258,9 @@ export const proposalTheme = EditorView.baseTheme({
   },
   '.cm-proposal-text': { color: 'var(--text-primary)' },
   '.cm-proposal-btn': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    verticalAlign: 'middle',
     background: 'none',
     border: 'none',
     cursor: 'pointer',

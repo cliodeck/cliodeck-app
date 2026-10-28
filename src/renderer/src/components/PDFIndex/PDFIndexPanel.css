@@ -115,7 +115,8 @@
 }
 
 .pdf-index-panel .search-icon {
-  font-size: var(--icon-xs);
+  display: inline-flex;
+  align-items: center;
   color: var(--text-tertiary);
 }
 
@@ -213,7 +214,8 @@
 }
 
 .pdf-empty .empty-icon {
-  font-size: var(--icon-xl);
+  display: flex;
+  justify-content: center;
   margin-bottom: var(--spacing-lg);
   opacity: 0.5;
 }

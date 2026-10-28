@@ -86,6 +86,8 @@ export const scholarlyTheme = EditorView.baseTheme({
     color: 'var(--text-secondary)',
   },
   '.cm-scholarly-frontmatter-fold-btn': {
+    display: 'inline-flex',
+    alignItems: 'center',
     background: 'transparent',
     color: 'var(--text-tertiary)',
     border: '1px solid var(--border-color)',

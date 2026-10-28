@@ -17,7 +17,8 @@
 }
 
 .similarity-progress-icon {
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
   animation: spin 2s linear infinite;
 }
 

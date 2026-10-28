@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { HelpCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ArrowRight, HelpCircle } from 'lucide-react';
 import './HelperTooltip.css';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export const HelperTooltip: React.FC<Props> = ({ content, onLearnMore }) => {
+  const { t } = useTranslation('common');
   const [isVisible, setIsVisible] = useState(false);
 
   return (
@@ -22,7 +24,7 @@ export const HelperTooltip: React.FC<Props> = ({ content, onLearnMore }) => {
           <p>{content}</p>
           {onLearnMore && (
             <button className="learn-more-btn" onClick={onLearnMore}>
-              En savoir plus →
+              {t('methodology.learnMore')} <ArrowRight size={12} />
             </button>
           )}
         </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileDown, X, AlertCircle, CheckCircle, WifiOff, FileType } from 'lucide-react';
+import { FileDown, X, AlertCircle, CheckCircle, WifiOff, FileType, Lightbulb } from 'lucide-react';
 
 type ExportMode = 'online' | 'offline' | 'pdf';
 import { useProjectStore } from '../../stores/projectStore';
@@ -171,7 +171,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         <div className="presentation-export-body">
           {/* Info about reveal.js */}
           <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-panel-hover)', borderRadius: '4px' }}>
-            💡 {t('presentation.info')}
+            <Lightbulb size={14} /> {t('presentation.info')}
             <br /><br />
             <strong>{t('presentation.controls')}</strong>
             <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>

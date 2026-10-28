@@ -373,7 +373,11 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
 function renderEvent(e: RunEvent, t: TFunction): React.ReactNode {
   switch (e.kind) {
     case 'run_started':
-      return <span>{t('recipeRun.log.runStarted', { recipe: e.recipe })}</span>;
+      return (
+        <span>
+          <Play size={12} /> {t('recipeRun.log.runStarted', { recipe: e.recipe })}
+        </span>
+      );
     case 'step_start':
       return (
         <span style={{ opacity: 0.8 }}>
@@ -386,6 +390,7 @@ function renderEvent(e: RunEvent, t: TFunction): React.ReactNode {
     case 'step_ok':
       return (
         <span style={{ color: 'var(--color-accent)' }}>
+          <CheckCircle2 size={12} />{' '}
           {t(e.stub ? 'recipeRun.log.stepOkStub' : 'recipeRun.log.stepOk', {
             stepId: e.stepId,
           })}
@@ -394,6 +399,7 @@ function renderEvent(e: RunEvent, t: TFunction): React.ReactNode {
     case 'step_failed':
       return (
         <span style={{ color: 'var(--color-danger)' }}>
+          <XCircle size={12} />{' '}
           {t('recipeRun.log.stepFailed', {
             stepId: e.stepId,
             message: e.error.message,
@@ -403,13 +409,13 @@ function renderEvent(e: RunEvent, t: TFunction): React.ReactNode {
     case 'run_completed':
       return (
         <span style={{ color: 'var(--color-accent)' }}>
-          {t('recipeRun.log.runCompleted')}
+          <CheckCircle2 size={12} /> {t('recipeRun.log.runCompleted')}
         </span>
       );
     case 'run_failed':
       return (
         <span style={{ color: 'var(--color-danger)' }}>
-          {t('recipeRun.log.runFailed', { message: e.error.message })}
+          <XCircle size={12} /> {t('recipeRun.log.runFailed', { message: e.error.message })}
         </span>
       );
   }

@@ -16,7 +16,7 @@ describe('MessageBubble', () => {
     const { container } = render(
       <MessageBubble message={baseMsg({ role: 'user', content: '**not bold**' })} />,
     );
-    expect(screen.getByText('👤')).toBeInTheDocument();
+    expect(container.querySelector('.message-avatar svg')).not.toBeNull();
     // User content is rendered in a <p>, literally (markdown not parsed).
     const p = container.querySelector('.message-content p');
     expect(p).not.toBeNull();

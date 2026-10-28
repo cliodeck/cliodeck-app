@@ -16,6 +16,7 @@ import {
   Trash2,
   X,
   Download,
+  FileText,
 } from 'lucide-react';
 import { useIdeaStore, type Idea, type IdeaLink } from '../../stores/ideaStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -343,7 +344,7 @@ const IdeaEditor: React.FC<IdeaEditorProps> = ({
             <span key={link.targetId} className="idea-editor__link">
               {link.targetType === 'idea'
                 ? linkedIdeaTitles.get(link.targetId) ?? link.targetId
-                : `📄 ${link.targetId}`}
+                : <><FileText size={12} /> {link.targetId}</>}
               {link.label && <em> ({link.label})</em>}
               <button onClick={() => onRemoveLink(link.targetId)} aria-label={t('ideas.removeLink')}>
                 <X size={10} />

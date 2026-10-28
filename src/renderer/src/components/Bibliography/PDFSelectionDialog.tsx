@@ -1,4 +1,5 @@
 import React from 'react';
+import { ArrowRight, FileText, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ZoteroAttachmentInfo } from '../../stores/bibliographyStore';
 import './PDFSelectionDialog.css';
@@ -25,7 +26,7 @@ export const PDFSelectionDialog: React.FC<PDFSelectionDialogProps> = ({
         <div className="pdf-selection-header">
           <h3>{t('bibliography.selectPDF')}</h3>
           <button className="close-btn" onClick={onCancel}>
-            ✕
+            <X size={18} />
           </button>
         </div>
 
@@ -40,7 +41,7 @@ export const PDFSelectionDialog: React.FC<PDFSelectionDialogProps> = ({
               className="pdf-selection-item"
               onClick={() => onSelect(attachment.key)}
             >
-              <div className="pdf-item-icon">📄</div>
+              <div className="pdf-item-icon"><FileText size={24} strokeWidth={1.5} /></div>
               <div className="pdf-item-info">
                 <div className="pdf-item-filename">{attachment.filename}</div>
                 {attachment.dateModified && (
@@ -49,7 +50,7 @@ export const PDFSelectionDialog: React.FC<PDFSelectionDialogProps> = ({
                   </div>
                 )}
               </div>
-              <div className="pdf-item-action">→</div>
+              <div className="pdf-item-action"><ArrowRight size={18} /></div>
             </button>
           ))}
         </div>

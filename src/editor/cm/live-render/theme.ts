@@ -91,6 +91,9 @@ export const liveRenderTheme = EditorView.baseTheme({
   },
 
   '.cm-live-image-missing': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '2px',
     color: 'var(--text-tertiary)',
     fontStyle: 'italic',
     fontSize: '0.9em',

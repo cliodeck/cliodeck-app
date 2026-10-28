@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Search, Book, AlertCircle } from 'lucide-react';
+import { X, Search, Book, AlertCircle, AlertTriangle, BookOpen, Check, Lightbulb } from 'lucide-react';
 import methodologyGuide from '../../../../../backend/data/methodology-guide.json';
 import './MethodologyModal.css';
 
@@ -60,7 +60,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
         <p className="feature-description">{feature.description}</p>
 
         <section className="detail-section">
-          <h3>✓ {t('methodology.capabilities')}</h3>
+          <h3><Check size={16} /> {t('methodology.capabilities')}</h3>
           <ul>
             {feature.capabilities.map((cap, idx) => (
               <li key={idx}>{cap}</li>
@@ -69,7 +69,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
         </section>
 
         <section className="detail-section">
-          <h3>⚠ {t('methodology.limitations')}</h3>
+          <h3><AlertTriangle size={16} /> {t('methodology.limitations')}</h3>
           <ul className="limitations-list">
             {feature.limitations.map((lim, idx) => (
               <li key={idx}>{lim}</li>
@@ -78,7 +78,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
         </section>
 
         <section className="detail-section">
-          <h3>💡 {t('methodology.bestPractices')}</h3>
+          <h3><Lightbulb size={16} /> {t('methodology.bestPractices')}</h3>
           <ul>
             {feature.bestPractices.map((practice, idx) => (
               <li key={idx}>{practice}</li>
@@ -87,7 +87,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
         </section>
 
         <section className="detail-section academic-context">
-          <h3>📚 {t('methodology.academicContext')}</h3>
+          <h3><BookOpen size={16} /> {t('methodology.academicContext')}</h3>
           <p>{feature.academicContext}</p>
         </section>
       </div>

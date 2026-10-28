@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   useUsageJournalStore,
@@ -278,7 +279,9 @@ export const UsageJournalPanel: React.FC = () => {
               <button onClick={onSave} disabled={!canSave}>
                 {saving ? t('usageJournal.saving') : t('usageJournal.save')}
               </button>
-              {savedFlash && <span className="usage-journal__ok">{t('usageJournal.saved')}</span>}
+              {savedFlash && (
+                <span className="usage-journal__ok"><Check size={14} /> {t('usageJournal.saved')}</span>
+              )}
             </div>
           </div>
 

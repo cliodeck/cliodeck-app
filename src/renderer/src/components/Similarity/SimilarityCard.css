@@ -183,10 +183,6 @@
   gap: 2px;
 }
 
-.similarity-card-archive::before {
-  content: "📁";
-  font-size: 9px;
-}
 
 .similarity-card-date {
   display: inline-flex;
@@ -194,7 +190,3 @@
   gap: 2px;
 }
 
-.similarity-card-date::before {
-  content: "📅";
-  font-size: 9px;
-}

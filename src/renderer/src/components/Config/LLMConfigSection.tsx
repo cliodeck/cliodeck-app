@@ -1,3 +1,4 @@
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -329,7 +330,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 onClick={onRefreshModels}
                 title={t('llm.refreshModels')}
               >
-                🔄
+                <RefreshCw size={14} />
               </button>
             </div>
             <div className="config-description">
@@ -411,7 +412,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 borderRadius: '4px',
                 marginTop: '8px'
               }}>
-                <strong>{t('llm.embeddingStrategyWarning')}</strong>
+                <strong><AlertTriangle size={14} /> {t('llm.embeddingStrategyWarning')}</strong>
                 <br />
                 <small>
                   {t('llm.embeddingStrategyWarningDetails')}

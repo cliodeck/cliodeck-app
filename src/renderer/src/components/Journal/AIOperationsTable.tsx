@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Check, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AIOperation } from '../../stores/journalStore';
 
@@ -42,7 +43,7 @@ export const AIOperationsTable: React.FC<Props> = ({ operations }) => {
                   <td>{op.operationType}</td>
                   <td>{op.modelName || 'N/A'}</td>
                   <td>{op.durationMs ? `${op.durationMs}ms` : 'N/A'}</td>
-                  <td>{op.success ? '✓' : '✗'}</td>
+                  <td>{op.success ? <Check size={14} /> : <X size={14} />}</td>
                   <td>
                     <button onClick={() => toggleExpand(op.id)}>
                       {expandedOp === op.id ? 'Réduire' : 'Détails'}

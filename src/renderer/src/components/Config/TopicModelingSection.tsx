@@ -2,6 +2,7 @@
  * TopicModelingSection - Gestion de l'environnement Python pour le topic modeling
  */
 import React, { useState, useEffect } from 'react';
+import { CheckCircle, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import './ConfigPanel.css';
@@ -18,7 +19,9 @@ export const TopicModelingSection: React.FC = () => {
   const [status, setStatus] = useState<TopicModelingStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [installProgress, setInstallProgress] = useState<string[]>([]);
+  const [installProgress, setInstallProgress] = useState<
+    Array<{ kind: 'progress' | 'success' | 'error'; text: string }>
+  >([]);
 
   // Load status on mount
   useEffect(() => {
@@ -55,7 +58,7 @@ export const TopicModelingSection: React.FC = () => {
 
     // Listen for progress messages
     const removeListener = window.electron.topicModeling.onSetupProgress((message) => {
-      setInstallProgress((prev) => [...prev, message]);
+      setInstallProgress((prev) => [...prev, { kind: 'progress', text: message }]);
     });
 
     try {
@@ -63,18 +66,21 @@ export const TopicModelingSection: React.FC = () => {
 
       // La réponse est { success: true } directement (pas de .data imbriqué)
       if (result.success) {
-        setInstallProgress((prev) => [...prev, `✅ ${t('topicModeling.installSuccess')}`]);
+        setInstallProgress((prev) => [...prev, { kind: 'success', text: t('topicModeling.installSuccess') }]);
         // Reload status
         await checkStatus();
       } else {
         setInstallProgress((prev) => [
           ...prev,
-          `❌ ${t('topicModeling.installError')}: ${result.error || 'Unknown error'}`,
+          { kind: 'error', text: `${t('topicModeling.installError')}: ${result.error || 'Unknown error'}` },
         ]);
       }
     } catch (error: unknown) {
       console.error('Failed to setup environment:', error);
-      setInstallProgress((prev) => [...prev, `❌ ${t('topicModeling.installError')}: ${error instanceof Error ? error.message : String(error)}`]);
+      setInstallProgress((prev) => [
+        ...prev,
+        { kind: 'error', text: `${t('topicModeling.installError')}: ${error instanceof Error ? error.message : String(error)}` },
+      ]);
     } finally {
       setInstalling(false);
       removeListener();
@@ -137,9 +143,11 @@ export const TopicModelingSection: React.FC = () => {
               {installing && installProgress.length > 0 && (
                 <div className="topic-install-progress">
                   <div className="topic-progress-log">
-                    {installProgress.map((msg, idx) => (
-                      <div key={idx} className="topic-progress-message">
-                        {msg}
+                    {installProgress.map((entry, idx) => (
+                      <div key={idx} className={`topic-progress-message topic-progress-message--${entry.kind}`}>
+                        {entry.kind === 'success' && <CheckCircle size={12} />}
+                        {entry.kind === 'error' && <XCircle size={12} />}
+                        {entry.text}
                       </div>
                     ))}
                   </div>

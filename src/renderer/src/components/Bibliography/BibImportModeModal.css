@@ -46,7 +46,8 @@
 }
 
 .import-option-btn .option-icon {
-  font-size: 32px;
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
 }
 
