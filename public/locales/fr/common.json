@@ -654,10 +654,15 @@
     "scope": {
       "prefix": "Recherche :",
       "manuscriptOff": "Manuscrit non consulté",
+      "readingNotesOff": "Notes de lecture non consultées",
+      "nothingConsultedTitle": "Aucune source ne sera consultée",
+      "nothingConsulted": "Les cases cochées sont écartées pour ce tour ({{reasons}}). Cochez une autre source, ou accordez le consentement dans Réglages → expert.",
       "reason": {
+        "toggle": "case décochée",
         "scope": "recherche restreinte",
         "stance": "mode de chat",
-        "disabled": "index désactivé"
+        "disabled": "index désactivé",
+        "cloud": "fournisseur distant sans consentement"
       },
       "title": "Modifier les sources consultées"
     },
@@ -957,6 +962,9 @@
     "manuscriptPinnedHint": "Choix fixé pour cette session.",
     "manuscriptResetDefault": "rétablir le défaut",
     "manuscriptExcludedHint": "Coché, mais non consulté : {{reason}}",
+    "includeReadingNotes": "Notes de lecture",
+    "readingNotesDefaultHint": "Selon l'espace : non consultées en Brainstorm, consultées ailleurs",
+    "readingNotesExcludedHint": "Cochées, mais non consultées : {{reason}}",
     "searchIn": "Recherche dans : {{list}}",
     "noSourceWarning": "Sélectionnez au moins une source."
   },
@@ -2411,6 +2419,7 @@
     "chunks_one": "{{count}} extrait",
     "chunks_other": "{{count}} extraits",
     "lastIndexed": "Dernière indexation : {{when}}",
+    "lastRun": "Dernière passe : {{indexed}} réindexée(s), {{unchanged}} inchangée(s), {{removed}} retirée(s), {{failures}} échec(s) — {{seconds}} s",
     "empty": "Rien d'indexé pour l'instant. L'indexation se fait à l'enregistrement, ou par le bouton ci-dessous.",
     "noProject": "Ouvrez un projet pour voir l'état de son index.",
     "reindex": "Réindexer",
@@ -2426,7 +2435,7 @@
     "title": "Corpus notes de lecture",
     "hint": "Vos notes de lecture (dossier reading-notes du projet) sont indexées comme cinquième corpus. L'assistant peut ainsi répondre à « qu'avais-je noté sur cet ouvrage ? ». Les extraits sont toujours présentés comme vos notes sur une référence, jamais comme la référence elle-même.",
     "enabled": "Indexer les notes de lecture",
-    "enabledHelp": "Désactiver arrête l'indexation et retire les notes des recherches",
+    "enabledHelp": "Désactiver arrête l'indexation et retire les notes des recherches. Pour les consulter ou non dans une conversation, utilisez la case « Notes de lecture » du panneau du chat.",
     "on": "Activé",
     "off": "Désactivé",
     "cloudConsent": "Envoyer les notes de lecture aux modèles en ligne",

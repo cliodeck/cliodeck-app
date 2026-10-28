@@ -213,8 +213,9 @@
   cursor: pointer;
 }
 
-/* Sous-texte de « Mon manuscrit » : le défaut qui s'applique, ou le lien
-   « rétablir le défaut » quand l'utilisateur a fixé la case. */
+/* Sous-texte de « Mon manuscrit » et de « Notes de lecture » : le défaut qui
+   s'applique, ou le lien « rétablir le défaut » quand l'utilisateur a fixé
+   la case. */
 .source-toggle-subhint {
   margin: -2px 0 0 8px;
 }

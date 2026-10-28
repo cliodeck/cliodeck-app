@@ -35,7 +35,10 @@ import {
   ManuscriptStore,
   manuscriptStorePath,
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
-import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
+import {
+  CHUNKER_VERSION,
+  chunkManuscriptChapter,
+} from '../../../backend/core/rag/manuscript-chunker.js';
 import { parseOutline } from '../../editor/outline.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { projectManager } from './project-manager.js';
@@ -77,8 +80,20 @@ function emptyReport(): ManuscriptIndexReport {
   };
 }
 
+/**
+ * Empreinte d'un chapitre : son texte brut ET la version du découpage. Sans
+ * la seconde, changer ce que l'on embarque (palier 3 : citations et notes de
+ * référence hors du texte) ne réindexait rien avant la prochaine
+ * modification de chaque chapitre. Incrémenter `CHUNKER_VERSION` provoque
+ * donc une passe complète à la sauvegarde suivante — automatique, par choix
+ * de l'auteur du projet, et rendue visible par `lastReport`.
+ */
 function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(`chunker:${CHUNKER_VERSION}\n`)
+    .update(content)
+    .digest('hex');
 }
 
 function chapterId(relativePath: string): string {
@@ -90,6 +105,13 @@ class ManuscriptIndexService {
   private workspaceRoot: string | null = null;
   /** Une seule passe à la fois : une sauvegarde rapide ne doit pas en lancer dix. */
   private running: Promise<ManuscriptIndexReport> | null = null;
+  /**
+   * Compte rendu de la dernière passe, pour la section des réglages : une
+   * passe lancée après sauvegarde est silencieuse, et la réindexation
+   * complète qui suit un changement de découpage (`CHUNKER_VERSION`) doit se
+   * voir quelque part.
+   */
+  private lastReport: ManuscriptIndexReport | null = null;
 
   /**
    * Rattache le service à un projet. Fermer le store précédent est
@@ -100,11 +122,13 @@ class ManuscriptIndexService {
     if (workspaceRoot === this.workspaceRoot) return;
     this.detachStore();
     this.workspaceRoot = workspaceRoot;
+    this.lastReport = null;
   }
 
   clear(): void {
     this.detachStore();
     this.workspaceRoot = null;
+    this.lastReport = null;
   }
 
   /**
@@ -218,9 +242,28 @@ class ManuscriptIndexService {
    */
   async index(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
     if (this.running) return this.running;
-    this.running = this.runIndex(embedder).finally(() => {
-      this.running = null;
-    });
+    this.running = this.runIndex(embedder)
+      .then(
+        (report) => {
+          this.lastReport = report;
+          return report;
+        },
+        (error: unknown) => {
+          // `runIndex` ne jette pas en principe ; si une passe se perd quand
+          // même, la section des réglages ne doit pas continuer d'afficher
+          // la dernière passe réussie comme si rien ne s'était passé.
+          const failed = emptyReport();
+          failed.failures.push({
+            relativePath: '(passe)',
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          this.lastReport = failed;
+          throw error;
+        }
+      )
+      .finally(() => {
+        this.running = null;
+      });
     return this.running;
   }
 
@@ -293,7 +336,10 @@ class ManuscriptIndexService {
         continue;
       }
 
-      const chunks = chunkManuscriptChapter(content);
+      // Le manuscrit n'embarque que ce que l'auteur a écrit : les blocs de
+      // citation et les notes de référence en sortent (palier 3). Les notes
+      // de lecture, elles, gardent leurs citations.
+      const chunks = chunkManuscriptChapter(content, { dropQuotations: true });
       const record = {
         id,
         relativePath: piece.relativePath,
@@ -391,8 +437,10 @@ class ManuscriptIndexService {
     chapterCount: number;
     chunkCount: number;
     lastIndexedAt: string | null;
+    /** Dernière passe de ce service pour ce projet ; `null` avant la première. */
+    lastReport: ManuscriptIndexReport | null;
   } | null {
-    return this.store ? this.store.stats() : null;
+    return this.store ? { ...this.store.stats(), lastReport: this.lastReport } : null;
   }
 
   private titleFromContent(content: string, fallback: string): string {

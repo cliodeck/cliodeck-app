@@ -245,6 +245,20 @@ describe('notes de lecture dans le chat', () => {
     expect(block).not.toContain('EXTRAIT');
     expect(formatReadingNotesContext([])).toBe('');
   });
+
+  it('trois consignes pour les notes aussi : rappel, arrière-plan, notes seules', () => {
+    const background = formatReadingNotesContext([hit], 'fr', 'background');
+    expect(background).toContain("CE QUE L'UTILISATEUR A RETENU DE SES LECTURES");
+    expect(background).toContain('TA TÂCHE');
+    expect(background).toContain('[L1] @Braudel_1949');
+    expect(formatReadingNotesContext([hit], 'en', 'background')).toContain('YOUR TASK');
+
+    const only = formatReadingNotesContext([hit], 'fr', 'only');
+    expect(only).toContain('PÉRIMÈTRE');
+    expect(only).toContain('uniquement ses NOTES DE LECTURE');
+    expect(only).toContain("ne s'applique pas");
+    expect(formatReadingNotesContext([hit], 'en', 'only')).toContain('READING NOTES');
+  });
 });
 
 describe('shouldIncludeManuscript — le manuscrit sort d’une recherche restreinte', () => {

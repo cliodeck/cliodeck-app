@@ -138,8 +138,11 @@ export interface ChatEngineRetrieverResult<TSource> {
 export interface ChatEngineRetrievalOptions {
   documentIds?: string[];
   collectionKeys?: string[];
-  /** `manuscript` = the author's manuscript alone (« qu'ai-je déjà écrit ? »). */
-  sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+  /**
+   * `manuscript` = the author's manuscript alone (« qu'ai-je déjà écrit ? »),
+   * `readingNotes` = their reading notes alone (« qu'ai-je noté sur… ? »).
+   */
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
   /** Opt-in to Obsidian vault alongside primary/secondary. Ignored when
    *  `sourceType === 'vault'` (vault-only). */
   includeVault?: boolean;
@@ -149,6 +152,8 @@ export interface ChatEngineRetrievalOptions {
    * admitted, subject to the mode's stance and the scope.
    */
   includeManuscript?: boolean;
+  /** Same contract for the « Notes de lecture » toggle. */
+  includeReadingNotes?: boolean;
   topK?: number;
 }
 

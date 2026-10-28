@@ -19,7 +19,11 @@ import { useModeStore } from '../../stores/modeStore';
 import {
   useRAGQueryStore,
   getResolvedSourceType,
+  manuscriptExclusionReason,
+  readingNotesExclusionReason,
+  readingNotesStance,
   resolveManuscriptToggle,
+  resolveReadingNotesToggle,
 } from '../../stores/ragQueryStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 
@@ -29,20 +33,63 @@ export function useChatSettingsProjection(): void {
   const setChatSettings = useChatStore((s) => s.setChatSettings);
   const { activeMode, activeModeId } = useModeStore();
   const ragParams = useRAGQueryStore((s) => s.params);
-  // The manuscript toggle is a tri-state resolved against the workspace
-  // (brainstorm → off by default): the effect must re-run when the user
-  // switches workspace, not only when a toggle changes.
+  // The manuscript and reading-notes toggles are tri-states resolved against
+  // the workspace (brainstorm → off by default): the effect must re-run when
+  // the user switches workspace, not only when a toggle changes.
   const workspace = useWorkspaceModeStore((s) => s.active);
+  const manuscriptIndexEnabled = useRAGQueryStore((s) => s.manuscriptIndexEnabled);
+  const readingNotesIndexEnabled = useRAGQueryStore((s) => s.readingNotesIndexEnabled);
+  const readingNotesCloudConsent = useRAGQueryStore((s) => s.readingNotesCloudConsent);
+  const generationIsCloud = useRAGQueryStore((s) => s.generationIsCloud);
 
   useEffect(() => {
     // Resolve the three independent source toggles plus the EFFECTIVE
-    // manuscript toggle into the (sourceType, includeVault,
-    // includeManuscript) bag understood by the retrieval pipeline. When
-    // everything is off we still project a permissive fallback so retrieval
-    // never silently breaks — the UI surfaces the warning. Manuscript-only
-    // is a valid selection (`sourceType: 'manuscript'`), never widened.
+    // manuscript and reading-notes toggles into the (sourceType,
+    // includeVault, includeManuscript, includeReadingNotes) bag understood by
+    // the retrieval pipeline. When everything is off we still project a
+    // permissive fallback so retrieval never silently breaks — the UI
+    // surfaces the warning. Manuscript-only and notes-only are valid
+    // selections (`sourceType: 'manuscript'` / `'readingNotes'`), never
+    // widened.
     const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
-    const resolved = getResolvedSourceType(ragParams, manuscriptEffective);
+    const readingNotesEffective = resolveReadingNotesToggle(ragParams.includeReadingNotes, workspace);
+    // What is projected is what will be CONSULTED, not the raw toggles: a
+    // notes-only selection whose notes are excluded (cloud provider without
+    // consent, index off) must become « nothing selected » — warning and
+    // permissive fallback — rather than a turn with no context at all.
+    const manuscriptReason = manuscriptExclusionReason({
+      params: ragParams,
+      manuscriptEffective,
+      stance: activeMode?.ragOverrides?.manuscript,
+      indexEnabled: manuscriptIndexEnabled,
+    });
+    const readingNotesReason = readingNotesExclusionReason({
+      params: ragParams,
+      readingNotesEffective,
+      stance: readingNotesStance(activeMode?.ragOverrides),
+      indexEnabled: readingNotesIndexEnabled,
+      cloudConsent: readingNotesCloudConsent,
+      generationIsCloud,
+    });
+    const manuscriptConsulted = manuscriptReason === null;
+    const readingNotesConsulted = readingNotesReason === null;
+    const resolved = getResolvedSourceType(ragParams, manuscriptConsulted, readingNotesConsulted);
+    // Des cases cochées dont aucune ne sera consultée : le tour ne part pas.
+    // Le repli permissif de `isEmpty` est pour « rien de coché » (un clic
+    // malheureux ne tue pas le tour) ; ici l'utilisateur a nommé son texte,
+    // et l'envoyer chercher ailleurs serait l'élargissement silencieux que
+    // l'interface promet de ne jamais faire.
+    const ownTicked = manuscriptEffective || readingNotesEffective;
+    const sendBlockedReasons =
+      resolved.isEmpty && ownTicked
+        ? [
+            ...new Set(
+              [manuscriptReason, readingNotesReason]
+                .filter((r): r is NonNullable<typeof r> => r !== null && r !== 'toggle')
+                .map((r) => `chat.scope.reason.${r}`)
+            ),
+          ]
+        : undefined;
     const retrieval: BrainstormChatRetrievalSettings = {
       topK: ragParams.topK,
       documentIds:
@@ -56,6 +103,7 @@ export function useChatSettingsProjection(): void {
       sourceType: resolved.sourceType,
       includeVault: resolved.includeVault,
       includeManuscript: resolved.includeManuscript,
+      includeReadingNotes: resolved.includeReadingNotes,
     };
     // Le sélecteur du panneau décide ; à défaut, la langue de l'interface.
     // Cette langue part au main à chaque tour : elle ne servait qu'aux modes
@@ -87,6 +135,18 @@ export function useChatSettingsProjection(): void {
       customSystemPrompt,
       promptLanguage,
       retrieval,
+      sendBlockedReasons,
     });
-  }, [ragParams, workspace, activeMode, activeModeId, lang, setChatSettings]);
+  }, [
+    ragParams,
+    workspace,
+    activeMode,
+    activeModeId,
+    lang,
+    setChatSettings,
+    manuscriptIndexEnabled,
+    readingNotesIndexEnabled,
+    readingNotesCloudConsent,
+    generationIsCloud,
+  ]);
 }

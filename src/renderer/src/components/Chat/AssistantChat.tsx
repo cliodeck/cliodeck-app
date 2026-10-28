@@ -36,7 +36,10 @@ import {
   useRAGQueryStore,
   effectiveSourceFamilies,
   manuscriptExclusionReason,
+  readingNotesExclusionReason,
+  readingNotesStance,
   resolveManuscriptToggle,
+  resolveReadingNotesToggle,
   SOURCE_FAMILY_LABEL_KEY,
 } from '../../stores/ragQueryStore';
 import { useCloudConsentGuard } from './useCloudConsentGuard';
@@ -116,7 +119,26 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     stance: activeMode?.ragOverrides?.manuscript,
     indexEnabled: manuscriptIndexEnabled,
   });
-  const scopeFamilies = effectiveSourceFamilies(ragParams, manuscriptExclusion === null);
+  // Les notes de lecture, l'autre corpus à la voix de l'auteur : même
+  // tri-état, et le main les retire aussi du prompt quand le fournisseur est
+  // distant sans consentement — la ligne doit le dire.
+  const readingNotesIndexEnabled = useRAGQueryStore((s) => s.readingNotesIndexEnabled);
+  const readingNotesCloudConsent = useRAGQueryStore((s) => s.readingNotesCloudConsent);
+  const generationIsCloud = useRAGQueryStore((s) => s.generationIsCloud);
+  const readingNotesEffective = resolveReadingNotesToggle(ragParams.includeReadingNotes, workspace);
+  const readingNotesExclusion = readingNotesExclusionReason({
+    params: ragParams,
+    readingNotesEffective,
+    stance: readingNotesStance(activeMode?.ragOverrides),
+    indexEnabled: readingNotesIndexEnabled,
+    cloudConsent: readingNotesCloudConsent,
+    generationIsCloud,
+  });
+  const scopeFamilies = effectiveSourceFamilies(
+    ragParams,
+    manuscriptExclusion === null,
+    readingNotesExclusion === null
+  );
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [draftedId, setDraftedId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
@@ -600,8 +622,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         {isSettingsOpen && <ModeSelector />}
       </div>
       {/* Ligne de portée, toujours visible dans les deux variantes : les
-          mêmes libellés que les cases du panneau, et « Manuscrit non
-          consulté » quand il ne l'est pas. Cliquer ouvre le panneau. */}
+          mêmes libellés que les cases du panneau, « Manuscrit non consulté »
+          et « Notes de lecture non consultées » quand ils ne le sont pas.
+          Cliquer ouvre le panneau. */}
       <button
         type="button"
         className="brainstorm-chat__scope"
@@ -622,6 +645,13 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
             · {t('chat.scope.manuscriptOff', 'Manuscript not consulted')}
             {manuscriptExclusion !== 'toggle' &&
               ` (${t(`chat.scope.reason.${manuscriptExclusion}`)})`}
+          </span>
+        )}
+        {readingNotesExclusion !== null && (
+          <span className="brainstorm-chat__scope-off" data-testid="chat-scope-reading-notes-off">
+            · {t('chat.scope.readingNotesOff', 'Reading notes not consulted')}
+            {readingNotesExclusion !== 'toggle' &&
+              ` (${t(`chat.scope.reason.${readingNotesExclusion}`)})`}
           </span>
         )}
       </button>

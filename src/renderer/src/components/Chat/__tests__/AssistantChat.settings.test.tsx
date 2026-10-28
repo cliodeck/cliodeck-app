@@ -244,12 +244,16 @@ describe('AssistantChat — « Mon manuscrit » : projection et ligne de portée
     expect(screen.getByTestId('chat-scope-line').textContent).toContain('ragSettings.includeManuscript');
     expect(screen.getByTestId('chat-scope-line').textContent).not.toContain('Select at least one source.');
 
-    // Plus rien d'effectif : l'avertissement, et le manuscrit absent.
+    // Plus rien d'effectif (les notes de lecture, consultées par défaut en
+    // Écrire, décochées aussi) : l'avertissement, et le manuscrit absent.
     act(() => {
-      useRAGQueryStore.getState().setParams({ includeManuscript: false });
+      useRAGQueryStore.getState().setParams({ includeManuscript: false, includeReadingNotes: false });
     });
     expect(screen.getByTestId('chat-scope-line').textContent).toContain('Select at least one source.');
     expect(screen.getByTestId('chat-scope-line').textContent).toContain('Manuscript not consulted');
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeReadingNotes: undefined });
+    });
 
     // Cliquer la ligne ouvre le panneau de réglages.
     expect(screen.queryByTestId('rag-settings-stub')).toBeNull();
@@ -289,5 +293,232 @@ describe('AssistantChat — « Mon manuscrit » : projection et ligne de portée
     expect(screen.queryByTestId('mode-selector-stub')).toBeNull();
     fireEvent.click(name);
     expect(screen.getByTestId('mode-selector-stub')).toBeTruthy();
+  });
+});
+
+/**
+ * « Notes de lecture » : cinquième famille, même tri-état que le manuscrit
+ * (défaut selon l'espace, Brainstorm : non), projetée en valeur EFFECTIVE
+ * vers `retrievalOptions.includeReadingNotes` ; la portée « notes seules »
+ * (`sourceType: 'readingNotes'`) et « manuscrit + notes » (`'manuscript'` +
+ * `includeReadingNotes`) ne s'élargissent jamais aux sources ; et la ligne de
+ * portée nomme les notes absentes — y compris la raison « fournisseur distant
+ * sans consentement », celle que le main applique en retirant les notes du
+ * prompt. Une sélection de documents ne les retire pas : le main les
+ * restreint à ces références.
+ */
+describe('AssistantChat — « Notes de lecture » : projection et ligne de portée', () => {
+  const allSources = {
+    includeBibliography: true,
+    includePrimary: true,
+    includeNotes: true,
+    includeManuscript: undefined,
+    includeReadingNotes: undefined,
+    selectedDocumentIds: [] as string[],
+  };
+  const localFlags = { indexEnabled: true, cloudConsent: false, generationIsCloud: false };
+  const retrieval = () => useChatStore.getState().chatSettings.retrieval;
+  const line = () => screen.getByTestId('chat-scope-line').textContent ?? '';
+
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
+    useRAGQueryStore.getState().setParams(allSources);
+    useRAGQueryStore.getState().setReadingNotesFlags(localFlags);
+    useWorkspaceModeStore.getState().setActive('write');
+  });
+  afterEach(() => {
+    cleanup();
+    useWorkspaceModeStore.getState().setActive('write');
+    useRAGQueryStore.getState().setParams(allSources);
+    useRAGQueryStore.getState().setReadingNotesFlags(localFlags);
+  });
+
+  it('espace Écrire → includeReadingNotes true ; Brainstorm → false ; une épingle prime sur l’espace', () => {
+    render(<AssistantChat variant="full" />);
+    expect(retrieval()?.includeReadingNotes).toBe(true);
+    expect(retrieval()?.sourceType).toBe('both');
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('brainstorm');
+    });
+    expect(retrieval()?.includeReadingNotes).toBe(false);
+    expect(retrieval()?.includeManuscript).toBe(false);
+    // Rien n'est épinglé : le défaut de l'espace a parlé seul.
+    expect(useRAGQueryStore.getState().params.includeReadingNotes).toBeUndefined();
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeReadingNotes: true });
+    });
+    expect(retrieval()?.includeReadingNotes).toBe(true);
+    // Le manuscrit, lui, suit toujours l'espace : les deux cases sont indépendantes.
+    expect(retrieval()?.includeManuscript).toBe(false);
+  });
+
+  it('« Notes de lecture » seules cochées → sourceType readingNotes, jamais élargi aux sources', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+      });
+    });
+    expect(retrieval()?.sourceType).toBe('readingNotes');
+    expect(retrieval()?.includeVault).toBe(false);
+    expect(retrieval()?.includeManuscript).toBe(false);
+    expect(retrieval()?.includeReadingNotes).toBe(true);
+
+    // Décocher les notes aussi : plus rien d'effectif → repli permissif sur
+    // les sources, les deux corpus de l'auteur absents.
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeReadingNotes: false });
+    });
+    expect(retrieval()?.sourceType).toBe('both');
+    expect(retrieval()?.includeManuscript).toBe(false);
+    expect(retrieval()?.includeReadingNotes).toBe(false);
+  });
+
+  it('manuscrit + notes, sans source → sourceType manuscript et includeReadingNotes true', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+      });
+    });
+    expect(retrieval()?.sourceType).toBe('manuscript');
+    expect(retrieval()?.includeVault).toBe(false);
+    expect(retrieval()?.includeManuscript).toBe(true);
+    expect(retrieval()?.includeReadingNotes).toBe(true);
+  });
+
+  it('la ligne de portée nomme les notes consultées en Écrire et les signale absentes en Brainstorm', () => {
+    useWorkspaceModeStore.getState().setActive('brainstorm');
+    render(<AssistantChat variant="full" />);
+    expect(line()).not.toContain('ragSettings.includeReadingNotes');
+    expect(line()).toContain('Reading notes not consulted');
+    // Décochées par l'espace : pas de raison entre parenthèses.
+    expect(line()).not.toContain('chat.scope.reason.');
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('write');
+    });
+    expect(line()).toContain('ragSettings.includeReadingNotes');
+    expect(line()).not.toContain('Reading notes not consulted');
+  });
+
+  it('une sélection de documents garde les notes dans la ligne ; un fournisseur distant sans consentement les retire, avec la raison', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({ selectedDocumentIds: ['d1'] });
+    });
+    // Le manuscrit est écarté par la portée restreinte ; les notes, non :
+    // le main les restreint aux références choisies.
+    expect(line()).toContain('Manuscript not consulted');
+    expect(line()).toContain('ragSettings.includeReadingNotes');
+    expect(line()).not.toContain('Reading notes not consulted');
+
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: true, cloudConsent: false, generationIsCloud: true });
+    });
+    expect(line()).not.toContain('ragSettings.includeReadingNotes');
+    expect(line()).toContain('Reading notes not consulted');
+    expect(line()).toContain('chat.scope.reason.cloud');
+
+    // Le consentement donné : les notes reviennent.
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: true, cloudConsent: true, generationIsCloud: true });
+    });
+    expect(line()).toContain('ragSettings.includeReadingNotes');
+    expect(line()).not.toContain('Reading notes not consulted');
+
+    // L'index désactivé l'emporte sur tout.
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: false, cloudConsent: true, generationIsCloud: false });
+    });
+    expect(line()).toContain('Reading notes not consulted');
+    expect(line()).toContain('chat.scope.reason.disabled');
+  });
+});
+
+describe('AssistantChat — la projection bloque l’envoi quand les cases cochées ne seront pas consultées', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
+  });
+  afterEach(() => {
+    cleanup();
+    useRAGQueryStore.getState().setReadingNotesFlags({
+      indexEnabled: true,
+      cloudConsent: false,
+      generationIsCloud: false,
+    });
+    useRAGQueryStore.getState().setParams({
+      includeBibliography: true,
+      includePrimary: true,
+      includeNotes: true,
+      includeManuscript: undefined,
+      includeReadingNotes: undefined,
+    });
+  });
+
+  it('notes de lecture seules, fournisseur distant sans consentement → envoi bloqué avec la raison', () => {
+    useWorkspaceModeStore.getState().setActive('write');
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setReadingNotesFlags({
+        indexEnabled: true,
+        cloudConsent: false,
+        generationIsCloud: true,
+      });
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+        includeReadingNotes: true,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toEqual(['chat.scope.reason.cloud']);
+
+    // Le consentement accordé : les notes seules, portée « notes seules », rien ne bloque.
+    act(() => {
+      useRAGQueryStore.getState().setReadingNotesFlags({
+        indexEnabled: true,
+        cloudConsent: true,
+        generationIsCloud: true,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toBeUndefined();
+    expect(useChatStore.getState().chatSettings.retrieval?.sourceType).toBe('readingNotes');
+  });
+
+  it('rien de coché du tout : le repli permissif d’avant, pas de blocage', () => {
+    useWorkspaceModeStore.getState().setActive('write');
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+        includeReadingNotes: false,
+      });
+    });
+    expect(useChatStore.getState().chatSettings.sendBlockedReasons).toBeUndefined();
+    expect(useChatStore.getState().chatSettings.retrieval?.sourceType).toBe('both');
   });
 });

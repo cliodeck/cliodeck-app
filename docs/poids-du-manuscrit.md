@@ -265,7 +265,18 @@ manuscript-intent.ts`) est journalisée avec la politique retenue dans
 interface : la case « Mon manuscrit » (tri-état, défaut selon l'espace) et la
 ligne « Recherche : … » toujours visible, la portée « manuscrit seul » quand
 elle est la seule cochée, la bannière de l'espace Brainstorm et le nom du mode
-de chat dans l'en-tête.
+de chat dans l'en-tête. La ligne de portée ne promet jamais un manuscrit que
+le main écartera : `manuscriptExclusionReason` (renderer) reproduit la
+politique hors intention — portée restreinte, posture « off », index
+désactivé — et nomme la raison. Revue de la pile le jour même : les motifs
+d'intention anglais et allemands ont été resserrés (« how do I cite »,
+« what if I argued », « habe ich richtig verstanden, dass… » ne sont pas des
+rappels) ; le doute vaut toujours « non ». Des cases cochées dont aucune ne
+sera consultée — le texte de l'auteur seul, écarté par un fournisseur distant
+sans consentement, un index coupé ou la posture du mode — **bloquent
+l'envoi** avec la raison : ni élargissement silencieux vers toutes les
+sources, ni tour sans aucun contexte. Le repli permissif reste réservé à
+« rien de coché ».
 
 ### Palier 3 — n'indexer que ce que l'auteur a écrit
 
@@ -282,14 +293,38 @@ de chat dans l'en-tête.
   ligne, chapitres non réindexés) : une passe de recouvrement inter-corpus
   au moment du tour, et une diversité par section.
 
+**État (2026-10-28) : livré.** `extractProseText` accepte deux options
+(`dropBlockquotes`, `minFootnoteWords`) que `chunkManuscriptChapter(…,
+{ dropQuotations: true })` pose, et que seul l'indexeur du manuscrit passe ;
+les statistiques du document et les notes de lecture ne changent pas.
+`CHUNKER_VERSION = 2` (`manuscript-chunker.ts`) entre dans l'empreinte de
+chaque chapitre : la première passe après mise à jour réembarque tout le
+manuscrit, à la sauvegarde suivante ou par « Réindexer », et la section
+« Corpus manuscrit » affiche désormais la dernière passe (réindexées,
+inchangées, retirées, échecs, durée). Non mesuré : la durée de cette passe
+sur le fournisseur embarqué pour un livre long — à relever sur un projet réel
+avant la prochaine version.
+
 ## Au-delà du manuscrit
 
-- **Les notes de lecture ont la même structure** : toujours actives, dans
-  la langue de l'auteur, cosinus exhaustif, sans quota, sans case. Une fois
-  le manuscrit borné, elles deviennent le corpus suivant « trop fort ». La
-  bonne unité de conception est « les corpus à la voix de l'auteur »
-  (manuscrit, notes de lecture, vault) face aux corpus de sources. Chantier
-  suivant.
+- **Les notes de lecture avaient la même structure** : toujours actives,
+  dans la langue de l'auteur, cosinus exhaustif, sans quota, sans case. Une
+  fois le manuscrit borné, elles devenaient le corpus suivant « trop fort ».
+  **Fait le 2026-10-28, le jour même**, avec les décisions de l'auteur :
+  absentes par défaut dans l'espace Brainstorm comme le manuscrit, cinquième
+  case « Notes de lecture » avec une portée « notes seules », question de
+  rappel détectée (« qu'ai-je noté sur… »), et — la différence voulue — une
+  sélection de documents ou de collection les **cadre** sur ces références
+  au lieu de les écarter. **Une seule bande pour la voix de l'auteur**
+  (`selectWithOwnTextBands`) : 20 % des places pour le manuscrit et les notes
+  ensemble — deux bandes de 20 % faisaient quatre places sur dix, trop —, au
+  moins une chacun quand les deux ont quelque chose à dire, le reste à la
+  pertinence ; une question de rappel ou une portée « seul » élargit la
+  bande pour le corpus nommé. Politique commune
+  (`resolveReadingNotesPolicy`), trois consignes. Détail
+  dans [`reading-notes.md`](reading-notes.md). Reste le vault Obsidian, qui a
+  sa case depuis longtemps et un seuil, mais pas de bande : à traiter quand
+  la mesure le demandera.
 - **Le mode libre** (`free-mode`) injecte le bloc manuscrit sans aucun
   prompt système : la pire posture pour se citer soi-même. Toute politique
   par mode doit le couvrir.

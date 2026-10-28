@@ -11,6 +11,7 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 import { useBrainstormChat } from '../useBrainstormChat';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 import { useChatStore } from '../../../stores/chatStore';
+import { useNotificationStore } from '../../../stores/notificationStore';
 
 type StartOpts = Record<string, unknown> | undefined;
 type ChunkEnvelope = {
@@ -152,5 +153,49 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     const opts = optsOf(start);
     expect(opts).not.toHaveProperty('numCtx');
     expect(opts.model).toBe('gemma3:4b');
+  });
+});
+
+describe('useBrainstormChat — des cases cochées dont aucune ne sera consultée bloquent l’envoi', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useNotificationStore.setState({ notifications: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: undefined });
+  });
+
+  it('ne part pas, n’ajoute aucun message, et dit pourquoi', async () => {
+    // Notes de lecture seules cochées, fournisseur distant sans consentement :
+    // avant, le tour partait soit sans aucun contexte, soit — après la revue —
+    // vers toutes les sources. Ni l'un ni l'autre n'est ce qui a été coché.
+    const start = installFusionChat();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: ['chat.scope.reason.cloud'] });
+
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('qu’ai-je noté sur Braudel ?');
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toHaveLength(0);
+    const notes = useNotificationStore.getState().notifications;
+    expect(notes).toHaveLength(1);
+    expect(notes[0].level).toBe('warning');
+    // Le simulacre i18n rend la clé sans interpolation : la raison est
+    // observable dans `details`, que l'interface réelle affiche aussi.
+    expect(notes[0].title).toBe('chat.scope.nothingConsultedTitle');
+    expect(notes[0].details).toContain('chat.scope.reason.cloud');
+  });
+
+  it('part normalement quand rien ne bloque', async () => {
+    const start = installFusionChat();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: undefined });
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

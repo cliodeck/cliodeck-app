@@ -31,13 +31,15 @@ export const CORPUS_ORDER: readonly CorpusId[] = [
  * Portée demandée par l'appelant.
  *
  * `sourceType` : 'secondary' = bibliographie, 'primary' = archives,
- * 'both' = les deux, 'vault' = notes seules, 'manuscript' = manuscrit seul.
+ * 'both' = les deux, 'vault' = notes seules, 'manuscript' = manuscrit seul,
+ * 'readingNotes' = notes de lecture seules.
  * `includeVault` / `includeManuscript` / `includeReadingNotes` ajoutent
  * notes, manuscrit et notes de lecture aux deux premiers — ce sont des
- * opt-in : un appelant historique ne les voit jamais.
+ * opt-in : un appelant historique ne les voit jamais. Combinés à une portée
+ * « seul », ils l'étendent (manuscrit + notes de lecture, sans source).
  */
 export interface CorpusScopeQuery {
-  sourceType?: 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript';
+  sourceType?: 'secondary' | 'primary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
   includeVault?: boolean;
   includeManuscript?: boolean;
   includeReadingNotes?: boolean;
@@ -55,7 +57,7 @@ export function corporaInScope(q: CorpusScopeQuery): Set<CorpusId> {
   // Le mode « notes seules » implique les notes, quel que soit le drapeau.
   if (q.includeVault || sourceType === 'vault') scope.add('vault');
   if (q.includeManuscript || sourceType === 'manuscript') scope.add('manuscript');
-  if (q.includeReadingNotes) scope.add('readingNotes');
+  if (q.includeReadingNotes || sourceType === 'readingNotes') scope.add('readingNotes');
   return scope;
 }
 
@@ -68,6 +70,14 @@ export interface CorpusSearchOptions {
   documentIds?: string[];
   /** Bibliographie seulement : restreindre à ces collections Zotero. */
   collectionKeys?: string[];
+  /**
+   * Notes de lecture seulement : ne garder que les notes de ces références
+   * (clés de citation). Posé par le service quand l'utilisateur a restreint
+   * la recherche à des documents ou à une collection — ses notes sur ces
+   * références restent pertinentes, les autres non. Absent : pas de filtre ;
+   * vide : aucune note.
+   */
+  readingNoteCitekeys?: readonly string[];
   /**
    * Vrai quand ce corpus est le seul de la portée. Personne d'autre ne
    * répondra : un corpus qui d'ordinaire se tait sous le seuil garde alors

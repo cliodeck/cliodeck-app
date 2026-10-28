@@ -1137,11 +1137,12 @@ const api = {
           retrievalOptions?: {
             documentIds?: string[];
             collectionKeys?: string[];
-            /** `manuscript` : le manuscrit seul. */
-            sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+            /** `manuscript` : le manuscrit seul ; `readingNotes` : les notes de lecture seules. */
+            sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
             includeVault?: boolean;
-            /** Case « Mon manuscrit », valeur effective ; absente = admis. */
+            /** Cases « Mon manuscrit » et « Notes de lecture », valeur effective ; absente = admis. */
             includeManuscript?: boolean;
+            includeReadingNotes?: boolean;
             topK?: number;
           };
           systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };

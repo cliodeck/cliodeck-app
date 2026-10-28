@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { isCloudProvider } from './cloudConsentStore';
 import type { WorkspaceMode } from './workspaceModeStore';
 
 // MARK: - Types
@@ -15,25 +16,30 @@ export type SourceType = 'secondary' | 'primary' | 'both' | 'vault' | 'manuscrip
 
 /**
  * Resolved filter bag for the retrieval pipeline. Derived from the three
- * independent source toggles plus the EFFECTIVE manuscript toggle via
+ * independent source toggles plus the EFFECTIVE toggles of the two corpora in
+ * the author's own voice (manuscript, reading notes) via
  * `getResolvedSourceType()`.
  */
 export interface ResolvedSourceSelection {
   /**
-   * `manuscript` = manuscript-only search: « Mon manuscrit » is the only
-   * ticked box. A valid selection in its own right, never widened.
+   * `manuscript` = no source ticked, « Mon manuscrit » is (the reading notes
+   * may ride along through `includeReadingNotes`). `readingNotes` = « Notes
+   * de lecture » is the only ticked box. Both are valid selections in their
+   * own right, never widened.
    */
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+  sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
   includeVault: boolean;
   /** Effective value sent to main (`retrievalOptions.includeManuscript`). */
   includeManuscript: boolean;
+  /** Effective value sent to main (`retrievalOptions.includeReadingNotes`). */
+  includeReadingNotes: boolean;
   /** True when the user turned every toggle off — caller should decide
    *  whether to fall back to "all sources" or block send. */
   isEmpty: boolean;
 }
 
-/** The four source families the chat can consult, in display order. */
-export type SourceFamily = 'bibliography' | 'primary' | 'notes' | 'manuscript';
+/** The five source families the chat can consult, in display order. */
+export type SourceFamily = 'bibliography' | 'primary' | 'notes' | 'readingNotes' | 'manuscript';
 
 /**
  * Label key of each family — shared by the settings panel's checkboxes, its
@@ -44,6 +50,7 @@ export const SOURCE_FAMILY_LABEL_KEY: Record<SourceFamily, string> = {
   bibliography: 'ragSettings.includeBibliography',
   primary: 'ragSettings.includePrimary',
   notes: 'ragSettings.includeNotes',
+  readingNotes: 'ragSettings.includeReadingNotes',
   manuscript: 'ragSettings.includeManuscript',
 };
 
@@ -80,6 +87,13 @@ export interface RAGQueryParams {
    * reintroduced. The effective boolean is what travels to main.
    */
   includeManuscript?: boolean;
+  /**
+   * Fifth toggle « Notes de lecture » — the other corpus in the author's own
+   * voice, same tri-state and same lifetime as `includeManuscript`
+   * (`resolveReadingNotesToggle`). A document or collection selection does
+   * not exclude the notes: main SCOPES them to those references instead.
+   */
+  includeReadingNotes?: boolean;
 
   // Collection filtering (Zotero collections)
   selectedCollectionKeys: string[]; // Empty = all collections (no filter)
@@ -155,10 +169,28 @@ interface RAGQueryState {
    * la ligne de portée doit le dire (`manuscriptExclusionReason`).
    */
   manuscriptIndexEnabled: boolean;
+  /**
+   * `rag.indexReadingNotes` tel que lu au lancement et à chaque
+   * enregistrement des réglages : sans index, la case « Notes de lecture »
+   * ne consulte rien (`readingNotesExclusionReason`).
+   */
+  readingNotesIndexEnabled: boolean;
+  /**
+   * `rag.readingNotesCloudConsent` : sans lui, le main retire les notes du
+   * prompt dès que le fournisseur de génération est distant.
+   */
+  readingNotesCloudConsent: boolean;
+  /** Le fournisseur de génération (`config.llm`) est-il distant ? (`isCloudProvider`) */
+  generationIsCloud: boolean;
 
   // Actions
   setParams: (params: Partial<RAGQueryParams>) => void;
   setManuscriptIndexEnabled: (enabled: boolean) => void;
+  setReadingNotesFlags: (flags: {
+    indexEnabled: boolean;
+    cloudConsent: boolean;
+    generationIsCloud: boolean;
+  }) => void;
   resetToDefaults: () => Promise<void>;
   /**
    * Répercute un enregistrement des réglages LLM (modèle de chat, fenêtre
@@ -190,8 +222,9 @@ const DEFAULT_PARAMS: RAGQueryParams = {
   includeBibliography: true,
   includePrimary: true,
   includeNotes: true,
-  // Manuscript: « selon l'espace » until the user pins it.
+  // Manuscript and reading notes: « selon l'espace » until the user pins them.
   includeManuscript: undefined,
+  includeReadingNotes: undefined,
 
   // Collection filtering (empty = no filter, search all)
   selectedCollectionKeys: [],
@@ -281,16 +314,34 @@ async function scopeToProjectCollection(
 }
 
 /**
- * Resolve the tri-state manuscript toggle against the workspace: pinned
- * wins; otherwise the manuscript is consulted everywhere except in the
- * Brainstorm workspace, where it is off by default so the author's own text
- * does not crowd out the sources (docs/poids-du-manuscrit.md, décision 1).
+ * Resolve the tri-state toggle of a corpus in the author's own voice
+ * (manuscript, reading notes) against the workspace: pinned wins; otherwise
+ * the corpus is consulted everywhere except in the Brainstorm workspace,
+ * where it is off by default so the author's own text does not crowd out the
+ * sources (docs/poids-du-manuscrit.md, décision 1 — extended to the reading
+ * notes on 2026-10-28).
  */
-export function resolveManuscriptToggle(
+export function resolveOwnTextToggle(
   pinned: boolean | undefined,
   workspace: WorkspaceMode
 ): boolean {
   return pinned ?? workspace !== 'brainstorm';
+}
+
+/** `resolveOwnTextToggle` for « Mon manuscrit ». */
+export function resolveManuscriptToggle(
+  pinned: boolean | undefined,
+  workspace: WorkspaceMode
+): boolean {
+  return resolveOwnTextToggle(pinned, workspace);
+}
+
+/** `resolveOwnTextToggle` for « Notes de lecture ». */
+export function resolveReadingNotesToggle(
+  pinned: boolean | undefined,
+  workspace: WorkspaceMode
+): boolean {
+  return resolveOwnTextToggle(pinned, workspace);
 }
 
 /**
@@ -330,31 +381,99 @@ export function manuscriptExclusionReason(input: {
 }
 
 /**
+ * Why the reading notes will NOT be consulted on the next turn, or `null`
+ * when they will. Mirrors main's policy for this corpus, short of the recall
+ * question (« qu'ai-je noté sur Braudel ? ») that only main sees:
+ *   - `disabled` — `rag.indexReadingNotes` is off;
+ *   - `cloud`    — the generation provider is a cloud provider and
+ *                  `rag.readingNotesCloudConsent` was not given: main
+ *                  withholds the notes from the prompt (docs/reading-notes.md);
+ *   - `toggle`   — the effective toggle is off;
+ *   - `stance`   — the chat mode's stance towards the notes is `off`
+ *                  (`readingNotesStance`).
+ * There is deliberately NO `scope` reason: a document or collection
+ * selection SCOPES the notes to those references main-side (by citation key)
+ * instead of excluding them, and a notes-only Obsidian search does not
+ * exclude them either.
+ */
+export type ReadingNotesExclusionReason = 'disabled' | 'cloud' | 'toggle' | 'scope' | 'stance';
+
+export function readingNotesExclusionReason(input: {
+  params: RAGQueryParams;
+  readingNotesEffective: boolean;
+  /** The mode's stance towards the notes, see `readingNotesStance`. */
+  stance?: unknown;
+  /** `rag.indexReadingNotes` as last known (`readingNotesIndexEnabled`). */
+  indexEnabled: boolean;
+  /** `rag.readingNotesCloudConsent` as last known. */
+  cloudConsent: boolean;
+  /** The generation provider is a cloud provider (`isCloudProvider`). */
+  generationIsCloud: boolean;
+}): ReadingNotesExclusionReason | null {
+  const { params, readingNotesEffective, stance, indexEnabled, cloudConsent, generationIsCloud } =
+    input;
+  if (!indexEnabled) return 'disabled';
+  if (generationIsCloud && !cloudConsent) return 'cloud';
+  if (!readingNotesEffective) return 'toggle';
+  const b = params.includeBibliography;
+  const p = params.includePrimary;
+  const n = params.includeNotes;
+  // Own text only (notes alone, or manuscript + notes): an explicit scope,
+  // consulted whatever the mode says — same precedence as the manuscript.
+  if (!b && !p && !n) return null;
+  // Obsidian notes only: the user named what they query; main excludes the
+  // reading notes as it excludes the manuscript. A document or collection
+  // selection, by contrast, SCOPES the notes and never excludes them.
+  if (!b && !p && n) return 'scope';
+  if (stance === 'off') return 'stance';
+  return null;
+}
+
+/**
+ * Stance of a chat mode towards the reading notes: `ragOverrides.readingNotes`,
+ * falling back to the manuscript's. The notes are the other corpus in the
+ * author's voice; a mode that silences the manuscript silences them too
+ * unless it says otherwise (`backend/types/mode.ts`).
+ */
+export function readingNotesStance(
+  overrides: { readingNotes?: unknown; manuscript?: unknown } | undefined
+): unknown {
+  return overrides?.readingNotes ?? overrides?.manuscript;
+}
+
+/**
  * Families effectively consulted, in display order. Shared by the panel's
  * « Recherche dans : » hint and the chat's scope line so both say the same.
- * `manuscriptConsulted` is `manuscriptExclusionReason(…) === null`, not the
- * raw toggle.
+ * `manuscriptConsulted` is `manuscriptExclusionReason(…) === null` and
+ * `readingNotesConsulted` is `readingNotesExclusionReason(…) === null`, not
+ * the raw toggles.
  */
 export function effectiveSourceFamilies(
   params: RAGQueryParams,
-  manuscriptConsulted: boolean
+  manuscriptConsulted: boolean,
+  readingNotesConsulted: boolean
 ): SourceFamily[] {
   const families: SourceFamily[] = [];
   if (params.includeBibliography) families.push('bibliography');
   if (params.includePrimary) families.push('primary');
   if (params.includeNotes) families.push('notes');
+  // Même ordre que les cases du panneau : le manuscrit, puis les notes de
+  // lecture — les deux voix de l'auteur, après les sources.
   if (manuscriptConsulted) families.push('manuscript');
+  if (readingNotesConsulted) families.push('readingNotes');
   return families;
 }
 
 /**
- * Map the three independent toggles plus the EFFECTIVE manuscript toggle to
- * the filter bag expected by the retrieval pipeline (`sourceType` understood
- * by `fusion-chat-service` + `retrieval-service`, plus the separate
- * `includeVault` / `includeManuscript` opt-ins).
+ * Map the three independent toggles plus the EFFECTIVE manuscript and
+ * reading-notes toggles to the filter bag expected by the retrieval pipeline
+ * (`sourceType` understood by `fusion-chat-service` + `retrieval-service`,
+ * plus the separate `includeVault` / `includeManuscript` /
+ * `includeReadingNotes` opt-ins).
  *
  * Truth table (b = bibliography, p = primary, n = notes; m = manuscript
- * effective, copied into `includeManuscript` in every non-empty case):
+ * effective, r = reading notes effective, each copied into its
+ * `include…` flag in every non-empty case):
  *   b p n → { sourceType: 'both',      includeVault: true  }
  *   b p   → { sourceType: 'both',      includeVault: false }
  *   b   n → { sourceType: 'secondary', includeVault: true  }
@@ -362,40 +481,68 @@ export function effectiveSourceFamilies(
  *   b     → { sourceType: 'secondary', includeVault: false }
  *     p   → { sourceType: 'primary',   includeVault: false }
  *       n → { sourceType: 'vault',     includeVault: true  }
- *       m → { sourceType: 'manuscript', includeVault: false, includeManuscript: true }
- *           (manuscript-only is a VALID selection: « qu'ai-je déjà écrit ? »
- *            must never fall back on the sources — never silently widen)
+ *       m → { sourceType: 'manuscript', includeVault: false,
+ *             includeManuscript: true, includeReadingNotes: r }
+ *           (manuscript-only, or manuscript + notes: a VALID selection —
+ *            « qu'ai-je déjà écrit ? » must never fall back on the sources)
+ *       r → { sourceType: 'readingNotes', includeVault: false,
+ *             includeManuscript: false, includeReadingNotes: true }
+ *           (notes-only: « qu'ai-je noté sur… ? », never widened either)
  *   none  → { sourceType: 'both', includeVault: true, includeManuscript: false,
- *             isEmpty: true }
+ *             includeReadingNotes: false, isEmpty: true }
  *           (fallback "all sources" so a misclick never kills the turn;
  *            the UI surfaces a warning and callers may choose to block)
  */
 export function getResolvedSourceType(
   params: RAGQueryParams,
-  manuscriptEffective: boolean
+  manuscriptEffective: boolean,
+  readingNotesEffective: boolean
 ): ResolvedSourceSelection {
   const b = params.includeBibliography;
   const p = params.includePrimary;
   const n = params.includeNotes;
   const m = manuscriptEffective;
+  const r = readingNotesEffective;
   if (!b && !p && !n) {
     if (m) {
-      return { sourceType: 'manuscript', includeVault: false, includeManuscript: true, isEmpty: false };
+      return {
+        sourceType: 'manuscript',
+        includeVault: false,
+        includeManuscript: true,
+        includeReadingNotes: r,
+        isEmpty: false,
+      };
     }
-    return { sourceType: 'both', includeVault: true, includeManuscript: false, isEmpty: true };
+    if (r) {
+      return {
+        sourceType: 'readingNotes',
+        includeVault: false,
+        includeManuscript: false,
+        includeReadingNotes: true,
+        isEmpty: false,
+      };
+    }
+    return {
+      sourceType: 'both',
+      includeVault: true,
+      includeManuscript: false,
+      includeReadingNotes: false,
+      isEmpty: true,
+    };
   }
   if (b && p) {
-    return { sourceType: 'both', includeVault: n, includeManuscript: m, isEmpty: false };
+    return { sourceType: 'both', includeVault: n, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
   }
   if (b && !p) {
-    return { sourceType: 'secondary', includeVault: n, includeManuscript: m, isEmpty: false };
+    return { sourceType: 'secondary', includeVault: n, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
   }
   if (!b && p) {
-    return { sourceType: 'primary', includeVault: n, includeManuscript: m, isEmpty: false };
+    return { sourceType: 'primary', includeVault: n, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
   }
-  // notes-only — fusion-chat-service maps `sourceType === 'vault'` to
-  // "search Obsidian only" with `includeVault` implicit.
-  return { sourceType: 'vault', includeVault: true, includeManuscript: m, isEmpty: false };
+  // notes-only — Obsidian only: `corporaInScope` adds no source corpus, and
+  // main's policies keep the manuscript and the reading notes out of it
+  // unless a recall question asks for them (hence the 'scope' reason below).
+  return { sourceType: 'vault', includeVault: true, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
 }
 
 // MARK: - Store
@@ -413,6 +560,9 @@ export const useRAGQueryStore = create<RAGQueryState>()(
       isLoadingDocuments: false, // Issue #16
       isSettingsPanelOpen: false,
       manuscriptIndexEnabled: true,
+      readingNotesIndexEnabled: true,
+      readingNotesCloudConsent: false,
+      generationIsCloud: false,
 
       // Actions
       setParams: (newParams: Partial<RAGQueryParams>) => {
@@ -423,6 +573,14 @@ export const useRAGQueryStore = create<RAGQueryState>()(
 
       setManuscriptIndexEnabled: (enabled: boolean) => {
         set({ manuscriptIndexEnabled: enabled });
+      },
+
+      setReadingNotesFlags: ({ indexEnabled, cloudConsent, generationIsCloud }) => {
+        set({
+          readingNotesIndexEnabled: indexEnabled,
+          readingNotesCloudConsent: cloudConsent,
+          generationIsCloud,
+        });
       },
 
       applyLLMConfig: (llm) => {
@@ -448,6 +606,15 @@ export const useRAGQueryStore = create<RAGQueryState>()(
 
           set({
             manuscriptIndexEnabled: ragConfig.indexManuscript !== false,
+            readingNotesIndexEnabled: ragConfig.indexReadingNotes !== false,
+            readingNotesCloudConsent: ragConfig.readingNotesCloudConsent === true,
+            // Même classification que la garde de consentement
+            // (`useCloudConsentGuard`) : c'est elle que le main applique
+            // avant de retirer les notes du prompt.
+            generationIsCloud: isCloudProvider({
+              backend: typeof llmConfig.backend === 'string' ? llmConfig.backend : '',
+              ollamaURL: typeof llmConfig.ollamaURL === 'string' ? llmConfig.ollamaURL : undefined,
+            }).isCloud,
             params: {
               provider: (llmConfig.generationProvider as LLMProvider) || DEFAULT_PARAMS.provider,
               model: llmConfig.ollamaChatModel || DEFAULT_PARAMS.model,
@@ -463,6 +630,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
               includeNotes: DEFAULT_PARAMS.includeNotes,
               // Back to « selon l'espace » : a pin lives one session.
               includeManuscript: DEFAULT_PARAMS.includeManuscript,
+              includeReadingNotes: DEFAULT_PARAMS.includeReadingNotes,
               selectedCollectionKeys: DEFAULT_PARAMS.selectedCollectionKeys,
               selectedDocumentIds: DEFAULT_PARAMS.selectedDocumentIds, // Issue #16
               temperature: DEFAULT_PARAMS.temperature,

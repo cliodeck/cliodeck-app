@@ -19,6 +19,7 @@ import {
   MANUSCRIPT_QUOTA_RATIO,
   manuscriptSlots,
   selectWithManuscriptQuota,
+  selectWithOwnTextBands,
 } from '../retrieval-quota.js';
 
 interface Hit {
@@ -142,5 +143,77 @@ describe('selectWithManuscriptQuota', () => {
   it('ne rend rien pour un topK nul ou négatif', () => {
     expect(selectWithManuscriptQuota([...biblio(5), ...manuscrit(5)], 0)).toEqual([]);
     expect(selectWithManuscriptQuota([...biblio(5)], -3)).toEqual([]);
+  });
+});
+
+describe('selectWithOwnTextBands — une seule bande pour la voix de l’auteur, manuscrit et notes confondus', () => {
+  const notes = (n: number, base = 0.95): Hit[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `note-${i}`,
+      similarity: base - i * 0.01,
+      sourceType: 'readingNotes',
+    }));
+  const count = (hits: Hit[], type: string) => kinds(hits).filter((k) => k === type).length;
+  const ownCount = (hits: Hit[]) => count(hits, 'manuscript') + count(hits, 'readingNotes');
+
+  it('ne laisse plus les notes rafler les places au mérite', () => {
+    // Avant : « à armes égales » — dix notes mieux notées que la bibliographie
+    // prenaient les dix places.
+    const out = selectWithOwnTextBands([...biblio(20, 0.5), ...notes(20)], 10);
+    expect(count(out, 'readingNotes')).toBe(manuscriptSlots(10));
+    expect(count(out, 'secondary')).toBe(10 - manuscriptSlots(10));
+  });
+
+  it('leur garantit la bande quand la bibliographie sature (le défaut rc.4, côté notes)', () => {
+    const out = selectWithOwnTextBands([...biblio(20), ...notes(5, 0.4)], 10);
+    expect(count(out, 'readingNotes')).toBe(manuscriptSlots(10));
+  });
+
+  it('manuscrit ET notes : deux places sur dix à eux deux, une chacun — jamais quatre', () => {
+    // La décision du 2026-10-28 : deux bandes de 20 % faisaient quatre places
+    // sur dix pour le propre texte de l'auteur.
+    const out = selectWithOwnTextBands([...biblio(20), ...manuscrit(5, 0.9), ...notes(5, 0.95)], 10);
+    expect(ownCount(out)).toBe(2);
+    expect(count(out, 'manuscript')).toBe(1);
+    expect(count(out, 'readingNotes')).toBe(1);
+    expect(count(out, 'secondary')).toBe(8);
+
+    const twenty = selectWithOwnTextBands([...biblio(40), ...manuscrit(5, 0.9), ...notes(5, 0.95)], 20);
+    expect(ownCount(twenty)).toBe(4);
+    expect(count(twenty, 'manuscript')).toBeGreaterThanOrEqual(1);
+    expect(count(twenty, 'readingNotes')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('une bande élargie par l’appelant élargit la bande commune, pour le corpus nommé', () => {
+    // Question de rappel sur les notes : six places pour elles, le manuscrit
+    // garde son plafond ordinaire, et une place.
+    const out = selectWithOwnTextBands([...biblio(20), ...manuscrit(5, 0.9), ...notes(10, 0.95)], 10, {
+      readingNotes: 6,
+    });
+    expect(ownCount(out)).toBe(6);
+    expect(count(out, 'manuscript')).toBe(1);
+    expect(count(out, 'readingNotes')).toBe(5);
+    expect(count(out, 'secondary')).toBe(4);
+  });
+
+  it('deux portées « seul » qui débordent : les plus pertinents l’emportent entre eux', () => {
+    const out = selectWithOwnTextBands([...manuscrit(10, 0.5), ...notes(10, 0.9)], 10, {
+      manuscript: 10,
+      readingNotes: 10,
+    });
+    expect(out).toHaveLength(10);
+    // Une place au moins pour chacun, le reste aux notes, mieux notées.
+    expect(count(out, 'manuscript')).toBe(1);
+    expect(count(out, 'readingNotes')).toBe(9);
+  });
+
+  it('une bande nulle écarte le corpus', () => {
+    const out = selectWithOwnTextBands([...biblio(5), ...notes(5)], 10, { readingNotes: 0 });
+    expect(count(out, 'readingNotes')).toBe(0);
+  });
+
+  it('la forme historique garde le manuscrit seul dans sa bande', () => {
+    const out = selectWithManuscriptQuota([...biblio(20), ...manuscrit(5)], 10);
+    expect(count(out, 'manuscript')).toBe(manuscriptSlots(10));
   });
 });

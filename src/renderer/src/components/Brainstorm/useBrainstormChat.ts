@@ -20,6 +20,7 @@ import {
 } from '../../stores/mcpToolsStore';
 import { useMcpToolsList } from './useMcpToolsList';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { useNotificationStore } from '../../stores/notificationStore';
 import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {
@@ -49,9 +50,10 @@ interface FusionChatApi {
       retrievalOptions?: {
         documentIds?: string[];
         collectionKeys?: string[];
-        sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+        sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
         includeVault?: boolean;
         includeManuscript?: boolean;
+        includeReadingNotes?: boolean;
         topK?: number;
       };
       systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };
@@ -214,6 +216,20 @@ export function useBrainstormChat(): UseBrainstormChat {
     async (content: string) => {
       const trimmed = content.trim();
       if (!trimmed) return;
+      // Des cases cochées dont aucune ne sera consultée (texte de l'auteur
+      // seul, écarté pour ce tour) : le tour ne part pas, et l'utilisateur
+      // sait pourquoi. Ni élargissement silencieux, ni réponse sans contexte.
+      const blocked = useChatStore.getState().chatSettings.sendBlockedReasons;
+      if (blocked) {
+        const reasons = blocked.map((key) => t(key)).join(', ') || t('chat.scope.reason.toggle');
+        useNotificationStore.getState().notify({
+          level: 'warning',
+          title: t('chat.scope.nothingConsultedTitle'),
+          message: t('chat.scope.nothingConsulted', { reasons }),
+          details: reasons,
+        });
+        return;
+      }
       const chat = api();
       // Capture user message, then prep the assistant placeholder before
       // firing IPC — chunks may land before the IPC promise resolves.

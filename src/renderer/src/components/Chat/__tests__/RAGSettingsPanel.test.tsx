@@ -282,8 +282,12 @@ describe('RAGSettingsPanel — « Mon manuscrit » (tri-état)', () => {
         includeNotes: false,
       });
     });
-    // Manuscrit seul (défaut de l'espace Écrire) : « Recherche dans : … »,
-    // pas d'avertissement.
+    // Manuscrit seul (défaut de l'espace Écrire ; les notes de lecture, qui
+    // suivent le même défaut, épinglées à non pour isoler le manuscrit) :
+    // « Recherche dans : … », pas d'avertissement.
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeReadingNotes: false });
+    });
     expect(manuscriptToggle().checked).toBe(true);
     expect(screen.getByTestId('search-in-hint').textContent).not.toContain('Select at least one source.');
     expect(screen.getByTestId('search-in-hint').textContent).toContain('Searching in:');
@@ -295,6 +299,173 @@ describe('RAGSettingsPanel — « Mon manuscrit » (tri-état)', () => {
     // Le recocher : la sélection « manuscrit seul » revient, sans avertissement.
     fireEvent.click(manuscriptToggle());
     expect(screen.getByTestId('search-in-hint').textContent).not.toContain('Select at least one source.');
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeReadingNotes: undefined });
+    });
+    await act(async () => undefined);
+  });
+});
+
+/**
+ * Cinquième case « Notes de lecture » : le même tri-état que « Mon
+ * manuscrit » (défaut selon l'espace, épingle de session, « rétablir le
+ * défaut »), « notes seules » comme sélection valide, et un sous-texte qui
+ * dit quand la case est cochée mais les notes non consultées — index
+ * désactivé, ou fournisseur distant sans consentement. Une sélection de
+ * documents ne les retire pas de « Recherche dans : … ».
+ */
+describe('RAGSettingsPanel — « Notes de lecture » (cinquième case, tri-état)', () => {
+  const allSources = {
+    includeBibliography: true,
+    includePrimary: true,
+    includeNotes: true,
+    includeManuscript: undefined,
+    includeReadingNotes: undefined,
+    selectedDocumentIds: [] as string[],
+  };
+  const localFlags = { indexEnabled: true, cloudConsent: false, generationIsCloud: false };
+
+  function notesToggle(): HTMLInputElement {
+    return screen.getByTestId('include-reading-notes-toggle') as HTMLInputElement;
+  }
+  const searchIn = () => screen.getByTestId('search-in-hint').textContent ?? '';
+  const hint = () => screen.getByTestId('reading-notes-toggle-hint').textContent ?? '';
+
+  beforeEach(() => {
+    useRAGQueryStore.setState((s) => ({
+      ...s,
+      isSettingsPanelOpen: true,
+      availableModels: MODELS,
+      params: { ...s.params, provider: 'ollama', model: 'qwen3.5:35b', numCtx: 4096, ...allSources },
+    }));
+    useRAGQueryStore.getState().setReadingNotesFlags(localFlags);
+    useWorkspaceModeStore.getState().setActive('write');
+  });
+  afterEach(() => {
+    cleanup();
+    useWorkspaceModeStore.getState().setActive('write');
+    useRAGQueryStore.getState().setReadingNotesFlags(localFlags);
+    useRAGQueryStore.setState((s) => ({
+      ...s,
+      isSettingsPanelOpen: false,
+      availableModels: [],
+      params: { ...s.params, ...allSources },
+    }));
+  });
+
+  it('suit l’espace quand rien n’est épinglé ; cliquer épingle pour la session ; « rétablir le défaut » rend la main', async () => {
+    installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+
+    expect(notesToggle().checked).toBe(true);
+    expect(hint()).toContain('Depends on the workspace: not consulted in Brainstorm, consulted elsewhere');
+    expect(screen.queryByTestId('reading-notes-toggle-reset')).toBeNull();
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('brainstorm');
+    });
+    expect(notesToggle().checked).toBe(false);
+    // Le défaut a parlé : rien n'a été écrit dans le magasin.
+    expect(useRAGQueryStore.getState().params.includeReadingNotes).toBeUndefined();
+
+    fireEvent.click(notesToggle());
+    expect(useRAGQueryStore.getState().params.includeReadingNotes).toBe(true);
+    expect(notesToggle().checked).toBe(true);
+    expect(hint()).toContain('Pinned for this session.');
+    expect(screen.getByTestId('reading-notes-toggle-reset').textContent).toBe('restore the default');
+    // La case du manuscrit n'a pas bougé : les deux sont indépendantes.
+    expect((screen.getByTestId('include-manuscript-toggle') as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(screen.getByTestId('reading-notes-toggle-reset'));
+    expect(useRAGQueryStore.getState().params.includeReadingNotes).toBeUndefined();
+    // Brainstorm → le défaut ne consulte pas les notes.
+    expect(notesToggle().checked).toBe(false);
+    expect(screen.queryByTestId('reading-notes-toggle-reset')).toBeNull();
+    await act(async () => undefined);
+  });
+
+  it('notes seules reste une sélection valide ; l’avertissement n’apparaît que quand plus rien n’est consulté', async () => {
+    installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+      });
+    });
+    // Le mock de react-i18next rend le repli sans interpolation : la liste
+    // n'est pas observable ici (elle l'est dans le test du résolveur), seule
+    // l'alternative « Recherche dans » / avertissement l'est.
+    expect(notesToggle().checked).toBe(true);
+    expect(searchIn()).toContain('Searching in:');
+    expect(searchIn()).not.toContain('Select at least one source.');
+
+    fireEvent.click(notesToggle());
+    expect(searchIn()).toContain('Select at least one source.');
+
+    fireEvent.click(notesToggle());
+    expect(searchIn()).not.toContain('Select at least one source.');
+    await act(async () => undefined);
+  });
+
+  it('une sélection de documents garde les notes dans « Recherche dans » ; le sous-texte dit quand elles sont cochées mais non consultées', async () => {
+    installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({ selectedDocumentIds: ['d1'] });
+    });
+    // Le manuscrit sort (portée restreinte), les notes restent : le main les
+    // restreint aux références choisies au lieu de les écarter. Le mock de
+    // react-i18next rend les clés des sous-textes à options.
+    expect(screen.getByTestId('manuscript-toggle-hint').textContent).toContain(
+      'ragSettings.manuscriptExcludedHint'
+    );
+    expect(hint()).not.toContain('ragSettings.readingNotesExcludedHint');
+
+    // Notes seules, documents choisis : toujours une sélection consultée.
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+        includeManuscript: false,
+      });
+    });
+    expect(searchIn()).toContain('Searching in:');
+    expect(searchIn()).not.toContain('Select at least one source.');
+
+    // Fournisseur distant sans consentement : cochées, mais non consultées —
+    // et plus rien ne l'est.
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: true, cloudConsent: false, generationIsCloud: true });
+    });
+    expect(notesToggle().checked).toBe(true);
+    expect(hint()).toContain('ragSettings.readingNotesExcludedHint');
+    expect(searchIn()).toContain('Select at least one source.');
+
+    // Le consentement donné : consultées de nouveau.
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: true, cloudConsent: true, generationIsCloud: true });
+    });
+    expect(hint()).not.toContain('ragSettings.readingNotesExcludedHint');
+    expect(searchIn()).not.toContain('Select at least one source.');
+
+    // Index désactivé : même sous-texte, quel que soit le fournisseur.
+    act(() => {
+      useRAGQueryStore
+        .getState()
+        .setReadingNotesFlags({ indexEnabled: false, cloudConsent: true, generationIsCloud: false });
+    });
+    expect(hint()).toContain('ragSettings.readingNotesExcludedHint');
+    expect(searchIn()).toContain('Select at least one source.');
     await act(async () => undefined);
   });
 });
