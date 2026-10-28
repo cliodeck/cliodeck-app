@@ -29,6 +29,7 @@ import {
 } from '../../../backend/core/rag/retrievers/corpus.js';
 import {
   applyThreshold,
+  CROSS_LANGUAGE_FALLBACK,
   relevanceScore,
 } from '../../../backend/core/rag/relevance.js';
 import type {
@@ -763,6 +764,9 @@ class RetrievalService {
         threshold,
         documentIds: q.documentIds,
         collectionKeys: q.collectionKeys,
+        // Un corpus seul dans la portée garde un repli : personne d'autre
+        // ne répondra (le manuscrit interrogé seul, palier 2).
+        sole: scope.size === 1,
       },
       (corpus, error) => {
         console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
@@ -1020,7 +1024,7 @@ class RetrievalService {
 
   private async searchManuscript(
     query: string,
-    options: { topK: number; threshold: number }
+    options: { topK: number; threshold: number; sole?: boolean }
   ): Promise<ManuscriptMappedSearchResult[]> {
     const store = this.getManuscriptStore();
     if (!store) return [];
@@ -1064,11 +1068,14 @@ class RetrievalService {
         sourceType: 'manuscript',
       })
     );
-    // Pas de repli sous le seuil : le quota de `selectWithManuscriptQuota`
-    // réserve des places au manuscrit « quand il a quelque chose à dire ».
-    // Sans seuil, il en avait toujours — et prenait ses places même hors
-    // sujet.
-    return applyThreshold(mapped, options.threshold, 0);
+    // Pas de repli sous le seuil quand le manuscrit accompagne les sources :
+    // la bande de `selectWithManuscriptQuota` lui réserve des places « quand
+    // il a quelque chose à dire », et sans seuil il en avait toujours, même
+    // hors sujet. Interrogé seul (« qu'ai-je déjà écrit sur X ? »), il garde
+    // les trois passages les plus proches : mieux vaut trois passages limites
+    // qu'une réponse de culture générale sous un prompt qui dit « aucune
+    // source ».
+    return applyThreshold(mapped, options.threshold, options.sole ? CROSS_LANGUAGE_FALLBACK : 0);
   }
 
   /**

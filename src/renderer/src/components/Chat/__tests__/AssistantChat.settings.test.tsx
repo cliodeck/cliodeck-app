@@ -28,6 +28,7 @@ vi.mock('../../Brainstorm/useBrainstormChat', () => ({
 import { AssistantChat } from '../AssistantChat';
 import { useChatStore } from '../../../stores/chatStore';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
+import { useWorkspaceModeStore } from '../../../stores/workspaceModeStore';
 
 describe('AssistantChat settings panel', () => {
   beforeEach(() => {
@@ -124,5 +125,151 @@ describe('AssistantChat — prompt système personnalisé du panneau', () => {
       });
     });
     expect(useChatStore.getState().chatSettings.customSystemPrompt).toBeUndefined();
+  });
+});
+
+/**
+ * « Mon manuscrit » (docs/poids-du-manuscrit.md, palier 2) : un tri-état
+ * résolu contre l'espace de travail, projeté en valeur EFFECTIVE vers
+ * `retrievalOptions.includeManuscript`, et une ligne de portée visible hors
+ * du panneau. Le mock de react-i18next (vitest.setup.ts) rend le repli
+ * quand il y en a un, la clé sinon : les libellés des familles se lisent
+ * donc par leur clé, « Manuscript not consulted » par son repli.
+ */
+describe('AssistantChat — « Mon manuscrit » : projection et ligne de portée', () => {
+  const allSources = {
+    includeBibliography: true,
+    includePrimary: true,
+    includeNotes: true,
+    includeManuscript: undefined,
+  };
+  const retrieval = () => useChatStore.getState().chatSettings.retrieval;
+
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    (window as unknown as { electron: unknown }).electron = {
+      config: { get: vi.fn(async () => null) },
+    };
+    useRAGQueryStore.getState().setParams(allSources);
+    useWorkspaceModeStore.getState().setActive('write');
+  });
+  afterEach(() => {
+    cleanup();
+    useWorkspaceModeStore.getState().setActive('write');
+    useRAGQueryStore.getState().setParams(allSources);
+  });
+
+  it('espace Écrire → includeManuscript true ; passer en Brainstorm → false, et l’effet se rejoue', () => {
+    render(<AssistantChat variant="full" />);
+    expect(retrieval()?.includeManuscript).toBe(true);
+    expect(retrieval()?.sourceType).toBe('both');
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('brainstorm');
+    });
+    expect(retrieval()?.includeManuscript).toBe(false);
+    // Les trois autres familles restent ce qu'elles étaient.
+    expect(retrieval()?.sourceType).toBe('both');
+    expect(retrieval()?.includeVault).toBe(true);
+    // Rien n'est épinglé : le défaut de l'espace a parlé seul.
+    expect(useRAGQueryStore.getState().params.includeManuscript).toBeUndefined();
+  });
+
+  it('case cochée en Brainstorm → true : le choix de l’utilisateur prime sur l’espace', () => {
+    useWorkspaceModeStore.getState().setActive('brainstorm');
+    render(<AssistantChat variant="full" />);
+    expect(retrieval()?.includeManuscript).toBe(false);
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeManuscript: true });
+    });
+    expect(retrieval()?.includeManuscript).toBe(true);
+
+    // Et décochée en Écrire → false, symétriquement.
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('write');
+      useRAGQueryStore.getState().setParams({ includeManuscript: false });
+    });
+    expect(retrieval()?.includeManuscript).toBe(false);
+  });
+
+  it('« Mon manuscrit » seul coché → sourceType manuscript, jamais élargi aux sources', () => {
+    render(<AssistantChat variant="full" />);
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+      });
+    });
+    expect(retrieval()?.sourceType).toBe('manuscript');
+    expect(retrieval()?.includeVault).toBe(false);
+    expect(retrieval()?.includeManuscript).toBe(true);
+
+    // Même sélection en Brainstorm sans épingle : plus rien d'effectif →
+    // repli permissif sur les sources, manuscrit toujours absent.
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('brainstorm');
+    });
+    expect(retrieval()?.sourceType).toBe('both');
+    expect(retrieval()?.includeManuscript).toBe(false);
+  });
+
+  it('la ligne de portée dit ce qui est consulté, signale le manuscrit absent, et ouvre les réglages', () => {
+    useWorkspaceModeStore.getState().setActive('brainstorm');
+    render(<AssistantChat variant="full" />);
+
+    const line = screen.getByTestId('chat-scope-line');
+    expect(line.textContent).toContain('ragSettings.includeBibliography');
+    expect(line.textContent).toContain('ragSettings.includePrimary');
+    expect(line.textContent).toContain('ragSettings.includeNotes');
+    expect(line.textContent).not.toContain('ragSettings.includeManuscript');
+    expect(line.textContent).toContain('Manuscript not consulted');
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('write');
+    });
+    expect(screen.getByTestId('chat-scope-line').textContent).toContain('ragSettings.includeManuscript');
+    expect(screen.getByTestId('chat-scope-line').textContent).not.toContain('Manuscript not consulted');
+
+    // Manuscrit seul : la ligne ne montre que lui, sans avertissement.
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+      });
+    });
+    expect(screen.getByTestId('chat-scope-line').textContent).not.toContain('ragSettings.includeBibliography');
+    expect(screen.getByTestId('chat-scope-line').textContent).toContain('ragSettings.includeManuscript');
+    expect(screen.getByTestId('chat-scope-line').textContent).not.toContain('Select at least one source.');
+
+    // Plus rien d'effectif : l'avertissement, et le manuscrit absent.
+    act(() => {
+      useRAGQueryStore.getState().setParams({ includeManuscript: false });
+    });
+    expect(screen.getByTestId('chat-scope-line').textContent).toContain('Select at least one source.');
+    expect(screen.getByTestId('chat-scope-line').textContent).toContain('Manuscript not consulted');
+
+    // Cliquer la ligne ouvre le panneau de réglages.
+    expect(screen.queryByTestId('rag-settings-stub')).toBeNull();
+    fireEvent.click(screen.getByTestId('chat-scope-line'));
+    expect(screen.getByTestId('rag-settings-stub')).toBeTruthy();
+  });
+
+  it('la ligne de portée existe aussi dans la variante panel', () => {
+    useWorkspaceModeStore.getState().setActive('brainstorm');
+    render(<AssistantChat variant="panel" />);
+    expect(screen.getByTestId('chat-scope-line').textContent).toContain('Manuscript not consulted');
+  });
+
+  it('affiche le nom du mode de chat actif à côté du bouton de réglages, et il ouvre les réglages', () => {
+    render(<AssistantChat variant="full" />);
+    // Sans liste de modes chargée, l'identifiant du mode actif sert de repli.
+    const name = screen.getByTestId('chat-mode-name');
+    expect(name.textContent).toContain('default-assistant');
+    expect(screen.queryByTestId('mode-selector-stub')).toBeNull();
+    fireEvent.click(name);
+    expect(screen.getByTestId('mode-selector-stub')).toBeTruthy();
   });
 });

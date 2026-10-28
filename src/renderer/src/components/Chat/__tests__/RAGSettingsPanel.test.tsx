@@ -18,6 +18,7 @@ vi.mock('../DocumentMultiSelect', () => ({
 
 import { RAGSettingsPanel } from '../RAGSettingsPanel';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
+import { useWorkspaceModeStore } from '../../../stores/workspaceModeStore';
 
 interface ShowInfo {
   contextLength?: number;
@@ -180,5 +181,120 @@ describe('RAGSettingsPanel — fenêtre de contexte et modèle', () => {
     });
     // Et la longueur déclarée est relue pour le nouveau modèle.
     await waitFor(() => expect(showModel).toHaveBeenCalledWith('gemma3:4b'));
+  });
+});
+
+/**
+ * Quatrième case « Mon manuscrit » (docs/poids-du-manuscrit.md, palier 2) :
+ * la case montre la valeur EFFECTIVE — épinglée par l'utilisateur, sinon le
+ * défaut de l'espace (Brainstorm : non) — et cliquer épingle pour la
+ * session. Le mock de react-i18next rend le repli anglais quand il y en a
+ * un, la clé sinon.
+ */
+describe('RAGSettingsPanel — « Mon manuscrit » (tri-état)', () => {
+  const allSources = {
+    includeBibliography: true,
+    includePrimary: true,
+    includeNotes: true,
+    includeManuscript: undefined,
+  };
+
+  function manuscriptToggle(): HTMLInputElement {
+    return screen.getByTestId('include-manuscript-toggle') as HTMLInputElement;
+  }
+
+  beforeEach(() => {
+    useRAGQueryStore.setState((s) => ({
+      ...s,
+      isSettingsPanelOpen: true,
+      availableModels: MODELS,
+      params: { ...s.params, provider: 'ollama', model: 'qwen3.5:35b', numCtx: 4096, ...allSources },
+    }));
+    useWorkspaceModeStore.getState().setActive('write');
+  });
+  afterEach(() => {
+    cleanup();
+    useWorkspaceModeStore.getState().setActive('write');
+    useRAGQueryStore.setState((s) => ({
+      ...s,
+      isSettingsPanelOpen: false,
+      availableModels: [],
+      params: { ...s.params, ...allSources },
+    }));
+  });
+
+  it('suit l’espace quand rien n’est épinglé : cochée en Écrire, décochée en Brainstorm', async () => {
+    installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+
+    expect(manuscriptToggle().checked).toBe(true);
+    expect(screen.getByTestId('manuscript-toggle-hint').textContent).toContain(
+      'Depends on the workspace: not consulted in Brainstorm, consulted elsewhere'
+    );
+    expect(screen.queryByTestId('manuscript-toggle-reset')).toBeNull();
+
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('brainstorm');
+    });
+    expect(manuscriptToggle().checked).toBe(false);
+    // Le défaut a parlé : rien n'a été écrit dans le magasin.
+    expect(useRAGQueryStore.getState().params.includeManuscript).toBeUndefined();
+    await act(async () => undefined);
+  });
+
+  it('cliquer épingle pour la session ; « rétablir le défaut » rend la main à l’espace', async () => {
+    installElectron({ contextLength: 131_072 });
+    useWorkspaceModeStore.getState().setActive('brainstorm');
+    render(<RAGSettingsPanel />);
+    expect(manuscriptToggle().checked).toBe(false);
+
+    fireEvent.click(manuscriptToggle());
+    expect(useRAGQueryStore.getState().params.includeManuscript).toBe(true);
+    expect(manuscriptToggle().checked).toBe(true);
+    expect(screen.getByTestId('manuscript-toggle-hint').textContent).toContain('Pinned for this session.');
+    expect(screen.getByTestId('manuscript-toggle-reset').textContent).toBe('restore the default');
+
+    // Un choix épinglé survit au changement d'espace.
+    act(() => {
+      useWorkspaceModeStore.getState().setActive('write');
+    });
+    expect(manuscriptToggle().checked).toBe(true);
+    fireEvent.click(manuscriptToggle());
+    expect(useRAGQueryStore.getState().params.includeManuscript).toBe(false);
+    expect(manuscriptToggle().checked).toBe(false);
+
+    fireEvent.click(screen.getByTestId('manuscript-toggle-reset'));
+    expect(useRAGQueryStore.getState().params.includeManuscript).toBeUndefined();
+    // Écrire → le défaut consulte le manuscrit.
+    expect(manuscriptToggle().checked).toBe(true);
+    expect(screen.queryByTestId('manuscript-toggle-reset')).toBeNull();
+    await act(async () => undefined);
+  });
+
+  it('manuscrit seul reste une sélection valide ; l’avertissement n’apparaît que quand plus rien n’est consulté', async () => {
+    installElectron({ contextLength: 131_072 });
+    render(<RAGSettingsPanel />);
+
+    act(() => {
+      useRAGQueryStore.getState().setParams({
+        includeBibliography: false,
+        includePrimary: false,
+        includeNotes: false,
+      });
+    });
+    // Manuscrit seul (défaut de l'espace Écrire) : « Recherche dans : … »,
+    // pas d'avertissement.
+    expect(manuscriptToggle().checked).toBe(true);
+    expect(screen.getByTestId('search-in-hint').textContent).not.toContain('Select at least one source.');
+    expect(screen.getByTestId('search-in-hint').textContent).toContain('Searching in:');
+
+    // Décocher le manuscrit : plus rien d'effectif → avertissement.
+    fireEvent.click(manuscriptToggle());
+    expect(screen.getByTestId('search-in-hint').textContent).toContain('Select at least one source.');
+
+    // Le recocher : la sélection « manuscrit seul » revient, sans avertissement.
+    fireEvent.click(manuscriptToggle());
+    expect(screen.getByTestId('search-in-hint').textContent).not.toContain('Select at least one source.');
+    await act(async () => undefined);
   });
 });

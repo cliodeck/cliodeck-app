@@ -650,6 +650,12 @@
     "settings": {
       "toggle": "Paramètres du chat"
     },
+    "modeLabel": "Mode :",
+    "scope": {
+      "prefix": "Recherche :",
+      "manuscriptOff": "Manuscrit non consulté",
+      "title": "Modifier les sources consultées"
+    },
     "placeholder": "Posez une question sur vos documents...",
     "send": "Envoyer (Enter)",
     "cancel": "Annuler",
@@ -941,6 +947,10 @@
     "includePrimaryHint": "Archives Tropy",
     "includeNotes": "Notes",
     "includeNotesHint": "Notes Obsidian",
+    "includeManuscript": "Mon manuscrit",
+    "manuscriptDefaultHint": "Selon l'espace : non consulté en Brainstorm, consulté ailleurs",
+    "manuscriptPinnedHint": "Choix fixé pour cette session.",
+    "manuscriptResetDefault": "rétablir le défaut",
     "searchIn": "Recherche dans : {{list}}",
     "noSourceWarning": "Sélectionnez au moins une source."
   },
@@ -1691,6 +1701,11 @@
     }
   },
   "ideas": {
+    "modeNotice": {
+      "message": "Le mode de chat « Brainstorming » cherche des idées dans vos sources, avec 20 extraits et sans votre manuscrit par défaut.",
+      "activate": "Activer le mode Brainstorming",
+      "dismiss": "Ne plus proposer"
+    },
     "tabChat": "Chat",
     "tabIdeas": "Idées",
     "tabCanvas": "Tableau",
@@ -2381,7 +2396,7 @@
     "title": "Corpus manuscrit",
     "hint": "Votre propre texte est indexé comme quatrième corpus, à côté de la bibliographie, des archives Tropy et du vault Obsidian. L'assistant peut ainsi répondre à « qu'ai-je déjà écrit sur ce point ? ». Les extraits sont toujours signalés comme provenant du manuscrit, jamais de la bibliographie : vous devez voir quand vous vous citez vous-même.",
     "enabled": "Indexer le manuscrit",
-    "enabledHelp": "Désactiver arrête l'indexation et retire le manuscrit des recherches",
+    "enabledHelp": "Désactiver arrête l'indexation et retire le manuscrit des recherches. Pour le consulter ou non dans une conversation, utilisez la case « Mon manuscrit » du panneau du chat.",
     "on": "Activé",
     "off": "Désactivé",
     "state": "État de l'index",

@@ -138,10 +138,17 @@ export interface ChatEngineRetrieverResult<TSource> {
 export interface ChatEngineRetrievalOptions {
   documentIds?: string[];
   collectionKeys?: string[];
-  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /** `manuscript` = the author's manuscript alone (« qu'ai-je déjà écrit ? »). */
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
   /** Opt-in to Obsidian vault alongside primary/secondary. Ignored when
    *  `sourceType === 'vault'` (vault-only). */
   includeVault?: boolean;
+  /**
+   * Effective value of the « Mon manuscrit » toggle (pinned by the user or
+   * the workspace default). Omitted = legacy caller: the manuscript is
+   * admitted, subject to the mode's stance and the scope.
+   */
+  includeManuscript?: boolean;
   topK?: number;
 }
 

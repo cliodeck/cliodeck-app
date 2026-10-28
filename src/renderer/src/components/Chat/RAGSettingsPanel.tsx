@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronRight, RotateCcw, Settings, RefreshCw, AlertTriangle, BookOpen, Scroll, Lightbulb, FileText, PenLine } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useRAGQueryStore, type LLMProvider } from '../../stores/ragQueryStore';
+import {
+  useRAGQueryStore,
+  effectiveSourceFamilies,
+  resolveManuscriptToggle,
+  SOURCE_FAMILY_LABEL_KEY,
+  type LLMProvider,
+} from '../../stores/ragQueryStore';
+import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { CollectionMultiSelect } from './CollectionMultiSelect';
 import { DocumentMultiSelect } from './DocumentMultiSelect';
 import {
@@ -65,6 +72,12 @@ export const RAGSettingsPanel: React.FC = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isEmbeddedModelAvailable, setIsEmbeddedModelAvailable] = useState(false);
   const hasTriedLoading = useRef(false);
+
+  // « Mon manuscrit » : la case montre la valeur EFFECTIVE — le choix fixé
+  // par l'utilisateur, sinon le défaut de l'espace (Brainstorm : non).
+  const workspace = useWorkspaceModeStore((s) => s.active);
+  const manuscriptPinned = params.includeManuscript !== undefined;
+  const manuscriptEffective = resolveManuscriptToggle(params.includeManuscript, workspace);
 
   // Fenêtre de contexte du modèle sélectionné, lue sur Ollama.
   const [modelInfo, setModelInfo] = useState<ModelContextInfo>({ source: 'none' });
@@ -379,9 +392,11 @@ export const RAGSettingsPanel: React.FC = () => {
           )}
 
           {/* Source Family Toggles — three independent checkboxes covering
-              the three families of ClioDeck sources. Any combination is
-              valid; selecting none surfaces a warning but still projects a
-              permissive fallback so the turn doesn't silently die. */}
+              the three families of ClioDeck sources, plus « Mon manuscrit »
+              (tri-state: pinned on/off, or « selon l'espace »). Any
+              combination is valid, manuscript alone included; selecting
+              none at all surfaces a warning but still projects a permissive
+              fallback so the turn doesn't silently die. */}
           <div className="setting-group">
             <label>{t('ragSettings.sources', 'Sources')}</label>
             <div className="source-toggle-list" role="group" aria-label={t('ragPanel.sources')}>
@@ -415,13 +430,43 @@ export const RAGSettingsPanel: React.FC = () => {
                 <FileText size={14} />
                 <span>{t('ragSettings.includeNotes', 'Notes')}</span>
               </label>
+              <label className="source-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={manuscriptEffective}
+                  onChange={(e) => setParams({ includeManuscript: e.target.checked })}
+                  aria-label={t('ragSettings.includeManuscript', 'My manuscript')}
+                  data-testid="include-manuscript-toggle"
+                />
+                <PenLine size={14} />
+                <span>{t('ragSettings.includeManuscript', 'My manuscript')}</span>
+              </label>
+              <small className="setting-hint source-toggle-subhint" data-testid="manuscript-toggle-hint">
+                {manuscriptPinned ? (
+                  <>
+                    {t('ragSettings.manuscriptPinnedHint', 'Pinned for this session.')}{' '}
+                    <button
+                      type="button"
+                      className="source-toggle-reset"
+                      onClick={() => setParams({ includeManuscript: undefined })}
+                      data-testid="manuscript-toggle-reset"
+                    >
+                      {t('ragSettings.manuscriptResetDefault', 'restore the default')}
+                    </button>
+                  </>
+                ) : (
+                  t(
+                    'ragSettings.manuscriptDefaultHint',
+                    'Depends on the workspace: not consulted in Brainstorm, consulted elsewhere'
+                  )
+                )}
+              </small>
             </div>
-            <small className="setting-hint">
+            <small className="setting-hint" data-testid="search-in-hint">
               {(() => {
-                const parts: string[] = [];
-                if (params.includeBibliography) parts.push(t('ragSettings.includeBibliography', 'Bibliography'));
-                if (params.includePrimary) parts.push(t('ragSettings.includePrimary', 'Primary sources'));
-                if (params.includeNotes) parts.push(t('ragSettings.includeNotes', 'Notes'));
+                const parts = effectiveSourceFamilies(params, manuscriptEffective).map((f) =>
+                  t(SOURCE_FAMILY_LABEL_KEY[f])
+                );
                 if (parts.length === 0) {
                   return (
                     <span style={{ color: 'var(--color-danger)' }}>

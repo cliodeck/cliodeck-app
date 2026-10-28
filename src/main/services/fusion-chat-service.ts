@@ -17,6 +17,15 @@ import type { WebContents } from 'electron';
 import { randomUUID } from 'crypto';
 import { configManager } from './config-manager.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
+import { detectManuscriptIntent } from '../../../backend/core/rag/manuscript-intent.js';
+import {
+  normalizeStance,
+  resolveManuscriptPolicy,
+  shouldIncludeManuscript,
+  type ManuscriptPolicy,
+  type ManuscriptWording,
+} from './manuscript-policy.js';
+import type { ManuscriptStance } from '../../../backend/types/mode.js';
 import { readingNotesIndexService } from './reading-notes-index-service.js';
 import { projectManager } from './project-manager.js';
 import {
@@ -219,28 +228,10 @@ export function shouldIncludeReadingNotes(opts: {
   return !opts.isCloud || opts.cloudConsent;
 }
 
-/**
- * Le manuscrit entre-t-il dans ce tour ?
- *
- * Jusqu'en 2026-10 il entrait toujours, quelle que soit la portée demandée :
- * avec un seul livre sélectionné, le modèle prenait le texte de l'utilisateur
- * pour le livre, et un paragraphe « PÉRIMÈTRE » rattrapait la confusion dans
- * le prompt. Quand l'utilisateur a dit de quoi il parle — des documents
- * choisis, une collection, ses notes seules — c'est de cela qu'il parle, et
- * le manuscrit n'est pas interrogé (`docs/poids-du-manuscrit.md`).
- */
-export function shouldIncludeManuscript(opts: {
-  enabled: boolean;
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
-  documentIds?: string[];
-  collectionKeys?: string[];
-}): boolean {
-  if (!opts.enabled) return false;
-  if (opts.sourceType === 'vault') return false;
-  if ((opts.documentIds?.length ?? 0) > 0) return false;
-  if ((opts.collectionKeys?.length ?? 0) > 0) return false;
-  return true;
-}
+// La place du manuscrit dans un tour est une politique à part entière
+// (`manuscript-policy.ts`) ; `shouldIncludeManuscript` y vit et reste
+// exporté d'ici pour les appelants et les tests historiques.
+export { shouldIncludeManuscript };
 
 /** Ce que la recherche d'un tour laisse au journal, en plus des sources. */
 interface TurnRetrievalRecord {
@@ -250,6 +241,12 @@ interface TurnRetrievalRecord {
     sources: number;
     manuscript: number;
     readingNotes: number;
+  };
+  /** La politique du manuscrit retenue pour ce tour, et ce qui l'a décidée. */
+  manuscript: Pick<ManuscriptPolicy, 'stance' | 'wording' | 'slots' | 'reason'> & {
+    requested?: boolean;
+    recallIntent: boolean;
+    recallMatch?: string;
   };
 }
 import {
@@ -357,16 +354,19 @@ export interface FusionChatSystemPromptOptions {
  * the "never silently widen the scope" invariant the UI contract relies on.
  */
 export function resolveRetrievalArgs(options?: ChatEngineRetrievalOptions): {
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
+  sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
   includeVault: boolean;
 } {
   const st = options?.sourceType;
-  const sourceType: 'primary' | 'secondary' | 'both' | 'vault' =
-    st === 'vault' || st === 'primary' || st === 'secondary' || st === 'both'
+  // `manuscript` (palier 2) : le manuscrit seul, quand « Mon manuscrit » est
+  // la seule case cochée. Jamais ramené à `both` — ce serait l'élargissement
+  // silencieux que l'interface promet de ne jamais faire.
+  const sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' =
+    st === 'vault' || st === 'primary' || st === 'secondary' || st === 'both' || st === 'manuscript'
       ? st
       : 'both';
   const includeVault =
-    sourceType === 'vault' ? true : options?.includeVault === true;
+    sourceType === 'vault' ? true : sourceType === 'manuscript' ? false : options?.includeVault === true;
   return { sourceType, includeVault };
 }
 
@@ -770,29 +770,42 @@ class FusionChatService {
             // `resolveRetrievalArgs`). `retrieval-service` natively
             // short-circuits `sourceType === 'vault'` to Obsidian only.
             const { sourceType, includeVault } = resolveRetrievalArgs(options);
-            // Le manuscrit est un quatrième corpus : ce que l'auteur a déjà
-            // écrit. Désactivable par `rag.indexManuscript`, et hors d'une
-            // recherche que l'utilisateur a lui-même restreinte.
-            const includeManuscript = shouldIncludeManuscript({
+            const manuscriptOnly = sourceType === 'manuscript';
+            const topK = options?.topK ?? configManager.getRAGConfig().topK;
+            // Le manuscrit : ce que l'auteur a déjà écrit. Sa place dans le
+            // tour est une politique (manuscript-policy.ts, palier 2) :
+            // question de rappel > portée > case « Mon manuscrit » > posture
+            // du mode de chat, résolue ici, côté main, à chaque tour.
+            const recall = detectManuscriptIntent(lastUser);
+            const manuscript = resolveManuscriptPolicy({
               enabled: manuscriptIndexService.isEnabled(),
+              requested: options?.includeManuscript,
               sourceType,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
+              stance: await resolveManuscriptStance(args.systemPrompt?.modeId),
+              recallIntent: recall.intent,
+              topK,
             });
             // Cinquième corpus : les notes de lecture. Désactivable par
-            // `rag.indexReadingNotes`, et hors d'un fournisseur distant sans
-            // `rag.readingNotesCloudConsent`.
-            const includeReadingNotes = shouldIncludeReadingNotes({
-              enabled: readingNotesIndexService.isEnabled(),
-              isCloud: classifyProvider({ backend: cfg.backend, ollamaURL: cfg.ollamaURL }).isCloud,
-              cloudConsent: readingNotesIndexService.cloudConsent(),
-            });
+            // `rag.indexReadingNotes`, hors d'un fournisseur distant sans
+            // `rag.readingNotesCloudConsent`, et hors de la portée
+            // « manuscrit seul » — l'utilisateur a nommé ce qu'il interroge.
+            const includeReadingNotes =
+              !manuscriptOnly &&
+              shouldIncludeReadingNotes({
+                enabled: readingNotesIndexService.isEnabled(),
+                isCloud: classifyProvider({ backend: cfg.backend, ollamaURL: cfg.ollamaURL })
+                  .isCloud,
+                cloudConsent: readingNotesIndexService.cloudConsent(),
+              });
             const { hits, manuscriptHits, readingNoteHits, stats, securityEvents } =
               await retrievalService.searchWithStats({
               query: lastUser,
               sourceType,
               includeVault,
-              includeManuscript,
+              includeManuscript: manuscript.include,
+              manuscriptSlots: manuscript.slots,
               includeReadingNotes,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
@@ -867,10 +880,16 @@ class FusionChatService {
               retrievalService.describeDocuments(options?.documentIds ?? []),
               promptLang
             );
-            const sourcesBlock = formatContextAsSystemPrompt(effectiveHits, promptLang, {
-              ownBlocksFollow: ownHits.length + noteHits.length > 0,
-            });
-            const manuscriptBlock = formatManuscriptContext(ownHits, promptLang);
+            // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
+            // modèle que bibliographie et archives ont été interrogées en vain
+            // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
+            // porte alors le périmètre.
+            const sourcesBlock = manuscriptOnly
+              ? ''
+              : formatContextAsSystemPrompt(effectiveHits, promptLang, {
+                  ownBlocksFollow: ownHits.length + noteHits.length > 0,
+                });
+            const manuscriptBlock = formatManuscriptContext(ownHits, promptLang, manuscript.wording);
             const notesBlock = formatReadingNotesContext(noteHits, promptLang);
             const contextChars = {
               total:
@@ -882,7 +901,19 @@ class FusionChatService {
               manuscript: manuscriptBlock.length,
               readingNotes: notesBlock.length,
             };
-            lastRetrieval = { includeManuscript, contextChars };
+            lastRetrieval = {
+              includeManuscript: manuscript.include,
+              contextChars,
+              manuscript: {
+                stance: manuscript.stance,
+                wording: manuscript.wording,
+                slots: manuscript.slots,
+                reason: manuscript.reason,
+                requested: options?.includeManuscript,
+                recallIntent: recall.intent,
+                recallMatch: recall.match,
+              },
+            };
 
             return {
               systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock,
@@ -1146,6 +1177,9 @@ class FusionChatService {
               ? {
                   includeManuscript: entry.retrieval.includeManuscript,
                   contextChars: entry.retrieval.contextChars,
+                  // Ce qui a décidé de la place du manuscrit : la détection
+                  // d'intention s'audite après coup sur ces lignes.
+                  manuscriptPolicy: entry.retrieval.manuscript,
                 }
               : {}),
           },
@@ -1197,14 +1231,24 @@ export const fusionChatService = new FusionChatService();
  */
 export function formatManuscriptContext(
   hits: ManuscriptMappedSearchResult[],
-  lang: PromptLanguage = 'fr'
+  lang: PromptLanguage = 'fr',
+  wording: ManuscriptWording = 'recall'
 ): string {
   if (hits.length === 0) return '';
   const SNIPPET_CHARS = 1500;
-  // « L'utilisateur », jamais « l'auteur » : les sources portent un champ
-  // AUTEUR, et un bloc intitulé « texte de l'auteur » se lisait comme le
-  // texte de l'auteur du livre interrogé.
-  const lines: string[] = ['', ...CONTEXT_TEXT[lang].manuscript, ''];
+  const text = CONTEXT_TEXT[lang];
+  // Trois consignes pour trois situations (manuscript-policy.ts) : rappeler
+  // ce qui est écrit ; tenir le manuscrit en arrière-plan d'un brainstorm ;
+  // ne répondre que de lui. « L'utilisateur », jamais « l'auteur » : les
+  // sources portent un champ AUTEUR, et un bloc intitulé « texte de
+  // l'auteur » se lisait comme le texte de l'auteur du livre interrogé.
+  const header =
+    wording === 'only'
+      ? text.manuscriptOnly
+      : wording === 'background'
+        ? text.manuscriptBackground
+        : text.manuscript;
+  const lines: string[] = ['', ...header, ''];
   hits.forEach((h, i) => {
     const where = h.source.sectionTitle
       ? `${h.document.title ?? h.source.relativePath} — ${h.source.sectionTitle}`
@@ -1261,6 +1305,22 @@ async function isCompressionEnabled(modeId?: string): Promise<boolean> {
 }
 
 /**
+ * Posture du mode de chat envers le manuscrit (`ragOverrides.manuscript`),
+ * résolue côté main à partir de `systemPrompt.modeId` — jamais depuis la
+ * copie du renderer, qui perd les surcharges d'un mode au relancement. Même
+ * motif qu'`isCompressionEnabled` ; un mode irrésoluble vaut `recall`.
+ */
+async function resolveManuscriptStance(modeId?: string): Promise<ManuscriptStance> {
+  if (!modeId) return 'recall';
+  try {
+    const mode = await modeService.getModeManager().getMode(modeId);
+    return normalizeStance(mode?.ragOverrides?.manuscript);
+  } catch {
+    return 'recall';
+  }
+}
+
+/**
  * Consignes du bloc de contexte, par langue. Seules les phrases sont
  * traduites : les étiquettes de champ (`TITRE`, `AUTEUR`, `EXTRAIT`,
  * `type : bibliographie`) restent telles quelles dans les deux langues —
@@ -1272,7 +1332,12 @@ interface ContextText {
   /** Ajouté à la règle des sources quand un bloc manuscrit ou notes suit. */
   ownBlocksFollow: string;
   noSources: string;
+  /** Consigne de rappel : dire à l'utilisateur ce qu'il a déjà écrit. */
   manuscript: string[];
+  /** Arrière-plan d'un brainstorm : ce qu'il pense déjà, à ne pas reformuler. */
+  manuscriptBackground: string[];
+  /** Portée « manuscrit seul » : on ne répond que de lui. */
+  manuscriptOnly: string[];
   readingNotes: string[];
   colon: string;
   scopeOne: (named: string) => string[];
@@ -1296,6 +1361,15 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       "--- MANUSCRIT DE L'UTILISATEUR (hors sources) ---",
       "Passages du MANUSCRIT EN COURS : le texte que l'utilisateur est lui-même en train d'écrire. Ce n'est PAS une source, et les numéros [M…] ne désignent aucun des documents numérotés ci-dessus.",
       "Sers-t'en pour une seule chose : lui dire ce qu'il a déjà écrit — répétition, oubli, contradiction — en disant « dans ton manuscrit ». Toute affirmation sur le passé s'appuie sur une source [N], jamais sur un passage [M]. N'attribue JAMAIS son contenu à une source ni à l'auteur d'une source.",
+    ],
+    manuscriptBackground: [
+      "--- CE QUE L'UTILISATEUR A DÉJÀ ÉCRIT (repères, hors sources) ---",
+      "Passages de son MANUSCRIT EN COURS : ils disent ce qu'il pense déjà. Ce ne sont PAS des sources, et les numéros [M…] ne désignent aucun des documents numérotés ci-dessus.",
+      "TA TÂCHE avec ces passages : propose ce que les sources [N] permettent de dire et que ces passages ne disent pas encore. Ne reformule aucun d'eux en idée nouvelle et ne les compte jamais à l'appui d'une hypothèse. Si une idée recoupe l'un d'eux, dis-le en une ligne (« déjà dans ton manuscrit, [M1] ») et passe à la suivante.",
+    ],
+    manuscriptOnly: [
+      "PÉRIMÈTRE : l'utilisateur interroge uniquement son MANUSCRIT EN COURS — le texte qu'il est lui-même en train d'écrire. Aucune source n'a été interrogée pour ce tour, et la règle « réponds à partir des sources » ne s'applique pas.",
+      "Réponds à partir des passages [M…] ci-dessous, en situant chacun (chapitre, section), en signalant les répétitions et les contradictions entre passages. Ne présente rien comme une source, et n'attribue rien à un autre auteur que l'utilisateur.",
     ],
     readingNotes: [
       "Extraits des NOTES DE LECTURE de l'utilisateur (son commentaire d'une référence, pas la référence elle-même).",
@@ -1327,6 +1401,15 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       "--- THE USER'S MANUSCRIPT (not a source) ---",
       'Passages from the MANUSCRIPT IN PROGRESS: the text the user is writing themselves. It is NOT a source, and the [M…] numbers refer to none of the numbered documents above.',
       'Use them for one thing only: telling the user what they have already written — repetition, omission, contradiction — saying "in your manuscript". Every claim about the past rests on a source [N], never on an [M] passage. NEVER attribute their content to a source or to the author of a source.',
+    ],
+    manuscriptBackground: [
+      '--- WHAT THE USER HAS ALREADY WRITTEN (landmarks, not sources) ---',
+      'Passages from their MANUSCRIPT IN PROGRESS: they say what the user already thinks. They are NOT sources, and the [M…] numbers refer to none of the numbered documents above.',
+      'YOUR TASK with these passages: propose what the sources [N] allow you to say and that these passages do not say yet. Never rephrase one of them as a new idea and never count them in support of a hypothesis. If an idea overlaps one of them, say so in one line ("already in your manuscript, [M1]") and move on.',
+    ],
+    manuscriptOnly: [
+      'SCOPE: the user is querying only their MANUSCRIPT IN PROGRESS — the text they are writing themselves. No source was searched for this turn, and the rule "answer from the sources" does not apply.',
+      'Answer from the [M…] passages below, locating each one (chapter, section) and pointing out repetitions and contradictions between passages. Present nothing as a source, and attribute nothing to any author other than the user.',
     ],
     readingNotes: [
       "Excerpts from the user's READING NOTES (their commentary on a reference, not the reference itself).",

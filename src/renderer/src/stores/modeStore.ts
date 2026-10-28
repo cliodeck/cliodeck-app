@@ -82,10 +82,11 @@ export const useModeStore = create<ModeState>()(
               repeat_penalty: mode.generationParams.repeat_penalty,
             };
 
-            // Only apply defined RAG overrides
+            // Only apply defined RAG overrides. The manuscript stance
+            // (`rag.manuscript`) is resolved main-side from `modeId`, like
+            // `enableContextCompression`: nothing to project here.
             const rag = mode.ragOverrides;
             if (rag.topK !== undefined) overrides.topK = rag.topK;
-            if (rag.sourceType !== undefined) overrides.sourceType = rag.sourceType;
             if (rag.numCtx !== undefined) overrides.numCtx = rag.numCtx;
 
             useRAGQueryStore.getState().setParams(overrides);

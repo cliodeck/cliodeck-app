@@ -244,8 +244,28 @@ l'intention de rappel n'est pas détectée.
   défaut, jamais sur le silence. L'intention détectée est journalisée.
 
 Préséance, du plus fort au plus faible : intention de rappel explicite >
-case cochée par l'utilisateur > défaut de l'espace > posture du mode de
-chat > bande par défaut.
+portée « manuscrit seul » > portée restreinte par l'utilisateur (documents,
+collection, notes seules) > case cochée par l'utilisateur ou défaut de
+l'espace > posture du mode de chat > bande par défaut.
+
+**État (2026-10-28) : livré.** La politique est une fonction pure,
+`resolveManuscriptPolicy` (`src/main/services/manuscript-policy.ts`),
+résolue côté main à chaque tour ; la posture du mode vient de
+`ragOverrides.manuscript` lue par `systemPrompt.modeId`, comme la
+compression. Largeurs : rappel `min(topK − 1, 6)` ; arrière-plan
+`min(bande, 2)` ; manuscrit seul `topK`, avec un repli de trois passages
+sous le seuil (`CorpusSearchOptions.sole`) pour que la question ne tombe
+jamais sur une réponse de culture générale. Le mode « Brainstorming » est en
+`background`, le mode libre en `off`, les six autres en `recall` par défaut ;
+`sourceType`, `useGraphContext`, `similarityThreshold` et `summaryGeneration`
+sont retirés de `ModeRAGOverrides` (un fichier de mode qui les porte est
+accepté et ignoré). La détection d'intention (`backend/core/rag/
+manuscript-intent.ts`) est journalisée avec la politique retenue dans
+`inputMetadata.manuscriptPolicy` de l'opération `rag_query`. Côté
+interface : la case « Mon manuscrit » (tri-état, défaut selon l'espace) et la
+ligne « Recherche : … » toujours visible, la portée « manuscrit seul » quand
+elle est la seule cochée, la bannière de l'espace Brainstorm et le nom du mode
+de chat dans l'en-tête.
 
 ### Palier 3 — n'indexer que ce que l'auteur a écrit
 

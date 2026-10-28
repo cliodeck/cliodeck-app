@@ -103,11 +103,8 @@ WARNING:
     },
     ragOverrides: {
       topK: 25,
-      sourceType: 'secondary',
       numCtx: 32768,
-      useGraphContext: true,
       enableContextCompression: false,
-      similarityThreshold: 0.10,
     },
     modelRecommendation: {
       suggestedModels: ['qwen3:30b-a3b', 'qwen3:8b', 'gemma3:12b', 'mistral3:14b'],
@@ -179,11 +176,8 @@ CAUTION:
     },
     ragOverrides: {
       topK: 8,
-      sourceType: 'primary',
       numCtx: 8192,
       enableContextCompression: true,
-      summaryGeneration: 'disabled',
-      similarityThreshold: 0.15,
     },
     modelRecommendation: {
       suggestedModels: ['gemma3:12b', 'qwen3:8b', 'qwen3:4b'],
@@ -253,10 +247,8 @@ FORMAT:
     },
     ragOverrides: {
       topK: 15,
-      sourceType: 'both',
       numCtx: 16384,
       enableContextCompression: false,
-      similarityThreshold: 0.12,
     },
     modelRecommendation: {
       suggestedModels: ['phi4-reasoning', 'deepseek-r1:32b', 'qwen3:30b-a3b'],
@@ -326,7 +318,6 @@ WHEN REPHRASING:
     },
     ragOverrides: {
       topK: 10,
-      sourceType: 'both',
       numCtx: 16384,
       enableContextCompression: true,
     },
@@ -398,9 +389,7 @@ APPROACH:
     },
     ragOverrides: {
       topK: 10,
-      sourceType: 'secondary',
       numCtx: 8192,
-      useGraphContext: false,
       enableContextCompression: true,
     },
     modelRecommendation: {
@@ -485,11 +474,12 @@ APPROACH:
     },
     ragOverrides: {
       topK: 20,
-      sourceType: 'both',
       numCtx: 16384,
-      useGraphContext: true,
       enableContextCompression: false,
-      similarityThreshold: 0.05,
+      // Le manuscrit en arrière-plan : une ou deux places, présentées comme
+      // ce que l'utilisateur pense déjà — un brainstorm cherche ce que les
+      // sources permettent au-delà (docs/poids-du-manuscrit.md).
+      manuscript: 'background',
     },
     modelRecommendation: {
       suggestedModels: ['qwen3:8b', 'gemma3:12b', 'mistral3:14b'],
@@ -531,7 +521,10 @@ APPROACH:
       top_k: 50,
       repeat_penalty: 1.0,
     },
-    ragOverrides: {},
+    // Sans prompt système, le texte de l'utilisateur n'aurait aucun cadre :
+    // la pire posture pour se citer soi-même. Une question de rappel
+    // explicite l'emporte quand même (manuscript-policy.ts).
+    ragOverrides: { manuscript: 'off' },
     modelRecommendation: {
       suggestedModels: [],
       minContextWindow: 2048,

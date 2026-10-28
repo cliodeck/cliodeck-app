@@ -353,6 +353,28 @@ describe('sélection de documents et manuscrit — ne pas prendre l’un pour l�
     expect(block).toContain('jamais sur un passage [M]');
   });
 
+  it('trois consignes pour trois situations : rappel, arrière-plan, manuscrit seul', () => {
+    const recall = formatManuscriptContext([own], 'fr', 'recall');
+    expect(recall).toContain('lui dire ce qu\'il a déjà écrit');
+
+    // Arrière-plan d'un brainstorm : ce que l'utilisateur pense déjà, à ne
+    // pas lui reformuler — une tâche, pas trois négations.
+    const background = formatManuscriptContext([own], 'fr', 'background');
+    expect(background).toContain("CE QUE L'UTILISATEUR A DÉJÀ ÉCRIT");
+    expect(background).toContain('TA TÂCHE');
+    expect(background).toContain('Ne reformule aucun');
+    expect(background).toContain('[M1] Mon article');
+    expect(formatManuscriptContext([own], 'en', 'background')).toContain('YOUR TASK');
+
+    // Manuscrit seul : le périmètre remplace l'en-tête « aucune source », et
+    // la règle « réponds à partir des sources » est levée pour le tour.
+    const only = formatManuscriptContext([own], 'fr', 'only');
+    expect(only).toContain('PÉRIMÈTRE');
+    expect(only).toContain('uniquement son MANUSCRIT EN COURS');
+    expect(only).toContain("ne s'applique pas");
+    expect(formatManuscriptContext([own], 'en', 'only')).toContain('MANUSCRIPT IN PROGRESS');
+  });
+
   it('la règle des sources nomme les blocs du manuscrit et des notes seulement quand ils suivent', () => {
     const hit = {
       sourceType: 'secondary',

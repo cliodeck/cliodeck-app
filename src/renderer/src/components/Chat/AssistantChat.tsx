@@ -32,7 +32,12 @@ import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
-import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import {
+  useRAGQueryStore,
+  effectiveSourceFamilies,
+  resolveManuscriptToggle,
+  SOURCE_FAMILY_LABEL_KEY,
+} from '../../stores/ragQueryStore';
 import { useCloudConsentGuard } from './useCloudConsentGuard';
 import { messageToDraft } from '../Brainstorm/messageToDraft';
 import { ChatSurface } from './ChatSurface';
@@ -82,7 +87,19 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const messages = useChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
-  const { modes } = useModeStore();
+  const { modes, activeMode, activeModeId } = useModeStore();
+  // Nom du mode de chat actif : jusqu'ici visible seulement derrière le
+  // bouton de réglages (ModeSelector). Repli sur l'identifiant tant que
+  // la liste des modes n'est pas chargée.
+  const activeModeName = activeMode?.metadata.name[lang] || activeModeId;
+  // Portée réellement interrogée, affichée hors du panneau de réglages :
+  // le manuscrit est un tri-état résolu contre l'espace de travail
+  // (Brainstorm : non consulté par défaut), et l'utilisateur doit le voir
+  // sans ouvrir le panneau pour comprendre pourquoi son texte n'apparaît pas.
+  const ragParams = useRAGQueryStore((s) => s.params);
+  const workspace = useWorkspaceModeStore((s) => s.active);
+  const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
+  const scopeFamilies = effectiveSourceFamilies(ragParams, manuscriptEffective);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [draftedId, setDraftedId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
@@ -546,6 +563,15 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         </button>
         <button
           type="button"
+          onClick={() => setIsSettingsOpen(true)}
+          title={settingsLabel}
+          className="brainstorm-chat__mode-name"
+          data-testid="chat-mode-name"
+        >
+          <span>{t('chat.modeLabel', 'Mode:')}</span> <strong>{activeModeName}</strong>
+        </button>
+        <button
+          type="button"
           onClick={() => setNerEnabled((v) => !v)}
           aria-pressed={nerEnabled}
           title={t('chat.brainstorm.nerToggle')}
@@ -556,6 +582,30 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         </button>
         {isSettingsOpen && <ModeSelector />}
       </div>
+      {/* Ligne de portée, toujours visible dans les deux variantes : les
+          mêmes libellés que les cases du panneau, et « Manuscrit non
+          consulté » quand il ne l'est pas. Cliquer ouvre le panneau. */}
+      <button
+        type="button"
+        className="brainstorm-chat__scope"
+        onClick={() => setIsSettingsOpen(true)}
+        title={t('chat.scope.title', 'Change which sources are searched')}
+        data-testid="chat-scope-line"
+      >
+        <span className="brainstorm-chat__scope-prefix">{t('chat.scope.prefix', 'Searching:')}</span>
+        {scopeFamilies.length === 0 ? (
+          <span className="brainstorm-chat__scope-empty">
+            {t('ragSettings.noSourceWarning', 'Select at least one source.')}
+          </span>
+        ) : (
+          <span>{scopeFamilies.map((f) => t(SOURCE_FAMILY_LABEL_KEY[f])).join(' · ')}</span>
+        )}
+        {!manuscriptEffective && (
+          <span className="brainstorm-chat__scope-off">
+            · {t('chat.scope.manuscriptOff', 'Manuscript not consulted')}
+          </span>
+        )}
+      </button>
       {isSettingsOpen && (
         <div
           className="brainstorm-chat__settings-panel"

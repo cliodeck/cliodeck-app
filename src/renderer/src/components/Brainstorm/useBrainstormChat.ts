@@ -49,8 +49,9 @@ interface FusionChatApi {
       retrievalOptions?: {
         documentIds?: string[];
         collectionKeys?: string[];
-        sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+        sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
         includeVault?: boolean;
+        includeManuscript?: boolean;
         topK?: number;
       };
       systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };

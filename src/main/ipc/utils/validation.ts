@@ -674,8 +674,12 @@ export const FusionChatStartSchema = z.object({
         .object({
           documentIds: z.array(z.string()).optional(),
           collectionKeys: z.array(z.string()).optional(),
-          sourceType: z.enum(['primary', 'secondary', 'both', 'vault']).optional(),
+          // `manuscript` : le manuscrit seul (« qu'ai-je déjà écrit sur X ? »).
+          sourceType: z.enum(['primary', 'secondary', 'both', 'vault', 'manuscript']).optional(),
           includeVault: z.boolean().optional(),
+          // Valeur effective de la case « Mon manuscrit » (épinglée ou défaut de
+          // l'espace de travail) ; absente = appelant historique, manuscrit admis.
+          includeManuscript: z.boolean().optional(),
           topK: z.number().int().min(1).max(100).optional(),
         })
         .optional(),

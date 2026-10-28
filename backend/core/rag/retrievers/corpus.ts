@@ -68,6 +68,14 @@ export interface CorpusSearchOptions {
   documentIds?: string[];
   /** Bibliographie seulement : restreindre à ces collections Zotero. */
   collectionKeys?: string[];
+  /**
+   * Vrai quand ce corpus est le seul de la portée. Personne d'autre ne
+   * répondra : un corpus qui d'ordinaire se tait sous le seuil garde alors
+   * un repli — le manuscrit interrogé seul (« qu'ai-je déjà écrit sur X ? »)
+   * doit rendre ses passages les plus proches plutôt qu'une réponse de
+   * culture générale.
+   */
+  sole?: boolean;
 }
 
 /**

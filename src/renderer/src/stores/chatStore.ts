@@ -114,7 +114,14 @@ export interface ChatSource {
 export interface BrainstormChatRetrievalSettings {
   documentIds?: string[];
   collectionKeys?: string[];
-  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /** `manuscript` = manuscript-only search (« Mon manuscrit » alone ticked). */
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
+  /**
+   * EFFECTIVE manuscript toggle, already resolved by the renderer against
+   * the workspace mode (brainstorm → off by default, elsewhere on).
+   * `undefined` is read as `true` by main for legacy callers.
+   */
+  includeManuscript?: boolean;
   /**
    * Opt-in to the Obsidian vault even when `sourceType` is not 'vault'.
    * Lets the user mix notes with primary/secondary without forcing a

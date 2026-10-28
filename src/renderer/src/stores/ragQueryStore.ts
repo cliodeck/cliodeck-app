@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { WorkspaceMode } from './workspaceModeStore';
 
 // MARK: - Types
 
@@ -14,15 +15,37 @@ export type SourceType = 'secondary' | 'primary' | 'both' | 'vault';
 
 /**
  * Resolved filter bag for the retrieval pipeline. Derived from the three
- * independent source toggles via `getResolvedSourceType()`.
+ * independent source toggles plus the EFFECTIVE manuscript toggle via
+ * `getResolvedSourceType()`.
  */
 export interface ResolvedSourceSelection {
-  sourceType: 'primary' | 'secondary' | 'both' | 'vault';
+  /**
+   * `manuscript` = manuscript-only search: « Mon manuscrit » is the only
+   * ticked box. A valid selection in its own right, never widened.
+   */
+  sourceType: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
   includeVault: boolean;
+  /** Effective value sent to main (`retrievalOptions.includeManuscript`). */
+  includeManuscript: boolean;
   /** True when the user turned every toggle off — caller should decide
    *  whether to fall back to "all sources" or block send. */
   isEmpty: boolean;
 }
+
+/** The four source families the chat can consult, in display order. */
+export type SourceFamily = 'bibliography' | 'primary' | 'notes' | 'manuscript';
+
+/**
+ * Label key of each family — shared by the settings panel's checkboxes, its
+ * « Recherche dans : » hint and the always-visible scope line of the chat,
+ * so the user reads the same words in the three places.
+ */
+export const SOURCE_FAMILY_LABEL_KEY: Record<SourceFamily, string> = {
+  bibliography: 'ragSettings.includeBibliography',
+  primary: 'ragSettings.includePrimary',
+  notes: 'ragSettings.includeNotes',
+  manuscript: 'ragSettings.includeManuscript',
+};
 
 export interface RAGQueryParams {
   // Provider selection
@@ -45,6 +68,18 @@ export interface RAGQueryParams {
   includeBibliography: boolean;
   includePrimary: boolean;
   includeNotes: boolean;
+  /**
+   * Fourth toggle « Mon manuscrit » — a TRI-STATE (docs/poids-du-manuscrit.md,
+   * palier 2):
+   *   - `undefined` = « selon l'espace de travail » : brainstorm → false,
+   *     every other workspace → true (`resolveManuscriptToggle`);
+   *   - `true` / `false` = pinned by the user for the session.
+   * Same lifetime as the three other toggles: `resetToDefaults` (run at
+   * every launch) puts it back to `undefined`, so nothing persists across
+   * launches and no renderer-side override of a main-side setting is
+   * reintroduced. The effective boolean is what travels to main.
+   */
+  includeManuscript?: boolean;
 
   // Collection filtering (Zotero collections)
   selectedCollectionKeys: string[]; // Empty = all collections (no filter)
@@ -148,6 +183,8 @@ const DEFAULT_PARAMS: RAGQueryParams = {
   includeBibliography: true,
   includePrimary: true,
   includeNotes: true,
+  // Manuscript: « selon l'espace » until the user pins it.
+  includeManuscript: undefined,
 
   // Collection filtering (empty = no filter, search all)
   selectedCollectionKeys: [],
@@ -237,11 +274,42 @@ async function scopeToProjectCollection(
 }
 
 /**
- * Map the three independent toggles to the filter bag expected by the
- * retrieval pipeline (`sourceType` understood by `fusion-chat-service` +
- * `retrieval-service`, plus a separate `includeVault` opt-in).
+ * Resolve the tri-state manuscript toggle against the workspace: pinned
+ * wins; otherwise the manuscript is consulted everywhere except in the
+ * Brainstorm workspace, where it is off by default so the author's own text
+ * does not crowd out the sources (docs/poids-du-manuscrit.md, décision 1).
+ */
+export function resolveManuscriptToggle(
+  pinned: boolean | undefined,
+  workspace: WorkspaceMode
+): boolean {
+  return pinned ?? workspace !== 'brainstorm';
+}
+
+/**
+ * Families effectively consulted, in display order. Shared by the panel's
+ * « Recherche dans : » hint and the chat's scope line so both say the same.
+ */
+export function effectiveSourceFamilies(
+  params: RAGQueryParams,
+  manuscriptEffective: boolean
+): SourceFamily[] {
+  const families: SourceFamily[] = [];
+  if (params.includeBibliography) families.push('bibliography');
+  if (params.includePrimary) families.push('primary');
+  if (params.includeNotes) families.push('notes');
+  if (manuscriptEffective) families.push('manuscript');
+  return families;
+}
+
+/**
+ * Map the three independent toggles plus the EFFECTIVE manuscript toggle to
+ * the filter bag expected by the retrieval pipeline (`sourceType` understood
+ * by `fusion-chat-service` + `retrieval-service`, plus the separate
+ * `includeVault` / `includeManuscript` opt-ins).
  *
- * Truth table (b = bibliography, p = primary, n = notes):
+ * Truth table (b = bibliography, p = primary, n = notes; m = manuscript
+ * effective, copied into `includeManuscript` in every non-empty case):
  *   b p n → { sourceType: 'both',      includeVault: true  }
  *   b p   → { sourceType: 'both',      includeVault: false }
  *   b   n → { sourceType: 'secondary', includeVault: true  }
@@ -249,29 +317,40 @@ async function scopeToProjectCollection(
  *   b     → { sourceType: 'secondary', includeVault: false }
  *     p   → { sourceType: 'primary',   includeVault: false }
  *       n → { sourceType: 'vault',     includeVault: true  }
- *   none  → { sourceType: 'both',      includeVault: true, isEmpty: true }
+ *       m → { sourceType: 'manuscript', includeVault: false, includeManuscript: true }
+ *           (manuscript-only is a VALID selection: « qu'ai-je déjà écrit ? »
+ *            must never fall back on the sources — never silently widen)
+ *   none  → { sourceType: 'both', includeVault: true, includeManuscript: false,
+ *             isEmpty: true }
  *           (fallback "all sources" so a misclick never kills the turn;
  *            the UI surfaces a warning and callers may choose to block)
  */
-export function getResolvedSourceType(params: RAGQueryParams): ResolvedSourceSelection {
+export function getResolvedSourceType(
+  params: RAGQueryParams,
+  manuscriptEffective: boolean
+): ResolvedSourceSelection {
   const b = params.includeBibliography;
   const p = params.includePrimary;
   const n = params.includeNotes;
+  const m = manuscriptEffective;
   if (!b && !p && !n) {
-    return { sourceType: 'both', includeVault: true, isEmpty: true };
+    if (m) {
+      return { sourceType: 'manuscript', includeVault: false, includeManuscript: true, isEmpty: false };
+    }
+    return { sourceType: 'both', includeVault: true, includeManuscript: false, isEmpty: true };
   }
   if (b && p) {
-    return { sourceType: 'both', includeVault: n, isEmpty: false };
+    return { sourceType: 'both', includeVault: n, includeManuscript: m, isEmpty: false };
   }
   if (b && !p) {
-    return { sourceType: 'secondary', includeVault: n, isEmpty: false };
+    return { sourceType: 'secondary', includeVault: n, includeManuscript: m, isEmpty: false };
   }
   if (!b && p) {
-    return { sourceType: 'primary', includeVault: n, isEmpty: false };
+    return { sourceType: 'primary', includeVault: n, includeManuscript: m, isEmpty: false };
   }
   // notes-only — fusion-chat-service maps `sourceType === 'vault'` to
   // "search Obsidian only" with `includeVault` implicit.
-  return { sourceType: 'vault', includeVault: true, isEmpty: false };
+  return { sourceType: 'vault', includeVault: true, includeManuscript: m, isEmpty: false };
 }
 
 // MARK: - Store
@@ -331,6 +410,8 @@ export const useRAGQueryStore = create<RAGQueryState>()(
               includeBibliography: DEFAULT_PARAMS.includeBibliography,
               includePrimary: DEFAULT_PARAMS.includePrimary,
               includeNotes: DEFAULT_PARAMS.includeNotes,
+              // Back to « selon l'espace » : a pin lives one session.
+              includeManuscript: DEFAULT_PARAMS.includeManuscript,
               selectedCollectionKeys: DEFAULT_PARAMS.selectedCollectionKeys,
               selectedDocumentIds: DEFAULT_PARAMS.selectedDocumentIds, // Issue #16
               temperature: DEFAULT_PARAMS.temperature,
