@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHUNK_CHAR_TARGET,
+  CHUNKER_VERSION,
+  FOOTNOTE_MIN_WORDS,
   chunkManuscriptChapter,
 } from '../manuscript-chunker.js';
 
@@ -38,8 +40,46 @@ describe('chunkManuscriptChapter — découpage du manuscrit', () => {
     expect(chunk.content).not.toContain('[@lester1932]');
     expect(chunk.content).not.toContain('[^1]');
     expect(chunk.content).toContain('Le port est disputé');
-    // En revanche le CORPS de la note est du texte de l'auteur : il reste.
+    // Sans option (notes de lecture), le CORPS de la note reste : c'est du
+    // texte de l'auteur.
     expect(chunk.content).toContain('Rapport du haut-commissaire');
+  });
+
+  it('n’embarque que ce que l’auteur a écrit : citations en bloc et notes de référence sortent', () => {
+    // Palier 3 (docs/poids-du-manuscrit.md) : un passage cité d'une source
+    // revenait comme source [N] et comme manuscrit [M], et une note de
+    // référence renvoyait les noms et titres de la bibliographie dans le
+    // corpus du manuscrit.
+    const longNote = Array.from({ length: FOOTNOTE_MIN_WORDS + 5 }, (_, i) => `mot${i}`).join(' ');
+    const md = [
+      '# Danzig',
+      '',
+      'Le port est disputé[^1], et pourtant la Ville libre résiste[^2].',
+      '',
+      '> La Société des Nations ne saurait tolérer une telle atteinte à ses prérogatives.',
+      '',
+      'Ma lecture diverge de celle de Lester.',
+      '',
+      '[^1]: Lester, *Rapport annuel* (Genève, 1932), p. 45.',
+      `[^2]: ${longNote}`,
+    ].join('\n');
+
+    const [chunk] = chunkManuscriptChapter(md, { dropQuotations: true });
+    expect(chunk.content).toContain('Le port est disputé');
+    expect(chunk.content).toContain('Ma lecture diverge');
+    expect(chunk.content).not.toContain('ne saurait tolérer');
+    expect(chunk.content).not.toContain('Rapport annuel');
+    // Une note longue est un argument : elle reste.
+    expect(chunk.content).toContain('mot0');
+
+    // Sans l'option, tout reste (notes de lecture).
+    const [kept] = chunkManuscriptChapter(md);
+    expect(kept.content).toContain('ne saurait tolérer');
+    expect(kept.content).toContain('Rapport annuel');
+  });
+
+  it('porte une version de découpage que l’indexeur mêle à l’empreinte', () => {
+    expect(CHUNKER_VERSION).toBeGreaterThanOrEqual(2);
   });
 
   it('ignore un titre situé dans un bloc de code', () => {

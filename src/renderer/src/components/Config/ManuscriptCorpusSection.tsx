@@ -17,12 +17,6 @@ import { RefreshCw, BookMarked } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useProjectStore } from '../../stores/projectStore';
 
-interface ManuscriptStats {
-  chapterCount: number;
-  chunkCount: number;
-  lastIndexedAt: string | null;
-}
-
 interface IndexReport {
   indexed: number;
   unchanged: number;
@@ -30,6 +24,18 @@ interface IndexReport {
   chunks: number;
   failures: Array<{ relativePath: string; reason: string }>;
   durationMs: number;
+}
+
+interface ManuscriptStats {
+  chapterCount: number;
+  chunkCount: number;
+  lastIndexedAt: string | null;
+  /**
+   * Dernière passe du service pour ce projet — y compris celles lancées en
+   * silence après une sauvegarde, et la passe complète qui suit un
+   * changement de découpage (`CHUNKER_VERSION`). Absent avant la première.
+   */
+  lastReport?: IndexReport | null;
 }
 
 interface ManuscriptApi {
@@ -166,6 +172,20 @@ export const ManuscriptCorpusSection: React.FC<Props> = ({
                       <br />
                       <small>
                         {t('manuscriptCorpus.lastIndexed', { when: lastIndexed })}
+                      </small>
+                    </>
+                  )}
+                  {stats.lastReport && (
+                    <>
+                      <br />
+                      <small data-testid="manuscript-last-run">
+                        {t('manuscriptCorpus.lastRun', {
+                          indexed: stats.lastReport.indexed,
+                          unchanged: stats.lastReport.unchanged,
+                          removed: stats.lastReport.removed,
+                          failures: stats.lastReport.failures.length,
+                          seconds: (stats.lastReport.durationMs / 1000).toFixed(1),
+                        })}
                       </small>
                     </>
                   )}

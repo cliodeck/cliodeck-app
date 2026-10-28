@@ -282,6 +282,18 @@ de chat dans l'en-tête.
   ligne, chapitres non réindexés) : une passe de recouvrement inter-corpus
   au moment du tour, et une diversité par section.
 
+**État (2026-10-28) : livré.** `extractProseText` accepte deux options
+(`dropBlockquotes`, `minFootnoteWords`) que `chunkManuscriptChapter(…,
+{ dropQuotations: true })` pose, et que seul l'indexeur du manuscrit passe ;
+les statistiques du document et les notes de lecture ne changent pas.
+`CHUNKER_VERSION = 2` (`manuscript-chunker.ts`) entre dans l'empreinte de
+chaque chapitre : la première passe après mise à jour réembarque tout le
+manuscrit, à la sauvegarde suivante ou par « Réindexer », et la section
+« Corpus manuscrit » affiche désormais la dernière passe (réindexées,
+inchangées, retirées, échecs, durée). Non mesuré : la durée de cette passe
+sur le fournisseur embarqué pour un livre long — à relever sur un projet réel
+avant la prochaine version.
+
 ## Au-delà du manuscrit
 
 - **Les notes de lecture ont la même structure** : toujours actives, dans

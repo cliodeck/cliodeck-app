@@ -67,8 +67,26 @@ const EXCLUDED_MARKS = new Set([
  * du manuscrit (corpus RAG) : un `[@clef]` ou un `[^1]` ne doit pas
  * polluer un embedding.
  */
-export function extractProseText(content: string): string {
-  return collect(content).plain.trim();
+export function extractProseText(content: string, options: ProseTextOptions = {}): string {
+  return collect(content, options).plain.trim();
+}
+
+/**
+ * Ce que le texte « prose » laisse de côté, au-delà de la syntaxe. Les
+ * statistiques n'en passent aucune : elles comptent tout ce que l'auteur a
+ * tapé. L'indexation du manuscrit (corpus RAG) les passe toutes les deux :
+ * un passage cité d'une source est le texte de la source, déjà retrouvable
+ * comme telle, et une note de référence n'est qu'une adresse
+ * (`docs/poids-du-manuscrit.md`, palier 3).
+ */
+export interface ProseTextOptions {
+  /** Retirer les blocs de citation (`>`) avec leur contenu. */
+  dropBlockquotes?: boolean;
+  /**
+   * Retirer le corps des notes de bas de page de moins de N mots — les
+   * références. Une note plus longue est un argument : elle reste.
+   */
+  minFootnoteWords?: number;
 }
 
 interface Collected {
@@ -79,7 +97,13 @@ interface Collected {
   defLabels: Set<string>;
 }
 
-function collect(content: string): Collected {
+/** Mots du corps d'une définition de note, après le `]:`. */
+function footnoteBodyWords(content: string, node: { from: number; to: number }, labelTo: number): number {
+  const body = content.slice(Math.min(node.to, labelTo + 2), node.to);
+  return body.split(/\s+/).filter(Boolean).length;
+}
+
+function collect(content: string, options: ProseTextOptions = {}): Collected {
   const tree = statsParser.parse(content);
 
   let paragraphs = 0;
@@ -98,11 +122,28 @@ function collect(content: string): Collected {
         citations += node.node.getChildren('CitationKey').length;
       }
 
+      if (options.dropBlockquotes && node.name === 'Blockquote') {
+        excluded.push([node.from, node.to]);
+        return false;
+      }
+
       if (node.name === 'FootnoteReference' || node.name === 'FootnoteDefinition') {
         const label = node.node.getChild('FootnoteLabel');
         if (label) {
           const set = node.name === 'FootnoteReference' ? refLabels : defLabels;
           set.add(content.slice(label.from, label.to));
+        }
+        if (
+          node.name === 'FootnoteDefinition' &&
+          options.minFootnoteWords !== undefined &&
+          label &&
+          footnoteBodyWords(content, node, label.to) < options.minFootnoteWords
+        ) {
+          // Une note de référence (« Lester, p. 45 », « Ibid. ») : rien à
+          // embarquer, et son contenu renverrait les noms et titres de la
+          // bibliographie dans le corpus du manuscrit.
+          excluded.push([node.from, node.to]);
+          return false;
         }
         // Descendre : le corps d'une définition compte comme texte, et peut
         // contenir appels et citations.

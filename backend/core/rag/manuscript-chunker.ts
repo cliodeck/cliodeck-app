@@ -27,6 +27,34 @@ import { extractProseText } from '../../../src/editor/document-stats.js';
 export const CHUNK_CHAR_TARGET = 2000;
 /** Recouvrement entre deux chunks d'une même section. */
 export const CHUNK_OVERLAP = 200;
+/**
+ * Version du découpage, mêlée à l'empreinte de contenu par l'indexeur du
+ * manuscrit. Sans elle, un changement ici ne réindexait rien : l'empreinte
+ * porte sur le texte brut, pas sur le texte extrait, et l'index gardait les
+ * anciens chunks jusqu'à la prochaine modification de chaque chapitre — des
+ * mois, sur un livre. À incrémenter à chaque changement de `extractProseText`
+ * ou de ce fichier qui modifie les chunks produits.
+ *
+ *  1 — découpage d'origine (rc.4) ;
+ *  2 — citations en bloc et notes de référence hors du texte embarqué
+ *      (docs/poids-du-manuscrit.md, palier 3).
+ */
+export const CHUNKER_VERSION = 2;
+/**
+ * En deçà, le corps d'une note est une référence (« Lester, p. 45 »), pas un
+ * argument : il sort du texte embarqué du manuscrit.
+ */
+export const FOOTNOTE_MIN_WORDS = 25;
+
+export interface ChunkOptions {
+  /**
+   * Retirer ce que l'auteur cite plutôt qu'écrit : blocs de citation et
+   * notes de référence. Vrai pour le manuscrit — un passage cité d'une
+   * source revenait comme source [N] et comme manuscrit [M] — ; faux pour
+   * les notes de lecture, dont les citations sont le propos.
+   */
+  dropQuotations?: boolean;
+}
 
 export interface ManuscriptChunk {
   /** Index du chunk dans le chapitre, 0-based. */
@@ -111,12 +139,18 @@ function splitLongText(text: string): string[] {
  * (« Le Volkstag » situe un paragraphe qui ne nomme peut-être jamais
  * Danzig).
  */
-export function chunkManuscriptChapter(markdown: string): ManuscriptChunk[] {
+export function chunkManuscriptChapter(
+  markdown: string,
+  options: ChunkOptions = {}
+): ManuscriptChunk[] {
   const chunks: ManuscriptChunk[] = [];
   let chunkIndex = 0;
+  const proseOptions = options.dropQuotations
+    ? { dropBlockquotes: true, minFootnoteWords: FOOTNOTE_MIN_WORDS }
+    : {};
 
   for (const section of splitIntoSections(markdown)) {
-    const prose = extractProseText(section.markdown);
+    const prose = extractProseText(section.markdown, proseOptions);
     if (!prose) continue;
 
     // Une section réduite à son propre titre n'a pas de corps : l'indexer

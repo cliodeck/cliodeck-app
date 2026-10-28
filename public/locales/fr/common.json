@@ -2405,6 +2405,7 @@
     "chunks_one": "{{count}} extrait",
     "chunks_other": "{{count}} extraits",
     "lastIndexed": "Dernière indexation : {{when}}",
+    "lastRun": "Dernière passe : {{indexed}} réindexée(s), {{unchanged}} inchangée(s), {{removed}} retirée(s), {{failures}} échec(s) — {{seconds}} s",
     "empty": "Rien d'indexé pour l'instant. L'indexation se fait à l'enregistrement, ou par le bouton ci-dessous.",
     "noProject": "Ouvrez un projet pour voir l'état de son index.",
     "reindex": "Réindexer",

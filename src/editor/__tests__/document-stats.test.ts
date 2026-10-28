@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { computeDocumentStats } from '../document-stats';
+import { computeDocumentStats, extractProseText } from '../document-stats';
 
 const CORPUS_DIR = fileURLToPath(
   new URL('../../../test-fixtures/editor/', import.meta.url)
@@ -57,6 +57,31 @@ describe('computeDocumentStats (comptages par arbre Lezer)', () => {
     // « Titre Du gras et un lien. » → 6 mots ; ni #, ni **, ni l'URL.
     expect(s.words).toBe(6);
     expect(s.chars).toBe('TitreDugrasetunlien.'.length);
+  });
+
+  it('les options de l’indexation retirent citations en bloc et notes de référence, sans toucher aux comptages', () => {
+    const md = [
+      'Thèse de l’auteur[^1].',
+      '',
+      '> Passage cité d’une source, long de quelques mots.',
+      '',
+      '[^1]: Lester, p. 45.',
+    ].join('\n');
+
+    // Statistiques : tout ce que l'auteur a tapé compte, options ou non.
+    const stats = computeDocumentStats(md);
+    expect(stats.footnotes).toBe(1);
+    expect(extractProseText(md)).toContain('Passage cité');
+    expect(extractProseText(md)).toContain('Lester, p. 45.');
+
+    const indexed = extractProseText(md, { dropBlockquotes: true, minFootnoteWords: 25 });
+    expect(indexed).toContain('Thèse de l’auteur');
+    expect(indexed).not.toContain('Passage cité');
+    expect(indexed).not.toContain('Lester');
+    // Une note assez longue pour être un argument reste.
+    const long = `Corps[^a].\n\n[^a]: ${'mot '.repeat(30).trim()}`;
+    expect(extractProseText(long, { minFootnoteWords: 25 })).toContain('mot mot');
+    expect(computeDocumentStats(md)).toEqual(stats);
   });
 
   it('document vide → tout à zéro', () => {

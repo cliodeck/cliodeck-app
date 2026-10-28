@@ -2405,6 +2405,7 @@
     "chunks_one": "{{count}} Auszug",
     "chunks_other": "{{count}} Auszüge",
     "lastIndexed": "Zuletzt indexiert: {{when}}",
+    "lastRun": "Letzter Durchlauf: {{indexed}} neu indexiert, {{unchanged}} unverändert, {{removed}} entfernt, {{failures}} fehlgeschlagen — {{seconds}} s",
     "empty": "Noch nichts indexiert. Die Indexierung erfolgt beim Speichern oder über die Schaltfläche unten.",
     "noProject": "Öffnen Sie ein Projekt, um den Zustand seines Index zu sehen.",
     "reindex": "Neu indexieren",

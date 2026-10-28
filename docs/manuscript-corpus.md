@@ -43,9 +43,24 @@ inchangé en fait **zéro**.
 **Découpage par l'arbre, texte épuré avant embedding.** `parseOutline`
 donne les vraies sections (un `#` dans un bloc de code n'en ouvre pas une),
 et `extractProseText` retire la syntaxe : un embedding de `[@lester1932]`
-n'apprend rien. Le **corps** d'une note de bas de page, lui, est du texte
-de l'auteur et reste indexé. Une section réduite à son seul titre est
-ignorée : elle produirait un extrait sans contenu.
+n'apprend rien. Une section réduite à son seul titre est ignorée : elle
+produirait un extrait sans contenu.
+
+**N'embarquer que ce que l'auteur a écrit (palier 3, 2026-10).** Les blocs
+de citation (`>`) sortent du texte embarqué : un passage cité d'une source
+est le texte de la source, déjà retrouvable comme telle, et il revenait
+deux fois dans le prompt — comme source `[N]` et comme manuscrit `[M]`. Le
+corps d'une note de bas de page de moins de `FOOTNOTE_MIN_WORDS` (25) mots
+sort aussi : c'est une référence (« Lester, p. 45 »), qui renvoyait les noms
+et titres de la bibliographie dans le corpus du manuscrit ; une note plus
+longue est un argument et reste dans le flux de sa section. L'option
+(`chunkManuscriptChapter(…, { dropQuotations: true })`) n'est passée que par
+l'indexeur du manuscrit : **les notes de lecture gardent leurs citations**,
+c'en est le propos. `CHUNKER_VERSION` entre dans l'empreinte de contenu,
+sinon rien ne se réindexe (l'empreinte porte sur le texte brut) ; la passe
+complète qui suit se déclenche à la sauvegarde suivante et se lit dans la
+section « Corpus manuscrit » des réglages (`lastReport`). Son coût sur le
+fournisseur embarqué reste à mesurer.
 
 **Best-effort, jamais bloquant.** Un fournisseur d'embeddings absent
 (Ollama éteint) laisse l'index en l'état et n'interrompt rien. Aucune

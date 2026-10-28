@@ -2405,6 +2405,7 @@
     "chunks_one": "{{count}} extract",
     "chunks_other": "{{count}} extracts",
     "lastIndexed": "Last indexed: {{when}}",
+    "lastRun": "Last pass: {{indexed}} re-indexed, {{unchanged}} unchanged, {{removed}} removed, {{failures}} failed — {{seconds}} s",
     "empty": "Nothing indexed yet. Indexing happens on save, or through the button below.",
     "noProject": "Open a project to see the state of its index.",
     "reindex": "Re-index",
