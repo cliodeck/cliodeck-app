@@ -6,6 +6,10 @@
  *   - Workspace hints, Obsidian vault status and recipes live below, in a
  *     collapsible "Project context" drawer (collapsed by default) so the
  *     technical scaffolding doesn't greet the user in place of the chat.
+ *   - While the default chat mode is active, a dismissable band above the
+ *     chat proposes the « Brainstorming » chat mode (palier 2 of
+ *     docs/poids-du-manuscrit.md); the refusal is remembered in the app
+ *     config, the switch is not (`useBrainstormModeNotice`).
  */
 
 import React, { useEffect, useState } from 'react';
@@ -27,6 +31,7 @@ import { IdeasGraph } from './IdeasGraph';
 import { IdeasCanvas } from './IdeasCanvas';
 import { useProjectStore } from '../../stores/projectStore';
 import { useIdeaStore } from '../../stores/ideaStore';
+import { useBrainstormModeNotice } from '../../hooks/useBrainstormModeNotice';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -65,6 +70,10 @@ export const BrainstormPanel: React.FC = () => {
   const [contextOpen, setContextOpen] = useState(false);
   const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   const loadIdeas = useIdeaStore((s) => s.loadIdeas);
+  const modeNotice = useBrainstormModeNotice();
+  // Sans projet, le panneau invite déjà à en ouvrir un : pas deux bandes, et
+  // rien à chercher dans des sources qui n'existent pas encore.
+  const showModeNotice = modeNotice.visible && status !== 'no_project';
 
   useEffect(() => {
     let cancelled = false;
@@ -191,9 +200,38 @@ export const BrainstormPanel: React.FC = () => {
 
       {/* Tab content */}
       {activeTab === 'chat' && (
-        <section className="brainstorm-panel__chat">
-          <AssistantChat variant="full" />
-        </section>
+        <>
+          {showModeNotice && (
+            <div className="brainstorm-panel__mode-notice" role="status">
+              <Lightbulb size={14} aria-hidden="true" />
+              <span className="brainstorm-panel__mode-notice-text">
+                {t(
+                  'ideas.modeNotice.message',
+                  'Le mode de chat « Brainstorming » cherche des idées dans vos sources, avec 20 extraits et sans votre manuscrit par défaut.'
+                )}
+              </span>
+              <div className="brainstorm-panel__mode-notice-actions">
+                <button
+                  type="button"
+                  className="brainstorm-panel__mode-notice-primary"
+                  onClick={modeNotice.activate}
+                >
+                  {t('ideas.modeNotice.activate', 'Activer le mode Brainstorming')}
+                </button>
+                <button
+                  type="button"
+                  className="brainstorm-panel__mode-notice-secondary"
+                  onClick={modeNotice.dismiss}
+                >
+                  {t('ideas.modeNotice.dismiss', 'Ne plus proposer')}
+                </button>
+              </div>
+            </div>
+          )}
+          <section className="brainstorm-panel__chat">
+            <AssistantChat variant="full" />
+          </section>
+        </>
       )}
       {activeTab === 'ideas' && (
         <section className="brainstorm-panel__chat">

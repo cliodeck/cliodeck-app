@@ -85,6 +85,12 @@ Rattaché pour ne jamais manquer, le corpus s'est mis à toujours arriver :
 places réservées sans plafond, inclusion inconditionnelle, prompt dont le
 format contredit la prose. Le constat, les décisions du 2026-10-28 et les
 trois paliers de remède sont dans [`poids-du-manuscrit.md`](poids-du-manuscrit.md).
+Depuis, sa place dans un tour est une **politique** résolue côté main
+(`src/main/services/manuscript-policy.ts`) : question de rappel explicite,
+portée demandée, case « Mon manuscrit » du panneau du chat (absente par
+défaut dans l'espace Brainstorm), posture du mode de chat
+(`ragOverrides.manuscript`). `rag.indexManuscript` ne règle plus que
+l'indexation et l'existence du corpus.
 
 ## Reste à faire
 

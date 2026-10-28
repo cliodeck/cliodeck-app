@@ -44,6 +44,74 @@
   color: var(--color-accent);
 }
 
+/* Nom du mode de chat actif, à côté du bouton de réglages : jusqu'ici il
+   n'était visible que derrière ce bouton. Cliquer ouvre les réglages, où
+   vit le sélecteur de mode. */
+.brainstorm-chat__mode-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.brainstorm-chat__mode-name strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.brainstorm-chat__mode-name:hover {
+  color: var(--color-accent);
+}
+
+/* Ligne de portée, toujours visible : ce qui est réellement interrogé. Le
+   panneau est caché derrière le bouton de réglages, et une case que personne
+   ne voit ne sert à rien (docs/poids-du-manuscrit.md, palier 2). Les
+   libellés du panneau sont longs : la ligne se replie plutôt que de couper
+   « Manuscrit non consulté », qui est ce qu'un utilisateur de Brainstorm
+   doit lire. */
+.brainstorm-chat__scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  width: 100%;
+  padding: 3px 8px;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.brainstorm-chat__scope:hover {
+  color: var(--text-primary);
+}
+
+.brainstorm-chat__scope-prefix {
+  color: var(--text-tertiary);
+}
+
+.brainstorm-chat__scope-off {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.brainstorm-chat__scope-empty {
+  color: var(--color-danger);
+}
+
 .brainstorm-chat__settings-panel {
   padding: 8px;
   border-bottom: 1px solid var(--border-color);

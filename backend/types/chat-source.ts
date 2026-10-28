@@ -33,6 +33,29 @@ export interface RAGExplanation {
       sourceType: string;
       chunkCount: number;
     }>;
+    /**
+     * Un compte par corpus, manuscrit et notes de lecture compris — ce que
+     * `totalResults` (sources externes seules) ne dit pas. `hitCount` est
+     * ce que le corpus a rendu après son seuil ; `selectedCount` ce qui a
+     * atteint le prompt après la bande du manuscrit et l'inspecteur.
+     */
+    corpora?: Array<{
+      source: 'secondary' | 'primary' | 'vault' | 'manuscript' | 'readingNotes';
+      attempted: boolean;
+      ok: boolean;
+      hitCount: number;
+      selectedCount: number;
+    }>;
+    /**
+     * Taille des blocs de contexte réellement injectés, en caractères :
+     * la part du manuscrit se lit ici, pas en recomptant des extraits.
+     */
+    contextChars?: {
+      total: number;
+      sources: number;
+      manuscript: number;
+      readingNotes: number;
+    };
   };
   compression?: {
     enabled: boolean;

@@ -26,13 +26,19 @@ import { useDraftsStore } from '../../stores/draftsStore';
 import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../../stores/chatStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
-import { SourcePopover } from '../Brainstorm/SourcePopover';
+import { SourcePopover, sourceKindLabelKey } from '../Brainstorm/SourcePopover';
 import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useModeStore } from '../../stores/modeStore';
-import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import {
+  useRAGQueryStore,
+  effectiveSourceFamilies,
+  manuscriptExclusionReason,
+  resolveManuscriptToggle,
+  SOURCE_FAMILY_LABEL_KEY,
+} from '../../stores/ragQueryStore';
 import { useCloudConsentGuard } from './useCloudConsentGuard';
 import { messageToDraft } from '../Brainstorm/messageToDraft';
 import { ChatSurface } from './ChatSurface';
@@ -58,6 +64,23 @@ export interface AssistantChatProps {
   variant: 'full' | 'panel';
 }
 
+/**
+ * Compte les extraits par famille. Le manuscrit et les notes de lecture ne
+ * sont pas des sources — le prompt le dit au modèle, l'en-tête de la liste
+ * doit le dire à l'auteur (docs/poids-du-manuscrit.md).
+ */
+function countSourceFamilies(
+  sources: readonly BrainstormSource[]
+): { sources: number; manuscript: number; readingNotes: number } {
+  const counts = { sources: 0, manuscript: 0, readingNotes: 0 };
+  for (const s of sources) {
+    if (s.sourceType === 'manuscript') counts.manuscript += 1;
+    else if (s.sourceType === 'readingNotes') counts.readingNotes += 1;
+    else counts.sources += 1;
+  }
+  return counts;
+}
+
 export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
@@ -65,7 +88,35 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const messages = useChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
   const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
-  const { modes } = useModeStore();
+  const { modes, activeMode, activeModeId } = useModeStore();
+  // Nom du mode de chat actif : jusqu'ici visible seulement derrière le
+  // bouton de réglages (ModeSelector). Repli sur l'identifiant tant que
+  // la liste des modes n'est pas chargée.
+  // Les modes ne sont nommés qu'en français et en anglais : sous l'interface
+  // allemande, on retombe sur l'anglais plutôt que sur l'identifiant brut.
+  const activeModeName =
+    activeMode?.metadata.name[lang] ||
+    activeMode?.metadata.name.en ||
+    activeMode?.metadata.name.fr ||
+    activeModeId;
+  // Portée réellement interrogée, affichée hors du panneau de réglages :
+  // le manuscrit est un tri-état résolu contre l'espace de travail
+  // (Brainstorm : non consulté par défaut), et l'utilisateur doit le voir
+  // sans ouvrir le panneau pour comprendre pourquoi son texte n'apparaît pas.
+  const ragParams = useRAGQueryStore((s) => s.params);
+  const manuscriptIndexEnabled = useRAGQueryStore((s) => s.manuscriptIndexEnabled);
+  const workspace = useWorkspaceModeStore((s) => s.active);
+  const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
+  // Le même raisonnement que le main (hors question de rappel) : la ligne ne
+  // doit jamais annoncer un manuscrit que la portée, le mode ou l'index
+  // écartent ensuite.
+  const manuscriptExclusion = manuscriptExclusionReason({
+    params: ragParams,
+    manuscriptEffective,
+    stance: activeMode?.ragOverrides?.manuscript,
+    indexEnabled: manuscriptIndexEnabled,
+  });
+  const scopeFamilies = effectiveSourceFamilies(ragParams, manuscriptExclusion === null);
   const [sentToWriteId, setSentToWriteId] = useState<string | null>(null);
   const [draftedId, setDraftedId] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<{ msgId: string; index: number } | null>(null);
@@ -302,6 +353,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const renderExtras = useCallback((m: AssistantUnifiedMessage): React.ReactNode => {
     const orig = m.original;
     const sources = orig.sources ?? [];
+    const families = countSourceFamilies(sources);
     const toolCalls = orig.toolCalls ?? [];
     return (
       <>
@@ -327,8 +379,12 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         )}
         {m.role === 'assistant' && sources.length > 0 && (
           <details className="brainstorm-chat__sources">
-            <summary>
-              📚 {t('chat.brainstorm.sourcesLabel')} ({sources.length})
+            <summary data-testid="sources-summary">
+              📚 {t('chat.brainstorm.sourcesLabel')} ({families.sources})
+              {families.manuscript > 0 &&
+                ` · ${t('chat.brainstorm.manuscriptLabel')} (${families.manuscript})`}
+              {families.readingNotes > 0 &&
+                ` · ${t('chat.brainstorm.readingNotesLabel')} (${families.readingNotes})`}
             </summary>
             <ul>
               {sources.map((s: BrainstormSource, i: number) => {
@@ -356,7 +412,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
                       }}
                     >
                       <div className="brainstorm-chat__source-head">
-                        <span className="brainstorm-chat__source-kind">{s.kind}</span>
+                        <span className="brainstorm-chat__source-kind">
+                          {t(sourceKindLabelKey(s.kind))}
+                        </span>
                         <strong>{s.title}</strong>
                         {(s.securityEvents?.length ?? 0) > 0 && (
                           <ShieldAlert
@@ -522,6 +580,15 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         </button>
         <button
           type="button"
+          onClick={() => setIsSettingsOpen(true)}
+          title={settingsLabel}
+          className="brainstorm-chat__mode-name"
+          data-testid="chat-mode-name"
+        >
+          <span>{t('chat.modeLabel', 'Mode:')}</span> <strong>{activeModeName}</strong>
+        </button>
+        <button
+          type="button"
           onClick={() => setNerEnabled((v) => !v)}
           aria-pressed={nerEnabled}
           title={t('chat.brainstorm.nerToggle')}
@@ -532,6 +599,32 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
         </button>
         {isSettingsOpen && <ModeSelector />}
       </div>
+      {/* Ligne de portée, toujours visible dans les deux variantes : les
+          mêmes libellés que les cases du panneau, et « Manuscrit non
+          consulté » quand il ne l'est pas. Cliquer ouvre le panneau. */}
+      <button
+        type="button"
+        className="brainstorm-chat__scope"
+        onClick={() => setIsSettingsOpen(true)}
+        title={t('chat.scope.title', 'Change which sources are searched')}
+        data-testid="chat-scope-line"
+      >
+        <span className="brainstorm-chat__scope-prefix">{t('chat.scope.prefix', 'Searching:')}</span>
+        {scopeFamilies.length === 0 ? (
+          <span className="brainstorm-chat__scope-empty">
+            {t('ragSettings.noSourceWarning', 'Select at least one source.')}
+          </span>
+        ) : (
+          <span>{scopeFamilies.map((f) => t(SOURCE_FAMILY_LABEL_KEY[f])).join(' · ')}</span>
+        )}
+        {manuscriptExclusion !== null && (
+          <span className="brainstorm-chat__scope-off">
+            · {t('chat.scope.manuscriptOff', 'Manuscript not consulted')}
+            {manuscriptExclusion !== 'toggle' &&
+              ` (${t(`chat.scope.reason.${manuscriptExclusion}`)})`}
+          </span>
+        )}
+      </button>
       {isSettingsOpen && (
         <div
           className="brainstorm-chat__settings-panel"

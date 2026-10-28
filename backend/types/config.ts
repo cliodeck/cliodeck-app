@@ -201,6 +201,12 @@ export interface AppConfig {
    * revient pas aux lancements suivants (`useLocalAiSupportWarning`).
    */
   localAiNoticeDismissed?: boolean;
+  /**
+   * La bannière de l'espace Brainstorm proposant le mode de chat
+   * « Brainstorming » a été refusée : elle ne revient plus
+   * (`useBrainstormModeNotice`).
+   */
+  brainstormModeNoticeDismissed?: boolean;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {

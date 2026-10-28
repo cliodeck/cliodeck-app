@@ -650,6 +650,17 @@
     "settings": {
       "toggle": "Chat settings"
     },
+    "modeLabel": "Mode:",
+    "scope": {
+      "prefix": "Searching:",
+      "manuscriptOff": "Manuscript not consulted",
+      "reason": {
+        "scope": "search restricted",
+        "stance": "chat mode",
+        "disabled": "index disabled"
+      },
+      "title": "Change which sources are searched"
+    },
     "placeholder": "Ask a question about your documents...",
     "send": "Send (Enter)",
     "cancel": "Cancel",
@@ -685,6 +696,13 @@
         "high": "high severity"
       }
     },
+    "sourceKind": {
+      "archive": "Archive",
+      "bibliographie": "Bibliography",
+      "note": "Note",
+      "manuscrit": "Manuscript",
+      "lecture": "Reading note"
+    },
     "source": "Source",
     "page": "Page",
     "similarity": "Similarity",
@@ -707,6 +725,18 @@
       "sourceTypePrimary": "Primary sources (Tropy)",
       "sourceTypeSecondary": "Secondary sources (PDF)",
       "sourceTypeAll": "All",
+      "corporaLabel": "Per corpus:",
+      "corpus": {
+        "secondary": "Bibliography",
+        "primary": "Archives",
+        "vault": "Notes (vault)",
+        "manuscript": "Manuscript",
+        "readingNotes": "Reading notes"
+      },
+      "corpusNotSearched": "not searched",
+      "corpusFailed": "failed",
+      "contextLabel": "Context:",
+      "contextManuscriptShare": "of which manuscript",
       "documentsConsulted": "Documents consulted",
       "chunks": "chunks",
       "score": "score",
@@ -746,6 +776,8 @@
       "graphCitation": "Citation",
       "graphSimilarity": "Similarity",
       "sourcesLabel": "Sources",
+      "manuscriptLabel": "Manuscript",
+      "readingNotesLabel": "Reading notes",
       "openProjectNotice": "Open a project to start brainstorming.",
       "projectContext": "Project context",
       "recipesCount": "{{count}} recipes",
@@ -920,6 +952,11 @@
     "includePrimaryHint": "Tropy archives",
     "includeNotes": "Notes",
     "includeNotesHint": "Obsidian notes",
+    "includeManuscript": "My manuscript",
+    "manuscriptDefaultHint": "Depends on the workspace: not consulted in Brainstorm, consulted elsewhere",
+    "manuscriptPinnedHint": "Pinned for this session.",
+    "manuscriptResetDefault": "restore the default",
+    "manuscriptExcludedHint": "Ticked, but not consulted: {{reason}}",
     "searchIn": "Searching in: {{list}}",
     "noSourceWarning": "Select at least one source."
   },
@@ -1670,6 +1707,11 @@
     }
   },
   "ideas": {
+    "modeNotice": {
+      "message": "The “Brainstorming” chat mode looks for ideas in your sources, with 20 extracts and without your manuscript by default.",
+      "activate": "Enable the Brainstorming mode",
+      "dismiss": "Don't suggest this again"
+    },
     "tabChat": "Chat",
     "tabIdeas": "Ideas",
     "tabCanvas": "Board",
@@ -2360,7 +2402,7 @@
     "title": "Manuscript corpus",
     "hint": "Your own text is indexed as a fourth corpus, alongside the bibliography, Tropy archives and Obsidian vault. The assistant can then answer “what have I already written about this?”. Extracts are always marked as coming from the manuscript, never from the bibliography: you must be able to see when you are citing yourself.",
     "enabled": "Index the manuscript",
-    "enabledHelp": "Turning this off stops indexing and removes the manuscript from searches",
+    "enabledHelp": "Turning this off stops indexing and removes the manuscript from searches. To consult it or not in a conversation, use the “My manuscript” box in the chat panel.",
     "on": "On",
     "off": "Off",
     "state": "Index state",

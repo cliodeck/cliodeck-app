@@ -213,6 +213,26 @@
   cursor: pointer;
 }
 
+/* Sous-texte de « Mon manuscrit » : le défaut qui s'applique, ou le lien
+   « rétablir le défaut » quand l'utilisateur a fixé la case. */
+.source-toggle-subhint {
+  margin: -2px 0 0 8px;
+}
+
+.source-toggle-reset {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.source-toggle-reset:hover {
+  color: var(--text-primary);
+}
+
 .advanced-toggle {
   padding: var(--spacing-sm) 0;
   background: transparent;

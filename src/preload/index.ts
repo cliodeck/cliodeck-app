@@ -1137,8 +1137,11 @@ const api = {
           retrievalOptions?: {
             documentIds?: string[];
             collectionKeys?: string[];
-            sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+            /** `manuscript` : le manuscrit seul. */
+            sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
             includeVault?: boolean;
+            /** Case « Mon manuscrit », valeur effective ; absente = admis. */
+            includeManuscript?: boolean;
             topK?: number;
           };
           systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };
@@ -1217,8 +1220,8 @@ const api = {
         callback: (envelope: {
           sessionId: string;
           sources: Array<{
-            kind: 'archive' | 'bibliographie' | 'note';
-            sourceType: 'primary' | 'secondary' | 'vault';
+            kind: 'archive' | 'bibliographie' | 'note' | 'manuscrit' | 'lecture';
+            sourceType: 'primary' | 'secondary' | 'vault' | 'manuscript' | 'readingNotes';
             title: string;
             snippet: string;
             similarity: number;

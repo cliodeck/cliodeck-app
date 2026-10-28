@@ -2,6 +2,24 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RAGExplanation } from '../../stores/chatStore';
 
+type CorpusSource = NonNullable<RAGExplanation['search']['corpora']>[number]['source'];
+
+/**
+ * Ordre d'affichage des corpus : les sources d'abord, le texte de l'auteur
+ * ensuite — l'ordre du prompt. Rien n'est omis : un corpus à zéro ou non
+ * interrogé se lit aussi (docs/poids-du-manuscrit.md).
+ */
+const CORPORA: ReadonlyArray<{ source: CorpusSource; key: string; fallback: string }> = [
+  { source: 'secondary', key: 'chat.explanation.corpus.secondary', fallback: 'Bibliographie' },
+  { source: 'primary', key: 'chat.explanation.corpus.primary', fallback: 'Archives' },
+  { source: 'vault', key: 'chat.explanation.corpus.vault', fallback: 'Notes (vault)' },
+  { source: 'manuscript', key: 'chat.explanation.corpus.manuscript', fallback: 'Manuscrit' },
+  { source: 'readingNotes', key: 'chat.explanation.corpus.readingNotes', fallback: 'Notes de lecture' },
+];
+
+/** Milliers avec une décimale, comme les autres tailles du panneau. */
+const kilo = (n: number): string => (n / 1000).toFixed(1);
+
 /**
  * Shared Explainable-AI panel.
  *
@@ -15,6 +33,13 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 }) => {
   const { t } = useTranslation('common');
   const [showExplanation, setShowExplanation] = useState(false);
+  // Les deux champs manquent aux explications persistées avant leur ajout :
+  // l'ancienne ligne « Type de sources » reste le repli.
+  const { corpora, contextChars } = explanation.search;
+  const manuscriptPercent =
+    contextChars && contextChars.total > 0
+      ? Math.round((contextChars.manuscript / contextChars.total) * 100)
+      : 0;
 
   return (
     <div className="message-explanation">
@@ -38,10 +63,48 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
             <ul>
               <li><strong>{t('chat.explanation.resultsFound', 'Résultats trouvés:')}</strong> {explanation.search.totalResults} {t('chat.explanation.chunks', 'chunks')}</li>
               <li><strong>{t('chat.explanation.duration', 'Durée:')}</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && t('chat.explanation.cacheHitSuffix', '(cache)')}</li>
-              <li><strong>{t('chat.explanation.sourceTypeLabel', 'Type de sources:')}</strong> {
-                explanation.search.sourceType === 'primary' ? t('chat.explanation.sourceTypePrimary', 'Archives (Tropy)') :
-                explanation.search.sourceType === 'secondary' ? t('chat.explanation.sourceTypeSecondary', 'Bibliographie (PDFs)') : t('chat.explanation.sourceTypeAll', 'Toutes')
-              }</li>
+              {corpora ? (
+                <li data-testid="explanation-corpora">
+                  <strong>{t('chat.explanation.corporaLabel', 'Par corpus:')}</strong>{' '}
+                  {CORPORA.map((c, i) => {
+                    const entry = corpora.find((x) => x.source === c.source);
+                    // Absent ou non tenté : non interrogé. Tenté mais en
+                    // échec : un zéro ferait croire qu'il n'avait rien à dire.
+                    const value =
+                      !entry || !entry.attempted
+                        ? t('chat.explanation.corpusNotSearched', 'non interrogé')
+                        : entry.ok || entry.selectedCount > 0
+                          ? String(entry.selectedCount)
+                          : t('chat.explanation.corpusFailed', 'échec');
+                    return (
+                      <React.Fragment key={c.source}>
+                        {i > 0 && ' · '}
+                        <span data-testid={`explanation-corpus-${c.source}`}>
+                          {t(c.key, c.fallback)} {value}
+                        </span>
+                      </React.Fragment>
+                    );
+                  })}
+                </li>
+              ) : (
+                <li><strong>{t('chat.explanation.sourceTypeLabel', 'Type de sources:')}</strong> {
+                  explanation.search.sourceType === 'primary' ? t('chat.explanation.sourceTypePrimary', 'Archives (Tropy)') :
+                  explanation.search.sourceType === 'secondary' ? t('chat.explanation.sourceTypeSecondary', 'Bibliographie (PDFs)') : t('chat.explanation.sourceTypeAll', 'Toutes')
+                }</li>
+              )}
+              {contextChars && (
+                <li data-testid="explanation-context-chars">
+                  <strong>{t('chat.explanation.contextLabel', 'Contexte:')}</strong>{' '}
+                  {kilo(contextChars.total)}k {t('chat.explanation.chars', 'caractères')}
+                  {contextChars.manuscript > 0 && (
+                    <>
+                      {', '}
+                      {t('chat.explanation.contextManuscriptShare', 'dont manuscrit')}{' '}
+                      {kilo(contextChars.manuscript)}k ({manuscriptPercent} %)
+                    </>
+                  )}
+                </li>
+              )}
             </ul>
             {explanation.search.documents.length > 0 && (
               <details className="explanation-documents">

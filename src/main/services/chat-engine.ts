@@ -138,10 +138,17 @@ export interface ChatEngineRetrieverResult<TSource> {
 export interface ChatEngineRetrievalOptions {
   documentIds?: string[];
   collectionKeys?: string[];
-  sourceType?: 'primary' | 'secondary' | 'both' | 'vault';
+  /** `manuscript` = the author's manuscript alone (« qu'ai-je déjà écrit ? »). */
+  sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript';
   /** Opt-in to Obsidian vault alongside primary/secondary. Ignored when
    *  `sourceType === 'vault'` (vault-only). */
   includeVault?: boolean;
+  /**
+   * Effective value of the « Mon manuscrit » toggle (pinned by the user or
+   * the workspace default). Omitted = legacy caller: the manuscript is
+   * admitted, subject to the mode's stance and the scope.
+   */
+  includeManuscript?: boolean;
   topK?: number;
 }
 
@@ -159,8 +166,9 @@ export interface ChatEngineRetriever<TSource> {
 
 /**
  * System-prompt composition directives passed through `RunChatTurnArgs`.
- * When `customText` is provided, the engine prepends it as a leading
- * `system` message (before any retrieval-injected system block). `modeId`
+ * When `customText` is provided, the engine prepends it as the first
+ * `system` message; the retrieval-injected block comes after every leading
+ * system message, just before the conversation. `modeId`
  * is advisory metadata — the engine itself does not resolve it; callers
  * resolve mode → text in their own wiring layer and pass the resolved
  * string via `customText`. Keeping the field here lets tests assert the
@@ -242,8 +250,12 @@ export async function runChatTurn<TSource = unknown>(
 
   // --- System-prompt override ---------------------------------------------
   // When the caller provides a `customText`, inject it as the FIRST system
-  // message so it sits above any retrieval-injected system block and any
-  // `.cliohints` system message the service may have already prepended.
+  // message, above the `.cliohints` system message the service may have
+  // already prepended. The retrieval block is inserted AFTER every leading
+  // system message (see below): role and rules first, then the material.
+  // Until 2026-10 the code prepended the retrieval block in front of this
+  // one, contradicting this very comment — the model read 10–20k chars of
+  // extracts before learning its role (docs/poids-du-manuscrit.md).
   let messages = args.messages;
   const customText = args.systemPrompt?.customText;
   if (customText && customText.trim().length > 0) {
@@ -269,9 +281,15 @@ export async function runChatTurn<TSource = unknown>(
           args.retrievalOptions
         );
         if (result && result.sources.length > 0) {
+          // After the leading system messages (mode text, hints), before
+          // the first conversation turn: the context is read as material
+          // governed by the rules above it, not as the persona.
+          const firstTurn = messages.findIndex((m) => m.role !== 'system');
+          const at = firstTurn === -1 ? messages.length : firstTurn;
           messages = [
+            ...messages.slice(0, at),
             { role: 'system', content: result.systemPrompt },
-            ...messages,
+            ...messages.slice(at),
           ];
           try {
             hooks.onSources?.(result.sources);

@@ -103,11 +103,8 @@ WARNING:
     },
     ragOverrides: {
       topK: 25,
-      sourceType: 'secondary',
       numCtx: 32768,
-      useGraphContext: true,
       enableContextCompression: false,
-      similarityThreshold: 0.10,
     },
     modelRecommendation: {
       suggestedModels: ['qwen3:30b-a3b', 'qwen3:8b', 'gemma3:12b', 'mistral3:14b'],
@@ -179,11 +176,8 @@ CAUTION:
     },
     ragOverrides: {
       topK: 8,
-      sourceType: 'primary',
       numCtx: 8192,
       enableContextCompression: true,
-      summaryGeneration: 'disabled',
-      similarityThreshold: 0.15,
     },
     modelRecommendation: {
       suggestedModels: ['gemma3:12b', 'qwen3:8b', 'qwen3:4b'],
@@ -253,10 +247,8 @@ FORMAT:
     },
     ragOverrides: {
       topK: 15,
-      sourceType: 'both',
       numCtx: 16384,
       enableContextCompression: false,
-      similarityThreshold: 0.12,
     },
     modelRecommendation: {
       suggestedModels: ['phi4-reasoning', 'deepseek-r1:32b', 'qwen3:30b-a3b'],
@@ -326,7 +318,6 @@ WHEN REPHRASING:
     },
     ragOverrides: {
       topK: 10,
-      sourceType: 'both',
       numCtx: 16384,
       enableContextCompression: true,
     },
@@ -398,9 +389,7 @@ APPROACH:
     },
     ragOverrides: {
       topK: 10,
-      sourceType: 'secondary',
       numCtx: 8192,
-      useGraphContext: false,
       enableContextCompression: true,
     },
     modelRecommendation: {
@@ -447,6 +436,7 @@ FORMAT :
 - Numérote tes idées et hypothèses
 - Classe-les par degré de solidité : 🟢 Solide (bien étayé) → 🟡 Plausible (à vérifier) → 🔴 Spéculatif (piste exploratoire)
 - Pour chaque idée, indique les sources qui l'inspirent
+- Le manuscrit de l'utilisateur, s'il apparaît en passages [M…], n'étaye aucune idée : il dit seulement ce qu'il a déjà écrit. Propose ce que les sources permettent au-delà
 - Termine par 2-3 questions ouvertes que le chercheur pourrait approfondir
 
 POSTURE :
@@ -467,6 +457,7 @@ FORMAT:
 - Number your ideas and hypotheses
 - Rank them by solidity: 🟢 Solid (well-supported) → 🟡 Plausible (needs verification) → 🔴 Speculative (exploratory lead)
 - For each idea, indicate the sources that inspired it
+- The user's manuscript, when it appears as [M…] passages, supports no idea: it only says what they have already written. Propose what the sources allow beyond it
 - End with 2-3 open questions the researcher could explore further
 
 APPROACH:
@@ -483,11 +474,12 @@ APPROACH:
     },
     ragOverrides: {
       topK: 20,
-      sourceType: 'both',
       numCtx: 16384,
-      useGraphContext: true,
       enableContextCompression: false,
-      similarityThreshold: 0.05,
+      // Le manuscrit en arrière-plan : une ou deux places, présentées comme
+      // ce que l'utilisateur pense déjà — un brainstorm cherche ce que les
+      // sources permettent au-delà (docs/poids-du-manuscrit.md).
+      manuscript: 'background',
     },
     modelRecommendation: {
       suggestedModels: ['qwen3:8b', 'gemma3:12b', 'mistral3:14b'],
@@ -529,7 +521,10 @@ APPROACH:
       top_k: 50,
       repeat_penalty: 1.0,
     },
-    ragOverrides: {},
+    // Sans prompt système, le texte de l'utilisateur n'aurait aucun cadre :
+    // la pire posture pour se citer soi-même. Une question de rappel
+    // explicite l'emporte quand même (manuscript-policy.ts).
+    ragOverrides: { manuscript: 'off' },
     modelRecommendation: {
       suggestedModels: [],
       minContextWindow: 2048,

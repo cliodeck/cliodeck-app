@@ -143,6 +143,43 @@ describe('chat-engine onExplanation', () => {
     expect(captured[0][1]).toEqual({ role: 'user', content: 'hello' });
   });
 
+  it('insère le bloc de contexte après les messages système de tête, avant la conversation', async () => {
+    // Jusqu'en 2026-10 le bloc de contexte était mis DEVANT le prompt de
+    // mode : le modèle lisait les extraits avant de connaître son rôle, et
+    // le manuscrit était la dernière matière lue (docs/poids-du-manuscrit.md).
+    const captured: ChatMessage[][] = [];
+    const provider: LLMProvider = {
+      id: 'fake',
+      name: 'Fake',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'ready' }) as never,
+      healthCheck: async () => ({ state: 'ready' }) as never,
+      chat: async function* (msgs: ChatMessage[]) {
+        captured.push(msgs);
+        yield { delta: '', done: true, finishReason: 'stop' };
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+    const retriever: ChatEngineRetriever<{ title: string }> = {
+      async search() {
+        return { systemPrompt: 'CTX', sources: [{ title: 'doc A' }] };
+      },
+    };
+
+    await runChatTurn<{ title: string }>({
+      provider,
+      // Les consignes de projet (`hints.md`) arrivent déjà en tête, en `system`.
+      messages: [
+        { role: 'system', content: 'HINTS' },
+        { role: 'user', content: 'hello' },
+      ],
+      retriever,
+      systemPrompt: { customText: 'MODE PROMPT' },
+    });
+    expect(captured[0].map((m) => m.content)).toEqual(['MODE PROMPT', 'HINTS', 'CTX', 'hello']);
+  });
+
   it('ignores systemPrompt when customText is empty or whitespace', async () => {
     const captured: ChatMessage[][] = [];
     const provider: LLMProvider = {

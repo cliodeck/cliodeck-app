@@ -82,6 +82,16 @@ describe('resolveRetrievalArgs (7-case truth table)', () => {
     });
   });
 
+  it('manuscrit seul (palier 2) : accepté tel quel, jamais élargi, sans le vault', () => {
+    // Avant, une valeur inconnue retombait sur `both` : « Mon manuscrit »
+    // seule cochée aurait interrogé toutes les sources — l'inverse de la
+    // demande.
+    expect(resolveRetrievalArgs({ sourceType: 'manuscript', includeVault: true })).toEqual({
+      sourceType: 'manuscript',
+      includeVault: false,
+    });
+  });
+
   it('defaults to "both" + vault-off when options are missing (no silent widening)', () => {
     expect(resolveRetrievalArgs(undefined)).toEqual({
       sourceType: 'both',
@@ -223,6 +233,36 @@ describe('RetrievalService.search — branch dispatch', () => {
     expect(secondarySpy).toHaveBeenCalledTimes(1);
     expect(tropySpy).toHaveBeenCalledTimes(1);
     expect(vaultSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('manuscrit seul : n’interroge que le manuscrit, et le dit seul (repli garanti)', async () => {
+    type WithManuscript = {
+      searchManuscript: (q: string, o: { topK: number; sole?: boolean }) => Promise<unknown[]>;
+    };
+    const svc = retrievalService as unknown as WithManuscript;
+    const original = svc.searchManuscript;
+    const manuscriptSpy = vi.fn().mockResolvedValue([]);
+    svc.searchManuscript = manuscriptSpy as unknown as WithManuscript['searchManuscript'];
+    try {
+      await retrievalService.search({
+        query: 'q',
+        sourceType: 'manuscript',
+        includeManuscript: true,
+        topK: 5,
+      });
+      expect(manuscriptSpy).toHaveBeenCalledTimes(1);
+      expect(manuscriptSpy.mock.calls[0][1]).toMatchObject({ sole: true });
+      expect(secondarySpy).not.toHaveBeenCalled();
+      expect(tropySpy).not.toHaveBeenCalled();
+      expect(vaultSpy).not.toHaveBeenCalled();
+
+      // Aux côtés des sources, le manuscrit n'est pas seul : pas de repli.
+      manuscriptSpy.mockClear();
+      await retrievalService.search({ query: 'q', sourceType: 'both', includeManuscript: true, topK: 5 });
+      expect(manuscriptSpy.mock.calls[0][1]).toMatchObject({ sole: false });
+    } finally {
+      svc.searchManuscript = original;
+    }
   });
 
   // Regression: the previous implementation split topK across sources

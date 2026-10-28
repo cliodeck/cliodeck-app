@@ -38,16 +38,33 @@ export interface ModeGenerationParams {
   repeat_penalty: number;
 }
 
-/** RAG configuration overrides applied when this mode is active.
- *  Only defined fields override the user's global RAG config. */
+/**
+ * Posture d'un mode envers le manuscrit de l'utilisateur
+ * (`docs/poids-du-manuscrit.md`, palier 2) :
+ *  - `recall` (défaut) : le manuscrit entre avec sa bande de places et une
+ *    consigne de rappel — dire ce que l'utilisateur a déjà écrit ;
+ *  - `background` : une ou deux places au plus, présenté comme ce qu'il
+ *    pense déjà et qu'il ne faut pas lui reformuler (brainstorming) ;
+ *  - `off` : jamais interrogé (mode libre : sans prompt système, le texte de
+ *    l'utilisateur n'aurait aucun cadre).
+ * Une question de rappel explicite l'emporte sur la posture.
+ */
+export type ManuscriptStance = 'off' | 'background' | 'recall';
+
+/**
+ * RAG configuration overrides applied when this mode is active. Only defined
+ * fields override the user's global RAG config.
+ *
+ * Retirés le 2026-10 parce que rien ne les lisait : `sourceType` (écriture
+ * morte dans le renderer), `similarityThreshold`, `useGraphContext`,
+ * `summaryGeneration`. Un fichier de mode qui les porte encore est accepté
+ * et ignoré (`ModeManager` ne valide que la forme d'objet).
+ */
 export interface ModeRAGOverrides {
   topK?: number;
-  sourceType?: 'secondary' | 'primary' | 'both';
   numCtx?: number;
-  useGraphContext?: boolean;
   enableContextCompression?: boolean;
-  similarityThreshold?: number;
-  summaryGeneration?: 'extractive' | 'abstractive' | 'disabled';
+  manuscript?: ManuscriptStance;
 }
 
 /** Model recommendation (advisory, not enforced) */
