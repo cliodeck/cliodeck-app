@@ -121,69 +121,64 @@ export function shouldIncludeManuscript(opts: {
   return true;
 }
 
-export function resolveManuscriptPolicy(input: ManuscriptPolicyInput): ManuscriptPolicy {
+/** Ce qui distingue un corpus de l'autre : sa lecture de la portée demandée. */
+interface OwnTextScopeReading {
+  /** La portée ne demande que ce corpus : toutes les places, consigne « seul ». */
+  only: boolean;
+  /**
+   * La portée ne demande que le texte de l'auteur et l'inclut explicitement
+   * (manuscrit seul avec les notes cochées) : sa bande ordinaire, sans que la
+   * posture du mode puisse l'écarter.
+   */
+  companion: boolean;
+  /** L'utilisateur a cadré sa recherche ailleurs : écarté, sauf question de rappel. */
+  restricted: boolean;
+}
+
+/**
+ * Le tronc commun des deux corpus à la voix de l'auteur. Un seul ordre de
+ * préséance, pour qu'une règle ajoutée ici vaille pour les deux : index →
+ * portée « seul » → compagnon d'une portée « seul » → question de rappel →
+ * portée restreinte → case → posture du mode → bande.
+ */
+function resolveOwnTextPolicy(
+  input: { enabled: boolean; requested?: boolean; stance?: unknown; recallIntent: boolean; topK: number },
+  scope: OwnTextScopeReading
+): ManuscriptPolicy {
   const stance = normalizeStance(input.stance);
-  const excluded = (reason: ManuscriptPolicyReason): ManuscriptPolicy => ({
-    include: false,
-    slots: 0,
-    wording: 'recall',
-    stance,
-    reason,
-  });
+  const policy = (
+    include: boolean,
+    slots: number,
+    wording: ManuscriptWording,
+    reason: ManuscriptPolicyReason
+  ): ManuscriptPolicy => ({ include, slots: include ? slots : 0, wording, stance, reason });
 
-  if (!input.enabled) return excluded('disabled');
-
-  if (input.sourceType === 'manuscript') {
-    return {
-      include: true,
-      slots: Math.max(0, input.topK),
-      wording: 'only',
-      stance,
-      reason: 'scope-only',
-    };
-  }
-
-  if (input.recallIntent) {
-    return {
-      include: true,
-      slots: recallSlots(input.topK),
-      wording: 'recall',
-      stance,
-      reason: 'recall-intent',
-    };
-  }
-
-  if (
-    !shouldIncludeManuscript({
-      enabled: true,
-      sourceType: input.sourceType,
-      documentIds: input.documentIds,
-      collectionKeys: input.collectionKeys,
-    })
-  ) {
-    return excluded('scope-restricted');
-  }
-
-  if (input.requested === false) return excluded('toggle-off');
-  if (stance === 'off') return excluded('stance-off');
-
+  if (!input.enabled) return policy(false, 0, 'recall', 'disabled');
+  if (scope.only) return policy(true, Math.max(0, input.topK), 'only', 'scope-only');
+  if (scope.companion) return policy(true, manuscriptSlots(input.topK), 'recall', 'scope-only');
+  if (input.recallIntent) return policy(true, recallSlots(input.topK), 'recall', 'recall-intent');
+  if (scope.restricted) return policy(false, 0, 'recall', 'scope-restricted');
+  if (input.requested === false) return policy(false, 0, 'recall', 'toggle-off');
+  if (stance === 'off') return policy(false, 0, 'recall', 'stance-off');
   if (stance === 'background') {
-    return {
-      include: true,
-      slots: backgroundSlots(input.topK),
-      wording: 'background',
-      stance,
-      reason: 'background',
-    };
+    return policy(true, backgroundSlots(input.topK), 'background', 'background');
   }
+  return policy(true, manuscriptSlots(input.topK), 'recall', 'default');
+}
 
-  return {
-    include: true,
-    slots: manuscriptSlots(input.topK),
-    wording: 'recall',
-    stance,
-    reason: 'default',
-  };
+export function resolveManuscriptPolicy(input: ManuscriptPolicyInput): ManuscriptPolicy {
+  return resolveOwnTextPolicy(input, {
+    only: input.sourceType === 'manuscript',
+    companion: false,
+    restricted:
+      input.sourceType !== 'manuscript' &&
+      !shouldIncludeManuscript({
+        enabled: true,
+        sourceType: input.sourceType,
+        documentIds: input.documentIds,
+        collectionKeys: input.collectionKeys,
+      }),
+  });
 }
 
 export interface ReadingNotesPolicyInput {
@@ -208,73 +203,17 @@ export interface ReadingNotesPolicyInput {
  * différence près, voulue par l'auteur du projet : une recherche restreinte
  * à des documents ou à une collection ne les écarte pas, elle les **cadre**
  * (`CorpusSearchOptions.readingNoteCitekeys`) — « d'après tes notes sur
- * Braudel » garde son sens quand Braudel est sélectionné. Notes seules
- * (`readingNotes`) ou manuscrit seul avec les notes demandées : pas de
- * source, les notes entrent.
+ * Braudel » garde son sens quand Braudel est sélectionné. Les notes Obsidian
+ * seules (`vault`) les écartent comme le manuscrit : l'utilisateur a nommé
+ * ce qu'il interroge. Notes seules (`readingNotes`) : toutes les places ;
+ * manuscrit seul avec la case des notes **explicitement** cochée : leur
+ * bande ordinaire — un appelant historique qui demande « manuscrit seul »
+ * sans rien dire des notes obtient le manuscrit seul.
  */
 export function resolveReadingNotesPolicy(input: ReadingNotesPolicyInput): ManuscriptPolicy {
-  const stance = normalizeStance(input.stance);
-  const excluded = (reason: ManuscriptPolicyReason): ManuscriptPolicy => ({
-    include: false,
-    slots: 0,
-    wording: 'recall',
-    stance,
-    reason,
+  return resolveOwnTextPolicy(input, {
+    only: input.sourceType === 'readingNotes',
+    companion: input.sourceType === 'manuscript' && input.requested === true,
+    restricted: input.sourceType === 'vault' || input.sourceType === 'manuscript',
   });
-
-  if (!input.enabled) return excluded('disabled');
-
-  if (input.sourceType === 'readingNotes') {
-    return {
-      include: true,
-      slots: Math.max(0, input.topK),
-      wording: 'only',
-      stance,
-      reason: 'scope-only',
-    };
-  }
-
-  // Manuscrit seul avec les notes demandées : l'utilisateur n'a coché que
-  // son propre texte. Cette portée explicite l'emporte sur la posture du
-  // mode, comme « notes seules » — et comme le prédit la ligne de portée.
-  if (input.sourceType === 'manuscript' && input.requested !== false) {
-    return {
-      include: true,
-      slots: manuscriptSlots(input.topK),
-      wording: 'recall',
-      stance,
-      reason: 'scope-only',
-    };
-  }
-
-  if (input.recallIntent) {
-    return {
-      include: true,
-      slots: recallSlots(input.topK),
-      wording: 'recall',
-      stance,
-      reason: 'recall-intent',
-    };
-  }
-
-  if (input.requested === false) return excluded('toggle-off');
-  if (stance === 'off') return excluded('stance-off');
-
-  if (stance === 'background') {
-    return {
-      include: true,
-      slots: backgroundSlots(input.topK),
-      wording: 'background',
-      stance,
-      reason: 'background',
-    };
-  }
-
-  return {
-    include: true,
-    slots: manuscriptSlots(input.topK),
-    wording: 'recall',
-    stance,
-    reason: 'default',
-  };
 }

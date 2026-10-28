@@ -396,7 +396,7 @@ export function manuscriptExclusionReason(input: {
  * instead of excluding them, and a notes-only Obsidian search does not
  * exclude them either.
  */
-export type ReadingNotesExclusionReason = 'disabled' | 'cloud' | 'toggle' | 'stance';
+export type ReadingNotesExclusionReason = 'disabled' | 'cloud' | 'toggle' | 'scope' | 'stance';
 
 export function readingNotesExclusionReason(input: {
   params: RAGQueryParams;
@@ -421,6 +421,10 @@ export function readingNotesExclusionReason(input: {
   // Own text only (notes alone, or manuscript + notes): an explicit scope,
   // consulted whatever the mode says — same precedence as the manuscript.
   if (!b && !p && !n) return null;
+  // Obsidian notes only: the user named what they query; main excludes the
+  // reading notes as it excludes the manuscript. A document or collection
+  // selection, by contrast, SCOPES the notes and never excludes them.
+  if (!b && !p && n) return 'scope';
   if (stance === 'off') return 'stance';
   return null;
 }
@@ -535,8 +539,9 @@ export function getResolvedSourceType(
   if (!b && p) {
     return { sourceType: 'primary', includeVault: n, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
   }
-  // notes-only — fusion-chat-service maps `sourceType === 'vault'` to
-  // "search Obsidian only" with `includeVault` implicit.
+  // notes-only — Obsidian only: `corporaInScope` adds no source corpus, and
+  // main's policies keep the manuscript and the reading notes out of it
+  // unless a recall question asks for them (hence the 'scope' reason below).
   return { sourceType: 'vault', includeVault: true, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
 }
 

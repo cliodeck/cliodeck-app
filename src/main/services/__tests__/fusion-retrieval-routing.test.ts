@@ -270,24 +270,52 @@ describe('RetrievalService.search — branch dispatch', () => {
       expect(tropySpy).not.toHaveBeenCalled();
       expect(vaultSpy).not.toHaveBeenCalled();
 
-      // Sélection de documents + collection : les notes de ces références.
+      // Sélection de documents : les notes de ces références.
       notesSpy.mockClear();
       await retrievalService.search({
         query: 'q',
         sourceType: 'secondary',
         includeReadingNotes: true,
-        documentIds: ['d1'],
+        documentIds: ['d1', 'd2'],
+        topK: 5,
+      });
+      let opts = notesSpy.mock.calls[0][1];
+      expect(opts.sole).toBe(false);
+      expect([...(opts.readingNoteCitekeys ?? [])].sort()).toEqual(['Braudel_1949', 'Lester_1932']);
+
+      // Documents ET collection : l'intersection, comme la bibliographie
+      // (SecondaryRetriever.resolveDocumentFilter) — d1 n'est pas dans COLL.
+      notesSpy.mockClear();
+      await retrievalService.search({
+        query: 'q',
+        sourceType: 'secondary',
+        includeReadingNotes: true,
+        documentIds: ['d1', 'd2'],
         collectionKeys: ['COLL'],
         topK: 5,
       });
-      const opts = notesSpy.mock.calls[0][1];
-      expect(opts.sole).toBe(false);
-      expect([...(opts.readingNoteCitekeys ?? [])].sort()).toEqual(['Braudel_1949', 'Lester_1932']);
+      opts = notesSpy.mock.calls[0][1];
+      expect([...(opts.readingNoteCitekeys ?? [])]).toEqual(['Lester_1932']);
 
       // Sans sélection : aucun cadrage.
       notesSpy.mockClear();
       await retrievalService.search({ query: 'q', sourceType: 'both', includeReadingNotes: true, topK: 5 });
       expect(notesSpy.mock.calls[0][1].readingNoteCitekeys).toBeUndefined();
+
+      // Texte de l'auteur seul (manuscrit + notes) : une sélection restée
+      // dans le panneau ne cadre rien, et les deux gardent leur repli.
+      notesSpy.mockClear();
+      await retrievalService.search({
+        query: 'q',
+        sourceType: 'manuscript',
+        includeManuscript: true,
+        includeReadingNotes: true,
+        documentIds: ['d1'],
+        topK: 5,
+      });
+      opts = notesSpy.mock.calls[0][1];
+      expect(opts.sole).toBe(true);
+      expect(opts.readingNoteCitekeys).toBeUndefined();
     } finally {
       svc.searchReadingNotes = originalSearch;
       svc.vectorStore = originalStore;

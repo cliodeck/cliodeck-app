@@ -747,6 +747,8 @@ class RetrievalService {
     const topK = q.topK || ragConfig.topK;
     const threshold = q.threshold || ragConfig.similarityThreshold;
     const scope = corporaInScope(q);
+    const ownTextOnly =
+      scope.size > 0 && [...scope].every((c) => c === 'manuscript' || c === 'readingNotes');
 
     if (DEBUG) {
       console.log(
@@ -766,14 +768,18 @@ class RetrievalService {
         threshold,
         documentIds: q.documentIds,
         collectionKeys: q.collectionKeys,
-        // Un corpus seul dans la portée garde un repli : personne d'autre
-        // ne répondra (le manuscrit ou les notes interrogés seuls).
-        sole: scope.size === 1,
+        // Sans aucune source dans la portée — le texte de l'auteur seul,
+        // manuscrit, notes de lecture ou les deux —, un corpus garde un
+        // repli : personne d'autre ne répondra.
+        sole: ownTextOnly,
         // Une sélection de documents ou de collection cadre les notes de
-        // lecture sur ces références au lieu de les écarter.
-        readingNoteCitekeys: scope.has('readingNotes')
-          ? this.citekeysForSelection(q.documentIds, q.collectionKeys)
-          : undefined,
+        // lecture sur ces références au lieu de les écarter — quand des
+        // sources sont interrogées : sans source, la sélection ne vaut pas
+        // (le renderer la garde même bibliographie décochée).
+        readingNoteCitekeys:
+          scope.has('readingNotes') && !ownTextOnly
+            ? this.citekeysForSelection(q.documentIds, q.collectionKeys)
+            : undefined,
       },
       (corpus, error) => {
         console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
@@ -911,11 +917,15 @@ class RetrievalService {
   }
 
   /**
-   * Clés de citation des références que l'utilisateur a sélectionnées
-   * (documents choisis, collections Zotero, sous-collections comprises) ;
+   * Clés de citation des références que l'utilisateur a sélectionnées ;
    * `undefined` sans sélection. Sert à cadrer les notes de lecture : ses
    * notes sur Braudel restent pertinentes quand Braudel est sélectionné, les
    * autres non. Une référence sans clé ne retient aucune note.
+   *
+   * Même arithmétique que la bibliographie (`SecondaryRetriever.
+   * resolveDocumentFilter`) : documents choisis ET collection → l'intersection
+   * — sinon les notes parleraient de références que la même sélection vient
+   * d'exclure des sources.
    */
   private citekeysForSelection(
     documentIds?: string[],
@@ -926,16 +936,19 @@ class RetrievalService {
     if (selected === 0 && inCollections === 0) return undefined;
     const store = this.vectorStore;
     if (!store) return [];
-    const ids = new Set<string>(documentIds ?? []);
+    let ids: string[] = documentIds ?? [];
     if (inCollections > 0) {
+      let docsInCollections: string[] = [];
       try {
-        for (const id of store.getDocumentIdsInCollections(collectionKeys ?? [], true)) ids.add(id);
+        docsInCollections = store.getDocumentIdsInCollections(collectionKeys ?? [], true);
       } catch (e) {
         console.warn('[retrieval] collections → documents lookup failed', e);
       }
+      ids =
+        selected > 0 ? ids.filter((id) => docsInCollections.includes(id)) : docsInCollections;
     }
     const citekeys = new Set<string>();
-    for (const id of ids) {
+    for (const id of new Set(ids)) {
       try {
         const doc = store.getDocument(id) as { bibtexKey?: string | null } | null;
         if (doc?.bibtexKey) citekeys.add(doc.bibtexKey);

@@ -186,19 +186,32 @@ describe('resolveReadingNotesPolicy — même préséance, sauf la portée restr
     });
   });
 
-  it('manuscrit seul avec les notes demandées : les notes entrent avec leur bande, posture du mode ou pas', () => {
-    expect(resolveReadingNotesPolicy(notes({ sourceType: 'manuscript' }))).toMatchObject({
-      include: true,
-      slots: manuscriptSlots(10),
-      reason: 'scope-only',
-    });
+  it('manuscrit seul avec la case des notes cochée : les notes entrent avec leur bande, posture du mode ou pas', () => {
+    expect(resolveReadingNotesPolicy(notes({ sourceType: 'manuscript', requested: true }))).toMatchObject(
+      { include: true, slots: manuscriptSlots(10), reason: 'scope-only' }
+    );
     // Le texte de l'auteur seul est une portée explicite : elle l'emporte sur
     // « off », comme la ligne de portée du renderer le prédit.
-    expect(resolveReadingNotesPolicy(notes({ sourceType: 'manuscript', stance: 'off' })).include).toBe(
-      true
-    );
+    expect(
+      resolveReadingNotesPolicy(notes({ sourceType: 'manuscript', requested: true, stance: 'off' }))
+        .include
+    ).toBe(true);
     expect(resolveReadingNotesPolicy(notes({ sourceType: 'manuscript', requested: false })).include).toBe(
       false
+    );
+    // Un appelant historique (« manuscrit seul », rien sur les notes) : le
+    // manuscrit seul, vraiment — la revue de la pile avait vu les notes s'y
+    // glisser.
+    expect(resolveReadingNotesPolicy(notes({ sourceType: 'manuscript' }))).toMatchObject({
+      include: false,
+      reason: 'scope-restricted',
+    });
+  });
+
+  it('notes Obsidian seules : écartées comme le manuscrit, sauf question de rappel', () => {
+    expect(resolveReadingNotesPolicy(notes({ sourceType: 'vault' })).reason).toBe('scope-restricted');
+    expect(resolveReadingNotesPolicy(notes({ sourceType: 'vault', recallIntent: true })).include).toBe(
+      true
     );
   });
 });

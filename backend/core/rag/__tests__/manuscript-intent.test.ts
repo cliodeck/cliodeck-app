@@ -138,6 +138,9 @@ const OTHER_QUESTIONS: readonly string[] = [
 
 /** Questions de rappel des notes de lecture : la bande des notes doit se lever. */
 const NOTES_RECALL_QUESTIONS: readonly string[] = [
+  // Revue 2026-10-28 : les points d'abréviation et de nombre ne ferment pas une phrase.
+  'Dans mes notes de lecture, cf. p. 3, ai-je cité Lester ?',
+  'Was habe ich zum 19. Jahrhundert notiert?',
   // Français — exigées par le cahier des charges
   "qu'ai-je noté sur Braudel ?",
   'Qu’avais-je noté à propos de la Méditerranée ?',
@@ -205,6 +208,9 @@ const NOTES_RECALL_QUESTIONS: readonly string[] = [
  * méthode ou de rangement sur ses propres notes.
  */
 const NOTES_OTHER_QUESTIONS: readonly string[] = [
+  // Revue 2026-10-28 : « do I » + verbe quelconque devant « in my notes » n'est pas un rappel.
+  'Where do I put this in my notes?',
+  'Where do I find the quotation in my notes?',
   // Exigées par le cahier des charges
   'note that Braudel wrote in 1949',
   'a noted historian of the Mediterranean',

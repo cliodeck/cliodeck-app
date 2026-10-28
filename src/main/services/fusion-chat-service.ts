@@ -782,8 +782,10 @@ class FusionChatService {
       ? {
           async search(lastUser, options?: ChatEngineRetrievalOptions) {
             // Strict routing per the 7-case truth table (see
-            // `resolveRetrievalArgs`). `retrieval-service` natively
-            // short-circuits `sourceType === 'vault'` to Obsidian only.
+            // `resolveRetrievalArgs`). `sourceType === 'vault'` means Obsidian
+            // only: `corporaInScope` adds no source corpus, and the policies
+            // below keep the manuscript and the reading notes out of it
+            // unless a recall question asks for them.
             const { sourceType, includeVault } = resolveRetrievalArgs(options);
             // Portées « seul » : le texte de l'auteur sans aucune source —
             // le manuscrit, les notes de lecture, ou les deux (manuscrit
@@ -836,7 +838,12 @@ class FusionChatService {
             const { hits, manuscriptHits, readingNoteHits, stats, securityEvents } =
               await retrievalService.searchWithStats({
               query: lastUser,
-              sourceType,
+              // Texte de l'auteur seul : la portée envoyée ne nomme que ce
+              // qui entre vraiment — « notes seules » sans consentement
+              // mais avec une question de rappel sur le manuscrit devient
+              // « manuscrit seul », au lieu d'interroger les notes pour
+              // jeter leurs résultats et de priver le manuscrit de son repli.
+              sourceType: ownOnly ? (manuscript.include ? 'manuscript' : 'readingNotes') : sourceType,
               includeVault,
               includeManuscript: manuscript.include,
               manuscriptSlots: manuscript.slots,

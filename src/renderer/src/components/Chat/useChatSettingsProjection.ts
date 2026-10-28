@@ -19,6 +19,9 @@ import { useModeStore } from '../../stores/modeStore';
 import {
   useRAGQueryStore,
   getResolvedSourceType,
+  manuscriptExclusionReason,
+  readingNotesExclusionReason,
+  readingNotesStance,
   resolveManuscriptToggle,
   resolveReadingNotesToggle,
 } from '../../stores/ragQueryStore';
@@ -34,6 +37,10 @@ export function useChatSettingsProjection(): void {
   // the workspace (brainstorm → off by default): the effect must re-run when
   // the user switches workspace, not only when a toggle changes.
   const workspace = useWorkspaceModeStore((s) => s.active);
+  const manuscriptIndexEnabled = useRAGQueryStore((s) => s.manuscriptIndexEnabled);
+  const readingNotesIndexEnabled = useRAGQueryStore((s) => s.readingNotesIndexEnabled);
+  const readingNotesCloudConsent = useRAGQueryStore((s) => s.readingNotesCloudConsent);
+  const generationIsCloud = useRAGQueryStore((s) => s.generationIsCloud);
 
   useEffect(() => {
     // Resolve the three independent source toggles plus the EFFECTIVE
@@ -46,7 +53,27 @@ export function useChatSettingsProjection(): void {
     // widened.
     const manuscriptEffective = resolveManuscriptToggle(ragParams.includeManuscript, workspace);
     const readingNotesEffective = resolveReadingNotesToggle(ragParams.includeReadingNotes, workspace);
-    const resolved = getResolvedSourceType(ragParams, manuscriptEffective, readingNotesEffective);
+    // What is projected is what will be CONSULTED, not the raw toggles: a
+    // notes-only selection whose notes are excluded (cloud provider without
+    // consent, index off) must become « nothing selected » — warning and
+    // permissive fallback — rather than a turn with no context at all.
+    const manuscriptConsulted =
+      manuscriptExclusionReason({
+        params: ragParams,
+        manuscriptEffective,
+        stance: activeMode?.ragOverrides?.manuscript,
+        indexEnabled: manuscriptIndexEnabled,
+      }) === null;
+    const readingNotesConsulted =
+      readingNotesExclusionReason({
+        params: ragParams,
+        readingNotesEffective,
+        stance: readingNotesStance(activeMode?.ragOverrides),
+        indexEnabled: readingNotesIndexEnabled,
+        cloudConsent: readingNotesCloudConsent,
+        generationIsCloud,
+      }) === null;
+    const resolved = getResolvedSourceType(ragParams, manuscriptConsulted, readingNotesConsulted);
     const retrieval: BrainstormChatRetrievalSettings = {
       topK: ragParams.topK,
       documentIds:
@@ -93,5 +120,16 @@ export function useChatSettingsProjection(): void {
       promptLanguage,
       retrieval,
     });
-  }, [ragParams, workspace, activeMode, activeModeId, lang, setChatSettings]);
+  }, [
+    ragParams,
+    workspace,
+    activeMode,
+    activeModeId,
+    lang,
+    setChatSettings,
+    manuscriptIndexEnabled,
+    readingNotesIndexEnabled,
+    readingNotesCloudConsent,
+    generationIsCloud,
+  ]);
 }

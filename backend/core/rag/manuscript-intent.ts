@@ -74,7 +74,7 @@ const COMBINING_MARKS = /[̀-ͯ]/g;
  * Ramène un texte à la forme sur laquelle les motifs sont écrits. Idempotente.
  */
 export function normaliseForIntent(text: string): string {
-  return text
+  const collapsed = text
     .normalize('NFD')
     .replace(COMBINING_MARKS, '')
     .toLowerCase()
@@ -83,8 +83,32 @@ export function normaliseForIntent(text: string): string {
     .replace(/æ/g, 'ae')
     .replace(APOSTROPHES, "'")
     .replace(HYPHENS, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/\s+/g, ' ');
+  return stripNonFinalPeriods(collapsed).trim();
+}
+
+/**
+ * Points qui ne ferment pas une phrase : abréviations courantes des trois
+ * langues (déjà sans accents), jetons d'une ou deux lettres (« p. », « t. »)
+ * et nombres (« 19. Jahrhundert »). Laissés en place, ils coupaient « dans
+ * mes notes, cf. p. 3, ai-je cité Lester ? » en fragments : le veto des
+ * notes tombait dans l'un, le verbe dans l'autre, et les fenêtres `[^.?!]*`
+ * des motifs s'arrêtaient au premier. Retirés à la normalisation, phrases et
+ * fenêtres les traversent — au prix, rare, de deux phrases fondues quand
+ * l'une finit par un nombre : la fusion n'ajoute qu'un veto, jamais un
+ * rappel.
+ */
+const NON_FINAL_ABBREVIATIONS = new Set([
+  'cf', 'pp', 'vol', 'vols', 'eds', 'chap', 'fol', 'art', 'ibid', 'cit', 'loc', 'sqq', 'env',
+  'trad', 'dir', 'mss', 'fasc', 'hrsg', 'vgl', 'bzw', 'usw', 'ebd', 'etc', 'infra', 'supra',
+]);
+
+function stripNonFinalPeriods(text: string): string {
+  return text.replace(/(^|\s)([([«"']*)([^\s.]+)\.(?=\s|$)/g, (whole, lead: string, open: string, token: string) => {
+    const nonFinal =
+      /^\d+$/.test(token) || token.length <= 2 || NON_FINAL_ABBREVIATIONS.has(token);
+    return nonFinal ? `${lead}${open}${token}` : whole;
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -387,7 +411,14 @@ const EN_NOTE_BASE = `(?:note(?: down)?|jot(?: down)?|(?:take|make|keep) (?:down
 /** Past forms (preterite, participle). */
 const EN_NOTE_PAST = `(?:noted(?: down)?|jotted(?: down)?|(?:taken|took|made|kept) (?:down )?${EN_NOTES_NP})\\b`;
 /** A first-person auxiliary that is not a how-to: « did I », « have I », never « how do I ». */
-const EN_AUX_I = "(?<!\\bhow )(?:do|did|have|had)(?:n't)? i\\b";
+/**
+ * A first-person question about the notes as a place. The PAST auxiliaries
+ * take any verb (« have I cited Braudel in my notes »); the present « do I »
+ * only a recall verb — « where do I put this in my notes » and « where do I
+ * find X in my notes » are how-to questions, not recalls.
+ */
+const EN_AUX_I =
+  `(?<!\\bhow )(?:(?:did|have|had)(?:n't)? i\\b|do(?:n't)? i ${EN_ADV}(?:${EN_BASE}|${EN_PAST}|${EN_NOTE_BASE}|${EN_NOTE_PAST}))`;
 
 export const EN_NOTES_RECALL_PATTERNS: readonly RecallPattern[] = [
   {
@@ -521,6 +552,11 @@ export const NOTES_RECALL_PATTERNS: Readonly<Record<IntentLanguage, readonly Rec
  * Les phrases du texte normalisé, ponctuation forte comprise — c'est l'unité
  * sur laquelle les motifs s'appliquent et sur laquelle la garde du manuscrit
  * joue. Un point final coupe donc toujours une fenêtre, comme avant.
+ */
+/**
+ * Les phrases du texte normalisé. Les points d'abréviation et de nombre ont
+ * déjà disparu à la normalisation (`stripNonFinalPeriods`) : ici un point
+ * ferme toujours une phrase.
  */
 function sentencesOf(normalised: string): string[] {
   return normalised.match(/[^.?!]+[.?!]*/g) ?? [];

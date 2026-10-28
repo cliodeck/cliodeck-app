@@ -270,7 +270,7 @@ describe('manuscriptExclusionReason — la ligne de portée ne promet pas un man
   });
 });
 
-describe('readingNotesExclusionReason — pas de raison « portée » : une sélection restreint les notes, elle ne les écarte pas', () => {
+describe('readingNotesExclusionReason — une sélection de documents cadre les notes sans les écarter ; les notes Obsidian seules les écartent', () => {
   const open = (over: Partial<RAGQueryParams> = {}): RAGQueryParams => ({ ...make(true, true, true), ...over });
   /** Case effective, index actif, fournisseur local : le cas nominal. */
   const nominal = {
@@ -297,13 +297,15 @@ describe('readingNotesExclusionReason — pas de raison « portée » : une sél
     expect(readingNotesExclusionReason({ params: open(), ...nominal, cloudConsent: false })).toBeNull();
   });
 
-  it('jamais écartées par une recherche restreinte : notes Obsidian seules, documents choisis, collection', () => {
+  it('écartées par les notes Obsidian seules (comme le manuscrit) ; jamais par des documents choisis ou une collection', () => {
+    // Revue 2026-10-28 : « Notes » seule cochée veut dire Obsidian seul ; le
+    // main écarte alors les notes de lecture comme le manuscrit.
     expect(
       readingNotesExclusionReason({
         params: open({ includeBibliography: false, includePrimary: false }),
         ...nominal,
       })
-    ).toBeNull();
+    ).toBe('scope');
     expect(readingNotesExclusionReason({ params: open({ selectedDocumentIds: ['d1'] }), ...nominal })).toBeNull();
     expect(readingNotesExclusionReason({ params: open({ selectedCollectionKeys: ['K'] }), ...nominal })).toBeNull();
     // Même avec une posture qui les tolère : la portée ne joue jamais.
