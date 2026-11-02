@@ -2005,6 +2005,9 @@
     "renumberDone": "Footnotes renumbered across {{count}} chapter(s).",
     "renumberError": "Renumbering failed: the manuscript is unchanged.",
     "renumberInProgress": "Footnote renumbering in progress — try again in a moment.",
+    "renumberInterrupted": "Renumbering interrupted: the open chapter changed during the operation. Run it again to finish.",
+    "renumberTimedOut": "Renumbering stopped: the disk did not respond for {{minutes}} minutes. Some chapters may have been renumbered, not all: run it again once the disk responds.",
+    "renumberRestoreFailed": "Renumbering failed and could not be fully undone: some chapters may remain renumbered. Run it again once the files are accessible.",
     "settings": {
       "title": "Book settings",
       "saveError": "Could not save the settings — change reverted.",

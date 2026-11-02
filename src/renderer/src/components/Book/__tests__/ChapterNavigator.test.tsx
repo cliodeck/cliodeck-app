@@ -15,6 +15,8 @@ import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
+import { useManuscriptStore } from '../../../stores/manuscriptStore';
+import type { EditorFacade } from '@/editor/facade';
 
 const PROJECT_PATH = '/livre';
 
@@ -176,6 +178,78 @@ describe('ChapterNavigator', () => {
     expect(sent).toHaveLength(2);
     expect(sent[1].filePath).toBe('chapters/99-oublie.md');
     expect(sent[1].title).toBe('Oublié');
+  });
+});
+
+describe('ChapterNavigator pendant une opération sur le manuscrit', () => {
+  let loadFile: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    loadFile = vi.fn(async () => undefined);
+    useEditorStore.setState({ loadFile, editorFacade: null } as never);
+    setupStore([
+      chapter({ id: 'c1', title: 'Un', order: 0 }),
+      chapter({ id: 'c2', title: 'Deux', filePath: 'chapters/02.md', order: 1 }),
+    ]);
+    (window as unknown as { electron: unknown }).electron = { project: {} };
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useManuscriptStore.setState({ renumbering: false, exporting: false, info: {} });
+    while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
+  });
+
+  it('refuse la bascule pendant une renumérotation et dit pourquoi', async () => {
+    useManuscriptStore.setState({ renumbering: true });
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(loadFile).not.toHaveBeenCalled();
+    expect(useDialogStore.getState().alertMessage).toBe('book.renumberInProgress');
+    expect(useProjectStore.getState().currentChapterId).toBe('c1');
+  });
+
+  it('ne déplace pas le curseur du chapitre ouvert quand la bascule est refusée', async () => {
+    const revealLine = vi.fn();
+    useEditorStore.setState({ editorFacade: { revealLine } as unknown as EditorFacade });
+    useManuscriptStore.setState({
+      renumbering: true,
+      info: {
+        'chapters/02.md': {
+          stats: {} as never,
+          outline: [{ level: 2, text: 'Section', line: 7, from: 0, to: 0 }] as never,
+        },
+      },
+    });
+    render(<ChapterNavigator />);
+
+    fireEvent.click(screen.getAllByTitle('book.outlineToggle')[0]);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Section'));
+    });
+    await act(async () => {
+      useDialogStore.getState().closeAlert();
+    });
+
+    expect(loadFile).not.toHaveBeenCalled();
+    expect(revealLine).not.toHaveBeenCalled();
+  });
+
+  it('laisse naviguer pendant un export, qui a lu au départ et peut durer des minutes', async () => {
+    useManuscriptStore.setState({ exporting: true });
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(loadFile).toHaveBeenCalledWith(`${PROJECT_PATH}/chapters/02.md`);
+    expect(useDialogStore.getState().alertOpen).toBe(false);
   });
 });
 

@@ -44,7 +44,8 @@ interface ManuscriptState {
    * Une renumérotation des notes écrit les chapitres UN PAR UN sur le
    * disque : un export lancé pendant la boucle assemblerait un manuscrit
    * mi-renuméroté (#30). Les modales d'export refusent de partir tant que
-   * ce verrou est posé ; le bouton de renumérotation se désactive aussi.
+   * ce verrou est posé ; le bouton de renumérotation se désactive aussi, et
+   * le navigateur n'ouvre plus de chapitre (voir `editorStore.switchLock`).
    */
   renumbering: boolean;
   setRenumbering: (renumbering: boolean) => void;
@@ -108,7 +109,11 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
 
     set({ refreshing: true });
     try {
+      // Chemin et texte vivant lus dans le même tour, avant d'attendre le
+      // disque : relu après, ce texte serait celui du chapitre ouvert
+      // entre-temps, et son plan rangé sous le nom de celui-ci.
       const openRel = currentRelativePath();
+      const liveContent = useEditorStore.getState().getLiveContent();
       const toRead = chapters
         .filter((c) => !c.missing && c.filePath !== openRel)
         .map((c) => c.filePath);
@@ -131,7 +136,7 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
 
       // Le chapitre ouvert : toujours l'éditeur vivant.
       if (openRel) {
-        info[openRel] = derive(useEditorStore.getState().getLiveContent());
+        info[openRel] = derive(liveContent);
       }
 
       set({ info });
@@ -150,7 +155,11 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
     const { currentProject, chapters } = useProjectStore.getState();
     if (!currentProject) return [];
 
+    // Chemin et texte vivant lus dans le même tour, avant d'attendre le disque :
+    // relu après, ce texte serait celui du chapitre ouvert entre-temps, et une
+    // renumérotation l'écrirait dans le fichier de celui-ci.
     const openRel = currentRelativePath();
+    const liveContent = useEditorStore.getState().getLiveContent();
     const usable = chapters.filter((c) => !c.missing);
     const toRead = usable.filter((c) => c.filePath !== openRel).map((c) => c.filePath);
 
@@ -171,11 +180,7 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
     const docs: ManuscriptDocument[] = [];
     for (const chapter of usable) {
       if (chapter.filePath === openRel) {
-        docs.push({
-          chapter,
-          content: useEditorStore.getState().getLiveContent(),
-          live: true,
-        });
+        docs.push({ chapter, content: liveContent, live: true });
         continue;
       }
       const content = contents.get(chapter.filePath);

@@ -22,6 +22,8 @@ export interface EditorSettings {
   autoSaveDelay: number; // in milliseconds
 }
 
+export type EditorSwitchLock = 'book.renumberInProgress';
+
 interface EditorState {
   // Content
   content: string;
@@ -53,6 +55,15 @@ interface EditorState {
    * d'observer `content` (interdit — boucle de resynchronisation).
    */
   documentVersion: number;
+
+  /**
+   * Tant qu'il est posé, `loadFile` refuse d'ouvrir un autre fichier ; sa
+   * valeur est la clé i18n du motif. Une renumérotation écrit le manuscrit
+   * chapitre par chapitre en s'appuyant sur le chapitre ouvert : le changer
+   * sous elle envoyait le texte d'un chapitre dans le fichier d'un autre.
+   */
+  switchLock: EditorSwitchLock | null;
+  setSwitchLock: (lock: EditorSwitchLock | null) => void;
 
   // Actions
   setContent: (content: string) => void;
@@ -113,6 +124,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showPreview: false,
   editorFacade: null,
   documentVersion: 0,
+  switchLock: null,
+
+  setSwitchLock: (lock: EditorSwitchLock | null) => {
+    set({ switchLock: lock });
+  },
 
   setContent: (content: string) => {
     set({
@@ -123,6 +139,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   loadFile: async (filePath: string) => {
     logger.store('Editor', 'loadFile called', { filePath });
+
+    const refuseIfLocked = (): void => {
+      const { switchLock, filePath: openPath } = get();
+      if (switchLock && filePath !== openPath) {
+        throw new Error(i18n.t(switchLock));
+      }
+    };
+    refuseIfLocked();
 
     // Bascule de fichier : le fichier sortant est sauvegardé AVANT toute
     // chose. Sans cela, les frappes des dernières secondes étaient perdues
@@ -149,6 +173,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.loadFile response', result);
 
       if (result.success && result.content !== undefined) {
+        // Le verrou a pu être posé pendant les attentes : la bascule partie
+        // avant lui ne doit pas aboutir sous l'opération qu'il protège.
+        refuseIfLocked();
         set((state) => ({
           content: result.content,
           filePath,
@@ -171,7 +198,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // La sauvegarde lit l'éditeur vivant, jamais le miroir du store : la
     // synchronisation CM6 → store est debouncée et peut être en retard.
     const content = get().getLiveContent();
-    const { filePath } = get();
+    const { filePath, documentVersion } = get();
     logger.store('Editor', 'saveFile called', { filePath, contentLength: content.length });
 
     if (!filePath) {
@@ -184,7 +211,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.saveFile response', result);
 
       if (result.success) {
-        set({ content, isDirty: false, lastSavedAt: Date.now() });
+        // L'éditeur a pu changer de document pendant l'écriture : ce texte n'est
+        // pas le sien. Dans le miroir, une vue l'afficherait à son prochain montage
+        // et l'autosave l'écrirait dans le fichier entrant.
+        if (get().documentVersion === documentVersion) {
+          set({ content, isDirty: false, lastSavedAt: Date.now() });
+        }
         logger.store('Editor', 'File saved successfully');
       } else {
         throw new Error(result.error || 'Failed to save file');
