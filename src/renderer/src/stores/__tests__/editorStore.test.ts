@@ -6,10 +6,11 @@
  * façade avec propose), insertion directe (façade sans propose), et
  * fallback append (aucun éditeur monté).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useEditorStore } from '../editorStore';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
+import i18n from '../../i18n';
 
 beforeEach(() => {
   useEditorStore.setState({
@@ -254,5 +255,64 @@ describe('loadFile — bascule entre chapitres d’un livre', () => {
     await store.loadFile('/livre/chapters/02.md');
 
     expect(ipc.saved).toEqual([]);
+  });
+});
+
+describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
+  const files: Record<string, string> = {
+    '/livre/chapters/01.md': '# Un\n',
+    '/livre/chapters/02.md': '# Deux\n',
+  };
+  let saved: string[];
+
+  beforeEach(async () => {
+    saved = [];
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: {
+        loadFile: async (path: string) => ({ success: true, content: files[path] }),
+        saveFile: async (path: string) => {
+          saved.push(path);
+          return { success: true };
+        },
+      },
+    } as never;
+    await useEditorStore.getState().loadFile('/livre/chapters/01.md');
+    useEditorStore.setState({ isDirty: true });
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ switchLock: null } as never);
+  });
+
+  const lock = () => useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
+
+  it('refuse un autre fichier avec le message du verrou, sans rien écrire ni charger', async () => {
+    lock();
+
+    await expect(useEditorStore.getState().loadFile('/livre/chapters/02.md')).rejects.toThrow(
+      i18n.t('book.renumberInProgress')
+    );
+
+    expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
+    expect(saved).toEqual([]);
+  });
+
+  it('laisse relire le fichier ouvert', async () => {
+    lock();
+
+    await useEditorStore.getState().loadFile('/livre/chapters/01.md');
+
+    expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
+  });
+
+  it('repart une fois le verrou levé', async () => {
+    useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
+    useEditorStore.getState().setSwitchLock(null);
+
+    await useEditorStore.getState().loadFile('/livre/chapters/02.md');
+
+    expect(useEditorStore.getState().filePath).toBe('/livre/chapters/02.md');
   });
 });

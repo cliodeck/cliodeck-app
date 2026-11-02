@@ -22,6 +22,8 @@ export interface EditorSettings {
   autoSaveDelay: number; // in milliseconds
 }
 
+export type EditorSwitchLock = 'book.renumberInProgress';
+
 interface EditorState {
   // Content
   content: string;
@@ -53,6 +55,15 @@ interface EditorState {
    * d'observer `content` (interdit — boucle de resynchronisation).
    */
   documentVersion: number;
+
+  /**
+   * Tant qu'il est posé, `loadFile` refuse d'ouvrir un autre fichier ; sa
+   * valeur est la clé i18n du motif. Une renumérotation écrit le manuscrit
+   * chapitre par chapitre en s'appuyant sur le chapitre ouvert : le changer
+   * sous elle envoyait le texte d'un chapitre dans le fichier d'un autre.
+   */
+  switchLock: EditorSwitchLock | null;
+  setSwitchLock: (lock: EditorSwitchLock | null) => void;
 
   // Actions
   setContent: (content: string) => void;
@@ -113,6 +124,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showPreview: false,
   editorFacade: null,
   documentVersion: 0,
+  switchLock: null,
+
+  setSwitchLock: (lock: EditorSwitchLock | null) => {
+    set({ switchLock: lock });
+  },
 
   setContent: (content: string) => {
     set({
@@ -123,6 +139,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   loadFile: async (filePath: string) => {
     logger.store('Editor', 'loadFile called', { filePath });
+
+    const { switchLock } = get();
+    if (switchLock && filePath !== get().filePath) {
+      throw new Error(i18n.t(switchLock));
+    }
 
     // Bascule de fichier : le fichier sortant est sauvegardé AVANT toute
     // chose. Sans cela, les frappes des dernières secondes étaient perdues

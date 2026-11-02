@@ -34,6 +34,7 @@ import { useSlidesStore } from '../../stores/slidesStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { runCitationCheck } from '../../services/check-citations';
+import { ExportReadTimedOutError, startExportReadLimit } from '../Export/export-read-limit';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
 
@@ -53,6 +54,10 @@ export const EditorPanel: React.FC = () => {
   const isBook = useProjectStore((s) => s.currentProject?.type === 'book');
   const addChapter = useProjectStore((s) => s.addChapter);
   const isRenumbering = useManuscriptStore((s) => s.renumbering);
+  // Ouvrir un projet et renuméroter ne se chevauchent pas : `loadProject` charge
+  // son document par `loadFile`, que le verrou de la renumérotation refuserait,
+  // et son repli prendrait ce refus pour un fichier absent, à recréer vide.
+  const isProjectLoading = useProjectStore((s) => s.loadState.kind === 'loading');
   // Brouillons Brainstorm (#7) — panneau flottant, compteur sur le bouton.
   const draftsCount = useDraftsStore((s) => s.drafts.length);
   const isDraftsPanelOpen = useDraftsStore((s) => s.isPanelOpen);
@@ -169,18 +174,118 @@ export const EditorPanel: React.FC = () => {
     insertFormatting('footnote');
   };
 
+  // La façade se relit au moment d'écrire : celle d'avant une attente peut être
+  // celle d'une vue détruite, où `setValue` ne fait rien, en silence.
+  const setOpenEditorText = (text: string): void => {
+    const { editorFacade } = useEditorStore.getState();
+    if (editorFacade) editorFacade.setValue(text);
+    else setContent(text);
+  };
+
+  /**
+   * Renumérote tout le livre et rend le message à afficher : l'appelant ne
+   * l'affiche qu'une fois les verrous relâchés. `isAbandoned` dit que la limite
+   * de durée est passée : l'auteur a repris la main, plus rien ne s'écrit.
+   */
+  const renumberBook = async (isAbandoned: () => boolean) => {
+    const project = useProjectStore.getState().currentProject;
+    if (!project) return null;
+
+    // Le verrou arrête les bascules, mais ni celle déjà partie avant lui ni celle
+    // qui ne passe pas par `loadFile`. L'éditeur montre-t-il encore le départ ?
+    const startRel = currentRelativePath();
+    const editorMoved = (): boolean =>
+      currentRelativePath() !== startRel ||
+      useProjectStore.getState().currentProject?.path !== project.path;
+
+    const docs = await useManuscriptStore.getState().readManuscript();
+    if (isAbandoned() || docs.length === 0) return null;
+    if (editorMoved()) return t('book.renumberInterrupted');
+
+    const mode = useProjectStore.getState().bookSettings.noteNumbering;
+    const renumbered = renumberManuscript(
+      docs.map((d) => ({ key: d.chapter.filePath, content: d.content })),
+      mode
+    );
+    const changed = renumbered.filter((d) => d.changed);
+    if (changed.length === 0) return t('book.renumberNoChange');
+
+    const openKey = docs.find((d) => d.live)?.chapter.filePath;
+    const originals = new Map(docs.map((d) => [d.chapter.filePath, d.content]));
+    const written: string[] = [];
+    let interrupted = false;
+
+    try {
+      for (const doc of changed) {
+        if (isAbandoned()) return null;
+        // Le texte vivant a été lu avant les attentes : ce que l'auteur a tapé
+        // depuis n'est pas dans `doc.content`, et `setValue` l'effacerait.
+        interrupted =
+          editorMoved() ||
+          (doc.key === openKey &&
+            useEditorStore.getState().getLiveContent() !== originals.get(doc.key));
+        if (interrupted) throw new Error('book.renumberInterrupted');
+
+        if (doc.key === openKey) {
+          // Chapitre ouvert : passer par l'éditeur, l'édition reste
+          // annulable et la sauvegarde suit le chemin habituel.
+          setOpenEditorText(doc.content);
+          await useEditorStore.getState().saveFile();
+        } else {
+          const result = await window.electron.editor.saveFile(
+            `${project.path}/${doc.key}`,
+            doc.content
+          );
+          if (!result.success) throw new Error(result.error || doc.key);
+        }
+        written.push(doc.key);
+      }
+    } catch (error) {
+      // Atomique : ce qui a été écrit est remis dans son état d'origine —
+      // un manuscrit à moitié renuméroté serait pire que pas de
+      // renumérotation du tout.
+      for (const key of written) {
+        // L'auteur a repris la main : ces textes ont pu changer depuis.
+        if (isAbandoned()) break;
+        const original = originals.get(key);
+        if (original === undefined) continue;
+        const target = `${project.path}/${key}`;
+        if (useEditorStore.getState().filePath === target) {
+          // L'aller a écrit ce chapitre SUR LE DISQUE (via saveFile) :
+          // restaurer le seul tampon de l'éditeur laissait donc le fichier
+          // renuméroté, et ne restaurait rien du tout si la façade était
+          // nulle ou l'autosave désactivé. On réécrit explicitement.
+          setOpenEditorText(original);
+          await useEditorStore
+            .getState()
+            .saveFile()
+            .catch(() => undefined);
+        } else {
+          // Y compris le chapitre ouvert au départ, si l'éditeur l'a quitté :
+          // `saveFile` écrirait son texte dans le fichier qui l'a remplacé.
+          await window.electron.editor.saveFile(target, original).catch(() => undefined);
+        }
+      }
+      if (interrupted) return t('book.renumberInterrupted');
+      throw error;
+    }
+
+    // Sans l'attendre : le travail est fait, une relecture qui traînerait
+    // retiendrait les verrous et le message de fin.
+    void useManuscriptStore.getState().refreshAll();
+    return t('book.renumberDone', { count: changed.length });
+  };
+
   // Renumérotation manuelle des notes (arbitrage 2 du plan CM6 : commande
   // explicite, jamais silencieuse). CM6 uniquement.
   const handleRenumberFootnotes = async () => {
     logger.component('EditorPanel', 'handleRenumberFootnotes clicked');
-    const store = useEditorStore.getState();
 
     // Document isolé : comportement historique.
     if (!isBook) {
-      const result = renumberFootnotes(store.getLiveContent());
+      const result = renumberFootnotes(useEditorStore.getState().getLiveContent());
       if (!result.changed) return;
-      if (store.editorFacade) store.editorFacade.setValue(result.content);
-      else setContent(result.content);
+      setOpenEditorText(result.content);
       return;
     }
 
@@ -198,79 +303,28 @@ export const EditorPanel: React.FC = () => {
       return;
     }
     useManuscriptStore.getState().setRenumbering(true);
+    useEditorStore.getState().setSwitchLock('book.renumberInProgress');
+    let abandoned = false;
+    let message: string | null = null;
     try {
-      const docs = await useManuscriptStore.getState().readManuscript();
-      if (docs.length === 0) return;
-
-      const mode = useProjectStore.getState().bookSettings.noteNumbering;
-      const renumbered = renumberManuscript(
-        docs.map((d) => ({ key: d.chapter.filePath, content: d.content })),
-        mode
-      );
-      const changed = renumbered.filter((d) => d.changed);
-      if (changed.length === 0) {
-        await useDialogStore.getState().showAlert(t('book.renumberNoChange'));
-        return;
-      }
-
-      const project = useProjectStore.getState().currentProject;
-      if (!project) return;
-      const openRel = currentRelativePath();
-      const originals = new Map(docs.map((d) => [d.chapter.filePath, d.content]));
-      const written: string[] = [];
-
-      try {
-        for (const doc of changed) {
-          if (doc.key === openRel) {
-            // Chapitre ouvert : passer par l'éditeur, l'édition reste
-            // annulable et la sauvegarde suit le chemin habituel.
-            store.editorFacade?.setValue(doc.content);
-            await useEditorStore.getState().saveFile();
-          } else {
-            const result = await window.electron.editor.saveFile(
-              `${project.path}/${doc.key}`,
-              doc.content
-            );
-            if (!result.success) throw new Error(result.error || doc.key);
-          }
-          written.push(doc.key);
-        }
-      } catch (error) {
-        // Atomique : ce qui a été écrit est remis dans son état d'origine —
-        // un manuscrit à moitié renuméroté serait pire que pas de
-        // renumérotation du tout.
-        for (const key of written) {
-          const original = originals.get(key);
-          if (original === undefined) continue;
-          if (key === openRel) {
-            // L'aller a écrit ce chapitre SUR LE DISQUE (via saveFile) :
-            // restaurer le seul tampon de l'éditeur laissait donc le fichier
-            // renuméroté, et ne restaurait rien du tout si la façade était
-            // nulle ou l'autosave désactivé. On réécrit explicitement.
-            store.editorFacade?.setValue(original);
-            await useEditorStore
-              .getState()
-              .saveFile()
-              .catch(() => undefined);
-          } else {
-            await window.electron.editor
-              .saveFile(`${project.path}/${key}`, original)
-              .catch(() => undefined);
-          }
-        }
-        throw error;
-      }
-
-      await useManuscriptStore.getState().refreshAll();
-      await useDialogStore
-        .getState()
-        .showAlert(t('book.renumberDone', { count: changed.length }));
+      // La limite des exports, pour la même raison : une écriture sans réponse
+      // ne s'annule pas, et sans elle un disque mort laisserait chapitres et
+      // projet fermés jusqu'à ce qu'on quitte l'app.
+      message = await startExportReadLimit()(renumberBook(() => abandoned));
     } catch (error) {
       logger.error('EditorPanel', error);
-      await useDialogStore.getState().showAlert(t('book.renumberError'));
+      abandoned = true;
+      message =
+        error instanceof ExportReadTimedOutError
+          ? t('book.renumberTimedOut', { minutes: error.timeLimitMinutes })
+          : t('book.renumberError');
     } finally {
+      // Avant l'alerte, jamais après : la navigation et les exports n'ont pas à
+      // attendre qu'on ferme un dialogue, qui peut être derrière d'autres.
+      useEditorStore.getState().setSwitchLock(null);
       useManuscriptStore.getState().setRenumbering(false);
     }
+    if (message) await useDialogStore.getState().showAlert(message);
   };
 
   /**
@@ -313,7 +367,7 @@ export const EditorPanel: React.FC = () => {
             <button
               className="toolbar-btn"
               onClick={() => void handleRenumberFootnotes()}
-              disabled={isRenumbering}
+              disabled={isRenumbering || isProjectLoading}
               title={t('toolbar.renumberFootnotes')}
             >
               <ListOrdered size={18} strokeWidth={1.5} />

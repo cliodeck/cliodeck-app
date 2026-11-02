@@ -129,9 +129,9 @@ export const ChapterNavigator: React.FC = () => {
 
   const goToLine = (chapter: ResolvedChapter, line: number): void => {
     if (chapter.filePath !== openRelPath) {
-      void openChapter(chapter).then(() => {
+      void openChapter(chapter).then((opened) => {
         // Le chapitre vient d'être chargé : la façade est reconstruite.
-        useEditorStore.getState().editorFacade?.revealLine(line);
+        if (opened) useEditorStore.getState().editorFacade?.revealLine(line);
       });
       return;
     }
@@ -147,15 +147,24 @@ export const ChapterNavigator: React.FC = () => {
       .showAlert(error instanceof Error ? error.message : t(fallbackKey));
   };
 
-  const openChapter = async (chapter: ResolvedChapter): Promise<void> => {
-    if (!currentProject || chapter.missing) return;
+  /** Rend vrai si le chapitre est bien celui qu'affiche désormais l'éditeur. */
+  const openChapter = async (chapter: ResolvedChapter): Promise<boolean> => {
+    if (!currentProject || chapter.missing) return false;
+    // Pendant une renumérotation seulement : un export lit le manuscrit à son
+    // départ et peut durer des minutes, on continue d'écrire pendant ce temps.
+    if (useManuscriptStore.getState().renumbering) {
+      await useDialogStore.getState().showAlert(t('book.renumberInProgress'));
+      return false;
+    }
     try {
       // `loadFile` sauvegarde le chapitre sortant avant de charger : c'est
       // ce qui rend la bascule sûre (verrou Phase 0).
       await loadFile(`${currentProject.path}/${chapter.filePath}`);
       setCurrentChapter(chapter.id);
+      return true;
     } catch (error) {
       await report(error, 'toolbar.openError');
+      return false;
     }
   };
 

@@ -13,6 +13,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useProjectStore } from '../projectStore';
+import { useEditorStore } from '../editorStore';
+import { useDialogStore } from '../dialogStore';
+import i18n from '../../i18n';
 
 interface ElectronStub {
   project: {
@@ -193,5 +196,53 @@ describe('projectStore.createProject — same machine', () => {
     const s = useProjectStore.getState().loadState;
     expect(s.kind).toBe('failed');
     if (s.kind === 'failed') expect(s.error).toBe('disk full');
+  });
+});
+
+describe('projectStore — bascule refusée pendant une renumérotation', () => {
+  const inProgress = i18n.t('book.renumberInProgress');
+  const opened = { ...fakeProject, createdAt: new Date(), lastOpenedAt: new Date() };
+  const openedState = { kind: 'ready', loadedAt: 'avant', path: '/tmp/p1' } as const;
+
+  beforeEach(() => {
+    useProjectStore.setState({ currentProject: opened, loadState: openedState });
+    useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ switchLock: null } as never);
+    useProjectStore.setState({ currentProject: null });
+    while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
+  });
+
+  it('loadProject n’appelle pas le main, garde le projet et dit pourquoi', async () => {
+    const refused = useProjectStore.getState().loadProject('/tmp/p2');
+    await vi.waitFor(() => expect(useDialogStore.getState().alertOpen).toBe(true));
+    useDialogStore.getState().closeAlert();
+    await refused;
+
+    expect(stub.project.load).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject).toBe(opened);
+    expect(useProjectStore.getState().loadState).toBe(openedState);
+  });
+
+  it('closeProject n’appelle pas le main, garde le projet et dit pourquoi', async () => {
+    const refused = Promise.resolve(useProjectStore.getState().closeProject());
+    await vi.waitFor(() => expect(useDialogStore.getState().alertMessage).toBe(inProgress));
+    useDialogStore.getState().closeAlert();
+    await refused;
+
+    expect(stub.project.close).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject).toBe(opened);
+  });
+
+  it('une fois le verrou levé, les deux repartent', async () => {
+    useEditorStore.setState({ switchLock: null } as never);
+
+    await useProjectStore.getState().closeProject();
+
+    expect(stub.project.close).toHaveBeenCalledTimes(1);
+    expect(useProjectStore.getState().currentProject).toBeNull();
+    expect(useDialogStore.getState().alertOpen).toBe(false);
   });
 });

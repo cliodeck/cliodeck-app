@@ -6,6 +6,8 @@ import {
   type ResolvedChapter,
   type UnattachedFile,
 } from '@backend/types/book';
+import i18n from '../i18n';
+import { useDialogStore } from './dialogStore';
 
 // MARK: - Types
 
@@ -95,6 +97,21 @@ async function saveOutgoingEditorIfDirty(): Promise<void> {
   }
 }
 
+/**
+ * Le verrou de bascule de l'éditeur vaut aussi pour le projet : une
+ * renumérotation écrit le manuscrit du projet courant, fichier par fichier.
+ * Rend vrai si l'action doit s'arrêter, l'auteur étant alors prévenu. Une
+ * alerte et non un rejet : les appelants traduiraient un rejet par « project.json
+ * endommagé », et le bouton de fermeture n'en attrape aucun.
+ */
+async function refusedBySwitchLock(): Promise<boolean> {
+  const { useEditorStore } = await import('./editorStore');
+  const { switchLock } = useEditorStore.getState();
+  if (!switchLock) return false;
+  await useDialogStore.getState().showAlert(i18n.t(switchLock));
+  return true;
+}
+
 // MARK: - Store
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -107,6 +124,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   recentProjects: [],
 
   loadProject: async (projectPath: string) => {
+    if (await refusedBySwitchLock()) return;
     set({ loadState: { kind: 'loading', path: projectPath } });
     try {
       // Bascule de PROJET : le garde anti-perte d'editorStore.loadFile ne
@@ -317,6 +335,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   closeProject: async () => {
+    if (await refusedBySwitchLock()) return;
+
     // Fermer le projet abandonne le document courant : on le sauvegarde
     // tant que le backend du projet est encore ouvert. Best-effort ici (la
     // fermeture doit rester possible), mais l'échec est signalé.

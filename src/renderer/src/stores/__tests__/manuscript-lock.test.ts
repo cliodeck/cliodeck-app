@@ -50,35 +50,37 @@ describe('verrou du manuscrit', () => {
   });
 
   /**
-   * La renumérotation tient le verrou jusqu'à la fermeture de son alerte
-   * finale (`handleRenumberFootnotes`, EditorPanel). Une alerte de fond qui
-   * survenait à ce moment — fin d'un téléchargement Zotero, par exemple —
-   * écrasait son résolveur : l'attente ne se terminait jamais, le `finally`
-   * ne relâchait rien, et exports comme renumérotation restaient refusés
-   * jusqu'au redémarrage.
+   * La renumérotation relâche le verrou AVANT son alerte finale : elle le
+   * tenait jusqu'à la fermeture du dialogue, et une alerte de fond (fin d'un
+   * téléchargement Zotero, par exemple) laissait exports et renumérotation
+   * refusés tant que personne n'avait tout fermé. `handleRenumberFootnotes`
+   * lui-même est couvert par `Editor/__tests__/renumber-switch.test.tsx` ; ici,
+   * la même séquence ramenée au verrou et à la file de dialogues.
    */
-  it('se libère même si une alerte tierce survient pendant l’attente', async () => {
+  it('est déjà libre pendant l’alerte finale, même si une alerte tierce survient', async () => {
     const dialogs = () => useDialogStore.getState();
     const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     void (async () => {
       useManuscriptStore.getState().setRenumbering(true);
       try {
-        await dialogs().showAlert('book.renumberDone');
+        // Les chapitres s'écrivent ici.
       } finally {
         useManuscriptStore.getState().setRenumbering(false);
       }
+      await dialogs().showAlert('book.renumberDone');
     })();
     void dialogs().showAlert('bibliography.pdfDownloadedAndIndexed');
 
-    expect(reason()).toBe('book.renumberInProgress');
-
-    dialogs().closeAlert();
-    await flush();
-    dialogs().closeAlert();
-    await flush();
-
     expect(reason()).toBeUndefined();
+    expect(dialogs().alertMessage).toBe('book.renumberDone');
+
+    dialogs().closeAlert();
+    await flush();
+    expect(dialogs().alertMessage).toBe('bibliography.pdfDownloadedAndIndexed');
+    dialogs().closeAlert();
+    await flush();
+
     expect(dialogs().alertOpen).toBe(false);
   });
 });

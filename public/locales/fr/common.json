@@ -2005,6 +2005,8 @@
     "renumberDone": "Notes renumérotées dans {{count}} chapitre(s).",
     "renumberError": "La renumérotation a échoué : le manuscrit est inchangé.",
     "renumberInProgress": "Renumérotation des notes en cours — réessayez dans un instant.",
+    "renumberInterrupted": "Renumérotation interrompue : le chapitre ouvert a changé pendant l'opération. Relancez-la pour la terminer.",
+    "renumberTimedOut": "Renumérotation arrêtée : le disque n'a pas répondu pendant {{minutes}} minutes. Des chapitres ont pu être renumérotés, pas tous : relancez-la quand le disque répondra.",
     "settings": {
       "title": "Réglages de l'ouvrage",
       "saveError": "Enregistrement des réglages impossible — modification annulée.",

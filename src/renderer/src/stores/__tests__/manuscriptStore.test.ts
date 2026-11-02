@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { useManuscriptStore, currentRelativePath } from '../manuscriptStore';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
+import type { EditorFacade } from '@/editor/facade';
 
 /**
  * Le store de manuscrit (Phase 3) tient une règle non négociable : le
@@ -31,6 +32,36 @@ function installIpc(files: Record<string, string>): { readCalls: string[][] } {
     },
   } as never;
   return { readCalls };
+}
+
+/** Comme `installIpc`, mais la lecture du disque attend `release()`. */
+function installHeldIpc(files: Record<string, string>): { release: () => void } {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const g = globalThis as unknown as { window?: unknown };
+  if (!g.window) g.window = g;
+  (globalThis as unknown as { electron: unknown }).electron = {
+    project: {
+      readChapters: vi.fn(async (data: { filePaths: string[] }) => {
+        await held;
+        return {
+          success: true,
+          files: data.filePaths.map((filePath) => ({ filePath, content: files[filePath] })),
+        };
+      }),
+    },
+  } as never;
+  return { release };
+}
+
+/** L'auteur ouvre le chapitre 2 : le fichier et la vue changent ensemble. */
+function switchToChapterTwo(): void {
+  useEditorStore.setState({
+    filePath: `${PROJECT_PATH}/chapters/02.md`,
+    editorFacade: { getValue: () => '# Deux (vivant)\n' } as EditorFacade,
+  });
 }
 
 function setChapters(): void {
@@ -101,6 +132,41 @@ describe('readManuscript', () => {
       'chapters/02.md',
       'chapters/01.md',
     ]);
+  });
+});
+
+describe('bascule de chapitre pendant la lecture du disque', () => {
+  beforeEach(() => {
+    useEditorStore.setState({
+      editorFacade: { getValue: () => '# Un (vivant)\n' } as EditorFacade,
+    });
+  });
+
+  it('readManuscript garde au chapitre ouvert au départ son propre texte', async () => {
+    const { release } = installHeldIpc({ 'chapters/02.md': '# Deux (disque)\n' });
+
+    const reading = useManuscriptStore.getState().readManuscript();
+    switchToChapterTwo();
+    release();
+    const docs = await reading;
+
+    expect(docs.map((d) => [d.chapter.filePath, d.content, d.live])).toEqual([
+      ['chapters/01.md', '# Un (vivant)\n', true],
+      ['chapters/02.md', '# Deux (disque)\n', false],
+    ]);
+  });
+
+  it('refreshAll ne range pas sous un chapitre le plan de celui qui l’a remplacé', async () => {
+    const { release } = installHeldIpc({ 'chapters/02.md': '# Deux (disque)\n' });
+
+    const refreshing = useManuscriptStore.getState().refreshAll();
+    switchToChapterTwo();
+    release();
+    await refreshing;
+
+    const { info } = useManuscriptStore.getState();
+    expect(info['chapters/01.md'].outline[0].text).toBe('Un (vivant)');
+    expect(info['chapters/02.md'].outline[0].text).toBe('Deux (disque)');
   });
 });
 
