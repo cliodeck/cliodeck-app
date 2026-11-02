@@ -29,14 +29,27 @@ vi.mock('../../../stores/editorStore', () => ({
   }),
 }));
 
+// MainLayout, pour le changement de panneau par le menu : seuls ses panneaux
+// lourds sont remplacés, le panneau gauche et son aiguillage restent les vrais.
+vi.mock('../../Bibliography/BibliographyPanel', () => ({
+  BibliographyPanel: () => <div data-testid="panneau-bibliographie" />,
+}));
+vi.mock('../../Chat/AssistantChat', () => ({ AssistantChat: () => null }));
+vi.mock('../../Project/ProjectPanel', () => ({ ProjectPanel: () => null }));
+vi.mock('../../Brainstorm/BrainstormPanel', () => ({ BrainstormPanel: () => null }));
+vi.mock('../../Layout/StatusBar', () => ({ StatusBar: () => null }));
+vi.mock('../../common/StatusToast', () => ({ StatusToast: () => null }));
+
 import { PDFExportModal } from '../PDFExportModal';
 import { WordExportModal } from '../WordExportModal';
 import { PresentationExportModal } from '../PresentationExportModal';
+import { MainLayout } from '../../Layout/MainLayout';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 
 interface ExportOutcome {
   success: boolean;
   error?: string;
+  unresolvedCitations?: string[];
 }
 
 type ExportModal = React.FC<{ isOpen: boolean; onClose: () => void }>;
@@ -200,4 +213,72 @@ describe.each(MODALS)('modale d’export $name', ({ Modal, exportLabel, exportin
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+});
+
+/**
+ * ProjectPanel monte les modales PDF et Word dans le panneau gauche. Le fond de
+ * la modale bloque la souris, mais pas les accélérateurs de menu : Alt+2 quittait
+ * le panneau, donc démontait la modale, et l'issue de l'export n'était vue nulle
+ * part (en souffrait surtout un échec, ou les citations non résolues d'un Word).
+ */
+describe.each(MODALS.filter(({ name }) => name !== 'présentation'))(
+  'modale d’export $name dans le panneau gauche',
+  ({ Modal, exportLabel, exportingLabel }) => {
+    const showBibliography = () =>
+      act(() => {
+        window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' }));
+      });
+
+    it('le menu « Bibliographie » pendant l’export ne fait pas perdre l’échec', async () => {
+      const finish = installElectron();
+      const { container } = render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
+      await startExport(exportLabel, exportingLabel);
+
+      showBibliography();
+
+      expect(screen.getByRole('button', { name: exportingLabel })).toBeInTheDocument();
+      expect(screen.queryByTestId('panneau-bibliographie')).toBeNull();
+
+      finish({ success: false, error: 'xelatex a échoué' });
+      await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+      expect(container.querySelector('.export-error')).toHaveTextContent('xelatex a échoué');
+    });
+
+    it('l’export fini, le menu change de nouveau de panneau', async () => {
+      const finish = installElectron();
+      const { container } = render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
+      await startExport(exportLabel, exportingLabel);
+      showBibliography();
+      finish({ success: false, error: 'xelatex a échoué' });
+      await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+
+      showBibliography();
+
+      expect(screen.getByTestId('panneau-bibliographie')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: exportLabel })).toBeNull();
+    });
+
+    it('hors export, le menu change de panneau', async () => {
+      installElectron();
+      render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
+      await screen.findByRole('button', { name: exportLabel });
+
+      showBibliography();
+
+      expect(screen.getByTestId('panneau-bibliographie')).toBeInTheDocument();
+    });
+  },
+);
+
+it('le menu « Bibliographie » pendant un export Word ne fait pas perdre les citations non résolues', async () => {
+  const finish = installElectron();
+  render(<MainLayout leftPanel={<WordExportModal isOpen onClose={vi.fn()} />} />);
+  await startExport('export.word.export', 'export.word.exporting');
+
+  act(() => {
+    window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' }));
+  });
+  finish({ success: true, unresolvedCitations: ['absente'] });
+
+  expect(await screen.findByTestId('word-export-unresolved')).toBeInTheDocument();
 });
