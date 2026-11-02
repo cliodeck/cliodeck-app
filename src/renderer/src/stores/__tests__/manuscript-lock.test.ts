@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { useManuscriptStore } from '../manuscriptStore';
+import { useDialogStore } from '../dialogStore';
 
 const reason = () => useManuscriptStore.getState().manuscriptBusyReason();
 
@@ -46,5 +47,38 @@ describe('verrou du manuscrit', () => {
     useManuscriptStore.getState().setRenumbering(true);
     useManuscriptStore.getState().setExporting(true);
     expect(reason()).toBe('book.renumberInProgress');
+  });
+
+  /**
+   * La renumérotation tient le verrou jusqu'à la fermeture de son alerte
+   * finale (`handleRenumberFootnotes`, EditorPanel). Une alerte de fond qui
+   * survenait à ce moment — fin d'un téléchargement Zotero, par exemple —
+   * écrasait son résolveur : l'attente ne se terminait jamais, le `finally`
+   * ne relâchait rien, et exports comme renumérotation restaient refusés
+   * jusqu'au redémarrage.
+   */
+  it('se libère même si une alerte tierce survient pendant l’attente', async () => {
+    const dialogs = () => useDialogStore.getState();
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    void (async () => {
+      useManuscriptStore.getState().setRenumbering(true);
+      try {
+        await dialogs().showAlert('book.renumberDone');
+      } finally {
+        useManuscriptStore.getState().setRenumbering(false);
+      }
+    })();
+    void dialogs().showAlert('bibliography.pdfDownloadedAndIndexed');
+
+    expect(reason()).toBe('book.renumberInProgress');
+
+    dialogs().closeAlert();
+    await flush();
+    dialogs().closeAlert();
+    await flush();
+
+    expect(reason()).toBeUndefined();
+    expect(dialogs().alertOpen).toBe(false);
   });
 });

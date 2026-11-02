@@ -6,6 +6,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -20,9 +21,6 @@ interface WordExportModalProps {
 }
 
 export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClose }) => {
-  // Échap ferme la modale (le piège de focus s'active quand la ref
-  // est attachée au conteneur).
-  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { filePath, getLiveContent } = useEditorStore();
@@ -37,6 +35,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // La minuterie de succès appelle le `onClose` du parent : démontée, la
+  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
+  const afterSuccess = useMountedTimeout();
   const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
@@ -230,7 +231,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
-        setTimeout(() => {
+        afterSuccess(() => {
           onClose();
           // Reset state
           setIsExporting(false);
@@ -265,6 +266,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
+
+  // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
+  // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
+  // la ref est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;
 

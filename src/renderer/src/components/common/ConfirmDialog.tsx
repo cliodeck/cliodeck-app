@@ -7,7 +7,7 @@ import './ConfirmDialog.css'
 
 export function ConfirmDialog() {
   const { t } = useTranslation('common')
-  const { confirmOpen, confirmMessage, confirmTitle, resolveConfirm } = useDialogStore()
+  const { confirmOpen, confirmMessage, confirmTitle, confirmResolver, resolveConfirm } = useDialogStore()
   const cancelButtonRef = useRef<HTMLButtonElement>(null)
 
   const dialogRef = useFocusTrap({
@@ -23,11 +23,15 @@ export function ConfirmDialog() {
   // Entrée successifs suffisaient à effacer tout le journal, la purge
   // demandant justement deux confirmations d'affilée. Le geste par défaut
   // doit être celui qui ne détruit rien.
+  //
+  // Dépend aussi du résolveur, propre à chaque demande : deux confirmations
+  // en file se succèdent sans passer par « fermé », et le focus resterait sur
+  // le Confirmer qui vient de servir.
   useEffect(() => {
     if (confirmOpen && cancelButtonRef.current) {
       cancelButtonRef.current.focus()
     }
-  }, [confirmOpen])
+  }, [confirmOpen, confirmResolver])
 
   if (!confirmOpen) return null
 

@@ -1,6 +1,16 @@
 import { create } from 'zustand'
 
+type DialogRequest =
+  | { kind: 'alert'; message: string; title?: string; resolve: () => void }
+  | { kind: 'confirm'; message: string; title?: string; resolve: (value: boolean) => void }
+
 interface DialogState {
+  // File des demandes : un seul dialogue à l'écran, la tête. Remplacer le
+  // dialogue ouvert le faisait disparaître sans avoir été lu et laissait sa
+  // promesse sans réponse — or des appelants l'attendent en tenant un verrou
+  // (la renumérotation d'un livre, jusqu'au redémarrage).
+  queue: DialogRequest[]
+
   // Alert state
   alertOpen: boolean
   alertMessage: string
@@ -20,64 +30,52 @@ interface DialogState {
   resolveConfirm: (value: boolean) => void
 }
 
-export const useDialogStore = create<DialogState>((set, get) => ({
-  // Alert state
-  alertOpen: false,
-  alertMessage: '',
-  alertTitle: undefined,
-  alertResolver: null,
+/** Les champs lus par les composants ne montrent que la tête de la file. */
+function showingHeadOf(queue: DialogRequest[]) {
+  const head = queue[0]
+  const alert = head?.kind === 'alert' ? head : null
+  const confirm = head?.kind === 'confirm' ? head : null
+  return {
+    queue,
 
-  // Confirm state
-  confirmOpen: false,
-  confirmMessage: '',
-  confirmTitle: undefined,
-  confirmResolver: null,
+    alertOpen: alert !== null,
+    alertMessage: alert?.message ?? '',
+    alertTitle: alert?.title,
+    alertResolver: alert?.resolve ?? null,
+
+    confirmOpen: confirm !== null,
+    confirmMessage: confirm?.message ?? '',
+    confirmTitle: confirm?.title,
+    confirmResolver: confirm?.resolve ?? null,
+  }
+}
+
+export const useDialogStore = create<DialogState>((set, get) => ({
+  ...showingHeadOf([]),
 
   showAlert: (message: string, title?: string) => {
     return new Promise<void>((resolve) => {
-      set({
-        alertOpen: true,
-        alertMessage: message,
-        alertTitle: title,
-        alertResolver: resolve,
-      })
+      set(showingHeadOf([...get().queue, { kind: 'alert', message, title, resolve }]))
     })
   },
 
   closeAlert: () => {
-    const { alertResolver } = get()
-    if (alertResolver) {
-      alertResolver()
-    }
-    set({
-      alertOpen: false,
-      alertMessage: '',
-      alertTitle: undefined,
-      alertResolver: null,
-    })
+    const [head, ...rest] = get().queue
+    if (head?.kind !== 'alert') return
+    set(showingHeadOf(rest))
+    head.resolve()
   },
 
   showConfirm: (message: string, title?: string) => {
     return new Promise<boolean>((resolve) => {
-      set({
-        confirmOpen: true,
-        confirmMessage: message,
-        confirmTitle: title,
-        confirmResolver: resolve,
-      })
+      set(showingHeadOf([...get().queue, { kind: 'confirm', message, title, resolve }]))
     })
   },
 
   resolveConfirm: (value: boolean) => {
-    const { confirmResolver } = get()
-    if (confirmResolver) {
-      confirmResolver(value)
-    }
-    set({
-      confirmOpen: false,
-      confirmMessage: '',
-      confirmTitle: undefined,
-      confirmResolver: null,
-    })
+    const [head, ...rest] = get().queue
+    if (head?.kind !== 'confirm') return
+    set(showingHeadOf(rest))
+    head.resolve(value)
   },
 }))

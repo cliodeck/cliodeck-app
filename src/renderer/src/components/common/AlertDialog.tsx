@@ -7,7 +7,7 @@ import './AlertDialog.css'
 
 export function AlertDialog() {
   const { t } = useTranslation('common')
-  const { alertOpen, alertMessage, alertTitle, closeAlert } = useDialogStore()
+  const { alertOpen, alertMessage, alertTitle, alertResolver, closeAlert } = useDialogStore()
   const okButtonRef = useRef<HTMLButtonElement>(null)
 
   const dialogRef = useFocusTrap({
@@ -16,12 +16,13 @@ export function AlertDialog() {
     restoreFocus: true,
   })
 
-  // Focus the OK button when dialog opens
+  // Focus the OK button when dialog opens — et à chaque demande : deux alertes
+  // en file se succèdent sans passer par « fermé ».
   useEffect(() => {
     if (alertOpen && okButtonRef.current) {
       okButtonRef.current.focus()
     }
-  }, [alertOpen])
+  }, [alertOpen, alertResolver])
 
   if (!alertOpen) return null
 

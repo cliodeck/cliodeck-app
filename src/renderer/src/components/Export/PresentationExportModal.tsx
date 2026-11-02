@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import { backdropClose } from '../../utils/backdropClose';
 interface PresentationExportModalProps {
   isOpen: boolean;
@@ -15,9 +16,6 @@ interface PresentationExportModalProps {
 }
 
 export const PresentationExportModal: React.FC<PresentationExportModalProps> = ({ isOpen, onClose }) => {
-  // Échap ferme la modale (le piège de focus s'active quand la ref
-  // est attachée au conteneur).
-  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject } = useProjectStore();
   const { content } = useEditorStore();
@@ -30,6 +28,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // La minuterie de succès appelle le `onClose` du parent : démontée, la
+  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
+  const afterSuccess = useMountedTimeout();
 
   // Initialize with project data
   useEffect(() => {
@@ -128,7 +129,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
 
       if (result.success) {
         setSuccess(true);
-        setTimeout(() => {
+        afterSuccess(() => {
           onClose();
           // Reset state
           setIsExporting(false);
@@ -155,6 +156,11 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
+
+  // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
+  // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
+  // la ref est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;
 

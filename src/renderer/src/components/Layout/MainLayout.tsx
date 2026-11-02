@@ -9,6 +9,7 @@ import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
 import { WorkspaceModeBar } from './WorkspaceModeBar';
 import { BrainstormPanel } from '../Brainstorm/BrainstormPanel';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
+import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { StatusBar } from './StatusBar';
 import { StatusToast } from '../common/StatusToast';
 import { logger } from '../../utils/logger';
@@ -97,6 +98,12 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   // Listen to menu shortcuts for panel switching and PDF export
   useEffect(() => {
     const handleSwitchPanel = (event: Event) => {
+      // ProjectPanel héberge les modales PDF et Word : le quitter pendant un
+      // export les démonterait, et l'issue (un échec, des citations non
+      // résolues) n'aurait plus d'interface. Le fond de la modale arrête la
+      // souris, pas les accélérateurs de menu : Alt+2 passait à côté.
+      if (useManuscriptStore.getState().exporting) return;
+
       const customEvent = event as CustomEvent;
       const panel = customEvent.detail;
       // Read store fresh each event so menu shortcuts target the *current*

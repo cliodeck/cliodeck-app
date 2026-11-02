@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
@@ -28,8 +28,14 @@ export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTML
     }
   }, [active, restoreFocus])
 
-  // Restore focus when trap deactivates
-  useEffect(() => {
+  // Restore focus when trap deactivates.
+  //
+  // En phase layout, donc avant les effets passifs de TOUS les composants du
+  // même commit : quand un piège cède la place à un autre (deux dialogues en
+  // file), la restauration du sortant doit précéder la capture de l'entrant,
+  // quel que soit leur ordre de montage. Sinon le sortant reprend le focus à
+  // l'entrant, et celui-ci capture `body` au lieu du déclencheur.
+  useLayoutEffect(() => {
     if (!active && restoreFocus && previousFocusRef.current) {
       previousFocusRef.current.focus()
       previousFocusRef.current = null
