@@ -44,7 +44,10 @@ export function useMenuShortcuts() {
     };
 
     const handleSaveFile = async () => {
-      const { filePath } = useEditorStore.getState();
+      const { filePath, bufferDetached } = useEditorStore.getState();
+
+      // Hors de tout document, le temps d'un changement de projet : rien à enregistrer.
+      if (bufferDetached) return;
 
       // If no file path exists, open "Save As" dialog
       if (!filePath) {

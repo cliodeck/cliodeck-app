@@ -219,6 +219,7 @@ describe('projectStore — bascule refusée pendant une renumérotation', () => 
   it('loadProject n’appelle pas le main, garde le projet et dit pourquoi', async () => {
     const refused = useProjectStore.getState().loadProject('/tmp/p2');
     await vi.waitFor(() => expect(useDialogStore.getState().alertOpen).toBe(true));
+    expect(useProjectStore.getState().loadState).toBe(openedState);
     useDialogStore.getState().closeAlert();
     await refused;
 
@@ -235,6 +236,19 @@ describe('projectStore — bascule refusée pendant une renumérotation', () => 
 
     expect(stub.project.close).not.toHaveBeenCalled();
     expect(useProjectStore.getState().currentProject).toBe(opened);
+  });
+
+  it('createProject n’appelle pas le main, garde le projet et dit pourquoi', async () => {
+    const refused = useProjectStore.getState().createProject('Neuf', 'article', '/tmp');
+    await vi.waitFor(() => expect(useDialogStore.getState().alertMessage).toBe(inProgress));
+    // Aucun voile de chargement derrière l'alerte : le refus arrive avant tout.
+    expect(useProjectStore.getState().loadState).toBe(openedState);
+    useDialogStore.getState().closeAlert();
+
+    expect(await refused).toBe(false);
+    expect(stub.project.create).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject).toBe(opened);
+    expect(useProjectStore.getState().loadState).toBe(openedState);
   });
 
   it('une fois le verrou levé, les deux repartent', async () => {

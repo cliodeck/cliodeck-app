@@ -748,4 +748,106 @@ describe('detach : hors de tout document, le temps d’un changement de projet',
     expect(store().filePath).toBe(B);
     expect(useDialogStore.getState().confirmOpen).toBe(false);
   });
+
+  /** Détache, puis la vue détachée se monte : un texte vide, sa façade. */
+  async function detached(): Promise<void> {
+    openOn(A, '# A\n');
+    await store().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    live = '';
+    useEditorStore.setState({
+      editorFacade: { getValue: () => live, setValue } as unknown as EditorFacade,
+    });
+  }
+
+  it('Cmd+S : saveFileAs n’écrit pas un fichier vide, et le tampon ne prend aucun chemin', async () => {
+    await detached();
+
+    const outcome = await store().saveFileAs('/ailleurs/note.md');
+
+    expect(outcome).toEqual({ status: 'superseded' });
+    expect(writes).toEqual([]);
+    expect(disk['/ailleurs/note.md']).toBeUndefined();
+    expect(store().filePath).toBeNull();
+    expect(store().bufferDetached).toBe(true);
+  });
+
+  it('saveFile n’a rien à écrire, et ne réclame pas de chemin', async () => {
+    await detached();
+
+    await expect(store().saveFile()).resolves.toBeUndefined();
+
+    expect(writes).toEqual([]);
+    expect(store().lastSavedAt).toBeNull();
+  });
+
+  it.each([
+    ['open-file', { kind: 'open', filePath: B }],
+    ['new-document', { kind: 'untitled' }],
+  ] as const)('%s : le changement de projet a la main, rien ne bouge', async (reason, target) => {
+    await detached();
+    const version = store().documentVersion;
+
+    const outcome = await store().replaceBuffer(target, reason);
+
+    expect(outcome).toEqual({ status: 'superseded' });
+    expect(store().filePath).toBeNull();
+    expect(store().bufferDetached).toBe(true);
+    expect(store().documentVersion).toBe(version);
+    expect(reads).toEqual([]);
+  });
+
+  it('une demande de l’auteur ne chasse pas l’ouverture en cours du projet', async () => {
+    await detached();
+    const gate = deferred();
+    beforeRead = () => gate.promise;
+
+    const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'project-open');
+    await flushMicrotasks();
+    await store().replaceBuffer({ kind: 'open', filePath: C }, 'open-file');
+    gate.release();
+
+    expect(await opening).toEqual({ status: 'replaced' });
+    expect(store().filePath).toBe(B);
+  });
+
+  it('un texte inséré par programme dans le tampon détaché ne pose aucune question', async () => {
+    await detached();
+    store().insertText('[@cle]');
+    live = '[@cle]';
+
+    const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'project-open');
+    await flushMicrotasks();
+
+    expect(useDialogStore.getState().confirmOpen).toBe(false);
+    expect(await opening).toEqual({ status: 'replaced' });
+    expect(store().content).toBe('# B\n');
+    expect(store().isDirty).toBe(false);
+  });
+
+  it('un texte inséré pendant la lecture n’arrête pas l’ouverture : l’éditeur ne reste pas figé', async () => {
+    await detached();
+    beforeRead = () => {
+      live = '[@cle]';
+    };
+
+    const outcome = await store().replaceBuffer({ kind: 'open', filePath: B }, 'project-open');
+
+    expect(outcome).toEqual({ status: 'replaced' });
+    expect(store().bufferDetached).toBe(false);
+  });
+
+  it.each([
+    ['project-open', { kind: 'open', filePath: B }, B],
+    ['project-restore', { kind: 'open', filePath: A }, A],
+    ['project-open', { kind: 'untitled' }, null],
+  ] as const)('verrou posé pendant la bascule : %s sort quand même du tampon détaché', async (reason, target, path) => {
+    await detached();
+    store().setSwitchLock(LOCK);
+
+    const outcome = await store().replaceBuffer(target, reason);
+
+    expect(outcome).toEqual({ status: 'replaced' });
+    expect(store().filePath).toBe(path);
+    expect(store().bufferDetached).toBe(false);
+  });
 });

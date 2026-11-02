@@ -66,7 +66,8 @@ export const ProjectPanel: React.FC = () => {
 
     setIsCreating(true);
     try {
-      await createProject(projectName, newProjectType, newProjectPath);
+      // Rien de créé, sans erreur : la modale reste, avec ce que l'auteur y a saisi.
+      if (!(await createProject(projectName, newProjectType, newProjectPath))) return;
       setShowCreateModal(false);
       setNewProjectName('');
       setNewProjectPath('');

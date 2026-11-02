@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StoreApi } from 'zustand';
 import {
   DEFAULT_BOOK_SETTINGS,
   type BookSettings,
@@ -62,7 +62,11 @@ interface ProjectState {
 
   // Actions
   loadProject: (projectPath: string) => Promise<void>;
-  createProject: (name: string, type: Project['type'], path: string) => Promise<void>;
+  /**
+   * Rend faux si rien n'a été créé sans qu'il y ait d'erreur : l'auteur garde son
+   * tampon sans titre, le verrou est posé, ou une autre demande a pris le pas.
+   */
+  createProject: (name: string, type: Project['type'], path: string) => Promise<boolean>;
   closeProject: () => void;
 
   setCurrentChapter: (chapterId: string) => void;
@@ -84,14 +88,200 @@ interface ProjectState {
  * Sauvegarde le document ouvert dans l'éditeur s'il a des modifications non
  * écrites, en lisant comme la porte le texte vivant : `isDirty` ne voit ni une
  * frappe que la synchronisation n'a pas poussée, ni une frappe pendant une écriture.
- * Appelé avant toute bascule/fermeture de projet : une fois le projet remplacé, le
- * main refuse d'écrire le sortant. La porte rejetterait alors, et le repli de
- * `loadProject` réécrirait le document du projet entrant. Import dynamique pour
- * éviter le cycle projectStore ↔ editorStore.
+ * Appelé avant la fermeture d'un projet, tant que le main autorise encore son
+ * écriture. Import dynamique pour éviter le cycle projectStore ↔ editorStore.
  */
 async function saveOutgoingEditorIfDirty(): Promise<void> {
   const { writeOpenDocumentWhileDirty } = await import('./editorStore');
   await writeOpenDocumentWhileDirty();
+}
+
+/** Le document quitté, à rouvrir si le changement de projet échoue. */
+interface DetachedEditor {
+  from: string | null;
+}
+
+/**
+ * Coupe l'éditeur du projet qu'on quitte, AVANT de demander le changement au main.
+ * Le sortant s'écrit pendant que son projet est encore le projet courant, et plus
+ * rien ne s'y tape ensuite : une frappe pendant `project:load` n'avait plus nulle
+ * part où s'écrire, la bascule rejetait, et le repli réécrivait le document entrant.
+ *
+ * Rend `null` si le changement n'a pas lieu : l'auteur garde son tampon sans titre,
+ * une autre demande a pris le pas, ou le verrou est posé, ce qui lui est dit. Rejette
+ * si le sortant ne peut pas être écrit : rien n'a changé, et rien ne se perd.
+ */
+async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
+  const { useEditorStore } = await import('./editorStore');
+  const outcome = await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+  if (outcome.status === 'locked') await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
+  return outcome.status === 'replaced' ? { from: outcome.detachedFrom ?? null } : null;
+}
+
+/**
+ * Le changement de projet a échoué : l'écran montre encore le projet d'avant, et
+ * l'éditeur y revient. Si le main a déjà basculé, il refuse de relire ce document :
+ * un tampon vide, mais le sortant est sur le disque et l'éditeur n'est pas figé.
+ */
+async function reopenAfterFailedSwitch(detached: DetachedEditor): Promise<void> {
+  const { useEditorStore } = await import('./editorStore');
+  const { replaceBuffer } = useEditorStore.getState();
+  if (detached.from) {
+    try {
+      const outcome = await replaceBuffer({ kind: 'open', filePath: detached.from }, 'project-restore');
+      if (outcome.status === 'replaced') return;
+    } catch (error) {
+      console.error('Document sortant impossible à rouvrir:', error);
+    }
+  }
+  await replaceBuffer({ kind: 'untitled' }, 'project-restore');
+}
+
+/** Un projet tel que le main le rend : dates sérialisées, et ce qu'il reste à ouvrir. */
+interface ProjectFromMain extends Omit<Project, 'createdAt' | 'lastOpenedAt'> {
+  createdAt: string;
+  lastOpenedAt?: string;
+  bibliographySource?: { filePath?: string };
+  book?: Partial<BookSettings>;
+}
+
+/**
+ * Pose le projet entrant, puis ses chapitres, sa bibliographie et son document.
+ * Commun à l'ouverture et à la création : la création s'arrêtait au premier point,
+ * et l'auteur tapait dans un éditeur sans document ou dans celui du projet d'avant.
+ * L'éditeur est détaché quand elle arrive, et n'en sort qu'ici.
+ */
+async function openProjectContents(
+  project: ProjectFromMain,
+  set: StoreApi<ProjectState>['setState']
+): Promise<void> {
+  set({
+    currentProject: {
+      ...project,
+      createdAt: new Date(project.createdAt),
+      lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
+    },
+    // Rien du projet d'avant : un navigateur composerait ses chemins sous le nouveau.
+    chapters: [],
+    unattachedFiles: [],
+    currentChapterId: null,
+    bookSettings: { ...DEFAULT_BOOK_SETTINGS },
+  });
+
+  // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
+  // JAMAIS empêcher l'ouverture du projet — un manuscrit ne devient pas
+  // inaccessible à cause d'une liste accessoire.
+  let firstChapterPath: string | null = null;
+  if (project.type === 'book') {
+    set({ bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...(project.book ?? {}) } });
+    try {
+      const chaptersResult = await window.electron.project.getChapters(project.path);
+      if (chaptersResult.success) {
+        set({
+          chapters: chaptersResult.chapters,
+          unattachedFiles: chaptersResult.unattached ?? [],
+        });
+        const first = chaptersResult.chapters.find(
+          (c: ResolvedChapter) => !c.missing
+        );
+        if (first) {
+          firstChapterPath = `${project.path}/${first.filePath}`;
+          set({ currentChapterId: first.id });
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
+    }
+  }
+
+  // Load bibliography if configured
+  console.log('🔍 Project data received:', {
+    hasBibliography: !!project.bibliography,
+    bibliographyPath: project.bibliography,
+    hasBibliographySource: !!project.bibliographySource
+  });
+
+  // Try loading from bibliographySource first (new system), fallback to bibliography (old system)
+  let bibliographyPath: string | null = null;
+
+  if (project.bibliographySource?.filePath) {
+    // New system: construct path from project directory + relative file path
+    bibliographyPath = `${project.path}/${project.bibliographySource.filePath}`;
+    console.log('📚 Using bibliographySource:', project.bibliographySource);
+  } else if (project.bibliography) {
+    // Old system: use absolute path directly
+    bibliographyPath = project.bibliography;
+    console.log('📚 Using legacy bibliography path');
+  }
+
+  if (bibliographyPath) {
+    try {
+      const { useBibliographyStore } = await import('./bibliographyStore');
+      console.log('📚 Loading bibliography from:', bibliographyPath);
+      // Use loadBibliographyWithMetadata to restore zoteroAttachments from metadata file
+      await useBibliographyStore.getState().loadBibliographyWithMetadata(bibliographyPath, project.path);
+      console.log('✅ Bibliography loaded for project (with metadata)');
+      // Refresh indexed PDFs to update the Chat panel state
+      await useBibliographyStore.getState().refreshIndexedPDFs();
+      console.log('✅ Indexed PDFs refreshed');
+    } catch (error) {
+      console.error('❌ Failed to load project bibliography:', error);
+    }
+  } else {
+    console.log('ℹ️ No bibliography to load');
+    // Still refresh indexed PDFs in case there are documents indexed without bibliography
+    try {
+      const { useBibliographyStore } = await import('./bibliographyStore');
+      await useBibliographyStore.getState().refreshIndexedPDFs();
+    } catch (error) {
+      console.error('❌ Failed to refresh indexed PDFs:', error);
+    }
+  }
+
+  // Ouvrir le document principal. Pour un livre, c'est le PREMIER
+  // chapitre du manifeste : un livre n'a pas de `document.md` et
+  // l'ouvrir créerait un fichier fantôme hors manuscrit.
+  const documentPath =
+    project.type === 'presentation'
+      ? `${project.path}/slides.md`
+      : project.type === 'book'
+        ? firstChapterPath
+        : `${project.path}/document.md`;
+
+  const { useEditorStore } = await import('./editorStore');
+  const { replaceBuffer } = useEditorStore.getState();
+  const openDocument = async (filePath: string): Promise<boolean> => {
+    const outcome = await replaceBuffer({ kind: 'open', filePath }, 'project-open');
+    return outcome.status === 'replaced';
+  };
+
+  let opened = false;
+  if (!documentPath) {
+    // Livre au manifeste vide (tous les chapitres manquants, ou projet
+    // créé hors app) : on n'invente pas de fichier — la Phase 2 offrira
+    // de créer un chapitre ou de rattacher un fichier existant.
+    console.warn('ℹ️ Aucun chapitre à ouvrir : manifeste vide');
+  } else {
+    try {
+      // Load file FIRST so content is ready in the store
+      opened = await openDocument(documentPath);
+      console.log('📝 Document loaded into editor with path tracking');
+    } catch (error) {
+      console.error('Failed to load document into editor:', error);
+
+      // If document doesn't exist, create it
+      try {
+        await window.electron.fs.writeFile(documentPath, `# ${project.name}\n`);
+        opened = await openDocument(documentPath);
+        console.log('📝 Created and loaded document');
+      } catch (createError) {
+        console.error('Failed to create document:', createError);
+      }
+    }
+  }
+
+  // Rien à ouvrir : ni l'ancien document, ni un éditeur figé en lecture seule.
+  if (!opened) await replaceBuffer({ kind: 'untitled' }, 'project-open');
 }
 
 /**
@@ -122,14 +312,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   loadProject: async (projectPath: string) => {
     if (await refusedBySwitchLock()) return;
+    const loadStateBefore = get().loadState;
     set({ loadState: { kind: 'loading', path: projectPath } });
+    let detached: DetachedEditor | null = null;
     try {
-      // Bascule de PROJET : le garde anti-perte d'editorStore.loadFile ne
-      // couvre que les bascules de fichier — ici le document sortant doit
-      // être sauvegardé AVANT project.load, pendant que son projet est
-      // encore le projet courant (chemins validés côté main). Échec de
-      // sauvegarde → on annule la bascule plutôt que de perdre les frappes.
-      await saveOutgoingEditorIfDirty();
+      detached = await detachOutgoingEditor();
+      if (!detached) {
+        set({ loadState: loadStateBefore });
+        return;
+      }
 
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
@@ -146,119 +337,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         bibliographySource: project.bibliographySource
       });
 
-      set({
-        currentProject: {
-          ...project,
-          createdAt: new Date(project.createdAt),
-          lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
-        },
-      });
-
-      // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
-      // JAMAIS empêcher l'ouverture du projet — un manuscrit ne devient pas
-      // inaccessible à cause d'une liste accessoire.
-      let firstChapterPath: string | null = null;
-      if (project.type === 'book') {
-        set({ bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...(project.book ?? {}) } });
-        try {
-          const chaptersResult = await window.electron.project.getChapters(project.path);
-          if (chaptersResult.success) {
-            set({
-              chapters: chaptersResult.chapters,
-              unattachedFiles: chaptersResult.unattached ?? [],
-            });
-            const first = chaptersResult.chapters.find(
-              (c: ResolvedChapter) => !c.missing
-            );
-            if (first) {
-              firstChapterPath = `${project.path}/${first.filePath}`;
-              set({ currentChapterId: first.id });
-            }
-          }
-        } catch (error) {
-          console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
-        }
-      }
-
-      // Load bibliography if configured
-      console.log('🔍 Project data received:', {
-        hasBibliography: !!project.bibliography,
-        bibliographyPath: project.bibliography,
-        hasBibliographySource: !!project.bibliographySource
-      });
-
-      // Try loading from bibliographySource first (new system), fallback to bibliography (old system)
-      let bibliographyPath: string | null = null;
-
-      if (project.bibliographySource?.filePath) {
-        // New system: construct path from project directory + relative file path
-        bibliographyPath = `${project.path}/${project.bibliographySource.filePath}`;
-        console.log('📚 Using bibliographySource:', project.bibliographySource);
-      } else if (project.bibliography) {
-        // Old system: use absolute path directly
-        bibliographyPath = project.bibliography;
-        console.log('📚 Using legacy bibliography path');
-      }
-
-      if (bibliographyPath) {
-        try {
-          const { useBibliographyStore } = await import('./bibliographyStore');
-          console.log('📚 Loading bibliography from:', bibliographyPath);
-          // Use loadBibliographyWithMetadata to restore zoteroAttachments from metadata file
-          await useBibliographyStore.getState().loadBibliographyWithMetadata(bibliographyPath, project.path);
-          console.log('✅ Bibliography loaded for project (with metadata)');
-          // Refresh indexed PDFs to update the Chat panel state
-          await useBibliographyStore.getState().refreshIndexedPDFs();
-          console.log('✅ Indexed PDFs refreshed');
-        } catch (error) {
-          console.error('❌ Failed to load project bibliography:', error);
-        }
-      } else {
-        console.log('ℹ️ No bibliography to load');
-        // Still refresh indexed PDFs in case there are documents indexed without bibliography
-        try {
-          const { useBibliographyStore } = await import('./bibliographyStore');
-          await useBibliographyStore.getState().refreshIndexedPDFs();
-        } catch (error) {
-          console.error('❌ Failed to refresh indexed PDFs:', error);
-        }
-      }
-
-      // Ouvrir le document principal. Pour un livre, c'est le PREMIER
-      // chapitre du manifeste : un livre n'a pas de `document.md` et
-      // l'ouvrir créerait un fichier fantôme hors manuscrit.
-      const documentPath =
-        project.type === 'presentation'
-          ? `${project.path}/slides.md`
-          : project.type === 'book'
-            ? firstChapterPath
-            : `${project.path}/document.md`;
-
-      if (!documentPath) {
-        // Livre au manifeste vide (tous les chapitres manquants, ou projet
-        // créé hors app) : on n'invente pas de fichier — la Phase 2 offrira
-        // de créer un chapitre ou de rattacher un fichier existant.
-        console.warn('ℹ️ Aucun chapitre à ouvrir : manifeste vide');
-      } else {
-        try {
-          // Load file FIRST so content is ready in the store
-          const { useEditorStore } = await import('./editorStore');
-          await useEditorStore.getState().loadFile(documentPath);
-          console.log('📝 Document loaded into editor with path tracking');
-        } catch (error) {
-          console.error('Failed to load document into editor:', error);
-
-          // If document doesn't exist, create it
-          try {
-            const { useEditorStore } = await import('./editorStore');
-            await window.electron.fs.writeFile(documentPath, `# ${project.name}\n`);
-            await useEditorStore.getState().loadFile(documentPath);
-            console.log('📝 Created and loaded document');
-          } catch (createError) {
-            console.error('Failed to create document:', createError);
-          }
-        }
-      }
+      await openProjectContents(project, set);
 
       // Update recent projects
       await get().loadRecentProjects();
@@ -272,6 +351,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to load project:', error);
+      if (detached) await reopenAfterFailedSwitch(detached);
       set({
         loadState: {
           kind: 'failed',
@@ -285,11 +365,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (name: string, type: Project['type'], path: string) => {
+    if (await refusedBySwitchLock()) return false;
+    const loadStateBefore = get().loadState;
     set({ loadState: { kind: 'loading', path } });
+    let detached: DetachedEditor | null = null;
     try {
-      // Même garde que loadProject : créer un projet bascule aussi hors du
-      // document courant.
-      await saveOutgoingEditorIfDirty();
+      // Même coupure que loadProject : créer un projet bascule aussi le main.
+      detached = await detachOutgoingEditor();
+      if (!detached) {
+        set({ loadState: loadStateBefore });
+        return false;
+      }
 
       const result = await window.electron.project.create({ name, type, path });
 
@@ -297,28 +383,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         throw new Error(result.error || 'Failed to create project');
       }
 
-      const project = result.project;
+      await openProjectContents(result.project, set);
+
+      await get().loadRecentProjects();
 
       set({
-        currentProject: {
-          ...project,
-          createdAt: new Date(project.createdAt),
-          lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
-        },
-        chapters: [],
-        unattachedFiles: [],
-        currentChapterId: null,
-        bookSettings: { ...DEFAULT_BOOK_SETTINGS },
         loadState: {
           kind: 'ready',
           loadedAt: new Date().toISOString(),
           path,
         },
       });
-
-      await get().loadRecentProjects();
+      return true;
     } catch (error) {
       console.error('Failed to create project:', error);
+      if (detached) await reopenAfterFailedSwitch(detached);
       set({
         loadState: {
           kind: 'failed',

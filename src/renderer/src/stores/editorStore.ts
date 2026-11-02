@@ -36,7 +36,10 @@ export type BufferTarget =
   | { kind: 'untitled'; discardOutgoing?: true }
   | { kind: 'detach'; discardOutgoing?: true };
 
-/** Pourquoi le document change : pour le journal, sans effet sur le remplacement. */
+/**
+ * Pourquoi le document change : pour le journal et, hors de tout document, pour
+ * laisser au changement de projet en cours le soin de sortir de `detach`.
+ */
 export type BufferReason =
   | 'open-file'
   | 'new-document'
@@ -98,7 +101,10 @@ interface EditorState {
    */
   documentVersion: number;
 
-  /** La vue est hors de tout document (`detach`) : lecture seule, pas de cache. */
+  /**
+   * La vue est hors de tout document (`detach`) : lecture seule, pas de cache, et
+   * seul le changement de projet en cours remplace le tampon.
+   */
   bufferDetached: boolean;
 
   /**
@@ -268,12 +274,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     logger.store('Editor', 'replaceBuffer called', { next, reason });
     const openPath = next.kind === 'open' ? next.filePath : null;
 
+    // Hors de tout document, le changement de projet a la main. Rouvrir un fichier du
+    // projet qu'on quitte y ramènerait l'éditeur, et la frappe suivante irait vers un
+    // chemin que le main refuse dès qu'il a basculé.
+    if (get().bufferDetached && (reason === 'open-file' || reason === 'new-document')) {
+      return { status: 'superseded' };
+    }
+
     // Le verrou se contrôle en tête et de nouveau à l'arrivée : la demande partie
     // avant lui ne doit pas aboutir sous l'opération qu'il protège. Rouvrir le
     // fichier ouvert ne bascule rien : il n'y a rien à refuser, ni rien à relire.
+    // Un tampon détaché n'a aucun document à protéger, et y rester figerait l'éditeur.
     const refusedByLock = (): BufferOutcome | null => {
-      const { switchLock, filePath } = get();
-      if (!switchLock) return null;
+      const { switchLock, filePath, bufferDetached } = get();
+      if (!switchLock || bufferDetached) return null;
       return openPath !== null && openPath === filePath
         ? { status: 'unchanged' }
         : { status: 'locked', lock: switchLock };
@@ -325,15 +339,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // dernières secondes étaient perdues (useAutoSave annule son minuteur quand
     // `filePath` change) et le contenu sortant finissait écrit dans le fichier
     // entrant. L'écriture lit l'éditeur vivant, donc y compris ce que la
-    // synchronisation debouncée n'a pas encore poussé.
-    const keepOutgoing = next.kind === 'open' || !next.discardOutgoing;
+    // synchronisation debouncée n'a pas encore poussé. Un tampon détaché n'a rien à
+    // garder : ce qui s'y trouverait n'y est pas venu de l'auteur, et une question
+    // à ce moment-là laisserait le projet ouvert sur un éditeur figé.
+    const outgoingDetached = get().bufferDetached;
+    const keepOutgoing = !outgoingDetached && (next.kind === 'open' || !next.discardOutgoing);
     if (keepOutgoing && !(await flushOutgoing(request))) return { status: 'cancelled' };
     const staleAfterFlush = refusedOnArrival();
     if (staleAfterFlush) return staleAfterFlush;
 
     // Un tampon sans titre n'a nulle part où s'écrire : son texte de cet instant est
     // le seul que l'auteur a accepté de perdre, ou qui était vide.
-    const untitledText = get().filePath ? null : get().getLiveContent();
+    const untitledText = get().filePath || outgoingDetached ? null : get().getLiveContent();
 
     const text = openPath === null ? '' : await readDocumentFromDisk(openPath);
     const staleAfterRead = refusedOnArrival();
@@ -365,6 +382,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     logger.store('Editor', 'saveFile called', { filePath, contentLength: content.length });
 
     if (!filePath) {
+      // Hors de tout document, le sortant est déjà écrit : Enregistrer n'a rien à
+      // proposer. L'erreur ouvrirait le dialogue « Enregistrer sous ».
+      if (get().bufferDetached) return;
       throw new Error('No file path specified. Use saveFileAs instead.');
     }
 
@@ -391,7 +411,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   saveFileAs: async (newFilePath: string): Promise<SaveAsOutcome> => {
-    const { switchLock, documentVersion } = get();
+    const { switchLock, documentVersion, bufferDetached } = get();
+    // Hors de tout document : ce serait écrire un fichier vide, et donner un chemin
+    // à un tampon que le changement de projet va remplacer.
+    if (bufferDetached) return { status: 'superseded' };
     if (switchLock) return { status: 'locked', lock: switchLock };
 
     const content = get().getLiveContent();

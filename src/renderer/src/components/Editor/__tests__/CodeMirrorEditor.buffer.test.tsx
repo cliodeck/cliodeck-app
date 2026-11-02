@@ -527,12 +527,44 @@ describe('vue détachée, le temps d’un changement de projet', () => {
     expect(disk[A]).toBe(`${TEXT_A}${PHRASE}`);
 
     await act(async () => {
-      await useEditorStore.getState().loadFile(A);
+      await useEditorStore.getState().replaceBuffer({ kind: 'open', filePath: A }, 'project-restore');
     });
 
     expect(currentView().state.readOnly).toBe(false);
     expect(currentView().contentDOM.getAttribute('contenteditable')).toBe('true');
     expect(text(currentView())).toBe(`${TEXT_A}${PHRASE}`);
     expect(undo(currentView())).toBe(true);
+  });
+
+  it('dit ce qui se passe : l’auteur ne tape pas dans le vide sans le savoir', async () => {
+    await mountBook();
+
+    await act(async () => {
+      await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+
+    expect(currentView().contentDOM.textContent).toContain('project.loading');
+
+    await act(async () => {
+      await useEditorStore.getState().replaceBuffer({ kind: 'open', filePath: B }, 'project-open');
+    });
+
+    expect(currentView().contentDOM.textContent).not.toContain('project.loading');
+  });
+
+  it('une insertion par programme n’y entre pas : la lecture seule ne protège que du clavier', async () => {
+    await mountBook();
+    await act(async () => {
+      await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+
+    await act(async () => {
+      useEditorStore.getState().editorFacade?.replaceSelection('[@cle]');
+    });
+    await wait(400);
+
+    expect(text(currentView())).toBe('');
+    expect(useEditorStore.getState().content).toBe('');
+    expect(useEditorStore.getState().isDirty).toBe(false);
   });
 });
