@@ -351,6 +351,87 @@ describe('frappes pendant la bascule', () => {
   });
 });
 
+describe('frappes dans un tampon sans titre pendant la lecture du fichier demandé', () => {
+  it('tampon vide au départ : le texte reste, sans question, et un second clic la pose', async () => {
+    openOn(null, '');
+    const version = store().documentVersion;
+    beforeRead = (path) => {
+      if (path === B) live = 'Une page entière.';
+    };
+
+    const outcome = await store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+
+    expect(outcome).toEqual({ status: 'superseded' });
+    expect(store().filePath).toBeNull();
+    expect(store().getLiveContent()).toBe('Une page entière.');
+    expect(store().documentVersion).toBe(version);
+    expect(useDialogStore.getState().confirmOpen).toBe(false);
+
+    beforeRead = () => undefined;
+    const again = store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+    await flushMicrotasks();
+    expect(confirmMessage()).toBe(i18n.t('editor.discardUntitledConfirm'));
+    acceptConfirm();
+    expect(await again).toEqual({ status: 'replaced' });
+    expect(store().filePath).toBe(B);
+  });
+
+  it('question acceptée : l’accord ne vaut que pour le texte qu’il a vu', async () => {
+    openOn(null, '', { isDirty: true, live: 'Une page.' });
+    beforeRead = (path) => {
+      if (path === B) live = 'Une page. Et une autre.';
+    };
+
+    const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+    await flushMicrotasks();
+    acceptConfirm();
+
+    expect(await opening).toEqual({ status: 'superseded' });
+    expect(store().filePath).toBeNull();
+    expect(store().getLiveContent()).toBe('Une page. Et une autre.');
+  });
+
+  it('verrou posé pendant la lecture, avec une frappe : le refus reste dit à l’auteur', async () => {
+    openOn(null, '');
+    beforeRead = (path) => {
+      if (path === B) {
+        live = 'Une page entière.';
+        store().setSwitchLock(LOCK);
+      }
+    };
+
+    const outcome = await store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+
+    expect(outcome).toEqual({ status: 'locked', lock: LOCK });
+    expect(store().getLiveContent()).toBe('Une page entière.');
+  });
+
+  it('rien de tapé pendant la lecture : la bascule a lieu', async () => {
+    openOn(null, '');
+    beforeRead = () => undefined;
+
+    const outcome = await store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+
+    expect(outcome).toEqual({ status: 'replaced' });
+    expect(store().filePath).toBe(B);
+  });
+
+  it('enregistré sous pendant la lecture, sans frappe : rien à retenir, la bascule a lieu', async () => {
+    openOn(null, '', { isDirty: true, live: 'Une page.' });
+    beforeRead = async (path) => {
+      if (path === B) await store().saveFileAs(C);
+    };
+
+    const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+    await flushMicrotasks();
+    acceptConfirm();
+
+    expect(await opening).toEqual({ status: 'replaced' });
+    expect(store().filePath).toBe(B);
+    expect(disk[C]).toBe('Une page.');
+  });
+});
+
 describe('demandes concurrentes', () => {
   it('le dernier gagne, quel que soit l’ordre d’arrivée des lectures', async () => {
     openOn(A, '# A\n');

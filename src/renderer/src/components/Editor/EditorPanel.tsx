@@ -135,6 +135,8 @@ export const EditorPanel: React.FC = () => {
             { name: t('toolbar.markdown'), extensions: ['md'] },
             { name: t('project.allFiles'), extensions: ['*'] },
           ],
+          // Invite de remplacement : effet documenté sous Linux seulement.
+          properties: ['showOverwriteConfirmation'],
         });
 
         if (!result.canceled && result.filePath) {

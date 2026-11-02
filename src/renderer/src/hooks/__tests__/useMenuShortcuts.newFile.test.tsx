@@ -27,6 +27,10 @@ let openFile: ReturnType<typeof vi.fn>;
 let saveDialog: ReturnType<typeof vi.fn>;
 let live: string;
 
+/** La vue, réduite au texte vivant. */
+const facade = () =>
+  ({ getValue: () => live, setValue: () => undefined }) as unknown as EditorFacade;
+
 function mount(type: 'article' | 'book'): void {
   useProjectStore.setState({
     currentProject: {
@@ -44,7 +48,7 @@ function mount(type: 'article' | 'book'): void {
     content: disk[DOCUMENT],
     isDirty: false,
     switchLock: null,
-    editorFacade: { getValue: () => live, setValue: () => undefined } as unknown as EditorFacade,
+    editorFacade: facade(),
   });
   renderHook(() => useMenuShortcuts());
 }
@@ -157,6 +161,36 @@ describe('menu:new-file', () => {
     await menu('menu:new-file');
 
     expect(createChapter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('menu:save-file sur un tampon sans titre', () => {
+  // Le nom proposé arrivait dans le dernier dossier, souvent celui du projet : valider
+  // ce nom remplaçait le manuscrit, et seule l'invite du système l'empêchait.
+  it('ne propose aucun nom : document.md ne se remplace plus d’un simple Entrée', async () => {
+    mount('article');
+    await menu('menu:new-file');
+    await answerConfirm(true);
+    // La vue du tampon se monte ; l'auteur y tape.
+    live = 'Une idée à part.';
+    useEditorStore.setState({ editorFacade: facade() });
+
+    await menu('menu:save-file');
+
+    expect(saveDialog).toHaveBeenCalled();
+    expect(saveDialog.mock.calls[0][0]).not.toHaveProperty('defaultPath');
+    expect(disk[DOCUMENT]).toBe('# Article\n');
+    expect(disk['/ailleurs/note.md']).toBe('Une idée à part.');
+  });
+
+  it('passe l’option d’invite de remplacement, documentée pour Linux', async () => {
+    mount('article');
+    useEditorStore.setState({ filePath: null, content: '', isDirty: true });
+    live = 'Une page.';
+
+    await menu('menu:save-file');
+
+    expect(saveDialog.mock.calls[0][0].properties).toContain('showOverwriteConfirmation');
   });
 });
 

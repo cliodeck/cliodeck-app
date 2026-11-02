@@ -275,6 +275,23 @@ describe('« Nouveau fichier » dans un livre', () => {
   });
 });
 
+describe('Enregistrer un tampon sans titre', () => {
+  it('passe l’option d’invite de remplacement, et ne propose aucun nom', async () => {
+    await mount('article', DOCUMENT);
+    await clickNewFile();
+    await answerConfirm(true);
+    await typeInEditor('Une page.');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.save'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(saveDialog.mock.calls[0][0]).not.toHaveProperty('defaultPath');
+    expect(saveDialog.mock.calls[0][0].properties).toContain('showOverwriteConfirmation');
+  });
+});
+
 describe('les autres boutons de fichier sous le verrou', () => {
   it('Ouvrir dit la vraie raison, plus « fichier introuvable ou illisible »', async () => {
     await mount('article', DOCUMENT);

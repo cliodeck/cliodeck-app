@@ -205,7 +205,7 @@ function openDocumentNeedsFlush(): boolean {
  * Écrit le document ouvert tant qu'il reste du texte à écrire. Un échec d'écriture
  * remonte. `stillWanted` arrête la boucle quand l'écriture suivante n'a plus d'objet.
  */
-export async function flushOpenDocument(stillWanted: () => boolean = () => true): Promise<void> {
+export async function writeOpenDocumentWhileDirty(stillWanted: () => boolean = () => true): Promise<void> {
   for (let pass = 0; pass < MAX_FLUSH_PASSES && openDocumentNeedsFlush(); pass += 1) {
     await useEditorStore.getState().saveFile();
     if (!stillWanted()) break;
@@ -224,7 +224,7 @@ async function flushOutgoing(request: number): Promise<boolean> {
     if (state.getLiveContent() === '') return true;
     return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'));
   }
-  await flushOpenDocument(() => request === bufferRequestSeq);
+  await writeOpenDocumentWhileDirty(() => request === bufferRequestSeq);
   return true;
 }
 
@@ -331,11 +331,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const staleAfterFlush = refusedOnArrival();
     if (staleAfterFlush) return staleAfterFlush;
 
+    // Un tampon sans titre n'a nulle part où s'écrire : son texte de cet instant est
+    // le seul que l'auteur a accepté de perdre, ou qui était vide.
+    const untitledText = get().filePath ? null : get().getLiveContent();
+
     const text = openPath === null ? '' : await readDocumentFromDisk(openPath);
     const staleAfterRead = refusedOnArrival();
     if (staleAfterRead) return staleAfterRead;
 
-    // L'auteur a pu taper pendant ces attentes.
+    // L'auteur a pu taper pendant ces attentes. Comme plus bas pour un fichier, on ne
+    // l'interrompt pas pour perdre ce qu'il écrit.
+    if (untitledText !== null && get().getLiveContent() !== untitledText) {
+      return { status: 'superseded' };
+    }
     if (keepOutgoing && openDocumentNeedsFlush()) {
       await flushOutgoing(request);
       const staleAfterSecondFlush = refusedOnArrival();

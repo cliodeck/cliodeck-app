@@ -49,9 +49,12 @@ export function useMenuShortcuts() {
       // If no file path exists, open "Save As" dialog
       if (!filePath) {
         try {
+          // Aucun nom proposé : le main place le dialogue dans le dernier dossier, souvent
+          // celui du projet, et « document.md » y désignerait le manuscrit à remplacer.
+          // L'option d'invite de remplacement n'a d'effet documenté que sous Linux.
           const result = await window.electron.dialog.saveFile({
             filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
-            defaultPath: 'document.md',
+            properties: ['showOverwriteConfirmation'],
           });
 
           if (!result.canceled && result.filePath) {

@@ -10,7 +10,7 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
@@ -69,6 +69,12 @@ async function openProject(app: ElectronApplication, window: Page, projectJson: 
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
   }, projectJson);
   await window.locator('button[title="Ouvrir un projet"]').first().click();
+}
+
+/** Ce qu'observe le dialogue natif simulé : la forme vit dans le processus main. */
+interface SaveDialogOptions {
+  defaultPath?: string;
+  properties?: string[];
 }
 
 const editor = (window: Page) => window.locator('.codemirror-editor .cm-content');
@@ -218,6 +224,56 @@ test('article : Nouveau fichier laisse document.md intact, et il se rouvre avec 
     await expect(window.locator('.confirm-dialog')).toContainText('sans titre');
     await answerConfirm(window, 'confirm');
     await expect(editor(window)).toContainText('Dernière phrase.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : Cmd+S après Nouveau fichier ne propose pas de remplacer document.md', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+  const chosen = join(article.dir, 'une-idee.md');
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await window.locator('.toolbar-btn[title="Nouveau fichier"]').first().click();
+    await answerConfirm(window, 'confirm');
+    await expect(editor(window)).not.toContainText('Huit mille mots');
+    await typeAtEnd(window, 'Une idée à part.');
+
+    // L'auteur valide le nom proposé, s'il y en a un. Le dialogue natif est simulé :
+    // l'invite « Remplacer ? » du système, seul rempart jusqu'ici, n'est pas exercée.
+    await app.evaluate(({ dialog }, fallback) => {
+      const seen: SaveDialogOptions[] = [];
+      (globalThis as unknown as { saveDialogOptions: SaveDialogOptions[] }).saveDialogOptions = seen;
+      (dialog as unknown as { showSaveDialog: unknown }).showSaveDialog = async (options: SaveDialogOptions) => {
+        seen.push(options);
+        const proposed = options.defaultPath ?? '';
+        return { canceled: false, filePath: proposed.endsWith('.md') ? proposed : fallback };
+      };
+    }, chosen);
+    await sendMenu(app, 'menu:save-file');
+
+    await expect
+      .poll(() => (existsSync(chosen) ? readFileSync(chosen, 'utf8') : null), { timeout: 5_000 })
+      .toBe('Une idée à part.');
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+
+    const [options] = await app.evaluate(
+      () => (globalThis as unknown as { saveDialogOptions: SaveDialogOptions[] }).saveDialogOptions,
+    );
+    // Le dossier du dernier choix est conservé (Electron 43), sans nom de fichier.
+    expect(options.defaultPath ?? '').not.toContain('document.md');
+    expect(options.properties).toContain('showOverwriteConfirmation');
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

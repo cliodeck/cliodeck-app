@@ -90,8 +90,8 @@ interface ProjectState {
  * éviter le cycle projectStore ↔ editorStore.
  */
 async function saveOutgoingEditorIfDirty(): Promise<void> {
-  const { flushOpenDocument } = await import('./editorStore');
-  await flushOpenDocument();
+  const { writeOpenDocumentWhileDirty } = await import('./editorStore');
+  await writeOpenDocumentWhileDirty();
 }
 
 /**
