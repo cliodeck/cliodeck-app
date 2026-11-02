@@ -76,11 +76,7 @@ export function formatCitationReport(
   return `${t('citations.missing', { count: result.missing.size })}\n\n${lines.join('\n')}`;
 }
 
-/**
- * Vérifie puis affiche le résultat. C'est ce que doivent appeler le bouton
- * de la barre d'outils comme l'entrée de menu.
- */
-export async function runCitationCheck(t: TFunction): Promise<void> {
+async function reportCitations(t: TFunction): Promise<void> {
   try {
     const result = await checkCitations();
     await useDialogStore.getState().showAlert(formatCitationReport(result, t));
@@ -88,4 +84,23 @@ export async function runCitationCheck(t: TFunction): Promise<void> {
     logger.error('CheckCitations', error);
     await useDialogStore.getState().showAlert(t('citations.checkError'));
   }
+}
+
+let running: Promise<void> | null = null;
+
+/**
+ * Vérifie puis affiche le résultat. C'est ce que doivent appeler le bouton
+ * de la barre d'outils comme l'entrée de menu.
+ *
+ * Une seule vérification à la fois, jusqu'à la fermeture de son rapport : les
+ * dialogues passent en file et ne s'écrasent plus, si bien qu'une commande
+ * reçue deux fois demanderait deux clics sur OK pour le même rapport. Or les
+ * écouteurs du menu ne se retirent pas et se réabonnent quand `t` change : une
+ * seule commande de menu arrive ici deux fois.
+ */
+export function runCitationCheck(t: TFunction): Promise<void> {
+  running ??= reportCitations(t).finally(() => {
+    running = null;
+  });
+  return running;
 }
