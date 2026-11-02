@@ -271,6 +271,7 @@ export const FsReadDirectorySchema = z.object({
 export const FsWriteFileSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),
   content: z.string(),
+  options: z.object({ exclusive: z.boolean().optional() }).optional(),
 });
 
 export const FsReadFileSchema = z.object({

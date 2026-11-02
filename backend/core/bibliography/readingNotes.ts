@@ -1,7 +1,8 @@
 import { existsSync } from 'fs';
-import { mkdir, readdir, readFile, rename, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, rename } from 'fs/promises';
 import path from 'path';
 import yaml from 'js-yaml';
+import { atomicWriteFile } from '../fs/user-files.js';
 
 /**
  * Notes de lecture : un fichier Markdown par référence, dans un dossier
@@ -109,9 +110,7 @@ export function noteFileName(citekey: string): string {
 
 async function writeAtomically(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.tmp`;
-  await writeFile(temporary, content, 'utf-8');
-  await rename(temporary, file);
+  await atomicWriteFile(file, content);
 }
 
 /**

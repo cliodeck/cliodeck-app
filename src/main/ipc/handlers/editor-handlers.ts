@@ -3,6 +3,7 @@
  */
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
+import { atomicWriteFile } from '../../../../backend/core/fs/user-files.js';
 import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import { projectManager } from '../../services/project-manager.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
@@ -44,8 +45,7 @@ export function setupEditorHandlers() {
       console.log('📞 IPC Call: editor:save-file', { filePath: rawPath, contentLength: content.length });
       try {
         const filePath = await authorizeDocumentPath(rawPath, 'write');
-        const { writeFile } = await import('fs/promises');
-        await writeFile(filePath, content, 'utf-8');
+        await atomicWriteFile(filePath, content);
 
         // Log document operation to history
         const hm = historyService.getHistoryManager();

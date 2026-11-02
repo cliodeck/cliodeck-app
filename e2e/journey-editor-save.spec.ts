@@ -13,10 +13,23 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
+
+/** Le pont du preload, tel que les tests l'appellent depuis la page. */
+interface ElectronWindow {
+  electron: {
+    fs: {
+      readUserFile(filePath: string): Promise<{ kind: string; content?: string; reason?: string }>;
+      writeFile(filePath: string, content: string, options?: { exclusive?: boolean }): Promise<unknown>;
+      quarantineFile(
+        filePath: string
+      ): Promise<{ success: true; backupPath: string } | { success: false; error: string }>;
+    };
+  };
+}
 
 const ORIGINAL = '# Chapitre premier\n\nTexte déjà écrit.\n';
 const TYPED = 'Une phrase tapée dans l’éditeur.';
@@ -72,9 +85,85 @@ test('le texte tapé puis enregistré atteint document.md', async () => {
 
     // Le texte d'origine est conservé : on ajoute, on n'écrase pas.
     expect(readFileSync(projet.documentMd, 'utf8')).toContain('Texte déjà écrit');
+    // La sauvegarde passe par un fichier temporaire : rien ne doit en rester.
+    expect(readdirSync(projet.dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('le socle de fichiers est joignable depuis le renderer, et décide sur le vrai disque', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const dehors = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-dehors-'));
+
+  // Les liaisons du preload n'existent que dans l'app : Vitest ne les voit pas.
+  const fsBridge = {
+    readUserFile: (filePath: string) =>
+      window.evaluate((p) => (window as unknown as ElectronWindow).electron.fs.readUserFile(p), filePath),
+    writeExclusive: (filePath: string, content: string) =>
+      window.evaluate(
+        ([p, c]) =>
+          (window as unknown as ElectronWindow).electron.fs.writeFile(p, c, { exclusive: true }).then(
+            () => 'écrit',
+            (error: Error) => error.message
+          ),
+        [filePath, content] as const
+      ),
+    quarantineFile: (filePath: string) =>
+      window.evaluate((p) => (window as unknown as ElectronWindow).electron.fs.quarantineFile(p), filePath),
+  };
+
+  try {
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+    }, projet.projectJson);
+    await window.locator('button[title="Ouvrir un projet"]').first().click();
+    await expect(window.locator('.codemirror-editor .cm-content')).toContainText('Texte déjà écrit', {
+      timeout: 20_000,
+    });
+
+    expect(await fsBridge.readUserFile(projet.documentMd)).toEqual({ kind: 'ok', content: ORIGINAL });
+    expect(await fsBridge.readUserFile(join(projet.dir, 'absent.md'))).toEqual({ kind: 'absent' });
+
+    // Le TextDecoder strict du Node d'Electron, pas seulement celui de Vitest.
+    const latin1 = join(projet.dir, 'latin1.md');
+    writeFileSync(latin1, Buffer.from([0x45, 0x74, 0xe9]));
+    expect(await fsBridge.readUserFile(latin1)).toMatchObject({ kind: 'unreadable', reason: 'encoding' });
+
+    const secret = join(dehors, 'secret.md');
+    writeFileSync(secret, 'à ne pas lire');
+    expect(await fsBridge.readUserFile(secret)).toMatchObject({ kind: 'unreadable', reason: 'refused' });
+
+    // L'écriture exclusive crée le fichier absent et n'écrase pas celui qui existe.
+    const seed = join(projet.dir, 'neuf.md');
+    expect(await fsBridge.writeExclusive(seed, '# Neuf\n')).toBe('écrit');
+    expect(readFileSync(seed, 'utf8')).toBe('# Neuf\n');
+    expect(await fsBridge.writeExclusive(projet.documentMd, '# Écrasé\n')).toContain('EEXIST');
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
+
+    // La mise de côté garde les octets, à côté du fichier.
+    const abime = join(projet.dir, 'ideas.json');
+    writeFileSync(abime, '{ tronqué');
+    const quarantined = await fsBridge.quarantineFile(abime);
+    if (!quarantined.success) throw new Error(quarantined.error);
+    expect(quarantined.backupPath).toContain('ideas.json.illisible-');
+    expect(readFileSync(quarantined.backupPath, 'utf8')).toBe('{ tronqué');
+    expect(existsSync(abime)).toBe(false);
+
+    expect((await fsBridge.quarantineFile(secret)).success).toBe(false);
+    expect(readFileSync(secret, 'utf8')).toBe('à ne pas lire');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+    rmSync(dehors, { recursive: true, force: true });
   }
 });
