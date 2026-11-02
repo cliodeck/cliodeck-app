@@ -3,6 +3,13 @@
  */
 import { ipcMain, dialog, shell } from 'electron';
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
+import {
+  atomicWriteFile,
+  quarantineFile,
+  readUserFile,
+  withFileLock,
+  type UserFileRead,
+} from '../../../../backend/core/fs/user-files.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
 import { rememberConsentedPath } from '../utils/user-consented-paths.js';
@@ -114,18 +121,65 @@ export function setupFilesystemHandlers() {
     }
   });
 
-  ipcMain.handle('fs:write-file', async (_event, rawFilePath: unknown, rawContent: unknown) => {
-    const { filePath, content } = validate(FsWriteFileSchema, { filePath: rawFilePath, content: rawContent });
-    console.log('📞 IPC Call: fs:write-file', { filePath, contentLength: content.length });
+  // Sans lever pour un chemin refusé : l'appelant traite ce cas comme les autres
+  // illisibles, au lieu de le confondre avec une panne du canal.
+  ipcMain.handle('fs:read-user-file', async (_event, rawFilePath: unknown) => {
+    const { filePath } = validate(FsReadFileSchema, { filePath: rawFilePath });
+    logger.info('ipc', 'fs:read-user-file', { filePath });
+    let validatedPath: string;
     try {
-      const validatedPath = await validateWritePath(filePath);
-      const { writeFile } = await import('fs/promises');
-      await writeFile(validatedPath, content, 'utf-8');
+      validatedPath = await validateReadPath(filePath);
+    } catch (error: unknown) {
+      const refused: UserFileRead = {
+        kind: 'unreadable',
+        reason: 'refused',
+        message: error instanceof Error ? error.message : String(error),
+      };
+      return refused;
+    }
+    return readUserFile(validatedPath);
+  });
+
+  ipcMain.handle('fs:write-file', async (_event, rawFilePath: unknown, rawContent: unknown, rawOptions?: unknown) => {
+    const { filePath, content, options } = validate(FsWriteFileSchema, {
+      filePath: rawFilePath,
+      content: rawContent,
+      options: rawOptions,
+    });
+    console.log('📞 IPC Call: fs:write-file', { filePath, contentLength: content.length, options });
+    try {
+      // Le verrou avant la validation : ses `await` ne doivent pas pouvoir inverser
+      // deux écritures et laisser la plus ancienne sur le disque.
+      await withFileLock(filePath, async () => {
+        const validatedPath = await validateWritePath(filePath);
+        if (options?.exclusive) {
+          // Créer sans jamais écraser : EEXIST remonte si le fichier existe déjà.
+          const { writeFile } = await import('fs/promises');
+          await writeFile(validatedPath, content, { encoding: 'utf-8', flag: 'wx' });
+        } else {
+          await atomicWriteFile(validatedPath, content);
+        }
+      });
       console.log('📤 IPC Response: fs:write-file - success');
       return successResponse();
     } catch (error: unknown) {
       console.error('❌ fs:write-file error:', error);
       throw error;
+    }
+  });
+
+  ipcMain.handle('fs:quarantine-file', async (_event, rawFilePath: unknown) => {
+    const { filePath } = validate(FsReadFileSchema, { filePath: rawFilePath });
+    console.log('📞 IPC Call: fs:quarantine-file', { filePath });
+    try {
+      const backupPath = await withFileLock(filePath, async () =>
+        quarantineFile(await validateWritePath(filePath))
+      );
+      console.log('📤 IPC Response: fs:quarantine-file', { backupPath });
+      return successResponse({ backupPath });
+    } catch (error: unknown) {
+      console.error('❌ fs:quarantine-file error:', error);
+      return errorResponse(error);
     }
   });
 

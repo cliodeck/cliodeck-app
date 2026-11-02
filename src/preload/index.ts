@@ -308,7 +308,26 @@ const api = {
     readDirectory: (dirPath: string) => ipcRenderer.invoke('fs:read-directory', dirPath),
     exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath),
     readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
-    writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:write-file', filePath, content),
+    /** Lecture qui ne lève pas : `UserFileRead` de `backend/core/fs/user-files.ts`. */
+    readUserFile: (
+      filePath: string
+    ): Promise<
+      | { kind: 'absent' }
+      | { kind: 'ok'; content: string }
+      | {
+          kind: 'unreadable';
+          reason: 'permission' | 'encoding' | 'not-a-file' | 'io' | 'refused';
+          message: string;
+        }
+    > => ipcRenderer.invoke('fs:read-user-file', filePath),
+    /** `exclusive` : crée le fichier, et échoue (EEXIST) s'il existe déjà. */
+    writeFile: (filePath: string, content: string, options?: { exclusive?: boolean }) =>
+      ipcRenderer.invoke('fs:write-file', filePath, content, options),
+    /** Met un fichier abîmé de côté (`<nom>.illisible-<horodatage>`). */
+    quarantineFile: (
+      filePath: string
+    ): Promise<{ success: true; backupPath: string } | { success: false; error: string }> =>
+      ipcRenderer.invoke('fs:quarantine-file', filePath),
     copyFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fs:copy-file', sourcePath, targetPath),
   },
 

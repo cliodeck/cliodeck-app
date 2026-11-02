@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import {
@@ -43,6 +43,18 @@ describe('notes de lecture', () => {
     expect(await listReadingNotes(project)).toEqual([
       { file, citekey: 'Braudel_1949', zoteroKey: 'ABCD1234', tags: [] },
     ]);
+  });
+
+  it('deux écritures simultanées d’une même note ne se marchent plus dessus', async () => {
+    const file = await ensureReadingNote(project, braudel);
+
+    // Le `.tmp` à nom fixe : la seconde renommait un fichier déjà parti (ENOENT).
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => setProjectTags(project, braudel, [`chapitre-${i}`]))
+    );
+
+    expect(readFileSync(file, 'utf-8')).toMatch(/tags:\n {2}- chapitre-\d/);
+    expect(readdirSync(notesDir())).toEqual(['Braudel_1949.md']);
   });
 
   it('ne réécrit jamais une note existante en l’ouvrant', async () => {

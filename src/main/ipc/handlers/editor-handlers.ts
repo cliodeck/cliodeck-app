@@ -3,6 +3,7 @@
  */
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
+import { atomicWriteFile, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import { projectManager } from '../../services/project-manager.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
@@ -43,9 +44,13 @@ export function setupEditorHandlers() {
       const { filePath: rawPath, content, previousContent } = validate(EditorSaveFileSchema, { filePath: rawFilePath, content: rawContent, previousContent: rawPreviousContent });
       console.log('📞 IPC Call: editor:save-file', { filePath: rawPath, contentLength: content.length });
       try {
-        const filePath = await authorizeDocumentPath(rawPath, 'write');
-        const { writeFile } = await import('fs/promises');
-        await writeFile(filePath, content, 'utf-8');
+        // Le verrou avant la validation : ses `await` ne doivent pas pouvoir inverser
+        // deux sauvegardes et laisser la plus ancienne sur le disque.
+        const filePath = await withFileLock(rawPath, async () => {
+          const authorized = await authorizeDocumentPath(rawPath, 'write');
+          await atomicWriteFile(authorized, content);
+          return authorized;
+        });
 
         // Log document operation to history
         const hm = historyService.getHistoryManager();
