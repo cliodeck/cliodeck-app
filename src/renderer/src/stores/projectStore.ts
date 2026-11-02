@@ -68,6 +68,8 @@ interface ProjectState {
    */
   createProject: (name: string, type: Project['type'], path: string) => Promise<boolean>;
   closeProject: () => void;
+  /** Met à jour le projet courant sans le recharger : ni l'éditeur ni les services. */
+  patchCurrentProject: (patch: Partial<Pick<Project, 'cslPath'>>) => void;
 
   setCurrentChapter: (chapterId: string) => void;
   /** Recharge le manifeste depuis le disque (après création/modification). */
@@ -439,6 +441,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       bookSettings: { ...DEFAULT_BOOK_SETTINGS },
       loadState: { kind: 'idle' },
     });
+  },
+
+  patchCurrentProject: (patch) => {
+    const { currentProject } = get();
+    if (currentProject) set({ currentProject: { ...currentProject, ...patch } });
   },
 
   setCurrentChapter: (chapterId: string) => {

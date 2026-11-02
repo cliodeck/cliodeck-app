@@ -34,6 +34,7 @@ export const ProjectPanel: React.FC = () => {
     loadProject,
     createProject,
     closeProject,
+    patchCurrentProject,
     loadRecentProjects,
     chapters,
   } = useProjectStore();
@@ -320,11 +321,7 @@ export const ProjectPanel: React.FC = () => {
                 <CSLSettings
                   projectPath={currentProject.path}
                   currentCSL={currentProject.cslPath}
-                  onCSLChange={() => {
-                    // Reload project to get updated CSL path
-                    const projectJsonPath = `${currentProject.path}/project.json`;
-                    loadProject(projectJsonPath);
-                  }}
+                  onCSLChange={(cslPath) => patchCurrentProject({ cslPath })}
                 />
               </CollapsibleSection>
             )}
