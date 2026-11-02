@@ -57,8 +57,8 @@ function makeBook(): ProjectOnDisk & { one: string; two: string } {
   return { ...project, one, two };
 }
 
-function makeArticle(): ProjectOnDisk & { document: string } {
-  const project = baseProject('article');
+function makeArticle(extra: Record<string, unknown> = {}): ProjectOnDisk & { document: string } {
+  const project = baseProject('article', extra);
   const document = join(project.dir, 'document.md');
   writeFileSync(document, ARTICLE);
   return { ...project, document };
@@ -251,5 +251,60 @@ test('article : le menu Nouveau fichier pose la même question que le bouton', a
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('deux projets : frappe pendant une écriture lente, puis ouverture de B : le document de B reste', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const a = makeArticle();
+  const b = makeArticle({ id: '00000000-0000-4000-8000-000000000022', name: 'Projet B' });
+
+  try {
+    await openProject(app, window, a.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    // Un disque lent (clé USB, dossier réseau) : 900 ms par écriture.
+    await app.evaluate(({ ipcMain }) => {
+      const handlers = (ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+      })._invokeHandlers;
+      const original = handlers.get('editor:save-file');
+      if (!original) throw new Error('editor:save-file introuvable');
+      handlers.set('editor:save-file', async (...args: unknown[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return original(...args);
+      });
+    });
+
+    await typeAtEnd(window, 'Phrase un.');
+    await sendMenu(app, 'menu:save-file');
+    await window.waitForTimeout(100);
+    // Pendant l'écriture : la réponse efface `isDirty`, le texte vivant reste en avance.
+    await window.keyboard.type(' Phrase deux.');
+    await expect
+      .poll(() => readFileSync(a.document, 'utf8'), { timeout: 5_000 })
+      .toBe(`${ARTICLE}Phrase un.`);
+    await window.waitForTimeout(600);
+
+    await openProject(app, window, b.projectJson);
+    await expect
+      .poll(() => readFileSync(a.document, 'utf8'), { timeout: 5_000 })
+      .toBe(`${ARTICLE}Phrase un. Phrase deux.`);
+    await expect(editor(window)).not.toContainText('Phrase un.', { timeout: 10_000 });
+    await expect(editor(window)).toContainText('Huit mille mots');
+    expect(readFileSync(b.document, 'utf8')).toBe(ARTICLE);
+    await window.waitForTimeout(3_500);
+    expect(readFileSync(a.document, 'utf8')).toBe(`${ARTICLE}Phrase un. Phrase deux.`);
+    expect(readFileSync(b.document, 'utf8')).toBe(ARTICLE);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(a.dir, { recursive: true, force: true });
+    rmSync(b.dir, { recursive: true, force: true });
   }
 });

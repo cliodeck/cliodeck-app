@@ -202,6 +202,17 @@ function openDocumentNeedsFlush(): boolean {
 }
 
 /**
+ * Écrit le document ouvert tant qu'il reste du texte à écrire. Un échec d'écriture
+ * remonte. `stillWanted` arrête la boucle quand l'écriture suivante n'a plus d'objet.
+ */
+export async function flushOpenDocument(stillWanted: () => boolean = () => true): Promise<void> {
+  for (let pass = 0; pass < MAX_FLUSH_PASSES && openDocumentNeedsFlush(); pass += 1) {
+    await useEditorStore.getState().saveFile();
+    if (!stillWanted()) break;
+  }
+}
+
+/**
  * Met le document sortant à l'abri. Rend faux si l'auteur refuse d'abandonner un
  * tampon sans titre. Un échec d'écriture remonte : les modifications seraient
  * perdues sans un mot si le remplacement continuait. Une demande chassée entre-temps
@@ -213,10 +224,7 @@ async function flushOutgoing(request: number): Promise<boolean> {
     if (state.getLiveContent() === '') return true;
     return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'));
   }
-  for (let pass = 0; pass < MAX_FLUSH_PASSES && openDocumentNeedsFlush(); pass += 1) {
-    await useEditorStore.getState().saveFile();
-    if (request !== bufferRequestSeq) break;
-  }
+  await flushOpenDocument(() => request === bufferRequestSeq);
   return true;
 }
 
@@ -297,14 +305,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
 
     // Déjà ouvert : un tampon modifié n'a rien à attendre du disque, et le recharger
-    // jetterait les frappes et l'annulation. Un tampon propre n'a rien à perdre : il
-    // ne reprend le disque que si le fichier a changé dehors.
+    // jetterait les frappes et l'annulation. Un tampon propre ne reprend le disque que
+    // si le fichier a changé dehors. Le miroir a bougé pendant la lecture : l'auteur a
+    // tapé puis enregistré, et ce texte lu peut dater d'avant son écriture.
     if (openPath !== null && openPath === get().filePath) {
       if (openDocumentNeedsFlush()) return { status: 'unchanged' };
+      const mirrorAtRead = get().content;
       const text = await readDocumentFromDisk(openPath);
       const stale = refusedOnArrival();
       if (stale) return stale;
-      if (openDocumentNeedsFlush() || text === get().content) return { status: 'unchanged' };
+      const { content: mirror } = get();
+      if (openDocumentNeedsFlush() || mirror !== mirrorAtRead || text === mirror) {
+        return { status: 'unchanged' };
+      }
       return commit(text);
     }
 

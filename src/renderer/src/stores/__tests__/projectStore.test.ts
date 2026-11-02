@@ -12,6 +12,7 @@
  * with stubs so the store's behaviour is exercised in isolation.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { EditorFacade } from '@/editor/facade';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
@@ -244,5 +245,137 @@ describe('projectStore — bascule refusée pendant une renumérotation', () => 
     expect(stub.project.close).toHaveBeenCalledTimes(1);
     expect(useProjectStore.getState().currentProject).toBeNull();
     expect(useDialogStore.getState().alertOpen).toBe(false);
+  });
+});
+
+/**
+ * Le main n'autorise que les fichiers du projet courant : une fois `project.load`
+ * passé, le sortant ne peut plus être écrit. Ce refus faisait rejeter la porte, et le
+ * repli de `loadProject` réécrivait alors le document du projet entrant.
+ */
+describe('projectStore — le document sortant, avant de quitter son projet', () => {
+  const A = '/tmp/p1/document.md';
+  const B = '/tmp/p2/document.md';
+  const projectB = { ...fakeProject, id: 'p2', name: 'B', path: '/tmp/p2' };
+  const B_TEXT = '# Huit mille mots de B\n';
+
+  let disk: Record<string, string>;
+  let writes: Array<[string, string]>;
+  let allowedRoot: string;
+  let live: string;
+  /** Une écriture lente laisse à l'auteur le temps de taper. */
+  let duringWrite: () => void;
+  let writesAtSwitch: number;
+
+  /** La frappe que ni `isDirty` ni le miroir ne voient : écriture lente, synchro debouncée. */
+  function openWithUnsyncedText(text: string): void {
+    live = text;
+    useEditorStore.setState({
+      filePath: A,
+      content: '# A\n',
+      isDirty: false,
+      editorFacade: { getValue: () => live } as unknown as EditorFacade,
+    });
+  }
+
+  function passMainToB(): void {
+    writesAtSwitch = writes.length;
+    allowedRoot = '/tmp/p2';
+  }
+
+  beforeEach(() => {
+    disk = { [A]: '# A\n', [B]: B_TEXT };
+    writes = [];
+    allowedRoot = '/tmp/p1';
+    duringWrite = () => undefined;
+    writesAtSwitch = -1;
+    stub.fs.writeFile.mockImplementation(async (path: string, content: string) => {
+      disk[path] = content;
+    });
+    stub.project.load.mockImplementation(async () => {
+      passMainToB();
+      return { success: true, project: projectB };
+    });
+    stub.project.create.mockImplementation(async () => {
+      passMainToB();
+      return { success: true, project: projectB };
+    });
+    stub.project.close.mockImplementation(async () => {
+      passMainToB();
+    });
+    (window as unknown as { electron: unknown }).electron = {
+      ...stub,
+      editor: {
+        loadFile: async (path: string) =>
+          path in disk ? { success: true, content: disk[path] } : { success: false, error: 'ENOENT' },
+        saveFile: async (path: string, content: string) => {
+          if (!path.startsWith(`${allowedRoot}/`)) return { success: false, error: 'Write access denied' };
+          duringWrite();
+          writes.push([path, content]);
+          disk[path] = content;
+          return { success: true };
+        },
+      },
+    };
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null });
+  });
+
+  it('loadProject : la frappe va dans son fichier avant le passage du main, et B reste intact', async () => {
+    openWithUnsyncedText('# A\nphrase\n');
+
+    await useProjectStore.getState().loadProject('/tmp/p2');
+
+    expect(disk[A]).toBe('# A\nphrase\n');
+    expect(writesAtSwitch).toBe(1);
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(disk[B]).toBe(B_TEXT);
+    expect(useEditorStore.getState().filePath).toBe(B);
+    expect(useEditorStore.getState().content).toBe(B_TEXT);
+  });
+
+  it('loadProject : frappe pendant cette écriture, écrite elle aussi avant le passage du main', async () => {
+    openWithUnsyncedText('# A\nun\n');
+    let passes = 0;
+    duringWrite = () => {
+      passes += 1;
+      if (passes === 1) live = '# A\nun\ndeux\n';
+    };
+
+    await useProjectStore.getState().loadProject('/tmp/p2');
+
+    expect(writes.map(([, content]) => content)).toEqual(['# A\nun\n', '# A\nun\ndeux\n']);
+    expect(writesAtSwitch).toBe(2);
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(disk[B]).toBe(B_TEXT);
+  });
+
+  it('createProject : la frappe va dans son fichier avant le passage du main', async () => {
+    openWithUnsyncedText('# A\nphrase\n');
+
+    await useProjectStore.getState().createProject('B', 'article', '/tmp/p2');
+
+    expect(disk[A]).toBe('# A\nphrase\n');
+    expect(writesAtSwitch).toBe(1);
+  });
+
+  it('closeProject : la frappe va dans son fichier avant la fermeture', async () => {
+    openWithUnsyncedText('# A\nphrase\n');
+
+    await useProjectStore.getState().closeProject();
+
+    expect(disk[A]).toBe('# A\nphrase\n');
+    expect(writesAtSwitch).toBe(1);
+  });
+
+  it('rien de neuf : le fichier sortant n’est pas réécrit', async () => {
+    openWithUnsyncedText('# A\n');
+
+    await useProjectStore.getState().loadProject('/tmp/p2');
+
+    expect(writes).toEqual([]);
+    expect(useEditorStore.getState().filePath).toBe(B);
   });
 });

@@ -161,6 +161,29 @@ describe('rouvrir le fichier déjà ouvert', () => {
     expect(outcome).toEqual({ status: 'unchanged' });
     expect(store().documentVersion).toBe(version);
   });
+
+  it('frappe puis enregistrement pendant la relecture : le texte lu avant l’écriture ne revient pas', async () => {
+    openOn(A, '# A\n');
+    const version = store().documentVersion;
+    // Le texte est lu au départ de la lecture, qui répond après l'écriture.
+    const reading = deferred();
+    editorIpc.loadFile = async (path) => {
+      const text = disk[path];
+      await reading.promise;
+      return { success: true, content: text };
+    };
+
+    const reopening = store().replaceBuffer({ kind: 'open', filePath: A }, 'open-file');
+    await flushMicrotasks();
+    live = '# A\nphrase\n';
+    await store().saveFile();
+    reading.release();
+
+    expect(await reopening).toEqual({ status: 'unchanged' });
+    expect(store().documentVersion).toBe(version);
+    expect(store().content).toBe('# A\nphrase\n');
+    expect(disk[A]).toBe('# A\nphrase\n');
+  });
 });
 
 describe('document sans titre : le fichier sortant', () => {
@@ -360,6 +383,23 @@ describe('demandes concurrentes', () => {
     expect(await first).toEqual({ status: 'superseded' });
     expect(store().filePath).toBe(A);
   });
+
+  it('relecture chassée par une ouverture plus récente : elle ne ramène pas son fichier', async () => {
+    openOn(A, '# A\n');
+    disk[A] = '# A modifié dehors\n';
+    const reading = deferred();
+    beforeRead = (path) => (path === A ? reading.promise : undefined);
+
+    const reopening = store().replaceBuffer({ kind: 'open', filePath: A }, 'open-file');
+    await flushMicrotasks();
+    const opening = await store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+    reading.release();
+
+    expect(opening).toEqual({ status: 'replaced' });
+    expect(await reopening).toEqual({ status: 'superseded' });
+    expect(store().filePath).toBe(B);
+    expect(store().content).toBe('# B\n');
+  });
 });
 
 describe('le verrou de bascule (renumérotation en cours)', () => {
@@ -425,6 +465,7 @@ describe('le verrou de bascule (renumérotation en cours)', () => {
 
     expect(await switching).toEqual(LOCKED);
     expect(writes).toEqual([[A, '# A\nfrappe\n']]);
+    expect(reads).toEqual([]);
     expect(store().filePath).toBe(A);
     expect(store().documentVersion).toBe(version);
   });
@@ -441,6 +482,44 @@ describe('le verrou de bascule (renumérotation en cours)', () => {
     reading.release();
 
     expect(await opening).toEqual(LOCKED);
+    expect(store().filePath).toBe(A);
+    expect(store().documentVersion).toBe(version);
+  });
+
+  it('relecture du fichier ouvert, verrou posé pendant, disque changé : rien ne bouge', async () => {
+    openOn(A, '# A\n');
+    const version = store().documentVersion;
+    disk[A] = '# A renuméroté\n';
+    const reading = deferred();
+    beforeRead = () => reading.promise;
+
+    const reopening = store().replaceBuffer({ kind: 'open', filePath: A }, 'open-file');
+    await flushMicrotasks();
+    lock();
+    reading.release();
+
+    expect(await reopening).toEqual({ status: 'unchanged' });
+    expect(store().content).toBe('# A\n');
+    expect(store().documentVersion).toBe(version);
+  });
+
+  it('verrou posé pendant la seconde écriture du sortant : refusé à son arrivée', async () => {
+    openOn(A, '# A\n');
+    const version = store().documentVersion;
+    // Le premier passage n'a rien à écrire : la frappe tombe pendant la lecture de B.
+    beforeRead = (path) => {
+      if (path === B) live = '# A\nfrappe\n';
+    };
+    const writing = deferred();
+    beforeWrite = () => writing.promise;
+
+    const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'open-file');
+    await flushMicrotasks();
+    lock();
+    writing.release();
+
+    expect(await opening).toEqual(LOCKED);
+    expect(writes).toEqual([[A, '# A\nfrappe\n']]);
     expect(store().filePath).toBe(A);
     expect(store().documentVersion).toBe(version);
   });
