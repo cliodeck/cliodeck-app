@@ -1,10 +1,10 @@
 /**
  * Le socle d'écriture des fichiers de l'historien, sur un vrai disque.
  *
- * Seuls deux échecs sont simulés, faute de pouvoir les provoquer ici : le
- * `rename` qu'un antivirus refuse sous Windows, et la création du temporaire
- * sur un disque plein. Tout le reste (droits, xattr, liens, casse) passe par
- * le système de fichiers.
+ * Ne sont simulés que les échecs qu'on ne sait pas provoquer ici : le `rename`
+ * qu'un antivirus refuse sous Windows, la création du temporaire sur un disque
+ * plein, le `fsync` d'un volume qui décroche. Tout le reste (droits, ACL, xattr,
+ * liens, casse) passe par le système de fichiers.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,11 +18,19 @@ const h = vi.hoisted(() => ({
   renameCalls: 0,
   lastRenameTarget: null as string | null,
   temporaryOpenFailure: null as string | null,
+  temporaryRemovalFails: false,
+  syncFailures: { temporaire: null, dossier: null } as Record<'temporaire' | 'dossier', string | null>,
+  /** L'ordre des opérations qui rendent une sauvegarde durable. */
+  events: [] as string[],
   cpFails: false,
 }));
 
 function errno(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`${code}: simulé`), { code });
+}
+
+function isTemporary(file: unknown): boolean {
+  return path.basename(String(file)).startsWith('.~');
 }
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -32,15 +40,27 @@ vi.mock('fs/promises', async (importOriginal) => {
     rename: async (...args: Parameters<typeof actual.rename>) => {
       h.renameCalls++;
       h.lastRenameTarget = String(args[1]);
+      h.events.push('rename');
       const code = h.renameFailures.shift();
       if (code) throw errno(code);
       return actual.rename(...args);
     },
     open: async (...args: Parameters<typeof actual.open>) => {
-      if (h.temporaryOpenFailure && path.basename(String(args[0])).startsWith('.~')) {
-        throw errno(h.temporaryOpenFailure);
-      }
-      return actual.open(...args);
+      const kind = isTemporary(args[0]) ? 'temporaire' : 'dossier';
+      if (h.temporaryOpenFailure && kind === 'temporaire') throw errno(h.temporaryOpenFailure);
+      const handle = await actual.open(...args);
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        h.events.push(`sync:${kind}`);
+        const code = h.syncFailures[kind];
+        if (code) throw errno(code);
+        return sync();
+      };
+      return handle;
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (h.temporaryRemovalFails && isTemporary(args[0])) throw errno('EACCES');
+      return actual.rm(...args);
     },
   };
   return { ...mocked, default: mocked };
@@ -89,6 +109,9 @@ beforeEach(() => {
   h.renameFailures = [];
   h.renameCalls = 0;
   h.temporaryOpenFailure = null;
+  h.temporaryRemovalFails = false;
+  h.syncFailures = { temporaire: null, dossier: null };
+  h.events = [];
   h.cpFails = false;
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-user-files-')));
   doc = path.join(dir, 'document.md');
@@ -249,6 +272,35 @@ describe('atomicWriteFile', () => {
     expect(fs.readFileSync(real, 'utf8')).toBe('neuf');
   });
 
+  it('un lien pendant relatif se lit depuis son dossier réel, même atteint par un dossier lien', async () => {
+    const sub = path.join(dir, 'vrai', 'sous');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.symlinkSync(sub, path.join(dir, 'alias'));
+    fs.symlinkSync('../cible.md', path.join(sub, 'document.md'));
+    const viaAlias = path.join(dir, 'alias', 'document.md');
+
+    await atomicWriteFile(viaAlias, 'neuf');
+
+    // Là où le système le mettrait : `..` part de vrai/sous, pas de alias.
+    expect(fs.readFileSync(path.join(dir, 'vrai', 'cible.md'), 'utf8')).toBe('neuf');
+    expect(fs.existsSync(path.join(dir, 'cible.md'))).toBe(false);
+    expect(fs.lstatSync(viaAlias).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(viaAlias, 'utf8')).toBe('neuf');
+
+    await updateFile(viaAlias, (current) => `${current} et suite`);
+    expect(fs.readFileSync(path.join(dir, 'vrai', 'cible.md'), 'utf8')).toBe('neuf et suite');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuse un tube nommé, qu’un rename remplacerait', async () => {
+    const pipe = path.join(dir, 'tube');
+    execFileSync('mkfifo', [pipe]);
+
+    await expect(atomicWriteFile(pipe, 'x')).rejects.toMatchObject({ code: 'EISDIR' });
+
+    expect(fs.statSync(pipe).isFIFO()).toBe(true);
+    expect(temporaries()).toEqual([]);
+  });
+
   it('garde la casse enregistrée sur un disque insensible à la casse', async (ctx) => {
     const onDisk = path.join(dir, 'Chapitre.md');
     fs.writeFileSync(onDisk, 'ancien');
@@ -267,6 +319,149 @@ describe('atomicWriteFile', () => {
     await Promise.all(Array.from({ length: 100 }, (_, i) => atomicWriteFile(doc, payload(i))));
     expect(fs.readFileSync(doc, 'utf8')).toBe(payload(99));
     expect(temporaries()).toEqual([]);
+  });
+});
+
+describe('atomicWriteFile et la mise sur disque', () => {
+  it('pousse le texte sur le disque avant de remplacer, puis le dossier après', async () => {
+    fs.writeFileSync(doc, 'ancien');
+
+    await atomicWriteFile(doc, 'nouveau');
+
+    // Remplacer avant `fsync`, c'est risquer un fichier vide après une coupure.
+    expect(h.events).toEqual(['sync:temporaire', 'rename', 'sync:dossier']);
+  });
+
+  it('un EIO de fsync, signe d’un volume qui décroche, interdit de remplacer la bonne version', async () => {
+    fs.writeFileSync(doc, 'dernière bonne version');
+    h.syncFailures.temporaire = 'EIO';
+
+    await expect(atomicWriteFile(doc, 'nouveau')).rejects.toMatchObject({ code: 'EIO' });
+
+    expect(h.renameCalls).toBe(0);
+    expect(fs.readFileSync(doc, 'utf8')).toBe('dernière bonne version');
+    expect(temporaries()).toEqual([]);
+  });
+
+  it.each(['EINVAL', 'ENOTSUP', 'ENOSYS'])('un système qui ne sait pas faire fsync (%s) n’empêche pas la sauvegarde', async (code) => {
+    fs.writeFileSync(doc, 'ancien');
+    h.syncFailures.temporaire = code;
+
+    await atomicWriteFile(doc, 'nouveau');
+
+    expect(fs.readFileSync(doc, 'utf8')).toBe('nouveau');
+    expect(temporaries()).toEqual([]);
+  });
+
+  it('un fsync du dossier en échec ne fait pas mentir : le fichier est déjà à sa place', async () => {
+    fs.writeFileSync(doc, 'ancien');
+    h.syncFailures.dossier = 'EIO';
+
+    await atomicWriteFile(doc, 'nouveau');
+
+    expect(fs.readFileSync(doc, 'utf8')).toBe('nouveau');
+  });
+});
+
+describe('rename refusé hors Windows : le dossier permet de créer, pas de retirer', () => {
+  let restorePlatform: () => void = () => undefined;
+  afterEach(() => restorePlatform());
+
+  it.each(['EACCES', 'EPERM'])('%s : écrit en place, comme writeFile le permettait, sans temporaire restant', async (code) => {
+    restorePlatform = simulatePlatform('linux');
+    fs.writeFileSync(doc, 'ancien');
+    const inode = fs.statSync(doc).ino;
+    h.renameFailures = [code];
+
+    await atomicWriteFile(doc, 'nouveau');
+
+    expect(fs.readFileSync(doc, 'utf8')).toBe('nouveau');
+    expect(fs.statSync(doc).ino).toBe(inode);
+    expect(temporaries()).toEqual([]);
+  });
+
+  it('un temporaire qui ne se retire plus n’est laissé qu’une fois, pas à chaque autosave', async () => {
+    restorePlatform = simulatePlatform('linux');
+    fs.writeFileSync(doc, 'ancien');
+    h.renameFailures = ['EACCES', 'EACCES', 'EACCES'];
+    h.temporaryRemovalFails = true;
+
+    for (let i = 0; i < 3; i++) {
+      await atomicWriteFile(doc, `essai ${i}`);
+      expect(fs.readFileSync(doc, 'utf8')).toBe(`essai ${i}`);
+    }
+
+    expect(h.renameCalls).toBe(1);
+    expect(temporaries()).toHaveLength(1);
+    // Vide : ni le double du texte caché dans le dossier, ni la place qu'il prendrait.
+    expect(fs.statSync(path.join(dir, temporaries()[0])).size).toBe(0);
+  });
+
+  it('écrire en place pour un fichier ne prive pas les autres fichiers du dossier du remplacement', async () => {
+    restorePlatform = simulatePlatform('linux');
+    fs.writeFileSync(doc, 'ancien');
+    const other = path.join(dir, 'autre.md');
+    fs.writeFileSync(other, 'ancien');
+    const inode = fs.statSync(other).ino;
+    h.renameFailures = ['EACCES'];
+    h.temporaryRemovalFails = true;
+
+    await atomicWriteFile(doc, 'nouveau');
+    await atomicWriteFile(other, 'nouveau');
+
+    expect(fs.statSync(other).ino).not.toBe(inode);
+    expect(fs.readFileSync(other, 'utf8')).toBe('nouveau');
+  });
+
+  it('un temporaire qui se retire laisse le prochain essai retenter le remplacement', async () => {
+    restorePlatform = simulatePlatform('linux');
+    fs.writeFileSync(doc, 'ancien');
+    h.renameFailures = ['EACCES'];
+
+    await atomicWriteFile(doc, 'premier');
+    const inode = fs.statSync(doc).ino;
+    await atomicWriteFile(doc, 'second');
+
+    expect(h.renameCalls).toBe(2);
+    expect(fs.statSync(doc).ino).not.toBe(inode);
+    expect(fs.readFileSync(doc, 'utf8')).toBe('second');
+  });
+
+  describe.skipIf(process.platform !== 'darwin')('ACL réelles sous macOS', () => {
+    const me = os.userInfo().username;
+    const clearAcls = () => {
+      execFileSync('chmod', ['-N', dir]);
+      for (const name of fs.readdirSync(dir)) execFileSync('chmod', ['-N', path.join(dir, name)]);
+    };
+
+    it('« deny delete_child » sur le dossier : le texte part, et un seul temporaire reste', async () => {
+      fs.writeFileSync(doc, 'ancien');
+      execFileSync('chmod', ['+a', `${me} deny delete_child`, dir]);
+      try {
+        for (let i = 0; i < 3; i++) {
+          await atomicWriteFile(doc, `essai ${i}`);
+          expect(fs.readFileSync(doc, 'utf8')).toBe(`essai ${i}`);
+        }
+        expect(temporaries()).toHaveLength(1);
+        expect(fs.statSync(path.join(dir, temporaries()[0])).size).toBe(0);
+      } finally {
+        clearAcls();
+      }
+    });
+
+    it('« deny delete » sur le fichier : le texte part, et un seul temporaire reste', async () => {
+      fs.writeFileSync(doc, 'ancien');
+      execFileSync('chmod', ['+a', `${me} deny delete`, doc]);
+      try {
+        for (let i = 0; i < 3; i++) {
+          await atomicWriteFile(doc, `essai ${i}`);
+          expect(fs.readFileSync(doc, 'utf8')).toBe(`essai ${i}`);
+        }
+        expect(temporaries().length).toBeLessThanOrEqual(1);
+      } finally {
+        clearAcls();
+      }
+    });
   });
 });
 
@@ -413,6 +608,76 @@ describe('withFileLock', () => {
       return fs.readFileSync(doc, 'utf8');
     });
     await expect(Promise.race([written, sleep(2000).then(() => 'bloqué')])).resolves.toBe('depuis le verrou');
+  });
+
+  it('une tâche lancée sous le verrou et servie après sa libération reprend la file commune', async () => {
+    fs.writeFileSync(doc, '');
+    const append = (letter: string) =>
+      updateFile(doc, async (current) => {
+        await sleep(20);
+        return `${current ?? ''}${letter}`;
+      });
+
+    let late: Promise<unknown> = Promise.resolve();
+    await withFileLock(doc, async () => {
+      late = new Promise((resolve) => setTimeout(() => resolve(append('A')), 5));
+    });
+    await Promise.all([late, append('B')]);
+
+    expect(fs.readFileSync(doc, 'utf8').split('').sort()).toEqual(['A', 'B']);
+  });
+
+  it('des appels frères sous le même verrou passent un par un, dans l’ordre', async () => {
+    fs.writeFileSync(doc, '');
+    await withFileLock(doc, async () => {
+      await Promise.all(
+        [1, 2, 3].map((n) =>
+          updateFile(doc, async (current) => {
+            await sleep(5);
+            return `${current ?? ''}${n}`;
+          })
+        )
+      );
+    });
+    expect(fs.readFileSync(doc, 'utf8')).toBe('123');
+  });
+
+  it('ce que le détenteur lance sans l’attendre passe avant l’appel suivant', async () => {
+    const order: string[] = [];
+    const first = withFileLock(doc, async () => {
+      void withFileLock(doc, async () => {
+        await sleep(20);
+        order.push('imbriqué');
+      });
+      order.push('détenteur');
+    });
+    const second = withFileLock(doc, async () => {
+      order.push('suivant');
+    });
+    await Promise.all([first, second]);
+    expect(order).toEqual(['détenteur', 'imbriqué', 'suivant']);
+  });
+
+  it('une tâche survivant à un appel imbriqué ne s’attend pas soi-même tant que le verrou est tenu', async () => {
+    const outcome = withFileLock(doc, async () => {
+      let late: Promise<unknown> = Promise.resolve();
+      await withFileLock(doc, async () => {
+        late = new Promise((resolve) => setTimeout(() => resolve(atomicWriteFile(doc, 'tard')), 5));
+      });
+      await late;
+      return 'fini';
+    });
+    await expect(Promise.race([outcome, sleep(2000).then(() => 'bloqué')])).resolves.toBe('fini');
+    expect(fs.readFileSync(doc, 'utf8')).toBe('tard');
+  });
+
+  it('une erreur levée dans un appel imbriqué rend une promesse rejetée, jamais une levée synchrone', async () => {
+    await withFileLock(doc, async () => {
+      const nested = withFileLock(doc, () => {
+        throw new Error('boum');
+      });
+      await expect(nested).rejects.toThrow('boum');
+    });
   });
 
   it('le verrou tenu pour un fichier ne retient pas les autres fichiers', async () => {
@@ -575,6 +840,16 @@ describe('readUserFile', () => {
     expect(await readUserFile(doc)).toMatchObject({ kind: 'unreadable', reason: 'not-a-file' });
   });
 
+  it.skipIf(process.platform === 'win32')('rend unreadable/not-a-file pour un tube nommé, sans rester bloquée', async () => {
+    const pipe = path.join(dir, 'tube');
+    execFileSync('mkfifo', [pipe]);
+    const read = readUserFile(pipe);
+    await expect(Promise.race([read, sleep(1000).then(() => 'bloquée')])).resolves.toMatchObject({
+      kind: 'unreadable',
+      reason: 'not-a-file',
+    });
+  });
+
   it('rend unreadable/encoding pour du Latin-1, au lieu de U+FFFD irréversibles', async () => {
     fs.writeFileSync(doc, Buffer.from([0x45, 0x74, 0xe9]));
     expect(await readUserFile(doc)).toMatchObject({ kind: 'unreadable', reason: 'encoding' });
@@ -633,5 +908,39 @@ describe('quarantineFile', () => {
     expect(fs.readFileSync(backup, 'utf8')).toBe('{ abîmé');
     expect(fs.lstatSync(doc).isSymbolicLink()).toBe(true);
     expect(fs.existsSync(real)).toBe(false);
+  });
+
+  it('refuse un dossier : seul un fichier abîmé se met de côté', async () => {
+    const chapters = path.join(dir, 'chapters');
+    fs.mkdirSync(chapters);
+
+    await expect(quarantineFile(chapters)).rejects.toMatchObject({ code: 'EISDIR' });
+
+    expect(fs.statSync(chapters).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir)).toEqual(['chapters']);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuse un tube nommé', async () => {
+    const pipe = path.join(dir, 'tube');
+    execFileSync('mkfifo', [pipe]);
+
+    await expect(quarantineFile(pipe)).rejects.toMatchObject({ code: 'EISDIR' });
+
+    expect(fs.readdirSync(dir)).toEqual(['tube']);
+  });
+
+  it('sous Windows, reprend un rename qu’un antivirus retient', async () => {
+    const restorePlatform = simulatePlatform('win32');
+    try {
+      fs.writeFileSync(doc, 'abîmé');
+      h.renameFailures = ['EPERM'];
+
+      const backup = await quarantineFile(doc);
+
+      expect(h.renameCalls).toBe(2);
+      expect(fs.readFileSync(backup, 'utf8')).toBe('abîmé');
+    } finally {
+      restorePlatform();
+    }
   });
 });

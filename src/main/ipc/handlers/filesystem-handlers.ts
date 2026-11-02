@@ -148,14 +148,18 @@ export function setupFilesystemHandlers() {
     });
     console.log('📞 IPC Call: fs:write-file', { filePath, contentLength: content.length, options });
     try {
-      const validatedPath = await validateWritePath(filePath);
-      if (options?.exclusive) {
-        // Créer sans jamais écraser : EEXIST remonte si le fichier existe déjà.
-        const { writeFile } = await import('fs/promises');
-        await withFileLock(validatedPath, () => writeFile(validatedPath, content, { encoding: 'utf-8', flag: 'wx' }));
-      } else {
-        await atomicWriteFile(validatedPath, content);
-      }
+      // Le verrou avant la validation : ses `await` ne doivent pas pouvoir inverser
+      // deux écritures et laisser la plus ancienne sur le disque.
+      await withFileLock(filePath, async () => {
+        const validatedPath = await validateWritePath(filePath);
+        if (options?.exclusive) {
+          // Créer sans jamais écraser : EEXIST remonte si le fichier existe déjà.
+          const { writeFile } = await import('fs/promises');
+          await writeFile(validatedPath, content, { encoding: 'utf-8', flag: 'wx' });
+        } else {
+          await atomicWriteFile(validatedPath, content);
+        }
+      });
       console.log('📤 IPC Response: fs:write-file - success');
       return successResponse();
     } catch (error: unknown) {
@@ -168,8 +172,9 @@ export function setupFilesystemHandlers() {
     const { filePath } = validate(FsReadFileSchema, { filePath: rawFilePath });
     console.log('📞 IPC Call: fs:quarantine-file', { filePath });
     try {
-      const validatedPath = await validateWritePath(filePath);
-      const backupPath = await quarantineFile(validatedPath);
+      const backupPath = await withFileLock(filePath, async () =>
+        quarantineFile(await validateWritePath(filePath))
+      );
       console.log('📤 IPC Response: fs:quarantine-file', { backupPath });
       return successResponse({ backupPath });
     } catch (error: unknown) {

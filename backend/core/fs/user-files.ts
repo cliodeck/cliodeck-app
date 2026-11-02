@@ -11,9 +11,10 @@
  * étiquettes Finder et la date de création.
  *
  * Limites assumées : le verrou vaut dans le processus (le serveur MCP et le CLI
- * ne réécrivent pas ces fichiers), les liens durs sont rompus, et un arrêt brutal
+ * ne réécrivent pas ces fichiers), les liens durs sont rompus, un arrêt brutal
  * entre l'écriture et le rename laisse un `.~….tmp` caché, qu'aucun scan du
- * projet ne lit puisqu'il ne finit pas par `.md`.
+ * projet ne lit puisqu'il ne finit pas par `.md`, et là où le système refuse de
+ * remplacer le fichier, on écrit en place, sans la garantie du rename.
  *
  * Pas de dépendance à Electron : le socle se teste et se réutilise hors du main.
  */
@@ -22,7 +23,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { execFile } from 'child_process';
 import { randomBytes } from 'crypto';
 import { constants, readlinkSync, type Stats } from 'fs';
-import { access, lstat, open, readFile, rename, rm, stat, writeFile, type FileHandle } from 'fs/promises';
+import { access, lstat, open, readFile, rename, rm, stat, truncate, writeFile, type FileHandle } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import { fileIdentity } from '../vector-store/file-identity.js';
@@ -81,23 +82,64 @@ function resolveTarget(filePath: string): string {
       // sinon la clé changerait à la création (/var et /private/var sous macOS).
       return path.join(fileIdentity(path.dirname(current)), path.basename(current));
     }
-    current = path.resolve(path.dirname(current), link);
+    // Depuis le dossier réel du lien, comme le système : le `..` d'une cible relative
+    // ne remonte pas par le dossier lien qui a pu mener jusqu'ici.
+    current = path.resolve(fileIdentity(path.dirname(current)), link);
   }
   return current;
 }
 
+/** Une détention du verrou, avec sa propre file pour les appels faits sous lui. */
+interface LockHold {
+  readonly parent: LockHold | undefined;
+  released: boolean;
+  tail: Promise<void>;
+}
+
 const lockTails = new Map<string, Promise<void>>();
-const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>();
+const heldLocks = new AsyncLocalStorage<ReadonlyMap<string, LockHold>>();
+
+/**
+ * Le contexte asynchrone survit au verrou (un `setTimeout` lancé dessous, par
+ * exemple) : seule une détention encore active compte, sinon l'appel se croirait
+ * seul et perdrait une mise à jour.
+ */
+function activeHold(hold: LockHold | undefined): LockHold | undefined {
+  let current = hold;
+  while (current?.released) current = current.parent;
+  return current;
+}
+
+/** Sans cela, ce que `fn` a lancé sans l'attendre tournerait après la libération. */
+async function release(hold: LockHold): Promise<void> {
+  let seen: Promise<void>;
+  do {
+    seen = hold.tail;
+    await seen;
+  } while (seen !== hold.tail);
+  hold.released = true;
+}
 
 function runLocked<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  // Réentrant : sans cela, écrire depuis `withFileLock` s'attendrait soi-même.
   const held = heldLocks.getStore();
-  if (held?.has(key)) return fn();
+  const owner = activeHold(held?.get(key));
+  const hold: LockHold = { parent: owner, released: false, tail: Promise.resolve() };
 
-  const run = (lockTails.get(key) ?? Promise.resolve()).then(() =>
-    heldLocks.run(new Set([...(held ?? []), key]), fn)
-  );
+  // Un appel fait sous le verrou ne s'attend pas lui-même : il passe dans la file de
+  // son détenteur, derrière ses frères, et les siens passeront dans la sienne.
+  const previous = owner ? owner.tail : (lockTails.get(key) ?? Promise.resolve());
+  const run = previous.then(async () => {
+    try {
+      return await heldLocks.run(new Map(held).set(key, hold), fn);
+    } finally {
+      await release(hold);
+    }
+  });
   const tail = run.then(noop, noop);
+  if (owner) {
+    owner.tail = tail;
+    return run;
+  }
   lockTails.set(key, tail);
   void tail.then(() => {
     if (lockTails.get(key) === tail) lockTails.delete(key);
@@ -108,6 +150,10 @@ function runLocked<T>(key: string, fn: () => Promise<T>): Promise<T> {
 /**
  * File d'attente par fichier, dans le processus : `fn` passe après les appels
  * précédents sur ce fichier, quel que soit le chemin (lien, casse) qui le désigne.
+ * Réentrant : sous le verrou, les appels sur ce fichier passent eux aussi un par
+ * un, et `fn` ne rend la main qu'une fois servis ceux qu'il a lancés.
+ *
+ * Pour garder l'ordre d'arrivée, appeler dès la réception, avant tout `await`.
  */
 export function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
   return runLocked(resolveTarget(filePath), fn);
@@ -193,8 +239,19 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-/** Dossier en lecture seule, fichier inscriptible : le seul cas où écrire en place. */
-const NO_TEMPORARY_HERE_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
+/**
+ * Droit d'écrire le fichier, mais pas de créer ou de retirer dans son dossier : le
+ * seul cas où écrire en place, puisque `writeFile` y arrivait et que `rename` n'y
+ * arrivera jamais.
+ */
+const NO_REPLACE_HERE_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+/**
+ * Fichiers dont le temporaire ne se retire plus (ACL « deny delete ») : y repasser en
+ * laisserait un de plus à chaque autosave. Ils s'écrivent en place jusqu'à la fin de
+ * la session, sans prouver d'abord qu'il y a la place.
+ */
+const inPlaceForSession = new Set<string>();
 
 async function writeUnderLock(target: string, data: string | Uint8Array): Promise<void> {
   const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
@@ -211,13 +268,22 @@ async function writeUnderLock(target: string, data: string | Uint8Array): Promis
     await access(target, constants.W_OK);
   }
 
+  if (inPlaceForSession.has(target)) {
+    await writeFile(target, bytes);
+    return;
+  }
+
   // Préfixe et suffixe que les services de synchronisation ignorent (à confirmer
   // à la main) ; 32 caractères du nom pour tenir dans la limite du système.
   const temporary = path.join(
     path.dirname(target),
     `.~${path.basename(target).slice(0, 32)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
   );
-  const removeTemporary = () => rm(temporary, { force: true }).catch(noop);
+  const removeTemporary = () =>
+    rm(temporary, { force: true }).then(
+      () => true,
+      () => false
+    );
 
   if (existing && process.platform === 'darwin') await copyExtendedAttributes(target, temporary);
 
@@ -228,7 +294,7 @@ async function writeUnderLock(target: string, data: string | Uint8Array): Promis
     await removeTemporary();
     // Jamais sur ENOSPC : écrire en place sur un disque plein, c'est le défaut
     // même que ce socle corrige.
-    if (!NO_TEMPORARY_HERE_CODES.has(errorCode(error) ?? '')) throw error;
+    if (!NO_REPLACE_HERE_CODES.has(errorCode(error) ?? '')) throw error;
     await writeFile(target, bytes);
     return;
   }
@@ -242,10 +308,25 @@ async function writeUnderLock(target: string, data: string | Uint8Array): Promis
     } finally {
       await handle.close();
     }
-    await renameWithRetry(temporary, target);
   } catch (error) {
     await removeTemporary();
     throw error;
+  }
+
+  try {
+    await renameWithRetry(temporary, target);
+  } catch (error) {
+    const removed = await removeTemporary();
+    // Sous Windows, ce refus vient d'un antivirus qui passe : écrire en place se
+    // heurterait à lui, et l'ancienne version doit rester intacte.
+    if (process.platform === 'win32' || !NO_REPLACE_HERE_CODES.has(errorCode(error) ?? '')) throw error;
+    if (!removed) {
+      inPlaceForSession.add(target);
+      await truncate(temporary).catch(noop);
+    }
+    // Le temporaire, désormais vide ou retiré, vient de montrer qu'il y a la place.
+    await writeFile(target, bytes);
+    return;
   }
   await syncDirectory(path.dirname(target));
 }
@@ -354,11 +435,16 @@ export async function updateJsonFile<T>(
 /**
  * Met un fichier abîmé de côté : `<nom>.illisible-<horodatage>` dans le même
  * dossier, sans jamais écraser une mise de côté précédente. Rend le nouveau
- * chemin. Sur un lien, c'est le fichier réel qui est déplacé.
+ * chemin. Sur un lien, c'est le fichier réel qui est déplacé. Ce qui n'est pas un
+ * fichier ordinaire est refusé (EISDIR).
  */
 export function quarantineFile(filePath: string): Promise<string> {
   const target = resolveTarget(filePath);
   return runLocked(target, async () => {
+    // Un dossier se renommerait sans peine, et le projet entier avec.
+    if (!(await stat(target)).isFile()) {
+      throw Object.assign(new Error(`EISDIR: ${target} n'est pas un fichier ordinaire`), { code: 'EISDIR' });
+    }
     // `:` est interdit dans un nom de fichier sous Windows.
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     for (let n = 0; ; n++) {

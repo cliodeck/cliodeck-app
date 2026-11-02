@@ -17,7 +17,10 @@ import path from 'path';
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   projectPath: '' as string,
+  appPath: '/nulle-part' as string,
   diskFull: false,
+  /** Allonge les `realpath` à venir, donc la validation d'un chemin : en ms, dans l'ordre. */
+  realpathDelays: [] as number[],
 }));
 
 function enospc(): NodeJS.ErrnoException {
@@ -28,6 +31,11 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
   const mocked = {
     ...actual,
+    realpath: async (...args: Parameters<typeof actual.realpath>) => {
+      const delay = h.realpathDelays.shift();
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      return actual.realpath(...args);
+    },
     writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
       if (!h.diskFull) return actual.writeFile(...args);
       // O_TRUNC d'abord, l'échec ensuite : c'est l'ordre du système.
@@ -58,7 +66,7 @@ vi.mock('electron', () => ({
   dialog: {},
   shell: {},
   BrowserWindow: { fromWebContents: () => null },
-  app: { isPackaged: false, getPath: () => '/tmp', getAppPath: () => '/nulle-part' },
+  app: { isPackaged: false, getPath: () => '/tmp', getAppPath: () => h.appPath },
 }));
 
 vi.mock('../../../services/project-manager.js', () => ({
@@ -83,6 +91,7 @@ vi.mock('../../../services/history-service.js', () => ({
 
 import { setupEditorHandlers } from '../editor-handlers.js';
 import { setupFilesystemHandlers } from '../filesystem-handlers.js';
+import { validateWritePath } from '../../utils/path-validator.js';
 
 function call<T = unknown>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = h.handlers.get(channel);
@@ -102,14 +111,20 @@ describe('sauvegarde par fichier temporaire et rename', () => {
   let project: string;
   let documentMd: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     setupEditorHandlers();
     setupFilesystemHandlers();
     project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-save-')));
     h.projectPath = project;
+    h.appPath = '/nulle-part';
     h.diskFull = false;
+    h.realpathDelays = [];
     documentMd = path.join(project, 'document.md');
     fs.writeFileSync(documentMd, '# Chapitre\n\nTexte déjà écrit.\n');
+    // Sous Vitest, le second de deux import() concurrents d'un module simulé rend
+    // le vrai module (mesuré), et le validateur garde en cache son import paresseux.
+    // Un premier appel seul l'en préserve, quel que soit le test lancé d'abord.
+    await validateWritePath(documentMd);
   });
 
   afterEach(() => {
@@ -144,6 +159,15 @@ describe('sauvegarde par fichier temporaire et rename', () => {
     expect(fs.readFileSync(documentMd, 'utf8')).toBe('la suite');
   });
 
+  it('fs:write-file, disque plein : le fichier garde son texte, et l’erreur remonte', async () => {
+    h.diskFull = true;
+
+    await expect(call('fs:write-file', documentMd, 'la suite')).rejects.toMatchObject({ code: 'ENOSPC' });
+
+    expect(fs.readFileSync(documentMd, 'utf8')).toBe('# Chapitre\n\nTexte déjà écrit.\n');
+    expect(fs.readdirSync(project)).toEqual(['document.md']);
+  });
+
   it('un document.md lien symbolique reste un lien, et sa cible porte le nouveau texte', async () => {
     const realDir = path.join(project, 'vrai');
     fs.mkdirSync(realDir);
@@ -168,13 +192,14 @@ describe('sauvegarde par fichier temporaire et rename', () => {
     expect(fs.readdirSync(project).sort()).toEqual(['copie.md', 'document.md']);
   });
 
-  it('50 paires de fs:write-file concurrentes (30 et 29 idées) : le fichier reste un JSON valide', async () => {
+  it('50 paires de fs:write-file concurrentes (30 et 29 idées) : JSON toujours valide, et la dernière demandée gagne', async () => {
     const ideasJson = path.join(project, 'ideas.json');
     const long = ideas(30);
     const short = ideas(29);
     fs.writeFileSync(ideasJson, long);
 
     let corrupted = 0;
+    let oldestWon = 0;
     for (let pair = 0; pair < 50; pair++) {
       await Promise.all([
         call('fs:write-file', ideasJson, long),
@@ -183,14 +208,55 @@ describe('sauvegarde par fichier temporaire et rename', () => {
       const content = fs.readFileSync(ideasJson, 'utf8');
       try {
         JSON.parse(content);
-        expect([long, short]).toContain(content);
       } catch {
         corrupted++;
       }
+      if (content !== short) oldestWon++;
     }
 
     expect(corrupted).toBe(0);
+    expect(oldestWon).toBe(0);
     expect(fs.readdirSync(project).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it.each(['editor:save-file', 'fs:write-file'])(
+    '%s : la dernière demandée gagne, même quand la première met plus de temps à se valider',
+    async (channel) => {
+      h.realpathDelays = [30];
+
+      const responses = await Promise.all([
+        call(channel, documentMd, 'texte ancien'),
+        call(channel, documentMd, 'texte récent'),
+      ]);
+
+      expect(responses).toHaveLength(2);
+      expect(fs.readFileSync(documentMd, 'utf8')).toBe('texte récent');
+    }
+  );
+
+  it('une écriture demandée après une mise de côté ne part pas avec elle', async () => {
+    h.realpathDelays = [30];
+
+    const [quarantine] = await Promise.all([
+      call<{ success: boolean; backupPath: string }>('fs:quarantine-file', documentMd),
+      call('fs:write-file', documentMd, 'texte neuf'),
+    ]);
+
+    expect(fs.readFileSync(quarantine.backupPath, 'utf8')).toBe('# Chapitre\n\nTexte déjà écrit.\n');
+    expect(fs.readFileSync(documentMd, 'utf8')).toBe('texte neuf');
+  });
+
+  it('un écrit exclusif attend l’écriture en cours : il voit le fichier qu’elle crée, et refuse', async () => {
+    const seed = path.join(project, 'neuf.md');
+
+    const [normal, exclusive] = await Promise.allSettled([
+      call('fs:write-file', seed, 'premier'),
+      call('fs:write-file', seed, 'second', { exclusive: true }),
+    ]);
+
+    expect(normal.status).toBe('fulfilled');
+    expect(exclusive).toMatchObject({ status: 'rejected', reason: { code: 'EEXIST' } });
+    expect(fs.readFileSync(seed, 'utf8')).toBe('premier');
   });
 
   it('fs:write-file exclusif crée le fichier absent et refuse celui qui existe', async () => {
@@ -245,6 +311,38 @@ describe('sauvegarde par fichier temporaire et rename', () => {
     expect(path.basename(response.backupPath)).toMatch(/^ideas\.json\.illisible-/);
     expect(fs.readFileSync(response.backupPath, 'utf8')).toBe('{ tronqué');
     expect(fs.existsSync(ideasJson)).toBe(false);
+  });
+
+  it('fs:quarantine-file refuse un dossier du projet, et la racine du projet', async () => {
+    const chapters = path.join(project, 'chapters');
+    fs.mkdirSync(chapters);
+
+    for (const directory of [chapters, project]) {
+      const response = await call<{ success: boolean; error?: string }>('fs:quarantine-file', directory);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('EISDIR');
+      expect(fs.statSync(directory).isDirectory()).toBe(true);
+    }
+    expect(fs.readdirSync(project).sort()).toEqual(['chapters', 'document.md']);
+    const moved = `${path.basename(project)}.illisible-`;
+    expect(fs.readdirSync(path.dirname(project)).filter((name) => name.startsWith(moved))).toEqual([]);
+  });
+
+  it('fs:quarantine-file refuse ce qui se lit sans s’écrire : les ressources de l’application', async () => {
+    const resources = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-ressources-')));
+    const resource = path.join(resources, 'gabarit.md');
+    fs.writeFileSync(resource, 'gabarit');
+    h.appPath = resources;
+    try {
+      expect(await call('fs:read-user-file', resource)).toMatchObject({ kind: 'ok' });
+
+      const response = await call<{ success: boolean }>('fs:quarantine-file', resource);
+
+      expect(response.success).toBe(false);
+      expect(fs.readFileSync(resource, 'utf8')).toBe('gabarit');
+    } finally {
+      fs.rmSync(resources, { recursive: true, force: true });
+    }
   });
 
   it('fs:quarantine-file refuse un chemin hors du projet', async () => {
