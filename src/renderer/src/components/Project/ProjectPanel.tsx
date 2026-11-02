@@ -12,6 +12,7 @@ import { ZoteroProjectSettings } from './ZoteroProjectSettings';
 import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
 import { backdropClose } from '../../utils/backdropClose';
+import { createProjectErrorMessage } from './create-project-error';
 
 // Modals are only rendered when opened — keep them off the main chunk.
 const PDFExportModal = lazy(() =>
@@ -75,7 +76,9 @@ export const ProjectPanel: React.FC = () => {
       setShowOnboarding(true);
     } catch (error: unknown) {
       console.error('Failed to create project:', error);
-      await useDialogStore.getState().showAlert(t('project.createError'));
+      await useDialogStore
+        .getState()
+        .showAlert(createProjectErrorMessage(t, error, { name: projectName, folder: newProjectPath }));
     } finally {
       setIsCreating(false);
     }
