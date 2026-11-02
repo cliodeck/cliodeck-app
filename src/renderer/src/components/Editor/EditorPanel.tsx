@@ -212,8 +212,13 @@ export const EditorPanel: React.FC = () => {
 
     const openKey = docs.find((d) => d.live)?.chapter.filePath;
     const originals = new Map(docs.map((d) => [d.chapter.filePath, d.content]));
-    const written: string[] = [];
+    const renumberedTexts = new Map(changed.map((d) => [d.key, d.content]));
+    // Ce qu'une remise en état doit reprendre, et parmi eux ce qui a réellement
+    // quitté son texte d'origine sur le disque.
+    const touched: string[] = [];
+    const onDisk = new Set<string>();
     let interrupted = false;
+    let restoreFailed = false;
 
     try {
       for (const doc of changed) {
@@ -230,6 +235,9 @@ export const EditorPanel: React.FC = () => {
           // Chapitre ouvert : passer par l'éditeur, l'édition reste
           // annulable et la sauvegarde suit le chemin habituel.
           setOpenEditorText(doc.content);
+          // Avant l'écriture : si elle échoue, le tampon porte déjà le texte
+          // renuméroté, et l'autosave l'écrirait seul quelques secondes plus tard.
+          touched.push(doc.key);
           await useEditorStore.getState().saveFile();
         } else {
           const result = await window.electron.editor.saveFile(
@@ -237,37 +245,56 @@ export const EditorPanel: React.FC = () => {
             doc.content
           );
           if (!result.success) throw new Error(result.error || doc.key);
+          touched.push(doc.key);
         }
-        written.push(doc.key);
+        onDisk.add(doc.key);
       }
     } catch (error) {
+      if (!interrupted) logger.error('EditorPanel', error);
       // Atomique : ce qui a été écrit est remis dans son état d'origine —
       // un manuscrit à moitié renuméroté serait pire que pas de
       // renumérotation du tout.
-      for (const key of written) {
+      for (const key of touched) {
         // L'auteur a repris la main : ces textes ont pu changer depuis.
         if (isAbandoned()) break;
         const original = originals.get(key);
         if (original === undefined) continue;
         const target = `${project.path}/${key}`;
+        let restored: boolean;
         if (useEditorStore.getState().filePath === target) {
+          // Ni l'un ni l'autre des textes de l'opération : l'auteur a tapé depuis.
+          // Le remettre à l'original effacerait sa frappe, puis l'enregistrerait.
+          const live = useEditorStore.getState().getLiveContent();
+          if (live !== original && live !== renumberedTexts.get(key)) {
+            interrupted = true;
+            continue;
+          }
           // L'aller a écrit ce chapitre SUR LE DISQUE (via saveFile) :
           // restaurer le seul tampon de l'éditeur laissait donc le fichier
           // renuméroté, et ne restaurait rien du tout si la façade était
           // nulle ou l'autosave désactivé. On réécrit explicitement.
           setOpenEditorText(original);
-          await useEditorStore
+          restored = await useEditorStore
             .getState()
             .saveFile()
-            .catch(() => undefined);
+            .then(
+              () => true,
+              () => false
+            );
         } else {
           // Y compris le chapitre ouvert au départ, si l'éditeur l'a quitté :
           // `saveFile` écrirait son texte dans le fichier qui l'a remplacé.
-          await window.electron.editor.saveFile(target, original).catch(() => undefined);
+          restored = await window.electron.editor.saveFile(target, original).then(
+            (result) => result.success,
+            () => false
+          );
         }
+        // Une écriture refusée sur un fichier resté à l'original ne change rien.
+        if (!restored && onDisk.has(key)) restoreFailed = true;
       }
+      if (restoreFailed) return t('book.renumberRestoreFailed');
       if (interrupted) return t('book.renumberInterrupted');
-      throw error;
+      return t('book.renumberError');
     }
 
     // Sans l'attendre : le travail est fait, une relecture qui traînerait

@@ -10,7 +10,8 @@
  * Vrais EditorPanel, ChapterNavigator et stores ; seuls le disque (en mémoire,
  * derrière l'IPC) et la vue CM6 sont simulés. La fausse vue suit la vraie
  * (`CodeMirrorEditor`) : recréée sur `[filePath, documentVersion]`, façade retirée
- * au démontage, `setValue` sans effet une fois détruite.
+ * au démontage, `setValue` sans effet une fois détruite, `isDirty` posé à chaque
+ * modification, ce qui rend l'autosave visible dans ces tests.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
@@ -37,7 +38,10 @@ vi.mock('../CodeMirrorEditor', async () => {
       store.getState().setEditorFacade({
         getValue: () => text,
         setValue: (next: string) => {
-          if (!destroyed) text = next;
+          if (destroyed) return;
+          text = next;
+          // Comme la vraie vue : toute modification du document arme l'autosave.
+          store.setState({ isDirty: true });
         },
       } as never);
       return () => {
@@ -483,6 +487,230 @@ describe('les verrous', () => {
     expect(screen.getByTitle('toolbar.renumberFootnotes')).toBeDisabled();
     expect(locks()).toEqual({ renumbering: false, switchLock: null });
     expect(alertMessage()).toBe('');
+  });
+});
+
+describe('remise en état après un échec d’écriture', () => {
+  const RENUMBERED_A = '# A\n\nTexte A[^1] suite[^2].\n\n[^1]: une\n\n[^2]: deux\n';
+  const REFUSED = { success: false, error: 'refusé' } as const;
+
+  const clickRenumber = () =>
+    act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+  const waitForAutosave = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(useEditorStore.getState().settings.autoSaveDelay);
+    });
+  const type = (text: string) => useEditorStore.getState().editorFacade?.setValue(text);
+
+  /** Clic sur Renuméroter, l'écriture de C restant suspendue, puis refusée à `fail()`. */
+  async function clickRenumberHoldingC(): Promise<() => Promise<void>> {
+    const stuck = deferred();
+    beforeWrite = async (path) => {
+      if (path !== C) return;
+      await stuck.promise;
+      return REFUSED;
+    };
+    await clickRenumber();
+    return () =>
+      act(async () => {
+        stuck.release();
+      });
+  }
+
+  it('écriture du chapitre ouvert refusée : le tampon revient, l’autosave n’écrit pas le texte renuméroté', async () => {
+    await openBook(DISORDERED);
+    let first = true;
+    beforeWrite = async (path) => {
+      if (path === A && first) {
+        first = false;
+        return REFUSED;
+      }
+    };
+    vi.useFakeTimers();
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberError');
+    expect(live()).toBe(DISORDERED[A]);
+    expect(locks()).toEqual(FREE);
+
+    await waitForAutosave();
+    expect(disk).toEqual(DISORDERED);
+    expect(live()).toBe(DISORDERED[A]);
+  });
+
+  it('écritures refusées partout : le manuscrit est réellement inchangé, et le message reste juste', async () => {
+    await openBook(DISORDERED);
+    beforeWrite = async () => REFUSED;
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberError');
+    expect(disk).toEqual(DISORDERED);
+    expect(live()).toBe(DISORDERED[A]);
+  });
+
+  it('frappe pendant l’écriture de B, échec sur C : le texte tapé reste et atteint le disque', async () => {
+    await openBook(DISORDERED);
+    const typed = `${RENUMBERED_A}\nTapé pendant l’écriture.\n`;
+    beforeWrite = async (path) => {
+      if (path === B) type(typed);
+      if (path === C) return REFUSED;
+    };
+    vi.useFakeTimers();
+
+    await clickRenumber();
+
+    // Le chapitre garde son texte : il n'est donc pas « inchangé ».
+    expect(alertMessage()).toBe('book.renumberInterrupted');
+    expect(live()).toBe(typed);
+    expect(disk[B]).toBe(DISORDERED[B]);
+    expect(disk[C]).toBe(DISORDERED[C]);
+    expect(locks()).toEqual(FREE);
+
+    await waitForAutosave();
+    expect(disk[A]).toBe(typed);
+    expect(live()).toBe(typed);
+  });
+
+  it('frappe pendant l’écriture refusée du chapitre ouvert : le texte tapé reste', async () => {
+    await openBook(DISORDERED);
+    const typed = `${RENUMBERED_A}\nTapé pendant l’écriture.\n`;
+    let first = true;
+    beforeWrite = async (path) => {
+      if (path === A && first) {
+        first = false;
+        type(typed);
+        return REFUSED;
+      }
+    };
+    vi.useFakeTimers();
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberInterrupted');
+    expect(live()).toBe(typed);
+    expect(disk[B]).toBe(DISORDERED[B]);
+
+    await waitForAutosave();
+    expect(disk[A]).toBe(typed);
+  });
+
+  it('annulation par l’auteur : le tampon a déjà le texte d’origine, la remise en état suit', async () => {
+    await openBook(DISORDERED);
+    beforeWrite = async (path) => {
+      if (path === B) type(DISORDERED[A]);
+      if (path === C) return REFUSED;
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberError');
+    expect(disk).toEqual(DISORDERED);
+    expect(live()).toBe(DISORDERED[A]);
+  });
+
+  it('bascule vers un chapitre déjà écrit, sans frappe : il retrouve son texte', async () => {
+    await openBook(DISORDERED);
+    const fail = await clickRenumberHoldingC();
+
+    await act(async () => {
+      switchBypassingLock(B);
+    });
+    expect(live()).toBe(disk[B]);
+    expect(live()).not.toBe(DISORDERED[B]);
+    await fail();
+
+    expect(alertMessage()).toBe('book.renumberError');
+    expect(disk).toEqual(DISORDERED);
+    expect(live()).toBe(DISORDERED[B]);
+  });
+
+  it('bascule vers un chapitre déjà écrit, frappe : le texte tapé reste, les autres reviennent', async () => {
+    await openBook(DISORDERED);
+    const fail = await clickRenumberHoldingC();
+
+    await act(async () => {
+      switchBypassingLock(B);
+    });
+    const typed = `${live()}\nTapé après la bascule.\n`;
+    await act(async () => {
+      type(typed);
+    });
+    await fail();
+
+    expect(alertMessage()).toBe('book.renumberInterrupted');
+    expect(live()).toBe(typed);
+    expect(disk[A]).toBe(DISORDERED[A]);
+  });
+
+  it('restauration refusée sur un autre chapitre : le message ne dit pas le manuscrit intact', async () => {
+    await openBook(DISORDERED, B);
+    let writesOfA = 0;
+    beforeWrite = async (path) => {
+      if (path === C) return REFUSED;
+      if (path === A && ++writesOfA === 2) return REFUSED;
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberRestoreFailed');
+    expect(disk[A]).toBe(RENUMBERED_A);
+    // La suite de la remise en état n'est pas abandonnée pour autant.
+    expect(disk[B]).toBe(DISORDERED[B]);
+    expect(live()).toBe(DISORDERED[B]);
+    expect(locks()).toEqual(FREE);
+  });
+
+  it('restauration rejetée par l’IPC : même message, et non une erreur de plus', async () => {
+    await openBook(DISORDERED, B);
+    let writesOfA = 0;
+    beforeWrite = async (path) => {
+      if (path === C) return REFUSED;
+      if (path === A && ++writesOfA === 2) throw new Error('canal coupé');
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberRestoreFailed');
+    expect(disk[B]).toBe(DISORDERED[B]);
+  });
+
+  it('restauration refusée du chapitre ouvert : le tampon revient, le message reste honnête', async () => {
+    await openBook(DISORDERED);
+    let writesOfA = 0;
+    beforeWrite = async (path) => {
+      if (path === C) return REFUSED;
+      if (path === A && ++writesOfA === 2) return REFUSED;
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberRestoreFailed');
+    expect(disk[A]).toBe(RENUMBERED_A);
+    expect(disk[B]).toBe(DISORDERED[B]);
+    expect(live()).toBe(DISORDERED[A]);
+  });
+
+  it('interruption puis restauration refusée : l’échec de restauration prime sur l’interruption', async () => {
+    await openBook(DISORDERED);
+    let writesOfA = 0;
+    let switched = false;
+    beforeWrite = async (path) => {
+      if (path === B && !switched) {
+        switched = true;
+        switchBypassingLock(C);
+      }
+      if (path === A && ++writesOfA === 2) return REFUSED;
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberRestoreFailed');
+    expect(disk[B]).toBe(DISORDERED[B]);
+    expect(live()).toBe(DISORDERED[C]);
   });
 });
 

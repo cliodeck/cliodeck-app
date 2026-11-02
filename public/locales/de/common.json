@@ -2007,6 +2007,7 @@
     "renumberInProgress": "Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal.",
     "renumberInterrupted": "Neunummerierung unterbrochen: Das geöffnete Kapitel hat sich während des Vorgangs geändert. Starten Sie sie erneut, um sie abzuschließen.",
     "renumberTimedOut": "Neunummerierung abgebrochen: Der Datenträger hat {{minutes}} Minuten lang nicht geantwortet. Einige Kapitel wurden möglicherweise neu nummeriert, nicht alle: Starten Sie sie erneut, sobald der Datenträger wieder antwortet.",
+    "renumberRestoreFailed": "Neunummerierung fehlgeschlagen und nicht vollständig rückgängig gemacht: Einige Kapitel sind möglicherweise weiterhin neu nummeriert. Starten Sie sie erneut, sobald die Dateien wieder erreichbar sind.",
     "settings": {
       "title": "Bucheinstellungen",
       "saveError": "Einstellungen konnten nicht gespeichert werden — Änderung zurückgenommen.",
