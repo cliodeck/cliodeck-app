@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle, Clapperboard, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
@@ -20,9 +20,6 @@ interface PDFExportModalProps {
 }
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose }) => {
-  // Échap ferme la modale (le piège de focus s'active quand la ref
-  // est attachée au conteneur).
-  const trapRef = useFocusTrap({ active: isOpen, onEscape: onClose });
   const { t } = useTranslation('common');
   const { currentProject, chapters, bookSettings } = useProjectStore();
   const { filePath, getLiveContent } = useEditorStore();
@@ -38,6 +35,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
@@ -46,6 +44,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     style: 'chicago-note-bibliography',
     locale: 'fr-FR',
   });
+
+  // La minuterie de succès appelle le `onClose` du parent : démontée, la
+  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
+  useEffect(
+    () => () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    },
+    []
+  );
 
   // Check dependencies on mount
   useEffect(() => {
@@ -256,7 +263,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
       if (result.success) {
         setSuccess(true);
-        setTimeout(() => {
+        successTimer.current = setTimeout(() => {
           onClose();
           // Reset state
           setIsExporting(false);
@@ -290,6 +297,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
+
+  // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
+  // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
+  // la ref est attachée au conteneur).
+  const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;
 
