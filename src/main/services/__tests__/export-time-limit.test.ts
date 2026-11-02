@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
+import { EventEmitter } from 'events';
 import {
   chmodSync,
   closeSync,
@@ -45,7 +46,29 @@ const presentation = vi.hoisted(() => ({
   heldDir: null as string | null,
   dirBarrier: Promise.resolve(),
   dirHeld: false,
+  /** Le `writeFile` de ce fichier se fait, puis reste en attente de la barrière. */
+  heldFile: null as string | null,
+  fileBarrier: Promise.resolve(),
+  fileHeld: false,
+  /** Un stat sans réponse, comme sur un montage mort. */
+  deadPath: null as string | null,
+  statBarrier: Promise.resolve(),
+  statHeld: false,
+  /** Un stat synchrone sous ce dossier gèlerait le main sur un montage mort, et l'horloge avec. */
+  syncStatRoot: null as string | null,
+  syncStats: [] as string[],
 }));
+
+vi.mock('fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs')>();
+  const existsSync = (path: Parameters<typeof real.existsSync>[0]) => {
+    if (presentation.syncStatRoot && String(path).startsWith(presentation.syncStatRoot)) {
+      presentation.syncStats.push(String(path));
+    }
+    return real.existsSync(path);
+  };
+  return { ...real, existsSync };
+});
 
 vi.mock('fs/promises', async (importOriginal) => {
   const real = await importOriginal<typeof import('fs/promises')>();
@@ -57,7 +80,21 @@ vi.mock('fs/promises', async (importOriginal) => {
     }
     return made;
   };
-  return { ...real, mkdir };
+  const writeFile = async (...args: Parameters<typeof real.writeFile>) => {
+    await real.writeFile(...args);
+    if (String(args[0]) === presentation.heldFile) {
+      presentation.fileHeld = true;
+      await presentation.fileBarrier;
+    }
+  };
+  const access = async (...args: Parameters<typeof real.access>) => {
+    if (String(args[0]) === presentation.deadPath) {
+      presentation.statHeld = true;
+      await presentation.statBarrier;
+    }
+    return real.access(...args);
+  };
+  return { ...real, mkdir, writeFile, access };
 });
 
 vi.mock('electron', () => ({
@@ -103,6 +140,7 @@ vi.mock('electron', () => ({
 const { pdfExportService } = await import('../pdf-export.js');
 const { wordExportService } = await import('../word-export.js');
 const { revealJsExportService } = await import('../revealjs-export.js');
+const { ExportClock, watchSystemSleep } = await import('../export-time-limit.js');
 
 /** Ceux qu'`extendedToolPath` remettrait devant le faux pandoc s'ils manquaient au PATH. */
 const UNIX_TOOL_DIRS = [
@@ -117,6 +155,14 @@ const NEVER = () => new Promise<never>(() => undefined);
 
 /** Jamais atteinte d'elle-même : `expireWhen` la fait échoir. */
 const LIMIT = { timeLimitMs: 60_000 };
+
+/**
+ * Larges, car une machine saturée met des secondes à lancer un script (mesuré sous
+ * 16 processus de charge). Seul un test rouge les attend jusqu'au bout.
+ */
+const TEST_MS = 60_000;
+const READY_MS = 30_000;
+const SETTLED_MS = 15_000;
 
 let root: string;
 let bin: string;
@@ -234,7 +280,7 @@ function blockedAbstract(): string {
   return fifo;
 }
 
-async function waitUntil(condition: () => boolean, ms = 3000): Promise<void> {
+async function waitUntil(condition: () => boolean, ms = SETTLED_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!condition() && Date.now() < end) {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -250,7 +296,21 @@ async function releaseFifo(fifo: string): Promise<void> {
     } catch {
       return false; // Personne n'y lit encore.
     }
-  }, 2000);
+  });
+}
+
+/** Retient le `writeFile` de ce fichier, une fois fait. Rend de quoi le relâcher. */
+function holdWrite(file: string): () => void {
+  let release: () => void = () => undefined;
+  presentation.fileBarrier = new Promise((resolve) => { release = resolve; });
+  presentation.heldFile = file;
+  return () => release();
+}
+
+/** Il part peu après l'annonce de l'échec : le nettoyage du service n'est attendu que 2 s. */
+async function expectNoTempLeft(): Promise<void> {
+  await waitUntil(() => readdirSync(scratch).length === 0);
+  expect(readdirSync(scratch)).toEqual([]);
 }
 
 function useFakeClock(): void {
@@ -259,7 +319,8 @@ function useFakeClock(): void {
 
 /** Fait échoir l'horloge de l'export, une fois `ready` vrai. */
 async function expireWhen(ready: () => boolean): Promise<void> {
-  await waitUntil(ready, 10_000);
+  await waitUntil(ready, READY_MS);
+  if (!ready()) throw new Error('L’export n’a pas atteint l’attente que le test devait faire échoir.');
   vi.advanceTimersByTime(LIMIT.timeLimitMs);
 }
 
@@ -289,6 +350,12 @@ beforeEach(() => {
   presentation.openCalls = 0;
   presentation.heldDir = null;
   presentation.dirHeld = false;
+  presentation.heldFile = null;
+  presentation.fileHeld = false;
+  presentation.deadPath = null;
+  presentation.statHeld = false;
+  presentation.syncStatRoot = null;
+  presentation.syncStats = [];
 });
 
 afterEach(() => {
@@ -307,7 +374,8 @@ afterEach(() => {
   if (realTmpdir === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = realTmpdir;
   rmSync(root, { recursive: true, force: true });
-});
+  // Ce nettoyage synchrone a dépassé les 10 s par défaut sur une machine saturée.
+}, TEST_MS);
 
 describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend', () => {
   it(
@@ -322,9 +390,9 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
       expect(isAlive(pidOf('pandoc'))).toBe(false);
       expect(isAlive(pidOf('pandoc-enfant'))).toBe(false);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -342,9 +410,9 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       expect(isAlive(pidOf('pandoc-enfant'))).toBe(false);
       // Le SIGTERM n'a pas suffi : les 5 s de grâce sont passées avant le SIGKILL.
       expect(Date.now() - expiredAt).toBeGreaterThanOrEqual(4900);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -367,9 +435,9 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
 
       expect(await exporting).toMatchObject({ errorCode: 'export_timed_out' });
       expect(isAlive(pidOf('tenace'))).toBe(false);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -386,7 +454,7 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       expect(await exporting).toMatchObject({ errorCode: 'export_timed_out' });
       expect(readFileSync(pdfOptions().outputPath).equals(before)).toBe(true);
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -408,7 +476,7 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       });
       expect(isAlive(pidOf('pandoc'))).toBe(false);
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -425,7 +493,7 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       expect(vi.getTimerCount()).toBe(0);
       expect(killSpy).not.toHaveBeenCalled();
     },
-    15_000
+    TEST_MS
   );
 
   it(
@@ -440,12 +508,10 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
       } finally {
         await releaseFifo(fifo);
       }
-
-      await waitUntil(() => readdirSync(scratch).length === 0);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
       expect(calls()).toEqual([]);
     },
-    15_000
+    TEST_MS
   );
 });
 
@@ -465,10 +531,9 @@ describe.skipIf(process.platform === 'win32')('export PDF : citeproc par chapitr
       // Le repli aurait laissé le chapitre tel quel et poursuivi l'export.
       expect(calls()).toEqual(['citeproc']);
       expect(existsSync(join(project, 'sortie.pdf'))).toBe(false);
-      await waitUntil(() => readdirSync(scratch).length === 0);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -476,13 +541,13 @@ describe.skipIf(process.platform === 'win32')('export PDF : citeproc par chapitr
     async () => {
       tool('pandoc', pandocForBook('exit 1'));
 
-      const result = await pdfExportService.exportToPDF(bookOptions(2), undefined, { timeLimitMs: 10_000 });
+      const result = await pdfExportService.exportToPDF(bookOptions(2), undefined, LIMIT);
 
       expect(result).toMatchObject({ success: true });
       expect(calls()).toEqual(['citeproc', 'citeproc', 'principal']);
       expect(readFileSync(join(root, 'entree-principale.md'), 'utf8')).toContain('[@clef]');
     },
-    15_000
+    TEST_MS
   );
 
   it(
@@ -496,9 +561,9 @@ describe.skipIf(process.platform === 'win32')('export PDF : citeproc par chapitr
       expect(result).toMatchObject({ success: false, errorCode: 'export_timed_out' });
       expect(calls().length).toBeLessThan(6);
       expect(calls()).not.toContain('principal');
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    15_000
+    TEST_MS
   );
 });
 
@@ -520,9 +585,9 @@ describe.skipIf(process.platform === 'win32' || !pandocAvailable())('export PDF 
       expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
       expect(isAlive(pidOf('xelatex'))).toBe(false);
       expect(isAlive(pidOf('xelatex-enfant'))).toBe(false);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 });
 
@@ -542,9 +607,9 @@ describe.skipIf(process.platform === 'win32')('export Word', () => {
       expect(isAlive(pidOf('pandoc'))).toBe(false);
       expect(isAlive(pidOf('pandoc-enfant'))).toBe(false);
       expect(readFileSync(wordOptions().outputPath).equals(before)).toBe(true);
-      expect(readdirSync(scratch)).toEqual([]);
+      await expectNoTempLeft();
     },
-    20_000
+    TEST_MS
   );
 
   it(
@@ -558,7 +623,7 @@ describe.skipIf(process.platform === 'win32')('export Word', () => {
       expect(result).toMatchObject({ success: true });
       expect(vi.getTimerCount()).toBe(0);
     },
-    15_000
+    TEST_MS
   );
 
   it(
@@ -580,8 +645,411 @@ describe.skipIf(process.platform === 'win32')('export Word', () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(existsSync(native.outputPath)).toBe(false);
     },
-    15_000
+    TEST_MS
   );
+
+  it(
+    'une écriture qui se débloque après l’échéance n’annonce pas de succès',
+    async () => {
+      const { bibliographyPath: _unused, ...native } = wordOptions();
+      const release = holdWrite(native.outputPath);
+      const stages: string[] = [];
+      useFakeClock();
+
+      const exporting = wordExportService.exportToWord(native, (p) => stages.push(p.stage), LIMIT);
+      await expireWhen(() => presentation.fileHeld);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
+
+      vi.useRealTimers();
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(stages).not.toContain('complete');
+    },
+    TEST_MS
+  );
+});
+
+describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', () => {
+  describe.each([
+    {
+      name: 'PDF',
+      options: pdfOptions,
+      run: pdfExportService.exportToPDF.bind(pdfExportService),
+    },
+    {
+      name: 'Word',
+      options: wordOptions,
+      run: wordExportService.exportToWord.bind(wordExportService),
+    },
+  ])('$name : un stat sans réponse', ({ options, run }) => {
+    it(
+      'rend la main à l’échéance, et le travail repris ne lance plus rien',
+      async () => {
+        tool('pandoc', `echo principal >> "${root}/appels"`);
+        writeFileSync(join(project, 'abstract.md'), 'Un résumé.\n');
+        let release: () => void = () => undefined;
+        presentation.statBarrier = new Promise((resolve) => { release = resolve; });
+        presentation.deadPath = join(project, 'abstract.md');
+        useFakeClock();
+
+        const exporting = run(options(), undefined, LIMIT);
+        await expireWhen(() => presentation.statHeld);
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
+
+        vi.useRealTimers();
+        release();
+        // Word ne crée son dossier qu'après ce stat : le travail repris doit d'abord avancer.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await expectNoTempLeft();
+        expect(calls()).toEqual([]);
+        expect(existsSync(options().outputPath)).toBe(false);
+      },
+      TEST_MS
+    );
+  });
+
+  /** Tous les fichiers facultatifs d'un export : chaque test d'existence y passe. */
+  function optionalFiles(): { cslPath: string; templatePath: string } {
+    writeFileSync(join(project, 'abstract.md'), 'Un résumé.\n');
+    writeFileSync(join(project, 'style.csl'), '<style/>');
+    writeFileSync(join(project, 'modele.dotx'), 'pas un vrai modèle');
+    return { cslPath: join(project, 'style.csl'), templatePath: join(project, 'modele.dotx') };
+  }
+
+  it(
+    'PDF d’un livre, bibliographie par chapitre : aucun stat synchrone sur les fichiers du projet',
+    async () => {
+      tool('pandoc', pandocForBook('cat "$1"'));
+      const { cslPath } = optionalFiles();
+
+      presentation.syncStatRoot = project;
+      const result = await pdfExportService.exportToPDF({ ...bookOptions(1), cslPath }, undefined, LIMIT);
+      presentation.syncStatRoot = null;
+
+      expect(result).toMatchObject({ success: true });
+      expect(presentation.syncStats).toEqual([]);
+    },
+    TEST_MS
+  );
+
+  it(
+    'Word par pandoc : aucun stat synchrone sur les fichiers du projet',
+    async () => {
+      tool('pandoc', 'printf "%s" "docx" > "$3"');
+      const files = optionalFiles();
+
+      presentation.syncStatRoot = project;
+      const result = await wordExportService.exportToWord({ ...wordOptions(), ...files }, undefined, LIMIT);
+      presentation.syncStatRoot = null;
+
+      expect(result).toMatchObject({ success: true });
+      expect(presentation.syncStats).toEqual([]);
+    },
+    TEST_MS
+  );
+
+  it(
+    'PDF à bibliographie unique : aucun stat synchrone non plus',
+    async () => {
+      tool('pandoc', 'printf "%s" "%PDF-faux" > "$3"');
+      const { cslPath } = optionalFiles();
+
+      presentation.syncStatRoot = project;
+      const result = await pdfExportService.exportToPDF(
+        { ...pdfOptions(), cslPath, bibliographyPath: bibliography },
+        undefined,
+        LIMIT
+      );
+      presentation.syncStatRoot = null;
+
+      expect(result).toMatchObject({ success: true });
+      expect(presentation.syncStats).toEqual([]);
+    },
+    TEST_MS
+  );
+
+  /** `pathExists` non attendu : une promesse est toujours vraie, un fichier absent passerait. */
+  describe('un fichier facultatif présent est pris, un absent ne l’est pas', () => {
+    const recordArgs = (output: string) =>
+      `echo "$*" >> "${root}/arguments"\nprintf "%s" "${output}" > "$3"`;
+    const args = () => readFileSync(join(root, 'arguments'), 'utf8');
+
+    it(
+      'PDF',
+      async () => {
+        tool('pandoc', recordArgs('%PDF-faux'));
+        const { cslPath } = optionalFiles();
+        const bibliographyPath = bibliography;
+
+        await pdfExportService.exportToPDF(
+          { ...pdfOptions(), cslPath, bibliographyPath },
+          undefined,
+          LIMIT
+        );
+        expect(args()).toContain('--bibliography');
+        expect(args()).toContain('--csl');
+        expect(args()).toContain('Un résumé.');
+
+        // Le CSL ne compte qu'avec une bibliographie : d'abord lui seul.
+        rmSync(join(root, 'arguments'));
+        rmSync(cslPath);
+        await pdfExportService.exportToPDF(
+          { ...pdfOptions(), cslPath, bibliographyPath },
+          undefined,
+          LIMIT
+        );
+        expect(args()).toContain('--bibliography');
+        expect(args()).not.toContain('--csl');
+
+        rmSync(join(root, 'arguments'));
+        rmSync(bibliographyPath);
+        rmSync(join(project, 'abstract.md'));
+        await pdfExportService.exportToPDF(
+          { ...pdfOptions(), cslPath, bibliographyPath },
+          undefined,
+          LIMIT
+        );
+        expect(args()).not.toContain('--bibliography');
+        expect(args()).not.toContain('Un résumé.');
+      },
+      TEST_MS
+    );
+
+    it(
+      'PDF d’un livre : le citeproc de chaque chapitre',
+      async () => {
+        const record = `echo "$*" >> "${root}/arguments"`;
+        tool('pandoc', pandocForBook(`${record}\ncat "$1"`));
+        const { cslPath } = optionalFiles();
+        const options = { ...bookOptions(1), cslPath };
+
+        await pdfExportService.exportToPDF(options, undefined, LIMIT);
+        expect(args()).toContain('--csl');
+
+        rmSync(join(root, 'arguments'));
+        rmSync(cslPath);
+        await pdfExportService.exportToPDF(options, undefined, LIMIT);
+        expect(args()).toContain('--citeproc');
+        expect(args()).not.toContain('--csl');
+
+        // Sans bibliographie sur le disque, plus de citeproc par chapitre.
+        rmSync(join(root, 'appels'));
+        rmSync(bibliography);
+        await pdfExportService.exportToPDF(options, undefined, LIMIT);
+        expect(calls()).toEqual(['principal']);
+      },
+      TEST_MS
+    );
+
+    it(
+      'Word par pandoc',
+      async () => {
+        tool('pandoc', recordArgs('docx'));
+        const files = optionalFiles();
+
+        await wordExportService.exportToWord({ ...wordOptions(), ...files }, undefined, LIMIT);
+        expect(args()).toContain('--bibliography');
+        expect(args()).toContain('--csl');
+        expect(args()).toContain('--reference-doc');
+
+        rmSync(join(root, 'arguments'));
+        rmSync(files.cslPath);
+        rmSync(files.templatePath);
+        await wordExportService.exportToWord({ ...wordOptions(), ...files }, undefined, LIMIT);
+        expect(args()).toContain('--bibliography');
+        expect(args()).not.toContain('--csl');
+        expect(args()).not.toContain('--reference-doc');
+      },
+      TEST_MS
+    );
+
+    it(
+      'Word : sans bibliographie sur le disque, le générateur interne, pas pandoc',
+      async () => {
+        tool('pandoc', recordArgs('docx'));
+        rmSync(bibliography);
+
+        const result = await wordExportService.exportToWord(wordOptions(), undefined, LIMIT);
+
+        expect(result).toMatchObject({ success: true });
+        expect(existsSync(join(root, 'arguments'))).toBe(false);
+        // Un vrai docx : une archive ZIP.
+        expect(readFileSync(wordOptions().outputPath).subarray(0, 2).toString()).toBe('PK');
+      },
+      TEST_MS
+    );
+  });
+
+  it(
+    'Word par le générateur interne : aucun stat synchrone sur les fichiers du projet',
+    async () => {
+      const { bibliographyPath: _unused, ...native } = wordOptions();
+      const { templatePath } = optionalFiles();
+
+      presentation.syncStatRoot = project;
+      const result = await wordExportService.exportToWord({ ...native, templatePath }, undefined, LIMIT);
+      presentation.syncStatRoot = null;
+
+      expect(result).toMatchObject({ success: true });
+      expect(presentation.syncStats).toEqual([]);
+    },
+    TEST_MS
+  );
+});
+
+/**
+ * Le Mac qui dort ne fait rien tourner. Les deux temps sont ici indépendants :
+ * `vi.advanceTimersByTime` pour les minuteries, `wall` pour l'heure. Sous macOS,
+ * les minuteries comptent la veille et tombent dès le réveil ; ailleurs, elles
+ * peuvent ne pas la compter.
+ */
+describe('la veille ne compte pas dans la limite', () => {
+  const HOUR = 3_600_000;
+  let wall: number;
+  let power: EventEmitter;
+
+  const isExpired = (clock: InstanceType<typeof ExportClock>): boolean => {
+    try {
+      clock.throwIfExpired();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  /** Le temps passe pour tout le monde. */
+  const pass = (ms: number): void => {
+    wall += ms;
+    vi.advanceTimersByTime(ms);
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    wall = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => wall);
+    power = new EventEmitter();
+    watchSystemSleep(power);
+  });
+
+  it('sans veille, la limite tombe à l’heure et rien ne reste armé', () => {
+    const clock = new ExportClock(1000);
+    pass(999);
+    expect(isExpired(clock)).toBe(false);
+    pass(1);
+    expect(isExpired(clock)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    clock.stop();
+  });
+
+  it('une minuterie qui tombe au réveil, avant l’annonce : il reste le temps qui restait', () => {
+    const clock = new ExportClock(1000);
+    pass(400);
+    power.emit('suspend');
+    wall += HOUR;
+    vi.advanceTimersByTime(600); // Elle a compté la veille : elle tombe dès le réveil.
+    expect(isExpired(clock)).toBe(false);
+    power.emit('resume');
+    pass(599);
+    expect(isExpired(clock)).toBe(false);
+    pass(1);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('une annonce du réveil qui précède la minuterie : même reste', () => {
+    const clock = new ExportClock(1000);
+    pass(400);
+    power.emit('suspend');
+    wall += HOUR;
+    power.emit('resume');
+    vi.advanceTimersByTime(600);
+    expect(isExpired(clock)).toBe(false);
+    pass(599);
+    expect(isExpired(clock)).toBe(false);
+    pass(1);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('des minuteries qui ne comptent pas la veille : la limite tombe sans rallonge', () => {
+    const clock = new ExportClock(1000);
+    pass(400);
+    power.emit('suspend');
+    wall += HOUR;
+    power.emit('resume');
+    pass(600);
+    expect(isExpired(clock)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    clock.stop();
+  });
+
+  it('un réveil jamais annoncé ne retire pas l’échéance', () => {
+    const clock = new ExportClock(1000);
+    pass(400);
+    power.emit('suspend');
+    wall += HOUR;
+    vi.advanceTimersByTime(600);
+    expect(isExpired(clock)).toBe(false);
+    pass(600);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('plusieurs veilles s’additionnent', () => {
+    const clock = new ExportClock(1000);
+    pass(300);
+    power.emit('suspend');
+    wall += HOUR;
+    power.emit('resume');
+    pass(300);
+    power.emit('suspend');
+    wall += 2 * HOUR;
+    power.emit('resume');
+    vi.advanceTimersByTime(400);
+    expect(isExpired(clock)).toBe(false);
+    pass(399);
+    expect(isExpired(clock)).toBe(false);
+    pass(1);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('une heure système qu’on recule, sans veille, ne retarde pas la limite', () => {
+    const clock = new ExportClock(1000);
+    pass(999);
+    wall -= HOUR;
+    pass(1);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('une veille d’avant l’export ne lui donne aucune rallonge', () => {
+    power.emit('suspend');
+    wall += HOUR;
+    power.emit('resume');
+    const clock = new ExportClock(1000);
+    pass(1000);
+    expect(isExpired(clock)).toBe(true);
+    clock.stop();
+  });
+
+  it('une limite repartie après une veille se désarme aussi', () => {
+    const clock = new ExportClock(1000);
+    pass(400);
+    power.emit('suspend');
+    wall += HOUR;
+    vi.advanceTimersByTime(600);
+    power.emit('resume');
+    expect(vi.getTimerCount()).toBe(1);
+    clock.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    pass(1000);
+    expect(isExpired(clock)).toBe(false);
+  });
 });
 
 describe('export de présentation', () => {
@@ -607,7 +1075,7 @@ describe('export de présentation', () => {
       expect(existsSync(presentation.loadedFile as string)).toBe(false);
       expect(existsSync(slides().outputPath)).toBe(false);
     },
-    10_000
+    TEST_MS
   );
 
   it(
@@ -623,7 +1091,7 @@ describe('export de présentation', () => {
       expect(presentation.windows[0]).toMatchObject({ destroyed: true, closed: false });
       expect(existsSync(presentation.loadedFile as string)).toBe(false);
     },
-    10_000
+    TEST_MS
   );
 
   it(
@@ -637,7 +1105,7 @@ describe('export de présentation', () => {
       expect(presentation.windows[0]).toMatchObject({ destroyed: false, closed: true });
       expect(vi.getTimerCount()).toBe(0);
     },
-    10_000
+    TEST_MS
   );
 
   it(
@@ -665,7 +1133,7 @@ describe('export de présentation', () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(existsSync(outputDir)).toBe(false);
     },
-    10_000
+    TEST_MS
   );
 
   it(
@@ -677,14 +1145,14 @@ describe('export de présentation', () => {
       const result = await revealJsExportService.exportToRevealJs(
         { ...slides(), outputPath: output },
         undefined,
-        { timeLimitMs: 300 }
+        { timeLimitMs: 3000 }
       );
 
       expect(result).toEqual({ success: true, outputPath: output });
       expect(readFileSync(output, 'utf8')).toContain('<!DOCTYPE html>');
       expect(presentation.openCalls).toBe(1);
     },
-    10_000
+    TEST_MS
   );
 
   it(
@@ -703,7 +1171,7 @@ describe('export de présentation', () => {
       // Un rejet sans lecteur ferait échouer ce test : on lui laisse le temps de partir.
       await new Promise((resolve) => setTimeout(resolve, 20));
     },
-    10_000
+    TEST_MS
   );
 
   describe.each([
@@ -749,7 +1217,35 @@ describe('export de présentation', () => {
         expect(readFileSync(output, 'utf8')).toBe('EXPORT-PRECEDENT');
         expect(presentation.openCalls).toBe(0);
       },
-      15_000
+      TEST_MS
+    );
+
+    it(
+      'une écriture qui se débloque après l’échéance n’annonce pas de succès et n’ouvre rien',
+      async () => {
+        const output = join(project, file);
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('/* asset */')));
+        const release = holdWrite(output);
+        const stages: string[] = [];
+        useFakeClock();
+
+        const exporting = run(
+          { ...slides(), outputPath: output },
+          (progress) => stages.push(progress.stage),
+          LIMIT
+        );
+        await expireWhen(() => presentation.fileHeld);
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
+
+        vi.useRealTimers();
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(stages).not.toContain('complete');
+        expect(presentation.openCalls).toBe(0);
+      },
+      TEST_MS
     );
   });
 });

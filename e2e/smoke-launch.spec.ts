@@ -14,6 +14,9 @@ test('app launches and shows a main window', async () => {
     await expect(window).toHaveTitle(/.+/);
     // The React root should have mounted *something*.
     await expect(window.locator('#root')).toBeVisible({ timeout: 20_000 });
+    // La limite d'un export ne compte pas la veille : seul le main peut le lui dire.
+    const sleepListeners = await app.evaluate(({ powerMonitor }) => powerMonitor.listenerCount('suspend'));
+    expect(sleepListeners).toBeGreaterThan(0);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

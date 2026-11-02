@@ -539,6 +539,7 @@ export class RevealJsExportService {
 
       // Write HTML file
       await writeFile(outputPath, html, 'utf-8');
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'Présentation créée!', progress: 100 });
 
@@ -647,6 +648,7 @@ export class RevealJsExportService {
       await mkdir(dirname(outputPath), { recursive: true });
       clock.throwIfExpired();
       await writeFile(outputPath, html, 'utf-8');
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'Présentation offline créée!', progress: 100 });
       return { success: true, outputPath };
@@ -725,6 +727,7 @@ export class RevealJsExportService {
       await mkdir(dirname(outputPath), { recursive: true });
       clock.throwIfExpired();
       await writeFile(outputPath, pdfData);
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'PDF créé!', progress: 100 });
       return { success: true, outputPath };

@@ -1,6 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import { join, dirname, extname, isAbsolute } from 'path';
-import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -28,6 +27,7 @@ import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import {
+  pathExists,
   withExportTimeLimit,
   type ExportClock,
   type ExportLimits,
@@ -252,7 +252,7 @@ export class WordExportService {
 
       // Add bibliography and CSL if provided
       const bibPath = options.bibliographyPath;
-      if (bibPath && existsSync(bibPath)) {
+      if (bibPath && (await pathExists(bibPath))) {
         pandocArgs.push('--bibliography', bibPath);
         pandocArgs.push('--citeproc');
         console.log('📚 Using bibliography:', bibPath);
@@ -273,7 +273,7 @@ export class WordExportService {
             ? join(options.projectPath, options.cslPath)
             : options.cslPath;
         const cslPath = engineCsl ?? projectCsl;
-        if (cslPath && existsSync(cslPath)) {
+        if (cslPath && (await pathExists(cslPath))) {
           pandocArgs.push('--csl', cslPath);
           console.log('📚 Using CSL style:', cslPath);
         }
@@ -288,7 +288,7 @@ export class WordExportService {
       }
 
       // Add reference doc (template) if provided
-      if (options.templatePath && existsSync(options.templatePath)) {
+      if (options.templatePath && (await pathExists(options.templatePath))) {
         pandocArgs.push('--reference-doc', options.templatePath);
         console.log('📝 Using Word template:', options.templatePath);
       }
@@ -387,7 +387,7 @@ export class WordExportService {
         (options.projectType === 'article' || options.projectType === 'book')
       ) {
         const abstractPath = join(options.projectPath, 'abstract.md');
-        if (existsSync(abstractPath)) {
+        if (await pathExists(abstractPath)) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           const parts = splitAbstract(abstractContent);
           abstract = parts.body;
@@ -421,7 +421,7 @@ export class WordExportService {
       // qu'un style est enregistré dans les réglages.
       const willUsePandoc =
         !!options.bibliographyPath &&
-        existsSync(options.bibliographyPath) &&
+        (await pathExists(options.bibliographyPath)) &&
         (await this.checkPandoc());
 
       if (options.manuscript?.chapters?.length) {
@@ -440,7 +440,8 @@ export class WordExportService {
       // Même décision que celle prise plus haut pour choisir la cible
       // d'assemblage : les deux DOIVENT concorder, sinon on assemblerait
       // du LaTeX pour le générateur natif, ou l'inverse.
-      const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
+      const hasBibliography =
+        options.bibliographyPath && (await pathExists(options.bibliographyPath));
       const hasPandoc = await this.checkPandoc();
       const useEnginePipeline = !!options.citation?.useEngine;
 
@@ -738,7 +739,7 @@ export class WordExportService {
       // Check if template is provided or exists
       let finalBuffer: Buffer;
 
-      if (options.templatePath && existsSync(options.templatePath)) {
+      if (options.templatePath && (await pathExists(options.templatePath))) {
         onProgress?.({
           stage: 'template',
           message: 'Application du modèle Word...',
@@ -768,6 +769,7 @@ export class WordExportService {
 
       clock.throwIfExpired();
       await writeFile(outputPath, finalBuffer);
+      clock.throwIfExpired();
 
       onProgress?.({
         stage: 'complete',

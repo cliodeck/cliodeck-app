@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import { writeFile, mkdir, readFile, rm } from 'fs/promises';
 import { join, dirname } from 'path';
-import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
 import { processMarkdownCitations } from './citation-pipeline.js';
@@ -9,6 +8,7 @@ import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import {
+  pathExists,
   withExportTimeLimit,
   type ExportClock,
   type ExportLimits,
@@ -534,7 +534,7 @@ export class PDFExportService {
       '--citeproc',
       '--bibliography', opts.bibliographyPath,
     ];
-    if (opts.cslPath && existsSync(opts.cslPath)) {
+    if (opts.cslPath && (await pathExists(opts.cslPath))) {
       args.push('--csl', opts.cslPath);
     }
 
@@ -611,7 +611,7 @@ export class PDFExportService {
         // projectPath is the folder path for the project
         const abstractPath = join(options.projectPath, 'abstract.md');
         console.log('🔍 Looking for abstract at:', abstractPath);
-        if (existsSync(abstractPath)) {
+        if (await pathExists(abstractPath)) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           // Retire le titre de tête quel qu'il soit (« # Résumé », mais
           // aussi « # Abstract » ou « # Quatrième de couverture ») : passé
@@ -641,7 +641,7 @@ export class PDFExportService {
         const bibMode = resolveBibliographyMode({
           settings,
           bibliographyAvailable:
-            !!options.bibliographyPath && existsSync(options.bibliographyPath),
+            !!options.bibliographyPath && (await pathExists(options.bibliographyPath)),
           useEngine: !!options.citation?.useEngine,
         });
         const perChapterBib = bibMode.perChapter;
@@ -734,7 +734,7 @@ export class PDFExportService {
 
       // Copy bibliography if provided
       let bibPath: string | undefined;
-      if (options.bibliographyPath && existsSync(options.bibliographyPath)) {
+      if (options.bibliographyPath && (await pathExists(options.bibliographyPath))) {
         bibPath = join(tempDir, 'bibliography.bib');
         const bibContent = await readFile(options.bibliographyPath, 'utf-8');
         await writeFile(bibPath, bibContent);
@@ -757,6 +757,7 @@ export class PDFExportService {
         }
       }
 
+      const cslAvailable = !!options.cslPath && (await pathExists(options.cslPath));
       const pandocArgs = buildPandocArgs({
         mdPath,
         outputPath,
@@ -769,11 +770,11 @@ export class PDFExportService {
         bibPath,
         useEnginePipeline,
         cslPath: options.cslPath,
-        cslAvailable: !!options.cslPath && existsSync(options.cslPath),
+        cslAvailable,
         headerIncludesPath,
       });
 
-      if (bibPath && !useEnginePipeline && options.cslPath && existsSync(options.cslPath)) {
+      if (bibPath && !useEnginePipeline && cslAvailable) {
         console.log('📚 Using CSL style:', options.cslPath);
       }
 

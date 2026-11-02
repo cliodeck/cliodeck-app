@@ -8,7 +8,7 @@
  * l'appel au main, les lectures des modales, a la même limite côté renderer
  * (`export-read-limit.ts`).
  *
- * Trois règles :
+ * Quatre règles :
  *  - **Durée totale, pas délai d'inactivité.** Pandoc ne transmet rien de la
  *    sortie de xelatex : aucun octet pendant la compilation (mesuré), donc aucun
  *    signal d'activité sur lequel s'appuyer.
@@ -16,6 +16,7 @@
  *    chapitres pourrait sinon bloquer 30 fois.
  *  - **C'est tout l'arbre qui meurt** : tuer pandoc seul laisserait xelatex
  *    tourner. D'où `detached`, qui fait de l'outil le chef de son groupe.
+ *  - **La veille ne compte pas** : rien ne tourne pendant que le Mac dort.
  */
 
 import {
@@ -24,6 +25,7 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio,
 } from 'child_process';
+import { access } from 'fs/promises';
 import { EXPORT_TIME_LIMIT_MS } from '../../../backend/types/export-limits.js';
 
 /** Entre SIGTERM et SIGKILL. */
@@ -114,31 +116,83 @@ export async function killProcessTree(child: ChildProcess): Promise<void> {
   await groupGoneWithin(pid, KILL_GRACE_MS);
 }
 
+/**
+ * Tout test d'existence d'un export passe par ici : `existsSync` gèlerait le main
+ * sur un montage mort, et l'horloge avec lui, qui ne tomberait qu'au retour du disque.
+ */
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Le cumul de la veille depuis le lancement de l'app, pour toutes les horloges. */
+let sleptMs = 0;
+let asleepSince: number | null = null;
+
+function noteWake(): void {
+  if (asleepSince === null) return;
+  sleptMs += Date.now() - asleepSince;
+  asleepSince = null;
+}
+
+/**
+ * Ce que la limite écoute de la veille : `powerMonitor`, passé par le main, car ce
+ * module doit pouvoir se charger sans Electron (les tests de l'export Word s'en passent).
+ *
+ * Sous macOS, l'horloge que lisent les minuteries de Node compte la veille
+ * (`process.hrtime` suit `kern.boottime`, mesuré ; une vraie veille n'a pas été rejouée) :
+ * sans cela, un export en cours serait tué au réveil d'une nuit, alors qu'il n'a tourné
+ * que quelques instants.
+ */
+export function watchSystemSleep(power: {
+  on(event: 'suspend' | 'resume', listener: () => void): unknown;
+}): void {
+  power.on('suspend', () => {
+    asleepSince ??= Date.now();
+  });
+  power.on('resume', noteWake);
+}
+
 /** L'horloge d'un export : ce qui est lancé ou attendu sous elle s'arrête à l'échéance. */
 export class ExportClock {
   private readonly minutes: number;
+  private readonly startedAt = Date.now();
+  private readonly sleptBefore = sleptMs;
   private readonly children = new Set<ChildProcess>();
   private readonly expireHooks: Array<() => void> = [];
-  private readonly timer: NodeJS.Timeout;
   private readonly expiry: Promise<never>;
+  private rejectExpiry: (error: ExportTimedOutError) => void = () => undefined;
+  private timer: NodeJS.Timeout;
   private expired = false;
 
-  constructor(limitMs: number) {
+  constructor(private readonly limitMs: number) {
     this.minutes = Math.round(limitMs / 60_000);
-    let timer: NodeJS.Timeout | undefined;
     this.expiry = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        this.expired = true;
-        for (const hook of this.expireHooks) hook();
-        void Promise.all([...this.children].map(killProcessTree)).then(() =>
-          reject(new ExportTimedOutError(this.minutes))
-        );
-      }, limitMs);
+      this.rejectExpiry = reject;
     });
-    this.timer = timer as NodeJS.Timeout;
     // Rejet sans lecteur quand plus rien n'attend sous l'horloge à l'échéance.
     this.expiry.catch(() => undefined);
+    this.timer = setTimeout(this.onDeadline, limitMs);
   }
+
+  private readonly onDeadline = (): void => {
+    noteWake(); // Au réveil, la minuterie peut tomber avant l'annonce de `resume`.
+    const slept = sleptMs - this.sleptBefore;
+    const left = this.limitMs - (Date.now() - this.startedAt - slept);
+    if (slept > 0 && left > 0) {
+      this.timer = setTimeout(this.onDeadline, left);
+      return;
+    }
+    this.expired = true;
+    for (const hook of this.expireHooks) hook();
+    void Promise.all([...this.children].map(killProcessTree)).then(() =>
+      this.rejectExpiry(new ExportTimedOutError(this.minutes))
+    );
+  };
 
   /** Lance un outil : à l'échéance, tout son arbre mourra. Échue, elle ne lance plus rien. */
   spawn(
