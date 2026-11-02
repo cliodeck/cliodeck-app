@@ -35,9 +35,9 @@ import { detectLineSeparator, readDocText } from './fidelity';
  * ## Règle de fraîcheur : le disque fait foi
  *
  * Un état n'est restauré que si son document est **identique** au contenu
- * que le store vient de charger. Un fichier modifié hors ClioDeck, ou un
- * `createNewFile` qui remplace le contenu, invalide donc le cache — on
- * repart du texte réel plutôt que de ressusciter un tampon périmé.
+ * que le store vient de charger. Un fichier modifié hors ClioDeck invalide
+ * donc le cache — on repart du texte réel plutôt que de ressusciter un tampon
+ * périmé.
  */
 
 /** Nombre de documents mémorisés avant éviction du plus ancien. */

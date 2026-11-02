@@ -10,7 +10,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useEditorStore } from '../editorStore';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
-import i18n from '../../i18n';
 
 beforeEach(() => {
   useEditorStore.setState({
@@ -287,13 +286,12 @@ describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
   });
 
   const lock = () => useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
+  const LOCKED = { status: 'locked', lock: 'book.renumberInProgress' };
 
-  it('refuse un autre fichier avec le message du verrou, sans rien écrire ni charger', async () => {
+  it('refuse un autre fichier en rendant le motif du verrou, sans rien écrire ni charger', async () => {
     lock();
 
-    await expect(useEditorStore.getState().loadFile('/livre/chapters/02.md')).rejects.toThrow(
-      i18n.t('book.renumberInProgress')
-    );
+    await expect(useEditorStore.getState().loadFile('/livre/chapters/02.md')).resolves.toEqual(LOCKED);
 
     expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
     expect(saved).toEqual([]);
@@ -330,7 +328,7 @@ describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
     lock();
     release();
 
-    await expect(opening).rejects.toThrow(i18n.t('book.renumberInProgress'));
+    await expect(opening).resolves.toEqual(LOCKED);
     expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
     expect(useEditorStore.getState().content).toBe('# Un\n');
   });
@@ -345,7 +343,7 @@ describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
     lock();
     release();
 
-    await expect(opening).rejects.toThrow(i18n.t('book.renumberInProgress'));
+    await expect(opening).resolves.toEqual(LOCKED);
     expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
     expect(useEditorStore.getState().content).toBe('# Un\n');
     expect(useEditorStore.getState().documentVersion).toBe(version);
@@ -421,7 +419,9 @@ describe('saveFile — réponse revenue après un changement de document', () =>
 
   it('un nouveau tampon : il reste vide', async () => {
     const writing = useEditorStore.getState().saveFile();
-    useEditorStore.getState().createNewFile();
+    // Le document est déjà écrit : la seconde écriture de la porte n'aurait rien à dire.
+    useEditorStore.setState({ isDirty: false });
+    await useEditorStore.getState().createNewFile();
 
     releaseFirstWrite();
     await writing;

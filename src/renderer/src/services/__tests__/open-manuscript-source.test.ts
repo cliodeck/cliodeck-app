@@ -67,6 +67,7 @@ function setup(options: { openFilePath?: string } = {}): Harness {
       setTimeout(() => {
         useEditorStore.setState({ editorFacade: makeFacade() });
       }, 0);
+      return { status: 'replaced' };
     },
   });
 
@@ -203,4 +204,40 @@ describe('openManuscriptSource', () => {
     expect(res.errorKey).toBe('chat.sources.openFailed');
     expect(h.revealed).toEqual([]); // pas de curseur posé sur un chargement raté
   });
+
+  it('verrou posé : remonte sa clé, la vraie raison, sans poser de curseur', async () => {
+    const h = setup();
+    useEditorStore.setState({
+      loadFile: async () => ({ status: 'locked', lock: 'book.renumberInProgress' }),
+    });
+
+    const res = await openManuscriptSource({
+      relativePath: 'chapters/02-corps.md',
+      chapterId: 'c2',
+      lineNumber: 3,
+    });
+
+    expect(res).toEqual({ success: false, errorKey: 'book.renumberInProgress' });
+    expect(h.revealed).toEqual([]);
+    expect(useProjectStore.getState().currentChapterId).not.toBe('c2');
+  });
+
+  it.each(['cancelled', 'superseded'] as const)(
+    'bascule %s : ni message d’échec, ni curseur, ni chapitre rattaché',
+    async (status) => {
+      const h = setup();
+      useProjectStore.setState({ currentChapterId: 'c1' });
+      useEditorStore.setState({ loadFile: async () => ({ status }) });
+
+      const res = await openManuscriptSource({
+        relativePath: 'chapters/02-corps.md',
+        chapterId: 'c2',
+        lineNumber: 3,
+      });
+
+      expect(res).toEqual({ success: true });
+      expect(h.revealed).toEqual([]);
+      expect(useProjectStore.getState().currentChapterId).toBe('c1');
+    }
+  );
 });

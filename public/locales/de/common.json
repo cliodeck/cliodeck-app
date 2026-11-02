@@ -115,6 +115,7 @@
   },
   "editor": {
     "title": "Editor",
+    "discardUntitledConfirm": "Dieses unbenannte Dokument wurde nie gespeichert. Verwerfen? Sein Text geht verloren.",
     "fontSize": "Schriftgröße",
     "fontSizeHelp": "Textgröße im Markdown-Editor",
     "currentSize": "Aktuelle Größe: {{size}}px",
@@ -940,7 +941,7 @@
     "footnote": "Fußnote (Strg+Shift+F)",
     "blockquote": "Blockzitat",
     "checkCitations": "Zitate überprüfen",
-    "newFileConfirm": "Neue Datei erstellen? Nicht gespeicherte Änderungen gehen verloren.",
+    "newFileConfirm": "Ein leeres Dokument außerhalb des Projekts öffnen? Die geöffnete Datei wird zuerst gespeichert und bleibt über den Bereich „Projekt“ erreichbar.",
     "markdown": "Markdown",
     "openError": "Diese Datei konnte nicht geöffnet werden. Sie ist möglicherweise nicht vorhanden oder unlesbar.",
     "saveError": "Fehler beim Speichern der Datei",

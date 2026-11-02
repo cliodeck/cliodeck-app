@@ -115,6 +115,7 @@
   },
   "editor": {
     "title": "Éditeur",
+    "discardUntitledConfirm": "Ce document sans titre n'a jamais été enregistré. L'abandonner ? Son texte sera perdu.",
     "fontSize": "Taille de police",
     "fontSizeHelp": "Taille du texte dans l'éditeur Markdown",
     "currentSize": "Taille actuelle: {{size}}px",
@@ -940,7 +941,7 @@
     "footnote": "Note de bas de page (Ctrl+Shift+F)",
     "blockquote": "Bloc citation",
     "checkCitations": "Vérifier les citations",
-    "newFileConfirm": "Créer un nouveau fichier ? Les modifications non sauvegardées seront perdues.",
+    "newFileConfirm": "Ouvrir un document vide, hors du projet ? Le fichier ouvert est d'abord enregistré et reste accessible depuis le panneau Projet.",
     "markdown": "Markdown",
     "openError": "Ce fichier n'a pas pu être ouvert. Il est peut-être introuvable ou illisible.",
     "saveError": "Erreur lors de la sauvegarde du fichier",

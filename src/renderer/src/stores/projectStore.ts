@@ -82,19 +82,16 @@ interface ProjectState {
 
 /**
  * Sauvegarde le document ouvert dans l'éditeur s'il a des modifications non
- * écrites. Appelé avant toute bascule/fermeture de projet : à ce moment le
- * garde d'`editorStore.loadFile` (scoped aux bascules de fichier) ne joue
- * pas encore, et une fois le projet remplacé il serait trop tard pour
- * écrire le fichier sortant. Import dynamique pour éviter le cycle
- * projectStore ↔ editorStore.
+ * écrites, en lisant comme la porte le texte vivant : `isDirty` ne voit ni une
+ * frappe que la synchronisation n'a pas poussée, ni une frappe pendant une écriture.
+ * Appelé avant toute bascule/fermeture de projet : une fois le projet remplacé, le
+ * main refuse d'écrire le sortant. La porte rejetterait alors, et le repli de
+ * `loadProject` réécrirait le document du projet entrant. Import dynamique pour
+ * éviter le cycle projectStore ↔ editorStore.
  */
 async function saveOutgoingEditorIfDirty(): Promise<void> {
-  const { useEditorStore } = await import('./editorStore');
-  const editor = useEditorStore.getState();
-  if (editor.filePath && editor.isDirty) {
-    await editor.saveFile();
-    console.log('💾 Document sortant sauvegardé avant bascule de projet');
-  }
+  const { writeOpenDocumentWhileDirty } = await import('./editorStore');
+  await writeOpenDocumentWhileDirty();
 }
 
 /**

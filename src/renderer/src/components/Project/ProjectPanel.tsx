@@ -152,7 +152,10 @@ export const ProjectPanel: React.FC = () => {
 
   const handleFileSelect = async (filePath: string) => {
     try {
-      await loadFile(filePath);
+      const outcome = await loadFile(filePath);
+      if (outcome.status === 'locked') {
+        await useDialogStore.getState().showAlert(t(outcome.lock));
+      }
     } catch (error: unknown) {
       console.error('Failed to load file:', error);
       await useDialogStore.getState().showAlert(t('toolbar.openError'));

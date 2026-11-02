@@ -115,6 +115,7 @@
   },
   "editor": {
     "title": "Editor",
+    "discardUntitledConfirm": "This untitled document has never been saved. Discard it? Its text will be lost.",
     "fontSize": "Font size",
     "wordWrap": "Word wrap",
     "minimap": "Show minimap",
@@ -940,7 +941,7 @@
     "footnote": "Footnote (Ctrl+Shift+F)",
     "blockquote": "Block quote",
     "checkCitations": "Check citations",
-    "newFileConfirm": "Create a new file? Unsaved changes will be lost.",
+    "newFileConfirm": "Open a blank document, outside the project? The open file is saved first and stays available from the Project panel.",
     "markdown": "Markdown",
     "openError": "This file could not be opened. It may be missing or unreadable.",
     "saveError": "Error saving file",

@@ -3,6 +3,7 @@ import i18n from '../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
+import { useDialogStore } from './dialogStore';
 import {
   appendDraftToContent,
   insertDraftAtOffset,
@@ -23,6 +24,45 @@ export interface EditorSettings {
 }
 
 export type EditorSwitchLock = 'book.renumberInProgress';
+
+/**
+ * Ce qui remplace le document ouvert. `untitled` : un tampon sans titre.
+ * `detach` : hors de tout document et en lecture seule, le temps qu'un changement
+ * de projet se fasse. `discardOutgoing` saute l'écriture du sortant : seulement
+ * après un accord explicite de l'auteur.
+ */
+export type BufferTarget =
+  | { kind: 'open'; filePath: string }
+  | { kind: 'untitled'; discardOutgoing?: true }
+  | { kind: 'detach'; discardOutgoing?: true };
+
+/** Pourquoi le document change : pour le journal, sans effet sur le remplacement. */
+export type BufferReason =
+  | 'open-file'
+  | 'new-document'
+  | 'project-switch'
+  | 'project-open'
+  | 'project-restore'
+  | 'project-close';
+
+/**
+ * `unchanged` : le fichier demandé est déjà là, rien n'a bougé. `superseded` : une
+ * demande plus récente, ou un verrou entre-temps, a pris le pas. `cancelled` :
+ * l'auteur a refusé d'abandonner un tampon sans titre. `locked` : refusé par le
+ * verrou de bascule, à dire à l'auteur (`lock` est la clé i18n du motif).
+ */
+export type BufferOutcome =
+  | { status: 'replaced'; detachedFrom?: string | null }
+  | { status: 'unchanged' }
+  | { status: 'superseded' }
+  | { status: 'cancelled' }
+  | { status: 'locked'; lock: EditorSwitchLock };
+
+/** `saveFileAs` n'est pas un remplacement : le document reste, seul son chemin change. */
+export type SaveAsOutcome =
+  | { status: 'saved' }
+  | { status: 'superseded' }
+  | { status: 'locked'; lock: EditorSwitchLock };
 
 interface EditorState {
   // Content
@@ -50,14 +90,19 @@ interface EditorState {
   editorFacade: EditorFacade | null;
 
   /**
-   * Incrémenté à chaque remplacement externe du document (loadFile,
-   * createNewFile) : l'éditeur CM6 se recrée sur ce signal au lieu
-   * d'observer `content` (interdit — boucle de resynchronisation).
+   * Incrémenté à chaque remplacement du document (`replaceBuffer`) : l'éditeur
+   * CM6 se recrée sur ce signal au lieu d'observer `content` (interdit — boucle
+   * de resynchronisation). Une vue n'appartient à son document que tant que ce
+   * numéro ne change pas. Le chemin ne le dit pas : il reste le même quand on
+   * relit un fichier, et change sans remplacement au premier enregistrement.
    */
   documentVersion: number;
 
+  /** La vue est hors de tout document (`detach`) : lecture seule, pas de cache. */
+  bufferDetached: boolean;
+
   /**
-   * Tant qu'il est posé, `loadFile` refuse d'ouvrir un autre fichier ; sa
+   * Tant qu'il est posé, le document ouvert ne peut pas être remplacé ; sa
    * valeur est la clé i18n du motif. Une renumérotation écrit le manuscrit
    * chapitre par chapitre en s'appuyant sur le chapitre ouvert : le changer
    * sous elle envoyait le texte d'un chapitre dans le fichier d'un autre.
@@ -67,11 +112,18 @@ interface EditorState {
 
   // Actions
   setContent: (content: string) => void;
-  loadFile: (filePath: string) => Promise<void>;
+  /**
+   * La seule porte pour remplacer le document ouvert : elle écrit le sortant,
+   * demande avant d'abandonner un tampon sans titre, laisse gagner la dernière
+   * demande et refuse sous le verrou. Rejette si le sortant ne peut pas être écrit
+   * ou si le fichier demandé ne peut pas être lu : rien n'a alors changé.
+   */
+  replaceBuffer: (next: BufferTarget, reason: BufferReason) => Promise<BufferOutcome>;
+  loadFile: (filePath: string) => Promise<BufferOutcome>;
   saveFile: () => Promise<void>;
-  saveFileAs: (filePath: string) => Promise<void>;
+  saveFileAs: (filePath: string) => Promise<SaveAsOutcome>;
   saveCurrentFile: () => Promise<void>;
-  createNewFile: () => void;
+  createNewFile: () => Promise<BufferOutcome>;
 
   updateSettings: (settings: Partial<EditorSettings>) => void;
   togglePreview: () => void;
@@ -113,6 +165,77 @@ const DEFAULT_SETTINGS: EditorSettings = {
   autoSaveDelay: 3000, // 3 seconds
 };
 
+// MARK: - La porte
+
+/**
+ * Le document a-t-il du texte à écrire ?
+ *
+ * On compare le texte VIVANT au miroir du store, pas seulement `isDirty` : la
+ * synchronisation CM6 → store est debouncée, et une frappe pendant une écriture
+ * n'est dans aucun des deux drapeaux. C'est précisément la fenêtre qui perdait
+ * des données.
+ */
+export function needsFlush(state: {
+  filePath: string | null;
+  isDirty: boolean;
+  live: string;
+  mirror: string;
+}): boolean {
+  if (!state.filePath) return false;
+  return state.isDirty || state.live !== state.mirror;
+}
+
+/** Une demande de remplacement chasse la précédente, et la pose du verrou aussi. */
+let bufferRequestSeq = 0;
+
+/** On peut taper pendant l'écriture : quelques passes, pas une boucle sans fin. */
+const MAX_FLUSH_PASSES = 3;
+
+function openDocumentNeedsFlush(): boolean {
+  const state = useEditorStore.getState();
+  return needsFlush({
+    filePath: state.filePath,
+    isDirty: state.isDirty,
+    live: state.getLiveContent(),
+    mirror: state.content,
+  });
+}
+
+/**
+ * Écrit le document ouvert tant qu'il reste du texte à écrire. Un échec d'écriture
+ * remonte. `stillWanted` arrête la boucle quand l'écriture suivante n'a plus d'objet.
+ */
+export async function writeOpenDocumentWhileDirty(stillWanted: () => boolean = () => true): Promise<void> {
+  for (let pass = 0; pass < MAX_FLUSH_PASSES && openDocumentNeedsFlush(); pass += 1) {
+    await useEditorStore.getState().saveFile();
+    if (!stillWanted()) break;
+  }
+}
+
+/**
+ * Met le document sortant à l'abri. Rend faux si l'auteur refuse d'abandonner un
+ * tampon sans titre. Un échec d'écriture remonte : les modifications seraient
+ * perdues sans un mot si le remplacement continuait. Une demande chassée entre-temps
+ * s'arrête là : l'écriture suivante n'est plus la sienne.
+ */
+async function flushOutgoing(request: number): Promise<boolean> {
+  const state = useEditorStore.getState();
+  if (!state.filePath) {
+    if (state.getLiveContent() === '') return true;
+    return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'));
+  }
+  await writeOpenDocumentWhileDirty(() => request === bufferRequestSeq);
+  return true;
+}
+
+async function readDocumentFromDisk(filePath: string): Promise<string> {
+  logger.ipc('editor.loadFile', { filePath });
+  const result = await window.electron.editor.loadFile(filePath);
+  logger.ipc('editor.loadFile response', result);
+  if (result.success && result.content !== undefined) return result.content;
+  throw new Error(result.error || 'Failed to load file');
+}
+
 // MARK: - Store
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -124,9 +247,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showPreview: false,
   editorFacade: null,
   documentVersion: 0,
+  bufferDetached: false,
   switchLock: null,
 
   setSwitchLock: (lock: EditorSwitchLock | null) => {
+    // Une lecture partie avant le verrou porte le texte d'avant l'opération : sans
+    // cela, elle aboutirait après lui et la frappe suivante le réécrirait.
+    if (lock) bufferRequestSeq += 1;
     set({ switchLock: lock });
   },
 
@@ -137,62 +264,98 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  loadFile: async (filePath: string) => {
-    logger.store('Editor', 'loadFile called', { filePath });
+  replaceBuffer: async (next: BufferTarget, reason: BufferReason): Promise<BufferOutcome> => {
+    logger.store('Editor', 'replaceBuffer called', { next, reason });
+    const openPath = next.kind === 'open' ? next.filePath : null;
 
-    const refuseIfLocked = (): void => {
-      const { switchLock, filePath: openPath } = get();
-      if (switchLock && filePath !== openPath) {
-        throw new Error(i18n.t(switchLock));
-      }
+    // Le verrou se contrôle en tête et de nouveau à l'arrivée : la demande partie
+    // avant lui ne doit pas aboutir sous l'opération qu'il protège. Rouvrir le
+    // fichier ouvert ne bascule rien : il n'y a rien à refuser, ni rien à relire.
+    const refusedByLock = (): BufferOutcome | null => {
+      const { switchLock, filePath } = get();
+      if (!switchLock) return null;
+      return openPath !== null && openPath === filePath
+        ? { status: 'unchanged' }
+        : { status: 'locked', lock: switchLock };
     };
-    refuseIfLocked();
+    const refusedAtHead = refusedByLock();
+    if (refusedAtHead) return refusedAtHead;
 
-    // Bascule de fichier : le fichier sortant est sauvegardé AVANT toute
-    // chose. Sans cela, les frappes des dernières secondes étaient perdues
-    // (useAutoSave annule son minuteur quand `filePath` change) et le
-    // contenu sortant finissait écrit dans le fichier entrant. La
-    // sauvegarde lit l'éditeur vivant (`getLiveContent`), donc y compris
-    // ce que la synchronisation debouncée n'a pas encore poussé.
-    const previousPath = get().filePath;
-    if (previousPath && previousPath !== filePath && get().isDirty) {
-      try {
-        await get().saveFile();
-        logger.store('Editor', 'Outgoing file saved before switch', { previousPath });
-      } catch (error) {
-        // Échec de sauvegarde : on n'ouvre pas le fichier suivant, sinon
-        // les modifications non écrites seraient perdues sans un mot.
-        logger.error('Editor', error);
-        throw error;
+    bufferRequestSeq += 1;
+    const request = bufferRequestSeq;
+    const refusedOnArrival = (): BufferOutcome | null =>
+      refusedByLock() ?? (request === bufferRequestSeq ? null : { status: 'superseded' });
+
+    const commit = (text: string): BufferOutcome => {
+      const detachedFrom = get().filePath;
+      set((state) => ({
+        content: text,
+        filePath: openPath,
+        isDirty: false,
+        // Nouveau document : l'indicateur ne doit pas dater d'un autre.
+        lastSavedAt: null,
+        documentVersion: state.documentVersion + 1,
+        bufferDetached: next.kind === 'detach',
+        // La vue sortante n'est détruite qu'au commit React : d'ici là, sa façade
+        // ferait lire son texte sous le chemin du document entrant.
+        editorFacade: null,
+      }));
+      logger.store('Editor', 'Buffer replaced', { reason, contentLength: text.length });
+      return next.kind === 'detach' ? { status: 'replaced', detachedFrom } : { status: 'replaced' };
+    };
+
+    // Déjà ouvert : un tampon modifié n'a rien à attendre du disque, et le recharger
+    // jetterait les frappes et l'annulation. Un tampon propre ne reprend le disque que
+    // si le fichier a changé dehors. Le miroir a bougé pendant la lecture : l'auteur a
+    // tapé puis enregistré, et ce texte lu peut dater d'avant son écriture.
+    if (openPath !== null && openPath === get().filePath) {
+      if (openDocumentNeedsFlush()) return { status: 'unchanged' };
+      const mirrorAtRead = get().content;
+      const text = await readDocumentFromDisk(openPath);
+      const stale = refusedOnArrival();
+      if (stale) return stale;
+      const { content: mirror } = get();
+      if (openDocumentNeedsFlush() || mirror !== mirrorAtRead || text === mirror) {
+        return { status: 'unchanged' };
       }
+      return commit(text);
     }
 
-    try {
-      logger.ipc('editor.loadFile', { filePath });
-      const result = await window.electron.editor.loadFile(filePath);
-      logger.ipc('editor.loadFile response', result);
+    // Le fichier sortant est écrit AVANT toute chose : sans cela, les frappes des
+    // dernières secondes étaient perdues (useAutoSave annule son minuteur quand
+    // `filePath` change) et le contenu sortant finissait écrit dans le fichier
+    // entrant. L'écriture lit l'éditeur vivant, donc y compris ce que la
+    // synchronisation debouncée n'a pas encore poussé.
+    const keepOutgoing = next.kind === 'open' || !next.discardOutgoing;
+    if (keepOutgoing && !(await flushOutgoing(request))) return { status: 'cancelled' };
+    const staleAfterFlush = refusedOnArrival();
+    if (staleAfterFlush) return staleAfterFlush;
 
-      if (result.success && result.content !== undefined) {
-        // Le verrou a pu être posé pendant les attentes : la bascule partie
-        // avant lui ne doit pas aboutir sous l'opération qu'il protège.
-        refuseIfLocked();
-        set((state) => ({
-          content: result.content,
-          filePath,
-          isDirty: false,
-          // Nouveau document : l'indicateur ne doit pas dater d'un autre.
-          lastSavedAt: null,
-          documentVersion: state.documentVersion + 1,
-        }));
-        logger.store('Editor', 'File loaded successfully', { contentLength: result.content.length });
-      } else {
-        throw new Error(result.error || 'Failed to load file');
-      }
-    } catch (error) {
-      logger.error('Editor', error);
-      throw error;
+    // Un tampon sans titre n'a nulle part où s'écrire : son texte de cet instant est
+    // le seul que l'auteur a accepté de perdre, ou qui était vide.
+    const untitledText = get().filePath ? null : get().getLiveContent();
+
+    const text = openPath === null ? '' : await readDocumentFromDisk(openPath);
+    const staleAfterRead = refusedOnArrival();
+    if (staleAfterRead) return staleAfterRead;
+
+    // L'auteur a pu taper pendant ces attentes. Comme plus bas pour un fichier, on ne
+    // l'interrompt pas pour perdre ce qu'il écrit.
+    if (untitledText !== null && get().getLiveContent() !== untitledText) {
+      return { status: 'superseded' };
     }
+    if (keepOutgoing && openDocumentNeedsFlush()) {
+      await flushOutgoing(request);
+      const staleAfterSecondFlush = refusedOnArrival();
+      if (staleAfterSecondFlush) return staleAfterSecondFlush;
+      // Il tape encore : on ne l'interrompt pas pour perdre ce qu'il écrit.
+      if (openDocumentNeedsFlush()) return { status: 'superseded' };
+    }
+
+    return commit(text);
   },
+
+  loadFile: (filePath: string) => get().replaceBuffer({ kind: 'open', filePath }, 'open-file'),
 
   saveFile: async () => {
     // La sauvegarde lit l'éditeur vivant, jamais le miroir du store : la
@@ -227,7 +390,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  saveFileAs: async (newFilePath: string) => {
+  saveFileAs: async (newFilePath: string): Promise<SaveAsOutcome> => {
+    const { switchLock, documentVersion } = get();
+    if (switchLock) return { status: 'locked', lock: switchLock };
+
     const content = get().getLiveContent();
     logger.store('Editor', 'saveFileAs called', { newFilePath, contentLength: content.length });
 
@@ -237,16 +403,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       logger.ipc('editor.saveFile response', result);
 
       if (result.success) {
+        // Mêmes gardes qu'une bascule : le fichier est écrit, mais le tampon ne
+        // change pas de chemin sous une opération verrouillée, et le texte d'un
+        // document remplacé pendant l'écriture n'a pas à entrer dans le miroir.
+        const { switchLock: lockOnArrival } = get();
+        if (lockOnArrival) return { status: 'locked', lock: lockOnArrival };
+        if (get().documentVersion !== documentVersion) return { status: 'superseded' };
+        // Ce qui a été tapé pendant l'écriture reste à écrire, désormais par l'autosave.
         set({
           content,
           filePath: newFilePath,
-          isDirty: false,
+          isDirty: get().getLiveContent() !== content,
           lastSavedAt: Date.now(),
         });
         logger.store('Editor', 'File saved successfully as', { newFilePath });
-      } else {
-        throw new Error(result.error || 'Failed to save file');
+        return { status: 'saved' };
       }
+      throw new Error(result.error || 'Failed to save file');
     } catch (error) {
       logger.error('Editor', error);
       throw error;
@@ -293,17 +466,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     await get().saveFile();
   },
 
-  createNewFile: () => {
-    logger.store('Editor', 'createNewFile called');
-    get().editorFacade?.setValue('');
-    set((state) => ({
-      content: '',
-      filePath: null,
-      isDirty: false,
-      lastSavedAt: null,
-      documentVersion: state.documentVersion + 1,
-    }));
-  },
+  createNewFile: () => get().replaceBuffer({ kind: 'untitled' }, 'new-document'),
 
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => {
     logger.store('Editor', 'insertFormatting called', { type });

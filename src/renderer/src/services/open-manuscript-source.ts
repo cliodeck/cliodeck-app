@@ -98,15 +98,21 @@ export async function openManuscriptSource(
   // L'éditeur n'est visible qu'en mode Écriture.
   useWorkspaceModeStore.getState().setActive('write');
 
-  // Déjà ouvert : ne pas repasser par `loadFile`, qui recrée la vue et
-  // détruirait l'historique d'annulation du chapitre pour rien.
+  // Déjà ouvert : ne pas repasser par `loadFile`, qui relirait le disque pour
+  // rien et, s'il a changé dehors, recréerait la vue et son historique d'annulation.
   const switched = currentRelativePath() !== relPath;
   // Mémorisée AVANT la bascule : c'est à elle qu'on compare pour savoir si
   // l'éditeur a fini de se remonter.
   const facadeBeforeSwitch = useEditorStore.getState().editorFacade;
   if (switched) {
     try {
-      await useEditorStore.getState().loadFile(`${currentProject.path}/${relPath}`);
+      const outcome = await useEditorStore.getState().loadFile(`${currentProject.path}/${relPath}`);
+      if (outcome.status === 'locked') return { success: false, errorKey: outcome.lock };
+      // L'auteur a gardé son tampon sans titre, ou a déjà demandé autre chose : ce
+      // n'est pas un échec à lui annoncer, et le curseur n'a rien à faire ici.
+      if (outcome.status === 'cancelled' || outcome.status === 'superseded') {
+        return { success: true };
+      }
     } catch (error) {
       logger.error('openManuscriptSource', error);
       return { success: false, errorKey: 'chat.sources.openFailed' };

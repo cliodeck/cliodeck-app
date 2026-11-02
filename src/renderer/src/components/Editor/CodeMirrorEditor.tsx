@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Compartment, EditorSelection, type Extension } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state';
 import {
   EditorView,
   drawSelection,
@@ -302,7 +302,6 @@ export const CodeMirrorEditor: React.FC = () => {
   // fermeture du projet — voir l'effet plus bas.
   const stateCache = useRef(new EditorStateCache()).current;
 
-  const filePath = useEditorStore((s) => s.filePath);
   const documentVersion = useEditorStore((s) => s.documentVersion);
   const settings = useEditorStore((s) => s.settings);
   // Projet presentation : le rendu live traite `---` comme frontière de
@@ -314,37 +313,52 @@ export const CodeMirrorEditor: React.FC = () => {
   const { currentTheme } = useTheme();
   const { t } = useTranslation('common');
 
-  // Création / recréation de la vue : au montage et à chaque remplacement
-  // externe du document (chargement de fichier, nouveau fichier).
+  // Création / recréation de la vue : au montage et à chaque remplacement du
+  // document (`documentVersion`). Pas sur le chemin : le premier enregistrement
+  // d'un tampon sans titre le change sans changer le document.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const store = useEditorStore.getState();
-    // Fichier auquel CETTE vue appartient : le démontage ne doit jamais
-    // écrire son texte dans le store si un autre document a pris la place
-    // entre-temps (bascule de chapitre / de fichier).
-    const ownFilePath = store.filePath;
+    // Document auquel CETTE vue appartient : une vue qui n'en est plus
+    // propriétaire n'écrit jamais dans le store. Sinon, sur une bascule de
+    // fichier, elle ferait afficher — puis sauvegarder — le texte sortant sous
+    // le nom du fichier entrant (écrasement silencieux). Le chemin ne dirait
+    // rien quand on relit le même fichier.
+    const ownVersion = store.documentVersion;
+    const ownsDocument = () => useEditorStore.getState().documentVersion === ownVersion;
+    // Suivi tant que la version ne change pas : `saveFileAs` donne un chemin au
+    // document sans le remplacer.
+    let ownFilePath = store.filePath;
+    const detached = store.bufferDetached;
     const changeListeners = new Set<(content: string) => void>();
     const selectionListeners = new Set<(offset: number) => void>();
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingSync = false;
 
+    // `isDirty` n'est posé que si le texte diffère du miroir : la sauvegarde a pu
+    // passer avant cette synchro debouncée, et le reposer 300 ms après elle
+    // annoncerait des modifications qui sont déjà sur le disque.
+    const pushToMirror = (view: EditorView): string => {
+      const content = readDocText(view.state);
+      const { content: mirror, isDirty } = useEditorStore.getState();
+      useEditorStore.setState({ content, isDirty: isDirty || content !== mirror });
+      return content;
+    };
+
     const syncToStore = (view: EditorView) => {
       pendingSync = false;
-      // Même garde qu'au démontage : ne rien pousser si le document
-      // courant n'est plus le nôtre.
-      if (useEditorStore.getState().filePath !== ownFilePath) return;
-      const content = readDocText(view.state);
-      useEditorStore.setState({ content, isDirty: true });
+      if (!ownsDocument()) return;
+      const content = pushToMirror(view);
       for (const listener of changeListeners) listener(content);
     };
 
     // Contrat propositionnel (Phase 4b) : les adjudications partent vers le
-    // main (routage journaux) via l'accesseur défensif. Contexte capturé à
-    // la création de la vue : l'événement `expired` émis par view.destroy()
-    // part APRÈS que les stores portent le nouveau chapitre/projet — le
-    // lire à ce moment attribuait l'expiration au mauvais document (#31).
+    // main (routage journaux) via l'accesseur défensif. Contexte propre à la
+    // vue : l'événement `expired` émis par view.destroy() part APRÈS que les
+    // stores portent le nouveau chapitre/projet — le lire à ce moment
+    // attribuait l'expiration au mauvais document (#31).
     const ownProjectPath =
       useProjectStore.getState().currentProject?.path ?? undefined;
     const proposalsInstance = proposals({
@@ -365,6 +379,9 @@ export const CodeMirrorEditor: React.FC = () => {
     proposalsRef.current = proposalsInstance;
 
     const documentExtensions: Extension[] = [
+        // Hors de tout document : l'auteur ne doit pas pouvoir y taper un texte
+        // qui n'a nulle part où aller.
+        detached ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
         history(),
         formattingKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -410,7 +427,7 @@ export const CodeMirrorEditor: React.FC = () => {
             const offset = update.state.selection.main.head;
             for (const listener of selectionListeners) listener(offset);
           }
-          if (!update.docChanged) return;
+          if (!update.docChanged || !ownsDocument()) return;
           // isDirty immédiat (autosave, indicateurs) ; contenu debouncé.
           if (!useEditorStore.getState().isDirty) {
             useEditorStore.setState({ isDirty: true });
@@ -469,28 +486,30 @@ export const CodeMirrorEditor: React.FC = () => {
       }
     });
 
+    // Le document reçoit son chemin sans transaction : les images relatives
+    // se résolvent contre lui, et les adjudications lui sont rattachées.
+    const unsubscribeFilePath = useEditorStore.subscribe((s) => {
+      if (s.documentVersion !== ownVersion || s.filePath === ownFilePath) return;
+      ownFilePath = s.filePath;
+      view.dispatch({ effects: liveRenderRefresh.of(null) });
+    });
+
     return () => {
       unsubscribeBibliography();
+      unsubscribeFilePath();
       // Ordre : retirer la façade, purger la sync en attente vers le store,
       // puis détruire la vue (la destruction émet `expired` pour les
       // propositions en attente — arbitrage 5).
       useEditorStore.getState().setEditorFacade(null);
       if (syncTimer) clearTimeout(syncTimer);
-      // La purge n'a lieu que si le store porte TOUJOURS notre document :
-      // sur une bascule de fichier, `loadFile` a déjà installé le nouveau
-      // contenu et écrire ici ferait afficher — puis sauvegarder — le texte
-      // sortant sous le nom du fichier entrant (écrasement silencieux).
-      if (pendingSync && useEditorStore.getState().filePath === ownFilePath) {
-        useEditorStore.setState({
-          content: readDocText(view.state),
-          isDirty: true,
-        });
-      }
-      // Mémorisation pour un retour ultérieur sur ce document. `loadFile` a
+      // La purge n'a lieu que si le store porte TOUJOURS notre document : sur
+      // une bascule, la porte a déjà installé le nouveau contenu.
+      if (pendingSync && ownsDocument()) pushToMirror(view);
+      // Mémorisation pour un retour ultérieur sur ce document. La porte a
       // sauvegardé le fichier sortant AVANT de basculer (verrou Phase 0) :
       // le texte de la vue correspond donc à celui du disque, et la règle de
       // fraîcheur du cache le revérifiera au retour de toute façon.
-      if (ownFilePath) {
+      if (ownFilePath && !detached) {
         stateCache.set(
           ownFilePath,
           serializeEditorState(view.state, view.scrollDOM.scrollTop)
@@ -504,7 +523,7 @@ export const CodeMirrorEditor: React.FC = () => {
       view.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, documentVersion, isPresentation]);
+  }, [documentVersion, isPresentation]);
 
   // Changement (ou fermeture) de projet : les états mémorisés appartiennent
   // au manuscrit qu'on quitte — les garder ferait grossir la mémoire et
@@ -522,7 +541,7 @@ export const CodeMirrorEditor: React.FC = () => {
         dynamicExtensions(settings, currentTheme === 'dark')
       ),
     });
-  }, [settings, currentTheme, dynamicCompartment, documentVersion, filePath]);
+  }, [settings, currentTheme, dynamicCompartment, documentVersion]);
 
   // Commande d'insertion IPC (bibliographie, modes IA). Le contenu balisé
   // IA (metadata.modeId) devient une PROPOSITION adjudicable — plus de

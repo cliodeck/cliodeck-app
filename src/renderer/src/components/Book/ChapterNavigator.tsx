@@ -159,7 +159,13 @@ export const ChapterNavigator: React.FC = () => {
     try {
       // `loadFile` sauvegarde le chapitre sortant avant de charger : c'est
       // ce qui rend la bascule sûre (verrou Phase 0).
-      await loadFile(`${currentProject.path}/${chapter.filePath}`);
+      const outcome = await loadFile(`${currentProject.path}/${chapter.filePath}`);
+      if (outcome.status === 'locked') {
+        await useDialogStore.getState().showAlert(t(outcome.lock));
+      }
+      // Refusée ou dépassée, la bascule n'a pas eu lieu : le navigateur ne doit pas
+      // annoncer un chapitre que l'éditeur ne montre pas.
+      if (outcome.status !== 'replaced' && outcome.status !== 'unchanged') return false;
       setCurrentChapter(chapter.id);
       return true;
     } catch (error) {
@@ -340,7 +346,9 @@ export const ChapterNavigator: React.FC = () => {
               key={chapter.id}
               className={[
                 'chapter-item',
-                chapter.id === currentChapterId ? 'active' : '',
+                // Le chapitre qui est devant l'auteur, pas le dernier cliqué : un tampon
+                // sans titre ou un autre fichier du projet n'en sont aucun.
+                chapter.id === currentChapterId && chapter.filePath === openRelPath ? 'active' : '',
                 kind !== 'chapter' ? 'chapter-item--matter' : '',
                 chapter.missing ? 'chapter-item--missing' : '',
               ]
