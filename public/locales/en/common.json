@@ -350,6 +350,7 @@
     "reopenOnboarding": "Replay the setup assistant"
   },
   "export": {
+    "timedOut": "The export was stopped: it had not finished after {{minutes}} minutes. Your text has not been changed, and you can run the export again.",
     "pdf": {
       "title": "PDF export",
       "documentTitle": "Document title",

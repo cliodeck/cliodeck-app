@@ -5,6 +5,8 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { resolveManuscriptContent } from '../../services/export-manuscript-content';
+import { exportErrorMessage, exportThrownMessage } from './export-error';
+import { startExportReadLimit } from './export-read-limit';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import {
@@ -156,11 +158,13 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       // texte vivant quand c'est bien lui qui est ouvert.
       let exportContent = '';
       if (currentProject.type !== 'book') {
-        const resolved = await resolveManuscriptContent(
-          currentProject.path,
-          currentProject.type,
-          filePath,
-          getLiveContent
+        const resolved = await startExportReadLimit()(
+          resolveManuscriptContent(
+            currentProject.path,
+            currentProject.type,
+            filePath,
+            getLiveContent
+          )
         );
         if (!resolved.ok) {
           setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
@@ -241,12 +245,12 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         }, 2000);
       } else {
         console.error('Word export failed:', result.error);
-        setError(result.error || t('export.word.unknownError'));
+        setError(exportErrorMessage(t, result, t('export.word.unknownError')));
         setIsExporting(false);
       }
     } catch (err: unknown) {
       console.error('Word export threw:', err);
-      setError(t('export.word.error'));
+      setError(exportThrownMessage(t, err, t('export.word.error')));
       setIsExporting(false);
     } finally {
       // Libéré ici, et non dans les branches : l'assemblage a fini de lire
@@ -269,7 +273,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
 
   // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
   // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
-  // la ref est attachée au conteneur).
+  // la ref est attachée au conteneur). Un export bloqué ne reste pas sans
+  // sortie : le main l'arrête de lui-même (`export-time-limit.ts`), et ce qui
+  // précède l'appel au main a la même limite (`export-read-limit.ts`).
   const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;

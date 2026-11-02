@@ -5,6 +5,12 @@ import { app, BrowserWindow, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
 import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
+import {
+  withExportTimeLimit,
+  type ExportClock,
+  type ExportLimits,
+  type ExportResult,
+} from './export-time-limit.js';
 
 // Rendu markdown des slides de la preview : même famille de grammaire que le
 // plugin markdown de reveal.js (qui embarque marked) — la preview et l'export
@@ -504,8 +510,17 @@ export class RevealJsExportService {
    */
   async exportToRevealJs(
     options: RevealJsExportOptions,
-    onProgress?: (progress: RevealJsProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    onProgress?: (progress: RevealJsProgress) => void,
+    limits?: ExportLimits
+  ): Promise<ExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runHtmlExport(options, onProgress, clock));
+  }
+
+  private async runHtmlExport(
+    options: RevealJsExportOptions,
+    onProgress: ((progress: RevealJsProgress) => void) | undefined,
+    clock: ExportClock
+  ): Promise<ExportResult> {
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation de la présentation...', progress: 20 });
 
@@ -520,35 +535,46 @@ export class RevealJsExportService {
       // Ensure output directory exists
       await mkdir(dirname(outputPath), { recursive: true });
 
+      clock.throwIfExpired();
+
       // Write HTML file
       await writeFile(outputPath, html, 'utf-8');
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'Présentation créée!', progress: 100 });
 
       console.log('✅ Reveal.js presentation exported:', outputPath);
 
-      // Ouverture dans le navigateur par défaut.
-      // `shell.openPath` remplace l'ancienne interpolation dans un shell
-      // (`open "${outputPath}"`) : un chemin contenant un guillemet en
-      // échappait le quoting et permettait d'enchaîner une commande
-      // arbitraire. Electron transmet ici le chemin à l'OS sans shell, et
-      // couvre les trois plateformes d'un seul appel.
-      try {
-        const failure = await shell.openPath(outputPath);
-        if (failure) {
-          console.warn('⚠️ Failed to open browser automatically:', failure);
-        } else {
-          console.log('✅ Opened presentation in default browser');
-        }
-      } catch (error) {
-        console.warn('⚠️ Failed to open browser automatically:', error);
-        // Don't fail the export if browser opening fails
-      }
+      // Non attendue : le fichier est écrit, l'export a réussi, quoi que fasse le
+      // navigateur. L'attendre annoncerait un échec si l'ouverture ne rendait
+      // jamais la main.
+      void this.openInBrowser(outputPath);
 
       return { success: true, outputPath };
     } catch (error: unknown) {
       console.error('❌ Reveal.js export failed:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  /**
+   * Ouverture dans le navigateur par défaut.
+   * `shell.openPath` remplace l'ancienne interpolation dans un shell
+   * (`open "${outputPath}"`) : un chemin contenant un guillemet en
+   * échappait le quoting et permettait d'enchaîner une commande
+   * arbitraire. Electron transmet ici le chemin à l'OS sans shell, et
+   * couvre les trois plateformes d'un seul appel.
+   */
+  private async openInBrowser(outputPath: string): Promise<void> {
+    try {
+      const failure = await shell.openPath(outputPath);
+      if (failure) {
+        console.warn('⚠️ Failed to open browser automatically:', failure);
+      } else {
+        console.log('✅ Opened presentation in default browser');
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to open browser automatically:', error);
     }
   }
 
@@ -582,8 +608,17 @@ export class RevealJsExportService {
    */
   async exportOffline(
     options: RevealJsExportOptions,
-    onProgress?: (progress: RevealJsProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    onProgress?: (progress: RevealJsProgress) => void,
+    limits?: ExportLimits
+  ): Promise<ExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runOfflineExport(options, onProgress, clock));
+  }
+
+  private async runOfflineExport(
+    options: RevealJsExportOptions,
+    onProgress: ((progress: RevealJsProgress) => void) | undefined,
+    clock: ExportClock
+  ): Promise<ExportResult> {
     try {
       onProgress?.({ stage: 'preparing', message: 'Téléchargement des assets reveal.js...', progress: 10 });
 
@@ -595,9 +630,9 @@ export class RevealJsExportService {
       const assets = getAllCdnAssets(theme, { includeMath: false });
 
       // Fetch all assets (parallelized)
-      const contents = await Promise.all(
+      const contents = await clock.run(Promise.all(
         assets.map((a) => this.fetchAsset(a.url, cacheDir))
-      );
+      ));
 
       const inlinedAssets = new Map<string, string>();
       assets.forEach((a, i) => inlinedAssets.set(a.url, contents[i]));
@@ -611,7 +646,9 @@ export class RevealJsExportService {
       );
 
       await mkdir(dirname(outputPath), { recursive: true });
+      clock.throwIfExpired();
       await writeFile(outputPath, html, 'utf-8');
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'Présentation offline créée!', progress: 100 });
       return { success: true, outputPath };
@@ -628,10 +665,23 @@ export class RevealJsExportService {
    */
   async exportToPDF(
     options: RevealJsExportOptions,
-    onProgress?: (progress: RevealJsProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    onProgress?: (progress: RevealJsProgress) => void,
+    limits?: ExportLimits
+  ): Promise<ExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runPdfExport(options, onProgress, clock));
+  }
+
+  private async runPdfExport(
+    options: RevealJsExportOptions,
+    onProgress: ((progress: RevealJsProgress) => void) | undefined,
+    clock: ExportClock
+  ): Promise<ExportResult> {
     let win: BrowserWindow | null = null;
     const tmpHtml = join(tmpdir(), `cliodeck-pdf-export-${Date.now()}.html`);
+    // `destroy` et non `close`, qui peut attendre une page bloquée.
+    clock.onExpire(() => {
+      if (win && !win.isDestroyed()) win.destroy();
+    });
 
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation HTML pour impression...', progress: 15 });
@@ -653,10 +703,10 @@ export class RevealJsExportService {
       // Le mode impression de reveal.js se déclenche par l'URL, pas par une
       // classe posée sur `.reveal` : sans `?print-pdf`, seule la diapositive
       // courante est rendue et le PDF n'en contient qu'une.
-      await win.loadFile(tmpHtml, { search: 'print-pdf' });
+      await clock.run(win.loadFile(tmpHtml, { search: 'print-pdf' }));
 
       // Wait for reveal.js to finish rendering
-      await new Promise<void>((resolve) => setTimeout(resolve, 2500));
+      await clock.run(new Promise<void>((resolve) => setTimeout(resolve, 2500)));
 
       onProgress?.({ stage: 'converting', message: 'Génération du PDF...', progress: 70 });
 
@@ -664,10 +714,10 @@ export class RevealJsExportService {
       // celle de ses diapositives. Ne pas la redonner ici : `pageSize` se
       // compte en pouces, et les 254000 × 190500 d'origine (des microns)
       // donnaient des pages de plusieurs kilomètres, qu'Electron 43 refuse.
-      const pdfData = await win.webContents.printToPDF({
+      const pdfData = await clock.run(win.webContents.printToPDF({
         printBackground: true,
         preferCSSPageSize: true,
-      });
+      }));
 
       const outputPath = options.outputPath || join(
         dirname(options.projectPath),
@@ -675,7 +725,9 @@ export class RevealJsExportService {
       );
 
       await mkdir(dirname(outputPath), { recursive: true });
+      clock.throwIfExpired();
       await writeFile(outputPath, pdfData);
+      clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'PDF créé!', progress: 100 });
       return { success: true, outputPath };
@@ -683,7 +735,7 @@ export class RevealJsExportService {
       console.error('❌ PDF export failed:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     } finally {
-      win?.close();
+      if (win && !win.isDestroyed()) win.close();
       // Le HTML intermédiaire contient toute la présentation : on le
       // supprime (l'ancienne version se contentait de le vider, sans
       // attendre la fin de l'écriture).

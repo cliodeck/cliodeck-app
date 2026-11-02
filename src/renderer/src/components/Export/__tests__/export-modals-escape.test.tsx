@@ -7,15 +7,19 @@
  * ferme ce qui est ouvert à ce moment-là, y compris une autre modale d'export.
  */
 import React, { useState } from 'react';
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, type Mock } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { EXPORT_TIME_LIMIT_MS } from '@backend/types/export-limits';
+
+/** Ce que chaque test fait varier : le type du projet et le fichier ouvert. */
+const opened = vi.hoisted(() => ({ type: 'article', file: '/tmp/demo/document.md' }));
 
 vi.mock('../../../stores/projectStore', () => ({
   useProjectStore: () => ({
     currentProject: {
       name: 'demo',
       path: '/tmp/demo',
-      type: 'article',
+      type: opened.type,
       bibliography: '/tmp/demo/biblio.bib',
       cslPath: '',
     },
@@ -24,7 +28,7 @@ vi.mock('../../../stores/projectStore', () => ({
 vi.mock('../../../stores/editorStore', () => ({
   useEditorStore: () => ({
     content: 'Un texte',
-    filePath: '/tmp/demo/document.md',
+    filePath: opened.file,
     getLiveContent: () => 'Un texte',
   }),
 }));
@@ -49,6 +53,8 @@ import { useManuscriptStore } from '../../../stores/manuscriptStore';
 interface ExportOutcome {
   success: boolean;
   error?: string;
+  errorCode?: string;
+  timeLimitMinutes?: number;
   unresolvedCitations?: string[];
 }
 
@@ -75,13 +81,18 @@ const MODALS: Array<{ name: string; Modal: ExportModal; exportLabel: string; exp
   },
 ];
 
+let exportCall: Mock;
+
 /** Installe un `export` que le test termine quand il veut. */
 function installElectron(): (outcome: ExportOutcome) => void {
   let release: (outcome: ExportOutcome) => void = () => undefined;
-  const exportFn = () =>
-    new Promise<ExportOutcome>((resolve) => {
-      release = resolve;
-    });
+  const exportFn = vi.fn(
+    (_options: unknown) =>
+      new Promise<ExportOutcome>((resolve) => {
+        release = resolve;
+      })
+  );
+  exportCall = exportFn;
   (window as unknown as { electron: unknown }).electron = {
     pdfExport: {
       checkDependencies: vi.fn().mockResolvedValue({ pandoc: true, xelatex: true }),
@@ -133,11 +144,45 @@ async function startExport(exportLabel: string, exportingLabel: string): Promise
   await screen.findByRole('button', { name: exportingLabel });
 }
 
+const electronFs = () =>
+  (window as unknown as { electron: { fs: Record<string, unknown> } }).electron.fs;
+
+/**
+ * Un disque qui ne répond plus : ni `exists` ni `readFile` ne rendent la main, tant
+ * que le test ne le décide pas.
+ */
+function stickDisk(content = '{}'): { unstick: () => void } {
+  let stuck = true;
+  const waiting: Array<() => void> = [];
+  function read<T>(answer: T) {
+    return () =>
+      stuck
+        ? new Promise<T>((resolve) => waiting.push(() => resolve(answer)))
+        : Promise.resolve(answer);
+  }
+  const fs = electronFs();
+  fs.exists = read(true);
+  fs.readFile = read(content);
+  return {
+    unstick: () => {
+      stuck = false;
+      for (const release of waiting) release();
+    },
+  };
+}
+
+const advance = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
 afterEach(() => {
   vi.useRealTimers();
   cleanup();
   // Un test rouge laisse son export en suspens, et le verrou du manuscrit avec.
   useManuscriptStore.getState().setExporting(false);
+  opened.type = 'article';
+  opened.file = '/tmp/demo/document.md';
 });
 
 describe.each(MODALS)('modale d’export $name', ({ Modal, exportLabel, exportingLabel }) => {
@@ -212,6 +257,240 @@ describe.each(MODALS)('modale d’export $name', ({ Modal, exportLabel, exportin
     vi.advanceTimersByTime(2_000);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Échap ne sort plus d'un export en cours : c'est la limite de durée du main qui
+ * rend la main. La modale doit alors redevenir pleinement utilisable.
+ */
+describe.each(MODALS)('modale d’export $name : export arrêté par la limite', ({ Modal, exportLabel, exportingLabel }) => {
+  const TIMED_OUT: ExportOutcome = {
+    success: false,
+    error: 'Export arrêté : aucun résultat après 15 minutes.',
+    errorCode: 'export_timed_out',
+    timeLimitMinutes: 15,
+  };
+
+  it('affiche le message traduit, réactive les boutons et relâche le drapeau', async () => {
+    const finish = installElectron();
+    const onClose = vi.fn();
+    const { container } = render(<Host Modal={Modal} onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+
+    finish(TIMED_OUT);
+
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+    expect(screen.getByRole('button', { name: exportLabel })).not.toBeDisabled();
+    expect(container.querySelector('.close-btn')).not.toBeDisabled();
+    expect(useManuscriptStore.getState().exporting).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Échap referme ensuite la modale', async () => {
+    const finish = installElectron();
+    const onClose = vi.fn();
+    const { container } = render(<Host Modal={Modal} onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+    finish(TIMED_OUT);
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('un second export peut partir et efface le message', async () => {
+    const finish = installElectron();
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+    finish(TIMED_OUT);
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+
+    await startExport(exportLabel, exportingLabel);
+    expect(container.querySelector('.export-error')).toBeNull();
+
+    finish({ success: true });
+    await waitFor(() => expect(container.querySelector('.export-success')).not.toBeNull());
+  });
+
+  it('une autre erreur garde son affichage', async () => {
+    const finish = installElectron();
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+
+    finish({ success: false, error: 'xelatex a échoué' });
+
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+    expect(container.querySelector('.export-error')).toHaveTextContent('xelatex a échoué');
+  });
+});
+
+/**
+ * Les modales lisent le disque avant d'appeler le main : le manuscrit quand c'est
+ * un autre fichier qui est ouvert, les réglages reveal.js ou Beamer. L'horloge du
+ * main n'a pas encore démarré, et Échap ne fait rien pendant un export : sur un
+ * disque qui ne répond plus, il ne restait qu'à quitter l'app.
+ */
+describe.each(MODALS)('modale d’export $name : une lecture qui pend avant l’appel au main', ({ Modal, exportLabel, exportingLabel }) => {
+  it('rend la main à l’échéance, sans avoir rien lancé', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    installElectron();
+    stickDisk();
+    opened.file = '/tmp/demo/abstract.md';
+    const onClose = vi.fn();
+    const { container } = render(<Host Modal={Modal} onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+
+    await advance(EXPORT_TIME_LIMIT_MS - 60_000);
+    expect(screen.getByRole('button', { name: exportingLabel })).toBeInTheDocument();
+    expect(container.querySelector('.export-error')).toBeNull();
+
+    await advance(60_000);
+
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+    expect(screen.getByRole('button', { name: exportLabel })).not.toBeDisabled();
+    expect(container.querySelector('.close-btn')).not.toBeDisabled();
+    expect(useManuscriptStore.getState().exporting).toBe(false);
+    expect(exportCall).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('une lecture qui se débloque après l’annonce ne lance plus l’export', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    installElectron();
+    const disk = stickDisk();
+    opened.file = '/tmp/demo/abstract.md';
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+    await advance(EXPORT_TIME_LIMIT_MS);
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+
+    disk.unstick();
+    await advance(1000);
+
+    expect(exportCall).not.toHaveBeenCalled();
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+  });
+
+  it('une fois le disque revenu, un second export part', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    const disk = stickDisk();
+    opened.file = '/tmp/demo/abstract.md';
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+    await advance(EXPORT_TIME_LIMIT_MS);
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+
+    disk.unstick();
+    await startExport(exportLabel, exportingLabel);
+    await waitFor(() => expect(exportCall).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.export-error')).toBeNull();
+
+    finish({ success: true });
+    await waitFor(() => expect(container.querySelector('.export-success')).not.toBeNull());
+  });
+
+  it('la limite des lectures ne court plus pendant l’export lui-même, qui a la sienne', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    opened.file = '/tmp/demo/abstract.md';
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+    await waitFor(() => expect(exportCall).toHaveBeenCalledTimes(1));
+
+    await advance(EXPORT_TIME_LIMIT_MS);
+
+    expect(container.querySelector('.export-error')).toBeNull();
+    expect(screen.getByRole('button', { name: exportingLabel })).toBeInTheDocument();
+    finish({ success: false, error: 'xelatex a échoué' });
+    await waitFor(() => expect(container.querySelector('.export-error')).toHaveTextContent('xelatex a échoué'));
+  });
+});
+
+describe('modale PDF d’une présentation : la lecture de beamer-config.json', () => {
+  it('qui pend rend la main, le repli sur les valeurs par défaut ne l’avale pas', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    installElectron();
+    stickDisk();
+    opened.type = 'presentation';
+    opened.file = '/tmp/demo/slides.md';
+    const { container } = render(<Host Modal={PDFExportModal} onClose={vi.fn()} />);
+    await startExport('export.pdf.export', 'export.pdf.exporting');
+
+    await advance(EXPORT_TIME_LIMIT_MS);
+
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+    expect(exportCall).not.toHaveBeenCalled();
+  });
+
+  it('partage la limite du manuscrit lu juste avant : une seule horloge', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    installElectron();
+    const fs = electronFs();
+    let manuscript: (text: string) => void = () => undefined;
+    fs.readFile = () => new Promise<string>((resolve) => { manuscript = resolve; });
+    opened.type = 'presentation';
+    opened.file = '/tmp/demo/abstract.md';
+    const { container } = render(<Host Modal={PDFExportModal} onClose={vi.fn()} />);
+    await startExport('export.pdf.export', 'export.pdf.exporting');
+
+    // Le manuscrit arrive tard ; c'est ensuite la lecture de la configuration qui pend.
+    await advance(EXPORT_TIME_LIMIT_MS - 60_000);
+    stickDisk();
+    manuscript('# Des diapositives');
+    await advance(60_000);
+
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+    expect(exportCall).not.toHaveBeenCalled();
+  });
+});
+
+describe('une configuration d’export illisible', () => {
+  const unreadable = () => {
+    const fs = electronFs();
+    fs.exists = vi.fn().mockResolvedValue(true);
+    fs.readFile = vi.fn().mockResolvedValue('{pas du json');
+  };
+
+  it('laisse partir l’export de présentation avec les valeurs par défaut', async () => {
+    installElectron();
+    unreadable();
+    render(<Host Modal={PresentationExportModal} onClose={vi.fn()} />);
+    await startExport('presentation.export', 'presentation.exporting');
+
+    await waitFor(() => expect(exportCall).toHaveBeenCalledTimes(1));
+    expect(exportCall.mock.calls[0][0]).toMatchObject({ config: {} });
+  });
+
+  it('laisse partir l’export PDF d’une présentation sans configuration Beamer', async () => {
+    installElectron();
+    unreadable();
+    opened.type = 'presentation';
+    opened.file = '/tmp/demo/slides.md';
+    render(<Host Modal={PDFExportModal} onClose={vi.fn()} />);
+    await startExport('export.pdf.export', 'export.pdf.exporting');
+
+    await waitFor(() => expect(exportCall).toHaveBeenCalledTimes(1));
+    expect(exportCall.mock.calls[0][0]).toMatchObject({ beamerConfig: undefined });
+  });
+
+  it('une configuration lisible arrive jusqu’à l’export', async () => {
+    installElectron();
+    const fs = electronFs();
+    fs.exists = vi.fn().mockResolvedValue(true);
+    fs.readFile = vi.fn().mockResolvedValue('{"theme":"black"}');
+    render(<Host Modal={PresentationExportModal} onClose={vi.fn()} />);
+    await startExport('presentation.export', 'presentation.exporting');
+
+    await waitFor(() => expect(exportCall).toHaveBeenCalledTimes(1));
+    expect(exportCall.mock.calls[0][0]).toMatchObject({ config: { theme: 'black' } });
   });
 });
 

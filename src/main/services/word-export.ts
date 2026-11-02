@@ -1,6 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import { join, dirname, extname, isAbsolute } from 'path';
-import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -27,6 +26,13 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import {
+  pathExists,
+  withExportTimeLimit,
+  type ExportClock,
+  type ExportLimits,
+  type ExportResult,
+} from './export-time-limit.js';
 import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
@@ -120,10 +126,7 @@ export function splitIntoChapters(markdown: string): string[] {
 }
 
 /** Résultat d'un export Word. */
-export interface WordExportResult {
-  success: boolean;
-  outputPath?: string;
-  error?: string;
+export interface WordExportResult extends ExportResult {
   /**
    * Clés de citation restées sans référence. L'export aboutit quand même —
    * mais le document contient ces clés telles quelles, et le dire est la
@@ -184,7 +187,8 @@ export class WordExportService {
   private async exportWithPandoc(
     options: WordExportOptions,
     outputPath: string,
-    onProgress?: (progress: WordExportProgress) => void
+    onProgress: ((progress: WordExportProgress) => void) | undefined,
+    clock: ExportClock
   ): Promise<WordExportResult> {
     const tempDir = join(tmpdir(), `cliodeck-word-export-${Date.now()}`);
     await mkdir(tempDir, { recursive: true });
@@ -248,7 +252,7 @@ export class WordExportService {
 
       // Add bibliography and CSL if provided
       const bibPath = options.bibliographyPath;
-      if (bibPath && existsSync(bibPath)) {
+      if (bibPath && (await pathExists(bibPath))) {
         pandocArgs.push('--bibliography', bibPath);
         pandocArgs.push('--citeproc');
         console.log('📚 Using bibliography:', bibPath);
@@ -269,7 +273,7 @@ export class WordExportService {
             ? join(options.projectPath, options.cslPath)
             : options.cslPath;
         const cslPath = engineCsl ?? projectCsl;
-        if (cslPath && existsSync(cslPath)) {
+        if (cslPath && (await pathExists(cslPath))) {
           pandocArgs.push('--csl', cslPath);
           console.log('📚 Using CSL style:', cslPath);
         }
@@ -284,7 +288,7 @@ export class WordExportService {
       }
 
       // Add reference doc (template) if provided
-      if (options.templatePath && existsSync(options.templatePath)) {
+      if (options.templatePath && (await pathExists(options.templatePath))) {
         pandocArgs.push('--reference-doc', options.templatePath);
         console.log('📝 Using Word template:', options.templatePath);
       }
@@ -298,10 +302,10 @@ export class WordExportService {
       const extendedPath = this.getExtendedPath();
 
       // Run pandoc
-      const pandocStderr = await new Promise<string>((resolve, reject) => {
+      const pandocStderr = await clock.run(new Promise<string>((resolve, reject) => {
         console.log('📄 Running pandoc:', 'pandoc', pandocArgs.join(' '));
 
-        const pandoc = spawn('pandoc', pandocArgs, {
+        const pandoc = clock.spawn('pandoc', pandocArgs, {
           cwd: tempDir,
           env: { ...process.env, PATH: extendedPath },
         });
@@ -324,7 +328,7 @@ export class WordExportService {
         pandoc.on('error', (err) => {
           reject(new Error(`Failed to start pandoc: ${err.message}`));
         });
-      });
+      }));
 
       onProgress?.({
         stage: 'complete',
@@ -357,7 +361,16 @@ export class WordExportService {
    */
   async exportToWord(
     options: WordExportOptions,
-    onProgress?: (progress: WordExportProgress) => void
+    onProgress?: (progress: WordExportProgress) => void,
+    limits?: ExportLimits
+  ): Promise<WordExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runExport(options, onProgress, clock));
+  }
+
+  private async runExport(
+    options: WordExportOptions,
+    onProgress: ((progress: WordExportProgress) => void) | undefined,
+    clock: ExportClock
   ): Promise<WordExportResult> {
     try {
       onProgress?.({
@@ -374,7 +387,7 @@ export class WordExportService {
         (options.projectType === 'article' || options.projectType === 'book')
       ) {
         const abstractPath = join(options.projectPath, 'abstract.md');
-        if (existsSync(abstractPath)) {
+        if (await pathExists(abstractPath)) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           const parts = splitAbstract(abstractContent);
           abstract = parts.body;
@@ -408,7 +421,7 @@ export class WordExportService {
       // qu'un style est enregistré dans les réglages.
       const willUsePandoc =
         !!options.bibliographyPath &&
-        existsSync(options.bibliographyPath) &&
+        (await pathExists(options.bibliographyPath)) &&
         (await this.checkPandoc());
 
       if (options.manuscript?.chapters?.length) {
@@ -427,13 +440,14 @@ export class WordExportService {
       // Même décision que celle prise plus haut pour choisir la cible
       // d'assemblage : les deux DOIVENT concorder, sinon on assemblerait
       // du LaTeX pour le générateur natif, ou l'inverse.
-      const hasBibliography = options.bibliographyPath && existsSync(options.bibliographyPath);
+      const hasBibliography =
+        options.bibliographyPath && (await pathExists(options.bibliographyPath));
       const hasPandoc = await this.checkPandoc();
       const useEnginePipeline = !!options.citation?.useEngine;
 
       if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
-        return await this.exportWithPandoc(options, outputPath, onProgress);
+        return await this.exportWithPandoc(options, outputPath, onProgress, clock);
       }
 
       if (hasBibliography && !hasPandoc) {
@@ -725,7 +739,7 @@ export class WordExportService {
       // Check if template is provided or exists
       let finalBuffer: Buffer;
 
-      if (options.templatePath && existsSync(options.templatePath)) {
+      if (options.templatePath && (await pathExists(options.templatePath))) {
         onProgress?.({
           stage: 'template',
           message: 'Application du modèle Word...',
@@ -753,7 +767,9 @@ export class WordExportService {
         finalBuffer = await Packer.toBuffer(doc);
       }
 
+      clock.throwIfExpired();
       await writeFile(outputPath, finalBuffer);
+      clock.throwIfExpired();
 
       onProgress?.({
         stage: 'complete',

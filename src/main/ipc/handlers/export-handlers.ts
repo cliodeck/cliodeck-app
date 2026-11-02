@@ -1,14 +1,17 @@
 /**
  * PDF, Word, and Presentation Export IPC handlers
  */
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, powerMonitor } from 'electron';
 import { pdfExportService } from '../../services/pdf-export.js';
 import { wordExportService } from '../../services/word-export.js';
 import { revealJsExportService } from '../../services/revealjs-export.js';
+import { watchSystemSleep } from '../../services/export-time-limit.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validate, PDFExportSchema, RevealJSExportSchema, WordExportSchema, StringPathSchema } from '../utils/validation.js';
 
 export function setupExportHandlers() {
+  watchSystemSleep(powerMonitor);
+
   // PDF Export handlers
   ipcMain.handle('pdf-export:check-dependencies', async () => {
     console.log('📞 IPC Call: pdf-export:check-dependencies');
