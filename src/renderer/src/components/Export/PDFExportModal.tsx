@@ -12,7 +12,8 @@ import {
 } from './ExportCitationSection';
 import './PDFExportModal.css';
 
-import { exportErrorMessage } from './export-error';
+import { exportErrorMessage, exportThrownMessage } from './export-error';
+import { readOptionalConfig, startExportReadLimit } from './export-read-limit';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import { backdropClose } from '../../utils/backdropClose';
@@ -198,17 +199,22 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         };
       }
 
+      // Une seule horloge pour toutes les lectures qui précèdent l'appel au main.
+      const withinReadLimit = startExportReadLimit();
+
       // Article et présentation : ne PAS prendre le tampon de l'éditeur tel
       // quel — il contient le fichier ouvert, qui peut être `abstract.md` ou
       // `context.md`. Le service résout le vrai manuscrit et privilégie le
       // texte vivant quand c'est bien lui qui est ouvert.
       let exportContent = '';
       if (currentProject.type !== 'book') {
-        const resolved = await resolveManuscriptContent(
-          currentProject.path,
-          currentProject.type,
-          filePath,
-          getLiveContent
+        const resolved = await withinReadLimit(
+          resolveManuscriptContent(
+            currentProject.path,
+            currentProject.type,
+            filePath,
+            getLiveContent
+          )
         );
         if (!resolved.ok) {
           setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
@@ -219,19 +225,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       }
 
       // For presentations, load Beamer configuration if it exists
-      let beamerConfig;
+      let beamerConfig: unknown;
       if (currentProject.type === 'presentation') {
-        try {
-          const beamerConfigPath = `${currentProject.path}/beamer-config.json`;
-          const configExists = await window.electron.fs.exists(beamerConfigPath);
-          if (configExists) {
-            const configContent = await window.electron.fs.readFile(beamerConfigPath);
-            beamerConfig = JSON.parse(configContent);
-            console.log('📊 Beamer configuration loaded:', beamerConfig);
-          }
-        } catch (err) {
-          console.warn('No Beamer config found, using defaults');
-        }
+        beamerConfig = await withinReadLimit(
+          readOptionalConfig(`${currentProject.path}/beamer-config.json`)
+        );
       }
 
       const result = await window.electron.pdfExport.export({
@@ -273,7 +271,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       }
     } catch (err: unknown) {
       console.error('PDF export threw:', err);
-      setError(t('export.pdf.error'));
+      setError(exportThrownMessage(t, err, t('export.pdf.error')));
       setIsExporting(false);
     } finally {
       // Libéré ici, et non dans les branches : l'assemblage a fini de lire
@@ -296,7 +294,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
   // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
   // la ref est attachée au conteneur). Un export bloqué ne reste pas sans
-  // sortie : le main l'arrête de lui-même (`export-time-limit.ts`).
+  // sortie : le main l'arrête de lui-même (`export-time-limit.ts`), et ce qui
+  // précède l'appel au main a la même limite (`export-read-limit.ts`).
   const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;

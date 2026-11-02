@@ -40,13 +40,36 @@ const presentation = vi.hoisted(() => ({
   loadFile: (): Promise<void> => Promise.resolve(),
   printToPDF: (): Promise<Buffer> => Promise.resolve(Buffer.from('%PDF-faux')),
   openPath: (): Promise<string> => Promise.resolve(''),
+  openCalls: 0,
+  /** Le `mkdir` de ce dossier se fait, puis reste en attente de la barrière. */
+  heldDir: null as string | null,
+  dirBarrier: Promise.resolve(),
+  dirHeld: false,
 }));
+
+vi.mock('fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs/promises')>();
+  const mkdir = async (...args: Parameters<typeof real.mkdir>) => {
+    const made = await real.mkdir(...args);
+    if (String(args[0]) === presentation.heldDir) {
+      presentation.dirHeld = true;
+      await presentation.dirBarrier;
+    }
+    return made;
+  };
+  return { ...real, mkdir };
+});
 
 vi.mock('electron', () => ({
   app: { getPath: () => presentation.userData, isPackaged: false },
   dialog: { showSaveDialog: vi.fn() },
   ipcMain: { handle: vi.fn() },
-  shell: { openPath: () => presentation.openPath() },
+  shell: {
+    openPath: () => {
+      presentation.openCalls += 1;
+      return presentation.openPath();
+    },
+  },
   BrowserWindow: class {
     destroyed = false;
     closed = false;
@@ -263,6 +286,9 @@ beforeEach(() => {
   presentation.loadFile = () => Promise.resolve();
   presentation.printToPDF = () => Promise.resolve(Buffer.from('%PDF-faux'));
   presentation.openPath = () => Promise.resolve('');
+  presentation.openCalls = 0;
+  presentation.heldDir = null;
+  presentation.dirHeld = false;
 });
 
 afterEach(() => {
@@ -617,12 +643,14 @@ describe('export de présentation', () => {
   it(
     'un CDN qui ne répond pas fait échouer l’export hors ligne, qui n’écrit rien ensuite',
     async () => {
-      let respond: (response: Response) => void = () => undefined;
+      const responders: Array<(response: Response) => void> = [];
       vi.stubGlobal(
         'fetch',
-        vi.fn(() => new Promise<Response>((resolve) => { respond = resolve; }))
+        vi.fn(() => new Promise<Response>((resolve) => { responders.push(resolve); }))
       );
-      const output = join(project, 'diapos.html');
+      // Un dossier encore absent : même sa création serait une suite de trop.
+      const outputDir = join(project, 'sorties');
+      const output = join(outputDir, 'diapos.html');
 
       const result = await revealJsExportService.exportOffline(
         { ...slides(), outputPath: output },
@@ -631,26 +659,97 @@ describe('export de présentation', () => {
       );
 
       expect(result).toMatchObject({ success: false, errorCode: 'export_timed_out' });
-      respond(new Response('/* tardif */'));
+      // Toutes les réponses : une seule en attente laisserait le travail suspendu,
+      // et l'assertion ci-dessous ne pourrait jamais échouer.
+      for (const respond of responders) respond(new Response('/* tardif */'));
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(existsSync(output)).toBe(false);
+      expect(existsSync(outputDir)).toBe(false);
     },
     10_000
   );
 
   it(
-    'un navigateur qui ne s’ouvre jamais ne retient pas l’export HTML',
+    'un navigateur qui ne s’ouvre jamais ne retient pas l’export HTML : le fichier est écrit, il a réussi',
     async () => {
       presentation.openPath = NEVER;
+      const output = join(project, 'diapos.html');
 
       const result = await revealJsExportService.exportToRevealJs(
-        { ...slides(), outputPath: join(project, 'diapos.html') },
+        { ...slides(), outputPath: output },
         undefined,
         { timeLimitMs: 300 }
       );
 
-      expect(result).toMatchObject({ success: false, errorCode: 'export_timed_out' });
+      expect(result).toEqual({ success: true, outputPath: output });
+      expect(readFileSync(output, 'utf8')).toContain('<!DOCTYPE html>');
+      expect(presentation.openCalls).toBe(1);
     },
     10_000
   );
+
+  it(
+    'un navigateur qui refuse de s’ouvrir ne fait pas échouer l’export HTML',
+    async () => {
+      presentation.openPath = () => Promise.reject(new Error('aucune application'));
+      const output = join(project, 'diapos.html');
+
+      const result = await revealJsExportService.exportToRevealJs(
+        { ...slides(), outputPath: output },
+        undefined,
+        LIMIT
+      );
+
+      expect(result).toEqual({ success: true, outputPath: output });
+      // Un rejet sans lecteur ferait échouer ce test : on lui laisse le temps de partir.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    },
+    10_000
+  );
+
+  describe.each([
+    {
+      name: 'HTML',
+      file: 'diapos.html',
+      run: revealJsExportService.exportToRevealJs.bind(revealJsExportService),
+    },
+    {
+      name: 'hors ligne',
+      file: 'diapos.html',
+      run: revealJsExportService.exportOffline.bind(revealJsExportService),
+    },
+    {
+      name: 'PDF',
+      file: 'diapos.pdf',
+      run: revealJsExportService.exportToPDF.bind(revealJsExportService),
+    },
+  ])('chemin $name : un dossier de sortie qui se débloque après l’échéance', ({ file, run }) => {
+    it(
+      'n’écrit plus rien par-dessus l’annonce de l’échec',
+      async () => {
+        const outputDir = join(project, 'sorties');
+        mkdirSync(outputDir);
+        const output = join(outputDir, file);
+        writeFileSync(output, 'EXPORT-PRECEDENT');
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('/* asset */')));
+        let release: () => void = () => undefined;
+        presentation.dirBarrier = new Promise((resolve) => { release = resolve; });
+        presentation.heldDir = outputDir;
+        useFakeClock();
+
+        const exporting = run({ ...slides(), outputPath: output }, undefined, LIMIT);
+        await expireWhen(() => presentation.dirHeld);
+        // Le délai laissé au nettoyage : le travail reste suspendu sur la barrière.
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });
+
+        vi.useRealTimers();
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(readFileSync(output, 'utf8')).toBe('EXPORT-PRECEDENT');
+        expect(presentation.openCalls).toBe(0);
+      },
+      15_000
+    );
+  });
 });

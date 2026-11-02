@@ -513,12 +513,13 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
-    return withExportTimeLimit(limits, () => this.runHtmlExport(options, onProgress));
+    return withExportTimeLimit(limits, (clock) => this.runHtmlExport(options, onProgress, clock));
   }
 
   private async runHtmlExport(
     options: RevealJsExportOptions,
-    onProgress: ((progress: RevealJsProgress) => void) | undefined
+    onProgress: ((progress: RevealJsProgress) => void) | undefined,
+    clock: ExportClock
   ): Promise<ExportResult> {
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation de la présentation...', progress: 20 });
@@ -534,6 +535,8 @@ export class RevealJsExportService {
       // Ensure output directory exists
       await mkdir(dirname(outputPath), { recursive: true });
 
+      clock.throwIfExpired();
+
       // Write HTML file
       await writeFile(outputPath, html, 'utf-8');
 
@@ -541,28 +544,36 @@ export class RevealJsExportService {
 
       console.log('✅ Reveal.js presentation exported:', outputPath);
 
-      // Ouverture dans le navigateur par défaut.
-      // `shell.openPath` remplace l'ancienne interpolation dans un shell
-      // (`open "${outputPath}"`) : un chemin contenant un guillemet en
-      // échappait le quoting et permettait d'enchaîner une commande
-      // arbitraire. Electron transmet ici le chemin à l'OS sans shell, et
-      // couvre les trois plateformes d'un seul appel.
-      try {
-        const failure = await shell.openPath(outputPath);
-        if (failure) {
-          console.warn('⚠️ Failed to open browser automatically:', failure);
-        } else {
-          console.log('✅ Opened presentation in default browser');
-        }
-      } catch (error) {
-        console.warn('⚠️ Failed to open browser automatically:', error);
-        // Don't fail the export if browser opening fails
-      }
+      // Non attendue : le fichier est écrit, l'export a réussi, quoi que fasse le
+      // navigateur. L'attendre annoncerait un échec si l'ouverture ne rendait
+      // jamais la main.
+      void this.openInBrowser(outputPath);
 
       return { success: true, outputPath };
     } catch (error: unknown) {
       console.error('❌ Reveal.js export failed:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  /**
+   * Ouverture dans le navigateur par défaut.
+   * `shell.openPath` remplace l'ancienne interpolation dans un shell
+   * (`open "${outputPath}"`) : un chemin contenant un guillemet en
+   * échappait le quoting et permettait d'enchaîner une commande
+   * arbitraire. Electron transmet ici le chemin à l'OS sans shell, et
+   * couvre les trois plateformes d'un seul appel.
+   */
+  private async openInBrowser(outputPath: string): Promise<void> {
+    try {
+      const failure = await shell.openPath(outputPath);
+      if (failure) {
+        console.warn('⚠️ Failed to open browser automatically:', failure);
+      } else {
+        console.log('✅ Opened presentation in default browser');
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to open browser automatically:', error);
     }
   }
 
@@ -634,6 +645,7 @@ export class RevealJsExportService {
       );
 
       await mkdir(dirname(outputPath), { recursive: true });
+      clock.throwIfExpired();
       await writeFile(outputPath, html, 'utf-8');
 
       onProgress?.({ stage: 'complete', message: 'Présentation offline créée!', progress: 100 });
@@ -711,6 +723,7 @@ export class RevealJsExportService {
       );
 
       await mkdir(dirname(outputPath), { recursive: true });
+      clock.throwIfExpired();
       await writeFile(outputPath, pdfData);
 
       onProgress?.({ stage: 'complete', message: 'PDF créé!', progress: 100 });

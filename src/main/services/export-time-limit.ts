@@ -4,7 +4,9 @@
  * Un export qui ne se termine pas (xelatex qui boucle, page reveal.js qui ne
  * charge jamais) n'a aucune autre sortie : Échap et Annuler ne l'interrompent
  * pas, car ils feraient perdre le résultat de tout export qui aboutit (#179).
- * Passé ce délai, l'export échoue et l'historien retrouve la main.
+ * Passé ce délai, l'export échoue et l'historien retrouve la main. Ce qui précède
+ * l'appel au main, les lectures des modales, a la même limite côté renderer
+ * (`export-read-limit.ts`).
  *
  * Trois règles :
  *  - **Durée totale, pas délai d'inactivité.** Pandoc ne transmet rien de la
@@ -22,9 +24,7 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio,
 } from 'child_process';
-
-/** Se change ici, en une ligne : aucun réglage visible, rc.6 n'ajoute rien. */
-export const EXPORT_TIME_LIMIT_MS = 15 * 60 * 1000;
+import { EXPORT_TIME_LIMIT_MS } from '../../../backend/types/export-limits.js';
 
 /** Entre SIGTERM et SIGKILL. */
 const KILL_GRACE_MS = 5000;
