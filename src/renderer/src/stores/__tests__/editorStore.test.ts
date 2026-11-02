@@ -307,6 +307,50 @@ describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
     expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
   });
 
+  /** Remplace une réponse de l'IPC par une attente, relâchée par l'appelant. */
+  function holdIpc(channel: 'saveFile' | 'loadFile', response: () => unknown): () => void {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { editor } = (globalThis as unknown as {
+      electron: { editor: Record<string, unknown> };
+    }).electron;
+    editor[channel] = async () => {
+      await gate;
+      return response();
+    };
+    return release;
+  }
+
+  it('refuse à son arrivée une bascule partie avant lui, le sortant étant déjà écrit', async () => {
+    const release = holdIpc('saveFile', () => ({ success: true }));
+
+    const opening = useEditorStore.getState().loadFile('/livre/chapters/02.md');
+    lock();
+    release();
+
+    await expect(opening).rejects.toThrow(i18n.t('book.renumberInProgress'));
+    expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
+    expect(useEditorStore.getState().content).toBe('# Un\n');
+  });
+
+  it('refuse de même une bascule dont la lecture était en cours', async () => {
+    useEditorStore.setState({ isDirty: false });
+    const version = useEditorStore.getState().documentVersion;
+    const release = holdIpc('loadFile', () => ({ success: true, content: '# Deux\n' }));
+
+    const opening = useEditorStore.getState().loadFile('/livre/chapters/02.md');
+    await Promise.resolve();
+    lock();
+    release();
+
+    await expect(opening).rejects.toThrow(i18n.t('book.renumberInProgress'));
+    expect(useEditorStore.getState().filePath).toBe('/livre/chapters/01.md');
+    expect(useEditorStore.getState().content).toBe('# Un\n');
+    expect(useEditorStore.getState().documentVersion).toBe(version);
+  });
+
   it('repart une fois le verrou levé', async () => {
     useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
     useEditorStore.getState().setSwitchLock(null);
@@ -314,5 +358,91 @@ describe('loadFile — verrou de bascule (renumérotation en cours)', () => {
     await useEditorStore.getState().loadFile('/livre/chapters/02.md');
 
     expect(useEditorStore.getState().filePath).toBe('/livre/chapters/02.md');
+  });
+});
+
+/**
+ * La réponse d'une écriture peut revenir alors que l'éditeur porte un autre
+ * document. La poser dans le store mettait le texte sortant dans le miroir du
+ * nouveau document : invisible tant que la vue vit, puis affiché à son prochain
+ * montage, et écrit dans le mauvais fichier à la frappe suivante.
+ */
+describe('saveFile — réponse revenue après un changement de document', () => {
+  const A = '/livre/chapters/01.md';
+  const B = '/livre/chapters/02.md';
+  let releaseFirstWrite: () => void;
+  let saved: Array<{ path: string; content: string }>;
+
+  beforeEach(() => {
+    saved = [];
+    let held = false;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: {
+        loadFile: async () => ({ success: true, content: '# Deux\n' }),
+        saveFile: async (path: string, content: string) => {
+          saved.push({ path, content });
+          if (!held) {
+            held = true;
+            await gate;
+          }
+          return { success: true };
+        },
+      },
+    } as never;
+    useEditorStore.setState({
+      filePath: A,
+      content: '# Un modifié\n',
+      isDirty: true,
+      lastSavedAt: null,
+      editorFacade: null,
+    });
+  });
+
+  it('une bascule de fichier : le miroir garde le document entrant', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    await useEditorStore.getState().loadFile(B);
+
+    releaseFirstWrite();
+    await writing;
+
+    const state = useEditorStore.getState();
+    expect(state.filePath).toBe(B);
+    expect(state.content).toBe('# Deux\n');
+    expect(state.isDirty).toBe(false);
+    expect(state.lastSavedAt).toBeNull();
+    // L'écriture elle-même a eu lieu : c'est sa seule trace dans le store qui disparaît.
+    expect(saved[0]).toEqual({ path: A, content: '# Un modifié\n' });
+  });
+
+  it('un nouveau tampon : il reste vide', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    useEditorStore.getState().createNewFile();
+
+    releaseFirstWrite();
+    await writing;
+
+    const state = useEditorStore.getState();
+    expect(state.filePath).toBeNull();
+    expect(state.content).toBe('');
+    expect(state.isDirty).toBe(false);
+    expect(state.lastSavedAt).toBeNull();
+  });
+
+  it('sans changement de document : la réponse se pose comme d’habitude', async () => {
+    const writing = useEditorStore.getState().saveFile();
+
+    releaseFirstWrite();
+    await writing;
+
+    const state = useEditorStore.getState();
+    expect(state.filePath).toBe(A);
+    expect(state.content).toBe('# Un modifié\n');
+    expect(state.isDirty).toBe(false);
+    expect(state.lastSavedAt).not.toBeNull();
   });
 });

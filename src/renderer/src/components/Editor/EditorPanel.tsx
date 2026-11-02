@@ -191,8 +191,8 @@ export const EditorPanel: React.FC = () => {
     const project = useProjectStore.getState().currentProject;
     if (!project) return null;
 
-    // Le verrou arrête les bascules, mais ni celle déjà partie avant lui ni celle
-    // qui ne passe pas par `loadFile`. L'éditeur montre-t-il encore le départ ?
+    // Le verrou arrête les bascules par `loadFile`, pas les autres (Cmd+N, qui
+    // vide l'éditeur directement). L'éditeur montre-t-il encore le départ ?
     const startRel = currentRelativePath();
     const editorMoved = (): boolean =>
       currentRelativePath() !== startRel ||

@@ -377,6 +377,88 @@ describe('bascule pendant la boucle d’écriture', () => {
   });
 });
 
+describe('bascule partie avant le clic sur Renuméroter', () => {
+  it('refusée à son arrivée : l’opération aboutit, chaque chapitre garde son texte', async () => {
+    await openBook(DISORDERED);
+    const typed = `${DISORDERED[A]}Tapé avant le clic.\n`;
+    await act(async () => {
+      useEditorStore.getState().editorFacade?.setValue(typed);
+    });
+    // `loadFile(B)` attend l'écriture du texte sortant de A, qui reste suspendue.
+    const outgoing = deferred();
+    const renumbered = deferred();
+    let writesOfA = 0;
+    beforeWrite = async (path) => {
+      if (path !== A) return;
+      writesOfA += 1;
+      await (writesOfA === 1 ? outgoing : renumbered).promise;
+    };
+    let refusal: unknown = 'en attente';
+    void useEditorStore
+      .getState()
+      .loadFile(B)
+      .then(
+        () => {
+          refusal = null;
+        },
+        (error: unknown) => {
+          refusal = error;
+        }
+      );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    expect(writesOfA).toBe(2);
+    await act(async () => {
+      outgoing.release();
+    });
+    await act(async () => {
+      renumbered.release();
+    });
+
+    expect(refusal).toEqual(new Error(i18n.t('book.renumberInProgress')));
+    expect(useEditorStore.getState().filePath).toBe(A);
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(disk[A]).toBe(
+      '# A\n\nTexte A[^1] suite[^2].\n\n[^1]: une\n\n[^2]: deux\nTapé avant le clic.\n'
+    );
+    expect(disk[B]).toBe('# B\n\nTexte B[^3].\n\n[^3]: trois\n');
+    expect(useEditorStore.getState().content).toBe(disk[A]);
+    expect(live()).toBe(disk[A]);
+    expect(locks()).toEqual(FREE);
+  });
+});
+
+describe('document remplacé pendant l’écriture du chapitre ouvert', () => {
+  it('Cmd+N, qui contourne le verrou : la réponse de l’écriture ne remplit pas le nouveau tampon', async () => {
+    await openBook(DISORDERED);
+    const stuck = deferred();
+    let first = true;
+    beforeWrite = async (path) => {
+      if (path === A && first) {
+        first = false;
+        await stuck.promise;
+      }
+    };
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    await act(async () => {
+      useEditorStore.getState().createNewFile();
+    });
+    await act(async () => {
+      stuck.release();
+    });
+
+    expect(useEditorStore.getState().content).toBe('');
+    expect(useEditorStore.getState().filePath).toBeNull();
+    expect(alertMessage()).toBe('book.renumberInterrupted');
+    expect(disk).toEqual(DISORDERED);
+  });
+});
+
 describe('projet remplacé pendant la boucle d’écriture', () => {
   it('ne restaure pas dans le fichier de même nom de l’autre projet', async () => {
     await openBook(DISORDERED);
@@ -773,6 +855,50 @@ describe('un disque qui ne répond plus', () => {
     expect(writes.map(([path]) => path)).toEqual([A, A, B]);
   });
 
+  it('écriture du chapitre ouvert sans réponse, bascule après la limite : le miroir reste celui du document ouvert', async () => {
+    await openBook(DISORDERED);
+    const stuck = deferred();
+    let first = true;
+    beforeWrite = async (path) => {
+      if (path === A && first) {
+        first = false;
+        await stuck.promise;
+      }
+    };
+    vi.useFakeTimers();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    await advanceToLimit();
+    expect(locks()).toEqual(FREE);
+
+    await act(async () => {
+      await useEditorStore.getState().loadFile(B);
+    });
+    await act(async () => {
+      stuck.release();
+    });
+
+    expect(useEditorStore.getState().filePath).toBe(B);
+    expect(useEditorStore.getState().content).toBe(DISORDERED[B]);
+    expect(useEditorStore.getState().isDirty).toBe(false);
+
+    // Une vue se crée sur le miroir (aller-retour de mode, par exemple) : elle
+    // montrait le texte de A sous le chemin de B, et l'autosave l'écrivait là.
+    await act(async () => {
+      useEditorStore.setState((s) => ({ documentVersion: s.documentVersion + 1 }));
+    });
+    expect(live()).toBe(DISORDERED[B]);
+    await act(async () => {
+      useEditorStore.getState().editorFacade?.setValue(`${live()}Frappe.\n`);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(useEditorStore.getState().settings.autoSaveDelay);
+    });
+    expect(disk[B]).toBe(`${DISORDERED[B]}Frappe.\n`);
+  });
+
   it('écriture qui échoue après la limite : pas de restauration non plus', async () => {
     await openBook(DISORDERED);
     const stuck = deferred();
@@ -787,17 +913,54 @@ describe('un disque qui ne répond plus', () => {
       fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
     });
     await advanceToLimit();
+    const renumberedA = disk[A];
 
+    await act(async () => {
+      stuck.release();
+    });
+
+    // Sans frappe : seule la limite retient la remise en état de A.
+    expect(writes.map(([path]) => path)).toEqual([A]);
+    expect(disk[A]).toBe(renumberedA);
+    expect(live()).toBe(renumberedA);
+  });
+
+  it('chapitre non ouvert repris après la limite, échec au retour du disque : le texte repris reste', async () => {
+    await openBook(DISORDERED, B);
+    const stuck = deferred();
+    beforeWrite = async (path) => {
+      if (path !== C) return;
+      await stuck.promise;
+      return { success: false, error: 'disque mort' };
+    };
+    vi.useFakeTimers();
+
+    // A puis B (ouvert) sont écrits, C reste suspendu.
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    await advanceToLimit();
+    expect(locks()).toEqual(FREE);
+
+    // L'auteur ouvre A, le reprend, l'enregistre et revient sur B : la garde de
+    // frappe ne voit que le chapitre ouvert, seule la limite protège encore A.
     const edited = '# A\n\nRepris après la limite.\n';
     await act(async () => {
+      await useEditorStore.getState().loadFile(A);
+    });
+    await act(async () => {
       useEditorStore.getState().editorFacade?.setValue(edited);
+      await useEditorStore.getState().saveFile();
+    });
+    await act(async () => {
+      await useEditorStore.getState().loadFile(B);
     });
     await act(async () => {
       stuck.release();
     });
 
-    expect(live()).toBe(edited);
-    expect(writes.map(([path]) => path)).toEqual([A]);
+    expect(disk[A]).toBe(edited);
+    expect(writes.map(([path]) => path)).toEqual([A, B, A]);
   });
 
   it('restauration suspendue à la limite : elle ne reprend pas au retour du disque', async () => {
@@ -817,14 +980,20 @@ describe('un disque qui ne répond plus', () => {
     await advanceToLimit();
     expect(locks()).toEqual(FREE);
 
+    // L'auteur reprend B, l'enregistre et le quitte : B était le suivant à remettre.
     const edited = '# B\n\nRepris après la limite.\n';
     await act(async () => {
       useEditorStore.getState().editorFacade?.setValue(edited);
+      await useEditorStore.getState().saveFile();
+    });
+    await act(async () => {
+      await useEditorStore.getState().loadFile(C);
     });
     await act(async () => {
       stuck.release();
     });
 
-    expect(live()).toBe(edited);
+    expect(disk[B]).toBe(edited);
+    expect(live()).toBe(DISORDERED[C]);
   });
 });
