@@ -7,6 +7,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
 
+import { exportErrorMessage } from './export-error';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import { backdropClose } from '../../utils/backdropClose';
@@ -138,7 +139,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
           setProgress({ stage: '', message: '', progress: 0 });
         }, 2000);
       } else {
-        setError(result.error || t('presentation.unknownError'));
+        setError(exportErrorMessage(t, result, t('presentation.unknownError')));
         setIsExporting(false);
       }
     } catch (err: unknown) {
@@ -159,7 +160,8 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
 
   // Échap passe par `handleClose`, comme Annuler : sans effet pendant l'export,
   // dont l'issue n'aurait plus d'interface (le piège de focus s'active quand
-  // la ref est attachée au conteneur).
+  // la ref est attachée au conteneur). Un export bloqué ne reste pas sans
+  // sortie : le main l'arrête de lui-même (`export-time-limit.ts`).
   const trapRef = useFocusTrap({ active: isOpen, onEscape: handleClose });
 
   if (!isOpen) return null;

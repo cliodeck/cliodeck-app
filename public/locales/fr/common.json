@@ -350,6 +350,7 @@
     "reopenOnboarding": "Rejouer l'assistant de démarrage"
   },
   "export": {
+    "timedOut": "L'export a été arrêté : il n'avait pas abouti après {{minutes}} minutes. Votre texte n'a pas été modifié, vous pouvez relancer l'export.",
     "pdf": {
       "title": "Export PDF",
       "documentTitle": "Titre du document",

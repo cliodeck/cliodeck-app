@@ -49,6 +49,8 @@ import { useManuscriptStore } from '../../../stores/manuscriptStore';
 interface ExportOutcome {
   success: boolean;
   error?: string;
+  errorCode?: string;
+  timeLimitMinutes?: number;
   unresolvedCitations?: string[];
 }
 
@@ -212,6 +214,73 @@ describe.each(MODALS)('modale d’export $name', ({ Modal, exportLabel, exportin
     vi.advanceTimersByTime(2_000);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Échap ne sort plus d'un export en cours : c'est la limite de durée du main qui
+ * rend la main. La modale doit alors redevenir pleinement utilisable.
+ */
+describe.each(MODALS)('modale d’export $name : export arrêté par la limite', ({ Modal, exportLabel, exportingLabel }) => {
+  const TIMED_OUT: ExportOutcome = {
+    success: false,
+    error: 'Export arrêté : aucun résultat après 15 minutes.',
+    errorCode: 'export_timed_out',
+    timeLimitMinutes: 15,
+  };
+
+  it('affiche le message traduit, réactive les boutons et relâche le drapeau', async () => {
+    const finish = installElectron();
+    const onClose = vi.fn();
+    const { container } = render(<Host Modal={Modal} onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+
+    finish(TIMED_OUT);
+
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+    expect(container.querySelector('.export-error')).toHaveTextContent('export.timedOut');
+    expect(screen.getByRole('button', { name: exportLabel })).not.toBeDisabled();
+    expect(container.querySelector('.close-btn')).not.toBeDisabled();
+    expect(useManuscriptStore.getState().exporting).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Échap referme ensuite la modale', async () => {
+    const finish = installElectron();
+    const onClose = vi.fn();
+    const { container } = render(<Host Modal={Modal} onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+    finish(TIMED_OUT);
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('un second export peut partir et efface le message', async () => {
+    const finish = installElectron();
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+    finish(TIMED_OUT);
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+
+    await startExport(exportLabel, exportingLabel);
+    expect(container.querySelector('.export-error')).toBeNull();
+
+    finish({ success: true });
+    await waitFor(() => expect(container.querySelector('.export-success')).not.toBeNull());
+  });
+
+  it('une autre erreur garde son affichage', async () => {
+    const finish = installElectron();
+    const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+    await startExport(exportLabel, exportingLabel);
+
+    finish({ success: false, error: 'xelatex a échoué' });
+
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+    expect(container.querySelector('.export-error')).toHaveTextContent('xelatex a échoué');
   });
 });
 

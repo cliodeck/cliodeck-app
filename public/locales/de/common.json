@@ -350,6 +350,7 @@
     "reopenOnboarding": "Einrichtungsassistent erneut starten"
   },
   "export": {
+    "timedOut": "Der Export wurde abgebrochen: Er war nach {{minutes}} Minuten nicht abgeschlossen. Ihr Text wurde nicht verändert, und Sie können den Export erneut starten.",
     "pdf": {
       "title": "PDF-Export",
       "documentTitle": "Dokumenttitel",
