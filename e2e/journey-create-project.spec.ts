@@ -341,3 +341,142 @@ test('tampon sans titre : Annuler garde le texte et le projet, et rien n’est o
     rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+test('tampon sans titre : accord, puis nom de projet déjà pris : le texte revient', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const parent = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-creation-'));
+  mkdirSync(join(parent, 'Pris'), { recursive: true });
+  const taken = JSON.stringify({ id: 'pris', name: 'Pris', type: 'article', createdAt: new Date().toISOString() });
+  writeFileSync(join(parent, 'Pris', 'project.json'), taken);
+
+  try {
+    await typeAtEnd(window, 'Idée sans titre');
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+    }, parent);
+    await window.locator('button[title="Nouveau projet"]').first().click();
+    await window.locator('.create-project-content input[type="text"]').first().fill('Pris');
+    await window.locator('.create-project-content .path-selector button').click();
+    await expect(window.locator('.create-project-content .path-selector input')).toHaveValue(parent);
+    await window.locator('.create-project-content .btn-submit').click();
+    await expect(window.locator('.confirm-dialog')).toContainText('sans titre', { timeout: 5_000 });
+    await window.locator('.confirm-dialog .confirm-dialog-btn-confirm').click();
+
+    await expect(window.locator('#alert-dialog-message')).toContainText("Rien n'a été modifié", { timeout: 10_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    await expect(editor(window)).toContainText('Idée sans titre');
+    await expect(editor(window)).toHaveAttribute('contenteditable', 'true');
+    expect(readFileSync(join(parent, 'Pris', 'project.json'), 'utf8')).toBe(taken);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(parent, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('pendant un project:load long, le navigateur n’ajoute aucun chapitre au livre qu’on quitte', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-projet-'));
+  mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  mkdirSync(join(dir, 'chapters'), { recursive: true });
+  const projectJson = join(dir, 'project.json');
+  const chapters = [{ id: 'c1', title: 'Un', filePath: 'chapters/01-un.md', order: 0, kind: 'chapter' }];
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000033',
+      name: 'Livre A',
+      type: 'book',
+      chapters,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  writeFileSync(join(dir, 'chapters', '01-un.md'), '# Un\n\nChapitre un.\n');
+  const b = makeB();
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(editor(window)).toContainText('Chapitre un', { timeout: 20_000 });
+    const addChapter = window.locator('.chapter-navigator-action[title="Ajouter un chapitre"]');
+    await expect(addChapter).toBeEnabled();
+
+    await slowDownProjectLoad(app, 1_500);
+    await openProject(app, window, b.projectJson);
+    await expect(editor(window)).toContainText('Ouverture du projet');
+    await expect(addChapter).toBeDisabled();
+
+    await expect(editor(window)).toContainText('Douze mille mots', { timeout: 20_000 });
+    const manifest = JSON.parse(readFileSync(projectJson, 'utf8')) as { chapters: unknown[] };
+    expect(manifest.chapters).toHaveLength(1);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(b.dir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+for (const choice of ['le même projet', 'un autre projet']) {
+  test(`dialogue d’ouverture resté ouvert : choisir ${choice} pendant une ouverture ne vide pas l’éditeur`, async () => {
+    const outcome = await launchApp();
+    if (outcome.kind === 'skip') {
+      test.skip(true, outcome.reason);
+      return;
+    }
+    const { app, window, userDataDir } = outcome.value;
+    const a = makeA();
+    const b = makeB();
+    const c = makeArticle('Projet C', '00000000-0000-4000-8000-000000000044', '# Article C\n\nTrois mille mots.\n');
+    const fromDialog = choice === 'le même projet' ? b : c;
+
+    try {
+      await openProject(app, window, b.projectJson);
+      await expect(editor(window)).toContainText('Douze mille mots', { timeout: 20_000 });
+      await openProject(app, window, a.projectJson);
+      await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+      await window.getByText('Projets récents').click();
+      const recentB = window.locator('.recent-project-content', { hasText: 'Projet B' });
+      await expect(recentB).toBeVisible();
+
+      await slowDownProjectLoad(app, 700);
+      // Sans fenêtre parente, le dialogue laisse la fenêtre cliquable : il répond plus tard.
+      await app.evaluate(({ dialog }, filePath) => {
+        dialog.showOpenDialog = async () => {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          return { canceled: false, filePaths: [filePath] };
+        };
+      }, fromDialog.projectJson);
+      await window.locator('button[title="Ouvrir un projet"]').first().click();
+      await window.waitForTimeout(100);
+      await recentB.click();
+
+      await expect(editor(window)).toContainText('Douze mille mots', { timeout: 20_000 });
+      await window.waitForTimeout(1_500);
+      await expect(window.locator('.project-loading-overlay')).toHaveCount(0);
+      await expect(editor(window)).toContainText('Douze mille mots');
+
+      await typeAtEnd(window, 'Une session entière.');
+      await window.waitForTimeout(3_500);
+      expect(readFileSync(b.document, 'utf8')).toBe(`${B_TEXT}Une session entière.`);
+      expect(readFileSync(c.document, 'utf8')).toBe('# Article C\n\nTrois mille mots.\n');
+    } finally {
+      await app.close().catch(() => undefined);
+      rmSync(a.dir, { recursive: true, force: true });
+      rmSync(b.dir, { recursive: true, force: true });
+      rmSync(c.dir, { recursive: true, force: true });
+      rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+}

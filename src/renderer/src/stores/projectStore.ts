@@ -64,7 +64,8 @@ interface ProjectState {
   loadProject: (projectPath: string) => Promise<void>;
   /**
    * Rend faux si rien n'a été créé sans qu'il y ait d'erreur : l'auteur garde son
-   * tampon sans titre, le verrou est posé, ou une autre demande a pris le pas.
+   * tampon sans titre, le verrou est posé, un autre changement de projet est en cours,
+   * ou une autre demande a pris le pas.
    */
   createProject: (name: string, type: Project['type'], path: string) => Promise<boolean>;
   closeProject: () => void;
@@ -98,9 +99,14 @@ async function saveOutgoingEditorIfDirty(): Promise<void> {
   await writeOpenDocumentWhileDirty();
 }
 
-/** Le document quitté, à rouvrir si le changement de projet échoue. */
+/** Ce que l'éditeur a quitté, à lui rendre si rien ne vient le remplacer. */
 interface DetachedEditor {
   from: string | null;
+  /**
+   * Le texte d'un tampon sans titre. L'auteur a accepté de l'abandonner pour ce projet,
+   * pas pour rien : il n'est sur aucun disque, et l'échec lui dira « rien n'a été modifié ».
+   */
+  untitledText?: string;
 }
 
 /**
@@ -117,13 +123,15 @@ async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
   const { useEditorStore } = await import('./editorStore');
   const outcome = await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
   if (outcome.status === 'locked') await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
-  return outcome.status === 'replaced' ? { from: outcome.detachedFrom ?? null } : null;
+  if (outcome.status !== 'replaced') return null;
+  return { from: outcome.detachedFrom ?? null, untitledText: outcome.detachedText };
 }
 
 /**
  * Le changement de projet a échoué : l'écran montre encore le projet d'avant, et
  * l'éditeur y revient. Si le main a déjà basculé, il refuse de relire ce document :
- * un tampon vide, mais le sortant est sur le disque et l'éditeur n'est pas figé.
+ * un tampon vide, mais le sortant est sur le disque et l'éditeur n'est pas figé. Sans
+ * document d'origine, c'est le texte du tampon sans titre qui revient, sans son annulation.
  */
 async function reopenAfterFailedSwitch(detached: DetachedEditor): Promise<void> {
   const { useEditorStore } = await import('./editorStore');
@@ -136,7 +144,7 @@ async function reopenAfterFailedSwitch(detached: DetachedEditor): Promise<void> 
       console.error('Document sortant impossible à rouvrir:', error);
     }
   }
-  await replaceBuffer({ kind: 'untitled' }, 'project-restore');
+  await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
 /** Un projet tel que le main le rend : dates sérialisées, et ce qu'il reste à ouvrir. */
@@ -155,7 +163,8 @@ interface ProjectFromMain extends Omit<Project, 'createdAt' | 'lastOpenedAt'> {
  */
 async function openProjectContents(
   project: ProjectFromMain,
-  set: StoreApi<ProjectState>['setState']
+  set: StoreApi<ProjectState>['setState'],
+  detached: DetachedEditor
 ): Promise<void> {
   set({
     currentProject: {
@@ -252,6 +261,8 @@ async function openProjectContents(
 
   const { useEditorStore } = await import('./editorStore');
   const { replaceBuffer } = useEditorStore.getState();
+  // Seul `replaced` sort du détachement : `unchanged` n'arrive pas d'un tampon sans chemin,
+  // et `superseded` (un verrou posé pendant la lecture) laisserait l'éditeur figé.
   const openDocument = async (filePath: string): Promise<boolean> => {
     const outcome = await replaceBuffer({ kind: 'open', filePath }, 'project-open');
     return outcome.status === 'replaced';
@@ -282,8 +293,13 @@ async function openProjectContents(
     }
   }
 
-  // Rien à ouvrir : ni l'ancien document, ni un éditeur figé en lecture seule.
-  if (!opened) await replaceBuffer({ kind: 'untitled' }, 'project-open');
+  // Rien à ouvrir : ni l'ancien document, ni un éditeur figé en lecture seule. Aucun
+  // chapitre n'est donc courant : le renommer réécrirait son titre dans ce tampon. Et
+  // rien n'ayant remplacé un tampon sans titre, son texte reste.
+  if (!opened) {
+    set({ currentChapterId: null });
+    await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-open');
+  }
 }
 
 /**
@@ -301,6 +317,16 @@ async function refusedBySwitchLock(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Un seul changement de projet à la fois : la règle du voile du panneau, que le dialogue
+ * d'ouverture, sans fenêtre parente, laisse passer. Le main ne sait pas en mener deux
+ * (services initialisés en parallèle), et le perdant, dont il refuse alors la lecture,
+ * viderait l'éditeur du gagnant. À lire sans attente avant de poser `loading`.
+ */
+function switchInProgress(state: ProjectState): boolean {
+  return state.loadState.kind === 'loading';
+}
+
 // MARK: - Store
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -314,6 +340,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   loadProject: async (projectPath: string) => {
     if (await refusedBySwitchLock()) return;
+    if (switchInProgress(get())) return;
     const loadStateBefore = get().loadState;
     set({ loadState: { kind: 'loading', path: projectPath } });
     let detached: DetachedEditor | null = null;
@@ -339,7 +366,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         bibliographySource: project.bibliographySource
       });
 
-      await openProjectContents(project, set);
+      await openProjectContents(project, set, detached);
 
       // Update recent projects
       await get().loadRecentProjects();
@@ -368,6 +395,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   createProject: async (name: string, type: Project['type'], path: string) => {
     if (await refusedBySwitchLock()) return false;
+    if (switchInProgress(get())) return false;
     const loadStateBefore = get().loadState;
     set({ loadState: { kind: 'loading', path } });
     let detached: DetachedEditor | null = null;
@@ -385,7 +413,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         throw new Error(result.error || 'Failed to create project');
       }
 
-      await openProjectContents(result.project, set);
+      await openProjectContents(result.project, set, detached);
 
       await get().loadRecentProjects();
 

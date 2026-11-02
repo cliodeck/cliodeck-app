@@ -29,11 +29,13 @@ export type EditorSwitchLock = 'book.renumberInProgress';
  * Ce qui remplace le document ouvert. `untitled` : un tampon sans titre.
  * `detach` : hors de tout document et en lecture seule, le temps qu'un changement
  * de projet se fasse. `discardOutgoing` saute l'écriture du sortant : seulement
- * après un accord explicite de l'auteur.
+ * après un accord explicite de l'auteur. `text` rend à un tampon sans titre le texte
+ * qu'un détachement lui a pris (`detachedText`), si le changement de projet n'a rien
+ * mis à sa place.
  */
 export type BufferTarget =
   | { kind: 'open'; filePath: string }
-  | { kind: 'untitled'; discardOutgoing?: true }
+  | { kind: 'untitled'; discardOutgoing?: true; text?: string }
   | { kind: 'detach'; discardOutgoing?: true };
 
 /**
@@ -52,10 +54,12 @@ export type BufferReason =
  * `unchanged` : le fichier demandé est déjà là, rien n'a bougé. `superseded` : une
  * demande plus récente, ou un verrou entre-temps, a pris le pas. `cancelled` :
  * l'auteur a refusé d'abandonner un tampon sans titre. `locked` : refusé par le
- * verrou de bascule, à dire à l'auteur (`lock` est la clé i18n du motif).
+ * verrou de bascule, à dire à l'auteur (`lock` est la clé i18n du motif). Un détachement
+ * rend ce qu'il a quitté : le chemin du fichier (`detachedFrom`), ou le texte d'un tampon
+ * sans titre (`detachedText`), qui n'existe nulle part ailleurs.
  */
 export type BufferOutcome =
-  | { status: 'replaced'; detachedFrom?: string | null }
+  | { status: 'replaced'; detachedFrom?: string | null; detachedText?: string }
   | { status: 'unchanged' }
   | { status: 'superseded' }
   | { status: 'cancelled' }
@@ -300,12 +304,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const refusedOnArrival = (): BufferOutcome | null =>
       refusedByLock() ?? (request === bufferRequestSeq ? null : { status: 'superseded' });
 
-    const commit = (text: string): BufferOutcome => {
+    const commit = (text: string, untitledLeft: string | null = null): BufferOutcome => {
       const detachedFrom = get().filePath;
       set((state) => ({
         content: text,
         filePath: openPath,
-        isDirty: false,
+        // Un texte rendu à un tampon sans titre n'est toujours écrit nulle part.
+        isDirty: openPath === null && text !== '',
         // Nouveau document : l'indicateur ne doit pas dater d'un autre.
         lastSavedAt: null,
         documentVersion: state.documentVersion + 1,
@@ -315,7 +320,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         editorFacade: null,
       }));
       logger.store('Editor', 'Buffer replaced', { reason, contentLength: text.length });
-      return next.kind === 'detach' ? { status: 'replaced', detachedFrom } : { status: 'replaced' };
+      if (next.kind !== 'detach') return { status: 'replaced' };
+      return { status: 'replaced', detachedFrom, ...(untitledLeft ? { detachedText: untitledLeft } : {}) };
     };
 
     // Déjà ouvert : un tampon modifié n'a rien à attendre du disque, et le recharger
@@ -352,7 +358,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // le seul que l'auteur a accepté de perdre, ou qui était vide.
     const untitledText = get().filePath || outgoingDetached ? null : get().getLiveContent();
 
-    const text = openPath === null ? '' : await readDocumentFromDisk(openPath);
+    const text =
+      openPath !== null
+        ? await readDocumentFromDisk(openPath)
+        : next.kind === 'untitled' && next.text
+          ? next.text
+          : '';
     const staleAfterRead = refusedOnArrival();
     if (staleAfterRead) return staleAfterRead;
 
@@ -369,7 +380,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (openDocumentNeedsFlush()) return { status: 'superseded' };
     }
 
-    return commit(text);
+    return commit(text, untitledText);
   },
 
   loadFile: (filePath: string) => get().replaceBuffer({ kind: 'open', filePath }, 'open-file'),

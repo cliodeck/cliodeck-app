@@ -312,6 +312,67 @@ describe('ChapterNavigator pendant une opération sur le manuscrit', () => {
   });
 });
 
+describe('ChapterNavigator pendant un changement de projet', () => {
+  let createChapter: ReturnType<typeof vi.fn>;
+  const loading = () =>
+    act(async () => {
+      useProjectStore.setState({ loadState: { kind: 'loading', path: '/autre/project.json' } });
+    });
+
+  beforeEach(() => {
+    createChapter = vi.fn(async () => ({ success: true }));
+    useEditorStore.setState({
+      loadFile: vi.fn(async () => ({ status: 'superseded' })),
+      editorFacade: null,
+    } as never);
+    (window as unknown as { electron: unknown }).electron = {
+      project: {
+        createChapter,
+        saveChapters: vi.fn(async () => ({ success: true })),
+        getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
+      },
+    };
+    setupStore(
+      [chapter({ id: 'c1', title: 'Un', order: 0 }), chapter({ id: 'c2', title: 'Deux', order: 1 })],
+      [{ filePath: 'chapters/brouillon.md' } as UnattachedFile]
+    );
+    useProjectStore.setState({ loadState: { kind: 'idle' } });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useProjectStore.setState({ loadState: { kind: 'idle' } });
+    vi.restoreAllMocks();
+  });
+
+  it('rien ne peut plus écrire dans le manifeste du projet qu’on quitte', async () => {
+    render(<ChapterNavigator />);
+    expect(screen.getByTitle('book.addChapter')).toBeEnabled();
+
+    await loading();
+
+    expect(screen.getByTitle('book.addChapter')).toBeDisabled();
+    expect(screen.getByTitle('book.settings.title')).toBeDisabled();
+    for (const button of screen.getAllByTitle('book.moveDown')) expect(button).toBeDisabled();
+    for (const button of screen.getAllByTitle('book.removeChapter')) expect(button).toBeDisabled();
+    expect(screen.getByTitle('book.attach')).toBeDisabled();
+  });
+
+  it('une saisie ouverte avant le changement n’ajoute aucun chapitre au projet quitté', async () => {
+    render(<ChapterNavigator />);
+    fireEvent.click(screen.getByTitle('book.addChapter'));
+    const input = screen.getByPlaceholderText('book.titlePlaceholder');
+    fireEvent.change(input, { target: { value: 'Chapitre fantôme' } });
+
+    await loading();
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+
+    expect(createChapter).not.toHaveBeenCalled();
+  });
+});
+
 describe('replaceLeadingHeading', () => {
   it('remplace le premier titre de niveau 1', () => {
     expect(replaceLeadingHeading('# Ancien\n\nTexte.\n', 'Nouveau')).toBe(

@@ -54,6 +54,7 @@ let refused: string[];
 let whileMainInitializes: () => Promise<void> | void;
 let mainFailsAfterSwitch: boolean;
 let beforeWrite: () => void;
+let recentPaths: string[];
 
 const store = () => useEditorStore.getState();
 const project = () => useProjectStore.getState();
@@ -87,6 +88,7 @@ async function installMain(): Promise<void> {
         }
         if (type === 'presentation') await writeFile(path.join(dir, 'slides.md'), `# Diapos de ${name}\n`);
         await writeFile(path.join(dir, 'project.json'), JSON.stringify(manifest));
+        recentPaths.unshift(path.join(dir, 'project.json'));
         mainCurrent.path = dir;
         await whileMainInitializes();
         if (mainFailsAfterSwitch) return { success: false, error: 'services' };
@@ -107,9 +109,13 @@ async function installMain(): Promise<void> {
       }),
       getChapters: vi.fn(async (dir: string) => {
         const manifest = JSON.parse(await readFile(path.join(dir, 'project.json'), 'utf8'));
-        return { success: true, chapters: manifest.chapters ?? [], unattached: [] };
+        return { success: true, chapters: manifest.chapters ?? [], unattached: manifest.unattached ?? [] };
       }),
-      getRecent: vi.fn(async () => []),
+      getRecent: vi.fn(async () => recentPaths),
+      getMetadata: vi.fn(async (projectJson: string) => ({
+        success: true,
+        project: { ...JSON.parse(await readFile(projectJson, 'utf8')), path: path.dirname(projectJson) },
+      })),
     },
     editor: {
       loadFile: async (filePath: string) => {
@@ -220,6 +226,7 @@ beforeEach(async () => {
   whileMainInitializes = () => undefined;
   mainFailsAfterSwitch = false;
   beforeWrite = () => undefined;
+  recentPaths = [];
   mainCurrent.path = null;
   await installMain();
   useEditorStore.setState((s) => ({
@@ -311,6 +318,16 @@ describe('createProject ouvre le document du projet créé', () => {
     expect(store().content).toBe('# Introduction\n\n');
   });
 
+  it('le projet créé rejoint aussitôt les récents', async () => {
+    await mountWorkbench();
+
+    await act(async () => {
+      await project().createProject('Neuf', 'article', root);
+    });
+
+    expect(project().recentProjects.map((p) => p.path)).toEqual([path.join(root, 'Neuf')]);
+  });
+
   it('frappe pendant project.create : rien de refusé, le projet créé s’ouvre, A reste intact', async () => {
     await openProjectA();
     const gate = hold();
@@ -375,6 +392,37 @@ describe('createProject ouvre le document du projet créé', () => {
     expect(project().loadState).toEqual({ kind: 'idle' });
     expect(currentView().state.doc.toString()).toBe('Une idée sans titre.');
     expect(existsSync(path.join(root, 'Neuf'))).toBe(false);
+  });
+
+  it('accord sur le tampon sans titre, puis création refusée : le texte revient, et la question reste due', async () => {
+    await mountWorkbench();
+    await typeAtEnd('Une idée sans titre.');
+    await writeProject(path.join(root, 'Pris'), { id: 'pris', name: 'Pris', type: 'article' });
+
+    const refused = project().createProject('Pris', 'article', root);
+    await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+      await expect(refused).rejects.toThrow('project_exists');
+    });
+
+    // L'alerte affirme « Rien n'a été modifié » : le tampon est tel que l'auteur l'a laissé.
+    expect(currentView().state.doc.toString()).toBe('Une idée sans titre.');
+    expect(currentView().state.readOnly).toBe(false);
+    expect(store().filePath).toBeNull();
+    expect(store().content).toBe('Une idée sans titre.');
+    expect(store().isDirty).toBe(true);
+    expect(store().bufferDetached).toBe(false);
+
+    // Cet accord ne valait que pour ce changement-là.
+    const created = project().createProject('Libre', 'article', root);
+    await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+      await created;
+    });
+    expect(store().filePath).toBe(path.join(root, 'Libre', 'document.md'));
+    expect(currentView().state.doc.toString()).toBe('# Libre');
   });
 
   it('écriture du sortant impossible : rejet, et l’éditeur reste sur son document', async () => {
@@ -489,7 +537,9 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
 
   it('du livre vers un article : les chapitres du livre ne survivent pas à la bascule', async () => {
     const chapters = [{ id: 'c9', title: 'Neuf', filePath: 'chapters/09.md', order: 0, kind: 'chapter' }];
-    await writeProject(dirA, { id: 'a', name: 'A', type: 'book', chapters });
+    const book = { ...DEFAULT_BOOK_SETTINGS, numberChapters: !DEFAULT_BOOK_SETTINGS.numberChapters };
+    const unattached = [{ filePath: 'chapters/brouillon.md' }];
+    await writeProject(dirA, { id: 'a', name: 'A', type: 'book', chapters, book, unattached });
     await mkdir(path.join(dirA, 'chapters'));
     await writeFile(path.join(dirA, 'chapters', '09.md'), '# Neuf\n');
     await mountWorkbench();
@@ -497,6 +547,8 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
       await project().loadProject(path.join(dirA, 'project.json'));
     });
     expect(project().currentChapterId).toBe('c9');
+    expect(project().bookSettings).toEqual(book);
+    expect(project().unattachedFiles).toEqual(unattached);
 
     await act(async () => {
       await project().loadProject(projectJsonB());
@@ -504,6 +556,8 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
 
     expect(project().chapters).toEqual([]);
     expect(project().currentChapterId).toBeNull();
+    expect(project().bookSettings).toEqual(DEFAULT_BOOK_SETTINGS);
+    expect(project().unattachedFiles).toEqual([]);
   });
 
   it('document illisible, repli impossible : tampon vide plutôt qu’un éditeur figé', async () => {
@@ -519,6 +573,189 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(store().bufferDetached).toBe(false);
     expect(currentView().state.readOnly).toBe(false);
     expect(project().loadState.kind).toBe('ready');
+  });
+
+  it('livre au premier chapitre illisible, repli impossible : aucun chapitre annoncé sur le tampon vide', async () => {
+    const chapters = [{ id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 0, kind: 'chapter' }];
+    await writeProject(dirB, { id: 'b', name: 'B', type: 'book', chapters });
+    await mkdir(path.join(dirB, 'chapters', '01.md'), { recursive: true });
+    await openProjectA();
+
+    await act(async () => {
+      await project().loadProject(projectJsonB());
+    });
+
+    expect(store().filePath).toBeNull();
+    expect(project().chapters.map((c) => c.id)).toEqual(['c1']);
+    // Renommer un « chapitre courant » réécrirait son titre dans le tampon sans titre.
+    expect(project().currentChapterId).toBeNull();
+    expect(project().loadState.kind).toBe('ready');
+  });
+
+  describe('l’auteur a accepté d’abandonner son tampon sans titre', () => {
+    const IDEA = 'Une idée sans titre.';
+
+    async function typeIdeaAndAccept(switchProject: () => Promise<void>): Promise<void> {
+      await mountWorkbench();
+      await typeAtEnd(IDEA);
+      const switching = switchProject();
+      await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+      await act(async () => {
+        dialogs().resolveConfirm(true);
+        await switching;
+      });
+    }
+
+    const expectIdeaBack = () => {
+      expect(currentView().state.doc.toString()).toBe(IDEA);
+      expect(currentView().state.readOnly).toBe(false);
+      expect(store().filePath).toBeNull();
+      expect(store().content).toBe(IDEA);
+      expect(store().isDirty).toBe(true);
+      expect(store().bufferDetached).toBe(false);
+    };
+
+    it('project.json illisible : le texte revient', async () => {
+      await writeFile(projectJsonB(), '{ pas du JSON');
+
+      await typeIdeaAndAccept(() => expect(project().loadProject(projectJsonB())).rejects.toThrow());
+
+      expectIdeaBack();
+      expect(project().currentProject).toBeNull();
+      expect(project().loadState.kind).toBe('failed');
+    });
+
+    it('échec après le passage du main : le texte revient quand même', async () => {
+      mainFailsAfterSwitch = true;
+
+      await typeIdeaAndAccept(() => expect(project().loadProject(projectJsonB())).rejects.toThrow('services'));
+
+      expectIdeaBack();
+    });
+
+    it('le projet s’ouvre mais n’a rien à montrer : rien n’a remplacé le texte, il reste', async () => {
+      await writeProject(dirB, { id: 'b', name: 'B', type: 'book', chapters: [] });
+
+      await typeIdeaAndAccept(() => project().loadProject(projectJsonB()));
+
+      expectIdeaBack();
+      expect(project().currentProject?.path).toBe(dirB);
+      expect(project().loadState.kind).toBe('ready');
+    });
+
+    it('le document du projet s’ouvre : le texte est abandonné, comme accepté', async () => {
+      await typeIdeaAndAccept(() => project().loadProject(projectJsonB()));
+
+      expect(store().filePath).toBe(documentB);
+      expect(currentView().state.doc.toString()).toBe(B_TEXT);
+      expect(store().isDirty).toBe(false);
+      expect(read(documentB)).toBe(B_TEXT);
+    });
+  });
+
+  describe('un seul changement de projet à la fois', () => {
+    // Le main n'en supporte pas deux : services initialisés en parallèle, et le perdant
+    // voit sa lecture refusée. Son repli vidait l'éditeur du gagnant.
+    const second: Array<[string, () => string]> = [
+      ['le même projet', projectJsonB],
+      ['un autre projet', () => path.join(dirA, 'project.json')],
+    ];
+
+    it.each(second)('une ouverture de %s pendant la première est refusée, et la première aboutit', async (_label, other) => {
+      await openProjectA();
+      const gate = hold();
+      whileMainInitializes = gate.wait;
+      const first = project().loadProject(projectJsonB());
+      await eventually(() => expect(mainCurrent.path).toBe(dirB));
+
+      await act(async () => {
+        await project().loadProject(other());
+      });
+      expect(window.electron.project.load).toHaveBeenCalledTimes(2);
+      expect(project().loadState).toEqual({ kind: 'loading', path: projectJsonB() });
+
+      await act(async () => {
+        gate.release();
+        await first;
+      });
+
+      expect(store().filePath).toBe(documentB);
+      expect(store().bufferDetached).toBe(false);
+      expect(project().currentProject?.path).toBe(dirB);
+      expect(project().loadState.kind).toBe('ready');
+      await typeAtEnd('Une session entière.');
+      await eventually(() => expect(read(documentB)).toBe(`${B_TEXT}Une session entière.`));
+    });
+
+    it('une création pendant une ouverture est refusée : rien de créé, et l’appelant le sait', async () => {
+      await openProjectA();
+      const gate = hold();
+      whileMainInitializes = gate.wait;
+      const first = project().loadProject(projectJsonB());
+      await eventually(() => expect(mainCurrent.path).toBe(dirB));
+
+      let created: boolean | undefined;
+      await act(async () => {
+        created = await project().createProject('Neuf', 'article', root);
+      });
+
+      expect(created).toBe(false);
+      expect(window.electron.project.create).not.toHaveBeenCalled();
+      expect(existsSync(path.join(root, 'Neuf'))).toBe(false);
+
+      await act(async () => {
+        gate.release();
+        await first;
+      });
+      expect(store().filePath).toBe(documentB);
+    });
+
+    it('une ouverture pendant une création est refusée', async () => {
+      await openProjectA();
+      const gate = hold();
+      whileMainInitializes = gate.wait;
+      const creating = project().createProject('Neuf', 'article', root);
+      await eventually(() => expect(mainCurrent.path).toBe(path.join(root, 'Neuf')));
+
+      await act(async () => {
+        await project().loadProject(projectJsonB());
+      });
+      expect(window.electron.project.load).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        gate.release();
+        await creating;
+      });
+      expect(store().filePath).toBe(path.join(root, 'Neuf', 'document.md'));
+    });
+
+    it('une fois la première finie, la suivante repart', async () => {
+      await openProjectA();
+      await act(async () => {
+        await project().loadProject(projectJsonB());
+      });
+      await act(async () => {
+        await project().loadProject(path.join(dirA, 'project.json'));
+      });
+      expect(store().filePath).toBe(documentA);
+    });
+  });
+
+  it('verrou posé pendant la lecture du document entrant : l’éditeur ne reste pas figé', async () => {
+    // La lecture revient `superseded`, et personne d'autre ne sortira du détachement.
+    await openProjectA();
+    const readFromMain = window.electron.editor.loadFile;
+    window.electron.editor.loadFile = async (filePath: string) => {
+      store().setSwitchLock('book.renumberInProgress');
+      return readFromMain(filePath);
+    };
+
+    await act(async () => {
+      await project().loadProject(projectJsonB());
+    });
+
+    expect(store().bufferDetached).toBe(false);
+    expect(currentView().state.readOnly).toBe(false);
   });
 
   it('l’auteur garde son tampon sans titre : le main n’est pas sollicité, et l’état d’avant revient', async () => {
