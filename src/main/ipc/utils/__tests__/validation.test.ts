@@ -39,6 +39,17 @@ describe('validate() helper', () => {
 });
 
 describe('ProjectCreateSchema', () => {
+  it.each(['..', '.', 'a/b', 'a\\b', '../dehors', '/absolu'])(
+    'refuse le nom %s, qui sortirait du dossier choisi',
+    (name) => {
+      expect(() => validate(ProjectCreateSchema, { name, path: '/p' })).toThrow('project_name_invalid');
+    }
+  );
+
+  it.each(["Thèse d'Anne", 'v1.2', '...', '.cache', 'a b'])('accepte le nom %s', (name) => {
+    expect(ProjectCreateSchema.parse({ name, path: '/p' }).name).toBe(name);
+  });
+
   it('accepts valid project data', () => {
     const result = ProjectCreateSchema.parse({
       name: 'Mon Projet',

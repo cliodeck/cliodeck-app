@@ -4,9 +4,12 @@
 import { z } from 'zod';
 import { NUM_CTX_MAX, NUM_CTX_MIN } from '../../../../backend/core/llm/context-windows.js';
 
+// Le nom devient un sous-dossier du dossier choisi : il ne doit pas en sortir.
+const isProjectFolderName = (name: string) => name !== '.' && name !== '..' && !/[/\\]/.test(name);
+
 // Project schemas
 export const ProjectCreateSchema = z.object({
-  name: z.string().min(1, 'Project name is required'),
+  name: z.string().min(1, 'Project name is required').refine(isProjectFolderName, 'project_name_invalid'),
   type: z.enum(['article', 'book', 'presentation']).optional(),
   path: z.string().min(1, 'Project path is required'),
   // Pas de `chapters` ici : le manifeste d'un livre est construit par

@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir, copyFile, readdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, copyFile, readdir, open, rm, rmdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { dirname, basename, join } from 'path';
@@ -38,6 +38,101 @@ async function autoMigrateWorkspace(projectDir: string): Promise<void> {
     );
   }
 }
+
+interface TemplateFile {
+  /** Chemin relatif au dossier du projet. */
+  relPath: string;
+  content: string;
+}
+
+/**
+ * Écrit les gabarits d'un nouveau projet, sans jamais remplacer un fichier
+ * (ouverture exclusive : un fichier apparu après le contrôle d'existence lève
+ * EEXIST). En cas d'échec, retire seulement ce que cet appel a créé.
+ */
+async function writeTemplates(projectPath: string, templates: TemplateFile[]): Promise<void> {
+  const createdFiles: string[] = [];
+  const createdDirs: string[] = [];
+  const ensureDir = async (dir: string) => {
+    if (!existsSync(dir)) {
+      await mkdir(dir, { recursive: true });
+      createdDirs.push(dir);
+    }
+  };
+  try {
+    await ensureDir(projectPath);
+    for (const { relPath, content } of templates) {
+      const target = path.join(projectPath, relPath);
+      await ensureDir(path.dirname(target));
+      const handle = await open(target, 'wx');
+      createdFiles.push(target);
+      try {
+        await handle.writeFile(content);
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch (error: unknown) {
+    await Promise.all(createdFiles.map((file) => rm(file, { force: true }).catch(() => undefined)));
+    for (const dir of createdDirs.reverse()) {
+      await rmdir(dir).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+const slidesTemplate = (name: string) => `## ${name}
+
+Auteur · Date
+
+Note: Bienvenue dans cette présentation.
+
+---
+
+## Plan
+
+- Contexte
+- Méthodologie
+- Résultats
+- Conclusion
+
+---
+
+## Contexte
+
+- Point important 1
+- Point important 2
+- Point important 3
+
+Note: Détaillez ici le contexte de votre recherche.
+
+---
+
+## Méthodologie
+
+- Méthode 1
+- Méthode 2
+- Méthode 3
+
+---
+
+## Résultats
+
+| Élément | Valeur |
+|---------|--------|
+| A       | 10     |
+| B       | 20     |
+
+Note: Commentez les résultats principaux.
+
+---
+
+## Conclusion
+
+Merci de votre attention !
+
+Note: N'oubliez pas de mentionner les perspectives futures.
+`;
 
 interface Project {
   id?: string;
@@ -121,14 +216,6 @@ export class ProjectManager {
     // Create a subfolder with the project name
     const projectPath = path.join(data.path, data.name);
 
-    // Create folder if it doesn't exist
-    if (!existsSync(projectPath)) {
-      await mkdir(projectPath, { recursive: true });
-    }
-
-    // Ensure flat .cliodeck/ layout (with config.json) from day 1. Idempotent.
-    await autoMigrateWorkspace(projectPath);
-
     // Issue #13: path is computed dynamically, not stored in project.json
     const project: Project = {
       id: crypto.randomUUID(),
@@ -140,20 +227,19 @@ export class ProjectManager {
       lastOpenedAt: new Date().toISOString(),
     };
 
+    const templates: TemplateFile[] = [];
+
     // Livre : squelette multi-fichiers + manifeste + réglages d'ouvrage.
     // Le `#` du fichier EST le titre du chapitre (plan, arbitrage 1) : le
     // manifeste et le fichier disent donc la même chose, et l'auteur peut
     // renommer depuis l'un ou l'autre.
     if (projectType === 'book') {
-      const chaptersPath = path.join(projectPath, CHAPTERS_DIR);
-      await mkdir(chaptersPath, { recursive: true });
-
       const firstTitle = 'Introduction';
       const firstFile = chapterFileName(0, firstTitle);
-      await writeFile(
-        path.join(chaptersPath, firstFile),
-        `# ${firstTitle}\n\n`
-      );
+      templates.push({
+        relPath: path.join(CHAPTERS_DIR, firstFile),
+        content: `# ${firstTitle}\n\n`,
+      });
 
       project.chapters = [
         {
@@ -167,88 +253,55 @@ export class ProjectManager {
       project.book = { ...DEFAULT_BOOK_SETTINGS };
     }
 
-    // Create project.json (without path field - it's computed from file location)
-    const projectFile = path.join(projectPath, 'project.json');
-    const { path: _excludedPath, ...projectForSave } = project;
-    await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
-
     // Article et présentation gardent leur document monolithique ; le livre
     // n'a PAS de document.md (son texte vit dans chapters/).
     if (projectType !== 'book') {
-      const mdFile = path.join(projectPath, 'document.md');
-      await writeFile(mdFile, data.content || '# ' + data.name);
+      templates.push({ relPath: 'document.md', content: data.content || '# ' + data.name });
     }
 
     // For articles and books, create abstract.md and context.md
     if (projectType === 'article' || projectType === 'book') {
-      const abstractFile = path.join(projectPath, 'abstract.md');
-      await writeFile(abstractFile, '# Résumé\n\nRésumé à compléter...');
+      templates.push({ relPath: 'abstract.md', content: '# Résumé\n\nRésumé à compléter...' });
 
       // Gabarit inerte : les instructions vivent dans un commentaire HTML,
       // retiré avant injection (cf. backend/core/hints/loader.ts). Un
       // context.md jamais édité n'apprend donc rien au modèle — l'ancien
       // gabarit, lui, aurait injecté son exemple sur l'IA dans l'éducation.
-      const contextFile = path.join(projectPath, CONTEXT_FILE);
-      await writeFile(contextFile, CONTEXT_TEMPLATE);
+      templates.push({ relPath: CONTEXT_FILE, content: CONTEXT_TEMPLATE });
     }
 
     // For presentations, create slides.md with reveal.js syntax
     if (projectType === 'presentation') {
-      const slidesFile = path.join(projectPath, 'slides.md');
-      const slidesTemplate = `## ${data.name}
-
-Auteur · Date
-
-Note: Bienvenue dans cette présentation.
-
----
-
-## Plan
-
-- Contexte
-- Méthodologie
-- Résultats
-- Conclusion
-
----
-
-## Contexte
-
-- Point important 1
-- Point important 2
-- Point important 3
-
-Note: Détaillez ici le contexte de votre recherche.
-
----
-
-## Méthodologie
-
-- Méthode 1
-- Méthode 2
-- Méthode 3
-
----
-
-## Résultats
-
-| Élément | Valeur |
-|---------|--------|
-| A       | 10     |
-| B       | 20     |
-
-Note: Commentez les résultats principaux.
-
----
-
-## Conclusion
-
-Merci de votre attention !
-
-Note: N'oubliez pas de mentionner les perspectives futures.
-`;
-      await writeFile(slidesFile, slidesTemplate);
+      templates.push({ relPath: 'slides.md', content: slidesTemplate(data.name) });
     }
+
+    // project.json (without path field - it's computed from file location)
+    // s'écrit en dernier : tant qu'il manque, le dossier n'est pas un projet.
+    const { path: _excludedPath, ...projectForSave } = project;
+    templates.push({ relPath: 'project.json', content: JSON.stringify(projectForSave, null, 2) });
+
+    // Créer ne remplace jamais rien : on refuse avant toute écriture, sans
+    // toucher au projet courant ni aux projets récents.
+    if (existsSync(path.join(projectPath, 'project.json'))) {
+      return { success: false as const, error: 'project_exists' };
+    }
+    if (templates.some((file) => existsSync(path.join(projectPath, file.relPath)))) {
+      return { success: false as const, error: 'project_files_exist' };
+    }
+
+    try {
+      await writeTemplates(projectPath, templates);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return { success: false as const, error: 'project_files_exist' };
+      }
+      throw error;
+    }
+
+    // Ensure flat .cliodeck/ layout (with config.json) from day 1. Idempotent.
+    await autoMigrateWorkspace(projectPath);
+
+    const projectFile = path.join(projectPath, 'project.json');
 
     // Add to recent projects
     configManager.addRecentProject(projectFile);
@@ -258,7 +311,7 @@ Note: N'oubliez pas de mentionner les perspectives futures.
     this.currentProjectPath = projectPath;
 
     console.log('✅ Project created:', projectPath);
-    return { success: true, path: projectFile, project };
+    return { success: true as const, path: projectFile, project };
   }
 
   async loadProject(projectPath: string) {
