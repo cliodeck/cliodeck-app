@@ -2,6 +2,7 @@ import { StateField, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { findImages } from './model';
+import { liveRenderRefresh } from './refresh';
 import { ImageWidget } from './widgets';
 
 /**
@@ -49,6 +50,11 @@ export function imageWidgets(options: ImageWidgetOptions) {
     create: (state) => computeAll(state, options, true),
 
     update: (value, tr) => {
+      // Dépendance externe : un document sans titre qui reçoit son chemin voit ses
+      // images relatives se résoudre, sans transaction de document.
+      if (tr.effects.some((e) => e.is(liveRenderRefresh))) {
+        return computeAll(tr.state, options, true);
+      }
       if (!tr.docChanged) return value;
       const mapped = value.map(tr.changes);
       let needs = false;

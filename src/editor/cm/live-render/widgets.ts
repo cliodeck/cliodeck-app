@@ -68,22 +68,28 @@ export class SlideBoundaryWidget extends WidgetType {
 }
 
 export class ImageWidget extends WidgetType {
+  /** Résolue à la construction : une même source peut changer d'URL avec le document. */
+  private readonly resolved: string | null;
+
   constructor(
     readonly src: string,
     readonly alt: string,
-    readonly resolveSrc?: (src: string) => string | null
+    resolveSrc?: (src: string) => string | null
   ) {
     super();
+    this.resolved = resolveSrc ? resolveSrc(src) : src;
   }
 
   override eq(other: ImageWidget): boolean {
-    return other.src === this.src && other.alt === this.alt;
+    return (
+      other.src === this.src && other.alt === this.alt && other.resolved === this.resolved
+    );
   }
 
   toDOM(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'cm-live-image';
-    const resolved = this.resolveSrc ? this.resolveSrc(this.src) : this.src;
+    const { resolved } = this;
     if (!resolved) {
       wrap.appendChild(this.placeholder());
       return wrap;

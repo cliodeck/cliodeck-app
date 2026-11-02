@@ -34,6 +34,7 @@ import { useSlidesStore } from '../../stores/slidesStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { runCitationCheck } from '../../services/check-citations';
+import { newDocument } from '../../services/new-document';
 import { ExportReadTimedOutError, startExportReadLimit } from '../Export/export-read-limit';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -52,11 +53,10 @@ export const EditorPanel: React.FC = () => {
   // Projet livre : le manuscrit est fait de N chapitres — le navigateur
   // ouvre l'atelier de la même façon que pour les présentations.
   const isBook = useProjectStore((s) => s.currentProject?.type === 'book');
-  const addChapter = useProjectStore((s) => s.addChapter);
   const isRenumbering = useManuscriptStore((s) => s.renumbering);
   // Ouvrir un projet et renuméroter ne se chevauchent pas : `loadProject` charge
-  // son document par `loadFile`, que le verrou de la renumérotation refuserait,
-  // et son repli prendrait ce refus pour un fichier absent, à recréer vide.
+  // son document par `loadFile`, que le verrou de la renumérotation refuserait, et
+  // le projet s'ouvrirait sans son document.
   const isProjectLoading = useProjectStore((s) => s.loadState.kind === 'loading');
   // Brouillons Brainstorm (#7) — panneau flottant, compteur sur le bouton.
   const draftsCount = useDraftsStore((s) => s.drafts.length);
@@ -90,26 +90,9 @@ export const EditorPanel: React.FC = () => {
     useEditorStore.getState().editorFacade?.replaceSelection(text);
   };
 
-  const handleNewFile = async () => {
+  const handleNewFile = () => {
     logger.component('EditorPanel', 'handleNewFile clicked');
-    // Dans un livre, « Nouveau » ajoute un chapitre au manuscrit : vider
-    // l'éditeur sortirait l'auteur du projet (`filePath: null`) et
-    // couperait l'autosave.
-    if (isBook) {
-      try {
-        await addChapter(t('book.untitledChapter'));
-      } catch (error) {
-        logger.error('EditorPanel', error);
-        await useDialogStore.getState().showAlert(t('book.addChapterError'));
-      }
-      return;
-    }
-    if (await useDialogStore.getState().showConfirm(t('toolbar.newFileConfirm'))) {
-      // L'éditeur vivant reçoit l'édition via la façade ; le store suit.
-      useEditorStore.getState().editorFacade?.setValue('');
-      setContent('');
-      logger.component('EditorPanel', 'New file created');
-    }
+    void newDocument(t);
   };
 
   const handleOpenFile = async () => {
@@ -125,8 +108,11 @@ export const EditorPanel: React.FC = () => {
 
       if (!result.canceled && result.filePaths.length > 0) {
         logger.component('EditorPanel', 'Loading file', { path: result.filePaths[0] });
-        await loadFile(result.filePaths[0]);
-        logger.component('EditorPanel', 'File loaded successfully');
+        const outcome = await loadFile(result.filePaths[0]);
+        if (outcome.status === 'locked') {
+          await useDialogStore.getState().showAlert(t(outcome.lock));
+        }
+        logger.component('EditorPanel', 'File load finished', { status: outcome.status });
       }
     } catch (error) {
       logger.error('EditorPanel', error);
@@ -153,8 +139,11 @@ export const EditorPanel: React.FC = () => {
 
         if (!result.canceled && result.filePath) {
           logger.component('EditorPanel', 'Saving file as', { path: result.filePath });
-          await useEditorStore.getState().saveFileAs(result.filePath);
-          logger.component('EditorPanel', 'File saved successfully');
+          const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
+          if (outcome.status === 'locked') {
+            await useDialogStore.getState().showAlert(t(outcome.lock));
+          }
+          logger.component('EditorPanel', 'File save finished', { status: outcome.status });
         }
       } else {
         logger.error('EditorPanel', error);
@@ -191,8 +180,8 @@ export const EditorPanel: React.FC = () => {
     const project = useProjectStore.getState().currentProject;
     if (!project) return null;
 
-    // Le verrou arrête les bascules par `loadFile`, pas les autres (Cmd+N, qui
-    // vide l'éditeur directement). L'éditeur montre-t-il encore le départ ?
+    // Le verrou arrête les remplacements par la porte, pas la création d'un projet.
+    // L'éditeur montre-t-il encore le départ ?
     const startRel = currentRelativePath();
     const editorMoved = (): boolean =>
       currentRelativePath() !== startRel ||

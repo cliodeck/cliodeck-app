@@ -15,25 +15,10 @@
  *    un délai à une fermeture déjà demandée.
  */
 import { useEffect } from 'react';
-import { useEditorStore } from '../stores/editorStore';
+import { needsFlush, useEditorStore } from '../stores/editorStore';
 import { logger } from '../utils/logger';
 
-/**
- * Faut-il écrire avant de quitter ?
- *
- * Extrait du hook pour être testable : c'est ici qu'est le piège, la
- * comparaison `live !== mirror` rattrapant le décalage de la synchro
- * debouncée que `isDirty` seul laisse passer.
- */
-export function needsFlush(state: {
-  filePath: string | null;
-  isDirty: boolean;
-  live: string;
-  mirror: string;
-}): boolean {
-  if (!state.filePath) return false;
-  return state.isDirty || state.live !== state.mirror;
-}
+export { needsFlush };
 
 export function useSaveOnQuit(): void {
   useEffect(() => {

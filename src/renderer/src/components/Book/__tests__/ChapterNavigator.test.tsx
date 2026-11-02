@@ -54,7 +54,7 @@ describe('ChapterNavigator', () => {
   let saveChapters: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    loadFile = vi.fn(async () => undefined);
+    loadFile = vi.fn(async () => ({ status: 'replaced' }));
     saveChapters = vi.fn(async () => ({ success: true }));
     useEditorStore.setState({ loadFile, editorFacade: null } as never);
     (window as unknown as { electron: unknown }).electron = {
@@ -111,6 +111,65 @@ describe('ChapterNavigator', () => {
     await waitFor(() =>
       expect(useProjectStore.getState().currentChapterId).toBe('c2')
     );
+  });
+
+  it('le chapitre déjà ouvert reste le chapitre courant (rien n’a été remplacé)', async () => {
+    loadFile.mockResolvedValue({ status: 'unchanged' });
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    useProjectStore.setState({ currentChapterId: 'c1' });
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useProjectStore.getState().currentChapterId).toBe('c2');
+  });
+
+  it.each(['cancelled', 'superseded'] as const)(
+    'bascule %s : le chapitre courant ne bouge pas, sans message',
+    async (status) => {
+      loadFile.mockResolvedValue({ status });
+      setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+      render(<ChapterNavigator />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Deux'));
+      });
+
+      expect(useProjectStore.getState().currentChapterId).toBe('c1');
+      expect(useDialogStore.getState().alertOpen).toBe(false);
+    }
+  );
+
+  it('verrou posé : la raison du refus, et le chapitre courant ne bouge pas', async () => {
+    loadFile.mockResolvedValue({ status: 'locked', lock: 'book.renumberInProgress' });
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useProjectStore.getState().currentChapterId).toBe('c1');
+    expect(useDialogStore.getState().alertMessage).toBe('book.renumberInProgress');
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it('la surbrillance suit le document ouvert, pas le dernier chapitre cliqué', async () => {
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    useEditorStore.setState({ filePath: `${PROJECT_PATH}/chapters/c1.md` });
+    render(<ChapterNavigator />);
+    const item = screen.getByText('Un').closest('li');
+    expect(item).toHaveClass('active');
+
+    // Un tampon sans titre : le chapitre n'est plus devant l'auteur.
+    act(() => useEditorStore.setState({ filePath: null }));
+    expect(item).not.toHaveClass('active');
+
+    // Un autre fichier du projet (context.md, une note de lecture) : de même.
+    act(() => useEditorStore.setState({ filePath: `${PROJECT_PATH}/context.md` }));
+    expect(item).not.toHaveClass('active');
   });
 
   it('n’ouvre pas un chapitre dont le fichier a disparu', async () => {
@@ -185,7 +244,7 @@ describe('ChapterNavigator pendant une opération sur le manuscrit', () => {
   let loadFile: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    loadFile = vi.fn(async () => undefined);
+    loadFile = vi.fn(async () => ({ status: 'replaced' }));
     useEditorStore.setState({ loadFile, editorFacade: null } as never);
     setupStore([
       chapter({ id: 'c1', title: 'Un', order: 0 }),

@@ -9,7 +9,7 @@
  *
  * Vrais EditorPanel, ChapterNavigator et stores ; seuls le disque (en mémoire,
  * derrière l'IPC) et la vue CM6 sont simulés. La fausse vue suit la vraie
- * (`CodeMirrorEditor`) : recréée sur `[filePath, documentVersion]`, façade retirée
+ * (`CodeMirrorEditor`) : recréée sur `documentVersion`, façade retirée
  * au démontage, `setValue` sans effet une fois détruite, `isDirty` posé à chaque
  * modification, ce qui rend l'autosave visible dans ces tests.
  */
@@ -20,7 +20,6 @@ import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import type { ResolvedChapter } from '@backend/types/book';
 
 import { EditorPanel } from '../EditorPanel';
-import i18n from '../../../i18n';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import { useProjectStore } from '../../../stores/projectStore';
@@ -30,7 +29,6 @@ vi.mock('../CodeMirrorEditor', async () => {
   const React = await import('react');
   const { useEditorStore: store } = await import('../../../stores/editorStore');
   const CodeMirrorEditor = () => {
-    const filePath = store((s) => s.filePath);
     const documentVersion = store((s) => s.documentVersion);
     React.useEffect(() => {
       let text = store.getState().content;
@@ -48,7 +46,7 @@ vi.mock('../CodeMirrorEditor', async () => {
         destroyed = true;
         store.getState().setEditorFacade(null);
       };
-    }, [filePath, documentVersion]);
+    }, [documentVersion]);
     return null;
   };
   return { CodeMirrorEditor };
@@ -179,6 +177,7 @@ const locks = () => ({
   switchLock: useEditorStore.getState().switchLock,
 });
 const FREE = { renumbering: false, switchLock: null };
+const LOCKED = { status: 'locked', lock: 'book.renumberInProgress' };
 
 beforeEach(() => {
   useManuscriptStore.setState({ renumbering: false, exporting: false, info: {} });
@@ -228,19 +227,13 @@ describe('bascule pendant la lecture du disque', () => {
 
     let refusal: unknown = null;
     await act(async () => {
-      refusal = await useEditorStore
-        .getState()
-        .loadFile(B)
-        .then(
-          () => null,
-          (error: unknown) => error
-        );
+      refusal = await useEditorStore.getState().loadFile(B);
     });
     await release();
 
     expect(writes).toEqual([]);
     expect(disk[A]).toBe(ORDERED[A]);
-    expect(refusal).toEqual(new Error(i18n.t('book.renumberInProgress')));
+    expect(refusal).toEqual(LOCKED);
     expect(useEditorStore.getState().filePath).toBe(A);
     expect(alertMessage()).toBe('book.renumberNoChange');
   });
@@ -397,14 +390,9 @@ describe('bascule partie avant le clic sur Renuméroter', () => {
     void useEditorStore
       .getState()
       .loadFile(B)
-      .then(
-        () => {
-          refusal = null;
-        },
-        (error: unknown) => {
-          refusal = error;
-        }
-      );
+      .then((outcome) => {
+        refusal = outcome;
+      });
 
     await act(async () => {
       fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
@@ -417,7 +405,7 @@ describe('bascule partie avant le clic sur Renuméroter', () => {
       renumbered.release();
     });
 
-    expect(refusal).toEqual(new Error(i18n.t('book.renumberInProgress')));
+    expect(refusal).toEqual(LOCKED);
     expect(useEditorStore.getState().filePath).toBe(A);
     expect(alertMessage()).toBe('book.renumberDone');
     expect(disk[A]).toBe(
@@ -431,7 +419,35 @@ describe('bascule partie avant le clic sur Renuméroter', () => {
 });
 
 describe('document remplacé pendant l’écriture du chapitre ouvert', () => {
-  it('Cmd+N, qui contourne le verrou : la réponse de l’écriture ne remplit pas le nouveau tampon', async () => {
+  it('Cmd+N est refusé : le chapitre reste ouvert, et l’opération aboutit', async () => {
+    await openBook(DISORDERED);
+    const stuck = deferred();
+    let first = true;
+    beforeWrite = async (path) => {
+      if (path === A && first) {
+        first = false;
+        await stuck.promise;
+      }
+    };
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    let refusal: unknown = null;
+    await act(async () => {
+      refusal = await useEditorStore.getState().createNewFile();
+    });
+    await act(async () => {
+      stuck.release();
+    });
+
+    expect(refusal).toEqual(LOCKED);
+    expect(useEditorStore.getState().filePath).toBe(A);
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(disk[A]).toBe('# A\n\nTexte A[^1] suite[^2].\n\n[^1]: une\n\n[^2]: deux\n');
+  });
+
+  it('verrou contourné : la réponse de l’écriture ne remplit pas le nouveau tampon', async () => {
     await openBook(DISORDERED);
     const stuck = deferred();
     let first = true;
@@ -446,7 +462,12 @@ describe('document remplacé pendant l’écriture du chapitre ouvert', () => {
       fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
     });
     await act(async () => {
-      useEditorStore.getState().createNewFile();
+      useEditorStore.setState((s) => ({
+        filePath: null,
+        content: '',
+        isDirty: false,
+        documentVersion: s.documentVersion + 1,
+      }));
     });
     await act(async () => {
       stuck.release();

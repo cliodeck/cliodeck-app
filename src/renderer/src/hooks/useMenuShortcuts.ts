@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDialogStore } from '../stores/dialogStore';
 import { useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { runCitationCheck } from '../services/check-citations';
+import { newDocument } from '../services/new-document';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
@@ -10,8 +12,7 @@ import { runCitationCheck } from '../services/check-citations';
  */
 export function useMenuShortcuts() {
   const { t } = useTranslation('common');
-  const { saveCurrentFile, loadFile, createNewFile, insertFormatting, togglePreview } =
-    useEditorStore();
+  const { saveCurrentFile, loadFile, insertFormatting, togglePreview } = useEditorStore();
   const { createProject, loadProject } = useProjectStore();
 
   useEffect(() => {
@@ -22,7 +23,7 @@ export function useMenuShortcuts() {
     }
     // File operations
     const handleNewFile = () => {
-      createNewFile();
+      void newDocument(t);
     };
 
     const handleOpenFile = async () => {
@@ -32,7 +33,10 @@ export function useMenuShortcuts() {
         });
 
         if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
-          await loadFile(result.filePaths[0]);
+          const outcome = await loadFile(result.filePaths[0]);
+          if (outcome.status === 'locked') {
+            await useDialogStore.getState().showAlert(t(outcome.lock));
+          }
         }
       } catch (error) {
         console.error('Failed to open file:', error);
@@ -51,7 +55,10 @@ export function useMenuShortcuts() {
           });
 
           if (!result.canceled && result.filePath) {
-            await useEditorStore.getState().saveFileAs(result.filePath);
+            const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
+            if (outcome.status === 'locked') {
+              await useDialogStore.getState().showAlert(t(outcome.lock));
+            }
           }
         } catch (error) {
           console.error('Failed to save file:', error);
@@ -199,7 +206,6 @@ export function useMenuShortcuts() {
   }, [
     saveCurrentFile,
     loadFile,
-    createNewFile,
     insertFormatting,
     togglePreview,
     createProject,

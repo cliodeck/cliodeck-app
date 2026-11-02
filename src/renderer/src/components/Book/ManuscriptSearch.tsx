@@ -96,7 +96,9 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
         const facadeBefore = useEditorStore.getState().editorFacade;
         if (switched) {
           // `loadFile` sauvegarde le chapitre sortant avant de charger.
-          await loadFile(target);
+          const opening = await loadFile(target);
+          if (opening.status === 'locked') setError(t(opening.lock));
+          if (opening.status !== 'replaced' && opening.status !== 'unchanged') return;
           setCurrentChapter(chapter.id);
         }
         // La vue CodeMirror n'est reconstruite qu'au commit React suivant :

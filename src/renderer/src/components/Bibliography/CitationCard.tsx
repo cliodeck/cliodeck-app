@@ -101,7 +101,10 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
   const handleOpenReadingNote = async () => {
     try {
       const file = await openReadingNote(citation.id);
-      if (file) await loadFile(file);
+      const outcome = file ? await loadFile(file) : null;
+      if (outcome?.status === 'locked') {
+        await useDialogStore.getState().showAlert(t(outcome.lock));
+      }
     } catch (error) {
       await useDialogStore.getState().showAlert(
         t('bibliography.readingNoteError', { error: error instanceof Error ? error.message : String(error) })

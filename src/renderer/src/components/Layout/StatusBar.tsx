@@ -122,8 +122,9 @@ export const StatusBar: React.FC = () => {
       </div>
 
       <div className="status-bar__section status-bar__section--right">
-        {/* Save state of the current document */}
-        {filePath && (
+        {/* Save state of the current document. Un tampon sans titre modifié compte
+            aussi : son texte n'est nulle part, et rien d'autre ne le dit. */}
+        {(filePath || isDirty) && (
           <span
             className={`status-bar__item ${isDirty ? 'status-bar__item--warning' : ''}`}
             title={
