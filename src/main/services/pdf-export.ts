@@ -8,6 +8,12 @@ import { processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import {
+  withExportTimeLimit,
+  type ExportClock,
+  type ExportLimits,
+  type ExportResult,
+} from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
 import {
   type BeamerConfig,
@@ -508,10 +514,14 @@ export class PDFExportService {
    * simple, sans perte). Pandoc évite lui-même les collisions avec les
    * notes de l'auteur ; l'isolation entre chapitres reste assurée par le
    * préfixage qui suit dans l'assembleur.
+   *
+   * Le repli ci-dessous ne vaut que pour un échec isolé. Après un dépassement,
+   * l'horloge refuse tout nouvel outil et l'export rend `export_timed_out` :
+   * jamais un PDF aux `[@clef]` non résolues, sans rien dire.
    */
   private async resolveCitationsInChapter(
     content: string,
-    opts: { bibliographyPath: string; cslPath?: string; tempDir: string }
+    opts: { bibliographyPath: string; cslPath?: string; tempDir: string; clock: ExportClock }
   ): Promise<string> {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
@@ -530,7 +540,7 @@ export class PDFExportService {
 
     const extendedPath = this.getExtendedPath();
     return new Promise<string>((resolve) => {
-      const proc = spawn('pandoc', args, {
+      const proc = opts.clock.spawn('pandoc', args, {
         cwd: opts.tempDir,
         env: { ...process.env, PATH: extendedPath },
       });
@@ -560,8 +570,17 @@ export class PDFExportService {
    */
   async exportToPDF(
     options: ExportOptions,
-    onProgress?: (progress: PandocProgress) => void
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    onProgress?: (progress: PandocProgress) => void,
+    limits?: ExportLimits
+  ): Promise<ExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runExport(options, onProgress, clock));
+  }
+
+  private async runExport(
+    options: ExportOptions,
+    onProgress: ((progress: PandocProgress) => void) | undefined,
+    clock: ExportClock
+  ): Promise<ExportResult> {
     // Déclaré hors du `try` pour que le `finally` puisse nettoyer même en
     // cas d'échec : un export raté (LaTeX manquant, caractère exotique)
     // laissait sinon le manuscrit complet en clair dans le répertoire
@@ -640,6 +659,7 @@ export class PDFExportService {
                   bibliographyPath: options.bibliographyPath!,
                   cslPath: options.cslPath,
                   tempDir,
+                  clock,
                 })
             : undefined,
         });
@@ -762,12 +782,16 @@ export class PDFExportService {
 
       const extendedPath = this.getExtendedPath();
 
-      await new Promise<void>((resolve, reject) => {
+      await clock.run(new Promise<void>((resolve, reject) => {
         console.log('📄 Running pandoc:', 'pandoc', pandocArgs.join(' '));
 
-        const pandoc = spawn('pandoc', pandocArgs, {
+        // TMPDIR : pandoc compile dans son propre dossier temporaire, avec la
+        // copie LaTeX du manuscrit, et ne le retire pas quand on le tue (mesuré
+        // sous macOS ; TMP et TEMP pour Windows, non mesuré). Placé ici, il part
+        // avec le nôtre.
+        const pandoc = clock.spawn('pandoc', pandocArgs, {
           cwd: tempDir,
-          env: { ...process.env, PATH: extendedPath },
+          env: { ...process.env, PATH: extendedPath, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir },
         });
 
         let stderr = '';
@@ -793,7 +817,7 @@ export class PDFExportService {
         pandoc.on('error', (err) => {
           reject(new Error(`Failed to start pandoc: ${err.message}`));
         });
-      });
+      }));
 
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 

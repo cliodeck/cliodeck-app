@@ -27,6 +27,12 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import {
+  withExportTimeLimit,
+  type ExportClock,
+  type ExportLimits,
+  type ExportResult,
+} from './export-time-limit.js';
 import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
@@ -120,10 +126,7 @@ export function splitIntoChapters(markdown: string): string[] {
 }
 
 /** Résultat d'un export Word. */
-export interface WordExportResult {
-  success: boolean;
-  outputPath?: string;
-  error?: string;
+export interface WordExportResult extends ExportResult {
   /**
    * Clés de citation restées sans référence. L'export aboutit quand même —
    * mais le document contient ces clés telles quelles, et le dire est la
@@ -184,7 +187,8 @@ export class WordExportService {
   private async exportWithPandoc(
     options: WordExportOptions,
     outputPath: string,
-    onProgress?: (progress: WordExportProgress) => void
+    onProgress: ((progress: WordExportProgress) => void) | undefined,
+    clock: ExportClock
   ): Promise<WordExportResult> {
     const tempDir = join(tmpdir(), `cliodeck-word-export-${Date.now()}`);
     await mkdir(tempDir, { recursive: true });
@@ -298,10 +302,10 @@ export class WordExportService {
       const extendedPath = this.getExtendedPath();
 
       // Run pandoc
-      const pandocStderr = await new Promise<string>((resolve, reject) => {
+      const pandocStderr = await clock.run(new Promise<string>((resolve, reject) => {
         console.log('📄 Running pandoc:', 'pandoc', pandocArgs.join(' '));
 
-        const pandoc = spawn('pandoc', pandocArgs, {
+        const pandoc = clock.spawn('pandoc', pandocArgs, {
           cwd: tempDir,
           env: { ...process.env, PATH: extendedPath },
         });
@@ -324,7 +328,7 @@ export class WordExportService {
         pandoc.on('error', (err) => {
           reject(new Error(`Failed to start pandoc: ${err.message}`));
         });
-      });
+      }));
 
       onProgress?.({
         stage: 'complete',
@@ -357,7 +361,16 @@ export class WordExportService {
    */
   async exportToWord(
     options: WordExportOptions,
-    onProgress?: (progress: WordExportProgress) => void
+    onProgress?: (progress: WordExportProgress) => void,
+    limits?: ExportLimits
+  ): Promise<WordExportResult> {
+    return withExportTimeLimit(limits, (clock) => this.runExport(options, onProgress, clock));
+  }
+
+  private async runExport(
+    options: WordExportOptions,
+    onProgress: ((progress: WordExportProgress) => void) | undefined,
+    clock: ExportClock
   ): Promise<WordExportResult> {
     try {
       onProgress?.({
@@ -433,7 +446,7 @@ export class WordExportService {
 
       if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
-        return await this.exportWithPandoc(options, outputPath, onProgress);
+        return await this.exportWithPandoc(options, outputPath, onProgress, clock);
       }
 
       if (hasBibliography && !hasPandoc) {
@@ -753,6 +766,7 @@ export class WordExportService {
         finalBuffer = await Packer.toBuffer(doc);
       }
 
+      clock.throwIfExpired();
       await writeFile(outputPath, finalBuffer);
 
       onProgress?.({

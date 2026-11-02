@@ -10,6 +10,7 @@
  * toujours. Ne JAMAIS utiliser ces gardes pour masquer un échec qui n'est
  * pas environnemental.
  */
+import { execFileSync } from 'child_process';
 import Database from 'better-sqlite3';
 
 /** Message à coller en commentaire au point d'usage, pour un skip lisible. */
@@ -39,6 +40,16 @@ export async function ollamaAvailable(
       signal: AbortSignal.timeout(500),
     });
     return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Vrai si un vrai pandoc répond : à utiliser avec `describe.skipIf(!pandocAvailable())`. */
+export function pandocAvailable(): boolean {
+  try {
+    execFileSync('pandoc', ['--version'], { stdio: 'ignore' });
+    return true;
   } catch {
     return false;
   }
