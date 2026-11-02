@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle, WifiOff, FileType, Lightbulb } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import './PresentationExportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import { backdropClose } from '../../utils/backdropClose';
 interface PresentationExportModalProps {
   isOpen: boolean;
@@ -27,16 +28,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // La minuterie de succès appelle le `onClose` du parent : démontée, la
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
-  useEffect(
-    () => () => {
-      if (successTimer.current) clearTimeout(successTimer.current);
-    },
-    []
-  );
+  const afterSuccess = useMountedTimeout();
 
   // Initialize with project data
   useEffect(() => {
@@ -135,7 +129,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
 
       if (result.success) {
         setSuccess(true);
-        successTimer.current = setTimeout(() => {
+        afterSuccess(() => {
           onClose();
           // Reset state
           setIsExporting(false);

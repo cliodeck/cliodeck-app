@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
@@ -6,6 +6,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import {
   ExportCitationSection,
   loadDefaultCitationValue,
@@ -34,7 +35,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // La minuterie de succès appelle le `onClose` du parent : démontée, la
+  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
+  const afterSuccess = useMountedTimeout();
   const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
@@ -43,15 +46,6 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     style: 'chicago-note-bibliography',
     locale: 'fr-FR',
   });
-
-  // La minuterie de succès appelle le `onClose` du parent : démontée, la
-  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
-  useEffect(
-    () => () => {
-      if (successTimer.current) clearTimeout(successTimer.current);
-    },
-    []
-  );
 
   // Initialize with project data
   useEffect(() => {
@@ -237,7 +231,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
-        successTimer.current = setTimeout(() => {
+        afterSuccess(() => {
           onClose();
           // Reset state
           setIsExporting(false);

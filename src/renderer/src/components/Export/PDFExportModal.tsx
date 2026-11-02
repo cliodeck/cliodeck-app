@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle, Clapperboard, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
@@ -13,6 +13,7 @@ import {
 import './PDFExportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useMountedTimeout } from '../../hooks/useMountedTimeout';
 import { backdropClose } from '../../utils/backdropClose';
 interface PDFExportModalProps {
   isOpen: boolean;
@@ -35,7 +36,9 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const [progress, setProgress] = useState({ stage: '', message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // La minuterie de succès appelle le `onClose` du parent : démontée, la
+  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
+  const afterSuccess = useMountedTimeout();
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
@@ -44,15 +47,6 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     style: 'chicago-note-bibliography',
     locale: 'fr-FR',
   });
-
-  // La minuterie de succès appelle le `onClose` du parent : démontée, la
-  // modale ne doit plus fermer ce qui serait ouvert entre-temps.
-  useEffect(
-    () => () => {
-      if (successTimer.current) clearTimeout(successTimer.current);
-    },
-    []
-  );
 
   // Check dependencies on mount
   useEffect(() => {
@@ -263,7 +257,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
 
       if (result.success) {
         setSuccess(true);
-        successTimer.current = setTimeout(() => {
+        afterSuccess(() => {
           onClose();
           // Reset state
           setIsExporting(false);

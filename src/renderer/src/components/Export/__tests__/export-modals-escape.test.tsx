@@ -8,7 +8,7 @@
  */
 import React, { useState } from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../../stores/projectStore', () => ({
   useProjectStore: () => ({
@@ -167,6 +167,22 @@ describe.each(MODALS)('modale d’export $name', ({ Modal, exportLabel, exportin
     await waitFor(() => expect(container.querySelector('.export-success')).not.toBeNull());
     unmount();
     vi.advanceTimersByTime(10_000);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('démontée en plein export, sa minuterie n’est jamais armée', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    const onClose = vi.fn();
+    const { unmount } = render(<Modal isOpen onClose={onClose} />);
+    await startExport(exportLabel, exportingLabel);
+
+    unmount();
+    await act(async () => {
+      finish({ success: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
 
     expect(onClose).not.toHaveBeenCalled();
   });
