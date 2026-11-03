@@ -34,6 +34,7 @@ import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
 import { setupApplicationMenu } from './menu.js';
 import { loadMenuTranslations, setLanguage } from './i18n.js';
+import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
 
 // Obtenir __dirname en ES modules
@@ -92,6 +93,8 @@ function createWindow() {
       mainWindow.webContents.openDevTools();
     }
   }
+
+  guardWindowClose(mainWindow);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -180,51 +183,14 @@ app.on('window-all-closed', () => {
   }
 });
 
-/**
- * Demande au renderer de vider l'éditeur sur le disque avant la sortie.
- *
- * `before-quit` arrêtait proprement le topic modeling mais ne touchait pas
- * à l'éditeur, et aucun `beforeunload` n'existait côté renderer : `Cmd+Q`
- * dans les trois secondes suivant une frappe perdait le texte, et sans
- * autosave la perte n'était pas bornée. Même classe de perte que la
- * bascule de projet (#37), à la sortie plutôt qu'au changement.
- *
- * Borné dans le temps : un renderer bloqué ne doit jamais empêcher de
- * quitter. Mieux vaut perdre la sauvegarde que la fenêtre ne se ferme pas.
- */
-async function flushRendererBeforeQuit(timeoutMs = 4000): Promise<void> {
-  const win = mainWindow;
-  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
-
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    const finish = (why: string): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      ipcMain.removeListener('app:flush-done', onDone);
-      console.log(`💾 [Quit] flush éditeur : ${why}`);
-      resolve();
-    };
-    const onDone = (): void => finish('terminé');
-    const timer = setTimeout(() => finish('délai dépassé'), timeoutMs);
-
-    ipcMain.once('app:flush-done', onDone);
-    try {
-      win.webContents.send('app:flush-before-quit');
-    } catch {
-      finish('renderer injoignable');
-    }
-  });
-}
-
 // Arrêter proprement le service Topic Modeling lors de la fermeture de l'app
 app.on('before-quit', async (event) => {
   // Empêcher la fermeture immédiate pour permettre un arrêt propre
   event.preventDefault();
 
-  // D'abord le travail de l'utilisateur, ensuite les services.
-  await flushRendererBeforeQuit();
+  // D'abord le travail de l'utilisateur, ensuite les services. L'auteur qui préfère rester
+  // garde tout : la sortie a été annulée plus haut, et les services tournent encore.
+  if (!(await mayLeaveRenderer(mainWindow))) return;
 
   try {
     // Importer et arrêter le service s'il est en cours d'exécution

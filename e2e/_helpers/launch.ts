@@ -84,6 +84,48 @@ export async function launchApp(options: { language?: string } = {}): Promise<La
 
   const window = await app.firstWindow({ timeout: 30_000 });
   await window.waitForLoadState('domcontentloaded');
+  await stubLeaveDialog(app);
 
   return { kind: 'ok', value: { app, window, userDataDir } };
+}
+
+/** Ce que le dialogue natif de sortie a demandé à l'auteur. */
+export interface LeaveDialogSeen {
+  message: string;
+  buttons: string[];
+}
+
+interface LeaveDialogStub {
+  __leaveDialogs: LeaveDialogSeen[];
+  __leaveAnswer: number;
+}
+
+/**
+ * Un tampon sans titre non vide, ou une écriture refusée, pose une question native à
+ * la fermeture. Personne n'y répondrait : `app.close()` resterait bloqué, et la suite
+ * avec lui, y compris quand un test échoue en plein milieu. Le dialogue répond donc
+ * « Quitter sans enregistrer » par défaut ; `answerLeaveDialog` change la réponse et
+ * `leaveDialogs` dit ce qui a été demandé.
+ */
+async function stubLeaveDialog(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ dialog }) => {
+    const stub = globalThis as unknown as LeaveDialogStub;
+    stub.__leaveDialogs = [];
+    stub.__leaveAnswer = 1;
+    (dialog as unknown as { showMessageBox: unknown }).showMessageBox = async (...args: unknown[]) => {
+      const { message, buttons } = args[args.length - 1] as LeaveDialogSeen;
+      stub.__leaveDialogs.push({ message, buttons });
+      return { response: stub.__leaveAnswer, checkboxChecked: false };
+    };
+  });
+}
+
+export function answerLeaveDialog(app: ElectronApplication, answer: 'stay' | 'leave'): Promise<void> {
+  return app.evaluate((_electron, response) => {
+    (globalThis as unknown as LeaveDialogStub).__leaveAnswer = response;
+  }, answer === 'stay' ? 0 : 1);
+}
+
+export function leaveDialogs(app: ElectronApplication): Promise<LeaveDialogSeen[]> {
+  return app.evaluate(() => (globalThis as unknown as LeaveDialogStub).__leaveDialogs);
 }

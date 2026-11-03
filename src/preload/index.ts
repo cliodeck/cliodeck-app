@@ -704,8 +704,8 @@ const api = {
         ipcRenderer.removeListener('app:flush-before-quit', listener);
       };
     },
-    /** Accusé : le renderer a fini d'écrire, la sortie peut se poursuivre. */
-    flushDone: () => ipcRenderer.send('app:flush-done'),
+    /** Accusé : le renderer a fini d'écrire. Le rapport dit si le texte est à l'abri. */
+    flushDone: (report: { outcome: string; error?: string }) => ipcRenderer.send('app:flush-done', report),
   },
 
   /**

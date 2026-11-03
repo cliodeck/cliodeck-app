@@ -1,0 +1,127 @@
+/**
+ * Le filet de sortie : le renderer écrit le document avant que l'éditeur soit détruit.
+ *
+ * `before-quit` arrêtait proprement le topic modeling mais ne touchait pas à l'éditeur, et
+ * aucun `beforeunload` n'existait côté renderer : `Cmd+Q` dans les trois secondes suivant
+ * une frappe perdait le texte, et sans autosave la perte n'était pas bornée. Même classe de
+ * perte que la bascule de projet (#37). La croix, `Cmd+W` et `Cmd+R` détruisent l'éditeur
+ * de la même façon : tous passent ici.
+ *
+ * Borné dans le temps : un renderer bloqué ne doit jamais empêcher de quitter. Mieux vaut
+ * perdre la sauvegarde que la fenêtre ne se ferme pas.
+ */
+import { dialog, ipcMain, type BrowserWindow } from 'electron';
+import type { FlushReport } from '../../backend/types/flush-report.js';
+import { t } from './i18n.js';
+
+export type { FlushReport };
+
+const FLUSH_TIMEOUT_MS = 4000;
+/** L'ordre des boutons du dialogue : `Rester` est aussi la réponse d'Échap et d'Entrée. */
+const STAY_BUTTON = 0;
+
+// Une seule fenêtre principale à la fois. Une croix et `Cmd+Q` coup sur coup sont deux
+// gestes pour une seule question : ni deux écritures, ni deux dialogues.
+let flushInFlight: Promise<FlushReport> | null = null;
+let decisionInFlight: Promise<boolean> | null = null;
+
+function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promise<FlushReport> {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isCrashed()) {
+    return Promise.resolve({ outcome: 'no-window' });
+  }
+  const contents = win.webContents;
+
+  return new Promise((resolve) => {
+    const finish = (report: FlushReport): void => {
+      clearTimeout(timer);
+      ipcMain.removeListener('app:flush-done', onDone);
+      resolve(report);
+    };
+    const onDone = (_event: unknown, report: FlushReport): void => finish(report);
+    const timer = setTimeout(() => finish({ outcome: 'timeout' }), timeoutMs);
+
+    ipcMain.once('app:flush-done', onDone);
+    try {
+      contents.send('app:flush-before-quit');
+    } catch {
+      finish({ outcome: 'no-window' });
+    }
+  });
+}
+
+/** Demande au renderer d'écrire le document ouvert, et rend ce qu'il en est advenu. */
+export function flushRenderer(
+  win: BrowserWindow | null,
+  timeoutMs: number = FLUSH_TIMEOUT_MS
+): Promise<FlushReport> {
+  flushInFlight ??= askRendererToFlush(win, timeoutMs).finally(() => {
+    flushInFlight = null;
+  });
+  return flushInFlight;
+}
+
+async function decideToLeave(win: BrowserWindow | null, timeoutMs: number): Promise<boolean> {
+  const report = await flushRenderer(win, timeoutMs);
+  console.log(`💾 [Quit] flush éditeur : ${report.outcome}${report.error ? ` (${report.error})` : ''}`);
+
+  // Sans réponse, personne à qui demander : on part. Seul un texte qu'on sait perdu retient.
+  if (report.outcome !== 'failed' && report.outcome !== 'untitled') return true;
+  if (!win || win.isDestroyed()) return true;
+
+  try {
+    // Sous macOS, le dialogue est une feuille de la fenêtre : réduite ou masquée, elle ne
+    // se verrait pas, et la sortie semblerait bloquée.
+    if (win.isMinimized()) win.restore();
+    win.show();
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      message: t(report.outcome === 'untitled' ? 'unsavedUntitledMessage' : 'unsavedSaveFailedMessage'),
+      buttons: [t('unsavedStay'), t('unsavedLeave')],
+      defaultId: STAY_BUTTON,
+      cancelId: STAY_BUTTON,
+      noLink: true,
+    });
+    return response !== STAY_BUTTON;
+  } catch (error) {
+    console.warn('⚠️ [Quit] dialogue de sortie impossible :', error);
+    return true;
+  }
+}
+
+/**
+ * Écrit le document, et rend vrai si le renderer peut être détruit. Un tampon sans titre
+ * non vide, ou une écriture ratée, le demandent à l'auteur : rend faux s'il préfère rester.
+ */
+export function mayLeaveRenderer(
+  win: BrowserWindow | null,
+  timeoutMs: number = FLUSH_TIMEOUT_MS
+): Promise<boolean> {
+  decisionInFlight ??= decideToLeave(win, timeoutMs).finally(() => {
+    decisionInFlight = null;
+  });
+  return decisionInFlight;
+}
+
+/**
+ * La fenêtre n'attend pas `before-quit` pour se fermer : sous Windows et Linux, la croix
+ * met `mainWindow` à nul avant lui, et sous macOS, elle ne quitte pas du tout. La fermeture
+ * attend donc le filet, puis repart une seule fois. Le passage est propre à cette fenêtre :
+ * celle que le Dock recrée sous macOS repose la question.
+ */
+export function guardWindowClose(win: BrowserWindow): void {
+  let cleared = false;
+  let deciding = false;
+
+  win.on('close', (event) => {
+    if (cleared) return;
+    event.preventDefault();
+    if (deciding) return;
+    deciding = true;
+    void mayLeaveRenderer(win).then((leave) => {
+      deciding = false;
+      if (!leave || win.isDestroyed()) return;
+      cleared = true;
+      win.close();
+    });
+  });
+}

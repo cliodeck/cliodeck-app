@@ -46,5 +46,11 @@
   "close": "Close",
   "about": "About ClioDeck",
   "documentation": "Documentation",
-  "reportIssue": "Report an issue"
+  "reportIssue": "Report an issue",
+  "reload": "Reload",
+  "forceReload": "Force Reload",
+  "unsavedStay": "Stay",
+  "unsavedLeave": "Quit without saving",
+  "unsavedUntitledMessage": "This untitled document is not saved anywhere. If you quit now, its text will be lost.",
+  "unsavedSaveFailedMessage": "The document could not be saved. If you quit now, your latest changes will be lost."
 }
