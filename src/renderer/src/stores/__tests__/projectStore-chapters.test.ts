@@ -189,6 +189,22 @@ describe('reorderChapters', () => {
     expect(calls.saveChapters[0].chapters.map((c) => c.id)).toEqual(['b', 'a']);
   });
 
+  it('un chapitre manquant le reste après réorganisation : il ne redevient pas ouvrable', async () => {
+    const missing = { ...CHAPTER_B, missing: true, outsideProject: true };
+    installProjectIpc({ chapters: [CHAPTER_A, missing] });
+    useProjectStore.setState({ chapters: [CHAPTER_A, missing] });
+
+    // Le navigateur retire `missing` de ce qu'il envoie au manifeste.
+    const { missing: _missing, ...sent } = missing;
+    await useProjectStore.getState().reorderChapters([sent, CHAPTER_A]);
+
+    expect(useProjectStore.getState().chapters[0]).toMatchObject({
+      id: 'b',
+      missing: true,
+      outsideProject: true,
+    });
+  });
+
   it('revient à la vérité disque si l’écriture échoue', async () => {
     installProjectIpc({ chapters: [CHAPTER_A, CHAPTER_B], failSave: true });
     useProjectStore.setState({ chapters: [CHAPTER_A, CHAPTER_B] });

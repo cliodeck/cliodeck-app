@@ -2000,6 +2000,7 @@
     "removeChapterError": "Kapitel konnte nicht entfernt werden",
     "reorderError": "Kapitel konnten nicht neu geordnet werden",
     "chapterMissing": "Datei nicht gefunden: {{path}}",
+    "chapterOutsideProject": "Dieses Kapitel ist eine Verknüpfung, die aus dem Projekt hinausführt: Es wird weder gelesen noch indexiert noch exportiert. Um es wiederherzustellen, ersetzen Sie die Verknüpfung {{path}} durch die Datei selbst und öffnen Sie das Projekt erneut.",
     "unattachedTitle_one": "{{count}} nicht zugeordnete Datei",
     "unattachedTitle_other": "{{count}} nicht zugeordnete Dateien",
     "unattachedHint": "Im Projekt gefunden, aber nicht im Manuskript enthalten.",

@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 import path from 'path';
 import type { Chapter, BookSettings } from '../../../backend/types/book.js';
+import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { prefixFootnoteLabels } from '../../editor/footnote-tools.js';
 
 /**
@@ -63,7 +64,8 @@ function isInsideProject(projectDir: string, relPath: string): boolean {
   if (path.isAbsolute(relPath)) return false;
   const resolved = path.resolve(projectDir, relPath);
   const rel = path.relative(projectDir, resolved);
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  // `isInside` après le contrôle lexical : un lien qui sort du projet n'est pas exporté.
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) && isInside(projectDir, resolved);
 }
 
 /**

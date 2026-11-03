@@ -38,6 +38,13 @@ place chaque pièce à l'export.
 
 - un fichier référencé mais absent du disque est marqué `missing` — **jamais
   retiré silencieusement** ;
+- un lien symbolique qui sort du projet (lui-même, ou par `chapters/`) est marqué
+  `missing` et `outsideProject` : un projet reçu par git ou en zip garde ses
+  liens, et ce fichier n'est ni lu, ni indexé, ni exporté. Sa ligne reste au
+  manifeste, et un fichier réel rétabli à cet endroit rend le chapitre. Un lien qui
+  reste dans le projet continue de marcher. La comparaison se fait sur les chemins
+  réels des deux côtés (`isInside`, `file-identity.ts`) : une racine de projet qui
+  passe par un lien ne rend rien manquant ;
 - un `.md` trouvé dans le projet mais absent du manifeste remonte comme
   **non rattaché** (`UnattachedFile`), avec une suggestion de titre ;
 - `abstract.md`, `context.md` et `document.md` ne comptent pas comme

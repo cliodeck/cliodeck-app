@@ -46,8 +46,13 @@ export interface Chapter {
  * elle est signalée, à charge pour l'interface de proposer la réparation.
  */
 export interface ResolvedChapter extends Chapter {
-  /** Le fichier référencé est introuvable sur le disque. */
+  /** Le fichier référencé est introuvable sur le disque, ou hors d'atteinte (voir ci-dessous). */
   missing?: boolean;
+  /**
+   * Le fichier est un lien qui sort du projet : ni lu ni indexé (décision Q16). `missing` est
+   * posé aussi, seul ce qui se dit à l'auteur change. Jamais écrit dans le manifeste.
+   */
+  outsideProject?: boolean;
 }
 
 /**

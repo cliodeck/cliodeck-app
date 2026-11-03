@@ -609,7 +609,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!currentProject) throw new Error('Aucun projet ouvert');
     // Optimiste : l'ordre local suit immédiatement le glisser-déposer, le
     // disque confirme ensuite (l'ordre stocké est renormalisé côté main).
-    set({ chapters: newChapters.map((c, index) => ({ ...c, order: index })) });
+    // Le manifeste ne porte pas les marques de réconciliation (`missing`…) : on
+    // les garde ici, sans quoi un chapitre manquant redeviendrait ouvrable.
+    const known = new Map(get().chapters.map((c) => [c.id, c]));
+    set({ chapters: newChapters.map((c, index) => ({ ...known.get(c.id), ...c, order: index })) });
     const result = await window.electron.project.saveChapters({
       projectPath: currentProject.path,
       chapters: newChapters.map(({ ...chapter }) => chapter),
