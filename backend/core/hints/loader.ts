@@ -23,11 +23,16 @@
  *
  * Les outils MCP externes NE DOIVENT PAS recevoir ce contexte sans opt-in
  * explicite : il peut contenir des jugements historiographiques privés.
+ *
+ * Un lien qui sort du projet n'est ni lu ni réécrit (décision Q16) : un projet
+ * reçu garde ses liens, et ce fichier partirait dans un message `system` à
+ * chaque tour, sans que l'auteur ait rien demandé.
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import { workspaceFiles } from '../workspace/layout.js';
+import { isInsideAsync } from '../vector-store/file-identity.js';
 import type { ChatMessage } from '../llm/providers/base.js';
 
 /** Nom du fichier de contexte, à la racine du projet. */
@@ -96,13 +101,21 @@ export function extractContextContent(raw: string): string {
   return trimmed;
 }
 
-async function readSource(sourcePath: string): Promise<ContextSource> {
-  let raw = '';
+/** Le texte de ce fichier du projet ; `null` s'il est absent, illisible ou lié dehors. */
+async function readInsideProject(workspaceRoot: string, sourcePath: string): Promise<string | null> {
   try {
-    raw = await fs.readFile(sourcePath, 'utf8');
+    if (!(await isInsideAsync(workspaceRoot, sourcePath))) {
+      console.warn(`[hints] ${sourcePath} est un lien qui sort du projet : il n'est pas lu.`);
+      return null;
+    }
+    return await fs.readFile(sourcePath, 'utf8');
   } catch {
-    return { sourcePath, content: '', present: false };
+    return null;
   }
+}
+
+function toSource(sourcePath: string, raw: string | null): ContextSource {
+  if (raw === null) return { sourcePath, content: '', present: false };
   const content = extractContextContent(raw);
   return { sourcePath, content, present: content.length > 0 };
 }
@@ -117,23 +130,18 @@ export async function loadWorkspaceHints(
   const contextPath = path.join(workspaceRoot, CONTEXT_FILE);
   const hintsPath = workspaceFiles(workspaceRoot).hints;
 
-  const [context, legacyHints] = await Promise.all([
-    readSource(contextPath),
-    readSource(hintsPath),
+  const [contextRaw, hintsRaw] = await Promise.all([
+    readInsideProject(workspaceRoot, contextPath),
+    readInsideProject(workspaceRoot, hintsPath),
   ]);
-
-  let raw = '';
-  try {
-    raw = await fs.readFile(contextPath, 'utf8');
-  } catch {
-    raw = '';
-  }
+  const context = toSource(contextPath, contextRaw);
+  const legacyHints = toSource(hintsPath, hintsRaw);
 
   const parts = [context.content, legacyHints.content].filter(Boolean);
   const normalized = parts.join('\n\n');
 
   return {
-    raw,
+    raw: contextRaw ?? '',
     normalized,
     sourcePath: contextPath,
     present: normalized.length > 0,
@@ -146,7 +154,12 @@ export async function writeWorkspaceHints(
   workspaceRoot: string,
   markdown: string
 ): Promise<void> {
-  await fs.writeFile(path.join(workspaceRoot, CONTEXT_FILE), markdown, 'utf8');
+  const contextPath = path.join(workspaceRoot, CONTEXT_FILE);
+  // `writeFile` suit les liens, y compris un lien cassé : le fichier s'écrirait dehors.
+  if (!(await isInsideAsync(workspaceRoot, contextPath))) {
+    throw new Error(`${CONTEXT_FILE} est un lien qui sort du projet : il n'a pas été réécrit.`);
+  }
+  await fs.writeFile(contextPath, markdown, 'utf8');
 }
 
 const HEADER = 'Contexte du projet, fourni par l’auteur';

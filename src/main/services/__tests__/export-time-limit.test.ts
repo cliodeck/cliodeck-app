@@ -25,11 +25,12 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pandocAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
+import { pandocAvailable, symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { DEFAULT_BOOK_SETTINGS } from '../../../../backend/types/book.js';
 
 /** Fenêtre et réseau d'une présentation : ce que le test décide de faire pendre. */
@@ -54,20 +55,39 @@ const presentation = vi.hoisted(() => ({
   deadPath: null as string | null,
   statBarrier: Promise.resolve(),
   statHeld: false,
-  /** Un stat synchrone sous ce dossier gèlerait le main sur un montage mort, et l'horloge avec. */
+  /** Un appel synchrone sous ce dossier gèlerait le main sur un montage mort, et l'horloge avec. */
   syncStatRoot: null as string | null,
   syncStats: [] as string[],
 }));
 
 vi.mock('fs', async (importOriginal) => {
   const real = await importOriginal<typeof import('fs')>();
-  const existsSync = (path: Parameters<typeof real.existsSync>[0]) => {
-    if (presentation.syncStatRoot && String(path).startsWith(presentation.syncStatRoot)) {
-      presentation.syncStats.push(String(path));
+  const note = (path: string): void => {
+    if (presentation.syncStatRoot && path.startsWith(presentation.syncStatRoot)) {
+      presentation.syncStats.push(path);
     }
+  };
+  const existsSync = (path: Parameters<typeof real.existsSync>[0]) => {
+    note(String(path));
     return real.existsSync(path);
   };
-  return { ...real, existsSync };
+  // Résoudre un chemin touche le disque autant qu'un stat : `isInside` ne tient donc pas ici.
+  const realpathNative = (path: string) => {
+    note(path);
+    return real.realpathSync.native(path);
+  };
+  const realpathSync = Object.assign(
+    (path: string) => {
+      note(path);
+      return real.realpathSync(path);
+    },
+    { native: realpathNative }
+  );
+  const readlinkSync = (path: string) => {
+    note(path);
+    return real.readlinkSync(path);
+  };
+  return { ...real, existsSync, realpathSync, readlinkSync };
 });
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -591,6 +611,40 @@ describe.skipIf(process.platform === 'win32' || !pandocAvailable())('export PDF 
   );
 });
 
+/** Le résumé part en métadonnée : ce que pandoc reçoit en arguments dit s'il a été lu. */
+describe.skipIf(process.platform === 'win32' || !symlinkAvailable)('export PDF : abstract.md en lien symbolique', () => {
+  const SECRET = 'SECRET-HORS-PROJET';
+
+  async function pandocArguments(): Promise<string> {
+    tool('pandoc', [`printf "%s\n" "$@" > "${root}/arguments"`, 'printf "%s" "%PDF-faux" > "$3"'].join('\n'));
+    const result = await pdfExportService.exportToPDF(pdfOptions(), undefined, LIMIT);
+    expect(result).toMatchObject({ success: true });
+    return readFileSync(join(root, 'arguments'), 'utf8');
+  }
+
+  it(
+    'lié hors du projet : il n’entre pas dans le PDF, qui s’exporte quand même',
+    async () => {
+      writeFileSync(join(root, 'journal.md'), `# Journal\n\n${SECRET}\n`);
+      symlinkSync(join(root, 'journal.md'), join(project, 'abstract.md'));
+
+      expect(await pandocArguments()).not.toContain(SECRET);
+    },
+    TEST_MS
+  );
+
+  it(
+    'lié dans le projet : il y reste',
+    async () => {
+      writeFileSync(join(project, 'brouillon-resume.md'), '# Résumé\n\nUn résumé relié.\n');
+      symlinkSync('brouillon-resume.md', join(project, 'abstract.md'));
+
+      expect(await pandocArguments()).toContain('Un résumé relié.');
+    },
+    TEST_MS
+  );
+});
+
 describe.skipIf(process.platform === 'win32')('export Word', () => {
   it(
     'un pandoc qui pend : export_timed_out, processus morts, dossier supprimé, sortie intacte',
@@ -721,7 +775,7 @@ describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', (
   }
 
   it(
-    'PDF d’un livre, bibliographie par chapitre : aucun stat synchrone sur les fichiers du projet',
+    'PDF d’un livre, bibliographie par chapitre : aucun appel synchrone sur les fichiers du projet',
     async () => {
       tool('pandoc', pandocForBook('cat "$1"'));
       const { cslPath } = optionalFiles();

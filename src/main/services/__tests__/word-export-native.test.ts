@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import PizZip from 'pizzip';
@@ -10,6 +10,7 @@ import {
 } from '../word-export';
 import { bibliographyService } from '../bibliography-service';
 import { CitationEngine, defaultCSLResourcesRoot } from '../../../../backend/core/citation/CitationEngine';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -28,10 +29,15 @@ const plain = (xml: string): string => xml.replace(/<[^>]+>/g, '');
 
 async function exportNative(
   content: string,
-  extra: { abstract?: string; citation?: { useEngine: boolean; style?: string; locale?: string } } = {}
+  extra: {
+    abstract?: string;
+    citation?: { useEngine: boolean; style?: string; locale?: string };
+    prepare?: (projectPath: string) => void;
+  } = {}
 ): Promise<{ document: string; footnotes: string; rels: string; unresolved?: string[] }> {
   const projectPath = mkdtempSync(join(dir, 'projet-'));
   if (extra.abstract) writeFileSync(join(projectPath, 'abstract.md'), extra.abstract);
+  extra.prepare?.(projectPath);
   const service = new WordExportService();
   vi.spyOn(
     service as unknown as { checkPandoc: () => Promise<boolean> },
@@ -108,6 +114,28 @@ describe('générateur docx interne : markdown en ligne', () => {
     expect(text).toContain('Un résumé soigné.');
     expect(text).not.toContain('#');
     expect(text).not.toContain('Résumé');
+  });
+
+  describe.skipIf(!symlinkAvailable)('abstract.md en lien symbolique (décision Q16)', () => {
+    it('lié hors du projet : il n’entre pas dans le document, qui s’exporte quand même', async () => {
+      const outside = join(dir, 'journal-prive.md');
+      writeFileSync(outside, '# Journal\n\nSECRET-HORS-PROJET\n');
+      const { document } = await exportNative('Corps.\n', {
+        prepare: (projectPath) => symlinkSync(outside, join(projectPath, 'abstract.md')),
+      });
+      expect(plain(document)).toContain('Corps.');
+      expect(plain(document)).not.toContain('SECRET-HORS-PROJET');
+    });
+
+    it('lié dans le projet : il reste imprimé', async () => {
+      const { document } = await exportNative('Corps.\n', {
+        prepare: (projectPath) => {
+          writeFileSync(join(projectPath, 'brouillon-resume.md'), '# Résumé\n\nUn résumé relié.\n');
+          symlinkSync('brouillon-resume.md', join(projectPath, 'abstract.md'));
+        },
+      });
+      expect(plain(document)).toContain('Un résumé relié.');
+    });
   });
 });
 

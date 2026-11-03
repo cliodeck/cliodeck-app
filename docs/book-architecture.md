@@ -44,7 +44,8 @@ place chaque pièce à l'export.
   manifeste, et un fichier réel rétabli à cet endroit rend le chapitre. Un lien qui
   reste dans le projet continue de marcher. La comparaison se fait sur les chemins
   réels des deux côtés (`isInside`, `file-identity.ts`) : une racine de projet qui
-  passe par un lien ne rend rien manquant ;
+  passe par un lien ne rend rien manquant. `abstract.md`, `context.md`,
+  `.cliodeck/hints.md` et le document d'une recette d'export suivent la même règle ;
 - un `.md` trouvé dans le projet mais absent du manifeste remonte comme
   **non rattaché** (`UnattachedFile`), avec une suggestion de titre ;
 - `abstract.md`, `context.md` et `document.md` ne comptent pas comme

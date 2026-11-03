@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'os';
 import path from 'path';
 import { symlinkAvailable } from '../../../__tests__/helpers/native-guards';
-import { fileIdentity, groupByFile, isInside, mayBeSameFile, sameFile } from '../file-identity';
+import { fileIdentity, groupByFile, isInside, isInsideAsync, mayBeSameFile, sameFile } from '../file-identity';
 
 /** Disque insensible à la casse : un seul fichier, enregistré sous cette casse-là. */
 const ON_DISK = '/projet/PDFs/Hughes‐Warrington_-_2025_-_ETHICS_FOR_ARTIFICIAL_HISTORIANS.pdf';
@@ -264,6 +264,55 @@ describe.skipIf(!symlinkAvailable)('sur un vrai disque, avec de vrais liens', ()
     if (!existsSync(nfc)) return; // ce système distingue les deux formes
     expect(isInside(nfc, path.join(nfd, '01.md'))).toBe(true);
     expect(isInside(nfd, path.join(nfc, '01.md'))).toBe(true);
+  });
+
+  it('la cible relative d’un lien cassé se lit depuis son dossier réel, comme le fera une écriture', () => {
+    // Par `lib/ch`, le lien se présente sous `lib/` : lexicalement, `../y.md` resterait dedans.
+    // Sur le disque il vit à la racine du projet, et mène dehors.
+    mkdirSync(path.join(projet, 'lib'));
+    symlinkSync('..', path.join(projet, 'lib', 'ch'));
+    symlinkSync('../y.md', path.join(projet, 'x.md'));
+
+    expect(isInside(projet, path.join(projet, 'lib', 'ch', 'x.md'))).toBe(false);
+  });
+
+  it('isInsideAsync rend le même verdict qu’isInside, cas par cas', async () => {
+    const chapters = path.join(projet, 'chapters');
+    mkdirSync(path.join(projet, 'lib'));
+    symlinkSync(projet, path.join(work, 'alias'));
+    symlinkSync(path.join(dehors, 'secret.md'), path.join(chapters, 'sortant.md'));
+    symlinkSync('01.md', path.join(chapters, 'interne.md'));
+    symlinkSync(path.join(dehors, 'absent.md'), path.join(chapters, 'casse-dehors.md'));
+    symlinkSync('a-venir.md', path.join(chapters, 'casse-dedans.md'));
+    symlinkSync('sortant.md', path.join(chapters, 'chaine.md'));
+    symlinkSync('boucle-b.md', path.join(chapters, 'boucle-a.md'));
+    symlinkSync('boucle-a.md', path.join(chapters, 'boucle-b.md'));
+    symlinkSync(dehors, path.join(projet, 'dossier-dehors'));
+    symlinkSync('..', path.join(projet, 'lib', 'ch'));
+    symlinkSync('../y.md', path.join(projet, 'x.md'));
+
+    const verdicts: Array<[string, string, boolean]> = [
+      [projet, path.join(chapters, '01.md'), true],
+      [path.join(work, 'alias'), path.join(chapters, '01.md'), true],
+      [projet, path.join(work, 'alias', 'chapters', '01.md'), true],
+      [projet, path.join(chapters, 'a-venir.md'), true],
+      [projet, path.join(chapters, 'sortant.md'), false],
+      [projet, path.join(chapters, 'interne.md'), true],
+      [projet, path.join(chapters, 'casse-dehors.md'), false],
+      [projet, path.join(chapters, 'casse-dedans.md'), true],
+      [projet, path.join(chapters, 'chaine.md'), false],
+      [projet, path.join(chapters, 'boucle-a.md'), false],
+      [projet, path.join(projet, 'dossier-dehors', 'secret.md'), false],
+      [projet, path.join(projet, 'dossier-dehors', 'absent.md'), false],
+      [projet, path.join(projet, 'lib', 'ch', 'x.md'), false],
+      [projet, path.join(dehors, 'secret.md'), false],
+      [projet, projet, false],
+    ];
+    for (const [root, candidate, expected] of verdicts) {
+      expect([candidate, isInside(root, candidate)]).toEqual([candidate, expected]);
+      expect([candidate, await isInsideAsync(root, candidate)]).toEqual([candidate, expected]);
+    }
+    expect(await isInsideAsync(projet, projet, { allowRoot: true })).toBe(true);
   });
 
   it('sameFile suit les liens, y compris vers un fichier encore absent', () => {

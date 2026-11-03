@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, mkdir, symlink, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 
 /**
  * Step `export` d'une recette dans un projet « livre ».
@@ -85,5 +86,92 @@ describe('recette : step export dans un livre', () => {
     expect(exportCalls[0].projectType).toBe('article');
     expect(exportCalls[0].content).toContain('Sans manifeste');
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Décision Q16 : un fichier lié hors du projet n'est pas lu. La branche « livre entier »
+ * passe par la garde de l'assembleur ; un document nommé, ou le `document.md` d'un
+ * article, était lu tel quel.
+ */
+describe.skipIf(!symlinkAvailable)('recette : un document en lien symbolique', () => {
+  const SECRET = 'SECRET-HORS-PROJET';
+  let outside: string;
+  const projects: string[] = [];
+
+  async function project(type: 'article' | 'book', withChapters: boolean): Promise<string> {
+    const dir = await makeProject(type, withChapters);
+    projects.push(dir);
+    return dir;
+  }
+
+  async function linkOut(dir: string, relPath: string): Promise<void> {
+    await rm(join(dir, relPath));
+    await symlink(join(outside, 'journal.md'), join(dir, relPath));
+  }
+
+  beforeEach(async () => {
+    exportCalls.length = 0;
+    outside = await mkdtemp(join(tmpdir(), 'cliodeck-recipe-dehors-'));
+    await writeFile(join(outside, 'journal.md'), `# Journal\n\n${SECRET} : texte privé.\n`);
+  });
+
+  afterEach(async () => {
+    await rm(outside, { recursive: true, force: true });
+    for (const dir of projects.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('un chapitre nommé par document_id : refusé, rien ne part à l’export', async () => {
+    const dir = await project('book', true);
+    await linkOut(dir, 'chapters/02.md');
+
+    await expect(runStep(dir, { document_id: 'chapters/02.md' })).rejects.toThrow(/leaves the workspace/);
+    expect(exportCalls).toHaveLength(0);
+  });
+
+  it('le document.md d’un article : refusé aussi', async () => {
+    const dir = await project('article', false);
+    await linkOut(dir, 'document.md');
+
+    await expect(runStep(dir, {})).rejects.toThrow(/leaves the workspace/);
+    expect(exportCalls).toHaveLength(0);
+  });
+
+  it('un lien cassé vers l’extérieur : refusé pour ce qu’il est, pas comme un fichier illisible', async () => {
+    const dir = await project('article', false);
+    await rm(join(dir, 'document.md'));
+    await symlink(join(outside, 'pas-encore.md'), join(dir, 'document.md'));
+
+    await expect(runStep(dir, {})).rejects.toThrow(/leaves the workspace/);
+  });
+
+  it('le livre entier ne lit pas document.md : un tel lien ne l’empêche pas de s’exporter', async () => {
+    const dir = await project('book', true);
+    await linkOut(dir, 'document.md');
+
+    await runStep(dir, {});
+
+    expect(exportCalls[0].content).toContain('Texte un.');
+    expect(exportCalls[0].content).not.toContain(SECRET);
+  });
+
+  it('un lien qui reste dans le projet s’exporte', async () => {
+    const dir = await project('book', true);
+    await symlink('01.md', join(dir, 'chapters', 'copie.md'));
+
+    await runStep(dir, { document_id: 'chapters/copie.md' });
+
+    expect(exportCalls[0].content).toContain('Texte un.');
+  });
+
+  it('une racine passée par un lien ne fait rien refuser à tort', async () => {
+    const dir = await project('article', false);
+    const alias = `${dir}-alias`;
+    await symlink(dir, alias);
+    projects.push(alias);
+
+    await runStep(alias, {});
+
+    expect(exportCalls[0].content).toContain('Fichier unique.');
   });
 });

@@ -30,7 +30,10 @@ passé quelques chapitres, on ne garde plus tout en tête.
 **Un lien qui sort du projet n'entre pas dans le corpus.** Chapitre, `document.md` ou
 `slides.md` : un projet reçu garde ses liens, et le fichier visé partirait vers le
 fournisseur d'embeddings puis dans les prompts. Déjà indexé, il sort de `manuscript_*`
-à la passe suivante, même s'il était la seule pièce du projet.
+dès l'ouverture du projet (`purgeOutside`, sans fournisseur ni envoi), puis à chaque
+passe, même s'il était la seule pièce du projet. Un chapitre simplement absent garde ses
+extraits quand plus aucune pièce n'est lisible : un dossier déplacé ou un changement de
+branche ne doivent pas faire tout réembarquer à leur retour.
 
 **Le disque fait foi, l'indexation se déclenche après sauvegarde.**
 L'alternative — lire l'éditeur vivant — ferait dépendre l'index d'un état

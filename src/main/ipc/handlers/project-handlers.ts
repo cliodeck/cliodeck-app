@@ -11,6 +11,7 @@ import { tropyService } from '../../services/tropy-service.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { usageJournalService } from '../../services/usage-journal-service.js';
 import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
+import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -127,6 +128,11 @@ export function setupProjectHandlers() {
 
           // Une note éditée hors de ClioDeck (Obsidian) entre deux sessions.
           indexReadingNotesInBackground('ouverture du projet');
+
+          // Un chapitre indexé puis devenu lien sortant : ses extraits partent avant la
+          // première question, sans attendre une sauvegarde.
+          manuscriptIndexService.configure(projectPath);
+          manuscriptIndexService.purgeOutside();
 
           console.log('✅ All services initialized successfully');
         }

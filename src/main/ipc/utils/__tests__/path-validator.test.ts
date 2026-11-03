@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import os from 'os';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'fs/promises';
+import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
 
 // Mock electron.app so validateReadPath does not try to load the real runtime.
 vi.mock('electron', () => ({
@@ -118,7 +119,7 @@ describe('validateWritePath', () => {
  * Un lien cassé n'a pas de chemin réel : le repli sur le dossier parent le croyait dans
  * le projet, et `atomicWriteFile`, qui suit les liens, créait le fichier à l'autre bout.
  */
-describe('lien symbolique cassé', () => {
+describe.skipIf(!symlinkAvailable)('lien symbolique cassé', () => {
   it('vers l’extérieur : ni lecture ni écriture', async () => {
     const link = path.join(projectDir, 'casse-dehors.md');
     await symlink(path.join(tmpRoot, 'dehors', 'pas-encore.md'), link);

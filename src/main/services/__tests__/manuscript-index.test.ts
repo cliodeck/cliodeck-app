@@ -414,6 +414,124 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
       }
     });
 
+    it('témoin : un livre dont tous les chapitres manquent garde son index', async () => {
+      // `chapters/` déplacé, changement de branche : au retour du dossier, rien à réembarquer.
+      writeProject(tmp, CHAPTERS);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      expect(tables().chapters).toBe(2);
+
+      fs.renameSync(path.join(tmp, 'chapters'), path.join(tmp, 'chapters-ailleurs'));
+      const absent = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(absent.removed).toBe(0);
+      expect(tables().chapters).toBe(2);
+
+      fs.renameSync(path.join(tmp, 'chapters-ailleurs'), path.join(tmp, 'chapters'));
+      const embedder = fakeEmbedder();
+      const back = await manuscriptIndexService.index(embedder);
+
+      expect(back).toMatchObject({ indexed: 0, unchanged: 2, removed: 0 });
+      expect(embedder.calls).toBe(0);
+    });
+
+    it('tous les chapitres manquent et l’un sort du projet : lui seul quitte l’index', async () => {
+      writeProject(tmp, CHAPTERS);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+
+      fs.rmSync(path.join(tmp, 'chapters', '01.md'));
+      linkOut('02.md');
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.removed).toBe(1);
+      expect(tables().chapters).toBe(1);
+      expect(tables().text).toContain('Danzig');
+    });
+
+    /**
+     * À l'ouverture du projet : la passe n'arrive qu'à la première sauvegarde, et une
+     * question posée avant enverrait l'extrait au modèle.
+     */
+    describe('purgeOutside', () => {
+      it('retire le chapitre devenu lien sortant, sans fournisseur ni passe', async () => {
+        writeProject(tmp, [CHAPTERS[0], { file: '02.md', title: 'Annexe', body: `# Annexe\n\n${SECRET} : texte privé.\n` }]);
+        manuscriptIndexService.configure(tmp);
+        await manuscriptIndexService.index(fakeEmbedder());
+        expect(tables().text).toContain(SECRET);
+        linkOut('02.md');
+
+        expect(manuscriptIndexService.purgeOutside()).toBe(1);
+
+        const after = tables();
+        expect(after.chapters).toBe(1);
+        expect(after.text).not.toContain(SECRET);
+        expect(after.text).toContain('Danzig');
+        expect(after.fts).toBe(after.chunks);
+      });
+
+      it('le seul chapitre du livre : retiré aussi', async () => {
+        writeProject(tmp, [{ file: '01.md', title: 'Seul', body: `# Seul\n\n${SECRET} : texte privé.\n` }]);
+        manuscriptIndexService.configure(tmp);
+        await manuscriptIndexService.index(fakeEmbedder());
+        linkOut('01.md');
+
+        expect(manuscriptIndexService.purgeOutside()).toBe(1);
+        expect(tables()).toMatchObject({ chapters: 0, chunks: 0, fts: 0 });
+      });
+
+      it('témoin : ne touche ni à un chapitre momentanément absent, ni à un lien interne', async () => {
+        writeProject(tmp, CHAPTERS);
+        manuscriptIndexService.configure(tmp);
+        await manuscriptIndexService.index(fakeEmbedder());
+        fs.rmSync(path.join(tmp, 'chapters', '01.md'));
+        fs.rmSync(path.join(tmp, 'chapters', '02.md'));
+        fs.writeFileSync(path.join(tmp, 'relie.md'), '# Relié\n');
+        fs.symlinkSync(path.join('..', 'relie.md'), path.join(tmp, 'chapters', '02.md'));
+
+        expect(manuscriptIndexService.purgeOutside()).toBe(0);
+        expect(tables().chapters).toBe(2);
+      });
+
+      it('témoin : un projet ouvert par un chemin en lien ne perd rien', async () => {
+        writeProject(tmp, CHAPTERS);
+        manuscriptIndexService.configure(tmp);
+        await manuscriptIndexService.index(fakeEmbedder());
+        manuscriptIndexService.clear();
+
+        const alias = `${tmp}-alias`;
+        fs.symlinkSync(tmp, alias);
+        try {
+          manuscriptIndexService.configure(alias);
+          expect(manuscriptIndexService.purgeOutside()).toBe(0);
+          expect(tables().chapters).toBe(2);
+        } finally {
+          manuscriptIndexService.clear();
+          fs.rmSync(alias, { force: true });
+        }
+      });
+
+      it('ne garde pas la base ouverte pour autant, sauf si elle l’était déjà', async () => {
+        writeProject(tmp, CHAPTERS);
+        manuscriptIndexService.configure(tmp);
+        await manuscriptIndexService.index(fakeEmbedder());
+        expect(manuscriptIndexService.stats()).not.toBeNull();
+
+        manuscriptIndexService.purgeOutside();
+        expect(manuscriptIndexService.stats()).not.toBeNull();
+
+        manuscriptIndexService.clear();
+        manuscriptIndexService.configure(tmp);
+        manuscriptIndexService.purgeOutside();
+        expect(manuscriptIndexService.stats()).toBeNull();
+      });
+
+      it('sans projet rattaché : rien à faire, rien ne jette', () => {
+        manuscriptIndexService.clear();
+        expect(manuscriptIndexService.purgeOutside()).toBe(0);
+      });
+    });
+
     it('témoin : un article sans document garde l’index qu’il a, comme avant', async () => {
       const documentMd = path.join(tmp, 'document.md');
       fs.writeFileSync(documentMd, '# Article\n\nDu texte.\n');

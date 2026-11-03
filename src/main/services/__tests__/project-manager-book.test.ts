@@ -506,6 +506,8 @@ describe.skipIf(!symlinkAvailable)('chapitre en lien symbolique', () => {
   it('`chapters` lié hors du projet : tout le dossier est manquant, rien n’est lu', async () => {
     await rm(path.join(projectDir, 'chapters'), { recursive: true });
     await symlink(outside, path.join(projectDir, 'chapters'));
+    // Un fichier que le manifeste ne cite pas : son nom non plus ne doit pas remonter.
+    await writeFile(path.join(outside, 'autre.md'), `# ${SECRET}\n`);
     await book([{ id: '1', title: 'Journal', filePath: 'chapters/journal.md' }]);
 
     const { chapters, unattached } = await manager.getChapters(projectDir);
@@ -533,7 +535,8 @@ describe.skipIf(!symlinkAvailable)('chapitre en lien symbolique', () => {
   it('la ligne survit à une réorganisation, à un renommage voisin et aux réglages', async () => {
     await book(MANIFEST);
     const { chapters } = await manager.getChapters(projectDir);
-    // Ce que le renderer renvoie : le manifeste sans les marques de réconciliation.
+    // Ce qui arrive ici après `ChapterSchema`, qui retire les marques de réconciliation
+    // (validation.test.ts) : le renderer, lui, renvoie `outsideProject` tel quel.
     const plain = chapters.map(({ missing: _m, outsideProject: _o, ...c }) => c);
 
     const reordered = await manager.saveChapters({ projectPath: projectDir, chapters: [plain[1], plain[0]] });

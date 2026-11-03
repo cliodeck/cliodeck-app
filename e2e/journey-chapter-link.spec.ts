@@ -9,9 +9,12 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { launchApp } from './_helpers/launch';
 
 const SECRET = 'SECRET-HORS-PROJET';
@@ -39,6 +42,8 @@ function makeLinkedBook(): LinkedBook {
   // Sortant, puis interne.
   symlinkSync(join(outside, 'journal.md'), join(real, 'chapters', '02-annexe.md'));
   symlinkSync('03-relie.md', join(real, 'chapters', '04-copie.md'));
+  // Le contexte part en message `system` à chaque tour : le même lien, en plus court.
+  symlinkSync(join(outside, 'journal.md'), join(real, 'context.md'));
   writeFileSync(
     join(real, 'project.json'),
     JSON.stringify({
@@ -56,6 +61,53 @@ function makeLinkedBook(): LinkedBook {
   );
   symlinkSync(real, alias);
   return { base, real, alias, outside };
+}
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Par le Node d'Electron : better-sqlite3 est compilé pour lui, pas pour Playwright. */
+function runInElectronNode(script: string, ...args: string[]): string {
+  const electronPath = createRequire(import.meta.url)('electron') as string;
+  return execFileSync(electronPath, ['-e', script, ...args], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    encoding: 'utf8',
+  });
+}
+
+/** L'index d'avant ce correctif : le texte du lien y est entré quand il était encore lu. */
+function seedManuscriptIndex(projectDir: string): void {
+  const moduleUrl = pathToFileURL(join(REPO_ROOT, 'dist/backend/core/vector-store/ManuscriptStore.js')).href;
+  const script = `
+    const [dbPath, modulePath, secret] = process.argv.slice(1);
+    import(modulePath).then(({ ManuscriptStore }) => {
+      const store = new ManuscriptStore({ dbPath });
+      const rows = [['chapters/01-un.md', 'Texte du premier chapitre.'], ['chapters/02-annexe.md', secret]];
+      rows.forEach(([relativePath, content], order) => {
+        const id = 'chapitre-' + order;
+        store.upsertChapter({ id, relativePath, title: relativePath, order, contentHash: 'x', indexedAt: new Date().toISOString() });
+        store.addChunk({ id: id + '-0', chapterId: id, chunkIndex: 0, content, sectionTitle: null, line: 1 }, new Float32Array(8).fill(0.5));
+      });
+      store.close();
+    });
+  `;
+  runInElectronNode(script, join(projectDir, '.cliodeck', 'brain.db'), moduleUrl, SECRET);
+}
+
+/** Les tables elles-mêmes, en lecture seule : l'app les tient ouvertes pendant ce temps. */
+function manuscriptIndex(projectDir: string): { chapters: string[]; chunks: string[]; fts: string[] } {
+  const script = `
+    const Database = require('better-sqlite3');
+    const db = new Database(process.argv[1], { readonly: true });
+    const column = (sql) => db.prepare(sql).pluck().all();
+    process.stdout.write(JSON.stringify({
+      chapters: column('SELECT relative_path FROM manuscript_chapters ORDER BY relative_path'),
+      chunks: column('SELECT content FROM manuscript_chunks'),
+      fts: column('SELECT content FROM manuscript_chunks_fts'),
+    }));
+    db.close();
+  `;
+  return JSON.parse(runInElectronNode(script, join(projectDir, '.cliodeck', 'brain.db')));
 }
 
 async function openProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
@@ -130,6 +182,13 @@ test('projet ouvert par un lien : rien de manquant à tort, et le chapitre sorta
     expect(reached.fsRead).toBeNull();
     expect(JSON.stringify(reached)).not.toContain(SECRET);
 
+    // Le contexte du projet en lien sortant : ni pour le modèle, ni pour l'interface.
+    const hints = await window.evaluate(() =>
+      (window as unknown as { electron: { fusion: { hints: { read: () => Promise<unknown> } } } }).electron.fusion.hints.read(),
+    );
+    expect(hints).toMatchObject({ success: true, hints: { present: false, raw: '' } });
+    expect(JSON.stringify(hints)).not.toContain(SECRET);
+
     // Réorganiser garde la ligne du manifeste, et le chapitre reste fermé.
     const row = window.locator('li.chapter-item', { hasText: 'Annexe' });
     await row.hover();
@@ -170,6 +229,34 @@ test('un fichier réel rétabli à la place du lien rend son chapitre à la réo
     await expect(chapterButton(window, 'Annexe')).toBeEnabled({ timeout: 20_000 });
     await chapterButton(window, 'Annexe').click();
     await expect(editor(window)).toContainText('Le texte rapatrié');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(book.base, { recursive: true, force: true });
+  }
+});
+
+test('un chapitre déjà indexé par le lien sort de l’index dès l’ouverture, sans sauvegarde', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeLinkedBook();
+  seedManuscriptIndex(book.real);
+  expect(manuscriptIndex(book.real).chunks).toContain(SECRET);
+
+  try {
+    await openProject(app, window, join(book.alias, 'project.json'));
+    await expect(editor(window)).toContainText('Texte du premier chapitre', { timeout: 20_000 });
+
+    // Le projet s'ouvre par un lien : le chapitre ordinaire ne part pas à tort.
+    await expect.poll(() => manuscriptIndex(book.real)).toEqual({
+      chapters: ['chapters/01-un.md'],
+      chunks: ['Texte du premier chapitre.'],
+      fts: ['Texte du premier chapitre.'],
+    });
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

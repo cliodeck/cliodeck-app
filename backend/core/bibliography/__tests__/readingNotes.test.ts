@@ -322,6 +322,17 @@ describe('lecture d’une note pour l’indexer', () => {
       expect(file).toBe(path.join(notesDir(), 'Braudel_1949-2.md'));
     });
 
+    it('un lien sortant vers un fichier au front matter cassé n’empêche pas de créer la note', async () => {
+      // Lu, ce fichier ferait répondre « en-tête illisible » pour un fichier qui n'est pas du projet.
+      writeFileSync(path.join(outside, 'casse.md'), '---\ntitle: [non fermé\n---\n');
+      symlinkSync(path.join(outside, 'casse.md'), path.join(notesDir(), 'Braudel_1949.md'));
+
+      const file = await ensureReadingNote(project, braudel);
+
+      expect(file).toBe(path.join(notesDir(), 'Braudel_1949-2.md'));
+      expect(readFileSync(path.join(outside, 'casse.md'), 'utf-8')).toBe('---\ntitle: [non fermé\n---\n');
+    });
+
     it('`reading-notes` lié hors du projet : rien n’est lu, rien ne s’écrit dehors, et le refus se dit', async () => {
       rmSync(notesDir(), { recursive: true, force: true });
       symlinkSync(outside, notesDir());

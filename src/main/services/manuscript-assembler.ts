@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import path from 'path';
 import type { Chapter, BookSettings } from '../../../backend/types/book.js';
-import { isInside } from '../../../backend/core/vector-store/file-identity.js';
+import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import { prefixFootnoteLabels } from '../../editor/footnote-tools.js';
 
 /**
@@ -64,8 +64,7 @@ function isInsideProject(projectDir: string, relPath: string): boolean {
   if (path.isAbsolute(relPath)) return false;
   const resolved = path.resolve(projectDir, relPath);
   const rel = path.relative(projectDir, resolved);
-  // `isInside` après le contrôle lexical : un lien qui sort du projet n'est pas exporté.
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) && isInside(projectDir, resolved);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /**
@@ -137,7 +136,13 @@ export async function assembleManuscript(
   let backOpened = false;
 
   for (const chapter of ordered) {
-    if (!isInsideProject(projectPath, chapter.filePath)) {
+    // Un lien qui sort du projet n'est pas exporté, même ouvert dans l'éditeur. Asynchrone :
+    // l'assemblage tourne sous la limite de durée de l'export, qu'un appel synchrone sur un
+    // montage mort gèlerait.
+    if (
+      !isInsideProject(projectPath, chapter.filePath) ||
+      !(await isInsideAsync(projectPath, path.resolve(projectPath, chapter.filePath)))
+    ) {
       warnings.push(`Chapitre ignoré (chemin hors projet) : ${chapter.filePath}`);
       continue;
     }

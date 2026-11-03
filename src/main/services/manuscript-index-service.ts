@@ -200,22 +200,15 @@ class ManuscriptIndexService {
    * Énumère les pièces du manuscrit : les chapitres du manifeste pour un
    * livre, `document.md` sinon. Les pièces absentes du disque sont
    * ignorées — `getChapters` les signale déjà comme `missing` —, tout comme
-   * un lien qui sort du projet (décision Q16). `excluded` dit qu'une pièce a
-   * été écartée : même sans aucune pièce restante, la passe doit alors purger.
+   * un lien qui sort du projet (décision Q16).
    */
-  private async listPieces(
-    workspaceRoot: string
-  ): Promise<{ pieces: ManuscriptPiece[]; excluded: boolean }> {
+  private async listPieces(workspaceRoot: string): Promise<ManuscriptPiece[]> {
     const res = await projectManager.getChapters(workspaceRoot);
     const pieces: ManuscriptPiece[] = [];
-    let excluded = false;
 
     if (res.success && res.chapters.length > 0) {
       for (const chapter of res.chapters) {
-        if (chapter.missing) {
-          excluded = true;
-          continue;
-        }
+        if (chapter.missing) continue;
         pieces.push({
           relativePath: chapter.filePath,
           absolutePath: path.join(workspaceRoot, chapter.filePath),
@@ -223,16 +216,13 @@ class ManuscriptIndexService {
           order: chapter.order,
         });
       }
-      return { pieces, excluded };
+      return pieces;
     }
 
     // Article / présentation : un document unique.
     for (const candidate of ['document.md', 'slides.md']) {
       const absolutePath = path.join(workspaceRoot, candidate);
-      if (!isInside(workspaceRoot, absolutePath)) {
-        excluded = true;
-        continue;
-      }
+      if (!isInside(workspaceRoot, absolutePath)) continue;
       try {
         await fs.access(absolutePath);
         pieces.push({
@@ -246,7 +236,41 @@ class ManuscriptIndexService {
         // pièce absente : on essaie la suivante
       }
     }
-    return { pieces, excluded };
+    return pieces;
+  }
+
+  /** Retire de l'index ce qui sort aujourd'hui du projet par un lien (décision Q16). */
+  private removeOutside(store: ManuscriptStore, workspaceRoot: string): number {
+    let removed = 0;
+    for (const known of store.listChapters()) {
+      if (!isInside(workspaceRoot, path.resolve(workspaceRoot, known.relativePath))) {
+        store.deleteChapter(known.id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * La même purge, à l'ouverture du projet : une passe n'arrive qu'à la première
+   * sauvegarde, et une question posée avant enverrait l'extrait au modèle. Sans
+   * fournisseur d'embeddings ni aucun envoi, et que le corpus soit activé ou non : la
+   * recherche lit ce qui est dans la table. Best-effort : ne jette jamais.
+   */
+  purgeOutside(): number {
+    const workspaceRoot = this.workspaceRoot;
+    if (!workspaceRoot) return 0;
+    const wasOpen = this.store !== null;
+    try {
+      const store = this.getStore();
+      return store ? this.removeOutside(store, workspaceRoot) : 0;
+    } catch (e) {
+      console.warn('[manuscript-index] purge des liens sortants ignorée :', e);
+      return 0;
+    } finally {
+      // Ouvert pour l'occasion : ce handle ne doit pas garder `brain.db` verrouillé.
+      if (!wasOpen) this.detachStore();
+    }
   }
 
   /**
@@ -293,9 +317,8 @@ class ManuscriptIndexService {
     }
 
     let pieces: ManuscriptPiece[];
-    let excluded: boolean;
     try {
-      ({ pieces, excluded } = await this.listPieces(workspaceRoot));
+      pieces = await this.listPieces(workspaceRoot);
     } catch (e) {
       report.failures.push({
         relativePath: '(manifeste)',
@@ -304,7 +327,11 @@ class ManuscriptIndexService {
       report.durationMs = Date.now() - started;
       return report;
     }
-    if (pieces.length === 0 && !excluded) {
+    if (pieces.length === 0) {
+      // Plus rien à lire : l'index reste, un dossier déplacé ou un changement de branche ne
+      // doivent pas faire tout réembarquer à leur retour. Sauf ce qui sort du projet.
+      const store = this.getStore();
+      if (store) report.removed = this.removeOutside(store, workspaceRoot);
       report.durationMs = Date.now() - started;
       return report;
     }
