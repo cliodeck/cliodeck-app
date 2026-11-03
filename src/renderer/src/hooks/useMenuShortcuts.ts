@@ -5,6 +5,7 @@ import { openErrorKey, useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { runCitationCheck } from '../services/check-citations';
 import { newDocument } from '../services/new-document';
+import i18n from '../i18n';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
@@ -45,14 +46,14 @@ export function useMenuShortcuts() {
     };
 
     const handleSaveFile = async () => {
-      const { filePath, bufferDetached } = useEditorStore.getState();
+      const { filePath, bufferDetached, documentVersion, lastSavedAt } = useEditorStore.getState();
 
       // Hors de tout document, le temps d'un changement de projet : rien à enregistrer.
       if (bufferDetached) return;
 
-      // If no file path exists, open "Save As" dialog
-      if (!filePath) {
-        try {
+      try {
+        // If no file path exists, open "Save As" dialog
+        if (!filePath) {
           // Aucun nom proposé : le main place le dialogue dans le dernier dossier, souvent
           // celui du projet, et « document.md » y désignerait le manuscrit à remplacer.
           // L'option d'invite de remplacement n'a d'effet documenté que sous Linux.
@@ -67,12 +68,21 @@ export function useMenuShortcuts() {
               await useDialogStore.getState().showAlert(t(outcome.lock));
             }
           }
-        } catch (error) {
-          console.error('Failed to save file:', error);
+        } else {
+          // File path exists, save directly
+          await saveCurrentFile();
         }
-      } else {
-        // File path exists, save directly
-        saveCurrentFile();
+      } catch (error) {
+        console.error('Failed to save file:', error);
+        // Comme pour l'autosave : un document remplacé pendant l'écriture n'est plus à
+        // l'écran, et une autre écriture a pu tout mettre sur le disque entre-temps. Un
+        // document propre au départ reste signalé : son fichier n'est peut-être plus là.
+        const now = useEditorStore.getState();
+        const overtaken =
+          now.documentVersion !== documentVersion || (now.lastSavedAt !== lastSavedAt && !now.isDirty);
+        // `i18n.t`, pas `t` : un écouteur de menu qui n'a pas été retiré garde le `t` du premier
+        // rendu, en français, et c'est lui qui répond le premier.
+        if (!overtaken) await useDialogStore.getState().showAlert(i18n.t('toolbar.saveError'));
       }
     };
 

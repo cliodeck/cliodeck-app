@@ -637,3 +637,169 @@ test('document absent : le gabarit se crée, s’ouvre, et reçoit la frappe', a
     rmSync(projet.dir, { recursive: true, force: true });
   }
 });
+
+// Les accélérateurs natifs ne passent pas par Playwright : le menu est simulé par
+// `webContents.send`, ce que fait le main à la réception du raccourci.
+const sendMenu = (app: ElectronApplication, channel: string) =>
+  app.evaluate(({ BrowserWindow }, c) => {
+    BrowserWindow.getAllWindows()[0].webContents.send(c);
+  }, channel);
+
+/** Les rejets non gérés de la page : c'est là que finissait un enregistrement raté, sans un mot. */
+async function watchRejections(window: Page): Promise<() => Promise<string[]>> {
+  await window.evaluate(() => {
+    const page = window as unknown as { __rejections: string[] };
+    page.__rejections = [];
+    window.addEventListener('unhandledrejection', (event) => {
+      page.__rejections.push(String(event.reason));
+    });
+  });
+  return () => window.evaluate(() => (window as unknown as { __rejections: string[] }).__rejections);
+}
+
+const SAVE_ERROR = 'Erreur lors de la sauvegarde du fichier';
+const alertMessage = (window: Page) => window.locator('.alert-dialog-message');
+
+/** Ferme les alertes à l'écran : les écouteurs de menu n'étant jamais retirés, une commande en ouvre deux. */
+async function closeAlerts(window: Page): Promise<void> {
+  const ok = window.locator('.alert-dialog-btn-ok');
+  await expect
+    .poll(async () => {
+      if (await ok.count()) await ok.click();
+      return ok.count();
+    })
+    .toBe(0);
+}
+
+async function stubSaveDialog(app: ElectronApplication, target: string): Promise<void> {
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+  }, target);
+}
+
+/** Un tampon sans titre, hors du projet, avec du texte qui n'existe nulle part ailleurs. */
+async function untitledBuffer(app: ElectronApplication, window: Page, text: string): Promise<void> {
+  await sendMenu(app, 'menu:new-file');
+  await window.locator('.confirm-dialog .confirm-dialog-btn-confirm').click();
+  await expect(editorOf(window)).not.toContainText('Texte déjà écrit');
+  await typeAtEnd(window, text);
+}
+
+test('Cmd+S sur un fichier non inscriptible : l’auteur le sait, le texte reste, et le second essai l’écrit', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    const rejections = await watchRejections(window);
+
+    chmodSync(projet.documentMd, 0o444);
+    await typeAtEnd(window, 'Une phrase.');
+    await sendMenu(app, 'menu:save-file');
+
+    await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlerts(window);
+    expect(await rejections()).toEqual([]);
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
+    await expect(editorOf(window)).toContainText('Une phrase.');
+
+    chmodSync(projet.documentMd, 0o644);
+    await sendMenu(app, 'menu:save-file');
+
+    await expect
+      .poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 15_000 })
+      .toBe(`${ORIGINAL}Une phrase.`);
+    // Le message de l'autosave, s'il a eu le temps de partir, n'a plus d'objet.
+    await expect(window.locator('.status-toast--error')).toHaveCount(0);
+  } finally {
+    chmodSync(projet.documentMd, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+for (const door of ['bouton', 'menu'] as const) {
+  test(`Enregistrer sous (${door}) vers un dossier refusé : l’auteur le sait, le tampon garde son texte, et le second essai l’écrit`, async () => {
+    const outcome = await launchApp();
+    if (outcome.kind === 'skip') {
+      test.skip(true, outcome.reason);
+      return;
+    }
+    const { app, window, userDataDir } = outcome.value;
+    const projet = makeProject();
+    const dehors = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-dehors-'));
+    const note = join(dehors, 'note.md');
+    const save = () =>
+      door === 'bouton'
+        ? window.locator('.toolbar-btn[title="Enregistrer"]').first().click()
+        : sendMenu(app, 'menu:save-file');
+
+    try {
+      await openProject(app, window, projet.projectJson);
+      await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+      const rejections = await watchRejections(window);
+      await untitledBuffer(app, window, 'Une idée à part.');
+      await stubSaveDialog(app, note);
+
+      chmodSync(dehors, 0o555);
+      await save();
+
+      await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+      await closeAlerts(window);
+      expect(await rejections()).toEqual([]);
+      expect(existsSync(note)).toBe(false);
+      await expect(editorOf(window)).toContainText('Une idée à part.');
+
+      chmodSync(dehors, 0o755);
+      await save();
+
+      await expect.poll(() => existsSync(note), { timeout: 15_000 }).toBe(true);
+      expect(readFileSync(note, 'utf8')).toBe('Une idée à part.');
+      expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
+    } finally {
+      chmodSync(dehors, 0o755);
+      await app.close();
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(projet.dir, { recursive: true, force: true });
+      rmSync(dehors, { recursive: true, force: true });
+    }
+  });
+}
+
+// L'écouteur jamais retiré garde le `t` du premier rendu, en français : il répond le premier.
+for (const [language, saveLabel, message] of [
+  ['en', 'Save', 'Error saving file'],
+  ['de', 'Speichern', 'Fehler beim Speichern der Datei'],
+] as const) {
+  test(`Cmd+S en échec, interface en ${language} : le message est dans la langue de l’auteur`, async () => {
+    const outcome = await launchApp({ language });
+    if (outcome.kind === 'skip') {
+      test.skip(true, outcome.reason);
+      return;
+    }
+    const { app, window, userDataDir } = outcome.value;
+    const dehors = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-dehors-'));
+
+    try {
+      await expect(window.locator(`.toolbar-btn[title="${saveLabel}"]`).first()).toBeVisible({ timeout: 20_000 });
+      await stubSaveDialog(app, join(dehors, 'note.md'));
+      chmodSync(dehors, 0o555);
+
+      await sendMenu(app, 'menu:save-file');
+
+      await expect(alertMessage(window).first()).toHaveText(message, { timeout: 10_000 });
+    } finally {
+      chmodSync(dehors, 0o755);
+      await app.close();
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(dehors, { recursive: true, force: true });
+    }
+  });
+}

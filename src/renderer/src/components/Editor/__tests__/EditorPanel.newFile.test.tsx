@@ -290,6 +290,77 @@ describe('Enregistrer un tampon sans titre', () => {
     expect(saveDialog.mock.calls[0][0]).not.toHaveProperty('defaultPath');
     expect(saveDialog.mock.calls[0][0].properties).toContain('showOverwriteConfirmation');
   });
+
+  // Le premier enregistrement d'un tampon sans titre : l'autosave n'y peut rien, et un
+  // rejet dans le `catch` du bouton laissait l'auteur sans le moindre message.
+  describe('quand l’écriture échoue', () => {
+    let rejections: unknown[];
+    const onRejection = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+
+    async function untitledWith(text: string): Promise<void> {
+      await mount('article', DOCUMENT);
+      await clickNewFile();
+      await answerConfirm(true);
+      await typeInEditor(text);
+    }
+
+    const clickSave = () =>
+      act(async () => {
+        fireEvent.click(screen.getByTitle('toolbar.save'));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+    beforeEach(() => {
+      rejections = [];
+      process.on('unhandledRejection', onRejection);
+    });
+
+    afterEach(() => {
+      process.off('unhandledRejection', onRejection);
+    });
+
+    it('destination refusée : le message, et le texte reste dans le tampon', async () => {
+      await untitledWith('Une page.');
+      beforeWrite = () => ({ success: false, error: 'EACCES: permission denied' });
+
+      await clickSave();
+
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+      expect(disk['/ailleurs/note.md']).toBeUndefined();
+      expect(useEditorStore.getState().filePath).toBeNull();
+      expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
+      expect(rejections).toEqual([]);
+    });
+
+    it('le second essai écrit le fichier, et le tampon prend son chemin', async () => {
+      await untitledWith('Une page.');
+      beforeWrite = () => ({ success: false, error: 'EACCES: permission denied' });
+      await clickSave();
+      act(() => useDialogStore.getState().closeAlert());
+
+      beforeWrite = () => undefined;
+      await clickSave();
+
+      expect(disk['/ailleurs/note.md']).toBe('Une page.');
+      expect(useEditorStore.getState().filePath).toBe('/ailleurs/note.md');
+      expect(useDialogStore.getState().alertOpen).toBe(false);
+    });
+
+    it('le dialogue lui-même en erreur : le même message', async () => {
+      await untitledWith('Une page.');
+      saveDialog.mockImplementation(async () => {
+        throw new Error('dialogue refusé');
+      });
+
+      await clickSave();
+
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+      expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
+      expect(rejections).toEqual([]);
+    });
+  });
 });
 
 describe('les autres boutons de fichier sous le verrou', () => {
