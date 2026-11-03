@@ -1728,6 +1728,18 @@
     }
   },
   "ideas": {
+    "loading": "Ideen werden geladen…",
+    "saveFailed": "Ihre letzten Änderungen konnten nicht gespeichert werden: Sie sind noch auf dem Bildschirm, aber nicht auf dem Datenträger. Bei jeder Änderung wird es erneut versucht.",
+    "noResponse": "Das Laufwerk hat nicht rechtzeitig geantwortet.",
+    "switchSaveFailedTitle": "Ihre Ideen sind nicht gespeichert",
+    "switchSaveFailed": "Ihre letzten Änderungen an den Ideen konnten nicht in der Ideendatei gespeichert werden. Wenn Sie jetzt das Projekt wechseln, gehen sie verloren; Ihr Dokument ist davon nicht betroffen.\n\nAbbrechen: in diesem Projekt bleiben, wo sie noch auf dem Bildschirm sind.\nBestätigen: das Projekt wechseln, ohne sie zu speichern.\n\nGrund: {{reason}}",
+    "closeSaveFailedTitle": "Ihre letzten Ideen sind nicht gespeichert",
+    "closeSaveFailed": "Das Projekt wurde geschlossen, bevor Ihre letzten Änderungen an den Ideen auf den Datenträger geschrieben werden konnten. Öffnen Sie dasselbe Projekt erneut, damit sie geschrieben werden: Das Öffnen eines anderen Projekts würde sie verlieren.",
+    "unreadable": {
+      "quarantined": "Die Datei mit Ihren Ideen war beschädigt und konnte nicht gelesen werden. Sie ist nicht verloren: Sie wurde beiseitegelegt, und die Liste beginnt wieder leer. Um Ihre Ideen wiederzufinden, öffnen Sie diese Datei in einem Texteditor: Was nicht beschädigt ist, lässt sich dort noch lesen.",
+      "blocked": "Die Datei mit Ihren Ideen kann im Moment nicht gelesen werden: Das Laufwerk oder der Netzwerkordner ist möglicherweise nicht erreichbar, oder es fehlen Zugriffsrechte. Sie wurde weder verschoben noch verändert. Die Tabs Ideen, Board und Graph bleiben bis dahin geschlossen, denn dort würde nichts gespeichert.",
+      "retry": "Erneut versuchen"
+    },
     "modeNotice": {
       "message": "Der Chat-Modus „Brainstorming“ sucht Ideen in Ihren Quellen, mit 20 Auszügen und standardmäßig ohne Ihr Manuskript.",
       "activate": "Brainstorming-Modus aktivieren",
@@ -2365,7 +2377,7 @@
     "title": "Etwas ist schiefgelaufen",
     "details": "Einzelheiten zum Fehler",
     "retry": "Erneut versuchen",
-    "saveFailed": "Das Dokument konnte nicht gespeichert werden. Wenn Sie jetzt neu laden, gehen Ihre letzten Änderungen verloren. Versuchen Sie es erneut, sobald der Zugriff auf die Datei wieder möglich ist.",
+    "saveFailed": "Ihre letzten Änderungen konnten nicht gespeichert werden. Wenn Sie jetzt neu laden, gehen sie verloren. Versuchen Sie es erneut, sobald der Zugriff auf die Datei wieder möglich ist.",
     "untitledUnsaved": "Dieses unbenannte Dokument ist nirgends gespeichert. Wenn Sie jetzt neu laden, geht sein Text verloren. Speichern Sie es zuerst über Datei > Speichern und versuchen Sie es dann erneut.",
     "reloadAnyway": "Trotzdem neu laden"
   },

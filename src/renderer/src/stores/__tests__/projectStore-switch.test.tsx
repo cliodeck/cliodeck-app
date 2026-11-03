@@ -11,7 +11,7 @@
  */
 import { createElement, type FC } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, act } from '@testing-library/react';
+import { cleanup, fireEvent, render, act, screen } from '@testing-library/react';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import os from 'os';
@@ -23,10 +23,15 @@ import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
+import { hasUnwrittenIdeas, useIdeaStore } from '../ideaStore';
 import { useNotificationStore } from '../notificationStore';
+import { BrainstormPanel } from '../../components/Brainstorm/BrainstormPanel';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import i18n from '../../i18n';
+
+// Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
+vi.setConfig({ testTimeout: 30_000 });
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -63,6 +68,8 @@ vi.mock('../../../../main/services/reading-notes-indexing.js', () => ({
 vi.mock('../../../../main/services/history-service.js', () => ({
   historyService: { getHistoryManager: () => null },
 }));
+vi.mock('../../components/Chat/AssistantChat', () => ({ AssistantChat: () => null }));
+vi.mock('react-force-graph-2d', () => ({ default: () => null }));
 
 const { setupEditorHandlers } = await import('../../../../main/ipc/handlers/editor-handlers');
 const { setupFilesystemHandlers } = await import('../../../../main/ipc/handlers/filesystem-handlers');
@@ -125,6 +132,9 @@ function installMain(): void {
       onInsertText: () => () => undefined,
     },
     fs: {
+      exists: (filePath: string) => ipc('fs:exists', filePath),
+      readUserFile: (filePath: string) => ipc('fs:read-user-file', filePath),
+      quarantineFile: (filePath: string) => ipc('fs:quarantine-file', filePath),
       writeFile: (filePath: string, content: string, options?: { exclusive?: boolean }) => {
         writesTo.push(filePath);
         return ipc('fs:write-file', filePath, content, options);
@@ -564,5 +574,325 @@ describe('fichier avec BOM : il reste ouvrable, et son BOM ne bouge pas', () => 
     await eventually(() => expect(store().isDirty).toBe(false));
     expect(store().content).toBe(`${TEXT}Suite.`);
     expect(currentView().state.doc.toString()).toBe(`${TEXT}Suite.`);
+  });
+});
+
+describe('les idées du projet qu’on quitte', () => {
+  const ideasOf = (dir: string) => path.join(dir, '.cliodeck', 'ideas.json');
+  const ideasFile = (title: string) =>
+    JSON.stringify({
+      ideas: [{ id: 'i1', title, content: '', tags: [], links: [], origin: { type: 'manual' } }],
+    });
+  const contentOnDisk = async (dir: string) =>
+    (JSON.parse(await readFile(ideasOf(dir), 'utf8')) as { ideas: Array<{ content: string }> }).ideas[0].content;
+  const ideaStore = () => useIdeaStore.getState();
+  const typedWithoutBlur = 'Tapé, jamais quitté le champ.';
+
+  beforeEach(async () => {
+    for (const [dir, title] of [
+      [dirA, 'Idée de A'],
+      [dirB, 'Idée de B'],
+    ]) {
+      await mkdir(path.join(dir, '.cliodeck'));
+      await writeFile(ideasOf(dir), ideasFile(title));
+    }
+    useIdeaStore.setState({
+      ideas: [],
+      isLoading: false,
+      selectedId: null,
+      persistence: { kind: 'ready' },
+      loadedFor: null,
+      saveError: null,
+    });
+    await openProjectA();
+    await ideaStore().loadIdeas(dirA);
+    ideaStore().updateIdea('i1', { content: typedWithoutBlur });
+  });
+
+  it('une frappe dont aucun blur n’est parti s’écrit dans A avant que le main bascule, et B garde sa liste', async () => {
+    const bBefore = await readFile(ideasOf(dirB), 'utf8');
+
+    await openProjectB();
+
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+    expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
+
+    // Ce que le panneau ferait après la bascule : B reçoit sa liste, et l'écriture suivante aussi.
+    await ideaStore().loadIdeas(dirB);
+    expect(ideaStore().ideas.map((idea) => idea.title)).toEqual(['Idée de B']);
+    await ideaStore().saveIdeas(dirB);
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+    expect(await contentOnDisk(dirB)).toBe('');
+  });
+
+  it('une écriture de A encore dans la file part avant la bascule, avec l’état courant', async () => {
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async (filePath: string, content: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return write(filePath, content);
+    };
+    const inFlight = ideaStore().saveIdeas(dirA);
+    await settle(10);
+    ideaStore().updateIdea('i1', { content: 'Tapé pendant la première écriture.' });
+    void ideaStore().saveIdeas(dirA);
+
+    await openProjectB();
+    await inFlight;
+
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(await contentOnDisk(dirA)).toBe('Tapé pendant la première écriture.');
+  });
+
+  describe('si elle ne s’écrit pas : la question est posée, et elle parle des idées', () => {
+    const asked = () => dialogs().confirmMessage;
+
+    /** Demande B, attend la question, et rend la bascule en cours. */
+    async function askingForB(): Promise<{ switching: Promise<void> }> {
+      const switching = project().loadProject(projectJsonB());
+      await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+      return { switching };
+    }
+
+    beforeEach(() => {
+      (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+        throw new Error('ENOSPC: no space left on device, write');
+      };
+    });
+
+    it('elle nomme les idées et la raison, jamais le seul « fichier »', async () => {
+      const { switching } = await askingForB();
+
+      expect(asked()).toContain(i18n.t('ideas.switchSaveFailed', { reason: 'ENOSPC: no space left on device, write' }));
+      expect(asked()).toContain('ENOSPC');
+      expect(asked()).toMatch(/idées/);
+      expect(dialogs().confirmTitle).toBe(i18n.t('ideas.switchSaveFailedTitle'));
+
+      await act(async () => {
+        dialogs().resolveConfirm(false);
+        await switching;
+      });
+    });
+
+    it('rester : rien n’a bougé, ni rejet, ni message d’erreur, et le texte est à l’écran', async () => {
+      const { switching } = await askingForB();
+
+      await act(async () => {
+        dialogs().resolveConfirm(false);
+        await switching;
+      });
+
+      expect(project().currentProject?.path).toBe(dirA);
+      expect(project().loadState.kind).toBe('ready');
+      expect(h.mainCurrent).toBe(dirA);
+      expect(ideaStore().ideas[0].content).toBe(typedWithoutBlur);
+      expect(ideaStore().saveError).toContain('ENOSPC');
+      expect(store().filePath).toBe(documentA);
+      expect(dialogs().alertOpen).toBe(false);
+    });
+
+    it('changer quand même : la bascule a lieu, B garde sa liste, et sortir ne repose pas la question', async () => {
+      const bBefore = await readFile(ideasOf(dirB), 'utf8');
+      const { switching } = await askingForB();
+
+      await act(async () => {
+        dialogs().resolveConfirm(true);
+        await switching;
+      });
+
+      expect(project().currentProject?.path).toBe(dirB);
+      expect(store().filePath).toBe(documentB);
+      expect(hasUnwrittenIdeas()).toBe(false);
+      expect(ideaStore().saveError).toBeNull();
+      expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
+      expect(await contentOnDisk(dirA)).toBe('');
+    });
+
+    it('changer quand même, mais le main refuse : rien n’est perdu, et la panne se dit encore', async () => {
+      (window.electron.project as { load: unknown }).load = vi.fn(async () => ({
+        success: false,
+        error: 'projet refusé',
+      }));
+      const { switching } = await askingForB();
+
+      await act(async () => {
+        dialogs().resolveConfirm(true);
+        await expect(switching).rejects.toThrow('projet refusé');
+      });
+
+      expect(project().currentProject?.path).toBe(dirA);
+      expect(ideaStore().ideas[0].content).toBe(typedWithoutBlur);
+      expect(hasUnwrittenIdeas()).toBe(true);
+      expect(ideaStore().saveError).toContain('ENOSPC');
+    });
+  });
+
+  it('un échec d’écriture, puis l’auteur défait ce qui ne s’écrivait pas : la bascule passe sans question', async () => {
+    await ideaStore().flushIdeas();
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    const id = ideaStore().addIdea({ title: 'De trop', content: '', tags: [], links: [], origin: { type: 'manual' } });
+    await ideaStore().saveIdeas(dirA);
+    expect(ideaStore().saveError).toContain('ENOSPC');
+
+    ideaStore().removeIdea(id);
+    await openProjectB();
+
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(project().currentProject?.path).toBe(dirB);
+  });
+
+  it('fermer un projet dont les idées ne s’écrivent plus n’empêche pas d’en ouvrir un autre', async () => {
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    await act(async () => {
+      await project().closeProject();
+    });
+    await openProjectB();
+
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(project().currentProject?.path).toBe(dirB);
+    await ideaStore().loadIdeas(dirB);
+    expect(ideaStore().ideas.map((idea) => idea.title)).toEqual(['Idée de B']);
+    expect(ideaStore().saveError).toBeNull();
+  });
+
+  it('fermer malgré une écriture ratée se dit, avec la raison, et le message reste', async () => {
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    await act(async () => {
+      await project().closeProject();
+    });
+
+    expect(project().currentProject).toBeNull();
+    const notice = toasts().find((toast) => toast.title === i18n.t('ideas.closeSaveFailedTitle'));
+    expect(notice?.level).toBe('error');
+    expect(notice?.duration).toBe(0);
+    expect(notice?.details).toContain('ENOSPC');
+  });
+
+  it('ce message dit vrai : rouvrir ce projet écrit ce qui attendait', async () => {
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    await act(async () => {
+      await project().closeProject();
+    });
+    (window.electron.fs as { writeFile: unknown }).writeFile = write;
+
+    await act(async () => {
+      await project().loadProject(path.join(dirA, 'project.json'));
+    });
+    await ideaStore().loadIdeas(dirA);
+
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+    expect(toasts().some((toast) => toast.title === i18n.t('ideas.closeSaveFailedTitle'))).toBe(false);
+  });
+
+  it('en ouvrir un autre à la place : le message a été dit, il part, et la sortie ne redemande rien', async () => {
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    await act(async () => {
+      await project().closeProject();
+    });
+
+    await openProjectB();
+
+    expect(toasts().some((toast) => toast.title === i18n.t('ideas.closeSaveFailedTitle'))).toBe(false);
+    expect(hasUnwrittenIdeas()).toBe(false);
+  });
+
+  it('fermer sans rien à écrire ne dit rien', async () => {
+    await ideaStore().flushIdeas();
+
+    await act(async () => {
+      await project().closeProject();
+    });
+
+    expect(toasts().some((toast) => toast.title === i18n.t('ideas.closeSaveFailedTitle'))).toBe(false);
+  });
+
+  describe('le panneau pendant que le main bascule : plus rien à y taper, puisque rien ne l’écrirait', () => {
+    let releaseLoad: (() => void) | null;
+    let realLoad: typeof window.electron.project.load;
+
+    beforeEach(async () => {
+      releaseLoad = null;
+      realLoad = window.electron.project.load;
+      (window.electron.project as { load: unknown }).load = vi.fn(async (projectJson: string) => {
+        await new Promise<void>((resolve) => {
+          releaseLoad = resolve;
+        });
+        return realLoad(projectJson);
+      });
+      await act(async () => {
+        render(createElement(BrainstormPanel));
+      });
+      await act(async () => {
+        await ideaStore().loadIdeas(dirA);
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'ideas.tabIdeas' }));
+      fireEvent.click(await screen.findByText('Idée de A'));
+      await screen.findByDisplayValue(typedWithoutBlur);
+    });
+
+    const held = async (): Promise<{ switching: Promise<void> }> => {
+      const switching = project().loadProject(projectJsonB());
+      await act(async () => {
+        await vi.waitFor(() => expect(releaseLoad).not.toBeNull(), { timeout: 5000, interval: 5 });
+      });
+      return { switching };
+    };
+
+    it('le champ d’idée quitte l’écran dès la bascule, et B arrive avec sa liste', async () => {
+      const { switching } = await held();
+
+      expect(screen.queryByDisplayValue(typedWithoutBlur)).toBeNull();
+      expect(screen.queryByTitle('ideas.create')).toBeNull();
+      expect(screen.getByText('ideas.loading')).toBeInTheDocument();
+      expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+
+      await act(async () => {
+        (releaseLoad as unknown as () => void)();
+        await switching;
+      });
+
+      expect(await screen.findByText('Idée de B', undefined, { timeout: 5000 })).toBeInTheDocument();
+      expect(screen.queryByText('Idée de A')).toBeNull();
+    });
+
+    it('une bascule qui échoue rend le panneau, avec sa liste', async () => {
+      (window.electron.project as { load: unknown }).load = vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          releaseLoad = resolve;
+        });
+        return { success: false, error: 'projet refusé' };
+      });
+      const { switching } = await held();
+      expect(screen.queryByDisplayValue(typedWithoutBlur)).toBeNull();
+
+      await act(async () => {
+        (releaseLoad as unknown as () => void)();
+        await expect(switching).rejects.toThrow('projet refusé');
+      });
+
+      expect(await screen.findByDisplayValue(typedWithoutBlur, undefined, { timeout: 5000 })).toBeInTheDocument();
+      expect(project().currentProject?.path).toBe(dirA);
+    });
+  });
+
+  it('fermer le projet l’écrit aussi, tant que le main l’autorise', async () => {
+    await act(async () => {
+      await project().closeProject();
+    });
+
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
   });
 });
