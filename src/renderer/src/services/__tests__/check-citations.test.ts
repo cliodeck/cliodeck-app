@@ -29,10 +29,13 @@ vi.mock('../../stores/manuscriptStore', () => ({
   useManuscriptStore: { getState: () => ({ readManuscript: fixture.readManuscript }) },
 }));
 
-import { runCitationCheck } from '../check-citations';
+import { formatCitationReport, runCitationCheck } from '../check-citations';
 import { useDialogStore } from '../../stores/dialogStore';
 
-const t = ((key: string) => key) as unknown as TFunction;
+const t = ((key: string, params?: Record<string, unknown>) =>
+  params && ('detail' in params || 'chapters' in params)
+    ? `${key}(${params.detail ?? params.chapters})`
+    : key) as unknown as TFunction;
 const dialogs = () => useDialogStore.getState();
 
 /** Laisse s'exécuter les suites des promesses résolues. */
@@ -54,9 +57,10 @@ describe('runCitationCheck', () => {
     fixture.isBook = false;
     fixture.live = 'Une affirmation [@absente].';
     fixture.readManuscript.mockReset();
-    fixture.readManuscript.mockResolvedValue([
-      { chapter: { title: 'Premier' }, content: 'Texte [@absente].' },
-    ]);
+    fixture.readManuscript.mockResolvedValue({
+      documents: [{ chapter: { title: 'Premier' }, content: 'Texte [@absente].' }],
+      unreadable: [],
+    });
   });
 
   it('deux commandes simultanées donnent un seul rapport, fermé par un seul OK', async () => {
@@ -124,5 +128,26 @@ describe('runCitationCheck', () => {
     void runCitationCheck(t);
     await flush();
     expect(dialogs().alertMessage).toContain('[@absente]');
+  });
+
+  it('livre avec un chapitre illisible : le rapport dit qu’il est incomplet, et lequel manque', async () => {
+    fixture.isBook = true;
+    fixture.readManuscript.mockResolvedValue({
+      documents: [{ chapter: { title: 'Premier' }, content: 'Aucune citation.' }],
+      unreadable: [{ chapter: { title: 'Second' }, reason: 'encoding' }],
+    });
+
+    void runCitationCheck(t);
+    await flush();
+
+    expect(dialogs().alertMessage).toContain('citations.allValid');
+    expect(dialogs().alertMessage).toContain('book.readIncomplete');
+    expect(dialogs().alertMessage).toContain('Second');
+    expect(dialogs().alertMessage).toContain('book.unreadableNotUtf8');
+  });
+
+  it('sans chapitre illisible : rien sur un résultat incomplet', () => {
+    const report = formatCitationReport({ total: 2, missing: new Map(), unreadable: [] }, t);
+    expect(report).toBe('citations.allValid');
   });
 });

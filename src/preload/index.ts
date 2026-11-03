@@ -52,8 +52,19 @@ const api = {
       kind?: 'chapter' | 'front' | 'back';
     }) => ipcRenderer.invoke('project:create-chapter', data),
     /** Lecture groupée : les fonctions transverses ont besoin des chapitres fermés. */
-    readChapters: (data: { projectPath: string; filePaths: string[] }) =>
-      ipcRenderer.invoke('project:read-chapters', data),
+    readChapters: (data: {
+      projectPath: string;
+      filePaths: string[];
+    }): Promise<{
+      success: boolean;
+      files: Array<{
+        filePath: string;
+        content?: string;
+        reason?: 'absent' | 'refused' | 'permission' | 'encoding' | 'not-a-file' | 'io';
+        error?: string;
+      }>;
+      error?: string;
+    }> => ipcRenderer.invoke('project:read-chapters', data),
     saveBookSettings: (data: {
       projectPath: string;
       settings: {

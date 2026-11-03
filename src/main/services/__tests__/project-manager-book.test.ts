@@ -37,6 +37,7 @@ vi.mock('../../../../backend/core/workspace/migrator.js', () => ({
 
 import { ProjectManager } from '../project-manager.js';
 import { DEFAULT_BOOK_SETTINGS } from '../../../../backend/types/book.js';
+import { atomicWriteFile } from '../../../../backend/core/fs/user-files.js';
 
 let workDir: string;
 let manager: ProjectManager;
@@ -339,6 +340,78 @@ describe('createChapter / saveChapters / saveBookSettings', () => {
       await readFile(path.join(projectDir, 'project.json'), 'utf-8')
     );
     expect(manifest.book.noteStyle).toBe('footnote');
+  });
+});
+
+describe('readChapters — un chapitre qui ne se lit pas ne se lit pas à moitié', () => {
+  /** « # Été » en Latin-1. */
+  const LATIN1 = Buffer.from([0x23, 0x20, 0xc9, 0x74, 0xe9, 0x0a]);
+  const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+  let projectDir: string;
+  const fileOf = (rel: string) => path.join(projectDir, rel);
+
+  beforeEach(async () => {
+    projectDir = path.join(workDir, 'Livre');
+    await mkdir(path.join(projectDir, 'chapters'), { recursive: true });
+  });
+
+  it('Latin-1 : refusé avec sa raison, sans texte, et le fichier ne bouge pas', async () => {
+    await writeFile(fileOf('chapters/01.md'), '# Un\n');
+    await writeFile(fileOf('chapters/02.md'), LATIN1);
+
+    const result = await manager.readChapters({
+      projectPath: projectDir,
+      filePaths: ['chapters/01.md', 'chapters/02.md'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files[0]).toEqual({ filePath: 'chapters/01.md', content: '# Un\n' });
+    expect(result.files[1]).toMatchObject({ filePath: 'chapters/02.md', reason: 'encoding' });
+    expect(result.files[1].content).toBeUndefined();
+    expect((await readFile(fileOf('chapters/02.md'))).equals(LATIN1)).toBe(true);
+  });
+
+  it('disparu : `absent`, et les autres sont lus dans l’ordre demandé', async () => {
+    await writeFile(fileOf('chapters/01.md'), '# Un\n');
+    await writeFile(fileOf('chapters/03.md'), '# Trois\n');
+
+    const result = await manager.readChapters({
+      projectPath: projectDir,
+      filePaths: ['chapters/03.md', 'chapters/02.md', 'chapters/01.md'],
+    });
+
+    expect(result.files.map((f) => [f.filePath, f.content, f.reason])).toEqual([
+      ['chapters/03.md', '# Trois\n', undefined],
+      ['chapters/02.md', undefined, 'absent'],
+      ['chapters/01.md', '# Un\n', undefined],
+    ]);
+  });
+
+  it('un chemin qui sort du projet : `refused`, jamais lu', async () => {
+    await writeFile(path.join(workDir, 'dehors.md'), '# Dehors\n');
+
+    const result = await manager.readChapters({ projectPath: projectDir, filePaths: ['../dehors.md'] });
+
+    expect(result.files[0]).toMatchObject({ filePath: '../dehors.md', reason: 'refused' });
+    expect(result.files[0].content).toBeUndefined();
+  });
+
+  it('BOM : il reste dans le texte, l’écriture le retrouvera', async () => {
+    await writeFile(fileOf('chapters/01.md'), Buffer.concat([BOM, Buffer.from('# Été\n', 'utf8')]));
+
+    const result = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/01.md'] });
+
+    expect(result.files[0].content).toBe('\uFEFF# Été\n');
+  });
+
+  it('une lecture demandée après une écriture lit ce que celle-ci a écrit', async () => {
+    await writeFile(fileOf('chapters/01.md'), '# Avant\n');
+
+    const writing = atomicWriteFile(fileOf('chapters/01.md'), '# Après\n');
+    const reading = manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/01.md'] });
+    await writing;
+
+    expect((await reading).files[0].content).toBe('# Après\n');
   });
 });
 

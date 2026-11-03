@@ -959,7 +959,8 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(window.electron.project.load).toHaveBeenCalledTimes(1);
     expect(project().loadState).toBe(before);
     expect(project().currentProject?.path).toBe(dirA);
-    expect(store().filePath).toBe(other);
+    // Pas de délai fixe : sous charge, la lecture de la demande gagnante dépasse 50 ms.
+    await eventually(() => expect(store().filePath).toBe(other));
     expect(store().bufferDetached).toBe(false);
   });
 });

@@ -137,7 +137,9 @@ describe('useAutoSave : une écriture réussie, et du texte tapé pendant', () =
     expect(store().isDirty).toBe(false);
   });
 
-  it('Cmd+S avec frappe pendant l’écriture : l’autosave prend la suite', async () => {
+  // Le minuteur armé par la première frappe est encore en attente : il suffit ici. Ce qui
+  // prouve la relance par `lastSavedAt` est dans la série d'échecs, plus bas.
+  it('Cmd+S avec frappe pendant l’écriture : le minuteur en attente écrit la frappe', async () => {
     renderHook(() => useAutoSave());
     const gate = hold();
     onWrite = async () => {
@@ -309,6 +311,105 @@ describe('useAutoSave : une écriture en échec', () => {
     type(' deux');
     await wait(DELAY);
     expect(writes).toHaveLength(before + 1);
+  });
+
+  it('Enregistrer réussit pendant la série, avec frappe pendant : elle part au délai normal, pas au prochain essai du recul', async () => {
+    onWrite = diskFull;
+    renderHook(() => useAutoSave());
+    type(' un');
+    await wait(DELAY);
+    await wait(DELAY * 2);
+    await wait(DELAY * 4);
+    await wait(DELAY * 8);
+    expect(writes).toHaveLength(4);
+
+    const gate = hold();
+    onWrite = async () => {
+      await gate.wait();
+      return { success: true };
+    };
+    const manual = store().saveFile();
+    type(' deux');
+    await act(async () => {
+      gate.release();
+      await manual;
+    });
+    onWrite = healthy;
+    expect(store().isDirty).toBe(true);
+    expect(writes).toHaveLength(5);
+
+    // Ni `isDirty` ni le nombre d'essais n'ont bougé : seul `lastSavedAt` relance le
+    // minuteur. Sans lui, la frappe attendrait le cinquième essai, 48 s après le quatrième.
+    await wait(DELAY);
+
+    expect(writes).toHaveLength(6);
+    expect(writes.at(-1)).toEqual([A, 'v0 un deux']);
+    expect(store().isDirty).toBe(false);
+    expect(toasts()).toHaveLength(0);
+  });
+
+  /** Enregistrer part, l'autosave part derrière lui : les deux écritures sont en vol. */
+  async function manualThenAutoInFlight(): Promise<{ finishManual: () => Promise<void>; failAuto: () => Promise<void> }> {
+    renderHook(() => useAutoSave());
+    type(' un');
+    await wait(DELAY - 100);
+
+    const manualGate = hold();
+    onWrite = async () => {
+      await manualGate.wait();
+      return { success: true };
+    };
+    const manual = store().saveFile();
+
+    const autoGate = hold();
+    onWrite = async () => {
+      await autoGate.wait();
+      return { success: false, error: 'EBUSY: resource busy' };
+    };
+    await wait(100);
+    expect(writes).toHaveLength(2);
+    onWrite = healthy;
+
+    return {
+      finishManual: () =>
+        act(async () => {
+          manualGate.release();
+          await manual;
+        }),
+      failAuto: () =>
+        act(async () => {
+          autoGate.release();
+          await vi.advanceTimersByTimeAsync(0);
+        }),
+    };
+  }
+
+  it('l’autosave échoue derrière un Enregistrer qui a tout écrit : ni message, ni essai de plus', async () => {
+    const { finishManual, failAuto } = await manualThenAutoInFlight();
+
+    await finishManual();
+    expect(store().isDirty).toBe(false);
+    await failAuto();
+
+    expect(toasts()).toEqual([]);
+    await runFor(60_000);
+    expect(writes).toHaveLength(2);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('témoin : même échec, mais il reste une frappe à écrire : il compte, et elle part', async () => {
+    const { finishManual, failAuto } = await manualThenAutoInFlight();
+
+    type(' deux');
+    await finishManual();
+    expect(store().isDirty).toBe(true);
+    await failAuto();
+
+    expect(toasts()).toHaveLength(1);
+    await runFor(DELAY * 2);
+    expect(writes.at(-1)).toEqual([A, 'v0 un deux']);
+    expect(store().isDirty).toBe(false);
+    expect(toasts()).toEqual([]);
   });
 
   it('un autre document : la série ne le concerne pas', async () => {

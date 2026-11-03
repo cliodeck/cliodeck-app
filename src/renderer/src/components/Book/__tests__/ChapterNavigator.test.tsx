@@ -156,7 +156,7 @@ describe('ChapterNavigator', () => {
     act(() => useDialogStore.getState().closeAlert());
   });
 
-  it('chapitre qui n’est pas en UTF-8 : le refus tel quel, et le chapitre courant ne bouge pas', async () => {
+  it('chapitre qui n’est pas en UTF-8 : le refus expliqué, et le chapitre courant ne bouge pas', async () => {
     loadFile.mockRejectedValue(new EditorFileError('unreadable', 'encoding', 'Ce fichier n’est pas en UTF-8.'));
     setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
     render(<ChapterNavigator />);
@@ -166,7 +166,41 @@ describe('ChapterNavigator', () => {
     });
 
     expect(useProjectStore.getState().currentChapterId).toBe('c1');
-    expect(useDialogStore.getState().alertMessage).toBe('Ce fichier n’est pas en UTF-8.');
+    expect(useDialogStore.getState().alertMessage).toBe('editor.notUtf8');
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it.each([
+    ['absent', undefined, '/livre/chapters/c2.md n’existe pas'],
+    ['unreadable', 'not-a-file', '/livre/chapters/c2.md n’est pas un fichier ordinaire'],
+    ['unreadable', 'permission', 'EACCES: permission denied'],
+  ] as const)(
+    'chapitre illisible (%s, %s) : le message traduit, jamais la phrase du main',
+    async (code, reason, mainText) => {
+      loadFile.mockRejectedValue(new EditorFileError(code, reason, mainText));
+      setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+      render(<ChapterNavigator />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Deux'));
+      });
+
+      expect(useProjectStore.getState().currentChapterId).toBe('c1');
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.openError');
+      act(() => useDialogStore.getState().closeAlert());
+    }
+  );
+
+  it('témoin : un chapitre sortant impossible à écrire garde son message', async () => {
+    loadFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useDialogStore.getState().alertMessage).toBe('ENOSPC: no space left on device');
     act(() => useDialogStore.getState().closeAlert());
   });
 

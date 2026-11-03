@@ -368,6 +368,81 @@ describe('document présent mais illisible : il ne bouge pas', () => {
   });
 });
 
+describe('le message d’un document non ouvert : il dit vrai tant qu’il est là', () => {
+  /** Projet B ouvert sur son document en Latin-1 : le tampon sans titre, et le message. */
+  async function refusedOnB(): Promise<void> {
+    await writeFile(documentB, LATIN1);
+    await openProjectA();
+    await openProjectB();
+    expect(toasts()).toHaveLength(1);
+  }
+
+  it('le fichier converti puis rouvert : le document à l’écran, et plus de message', async () => {
+    await refusedOnB();
+
+    await writeFile(documentB, '# Été\n');
+    await act(async () => {
+      await store().loadFile(documentB);
+    });
+
+    expect(store().filePath).toBe(documentB);
+    expect(currentView().state.doc.toString()).toBe('# Été\n');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('un autre fichier ouvert : le message parlait du tampon, il part aussi', async () => {
+    await refusedOnB();
+    const other = path.join(dirB, 'notes.md');
+    await writeFile(other, '# Notes\n');
+
+    await act(async () => {
+      await store().loadFile(other);
+    });
+
+    expect(store().filePath).toBe(other);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('rouvert sans conversion : le refus reste dit', async () => {
+    await refusedOnB();
+
+    await act(async () => {
+      await expect(store().loadFile(documentB)).rejects.toMatchObject({ reason: 'encoding' });
+    });
+
+    expect(store().filePath).toBeNull();
+    expect(toasts()).toHaveLength(1);
+    expect(readFileSync(documentB).equals(LATIN1)).toBe(true);
+  });
+
+  it('écrire dans le tampon : l’éditeur n’a toujours pas le document, le message reste', async () => {
+    await refusedOnB();
+
+    await typeAtEnd('Une idée.');
+    await settle(100);
+
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it('le projet quitté puis rouvert toujours refusé : un seul message, qui part de même', async () => {
+    await refusedOnB();
+    await act(async () => {
+      await project().loadProject(path.join(dirA, 'project.json'));
+    });
+    expect(toasts()).toEqual([]);
+    expect(store().filePath).toBe(documentA);
+
+    await openProjectB();
+    expect(toasts()).toHaveLength(1);
+
+    await writeFile(documentB, '# Été\n');
+    await act(async () => {
+      await store().loadFile(documentB);
+    });
+    expect(toasts()).toEqual([]);
+  });
+});
+
 describe('document absent : il se crée, sans rien pouvoir écraser', () => {
   it('article : gabarit, ouverture, et la frappe s’y écrit', async () => {
     await rm(documentB);

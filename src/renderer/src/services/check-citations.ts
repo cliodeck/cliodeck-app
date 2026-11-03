@@ -3,9 +3,10 @@ import { collectCitationKeys } from '@/editor/citation-tools';
 import { useEditorStore } from '../stores/editorStore';
 import { useBibliographyStore } from '../stores/bibliographyStore';
 import { useProjectStore } from '../stores/projectStore';
-import { useManuscriptStore } from '../stores/manuscriptStore';
+import { useManuscriptStore, type UnreadableChapter } from '../stores/manuscriptStore';
 import { useDialogStore } from '../stores/dialogStore';
 import { logger } from '../utils/logger';
+import { unreadableChaptersNote } from './unreadable-chapters';
 
 /**
  * Vérification des citations — implémentation UNIQUE.
@@ -31,6 +32,8 @@ export interface CitationCheckResult {
   total: number;
   /** Clé manquante -> chapitres où elle apparaît (vide hors projet livre). */
   missing: Map<string, Set<string>>;
+  /** Chapitres que la vérification n'a pas pu regarder. */
+  unreadable: UnreadableChapter[];
 }
 
 /** Relève les clés et confronte à la bibliographie. Sans effet de bord. */
@@ -40,8 +43,9 @@ export async function checkCitations(): Promise<CitationCheckResult> {
   );
   const isBook = useProjectStore.getState().currentProject?.type === 'book';
 
-  const sources: Array<{ label: string | null; content: string }> = isBook
-    ? (await useManuscriptStore.getState().readManuscript()).map((d) => ({
+  const manuscript = isBook ? await useManuscriptStore.getState().readManuscript() : null;
+  const sources: Array<{ label: string | null; content: string }> = manuscript
+    ? manuscript.documents.map((d) => ({
         label: d.chapter.title,
         content: d.content,
       }))
@@ -59,7 +63,7 @@ export async function checkCitations(): Promise<CitationCheckResult> {
     }
   }
 
-  return { total, missing };
+  return { total, missing, unreadable: manuscript?.unreadable ?? [] };
 }
 
 /** Met en forme le rapport destiné à l'utilisateur. */
@@ -67,13 +71,16 @@ export function formatCitationReport(
   result: CitationCheckResult,
   t: TFunction
 ): string {
-  if (result.missing.size === 0) {
-    return t('citations.allValid', { count: result.total });
-  }
   const lines = [...result.missing.entries()].map(([key, where]) =>
     where.size > 0 ? `[@${key}] — ${[...where].join(', ')}` : `[@${key}]`
   );
-  return `${t('citations.missing', { count: result.missing.size })}\n\n${lines.join('\n')}`;
+  const report =
+    result.missing.size === 0
+      ? t('citations.allValid', { count: result.total })
+      : `${t('citations.missing', { count: result.missing.size })}\n\n${lines.join('\n')}`;
+  // « Toutes valides » ne vaut pas pour un chapitre qu'on n'a pas lu.
+  if (result.unreadable.length === 0) return report;
+  return `${report}\n\n${t('book.readIncomplete', { detail: unreadableChaptersNote(result.unreadable, t) })}`;
 }
 
 async function reportCitations(t: TFunction): Promise<void> {

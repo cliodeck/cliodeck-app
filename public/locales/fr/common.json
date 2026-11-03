@@ -2014,6 +2014,10 @@
     "renumberInterrupted": "Renumérotation interrompue : le chapitre ouvert a changé pendant l'opération. Relancez-la pour la terminer.",
     "renumberTimedOut": "Renumérotation arrêtée : le disque n'a pas répondu pendant {{minutes}} minutes. Des chapitres ont pu être renumérotés, pas tous : relancez-la quand le disque répondra.",
     "renumberRestoreFailed": "La renumérotation a échoué et n'a pas pu être annulée partout : des chapitres ont pu rester renumérotés. Relancez-la quand les fichiers seront de nouveau accessibles.",
+    "renumberUnreadable": "Renumérotation annulée : le manuscrit est inchangé, car la numérotation traverse tous les chapitres. {{detail}}",
+    "readIncomplete": "Résultat incomplet. {{detail}}",
+    "unreadableChapters": "Chapitres illisibles : {{chapters}}.",
+    "unreadableNotUtf8": "Un fichier qui n'est pas en UTF-8 reste intact sur le disque : convertissez-le en UTF-8, puis relancez.",
     "settings": {
       "title": "Réglages de l'ouvrage",
       "saveError": "Enregistrement des réglages impossible — modification annulée.",

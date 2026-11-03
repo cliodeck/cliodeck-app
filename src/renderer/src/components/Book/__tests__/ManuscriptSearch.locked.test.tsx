@@ -110,3 +110,70 @@ describe('ManuscriptSearch : aller à une occurrence', () => {
     expect(useProjectStore.getState().currentChapterId).toBe('b');
   });
 });
+
+describe('ManuscriptSearch : un chapitre illisible', () => {
+  const search = async (): Promise<void> => {
+    render(<ManuscriptSearch onClose={() => undefined} />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Danzig' } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole('searchbox').closest('form') as HTMLFormElement);
+    });
+  };
+
+  it('la recherche dit qu’elle est incomplète, et rend ce qu’elle a trouvé ailleurs', async () => {
+    useProjectStore.setState({
+      chapters: [chapterOf('a'), chapterOf('b'), { ...chapterOf('c'), title: 'Chapitre c' }],
+    });
+    window.electron.project.readChapters = vi.fn(async () => ({
+      success: true,
+      files: [
+        { filePath: 'chapters/b.md', content: '# B\n\nDanzig en 1932.\n' },
+        { filePath: 'chapters/c.md', reason: 'encoding', error: 'pas UTF-8' },
+      ],
+    })) as never;
+
+    await search();
+
+    expect(screen.getByText('book.readIncomplete')).toBeInTheDocument();
+    expect(screen.getByTitle('search.goToLine')).toBeInTheDocument();
+  });
+
+  it('aucun résultat ailleurs : « aucun résultat » ne cache pas le chapitre non lu', async () => {
+    window.electron.project.readChapters = vi.fn(async () => ({
+      success: true,
+      files: [{ filePath: 'chapters/b.md', reason: 'encoding', error: 'pas UTF-8' }],
+    })) as never;
+
+    await search();
+
+    expect(screen.getByText('book.readIncomplete')).toBeInTheDocument();
+    expect(screen.getByText('search.noResults')).toBeInTheDocument();
+  });
+
+  it('témoin : tout est lu, rien sur un résultat incomplet', async () => {
+    await search();
+
+    expect(screen.queryByText('book.readIncomplete')).toBeNull();
+    expect(screen.getByTitle('search.goToLine')).toBeInTheDocument();
+  });
+
+  it('une nouvelle recherche après la conversion : le message est parti', async () => {
+    const reading = vi.fn(async () => ({
+      success: true,
+      files: [{ filePath: 'chapters/b.md', reason: 'encoding', error: 'pas UTF-8' }],
+    }));
+    window.electron.project.readChapters = reading as never;
+    await search();
+    expect(screen.getByText('book.readIncomplete')).toBeInTheDocument();
+
+    reading.mockResolvedValue({
+      success: true,
+      files: [{ filePath: 'chapters/b.md', content: '# B\n\nDanzig en 1932.\n' } as never],
+    });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole('searchbox').closest('form') as HTMLFormElement);
+    });
+
+    expect(screen.queryByText('book.readIncomplete')).toBeNull();
+  });
+});

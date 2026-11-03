@@ -317,6 +317,103 @@ test('projet au document en Latin-1 : pas un octet ne change, et l’auteur sait
   }
 });
 
+test('projet au document en Latin-1 : une fois converti et rouvert, le document s’affiche et le message s’en va', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  writeFileSync(projet.documentMd, LATIN1);
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    const toast = window.locator('.status-toast--error');
+    await expect(toast).toContainText('document de ce projet', { timeout: 20_000 });
+
+    writeFileSync(projet.documentMd, '# Été\n');
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+    }, projet.documentMd);
+    await window.locator('.toolbar-btn[title="Ouvrir"]').first().click();
+
+    await expect(editorOf(window)).toContainText('Été', { timeout: 10_000 });
+    await expect(toast).toHaveCount(0);
+
+    await typeAtEnd(window, 'Suite.');
+    await expect.poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 15_000 }).toBe('# Été\nSuite.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('livre au chapitre en Latin-1 : Renuméroter refuse sans toucher à un octet, et repart une fois le fichier converti', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-livre-'));
+  mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  mkdirSync(join(dir, 'chapters'));
+  const projectJson = join(dir, 'project.json');
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'Livre E2E',
+      type: 'book',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      chapters: [
+        { id: 'c1', title: 'Premier', filePath: 'chapters/01.md', order: 0, kind: 'chapter' },
+        { id: 'c2', title: 'Second', filePath: 'chapters/02.md', order: 1, kind: 'chapter' },
+      ],
+    }),
+  );
+  const first = join(dir, 'chapters', '01.md');
+  const second = join(dir, 'chapters', '02.md');
+  const FIRST = '# Premier\n\nTexte[^5].\n\n[^5]: Note un.\n';
+  const SECOND = '# Second\n\nTexte accentué : été[^9].\n\n[^9]: Note deux, évêque.\n';
+  writeFileSync(first, FIRST);
+  writeFileSync(second, Buffer.from(SECOND, 'latin1'));
+  const renumber = window.locator('button[title="Renuméroter les notes"]').first();
+  const alert = window.locator('#alert-dialog-message');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(editorOf(window)).toContainText('Premier', { timeout: 20_000 });
+
+    await renumber.click();
+    await expect(alert).toContainText('le manuscrit est inchangé', { timeout: 10_000 });
+    await expect(alert).toContainText('Second');
+    await expect(alert).toContainText('UTF-8');
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    await window.waitForTimeout(500);
+    expect(readFileSync(second).equals(Buffer.from(SECOND, 'latin1'))).toBe(true);
+    expect(readFileSync(first, 'utf8')).toBe(FIRST);
+    await expect(editorOf(window)).toContainText('[^5]');
+
+    // Le remède que le message prescrit.
+    writeFileSync(second, SECOND);
+    await renumber.click();
+    await expect(alert).toContainText('2 chapitre', { timeout: 10_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    expect(readFileSync(second, 'utf8')).toBe(SECOND.replaceAll('[^9]', '[^2]'));
+    await expect.poll(() => readFileSync(first, 'utf8'), { timeout: 15_000 }).toBe(FIRST.replaceAll('[^5]', '[^1]'));
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('ouvrir un fichier en Latin-1 : refus expliqué, et le document ouvert reste', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {

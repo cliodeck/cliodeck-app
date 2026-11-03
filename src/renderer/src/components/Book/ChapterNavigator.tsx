@@ -14,7 +14,7 @@ import { BookSettingsModal } from './BookSettingsModal';
 import type { Chapter, ResolvedChapter } from '@backend/types/book';
 import { parseOutline, replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../stores/projectStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { EditorFileError, openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
@@ -146,9 +146,14 @@ export const ChapterNavigator: React.FC = () => {
 
   const report = async (error: unknown, fallbackKey: string): Promise<void> => {
     logger.error('ChapterNavigator', error);
-    await useDialogStore
-      .getState()
-      .showAlert(error instanceof Error ? error.message : t(fallbackKey));
+    // Le texte d'une EditorFileError vient du main : il va au journal, pas à l'écran.
+    const message =
+      error instanceof EditorFileError
+        ? t(openErrorKey(error, fallbackKey))
+        : error instanceof Error
+          ? error.message
+          : t(fallbackKey);
+    await useDialogStore.getState().showAlert(message);
   };
 
   /** Rend vrai si le chapitre est bien celui qu'affiche désormais l'éditeur. */

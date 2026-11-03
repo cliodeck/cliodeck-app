@@ -51,9 +51,12 @@ export function useAutoSave(): void {
       logger.store('AutoSave', 'Document auto-saved successfully');
     } catch (error) {
       logger.error('AutoSave', error);
-      // Le document a changé pendant l'écriture : cet échec ne dit rien du nouveau.
-      const sameDocument = useEditorStore.getState().documentVersion === currentState.documentVersion;
-      if (sameDocument && mountedRef.current) {
+      // Le document a changé pendant l'écriture : cet échec ne dit rien du nouveau. Ou une
+      // écriture manuelle a tout écrit entre-temps : il n'y a plus rien à réessayer, et
+      // aucune réussite ne viendrait retirer le message.
+      const now = useEditorStore.getState();
+      const stillToWrite = now.documentVersion === currentState.documentVersion && now.isDirty;
+      if (stillToWrite && mountedRef.current) {
         failuresRef.current += 1;
         if (failuresRef.current === 1) {
           failureNoticeRef.current = useNotificationStore.getState().notify({

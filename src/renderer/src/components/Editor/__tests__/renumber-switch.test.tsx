@@ -71,6 +71,8 @@ const DISORDERED = {
 };
 
 let disk: Record<string, string>;
+/** Chapitres que le main refuse de lire, et sa raison. */
+let unreadableOnDisk: Map<string, string>;
 let writes: Array<[string, string]>;
 /** Attente insérée dans la prochaine lecture du disque, puis retirée. */
 let nextRead: Promise<void> | null;
@@ -92,6 +94,7 @@ function chapterOf(path: string, order: number): ResolvedChapter {
 
 async function openBook(files: Record<string, string>, open: string = A): Promise<void> {
   disk = { ...files };
+  unreadableOnDisk = new Map();
   writes = [];
   nextRead = null;
   beforeWrite = () => undefined;
@@ -103,10 +106,11 @@ async function openBook(files: Record<string, string>, open: string = A): Promis
         if (gate) await gate;
         return {
           success: true,
-          files: data.filePaths.map((filePath) => ({
-            filePath,
-            content: disk[`${PROJECT}/${filePath}`],
-          })),
+          files: data.filePaths.map((filePath) =>
+            unreadableOnDisk.has(filePath)
+              ? { filePath, reason: unreadableOnDisk.get(filePath), error: 'illisible' }
+              : { filePath, content: disk[`${PROJECT}/${filePath}`] }
+          ),
         };
       }),
       getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
@@ -191,6 +195,28 @@ afterEach(() => {
   useEditorStore.setState({ editorFacade: null, switchLock: null } as never);
   useProjectStore.setState({ currentProject: null, chapters: [] });
   while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
+});
+
+describe('renumérotation : un chapitre illisible', () => {
+  it.each(['encoding', 'absent', 'permission'])(
+    'fermé et illisible (%s) : refus, aucune écriture, et le chapitre ouvert ne bouge pas',
+    async (reason) => {
+      await openBook(DISORDERED);
+      unreadableOnDisk.set('chapters/b.md', reason);
+      const before = { ...disk };
+
+      await act(async () => {
+        fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+      });
+
+      expect(alertMessage()).toBe('book.renumberUnreadable');
+      expect(writes).toEqual([]);
+      expect(disk).toEqual(before);
+      expect(live()).toBe(DISORDERED[A]);
+      expect(useEditorStore.getState().isDirty).toBe(false);
+      expect(locks()).toEqual(FREE);
+    }
+  );
 });
 
 describe('renumérotation sans bascule', () => {

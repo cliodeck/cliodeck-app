@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ResolvedChapter } from '@backend/types/book';
+import type { ChapterUnreadableReason, ResolvedChapter } from '@backend/types/book';
 import { computeDocumentStats, type DocumentStatsCounts } from '@/editor/document-stats';
 import { parseOutline, type OutlineHeading } from '@/editor/outline';
 import { useEditorStore } from './editorStore';
@@ -36,6 +36,23 @@ export interface ManuscriptDocument {
   live: boolean;
 }
 
+/** Un chapitre du manifeste dont le texte n'a pas pu être lu. */
+export interface UnreadableChapter {
+  chapter: ResolvedChapter;
+  /** Inconnue si le main n'a rien dit de ce chapitre. */
+  reason?: ChapterUnreadableReason;
+}
+
+/**
+ * Le manuscrit tel qu'il a pu être lu. Ce qui manque est dit : retiré en silence, un
+ * chapitre décalerait la numérotation des notes, et une recherche ou une vérification
+ * des citations annoncerait « rien trouvé » sans l'avoir regardé.
+ */
+export interface ManuscriptRead {
+  documents: ManuscriptDocument[];
+  unreadable: UnreadableChapter[];
+}
+
 interface ManuscriptState {
   /** Dérivé par chemin de chapitre (relatif au projet). */
   info: Record<string, ChapterInfo>;
@@ -68,7 +85,7 @@ interface ManuscriptState {
   /** Recalcule le dérivé d'un seul chapitre à partir d'un texte connu. */
   refreshOne: (relPath: string, content: string) => void;
   /** Texte ordonné du manuscrit ; le chapitre ouvert vient de l'éditeur. */
-  readManuscript: () => Promise<ManuscriptDocument[]>;
+  readManuscript: () => Promise<ManuscriptRead>;
   clear: () => void;
 }
 
@@ -153,7 +170,7 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
 
   readManuscript: async () => {
     const { currentProject, chapters } = useProjectStore.getState();
-    if (!currentProject) return [];
+    if (!currentProject) return { documents: [], unreadable: [] };
 
     // Chemin et texte vivant lus dans le même tour, avant d'attendre le disque :
     // relu après, ce texte serait celui du chapitre ouvert entre-temps, et une
@@ -164,6 +181,7 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
     const toRead = usable.filter((c) => c.filePath !== openRel).map((c) => c.filePath);
 
     const contents = new Map<string, string>();
+    const reasons = new Map<string, ChapterUnreadableReason | undefined>();
     if (toRead.length > 0) {
       const result = await window.electron.project.readChapters({
         projectPath: currentProject.path,
@@ -174,19 +192,22 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
       }
       for (const file of result.files) {
         if (typeof file.content === 'string') contents.set(file.filePath, file.content);
+        else reasons.set(file.filePath, file.reason);
       }
     }
 
-    const docs: ManuscriptDocument[] = [];
+    const documents: ManuscriptDocument[] = [];
+    const unreadable: UnreadableChapter[] = [];
     for (const chapter of usable) {
       if (chapter.filePath === openRel) {
-        docs.push({ chapter, content: liveContent, live: true });
+        documents.push({ chapter, content: liveContent, live: true });
         continue;
       }
       const content = contents.get(chapter.filePath);
-      if (content !== undefined) docs.push({ chapter, content, live: false });
+      if (content !== undefined) documents.push({ chapter, content, live: false });
+      else unreadable.push({ chapter, reason: reasons.get(chapter.filePath) });
     }
-    return docs;
+    return { documents, unreadable };
   },
 
   clear: () => set({ info: {}, refreshing: false }),

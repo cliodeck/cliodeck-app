@@ -35,6 +35,7 @@ import { useManuscriptStore, currentRelativePath } from '../../stores/manuscript
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { runCitationCheck } from '../../services/check-citations';
 import { newDocument } from '../../services/new-document';
+import { unreadableChaptersNote } from '../../services/unreadable-chapters';
 import { ExportReadTimedOutError, startExportReadLimit } from '../Export/export-read-limit';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -189,8 +190,13 @@ export const EditorPanel: React.FC = () => {
       currentRelativePath() !== startRel ||
       useProjectStore.getState().currentProject?.path !== project.path;
 
-    const docs = await useManuscriptStore.getState().readManuscript();
-    if (isAbandoned() || docs.length === 0) return null;
+    const { documents: docs, unreadable } = await useManuscriptStore.getState().readManuscript();
+    if (isAbandoned()) return null;
+    // La numérotation traverse le livre : sans ce chapitre, elle serait fausse partout.
+    if (unreadable.length > 0) {
+      return t('book.renumberUnreadable', { detail: unreadableChaptersNote(unreadable, t) });
+    }
+    if (docs.length === 0) return null;
     if (editorMoved()) return t('book.renumberInterrupted');
 
     const mode = useProjectStore.getState().bookSettings.noteNumbering;

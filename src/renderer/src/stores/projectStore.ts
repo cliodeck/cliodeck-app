@@ -165,11 +165,13 @@ async function reopenAfterFailedSwitch(
 }
 
 let documentNotOpenedNotice: string | null = null;
+let stopWatchingEditor: (() => void) | null = null;
 
 /**
  * Le document du projet ne s'ouvre pas : l'éditeur montrera un tampon sans titre, qui
  * ressemble à un document vide. L'auteur doit le savoir avant d'y écrire, d'où un message
- * qui reste, jusqu'à ce qu'il le ferme ou que ce projet ne soit plus à l'écran.
+ * qui reste, jusqu'à ce qu'il le ferme, qu'un fichier s'ouvre dans l'éditeur ou que ce
+ * projet ne soit plus à l'écran.
  */
 function notifyDocumentNotOpened(filePath: string, error: unknown, messageKey: string): void {
   documentNotOpenedNotice = useNotificationStore.getState().notify({
@@ -182,6 +184,8 @@ function notifyDocumentNotOpened(filePath: string, error: unknown, messageKey: s
 }
 
 function dismissDocumentNotOpened(): void {
+  stopWatchingEditor?.();
+  stopWatchingEditor = null;
   if (documentNotOpenedNotice) useNotificationStore.getState().dismiss(documentNotOpenedNotice);
   documentNotOpenedNotice = null;
 }
@@ -337,6 +341,11 @@ async function openProjectContents(
     } catch (error) {
       console.error('Failed to load document into editor:', error);
       notifyDocumentNotOpened(documentPath, error, openErrorKey(error, 'project.documentOpenHint'));
+      // Il parle du tampon sans titre : un fichier ouvert le rend faux, surtout celui
+      // qu'il demandait de convertir puis de rouvrir.
+      stopWatchingEditor = useEditorStore.subscribe((state) => {
+        if (state.filePath) dismissDocumentNotOpened();
+      });
     }
   }
 

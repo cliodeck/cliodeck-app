@@ -2014,6 +2014,10 @@
     "renumberInterrupted": "Renumbering interrupted: the open chapter changed during the operation. Run it again to finish.",
     "renumberTimedOut": "Renumbering stopped: the disk did not respond for {{minutes}} minutes. Some chapters may have been renumbered, not all: run it again once the disk responds.",
     "renumberRestoreFailed": "Renumbering failed and could not be fully undone: some chapters may remain renumbered. Run it again once the files are accessible.",
+    "renumberUnreadable": "Renumbering cancelled: the manuscript is unchanged, because numbering runs across every chapter. {{detail}}",
+    "readIncomplete": "Incomplete result. {{detail}}",
+    "unreadableChapters": "Unreadable chapters: {{chapters}}.",
+    "unreadableNotUtf8": "A file that is not in UTF-8 remains untouched on disk: convert it to UTF-8, then try again.",
     "settings": {
       "title": "Book settings",
       "saveError": "Could not save the settings — change reverted.",
