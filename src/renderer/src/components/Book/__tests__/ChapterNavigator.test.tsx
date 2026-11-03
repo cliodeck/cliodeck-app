@@ -13,7 +13,7 @@ import type { ResolvedChapter, UnattachedFile } from '@backend/types/book';
 import { ChapterNavigator } from '../ChapterNavigator';
 import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
-import { EditorFileError, useEditorStore } from '../../../stores/editorStore';
+import { EditorFileError, OutgoingSaveError, useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import type { EditorFacade } from '@/editor/facade';
@@ -192,7 +192,7 @@ describe('ChapterNavigator', () => {
   );
 
   it('témoin : un chapitre sortant impossible à écrire garde son message', async () => {
-    loadFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+    loadFile.mockRejectedValue(new OutgoingSaveError(new Error('ENOSPC: no space left on device')));
     setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
     render(<ChapterNavigator />);
 

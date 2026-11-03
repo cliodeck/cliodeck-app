@@ -81,13 +81,27 @@ export class EditorFileError extends Error {
   }
 }
 
+/**
+ * Le document sortant n'a pas pu s'écrire, et le remplacement s'arrête là : rien n'a été
+ * lu. L'erreur garde le message de l'écriture, pour le journal et pour qui l'affiche tel quel.
+ */
+export class OutgoingSaveError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'OutgoingSaveError';
+  }
+}
+
 const NOT_UTF8_KEY = 'editor.notUtf8';
 
 /**
  * Le message d'une ouverture impossible. Un fichier qui n'est pas en UTF-8 est refusé
  * exprès, et l'auteur peut y remédier : « introuvable ou illisible » l'enverrait ailleurs.
+ * De même quand c'est le document ouvert qui ne s'écrit pas : le fichier demandé n'y est
+ * pour rien, et c'est le texte à l'écran qui n'est pas enregistré.
  */
 export function openErrorKey(error: unknown, fallbackKey: string): string {
+  if (error instanceof OutgoingSaveError) return 'toolbar.saveError';
   return error instanceof EditorFileError && error.reason === 'encoding' ? NOT_UTF8_KEY : fallbackKey;
 }
 
@@ -249,6 +263,20 @@ export async function writeOpenDocumentWhileDirty(stillWanted: () => boolean = (
 }
 
 /**
+ * À relever avant d'écrire : rend vrai si l'échec de cette écriture n'a plus d'objet. Le
+ * document a été remplacé et n'est plus à l'écran, ou une autre écriture a tout mis sur le
+ * disque entre-temps. Un document propre au départ reste signalé : son fichier n'est
+ * peut-être plus là, et la pastille dirait « Enregistré ».
+ */
+export function watchSaveOvertaken(): () => boolean {
+  const { documentVersion, lastSavedAt } = useEditorStore.getState();
+  return () => {
+    const now = useEditorStore.getState();
+    return now.documentVersion !== documentVersion || (now.lastSavedAt !== lastSavedAt && !now.isDirty);
+  };
+}
+
+/**
  * Met le document sortant à l'abri. Rend faux si l'auteur refuse d'abandonner un
  * tampon sans titre. Un échec d'écriture remonte : les modifications seraient
  * perdues sans un mot si le remplacement continuait. Une demande chassée entre-temps
@@ -260,7 +288,11 @@ async function flushOutgoing(request: number): Promise<boolean> {
     if (state.getLiveContent() === '') return true;
     return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'));
   }
-  await writeOpenDocumentWhileDirty(() => request === bufferRequestSeq);
+  try {
+    await writeOpenDocumentWhileDirty(() => request === bufferRequestSeq);
+  } catch (error) {
+    throw new OutgoingSaveError(error);
+  }
   return true;
 }
 

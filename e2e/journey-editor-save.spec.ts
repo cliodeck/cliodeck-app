@@ -677,6 +677,12 @@ async function stubSaveDialog(app: ElectronApplication, target: string): Promise
   }, target);
 }
 
+async function stubOpenDialog(app: ElectronApplication, target: string): Promise<void> {
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+  }, target);
+}
+
 /** Un tampon sans titre, hors du projet, avec du texte qui n'existe nulle part ailleurs. */
 async function untitledBuffer(app: ElectronApplication, window: Page, text: string): Promise<void> {
   await sendMenu(app, 'menu:new-file');
@@ -717,6 +723,44 @@ test('Cmd+S sur un fichier non inscriptible : l’auteur le sait, le texte reste
       .toBe(`${ORIGINAL}Une phrase.`);
     // Le message de l'autosave, s'il a eu le temps de partir, n'a plus d'objet.
     await expect(window.locator('.status-toast--error')).toHaveCount(0);
+  } finally {
+    chmodSync(projet.documentMd, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('Cmd+O vers un fichier sain, alors que le document ouvert refuse l’écriture : le message parle de l’enregistrement, le texte reste, et le second essai ouvre', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const sain = join(projet.dir, 'sain.md');
+  writeFileSync(sain, 'Un fichier parfaitement lisible.');
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    await stubOpenDialog(app, sain);
+
+    chmodSync(projet.documentMd, 0o444);
+    await typeAtEnd(window, 'Une phrase.');
+    await sendMenu(app, 'menu:open-file');
+
+    await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlerts(window);
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
+    await expect(editorOf(window)).toContainText('Une phrase.');
+
+    chmodSync(projet.documentMd, 0o644);
+    await sendMenu(app, 'menu:open-file');
+
+    await expect(editorOf(window)).toContainText('Un fichier parfaitement lisible.', { timeout: 15_000 });
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe(`${ORIGINAL}Une phrase.`);
   } finally {
     chmodSync(projet.documentMd, 0o644);
     await app.close();
@@ -774,9 +818,14 @@ for (const door of ['bouton', 'menu'] as const) {
 }
 
 // L'écouteur jamais retiré garde le `t` du premier rendu, en français : il répond le premier.
-for (const [language, saveLabel, message] of [
-  ['en', 'Save', 'Error saving file'],
-  ['de', 'Speichern', 'Fehler beim Speichern der Datei'],
+for (const [language, saveLabel, message, openMessage] of [
+  ['en', 'Save', 'Error saving file', 'This file could not be opened. It may be missing or unreadable.'],
+  [
+    'de',
+    'Speichern',
+    'Fehler beim Speichern der Datei',
+    'Diese Datei konnte nicht geöffnet werden. Sie ist möglicherweise nicht vorhanden oder unlesbar.',
+  ],
 ] as const) {
   test(`Cmd+S en échec, interface en ${language} : le message est dans la langue de l’auteur`, async () => {
     const outcome = await launchApp({ language });
@@ -797,6 +846,32 @@ for (const [language, saveLabel, message] of [
       await expect(alertMessage(window).first()).toHaveText(message, { timeout: 10_000 });
     } finally {
       chmodSync(dehors, 0o755);
+      await app.close();
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(dehors, { recursive: true, force: true });
+    }
+  });
+
+  test(`Cmd+O sur un fichier illisible, interface en ${language} : le message est dans la langue de l’auteur`, async () => {
+    const outcome = await launchApp({ language });
+    if (outcome.kind === 'skip') {
+      test.skip(true, outcome.reason);
+      return;
+    }
+    const { app, window, userDataDir } = outcome.value;
+    const dehors = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-dehors-'));
+    const illisible = join(dehors, 'illisible.md');
+    writeFileSync(illisible, 'Du texte.');
+
+    try {
+      await expect(window.locator(`.toolbar-btn[title="${saveLabel}"]`).first()).toBeVisible({ timeout: 20_000 });
+      await stubOpenDialog(app, illisible);
+      chmodSync(illisible, 0o000);
+
+      await sendMenu(app, 'menu:open-file');
+
+      await expect(alertMessage(window).first()).toHaveText(openMessage, { timeout: 10_000 });
+    } finally {
       await app.close();
       rmSync(userDataDir, { recursive: true, force: true });
       rmSync(dehors, { recursive: true, force: true });

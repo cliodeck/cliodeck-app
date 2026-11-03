@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Fichier › Enregistrer (Cmd+S) quand l'écriture échoue.
+ * Fichier › Enregistrer (Cmd+S) quand l'écriture échoue, et Fichier › Ouvrir (Cmd+O) à côté.
  *
  * `saveCurrentFile()` n'était pas attendu : l'échec finissait en rejet non géré, et le
  * « Enregistrer sous » du menu n'allait pas plus loin qu'un `console.error`. L'auteur ne
@@ -34,6 +34,7 @@ let writes: Array<[string, string]>;
 /** Ce que fait le disque à chaque écriture : réponse immédiate par défaut. */
 let onWrite: () => Promise<WriteVerdict>;
 let saveDialog: ReturnType<typeof vi.fn>;
+let openDialog: ReturnType<typeof vi.fn>;
 let live: string;
 let rejections: unknown[];
 
@@ -59,13 +60,15 @@ const wait = (ms: number) =>
     await vi.advanceTimersByTimeAsync(ms);
   });
 
-/** Déclenche Cmd+S tel que le preload le relaie, et laisse passer ce qui ne dépend pas du disque. */
-async function cmdS(): Promise<void> {
+/** Déclenche la commande telle que le preload la relaie, et laisse passer ce qui ne dépend pas du disque. */
+async function menu(channel: string): Promise<void> {
   await act(async () => {
-    for (const handler of handlers.get('menu:save-file') ?? []) void handler({});
+    for (const handler of handlers.get(channel) ?? []) void handler({});
     await vi.advanceTimersByTimeAsync(0);
   });
 }
+const cmdS = () => menu('menu:save-file');
+const cmdO = () => menu('menu:open-file');
 
 function hold(): { wait: () => Promise<void>; release: () => void } {
   let release = (): void => undefined;
@@ -112,6 +115,7 @@ beforeEach(() => {
   rejections = [];
   process.on('unhandledRejection', onRejection);
   saveDialog = vi.fn(async () => ({ canceled: false, filePath: NOTE }));
+  openDialog = vi.fn(async () => ({ canceled: false, filePaths: [CHAPTER] }));
   (window as unknown as { electron: unknown }).electron = {
     editor: {
       loadFile: async (path: string) => ({ success: true, content: disk[path] ?? '' }),
@@ -122,7 +126,7 @@ beforeEach(() => {
         return verdict;
       },
     },
-    dialog: { saveFile: saveDialog },
+    dialog: { saveFile: saveDialog, openFile: openDialog },
     ipcRenderer: {
       on: (channel: string, handler: (...args: unknown[]) => unknown) => {
         handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
@@ -471,5 +475,118 @@ describe('Cmd+S sur un tampon sans titre', () => {
 
     expect(writes).toEqual([]);
     expect(dialogs().alertOpen).toBe(false);
+  });
+});
+
+describe('Cmd+O', () => {
+  const unreadable = (): void => {
+    window.electron.editor.loadFile = (async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'permission',
+      error: 'EACCES: permission denied',
+    })) as never;
+  };
+
+  beforeEach(() => {
+    renderHook(() => useMenuShortcuts());
+  });
+
+  it('fichier illisible : le message de l’ouverture, et le document reste', async () => {
+    unreadable();
+
+    await cmdO();
+
+    expect(dialogs().alertMessage).toBe(i18n.t('toolbar.openError'));
+    expect(store().filePath).toBe(DOCUMENT);
+    expect(rejections).toEqual([]);
+  });
+
+  // « Ce fichier n'a pas pu être ouvert » envoyait l'auteur vers un fichier qui n'y est pour rien.
+  it('fichier sain, document ouvert qui refuse l’écriture : le message parle de l’enregistrement', async () => {
+    type('Une phrase.');
+    onWrite = refused;
+
+    await cmdO();
+
+    expect(dialogs().alertMessage).toBe(i18n.t('toolbar.saveError'));
+    expect(store().filePath).toBe(DOCUMENT);
+    expect(store().getLiveContent()).toBe(`${ORIGINAL}Une phrase.`);
+    expect(disk[DOCUMENT]).toBe(ORIGINAL);
+    expect(rejections).toEqual([]);
+  });
+
+  it('l’écriture revenue, le second essai écrit le document et ouvre le fichier', async () => {
+    type('Une phrase.');
+    onWrite = refused;
+    await cmdO();
+    act(() => dialogs().closeAlert());
+
+    onWrite = healthy;
+    await cmdO();
+
+    expect(disk[DOCUMENT]).toBe(`${ORIGINAL}Une phrase.`);
+    expect(store().filePath).toBe(CHAPTER);
+    expect(dialogs().alertOpen).toBe(false);
+  });
+
+  it('les deux à la fois : c’est l’écriture qui se dit, la lecture n’a pas eu lieu', async () => {
+    type('Une phrase.');
+    onWrite = refused;
+    unreadable();
+
+    await cmdO();
+
+    expect(dialogs().alertMessage).toBe(i18n.t('toolbar.saveError'));
+  });
+});
+
+// Le `t` de ces tests rend la clé : voir un texte allemand prouve que le message ne vient
+// pas du `t` de l'écouteur. Le vrai `t` périmé est joué dans le parcours e2e.
+describe('les messages du menu suivent la langue du moment, pas celle de l’écouteur', () => {
+  const LOCKED = 'Fußnoten werden gerade neu nummeriert — versuchen Sie es gleich noch einmal.';
+
+  beforeEach(async () => {
+    renderHook(() => useMenuShortcuts());
+    await i18n.changeLanguage('de');
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('fr');
+  });
+
+  it('Cmd+O sur un fichier illisible', async () => {
+    window.electron.editor.loadFile = (async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'permission',
+      error: 'EACCES: permission denied',
+    })) as never;
+
+    await cmdO();
+
+    expect(dialogs().alertMessage).toBe(
+      'Diese Datei konnte nicht geöffnet werden. Sie ist möglicherweise nicht vorhanden oder unlesbar.'
+    );
+  });
+
+  it('Cmd+O pendant une renumérotation', async () => {
+    act(() => store().setSwitchLock('book.renumberInProgress'));
+
+    await cmdO();
+
+    expect(dialogs().alertMessage).toBe(LOCKED);
+    expect(store().filePath).toBe(DOCUMENT);
+  });
+
+  it('Cmd+S sur un tampon sans titre, pendant une renumérotation', async () => {
+    open(null, '');
+    type('Une idée à part.');
+    act(() => store().setSwitchLock('book.renumberInProgress'));
+
+    await cmdS();
+
+    expect(dialogs().alertMessage).toBe(LOCKED);
+    expect(disk[NOTE]).toBeUndefined();
   });
 });

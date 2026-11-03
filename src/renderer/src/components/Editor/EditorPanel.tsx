@@ -26,7 +26,7 @@ const SimilarityPanel = lazy(() =>
 const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
-import { openErrorKey, useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../../stores/editorStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -123,6 +123,7 @@ export const EditorPanel: React.FC = () => {
 
   const handleSaveFile = async () => {
     logger.component('EditorPanel', 'handleSaveFile clicked');
+    const overtaken = watchSaveOvertaken();
     try {
       await saveFile();
       logger.component('EditorPanel', 'File saved successfully');
@@ -152,11 +153,11 @@ export const EditorPanel: React.FC = () => {
           }
         } catch (saveAsError) {
           logger.error('EditorPanel', saveAsError);
-          await useDialogStore.getState().showAlert(t('toolbar.saveError'));
+          if (!overtaken()) await useDialogStore.getState().showAlert(t('toolbar.saveError'));
         }
       } else {
         logger.error('EditorPanel', error);
-        await useDialogStore.getState().showAlert(t('toolbar.saveError'));
+        if (!overtaken()) await useDialogStore.getState().showAlert(t('toolbar.saveError'));
       }
     }
   };

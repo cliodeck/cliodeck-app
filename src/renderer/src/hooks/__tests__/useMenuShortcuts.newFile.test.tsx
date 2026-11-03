@@ -16,6 +16,7 @@ import { useMenuShortcuts } from '../useMenuShortcuts';
 import { useEditorStore } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import i18n from '../../i18n';
 
 const PROJECT = '/p/projet';
 const DOCUMENT = `${PROJECT}/document.md`;
@@ -240,7 +241,7 @@ describe('les entrées de fichier du menu sous le verrou', () => {
     await menu('menu:open-file');
 
     expect(openFile).toHaveBeenCalled();
-    expect(dialogs().alertMessage).toBe('book.renumberInProgress');
+    expect(dialogs().alertMessage).toBe(i18n.t('book.renumberInProgress'));
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
@@ -255,7 +256,7 @@ describe('les entrées de fichier du menu sous le verrou', () => {
 
     await menu('menu:open-file');
 
-    expect(dialogs().alertMessage).toBe('editor.notUtf8');
+    expect(dialogs().alertMessage).toBe(i18n.t('editor.notUtf8'));
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
@@ -270,7 +271,7 @@ describe('les entrées de fichier du menu sous le verrou', () => {
 
     await menu('menu:open-file');
 
-    expect(dialogs().alertMessage).toBe('toolbar.openError');
+    expect(dialogs().alertMessage).toBe(i18n.t('toolbar.openError'));
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
@@ -283,7 +284,7 @@ describe('les entrées de fichier du menu sous le verrou', () => {
     await menu('menu:save-file');
 
     expect(saveDialog).toHaveBeenCalled();
-    expect(dialogs().alertMessage).toBe('book.renumberInProgress');
+    expect(dialogs().alertMessage).toBe(i18n.t('book.renumberInProgress'));
     expect(disk['/ailleurs/note.md']).toBeUndefined();
     expect(useEditorStore.getState().filePath).toBeNull();
   });

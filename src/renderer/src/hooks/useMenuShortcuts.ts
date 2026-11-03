@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../stores/dialogStore';
-import { openErrorKey, useEditorStore } from '../stores/editorStore';
+import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { runCitationCheck } from '../services/check-citations';
 import { newDocument } from '../services/new-document';
@@ -22,6 +22,12 @@ export function useMenuShortcuts() {
       console.warn('Electron API not available, skipping menu shortcuts setup');
       return;
     }
+
+    // Les messages d'Ouvrir et d'Enregistrer passent par `i18n.t`, pas par `t` : un écouteur
+    // de menu qui n'a pas été retiré garde le `t` du premier rendu, en français, et c'est lui
+    // qui répond le premier. Nouveau fichier et Vérifier les citations reçoivent encore ce `t` :
+    // ils attendent la correction des écouteurs, qui rendra `t` à jour partout.
+
     // File operations
     const handleNewFile = () => {
       void newDocument(t);
@@ -36,21 +42,22 @@ export function useMenuShortcuts() {
         if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
           const outcome = await loadFile(result.filePaths[0]);
           if (outcome.status === 'locked') {
-            await useDialogStore.getState().showAlert(t(outcome.lock));
+            await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
           }
         }
       } catch (error) {
         console.error('Failed to open file:', error);
-        await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
+        await useDialogStore.getState().showAlert(i18n.t(openErrorKey(error, 'toolbar.openError')));
       }
     };
 
     const handleSaveFile = async () => {
-      const { filePath, bufferDetached, documentVersion, lastSavedAt } = useEditorStore.getState();
+      const { filePath, bufferDetached } = useEditorStore.getState();
 
       // Hors de tout document, le temps d'un changement de projet : rien à enregistrer.
       if (bufferDetached) return;
 
+      const overtaken = watchSaveOvertaken();
       try {
         // If no file path exists, open "Save As" dialog
         if (!filePath) {
@@ -65,7 +72,7 @@ export function useMenuShortcuts() {
           if (!result.canceled && result.filePath) {
             const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
             if (outcome.status === 'locked') {
-              await useDialogStore.getState().showAlert(t(outcome.lock));
+              await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
             }
           }
         } else {
@@ -74,15 +81,7 @@ export function useMenuShortcuts() {
         }
       } catch (error) {
         console.error('Failed to save file:', error);
-        // Comme pour l'autosave : un document remplacé pendant l'écriture n'est plus à
-        // l'écran, et une autre écriture a pu tout mettre sur le disque entre-temps. Un
-        // document propre au départ reste signalé : son fichier n'est peut-être plus là.
-        const now = useEditorStore.getState();
-        const overtaken =
-          now.documentVersion !== documentVersion || (now.lastSavedAt !== lastSavedAt && !now.isDirty);
-        // `i18n.t`, pas `t` : un écouteur de menu qui n'a pas été retiré garde le `t` du premier
-        // rendu, en français, et c'est lui qui répond le premier.
-        if (!overtaken) await useDialogStore.getState().showAlert(i18n.t('toolbar.saveError'));
+        if (!overtaken()) await useDialogStore.getState().showAlert(i18n.t('toolbar.saveError'));
       }
     };
 
