@@ -87,7 +87,11 @@ export const ChapterNavigator: React.FC = () => {
   const refreshAll = useManuscriptStore((s) => s.refreshAll);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState(false);
+  // Un changement de projet est en cours : ce panneau montre encore le projet qu'on
+  // quitte, et plus rien ne doit écrire dans son manifeste.
+  const isProjectLoading = useProjectStore((s) => s.loadState.kind === 'loading');
+  const busy = working || isProjectLoading;
   /** `'new'` = saisie de création ; sinon identifiant du chapitre renommé. */
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -188,9 +192,9 @@ export const ChapterNavigator: React.FC = () => {
     const title = draft.trim();
     const target = editing;
     cancelEditing();
-    if (!title || !target) return;
+    if (!title || !target || isProjectLoading) return;
 
-    setBusy(true);
+    setWorking(true);
     try {
       if (target === 'new') {
         await addChapter(title);
@@ -200,7 +204,7 @@ export const ChapterNavigator: React.FC = () => {
     } catch (error) {
       await report(error, target === 'new' ? 'book.addChapterError' : 'book.renameError');
     } finally {
-      setBusy(false);
+      setWorking(false);
     }
   };
 
@@ -225,8 +229,10 @@ export const ChapterNavigator: React.FC = () => {
     );
 
     // Le `#` fait foi à l'export : on l'aligne quand le chapitre est sous
-    // les yeux de l'auteur (édition annulable d'un simple Cmd+Z).
-    if (chapterId === currentChapterId) {
+    // les yeux de l'auteur (édition annulable d'un simple Cmd+Z). Le chemin le dit, pas
+    // `currentChapterId` : un chapitre annoncé n'est pas forcément celui qu'affiche
+    // l'éditeur, et son titre s'écrirait alors dans un autre texte.
+    if (chapter.filePath === currentRelativePath()) {
       const editor = useEditorStore.getState();
       const facade = editor.editorFacade;
       if (facade) {
@@ -241,13 +247,13 @@ export const ChapterNavigator: React.FC = () => {
       .getState()
       .showConfirm(t('book.removeChapterConfirm', { title: chapter.title }));
     if (!confirmed) return;
-    setBusy(true);
+    setWorking(true);
     try {
       await deleteChapter(chapter.id);
     } catch (error) {
       await report(error, 'book.removeChapterError');
     } finally {
-      setBusy(false);
+      setWorking(false);
     }
   };
 
@@ -256,18 +262,18 @@ export const ChapterNavigator: React.FC = () => {
     if (target < 0 || target >= chapters.length) return;
     const next = [...chapters];
     [next[index], next[target]] = [next[target], next[index]];
-    setBusy(true);
+    setWorking(true);
     try {
       await reorderChapters(next.map(({ missing: _m, ...c }) => c as Chapter));
     } catch (error) {
       await report(error, 'book.reorderError');
     } finally {
-      setBusy(false);
+      setWorking(false);
     }
   };
 
   const handleAttach = async (filePath: string): Promise<void> => {
-    setBusy(true);
+    setWorking(true);
     try {
       const suggested = unattachedFiles.find((f) => f.filePath === filePath);
       await persistChapters([
@@ -283,7 +289,7 @@ export const ChapterNavigator: React.FC = () => {
     } catch (error) {
       await report(error, 'book.attachError');
     } finally {
-      setBusy(false);
+      setWorking(false);
     }
   };
 
@@ -311,7 +317,7 @@ export const ChapterNavigator: React.FC = () => {
         <button
           className="chapter-navigator-action"
           onClick={() => setShowSettings(true)}
-          disabled={!currentProject}
+          disabled={!currentProject || isProjectLoading}
           title={t('book.settings.title')}
         >
           <Settings2 size={14} strokeWidth={1.5} />

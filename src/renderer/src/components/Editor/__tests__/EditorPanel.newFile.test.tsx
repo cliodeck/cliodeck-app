@@ -136,7 +136,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
-  useEditorStore.setState({ editorFacade: null, switchLock: null } as never);
+  useEditorStore.setState({ editorFacade: null, switchLock: null, bufferDetached: false } as never);
   useProjectStore.setState({ currentProject: null, chapters: [] });
   while (useDialogStore.getState().confirmOpen) useDialogStore.getState().resolveConfirm(false);
   while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
@@ -327,5 +327,44 @@ describe('les autres boutons de fichier sous le verrou', () => {
     expect(useDialogStore.getState().alertMessage).toBe('book.renumberInProgress');
     expect(disk['/ailleurs/note.md']).toBeUndefined();
     expect(useEditorStore.getState().filePath).toBeNull();
+  });
+});
+
+describe('la barre d’outils pendant un changement de projet', () => {
+  async function detach(type: 'article' | 'book'): Promise<void> {
+    await mount(type, DOCUMENT);
+    await act(async () => {
+      await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+  }
+
+  it('Enregistrer n’ouvre aucun dialogue sur un document absent', async () => {
+    await detach('article');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.save'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(saveDialog).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+    expect(useDialogStore.getState().alertOpen).toBe(false);
+  });
+
+  it('Nouveau fichier, article : aucune question et aucun tampon', async () => {
+    await detach('article');
+
+    await clickNewFile();
+
+    expect(useDialogStore.getState().confirmOpen).toBe(false);
+    expect(useEditorStore.getState().bufferDetached).toBe(true);
+  });
+
+  it('Nouveau fichier, livre : aucun chapitre', async () => {
+    await detach('book');
+
+    await clickNewFile();
+
+    expect(window.electron.project.createChapter).not.toHaveBeenCalled();
   });
 });

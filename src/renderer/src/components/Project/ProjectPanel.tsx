@@ -34,6 +34,7 @@ export const ProjectPanel: React.FC = () => {
     loadProject,
     createProject,
     closeProject,
+    patchCurrentProject,
     loadRecentProjects,
     chapters,
   } = useProjectStore();
@@ -66,7 +67,8 @@ export const ProjectPanel: React.FC = () => {
 
     setIsCreating(true);
     try {
-      await createProject(projectName, newProjectType, newProjectPath);
+      // Rien de créé, sans erreur : la modale reste, avec ce que l'auteur y a saisi.
+      if (!(await createProject(projectName, newProjectType, newProjectPath))) return;
       setShowCreateModal(false);
       setNewProjectName('');
       setNewProjectPath('');
@@ -319,11 +321,7 @@ export const ProjectPanel: React.FC = () => {
                 <CSLSettings
                   projectPath={currentProject.path}
                   currentCSL={currentProject.cslPath}
-                  onCSLChange={() => {
-                    // Reload project to get updated CSL path
-                    const projectJsonPath = `${currentProject.path}/project.json`;
-                    loadProject(projectJsonPath);
-                  }}
+                  onCSLChange={(cslPath) => patchCurrentProject({ cslPath })}
                 />
               </CollapsibleSection>
             )}

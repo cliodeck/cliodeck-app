@@ -240,6 +240,72 @@ describe('ChapterNavigator', () => {
   });
 });
 
+describe('renommer un chapitre', () => {
+  const OPEN_CHAPTER = `${PROJECT_PATH}/chapters/c1.md`;
+  let text: string;
+  let setValue: ReturnType<typeof vi.fn>;
+
+  async function rename(title: string): Promise<void> {
+    render(<ChapterNavigator />);
+    fireEvent.doubleClick(screen.getByText('Un'));
+    const input = screen.getByPlaceholderText('book.titlePlaceholder');
+    fireEvent.change(input, { target: { value: title } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+  }
+
+  beforeEach(() => {
+    text = '# Un\n\nTexte.\n';
+    setValue = vi.fn((next: string) => {
+      text = next;
+    });
+    useEditorStore.setState({
+      filePath: OPEN_CHAPTER,
+      editorFacade: { getValue: () => text, setValue } as unknown as EditorFacade,
+    });
+    (window as unknown as { electron: unknown }).electron = {
+      project: {
+        saveChapters: vi.fn(async () => ({ success: true })),
+        getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
+      },
+    };
+    setupStore([chapter({ id: 'c1', title: 'Un', order: 0 })]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    useEditorStore.setState({ filePath: null, editorFacade: null });
+    vi.restoreAllMocks();
+  });
+
+  it('le chapitre ouvert : son titre suit dans le texte', async () => {
+    await rename('Un bis');
+
+    expect(text).toBe('# Un bis\n\nTexte.\n');
+  });
+
+  it('un tampon sans titre sous un chapitre encore annoncé : son texte n’est pas touché', async () => {
+    text = 'Une idée.\n';
+    useEditorStore.setState({ filePath: null });
+
+    await rename('Un bis');
+
+    expect(setValue).not.toHaveBeenCalled();
+    expect(text).toBe('Une idée.\n');
+  });
+
+  it('un autre fichier du projet est ouvert : son texte n’est pas touché', async () => {
+    text = '# Notes\n';
+    useEditorStore.setState({ filePath: `${PROJECT_PATH}/notes.md` });
+
+    await rename('Un bis');
+
+    expect(setValue).not.toHaveBeenCalled();
+    expect(text).toBe('# Notes\n');
+  });
+});
+
 describe('ChapterNavigator pendant une opération sur le manuscrit', () => {
   let loadFile: ReturnType<typeof vi.fn>;
 
@@ -309,6 +375,67 @@ describe('ChapterNavigator pendant une opération sur le manuscrit', () => {
 
     expect(loadFile).toHaveBeenCalledWith(`${PROJECT_PATH}/chapters/02.md`);
     expect(useDialogStore.getState().alertOpen).toBe(false);
+  });
+});
+
+describe('ChapterNavigator pendant un changement de projet', () => {
+  let createChapter: ReturnType<typeof vi.fn>;
+  const loading = () =>
+    act(async () => {
+      useProjectStore.setState({ loadState: { kind: 'loading', path: '/autre/project.json' } });
+    });
+
+  beforeEach(() => {
+    createChapter = vi.fn(async () => ({ success: true }));
+    useEditorStore.setState({
+      loadFile: vi.fn(async () => ({ status: 'superseded' })),
+      editorFacade: null,
+    } as never);
+    (window as unknown as { electron: unknown }).electron = {
+      project: {
+        createChapter,
+        saveChapters: vi.fn(async () => ({ success: true })),
+        getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
+      },
+    };
+    setupStore(
+      [chapter({ id: 'c1', title: 'Un', order: 0 }), chapter({ id: 'c2', title: 'Deux', order: 1 })],
+      [{ filePath: 'chapters/brouillon.md' } as UnattachedFile]
+    );
+    useProjectStore.setState({ loadState: { kind: 'idle' } });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useProjectStore.setState({ loadState: { kind: 'idle' } });
+    vi.restoreAllMocks();
+  });
+
+  it('rien ne peut plus écrire dans le manifeste du projet qu’on quitte', async () => {
+    render(<ChapterNavigator />);
+    expect(screen.getByTitle('book.addChapter')).toBeEnabled();
+
+    await loading();
+
+    expect(screen.getByTitle('book.addChapter')).toBeDisabled();
+    expect(screen.getByTitle('book.settings.title')).toBeDisabled();
+    for (const button of screen.getAllByTitle('book.moveDown')) expect(button).toBeDisabled();
+    for (const button of screen.getAllByTitle('book.removeChapter')) expect(button).toBeDisabled();
+    expect(screen.getByTitle('book.attach')).toBeDisabled();
+  });
+
+  it('une saisie ouverte avant le changement n’ajoute aucun chapitre au projet quitté', async () => {
+    render(<ChapterNavigator />);
+    fireEvent.click(screen.getByTitle('book.addChapter'));
+    const input = screen.getByPlaceholderText('book.titlePlaceholder');
+    fireEvent.change(input, { target: { value: 'Chapitre fantôme' } });
+
+    await loading();
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+
+    expect(createChapter).not.toHaveBeenCalled();
   });
 });
 

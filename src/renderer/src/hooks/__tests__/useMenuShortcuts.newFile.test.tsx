@@ -100,7 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useEditorStore.setState({ editorFacade: null, switchLock: null } as never);
+  useEditorStore.setState({ editorFacade: null, switchLock: null, bufferDetached: false } as never);
   useProjectStore.setState({ currentProject: null, chapters: [] });
   while (dialogs().confirmOpen) dialogs().resolveConfirm(false);
   while (dialogs().alertOpen) dialogs().closeAlert();
@@ -191,6 +191,44 @@ describe('menu:save-file sur un tampon sans titre', () => {
     await menu('menu:save-file');
 
     expect(saveDialog.mock.calls[0][0].properties).toContain('showOverwriteConfirmation');
+  });
+});
+
+describe('le menu pendant un changement de projet', () => {
+  /** La vue est détachée : hors de tout document, et le sortant déjà écrit. */
+  async function detach(type: 'article' | 'book'): Promise<void> {
+    mount(type);
+    await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    live = '';
+    useEditorStore.setState({ editorFacade: facade() });
+  }
+
+  it('Cmd+S ne propose pas d’enregistrer un document absent', async () => {
+    await detach('article');
+
+    await menu('menu:save-file');
+
+    expect(saveDialog).not.toHaveBeenCalled();
+    expect(disk['/ailleurs/note.md']).toBeUndefined();
+    expect(useEditorStore.getState().filePath).toBeNull();
+  });
+
+  it('Cmd+N dans un article ne crée aucun tampon', async () => {
+    await detach('article');
+
+    await menu('menu:new-file');
+
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(useEditorStore.getState().bufferDetached).toBe(true);
+  });
+
+  it('Cmd+N dans un livre n’ajoute aucun chapitre au projet qu’on quitte', async () => {
+    await detach('book');
+
+    await menu('menu:new-file');
+
+    expect(createChapter).not.toHaveBeenCalled();
+    expect(useEditorStore.getState().bufferDetached).toBe(true);
   });
 });
 

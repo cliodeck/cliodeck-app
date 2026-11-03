@@ -30,7 +30,10 @@ export function newDocument(t: TFunction): Promise<void> {
 
 async function run(t: TFunction): Promise<void> {
   const { showAlert, showConfirm } = useDialogStore.getState();
-  const { filePath, switchLock } = useEditorStore.getState();
+  const { filePath, switchLock, bufferDetached } = useEditorStore.getState();
+  // Un changement de projet est en cours : aucun document n'est ouvert, et le projet
+  // affiché est celui qu'on quitte. Y ajouter un chapitre n'aurait aucun sens.
+  if (bufferDetached) return;
   if (switchLock) {
     await showAlert(t(switchLock));
     return;

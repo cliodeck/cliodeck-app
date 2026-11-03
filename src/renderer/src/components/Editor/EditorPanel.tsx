@@ -182,7 +182,7 @@ export const EditorPanel: React.FC = () => {
     const project = useProjectStore.getState().currentProject;
     if (!project) return null;
 
-    // Le verrou arrête les remplacements par la porte, pas la création d'un projet.
+    // Le verrou arrête ce qui part après lui, pas ce qui était déjà parti.
     // L'éditeur montre-t-il encore le départ ?
     const startRel = currentRelativePath();
     const editorMoved = (): boolean =>

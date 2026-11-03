@@ -6,6 +6,7 @@ import {
   highlightSpecialChars,
   keymap,
   lineNumbers,
+  placeholder,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
@@ -150,6 +151,7 @@ const cliodeckTheme = EditorView.theme({
     caretColor: 'var(--color-accent)',
     padding: '16px 8px',
   },
+  '.cm-placeholder': { color: 'var(--text-tertiary)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-accent)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground':
     {
@@ -380,8 +382,17 @@ export const CodeMirrorEditor: React.FC = () => {
 
     const documentExtensions: Extension[] = [
         // Hors de tout document : l'auteur ne doit pas pouvoir y taper un texte
-        // qui n'a nulle part où aller.
-        detached ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
+        // qui n'a nulle part où aller, ni une insertion y entrer par programme (la
+        // lecture seule n'arrête que le clavier). Le chargement peut durer : la vue
+        // dit pourquoi elle ne répond pas.
+        detached
+          ? [
+              EditorState.readOnly.of(true),
+              EditorView.editable.of(false),
+              EditorState.changeFilter.of(() => false),
+              placeholder(t('project.loading')),
+            ]
+          : [],
         history(),
         formattingKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),

@@ -7,7 +7,8 @@ import './CSLSettings.css';
 interface CSLSettingsProps {
   projectPath: string;
   currentCSL?: string;
-  onCSLChange?: () => void;
+  /** Le chemin absolu rendu par le main, `undefined` si le style est retiré. */
+  onCSLChange?: (cslPath: string | undefined) => void;
 }
 
 export const CSLSettings: React.FC<CSLSettingsProps> = ({
@@ -61,7 +62,7 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       // Use the final path (may be copied to project)
       const finalPath = result.cslPath || path;
       setCSLPath(finalPath);
-      onCSLChange?.();
+      onCSLChange?.(finalPath);
 
       console.log('✅ CSL path saved:', finalPath);
     } catch (error: unknown) {
@@ -77,13 +78,17 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
     try {
       const projectJsonPath = `${projectPath}/project.json`;
 
-      await window.electron.project.setCSLPath({
+      const result = await window.electron.project.setCSLPath({
         projectPath: projectJsonPath,
         cslPath: undefined,
       });
 
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to remove CSL path');
+      }
+
       setCSLPath(undefined);
-      onCSLChange?.();
+      onCSLChange?.(undefined);
 
       console.log('✅ CSL path removed');
     } catch (error) {
