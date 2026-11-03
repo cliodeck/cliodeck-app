@@ -10,7 +10,7 @@
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/react';
-import { useFocusTrap } from '../useFocusTrap';
+import { isModalOpen, useFocusTrap } from '../useFocusTrap';
 
 afterEach(() => cleanup());
 
@@ -77,5 +77,45 @@ describe('useFocusTrap — Échap', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(onEscape).not.toHaveBeenCalled();
+  });
+});
+
+describe('useFocusTrap — isModalOpen', () => {
+  it('vrai tant qu’un piège est actif avec son conteneur, faux après sa fermeture', () => {
+    const { rerender } = render(<AvecRef active onEscape={vi.fn()} />);
+    expect(isModalOpen()).toBe(true);
+
+    rerender(<AvecRef active={false} onEscape={vi.fn()} />);
+    expect(isModalOpen()).toBe(false);
+  });
+
+  it('faux après le démontage', () => {
+    const { unmount } = render(<AvecRef active onEscape={vi.fn()} />);
+    unmount();
+
+    expect(isModalOpen()).toBe(false);
+  });
+
+  it('faux pour un piège inactif, même monté', () => {
+    render(<AvecRef active={false} onEscape={vi.fn()} />);
+
+    expect(isModalOpen()).toBe(false);
+  });
+
+  it('faux pour un panneau sans conteneur, qui ne prend qu’Échap', () => {
+    render(<SansRef active onEscape={vi.fn()} />);
+
+    expect(isModalOpen()).toBe(false);
+  });
+
+  it('deux modales : la fermeture de l’une laisse l’autre compter', () => {
+    const first = render(<AvecRef active onEscape={vi.fn()} />);
+    const second = render(<AvecRef active onEscape={vi.fn()} />);
+
+    first.unmount();
+    expect(isModalOpen()).toBe(true);
+
+    second.unmount();
+    expect(isModalOpen()).toBe(false);
   });
 });

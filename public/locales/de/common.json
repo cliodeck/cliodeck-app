@@ -2373,7 +2373,9 @@
   "rebuild": {
     "title": "Suchindizes werden neu aufgebaut",
     "subtitle": "Die Suche über Ihr Korpus wird optimiert …",
-    "progressAria": "Fortschritt des Indexaufbaus"
+    "progressAria": "Fortschritt des Indexaufbaus",
+    "failedTitle": "Die Suchindizes konnten nicht neu aufgebaut werden",
+    "failedMessage": "Ihr Text ist nicht betroffen: Sie können weiterschreiben. Die Suche in Ihren Quellen ist möglicherweise unvollständig; ClioDeck versucht es beim nächsten Öffnen des Projekts erneut."
   },
   "fileTree": {
     "loading": "Dateien werden geladen …",

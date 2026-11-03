@@ -3,6 +3,7 @@ import { HNSWVectorStore } from './HNSWVectorStore';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
+import type { RebuildProgressEvent } from '../../types/rebuild-progress';
 
 /**
  * Enhanced Vector Store with HNSW indexing and BM25 hybrid search
@@ -33,6 +34,22 @@ export class EnhancedVectorStore {
    * vecteur, ils gardent ceux des extraits supprimés jusqu'à reconstruction.
    */
   private indexesStale: boolean = false;
+  /**
+   * La dernière reconstruction a échoué, et l'auteur l'a lu : le message lui promet
+   * la prochaine ouverture. Rien ne repart avant, sauf s'il y a un nouveau motif :
+   * `indexesStale`, parce que des documents ont quitté SQLite, ou que de nouveaux
+   * extraits arrivent sur un index incomplet.
+   */
+  private rebuildFailureReported: boolean = false;
+  /**
+   * HNSW et BM25 en mémoire ne contiennent pas tout le corpus : une reconstruction les
+   * a vidés et s'est arrêtée avant de les remplir. Cet état-là ne s'écrit jamais sur le
+   * disque : la prochaine ouverture, trouvant un index non vide, ne reconstruirait rien,
+   * et le reste du corpus sortirait de la recherche par le sens, sans un mot.
+   */
+  private indexesIncomplete: boolean = false;
+  /** Ce store n'a plus de projet à l'écran : il n'a plus rien à reconstruire ni à publier. */
+  private closed: boolean = false;
   private rebuildProgress: {
     current: number;
     total: number;
@@ -40,12 +57,7 @@ export class EnhancedVectorStore {
   } = { current: 0, total: 0, status: 'idle' };
 
   // Callback for progress updates
-  private onRebuildProgress?: (progress: {
-    current: number;
-    total: number;
-    status: string;
-    percentage: number;
-  }) => void;
+  private onRebuildProgress?: (progress: RebuildProgressEvent) => void;
 
   constructor(projectPath: string) {
     console.log('🚀 Initializing Enhanced Vector Store...');
@@ -129,14 +141,7 @@ export class EnhancedVectorStore {
   /**
    * Set progress callback for rebuild operations
    */
-  setRebuildProgressCallback(
-    callback: (progress: {
-      current: number;
-      total: number;
-      status: string;
-      percentage: number;
-    }) => void
-  ): void {
+  setRebuildProgressCallback(callback: (progress: RebuildProgressEvent) => void): void {
     this.onRebuildProgress = callback;
   }
 
@@ -144,7 +149,9 @@ export class EnhancedVectorStore {
    * Check if indexes need to be rebuilt
    */
   needsRebuild(): boolean {
+    if (this.closed) return false;
     if (this.indexesStale) return true;
+    if (this.rebuildFailureReported) return false;
     const hnswSize = this.hnswStore.getSize();
     const chunks = this.vectorStore.getAllChunksWithEmbeddings();
     return hnswSize === 0 && chunks.length > 0;
@@ -175,6 +182,8 @@ export class EnhancedVectorStore {
    * Add a chunk with embedding to all indexes
    */
   async addChunk(chunk: DocumentChunk, embedding: Float32Array): Promise<void> {
+    this.markStaleIfIncomplete();
+
     // Save to SQLite (original store)
     await this.vectorStore.saveChunk(chunk, embedding);
 
@@ -192,6 +201,7 @@ export class EnhancedVectorStore {
     chunks: Array<{ chunk: DocumentChunk; embedding: Float32Array }>
   ): Promise<void> {
     console.log(`📥 [ENHANCED] Adding ${chunks.length} chunks to all indexes...`);
+    this.markStaleIfIncomplete();
 
     // Save to SQLite
     console.log(`📥 [ENHANCED] Step 1: Saving ${chunks.length} chunks to SQLite...`);
@@ -218,6 +228,15 @@ export class EnhancedVectorStore {
     console.log(`📥 [ENHANCED] Step 4: Saving indexes to disk...`);
     await this.save();
     console.log(`📥 [ENHANCED] Step 4 complete: Indexes saved`);
+  }
+
+  /**
+   * De nouveaux extraits sur un index incomplet sont un nouveau motif : la reconstruction
+   * que planifie toute indexation refera le corpus entier. Avant d'écrire : même si
+   * l'ajout échoue en route, SQLite a pu les recevoir.
+   */
+  private markStaleIfIncomplete(): void {
+    if (this.indexesIncomplete) this.indexesStale = true;
   }
 
   /**
@@ -287,6 +306,10 @@ export class EnhancedVectorStore {
    * Rebuild all indexes from SQLite with progress tracking
    */
   async rebuildIndexes(): Promise<void> {
+    // Base fermée : l'échec irait s'afficher sur le projet suivant, et `clear()`
+    // aurait déjà supprimé du disque l'index du projet quitté.
+    if (this.closed) return;
+
     if (this.isRebuilding) {
       throw new Error('Rebuild already in progress');
     }
@@ -295,13 +318,16 @@ export class EnhancedVectorStore {
     // Levé AVANT de lire SQLite : une suppression pendant la reconstruction
     // le remet, et la reconstruction suivante la prendra en compte.
     this.indexesStale = false;
+    this.rebuildFailureReported = false;
+    // Dès avant `clear()` : il vide la mémoire d'abord, et peut lever ensuite sur le disque.
+    this.indexesIncomplete = true;
     console.log('🔨 Rebuilding all indexes from SQLite...');
     const startTime = Date.now();
 
     try {
       // Update progress: Starting
       this.rebuildProgress = { current: 0, total: 100, status: 'Initializing...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Clear existing indexes
       await this.hnswStore.clear();
@@ -309,15 +335,16 @@ export class EnhancedVectorStore {
 
       // Update progress: Loading chunks
       this.rebuildProgress = { current: 10, total: 100, status: 'Loading chunks from database...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Get all chunks with embeddings from SQLite
       const chunks = await this.vectorStore.getAllChunksWithEmbeddings();
 
       if (chunks.length === 0) {
         console.log('⚠️  No chunks to index');
+        this.indexesIncomplete = false;
         this.rebuildProgress = { current: 100, total: 100, status: 'No chunks to index' };
-        this.notifyProgress();
+        this.notifyProgress('done');
         return;
       }
 
@@ -329,7 +356,7 @@ export class EnhancedVectorStore {
         total: 100,
         status: `Building HNSW index (${chunks.length} chunks)...`,
       };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Add to HNSW (takes ~70% of time)
       await this.hnswStore.addChunks(chunks);
@@ -340,14 +367,15 @@ export class EnhancedVectorStore {
         total: 100,
         status: `Building BM25 index (${chunks.length} chunks)...`,
       };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Add to BM25
       this.bm25Index.addChunks(chunks.map((c) => c.chunk));
+      this.indexesIncomplete = false;
 
       // Update progress: Saving
       this.rebuildProgress = { current: 90, total: 100, status: 'Saving indexes...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Save indexes
       await this.save();
@@ -357,12 +385,13 @@ export class EnhancedVectorStore {
 
       // Update progress: Complete
       this.rebuildProgress = { current: 100, total: 100, status: 'Rebuild complete' };
-      this.notifyProgress();
+      this.notifyProgress('done');
     } catch (error) {
-      this.indexesStale = true;
+      this.rebuildFailureReported = true;
       console.error('❌ Failed to rebuild indexes:', error);
-      this.rebuildProgress = { current: 0, total: 100, status: `Error: ${error.message}` };
-      this.notifyProgress();
+      // Le `current` atteint reste : rabattu à 0, l'échec se lisait comme un début.
+      this.rebuildProgress = { ...this.rebuildProgress, status: `Error: ${error.message}` };
+      this.notifyProgress('failed', error.message);
       throw error;
     } finally {
       this.isRebuilding = false;
@@ -372,7 +401,7 @@ export class EnhancedVectorStore {
   /**
    * Notify progress callback
    */
-  private notifyProgress(): void {
+  private notifyProgress(phase: RebuildProgressEvent['phase'], error?: string): void {
     if (this.onRebuildProgress) {
       const percentage =
         this.rebuildProgress.total > 0
@@ -381,6 +410,8 @@ export class EnhancedVectorStore {
       this.onRebuildProgress({
         ...this.rebuildProgress,
         percentage,
+        phase,
+        error,
       });
     }
   }
@@ -408,6 +439,10 @@ export class EnhancedVectorStore {
    * Save all indexes to disk
    */
   async save(): Promise<void> {
+    if (this.indexesIncomplete) {
+      console.warn('⚠️  Indexes incomplete after a failed rebuild: not written to disk');
+      return;
+    }
     await this.hnswStore.save();
     // BM25 is rebuilt on load, no need to save
   }
@@ -615,8 +650,13 @@ export class EnhancedVectorStore {
 
   /**
    * Close database connection
+   *
+   * Une reconstruction ne peut pas être en cours ici : aucune de ses étapes ne rend la
+   * main au fil principal, et une demande de fermeture attend donc qu'elle se termine.
+   * Seule une reconstruction encore à venir (préchauffage, minuteur) est à arrêter.
    */
   close(): void {
+    this.closed = true;
     this.vectorStore.close();
   }
 

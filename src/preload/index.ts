@@ -87,13 +87,18 @@ const api = {
     }) => ipcRenderer.invoke('project:set-csl-path', data),
     getConfig: (projectPath: string) => ipcRenderer.invoke('project:get-config', projectPath),
     updateConfig: (projectPath: string, updates: any) => ipcRenderer.invoke('project:update-config', projectPath, updates),
+    // Même forme que RebuildProgressEvent : le preload ne compile que ce qui est sous src/.
     onRebuildProgress: (callback: (progress: {
       current: number;
       total: number;
       status: string;
       percentage: number;
+      phase: 'running' | 'done' | 'failed';
+      error?: string;
     }) => void) => {
-      ipcRenderer.on('project:rebuild-progress', (_event, progress) => callback(progress));
+      const listener = (_event: unknown, progress: Parameters<typeof callback>[0]) => callback(progress);
+      ipcRenderer.on('project:rebuild-progress', listener);
+      return () => ipcRenderer.removeListener('project:rebuild-progress', listener);
     },
   },
 

@@ -15,6 +15,7 @@ import { KnowledgeGraphBuilder, type GraphNode, type GraphEdge } from '../../../
 import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../backend/core/analysis/TopicModelingService.js';
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
 import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
+import type { RebuildProgressEvent } from '../../../backend/types/rebuild-progress.js';
 import { configManager } from './config-manager.js';
 import { retrievalService, type SourceType } from './retrieval-service.js';
 import { extractPdfIsolated } from './pdf-extract-isolated.js';
@@ -74,12 +75,7 @@ class PDFService {
    */
   async init(
     projectPath: string,
-    onRebuildProgress?: (progress: {
-      current: number;
-      total: number;
-      status: string;
-      percentage: number;
-    }) => void
+    onRebuildProgress?: (progress: RebuildProgressEvent) => void
   ) {
     if (!projectPath) {
       throw new Error('PDF Service requires a project path');
