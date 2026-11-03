@@ -164,19 +164,26 @@ async function reopenAfterFailedSwitch(
   await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
+let documentNotOpenedNotice: string | null = null;
+
 /**
  * Le document du projet ne s'ouvre pas : l'éditeur montrera un tampon sans titre, qui
  * ressemble à un document vide. L'auteur doit le savoir avant d'y écrire, d'où un message
- * qui reste jusqu'à ce qu'il le ferme.
+ * qui reste, jusqu'à ce qu'il le ferme ou que ce projet ne soit plus à l'écran.
  */
 function notifyDocumentNotOpened(filePath: string, error: unknown, messageKey: string): void {
-  useNotificationStore.getState().notify({
+  documentNotOpenedNotice = useNotificationStore.getState().notify({
     level: 'error',
     title: i18n.t('project.documentOpenError'),
     message: i18n.t(messageKey),
     details: `${filePath}\n${error instanceof Error ? error.message : String(error)}`,
     duration: 0,
   });
+}
+
+function dismissDocumentNotOpened(): void {
+  if (documentNotOpenedNotice) useNotificationStore.getState().dismiss(documentNotOpenedNotice);
+  documentNotOpenedNotice = null;
 }
 
 /** Un projet tel que le main le rend : dates sérialisées, et ce qu'il reste à ouvrir. */
@@ -198,6 +205,7 @@ async function openProjectContents(
   set: StoreApi<ProjectState>['setState'],
   detached: DetachedEditor
 ): Promise<void> {
+  dismissDocumentNotOpened();
   set({
     currentProject: {
       ...project,
@@ -501,6 +509,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     // Clear frontend state
+    dismissDocumentNotOpened();
     set({
       currentProject: null,
       chapters: [],

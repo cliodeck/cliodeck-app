@@ -245,6 +245,31 @@ describe('projectStore.loadProject — le document ne s’ouvre pas', () => {
     expectUntitledBuffer();
   });
 
+  it('rouvrir le projet : un seul message, et plus aucun une fois le fichier réparé', async () => {
+    const unreadable = { success: false, code: 'unreadable', reason: 'encoding', error: 'pas UTF-8' };
+    stub.editor.loadFile.mockResolvedValue(unreadable);
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    expect(toasts()).toHaveLength(1);
+
+    stub.editor.loadFile.mockResolvedValue({ success: true, content: '# Demo\n' });
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(toasts()).toEqual([]);
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+  });
+
+  it('fermer le projet : le message ne lui survit pas', async () => {
+    stub.editor.loadFile.mockResolvedValue({ success: false, code: 'unreadable', error: 'EACCES' });
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    expect(toasts()).toHaveLength(1);
+
+    await useProjectStore.getState().closeProject();
+
+    expect(toasts()).toEqual([]);
+  });
+
   it('createProject suit la même règle', async () => {
     stub.project.create.mockResolvedValue({ success: true, project: fakeProject });
     stub.editor.loadFile.mockResolvedValue({
