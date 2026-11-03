@@ -407,6 +407,16 @@ describe('Schémas du manuscrit (chapitres de livre)', () => {
     ).toThrow('Validation failed');
   });
 
+  it('retire les marques de réconciliation : elles disent le disque, pas le manifeste', () => {
+    // Le renderer renvoie `outsideProject` avec le reste. `saveChapters` recopie ce qu'il
+    // reçoit : sans ce retrait, la marque resterait écrite après le retour du fichier réel.
+    const { chapters } = validate(ProjectSaveChaptersSchema, {
+      projectPath: '/p',
+      chapters: [{ ...chapter, missing: true, outsideProject: true }],
+    });
+    expect(chapters[0]).toEqual(chapter);
+  });
+
   it('rejette un `kind` inconnu et un chemin vide', () => {
     expect(() =>
       validate(ProjectSaveChaptersSchema, {

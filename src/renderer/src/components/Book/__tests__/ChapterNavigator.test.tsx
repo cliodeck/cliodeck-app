@@ -254,6 +254,28 @@ describe('ChapterNavigator', () => {
     expect(loadFile).not.toHaveBeenCalled();
   });
 
+  it('dit pourquoi un chapitre lié hors du projet ne s’ouvre pas, et ne l’appelle pas introuvable', async () => {
+    setupStore([chapter({ id: 'c1', title: 'Annexe', missing: true, outsideProject: true })]);
+    render(<ChapterNavigator />);
+
+    const button = screen.getByText('Annexe').closest('button') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe('book.chapterOutsideProject');
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(loadFile).not.toHaveBeenCalled();
+  });
+
+  it('témoin : un chapitre disparu garde son message', () => {
+    setupStore([chapter({ id: 'c1', title: 'Fantôme', missing: true })]);
+    render(<ChapterNavigator />);
+
+    const button = screen.getByText('Fantôme').closest('button') as HTMLButtonElement;
+    expect(button.title).toBe('book.chapterMissing');
+  });
+
   it('réordonne en persistant le nouvel ordre', async () => {
     setupStore([
       chapter({ id: 'c1', title: 'Un', order: 0 }),

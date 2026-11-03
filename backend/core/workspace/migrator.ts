@@ -18,11 +18,18 @@
  *
  * Partial-success report (claw-code lesson 6.3): `copied`, `skipped` with
  * typed reason, `warnings`. Never throws on a single missing file.
+ *
+ * Rien de ce qui sort du projet n'est lu, déplacé ni modifié (`refuseIfOutside`). Un
+ * projet reçu par git ou en zip garde ses liens, et cette migration tourne à son ouverture,
+ * avant les gardes de lecture : ce qu'elle copie devient un fichier ordinaire du projet, que
+ * plus rien ne reconnaît comme venu d'ailleurs, et ce qu'elle déplace quitte le dossier de
+ * l'auteur. Un lien qui reste dans le projet continue de marcher.
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { isInsideAsync } from '../vector-store/file-identity.js';
 import {
   defaultWorkspaceConfig,
   writeWorkspaceConfig,
@@ -41,7 +48,8 @@ export type SkipReason =
   | 'target_exists'
   | 'flat_already_present'
   | 'not_a_file'
-  | 'empty_source';
+  | 'empty_source'
+  | 'outside_project';
 
 export interface MigrationEntry {
   source: string;
@@ -89,7 +97,25 @@ async function safeStat(p: string): Promise<{ size: number; isFile: boolean } | 
   }
 }
 
+/**
+ * Ce chemin mène-t-il hors du projet, lien suivi ? Le refus se note dans le rapport, et
+ * l'appelant laisse le chemin où il est. Les deux côtés sont comparés par chemins réels :
+ * une racine ouverte par un lien (`/tmp`, un dossier déplacé) ne refuse rien à tort.
+ */
+async function refuseIfOutside(
+  root: string,
+  source: string,
+  target: string,
+  report: MigrationReport,
+): Promise<boolean> {
+  if (await isInsideAsync(root, source)) return false;
+  report.skipped.push({ source, target, reason: 'outside_project' });
+  report.warnings.push(`${source} leads outside the project: the migration leaves it alone.`);
+  return true;
+}
+
 async function copyIfPresent(
+  root: string,
   source: string,
   target: string,
   overwrite: boolean,
@@ -100,6 +126,7 @@ async function copyIfPresent(
     report.skipped.push({ source, target, reason: 'source_missing' });
     return;
   }
+  if (await refuseIfOutside(root, source, target, report)) return;
   if (!stat.isFile) {
     report.skipped.push({ source, target, reason: 'not_a_file' });
     return;
@@ -179,6 +206,24 @@ export async function migrateWorkspaceToFlat(
 }
 
 /**
+ * Une ancienne base liée dehors serait renommée à l'autre bout du lien, puis versée dans
+ * `brain.db` ; un `brain.db` lié dehors recevrait la base du projet, qui serait supprimée.
+ */
+async function refuseConsolidation(
+  root: string,
+  legacy: string,
+  brainDb: string,
+  report: MigrationReport,
+): Promise<boolean> {
+  if ((await isInsideAsync(root, legacy)) && (await isInsideAsync(root, brainDb))) return false;
+  report.skipped.push({ source: legacy, target: brainDb, reason: 'outside_project' });
+  report.warnings.push(
+    `${path.basename(legacy)} not consolidated: it or brain.db leads outside the project.`,
+  );
+  return true;
+}
+
+/**
  * Fold `.cliodeck/history.db` into `.cliodeck/brain.db` (db-fusion step 1).
  *
  * Strategy: if `brain.db` is absent (the common case for fresh / pre-fusion
@@ -209,6 +254,7 @@ async function consolidateLegacyObsidian(
   if (!(await exists(legacyObs))) return;
 
   const flat = workspaceFiles(root);
+  if (await refuseConsolidation(root, legacyObs, flat.brainDb, report)) return;
   try {
     renameObsidianTablesInPlace(legacyObs);
 
@@ -381,6 +427,7 @@ async function consolidateLegacyPrimarySources(
   if (!(await exists(legacy))) return;
 
   const flat = workspaceFiles(root);
+  if (await refuseConsolidation(root, legacy, flat.brainDb, report)) return;
   try {
     renamePrimarySourcesTablesInPlace(legacy);
 
@@ -518,6 +565,7 @@ async function consolidateLegacyVectors(
   if (!(await exists(legacy))) return;
 
   const flat = workspaceFiles(root);
+  if (await refuseConsolidation(root, legacy, flat.brainDb, report)) return;
   try {
     renameVectorsTablesInPlace(legacy);
 
@@ -671,6 +719,12 @@ async function renameUnprefixedHistoryTables(
 ): Promise<void> {
   const flat = workspaceFiles(root);
   if (!(await exists(flat.brainDb))) return;
+  // Sans avertissement : cette étape passe à chaque ouverture, et la base visée peut être
+  // celle d'une autre application, qui a bien le droit d'avoir une table `sessions`.
+  if (!(await isInsideAsync(root, flat.brainDb))) {
+    report.skipped.push({ source: flat.brainDb, target: flat.brainDb, reason: 'outside_project' });
+    return;
+  }
 
   let db: Database.Database | undefined;
   try {
@@ -753,6 +807,7 @@ async function consolidateLegacyHistory(
   if (!(await exists(legacyHistory))) return;
 
   const flat = workspaceFiles(root);
+  if (await refuseConsolidation(root, legacyHistory, flat.brainDb, report)) return;
   if (await exists(flat.brainDb)) {
     report.warnings.push(
       `Cannot consolidate ${legacyHistory} into ${flat.brainDb}: both files exist. ` +
@@ -794,17 +849,26 @@ async function migrateLegacySubdir(
   const paths = workspacePaths(root);
   const flat = await ensureWorkspaceDirectories(root);
 
+  // Un `v2` lié dehors : déplacer viderait le dossier de l'auteur dans ce projet.
+  if (await refuseIfOutside(root, paths.legacyV2Dir, flat.root, report)) {
+    if (!(await exists(flat.config))) {
+      await writeWorkspaceConfig(root, defaultWorkspaceConfig(opts.name ?? path.basename(root)));
+      report.copied.push({ source: '(generated)', target: flat.config });
+    }
+    return report;
+  }
+
   const entries = await fs.readdir(paths.legacyV2Dir, { withFileTypes: true });
   for (const e of entries) {
     const source = path.join(paths.legacyV2Dir, e.name);
     const target = path.join(flat.root, e.name);
     if (e.isDirectory()) {
-      await mergeDir(source, target, opts.overwrite ?? false, report);
+      await mergeDir(root, source, target, opts.overwrite ?? false, report);
       await fs.rmdir(source).catch(() => {
         /* dir may be non-empty after collisions — leave it for the caller to see */
       });
     } else {
-      await moveFile(source, target, opts.overwrite ?? false, report);
+      await moveFile(root, source, target, opts.overwrite ?? false, report);
     }
   }
 
@@ -826,11 +890,15 @@ async function migrateLegacySubdir(
 }
 
 async function moveFile(
+  root: string,
   source: string,
   target: string,
   overwrite: boolean,
   report: MigrationReport,
 ): Promise<void> {
+  // Monté tel quel, le lien prendrait la place du fichier canonique (`brain.db`, que tous
+  // les services ouvrent) ; le repli par copie, plus bas, rapporterait son contenu.
+  if (await refuseIfOutside(root, source, target, report)) return;
   if (!overwrite && (await exists(target))) {
     report.skipped.push({ source, target, reason: 'flat_already_present' });
     return;
@@ -850,6 +918,7 @@ async function moveFile(
 }
 
 async function mergeDir(
+  root: string,
   source: string,
   target: string,
   overwrite: boolean,
@@ -861,10 +930,10 @@ async function mergeDir(
     const s = path.join(source, e.name);
     const t = path.join(target, e.name);
     if (e.isDirectory()) {
-      await mergeDir(s, t, overwrite, report);
+      await mergeDir(root, s, t, overwrite, report);
       await fs.rmdir(s).catch(() => {});
     } else {
-      await moveFile(s, t, overwrite, report);
+      await moveFile(root, s, t, overwrite, report);
     }
   }
 }
@@ -917,12 +986,15 @@ async function migrateCliobrain(
   for (const m of CLIOBRAIN_MATCHES) {
     const source = path.join(paths.cliobrainDir, m.source);
     const target = flat[m.target] as string;
-    await copyIfPresent(source, target, opts.overwrite ?? false, report);
+    await copyIfPresent(root, source, target, opts.overwrite ?? false, report);
   }
 
   // Merge ClioBrain config.json into the flat config (preserving unknown keys).
   const cliobrainCfg = path.join(paths.cliobrainDir, 'config.json');
-  if (await exists(cliobrainCfg)) {
+  const hasOwnConfig =
+    (await exists(cliobrainCfg)) &&
+    !(await refuseIfOutside(root, cliobrainCfg, flat.config, report));
+  if (hasOwnConfig) {
     try {
       const raw = await fs.readFile(cliobrainCfg, 'utf8');
       const legacy = JSON.parse(raw) as Record<string, unknown>;

@@ -39,6 +39,7 @@ import {
   CHUNKER_VERSION,
   chunkManuscriptChapter,
 } from '../../../backend/core/rag/manuscript-chunker.js';
+import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { parseOutline } from '../../editor/outline.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { projectManager } from './project-manager.js';
@@ -198,7 +199,8 @@ class ManuscriptIndexService {
   /**
    * Énumère les pièces du manuscrit : les chapitres du manifeste pour un
    * livre, `document.md` sinon. Les pièces absentes du disque sont
-   * ignorées — `getChapters` les signale déjà comme `missing`.
+   * ignorées — `getChapters` les signale déjà comme `missing` —, tout comme
+   * un lien qui sort du projet (décision Q16).
    */
   private async listPieces(workspaceRoot: string): Promise<ManuscriptPiece[]> {
     const res = await projectManager.getChapters(workspaceRoot);
@@ -220,6 +222,7 @@ class ManuscriptIndexService {
     // Article / présentation : un document unique.
     for (const candidate of ['document.md', 'slides.md']) {
       const absolutePath = path.join(workspaceRoot, candidate);
+      if (!isInside(workspaceRoot, absolutePath)) continue;
       try {
         await fs.access(absolutePath);
         pieces.push({
@@ -234,6 +237,40 @@ class ManuscriptIndexService {
       }
     }
     return pieces;
+  }
+
+  /** Retire de l'index ce qui sort aujourd'hui du projet par un lien (décision Q16). */
+  private removeOutside(store: ManuscriptStore, workspaceRoot: string): number {
+    let removed = 0;
+    for (const known of store.listChapters()) {
+      if (!isInside(workspaceRoot, path.resolve(workspaceRoot, known.relativePath))) {
+        store.deleteChapter(known.id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * La même purge, à l'ouverture du projet : une passe n'arrive qu'à la première
+   * sauvegarde, et une question posée avant enverrait l'extrait au modèle. Sans
+   * fournisseur d'embeddings ni aucun envoi, et que le corpus soit activé ou non : la
+   * recherche lit ce qui est dans la table. Best-effort : ne jette jamais.
+   */
+  purgeOutside(): number {
+    const workspaceRoot = this.workspaceRoot;
+    if (!workspaceRoot) return 0;
+    const wasOpen = this.store !== null;
+    try {
+      const store = this.getStore();
+      return store ? this.removeOutside(store, workspaceRoot) : 0;
+    } catch (e) {
+      console.warn('[manuscript-index] purge des liens sortants ignorée :', e);
+      return 0;
+    } finally {
+      // Ouvert pour l'occasion : ce handle ne doit pas garder `brain.db` verrouillé.
+      if (!wasOpen) this.detachStore();
+    }
   }
 
   /**
@@ -291,6 +328,10 @@ class ManuscriptIndexService {
       return report;
     }
     if (pieces.length === 0) {
+      // Plus rien à lire : l'index reste, un dossier déplacé ou un changement de branche ne
+      // doivent pas faire tout réembarquer à leur retour. Sauf ce qui sort du projet.
+      const store = this.getStore();
+      if (store) report.removed = this.removeOutside(store, workspaceRoot);
       report.durationMs = Date.now() - started;
       return report;
     }

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, renameSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { UnreadableFileError } from '../../fs/user-files';
+import { symlinkAvailable } from '../../../__tests__/helpers/native-guards';
 import {
   READING_NOTES_DIR,
   ensureReadingNote,
@@ -269,5 +270,76 @@ describe('lecture d’une note pour l’indexer', () => {
     const file = path.join(project, READING_NOTES_DIR, 'brouillon.md');
     writeFileSync(file, 'Juste du texte.\n');
     expect(await readReadingNote(file)).toBeNull();
+  });
+
+  /** Un projet reçu garde ses liens : une note peut pointer vers un fichier de l'auteur. */
+  describe.skipIf(!symlinkAvailable)('note en lien symbolique', () => {
+    let outside: string;
+    const notesDir = () => path.join(project, READING_NOTES_DIR);
+    const secret = `---\ncitekey: Braudel_1949\nzotero_key: ABCD1234\ntags:\n  - SECRET\n---\n\nSECRET-HORS-PROJET\n`;
+
+    beforeEach(() => {
+      outside = mkdtempSync(path.join(tmpdir(), 'cliodeck-notes-dehors-'));
+      writeFileSync(path.join(outside, 'journal.md'), secret);
+      rmSync(notesDir(), { recursive: true, force: true });
+      mkdirSync(notesDir());
+    });
+
+    afterEach(() => {
+      rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('hors du projet : pas listée, et son front matter n’est pas lu', async () => {
+      symlinkSync(path.join(outside, 'journal.md'), path.join(notesDir(), 'Braudel_1949.md'));
+
+      expect(await listReadingNotes(project)).toEqual([]);
+    });
+
+    it('une note interne en lien reste listée', async () => {
+      const real = path.join(project, 'brouillon.md');
+      writeFileSync(real, secret);
+      symlinkSync(real, path.join(notesDir(), 'Braudel_1949.md'));
+
+      expect((await listReadingNotes(project)).map((n) => n.citekey)).toEqual(['Braudel_1949']);
+    });
+
+    it('poser une étiquette ne réécrit pas le fichier extérieur', async () => {
+      symlinkSync(path.join(outside, 'journal.md'), path.join(notesDir(), 'Braudel_1949.md'));
+
+      const note = await setProjectTags(project, braudel, ['chapitre-2']);
+
+      expect(readFileSync(path.join(outside, 'journal.md'), 'utf-8')).toBe(secret);
+      expect(note.file).not.toBe(path.join(notesDir(), 'Braudel_1949.md'));
+      expect(readFileSync(note.file, 'utf-8')).toContain('chapitre-2');
+    });
+
+    it('un lien cassé vers l’extérieur n’est pas un nom libre : rien ne se crée dehors', async () => {
+      symlinkSync(path.join(outside, 'cree-dehors.md'), path.join(notesDir(), 'Braudel_1949.md'));
+
+      const file = await ensureReadingNote(project, braudel);
+
+      expect(existsSync(path.join(outside, 'cree-dehors.md'))).toBe(false);
+      expect(file).toBe(path.join(notesDir(), 'Braudel_1949-2.md'));
+    });
+
+    it('un lien sortant vers un fichier au front matter cassé n’empêche pas de créer la note', async () => {
+      // Lu, ce fichier ferait répondre « en-tête illisible » pour un fichier qui n'est pas du projet.
+      writeFileSync(path.join(outside, 'casse.md'), '---\ntitle: [non fermé\n---\n');
+      symlinkSync(path.join(outside, 'casse.md'), path.join(notesDir(), 'Braudel_1949.md'));
+
+      const file = await ensureReadingNote(project, braudel);
+
+      expect(file).toBe(path.join(notesDir(), 'Braudel_1949-2.md'));
+      expect(readFileSync(path.join(outside, 'casse.md'), 'utf-8')).toBe('---\ntitle: [non fermé\n---\n');
+    });
+
+    it('`reading-notes` lié hors du projet : rien n’est lu, rien ne s’écrit dehors, et le refus se dit', async () => {
+      rmSync(notesDir(), { recursive: true, force: true });
+      symlinkSync(outside, notesDir());
+
+      expect(await listReadingNotes(project)).toEqual([]);
+      await expect(ensureReadingNote(project, { citekey: 'Autre' })).rejects.toThrow(/sort du projet/);
+      expect(readdirSync(outside)).toEqual(['journal.md']);
+    });
   });
 });

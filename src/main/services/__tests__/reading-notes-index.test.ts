@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
+import { sqliteAvailable, symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { ReadingNotesIndexService } from '../reading-notes-index-service.js';
 import {
   ReadingNotesStore,
@@ -266,5 +266,59 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — consentement dis
     const report = await service.index(allowed);
     expect(report.indexed).toBe(1);
     expect(allowed.texts.join(' ')).toContain('confidentiel');
+  });
+
+  describe.skipIf(!symlinkAvailable)('note en lien symbolique', () => {
+    const SECRET = 'SECRETHORSPROJET';
+    let outside = '';
+
+    beforeEach(() => {
+      outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-dehors-'));
+      fs.writeFileSync(path.join(outside, 'journal.md'), `---\n${BRAUDEL}\n---\n\n${SECRET} : texte privé.\n`);
+    });
+
+    afterEach(() => {
+      fs.rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('hors du projet : n’atteint ni le fournisseur ni la base, et le rapport le dit', async () => {
+      fs.mkdirSync(path.join(tmp, READING_NOTES_DIR));
+      fs.symlinkSync(path.join(outside, 'journal.md'), path.join(tmp, READING_NOTES_DIR, 'Braudel_1949.md'));
+      const embedder = fakeEmbedder();
+
+      const report = await service.index(embedder);
+
+      expect(embedder.calls).toBe(0);
+      expect(report.indexed).toBe(0);
+      expect(report.failures.map((f) => f.relativePath)).toEqual([path.join(READING_NOTES_DIR, 'Braudel_1949.md')]);
+      expect(service.getSearchStore()!.stats().noteCount).toBe(0);
+    });
+
+    it('déjà indexée par le lien : la passe suivante retire ses extraits', async () => {
+      const file = writeNote(tmp, 'Braudel_1949.md', BRAUDEL, `${SECRET} : texte privé.\n`);
+      await service.index(fakeEmbedder());
+      const store = service.getSearchStore()!;
+      expect(store.stats().noteCount).toBe(1);
+      expect(store.searchLexical(SECRET, 5).length).toBeGreaterThan(0);
+
+      fs.rmSync(file);
+      fs.symlinkSync(path.join(outside, 'journal.md'), file);
+      const report = await service.index(fakeEmbedder());
+
+      expect(report.removed).toBe(1);
+      expect(store.stats()).toMatchObject({ noteCount: 0, chunkCount: 0 });
+      expect(store.searchLexical(SECRET, 5)).toEqual([]);
+    });
+
+    it('un lien interne reste indexé', async () => {
+      fs.mkdirSync(path.join(tmp, READING_NOTES_DIR));
+      fs.writeFileSync(path.join(tmp, 'brouillon.md'), `---\n${BRAUDEL}\n---\n\nLa longue durée.\n`);
+      fs.symlinkSync(path.join(tmp, 'brouillon.md'), path.join(tmp, READING_NOTES_DIR, 'Braudel_1949.md'));
+
+      const report = await service.index(fakeEmbedder());
+
+      expect(report.indexed).toBe(1);
+      expect(report.failures).toEqual([]);
+    });
   });
 });

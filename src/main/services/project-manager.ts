@@ -5,6 +5,7 @@ import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { readUserFile, withFileLock } from '../../../backend/core/fs/user-files.js';
+import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
 import {
@@ -30,7 +31,8 @@ async function autoMigrateWorkspace(projectDir: string): Promise<void> {
         kind: report.kind,
         copied: report.copied.length,
         skipped: report.skipped.length,
-        warnings: report.warnings.length,
+        // Le texte, pas le compte : un lien sortant refusé ne se dit que là.
+        warnings: report.warnings,
       });
     }
   } catch (e) {
@@ -473,7 +475,11 @@ export class ProjectManager {
     return { projectDir, projectFile: path.join(projectDir, 'project.json') };
   }
 
-  /** Refuse tout chemin de manifeste qui sort du dossier du projet. */
+  /**
+   * Refuse tout chemin de manifeste qui sort du dossier du projet. Contrôle lexical : il
+   * dit si une ligne a sa place dans le manifeste. Un lien se juge à part
+   * (`leavesProject`) : sa ligne reste, son fichier peut être rétabli à cet endroit.
+   */
   private isInsideProject(projectDir: string, relPath: string): boolean {
     if (path.isAbsolute(relPath)) return false;
     const resolved = path.resolve(projectDir, relPath);
@@ -481,8 +487,13 @@ export class ProjectManager {
     return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
   }
 
+  /** Ce chemin du projet mène-t-il dehors, par un lien (le sien ou celui d'un dossier) ? */
+  private leavesProject(projectDir: string, relPath: string): boolean {
+    return !isInside(projectDir, path.resolve(projectDir, relPath));
+  }
+
   private readChapter(projectDir: string, relPath: string): Promise<ChapterRead> {
-    if (!this.isInsideProject(projectDir, relPath)) {
+    if (!this.isInsideProject(projectDir, relPath) || this.leavesProject(projectDir, relPath)) {
       return Promise.resolve({
         filePath: relPath,
         reason: 'refused',
@@ -519,7 +530,8 @@ export class ProjectManager {
    *
    * Réconciliation (décision cadre n°2 — on ne perd jamais de texte) :
    * - une entrée dont le fichier a disparu est conservée et marquée
-   *   `missing`, jamais supprimée en silence ;
+   *   `missing`, jamais supprimée en silence ; de même pour un lien qui
+   *   sort du projet, marqué en plus `outsideProject` et jamais lu ;
    * - un `.md` présent dans le projet ou dans `chapters/` mais absent du
    *   manifeste est retourné comme « non rattaché », avec un titre suggéré.
    */
@@ -550,11 +562,13 @@ export class ProjectManager {
           continue;
         }
         const abs = path.resolve(projectDir, entry.filePath);
-        chapters.push({
-          ...entry,
-          kind: entry.kind ?? 'chapter',
-          ...(existsSync(abs) ? {} : { missing: true }),
-        });
+        let onDisk: Pick<ResolvedChapter, 'missing' | 'outsideProject'> = {};
+        if (this.leavesProject(projectDir, entry.filePath)) {
+          onDisk = { missing: true, outsideProject: true };
+        } else if (!existsSync(abs)) {
+          onDisk = { missing: true };
+        }
+        chapters.push({ ...entry, kind: entry.kind ?? 'chapter', ...onDisk });
       }
       chapters.sort((a, b) => a.order - b.order);
 
@@ -567,6 +581,8 @@ export class ProjectManager {
       const scan = async (dirRel: string): Promise<void> => {
         const dirAbs = dirRel ? path.join(projectDir, dirRel) : projectDir;
         if (!existsSync(dirAbs)) return;
+        // `chapters` lié ailleurs : ce dossier n'est pas celui du projet.
+        if (dirRel && this.leavesProject(projectDir, dirRel)) return;
         let entries: string[];
         try {
           entries = await readdir(dirAbs);
@@ -582,7 +598,10 @@ export class ProjectManager {
           if (claimed.has(rel)) continue;
           unattached.push({
             filePath: rel,
-            suggestedTitle: await this.suggestTitle(path.join(dirAbs, name)),
+            // Un lien qui sort du projet : on n'en lit rien, pas même le titre.
+            suggestedTitle: this.leavesProject(projectDir, rel)
+              ? undefined
+              : await this.suggestTitle(path.join(dirAbs, name)),
           });
         }
       };
@@ -735,13 +754,24 @@ export class ProjectManager {
 
       const order = chapters.length;
       const chaptersDir = path.join(projectDir, CHAPTERS_DIR);
+      // Le fichier s'écrirait à l'autre bout du lien, et naîtrait manquant.
+      if (this.leavesProject(projectDir, CHAPTERS_DIR)) {
+        throw new Error(
+          `Le dossier ${CHAPTERS_DIR} est un lien qui sort du projet : impossible d'y créer un chapitre.`
+        );
+      }
       await mkdir(chaptersDir, { recursive: true });
 
       // Nom libre s'il est déjà pris : le préfixe n'a pas valeur d'autorité,
       // mais deux fichiers ne peuvent pas partager un nom.
+      // Un lien cassé vers l'extérieur n'est pas un nom libre : `existsSync` ne le voit pas,
+      // et `writeFile` créerait le fichier à l'autre bout.
+      const taken = (name: string): boolean =>
+        existsSync(path.join(chaptersDir, name)) ||
+        this.leavesProject(projectDir, path.join(CHAPTERS_DIR, name));
       let fileName = chapterFileName(order, data.title);
       let attempt = 2;
-      while (existsSync(path.join(chaptersDir, fileName))) {
+      while (taken(fileName)) {
         fileName = chapterFileName(order, `${data.title}-${attempt}`);
         attempt += 1;
       }

@@ -377,9 +377,11 @@ export const ChapterNavigator: React.FC = () => {
                     onDoubleClick={() => startEditing(chapter.id, chapter.title)}
                     disabled={chapter.missing}
                     title={
-                      chapter.missing
-                        ? t('book.chapterMissing', { path: chapter.filePath })
-                        : `${chapter.filePath} — ${t('book.renameHint')}`
+                      chapter.outsideProject
+                        ? t('book.chapterOutsideProject', { path: chapter.filePath })
+                        : chapter.missing
+                          ? t('book.chapterMissing', { path: chapter.filePath })
+                          : `${chapter.filePath} — ${t('book.renameHint')}`
                     }
                   >
                     <span className="chapter-number">

@@ -26,6 +26,7 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import {
   pathExists,
   withExportTimeLimit,
@@ -387,7 +388,8 @@ export class WordExportService {
         (options.projectType === 'article' || options.projectType === 'book')
       ) {
         const abstractPath = join(options.projectPath, 'abstract.md');
-        if (await pathExists(abstractPath)) {
+        // Un lien qui sort du projet n'est pas lu : ce fichier s'imprimerait dans l'export.
+        if ((await pathExists(abstractPath)) && (await isInsideAsync(options.projectPath, abstractPath))) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           const parts = splitAbstract(abstractContent);
           abstract = parts.body;

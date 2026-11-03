@@ -16,6 +16,7 @@
  */
 import path from 'path';
 import { realpath } from 'fs/promises';
+import { realLocation } from '../../../../backend/core/vector-store/file-identity.js';
 
 // Lazy import to avoid circular dependencies
 let _projectManager: { getCurrentProjectPath: () => string | null } | null = null;
@@ -74,27 +75,15 @@ async function projectRoots(): Promise<string[]> {
 
 /**
  * Resolve symlinks and re-check that the real path is still inside an allowed
- * root. If the file does not exist yet (write case), we fall back to resolving
- * the closest existing ancestor.
+ * root. If the file does not exist yet (write case), `realLocation` resolves the
+ * closest existing ancestor, and follows a dangling link: `atomicWriteFile` would
+ * create the file at its far end. A link loop stays where it is: reading it fails.
  */
 async function realpathWithFallback(resolved: string): Promise<string> {
   try {
     return await realpath(resolved);
   } catch {
-    // Walk up until we find an existing ancestor, then append the remainder.
-    let current = resolved;
-    const segments: string[] = [];
-    while (true) {
-      const parent = path.dirname(current);
-      if (parent === current) return resolved; // no existing ancestor
-      try {
-        const real = await realpath(parent);
-        return path.join(real, ...segments.reverse());
-      } catch {
-        segments.push(path.basename(current));
-        current = parent;
-      }
-    }
+    return realLocation(resolved) ?? resolved;
   }
 }
 

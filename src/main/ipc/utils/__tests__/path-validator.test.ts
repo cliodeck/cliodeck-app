@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import os from 'os';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'fs/promises';
+import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
 
 // Mock electron.app so validateReadPath does not try to load the real runtime.
 vi.mock('electron', () => ({
@@ -108,6 +109,49 @@ describe('validateWritePath', () => {
       await expect(validateWritePath(path.join(saved!, 'x.md'))).rejects.toThrow(
         'Write access denied'
       );
+    } finally {
+      projectPathRef.current = saved;
+    }
+  });
+});
+
+/**
+ * Un lien cassé n'a pas de chemin réel : le repli sur le dossier parent le croyait dans
+ * le projet, et `atomicWriteFile`, qui suit les liens, créait le fichier à l'autre bout.
+ */
+describe.skipIf(!symlinkAvailable)('lien symbolique cassé', () => {
+  it('vers l’extérieur : ni lecture ni écriture', async () => {
+    const link = path.join(projectDir, 'casse-dehors.md');
+    await symlink(path.join(tmpRoot, 'dehors', 'pas-encore.md'), link);
+
+    await expect(validateReadPath(link)).rejects.toThrow('Read access denied');
+    await expect(validateWritePath(link)).rejects.toThrow('Write access denied');
+  });
+
+  it('vers l’extérieur par une cible relative : pareil', async () => {
+    const link = path.join(projectDir, 'casse-relatif.md');
+    await symlink('../pas-encore.md', link);
+
+    await expect(validateWritePath(link)).rejects.toThrow('Write access denied');
+  });
+
+  it('vers l’intérieur : le fichier reste à créer dans le projet', async () => {
+    const link = path.join(projectDir, 'casse-dedans.md');
+    await symlink('a-venir.md', link);
+
+    expect(await validateWritePath(link)).toBe(link);
+    expect(await validateReadPath(link)).toBe(link);
+  });
+
+  it('une racine passée par un lien reste valable, fichier présent ou à créer', async () => {
+    const alias = path.join(tmpRoot, 'alias');
+    await symlink(projectDir, alias);
+    const saved = projectPathRef.current;
+    projectPathRef.current = alias;
+    try {
+      expect(await validateReadPath(path.join(alias, 'document.md'))).toBe(path.join(alias, 'document.md'));
+      expect(await validateWritePath(path.join(alias, 'neuf.md'))).toBe(path.join(alias, 'neuf.md'));
+      expect(await validateWritePath(path.join(alias, 'sous', 'neuf.md'))).toBe(path.join(alias, 'sous', 'neuf.md'));
     } finally {
       projectPathRef.current = saved;
     }

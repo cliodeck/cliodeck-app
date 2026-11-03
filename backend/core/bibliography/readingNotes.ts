@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rename } from 'fs/promises';
 import path from 'path';
 import yaml from 'js-yaml';
 import { atomicWriteFile, UnreadableFileError, updateFile, withFileLock } from '../fs/user-files.js';
+import { isInside } from '../vector-store/file-identity.js';
 
 /**
  * Notes de lecture : un fichier Markdown par référence, dans un dossier
@@ -125,7 +126,9 @@ function withNotesLock<T>(projectPath: string, fn: () => Promise<T>): Promise<T>
 /**
  * Toutes les notes de lecture du projet. Les fichiers sans identité
  * (ni `citekey` ni `zotero_key`) ou au front matter illisible sont ignorés :
- * ils ne sont pas, ou plus, des notes que ClioDeck sait rattacher.
+ * ils ne sont pas, ou plus, des notes que ClioDeck sait rattacher. Un lien qui
+ * sort du projet non plus : un projet se partage, et une étiquette posée
+ * réécrirait le fichier à l'autre bout.
  */
 export async function listReadingNotes(projectPath: string): Promise<ReadingNoteInfo[]> {
   const dir = path.join(projectPath, READING_NOTES_DIR);
@@ -135,6 +138,10 @@ export async function listReadingNotes(projectPath: string): Promise<ReadingNote
   for (const name of await readdir(dir)) {
     if (!name.toLowerCase().endsWith('.md')) continue;
     const file = path.join(dir, name);
+    if (!isInside(projectPath, file)) {
+      console.warn(`⚠️ Note de lecture ignorée, lien hors du projet : ${name}`);
+      continue;
+    }
     try {
       const { frontMatter } = parseNote(await readFile(file, 'utf-8'));
       const citekey = typeof frontMatter.citekey === 'string' ? frontMatter.citekey : undefined;
@@ -214,8 +221,13 @@ export async function ensureReadingNote(projectPath: string, reference: Referenc
   const existing = findReadingNote(await listReadingNotes(projectPath), reference);
   if (existing) return existing.file;
 
-  let file = path.join(projectPath, READING_NOTES_DIR, noteFileName(reference.citekey));
-  if (existsSync(file)) {
+  const dir = path.join(projectPath, READING_NOTES_DIR);
+  if (!isInside(projectPath, dir)) {
+    throw new Error(`Le dossier ${READING_NOTES_DIR} est un lien qui sort du projet : la note n'a pas été créée.`);
+  }
+
+  let file = path.join(dir, noteFileName(reference.citekey));
+  if (existsSync(file) && isInside(projectPath, file)) {
     // Un front matter cassé rend la note invisible à `listReadingNotes`.
     // Créer une seconde note à côté ferait croire la première perdue : on
     // s'arrête et on le dit.
@@ -228,9 +240,10 @@ export async function ensureReadingNote(projectPath: string, reference: Referenc
     }
   }
   // Un fichier de même nom sans identité ClioDeck (écrit à la main) ne se
-  // remplace pas : on en choisit un autre.
-  for (let n = 2; existsSync(file); n++) {
-    file = path.join(projectPath, READING_NOTES_DIR, noteFileName(`${reference.citekey}-${n}`));
+  // remplace pas : on en choisit un autre. Un lien qui sort du projet, même
+  // cassé, n'est pas un nom libre non plus : l'écriture le suivrait.
+  for (let n = 2; existsSync(file) || !isInside(projectPath, file); n++) {
+    file = path.join(dir, noteFileName(`${reference.citekey}-${n}`));
   }
   await writeAtomically(file, serializeNote({ frontMatter: identityFrontMatter(reference), body: template(reference) }));
   return file;

@@ -11,7 +11,7 @@
  * dans un dossier temporaire nettoyé après chaque test.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'fs/promises';
+import { mkdtemp, rm, readFile, rename, symlink, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -38,6 +38,7 @@ vi.mock('../../../../backend/core/workspace/migrator.js', () => ({
 import { ProjectManager } from '../project-manager.js';
 import { DEFAULT_BOOK_SETTINGS } from '../../../../backend/types/book.js';
 import { atomicWriteFile } from '../../../../backend/core/fs/user-files.js';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 
 let workDir: string;
 let manager: ProjectManager;
@@ -412,6 +413,198 @@ describe('readChapters — un chapitre qui ne se lit pas ne se lit pas à moiti�
     await writing;
 
     expect((await reading).files[0].content).toBe('# Après\n');
+  });
+});
+
+/**
+ * Un projet se partage, et git comme zip conservent les liens : `chapters/annexe.md`
+ * peut pointer vers `~/.ssh/config`. Décision Q16 : ce chapitre est marqué manquant,
+ * ni lu ni indexé ; un lien qui reste dans le projet continue de marcher.
+ */
+describe.skipIf(!symlinkAvailable)('chapitre en lien symbolique', () => {
+  const SECRET = 'SECRET-HORS-PROJET';
+  let projectDir: string;
+  let outside: string;
+
+  async function book(chapters: Array<{ id: string; title: string; filePath: string }>) {
+    await writeFile(
+      path.join(projectDir, 'project.json'),
+      JSON.stringify({
+        type: 'book',
+        name: 'Livre',
+        chapters: chapters.map((c, order) => ({ ...c, order, kind: 'chapter' })),
+      })
+    );
+  }
+
+  beforeEach(async () => {
+    projectDir = path.join(workDir, 'Livre');
+    outside = path.join(workDir, 'dehors');
+    await mkdir(path.join(projectDir, 'chapters'), { recursive: true });
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'journal.md'), `# ${SECRET}\n\nTexte privé.\n`);
+    await writeFile(path.join(projectDir, 'chapters', '01.md'), '# Un\n');
+    await symlink(path.join(outside, 'journal.md'), path.join(projectDir, 'chapters', '02.md'));
+  });
+
+  const MANIFEST = [
+    { id: '1', title: 'Un', filePath: 'chapters/01.md' },
+    { id: '2', title: 'Annexe', filePath: 'chapters/02.md' },
+  ];
+
+  it('un lien qui sort du projet : marqué manquant, jamais lu', async () => {
+    await book(MANIFEST);
+
+    const { chapters } = await manager.getChapters(projectDir);
+    expect(chapters[0].missing).toBeUndefined();
+    expect(chapters[1]).toMatchObject({ title: 'Annexe', missing: true, outsideProject: true });
+
+    const { files } = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/02.md'] });
+    expect(files[0]).toMatchObject({ filePath: 'chapters/02.md', reason: 'refused' });
+    expect(files[0].content).toBeUndefined();
+    expect(JSON.stringify(files)).not.toContain(SECRET);
+  });
+
+  it('un lien qui reste dans le projet continue de marcher', async () => {
+    await symlink('01.md', path.join(projectDir, 'chapters', '03.md'));
+    await book([{ id: '3', title: 'Trois', filePath: 'chapters/03.md' }]);
+
+    const { chapters } = await manager.getChapters(projectDir);
+    expect(chapters[0].missing).toBeUndefined();
+    expect(chapters[0].outsideProject).toBeUndefined();
+    const { files } = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/03.md'] });
+    expect(files[0].content).toBe('# Un\n');
+  });
+
+  it('une racine passée par un lien ne rend aucun chapitre manquant à tort', async () => {
+    await book(MANIFEST);
+    const alias = path.join(workDir, 'alias');
+    await symlink(projectDir, alias);
+
+    for (const opened of [alias, path.join(alias, 'project.json')]) {
+      const { chapters } = await manager.getChapters(opened);
+      expect(chapters[0].missing).toBeUndefined();
+      expect(chapters[1]).toMatchObject({ missing: true, outsideProject: true });
+      const { files } = await manager.readChapters({ projectPath: opened, filePaths: ['chapters/01.md'] });
+      expect(files[0].content).toBe('# Un\n');
+    }
+  });
+
+  it('`chapters` lié à l’intérieur du projet : les chapitres restent présents', async () => {
+    const drafts = path.join(projectDir, 'brouillons');
+    await rename(path.join(projectDir, 'chapters'), drafts);
+    await rm(path.join(drafts, '02.md'));
+    await symlink(drafts, path.join(projectDir, 'chapters'));
+    await book([MANIFEST[0]]);
+
+    const { chapters } = await manager.getChapters(projectDir);
+    expect(chapters[0].missing).toBeUndefined();
+    const { files } = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/01.md'] });
+    expect(files[0].content).toBe('# Un\n');
+  });
+
+  it('`chapters` lié hors du projet : tout le dossier est manquant, rien n’est lu', async () => {
+    await rm(path.join(projectDir, 'chapters'), { recursive: true });
+    await symlink(outside, path.join(projectDir, 'chapters'));
+    // Un fichier que le manifeste ne cite pas : son nom non plus ne doit pas remonter.
+    await writeFile(path.join(outside, 'autre.md'), `# ${SECRET}\n`);
+    await book([{ id: '1', title: 'Journal', filePath: 'chapters/journal.md' }]);
+
+    const { chapters, unattached } = await manager.getChapters(projectDir);
+    expect(chapters[0]).toMatchObject({ missing: true, outsideProject: true });
+    expect(unattached).toEqual([]);
+    const { files } = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/journal.md'] });
+    expect(files[0].reason).toBe('refused');
+    expect(files[0].content).toBeUndefined();
+  });
+
+  it('un lien cassé vers l’extérieur se distingue d’un lien cassé vers l’intérieur', async () => {
+    await symlink(path.join(outside, 'pas-encore.md'), path.join(projectDir, 'chapters', 'dehors.md'));
+    await symlink('pas-encore.md', path.join(projectDir, 'chapters', 'dedans.md'));
+    await book([
+      { id: 'd', title: 'Dehors', filePath: 'chapters/dehors.md' },
+      { id: 'i', title: 'Dedans', filePath: 'chapters/dedans.md' },
+    ]);
+
+    const { chapters } = await manager.getChapters(projectDir);
+    expect(chapters[0]).toMatchObject({ missing: true, outsideProject: true });
+    expect(chapters[1].missing).toBe(true);
+    expect(chapters[1].outsideProject).toBeUndefined();
+  });
+
+  it('la ligne survit à une réorganisation, à un renommage voisin et aux réglages', async () => {
+    await book(MANIFEST);
+    const { chapters } = await manager.getChapters(projectDir);
+    // Ce qui arrive ici après `ChapterSchema`, qui retire les marques de réconciliation
+    // (validation.test.ts) : le renderer, lui, renvoie `outsideProject` tel quel.
+    const plain = chapters.map(({ missing: _m, outsideProject: _o, ...c }) => c);
+
+    const reordered = await manager.saveChapters({ projectPath: projectDir, chapters: [plain[1], plain[0]] });
+    expect(reordered.success).toBe(true);
+    const renamed = await manager.saveChapters({
+      projectPath: projectDir,
+      chapters: [plain[1], { ...plain[0], title: 'Un, renommé' }],
+    });
+    expect(renamed.success).toBe(true);
+    expect((await manager.saveBookSettings({ projectPath: projectDir, settings: { numberChapters: false } })).success).toBe(true);
+    expect((await manager.createChapter({ projectPath: projectDir, title: 'Suite' })).success).toBe(true);
+
+    const manifest = await readManifest('Livre');
+    expect(manifest.chapters.map((c: { filePath: string }) => c.filePath).slice(0, 2)).toEqual([
+      'chapters/02.md',
+      'chapters/01.md',
+    ]);
+    expect(manifest.chapters[0].missing).toBeUndefined();
+    expect(manifest.chapters[0].outsideProject).toBeUndefined();
+  });
+
+  it('un fichier réel rétabli à cet endroit rend son chapitre à l’auteur', async () => {
+    await book(MANIFEST);
+    expect((await manager.getChapters(projectDir)).chapters[1].missing).toBe(true);
+
+    await rm(path.join(projectDir, 'chapters', '02.md'));
+    await writeFile(path.join(projectDir, 'chapters', '02.md'), '# Annexe rétablie\n');
+
+    const { chapters } = await manager.getChapters(projectDir);
+    expect(chapters[1].missing).toBeUndefined();
+    expect(chapters[1].outsideProject).toBeUndefined();
+    const { files } = await manager.readChapters({ projectPath: projectDir, filePaths: ['chapters/02.md'] });
+    expect(files[0].content).toBe('# Annexe rétablie\n');
+  });
+
+  it('un fichier non rattaché en lien sortant : ni son titre ni rien d’autre n’est lu', async () => {
+    await book([MANIFEST[0]]);
+    await writeFile(path.join(projectDir, 'chapters', '03.md'), '# Vrai titre\n');
+
+    const { unattached } = await manager.getChapters(projectDir);
+    const byPath = Object.fromEntries(unattached.map((f) => [f.filePath, f.suggestedTitle]));
+    expect(byPath['chapters/03.md']).toBe('Vrai titre');
+    expect(Object.keys(byPath)).toContain('chapters/02.md');
+    expect(byPath['chapters/02.md']).toBeUndefined();
+    expect(JSON.stringify(unattached)).not.toContain(SECRET);
+  });
+
+  it('createChapter n’écrit pas à travers un `chapters` lié hors du projet', async () => {
+    await rm(path.join(projectDir, 'chapters'), { recursive: true });
+    await symlink(outside, path.join(projectDir, 'chapters'));
+    await book([]);
+
+    const result = await manager.createChapter({ projectPath: projectDir, title: 'Neuf' });
+
+    expect(result.success).toBe(false);
+    expect(existsSync(path.join(outside, '01-neuf.md'))).toBe(false);
+    expect((await readManifest('Livre')).chapters).toEqual([]);
+  });
+
+  it('createChapter ne prend pas un nom déjà occupé par un lien cassé vers l’extérieur', async () => {
+    await book([]);
+    await symlink(path.join(outside, 'cree-dehors.md'), path.join(projectDir, 'chapters', '01-neuf.md'));
+
+    const result = await manager.createChapter({ projectPath: projectDir, title: 'Neuf' });
+
+    expect(result.success).toBe(true);
+    expect(existsSync(path.join(outside, 'cree-dehors.md'))).toBe(false);
+    expect(result.chapter?.filePath).not.toBe('chapters/01-neuf.md');
   });
 });
 

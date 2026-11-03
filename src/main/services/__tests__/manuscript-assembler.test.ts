@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { assembleManuscript } from '../manuscript-assembler';
 import { DEFAULT_BOOK_SETTINGS, type Chapter } from '../../../../backend/types/book';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
 /**
  * Assemblage d'un manuscrit (plan chapitres, Phase 4, stratégie D).
@@ -276,5 +277,68 @@ describe('assembleManuscript — cible de sortie', () => {
     // L'isolation des notes, elle, reste indispensable dans les deux cibles.
     expect(markdown).toContain('[^ch1-1]');
     expect(markdown).toContain('[^ch2-1]');
+  });
+
+  describe.skipIf(!symlinkAvailable)('chapitre en lien symbolique', () => {
+    let outside: string;
+
+    beforeEach(async () => {
+      outside = await mkdtemp(path.join(tmpdir(), 'assembler-dehors-'));
+      await writeFile(path.join(outside, 'journal.md'), 'SECRET-HORS-PROJET\n');
+      await write('chapters/01.md', 'Texte du livre.\n');
+      await symlink(path.join(outside, 'journal.md'), path.join(dir, 'chapters', '02.md'));
+    });
+
+    afterEach(async () => {
+      await rm(outside, { recursive: true, force: true });
+    });
+
+    const CHAPTERS = [
+      CH({ id: 'a', filePath: 'chapters/01.md', order: 0 }),
+      CH({ id: 'b', filePath: 'chapters/02.md', order: 1 }),
+    ];
+
+    it('hors du projet : absent du flux, et un avertissement le nomme', async () => {
+      const { markdown, chapterCount, warnings } = await assembleManuscript({
+        projectPath: dir, settings: DEFAULT_BOOK_SETTINGS, chapters: CHAPTERS,
+      });
+
+      expect(markdown).toContain('Texte du livre.');
+      expect(markdown).not.toContain('SECRET-HORS-PROJET');
+      expect(chapterCount).toBe(1);
+      expect(warnings.some((w) => w.includes('hors projet') && w.includes('chapters/02.md'))).toBe(true);
+    });
+
+    it('même ouvert dans l’éditeur : le texte vivant ne passe pas la garde', async () => {
+      const { markdown } = await assembleManuscript({
+        projectPath: dir,
+        settings: DEFAULT_BOOK_SETTINGS,
+        chapters: CHAPTERS,
+        liveOverrides: { 'chapters/02.md': 'VIVANT-HORS-PROJET\n' },
+      });
+
+      expect(markdown).not.toContain('VIVANT-HORS-PROJET');
+    });
+
+    it('un lien interne et une racine liée passent', async () => {
+      await symlink('01.md', path.join(dir, 'chapters', '03.md'));
+      const alias = `${dir}-alias`;
+      await symlink(dir, alias);
+      try {
+        const { markdown, warnings } = await assembleManuscript({
+          projectPath: alias,
+          settings: DEFAULT_BOOK_SETTINGS,
+          chapters: [
+            CH({ id: 'a', filePath: 'chapters/01.md', order: 0 }),
+            CH({ id: 'c', filePath: 'chapters/03.md', order: 1 }),
+          ],
+        });
+
+        expect(warnings).toEqual([]);
+        expect(markdown.match(/Texte du livre\./g)).toHaveLength(2);
+      } finally {
+        await rm(alias, { force: true });
+      }
+    });
   });
 });

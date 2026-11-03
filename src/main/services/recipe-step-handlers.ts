@@ -20,6 +20,7 @@ import { retrievalService } from './retrieval-service.js';
 import { pdfService } from './pdf-service.js';
 import { pdfExportService } from './pdf-export.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import {
   normalizeBookSettings,
   type BookSettings,
@@ -197,9 +198,9 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
 }
 
   // Markdown file. When absent/empty we fall back to `<workspace>/document.md`
-  // for backward compatibility. We reject paths that escape the workspace
-  // (simple string check via path.relative — good enough for trusted local
-  // recipes, and cheaper than resolving symlinks).
+  // for backward compatibility. We reject paths that escape the workspace:
+  // here by name, and by a symlink just before reading. A received project
+  // keeps its links, and this file would end up in the export (decision Q16).
   // `document_id` est la clé canonique (nom de l'input déclaré) ; `document`
   // reste accepté — la recette builtin export-chapitre-chicago l'utilisait.
   const documentRelPath =
@@ -242,6 +243,11 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
     }
     content = assembled.markdown;
   } else {
+    // Ici et pas plus haut : le livre entier ne lit pas ce fichier, et un `document.md`
+    // qui traîne dans son dossier ne doit pas l'empêcher de s'exporter.
+    if (!(await isInsideAsync(ctx.workspaceRoot, docPath))) {
+      throw new Error(`export step: document_id "${documentRelPath}" is a link that leaves the workspace`);
+    }
     try {
       content = await fs.readFile(docPath, 'utf8');
     } catch (e) {
