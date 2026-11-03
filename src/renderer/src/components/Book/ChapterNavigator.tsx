@@ -14,7 +14,7 @@ import { BookSettingsModal } from './BookSettingsModal';
 import type { Chapter, ResolvedChapter } from '@backend/types/book';
 import { parseOutline, replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../stores/projectStore';
-import { EditorFileError, openErrorKey, useEditorStore } from '../../stores/editorStore';
+import { EditorFileError, openErrorKey, OutgoingSaveError, useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { logger } from '../../utils/logger';
@@ -146,9 +146,10 @@ export const ChapterNavigator: React.FC = () => {
 
   const report = async (error: unknown, fallbackKey: string): Promise<void> => {
     logger.error('ChapterNavigator', error);
-    // Le texte d'une EditorFileError vient du main : il va au journal, pas à l'écran.
+    // Le texte d'une lecture ou d'une écriture refusée vient du main, en anglais et avec le
+    // chemin complet : il va au journal, pas à l'écran.
     const message =
-      error instanceof EditorFileError
+      error instanceof EditorFileError || error instanceof OutgoingSaveError
         ? t(openErrorKey(error, fallbackKey))
         : error instanceof Error
           ? error.message

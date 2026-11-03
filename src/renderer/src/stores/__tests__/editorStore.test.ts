@@ -651,6 +651,25 @@ describe('loadFile — un document qui ne s’ouvre pas', () => {
     expect(openErrorKey(error, 'toolbar.openError')).toBe('editor.notUtf8');
   });
 
+  // Rien n'a été lu : « ce fichier n'a pas pu être ouvert » enverrait l'auteur vers le mauvais.
+  it('le document sortant qui ne s’écrit pas : le message dit l’enregistrement, et la cause reste', async () => {
+    respondWith({ success: true, content: '# B\n' });
+    window.electron.editor.saveFile = (async () => ({
+      success: false,
+      error: 'EACCES: permission denied',
+    })) as never;
+    useEditorStore.setState({ isDirty: true });
+
+    const error = await useEditorStore
+      .getState()
+      .loadFile(B)
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe('EACCES: permission denied');
+    expect(openErrorKey(error, 'toolbar.openError')).toBe('toolbar.saveError');
+    expect(useEditorStore.getState().filePath).toBe(A);
+  });
+
   it('toute autre erreur garde le message de l’appelant', () => {
     expect(openErrorKey(new Error('EACCES'), 'toolbar.openError')).toBe('toolbar.openError');
     expect(openErrorKey(new EditorFileError('absent', undefined, 'x'), 'toolbar.openError')).toBe('toolbar.openError');

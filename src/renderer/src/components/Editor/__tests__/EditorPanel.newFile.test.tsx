@@ -104,6 +104,36 @@ const typeInEditor = (text: string) =>
     useEditorStore.getState().editorFacade?.setValue(text);
   });
 
+const clickSave = () =>
+  act(async () => {
+    fireEvent.click(screen.getByTitle('toolbar.save'));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+const REFUSED = { success: false, error: 'Write access denied' } as const;
+
+/** Une écriture retenue, refusée au moment où le test la libère. Les suivantes aboutissent. */
+function heldRefusedWrite(): () => Promise<void> {
+  let release = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  window.electron.editor.saveFile = vi
+    .fn(async (path: string, content: string) => {
+      disk[path] = content;
+      return { success: true };
+    })
+    .mockImplementationOnce(async () => {
+      await gate;
+      return REFUSED;
+    }) as never;
+  return () =>
+    act(async () => {
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   disk = { [DOCUMENT]: ARTICLE, [SLIDES]: '# Diapo\n\n---\n\n## Une\n' };
@@ -289,6 +319,159 @@ describe('Enregistrer un tampon sans titre', () => {
 
     expect(saveDialog.mock.calls[0][0]).not.toHaveProperty('defaultPath');
     expect(saveDialog.mock.calls[0][0].properties).toContain('showOverwriteConfirmation');
+  });
+
+  // Le premier enregistrement d'un tampon sans titre : l'autosave n'y peut rien, et un
+  // rejet dans le `catch` du bouton laissait l'auteur sans le moindre message.
+  describe('quand l’écriture échoue', () => {
+    let rejections: unknown[];
+    const onRejection = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+
+    async function untitledWith(text: string): Promise<void> {
+      await mount('article', DOCUMENT);
+      await clickNewFile();
+      await answerConfirm(true);
+      await typeInEditor(text);
+    }
+
+    beforeEach(() => {
+      rejections = [];
+      process.on('unhandledRejection', onRejection);
+    });
+
+    afterEach(() => {
+      process.off('unhandledRejection', onRejection);
+    });
+
+    it('destination refusée : le message, et le texte reste dans le tampon', async () => {
+      await untitledWith('Une page.');
+      beforeWrite = () => ({ success: false, error: 'EACCES: permission denied' });
+
+      await clickSave();
+
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+      expect(disk['/ailleurs/note.md']).toBeUndefined();
+      expect(useEditorStore.getState().filePath).toBeNull();
+      expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
+      expect(rejections).toEqual([]);
+    });
+
+    it('le second essai écrit le fichier, et le tampon prend son chemin', async () => {
+      await untitledWith('Une page.');
+      beforeWrite = () => ({ success: false, error: 'EACCES: permission denied' });
+      await clickSave();
+      act(() => useDialogStore.getState().closeAlert());
+
+      beforeWrite = () => undefined;
+      await clickSave();
+
+      expect(disk['/ailleurs/note.md']).toBe('Une page.');
+      expect(useEditorStore.getState().filePath).toBe('/ailleurs/note.md');
+      expect(useDialogStore.getState().alertOpen).toBe(false);
+    });
+
+    it('le dialogue lui-même en erreur : le même message', async () => {
+      await untitledWith('Une page.');
+      saveDialog.mockImplementation(async () => {
+        throw new Error('dialogue refusé');
+      });
+
+      await clickSave();
+
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+      expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
+      expect(rejections).toEqual([]);
+    });
+
+    // Tampon remplacé pendant l'écriture : l'auteur a répondu à la question de la perte,
+    // et ce texte n'est plus à l'écran.
+    it('tampon remplacé pendant l’écriture : son échec n’annonce rien, comme au menu', async () => {
+      await untitledWith('Une page.');
+      const finish = heldRefusedWrite();
+      await clickSave();
+
+      await act(async () => {
+        await useEditorStore.getState().replaceBuffer({ kind: 'untitled', discardOutgoing: true }, 'new-document');
+      });
+      await finish();
+
+      expect(useDialogStore.getState().alertOpen).toBe(false);
+      expect(rejections).toEqual([]);
+    });
+  });
+});
+
+// Le menu et le bouton doivent dire la même chose : un échec qui n'a plus d'objet ne s'annonce
+// à aucune des deux portes. Le main refuse réellement une écriture encore en vol quand le
+// projet a changé, et l'alerte parlerait d'un document qui n'est plus à l'écran.
+describe('Enregistrer un document ouvert, quand l’écriture échoue', () => {
+  it('témoin : le message, et le texte reste', async () => {
+    await mount('article', DOCUMENT);
+    await typeInEditor('Une page.');
+    beforeWrite = () => REFUSED;
+
+    await clickSave();
+
+    expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+    expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
+    expect(disk[DOCUMENT]).toBe(ARTICLE);
+  });
+
+  it('témoin : un document propre au départ le dit aussi, son fichier n’est peut-être plus là', async () => {
+    await mount('article', DOCUMENT);
+    beforeWrite = () => REFUSED;
+
+    await clickSave();
+
+    expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+  });
+
+  it('document remplacé pendant l’écriture : son échec n’annonce rien', async () => {
+    await mount('article', DOCUMENT);
+    const finish = heldRefusedWrite();
+    await clickSave();
+
+    await act(async () => {
+      await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+    await finish();
+
+    expect(useEditorStore.getState().bufferDetached).toBe(true);
+    expect(useDialogStore.getState().alertOpen).toBe(false);
+  });
+
+  it('une autre écriture a tout mis sur le disque entre-temps : rien à annoncer', async () => {
+    await mount('article', DOCUMENT);
+    const finish = heldRefusedWrite();
+    await typeInEditor('Une page.');
+    await clickSave();
+
+    await act(async () => {
+      await useEditorStore.getState().saveFile();
+    });
+    expect(disk[DOCUMENT]).toBe('Une page.');
+    await finish();
+
+    expect(useDialogStore.getState().alertOpen).toBe(false);
+  });
+});
+
+describe('Ouvrir, quand c’est le document ouvert qui ne s’écrit pas', () => {
+  it('le message parle de l’enregistrement : le fichier demandé n’y est pour rien', async () => {
+    await mount('article', DOCUMENT);
+    await typeInEditor('Une page.');
+    beforeWrite = () => REFUSED;
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.open'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+    expect(useEditorStore.getState().getLiveContent()).toBe('Une page.');
   });
 });
 

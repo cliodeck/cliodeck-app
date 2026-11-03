@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createProjectErrorMessage } from '../create-project-error';
+import { OutgoingSaveError } from '../../../stores/editorStore';
 
 const t = (key: string, options?: Record<string, unknown>) =>
   options ? `${key} ${JSON.stringify(options)}` : key;
@@ -22,6 +23,12 @@ describe('createProjectErrorMessage', () => {
   it('reconnaît le nom refusé dans le message de validation', () => {
     const error = new Error('Validation failed: name: project_name_invalid');
     expect(createProjectErrorMessage(t, error, where)).toBe('project.createErrorNameInvalid');
+  });
+
+  // Le dossier choisi n'y est pour rien, même quand le chemin du document ressemble à un code.
+  it('le document ouvert qui ne s’écrit pas : le message parle de l’enregistrement', () => {
+    const cause = new Error("EACCES: permission denied, access '/Documents/project_exists/document.md'");
+    expect(createProjectErrorMessage(t, new OutgoingSaveError(cause), where)).toBe('toolbar.saveError');
   });
 
   it('garde le message général pour toute autre erreur', () => {

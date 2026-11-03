@@ -26,7 +26,7 @@ const SimilarityPanel = lazy(() =>
 const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
-import { openErrorKey, useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../../stores/editorStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -123,6 +123,7 @@ export const EditorPanel: React.FC = () => {
 
   const handleSaveFile = async () => {
     logger.component('EditorPanel', 'handleSaveFile clicked');
+    const overtaken = watchSaveOvertaken();
     try {
       await saveFile();
       logger.component('EditorPanel', 'File saved successfully');
@@ -131,26 +132,32 @@ export const EditorPanel: React.FC = () => {
       const msg = error instanceof Error ? error.message : '';
       if (msg.includes('No file path')) {
         logger.component('EditorPanel', 'No file path, showing save dialog');
-        const result = await window.electron.dialog.saveFile({
-          filters: [
-            { name: t('toolbar.markdown'), extensions: ['md'] },
-            { name: t('project.allFiles'), extensions: ['*'] },
-          ],
-          // Invite de remplacement : effet documenté sous Linux seulement.
-          properties: ['showOverwriteConfirmation'],
-        });
+        // Le premier enregistrement d'un tampon sans titre : l'autosave ne le rattrapera pas.
+        try {
+          const result = await window.electron.dialog.saveFile({
+            filters: [
+              { name: t('toolbar.markdown'), extensions: ['md'] },
+              { name: t('project.allFiles'), extensions: ['*'] },
+            ],
+            // Invite de remplacement : effet documenté sous Linux seulement.
+            properties: ['showOverwriteConfirmation'],
+          });
 
-        if (!result.canceled && result.filePath) {
-          logger.component('EditorPanel', 'Saving file as', { path: result.filePath });
-          const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
-          if (outcome.status === 'locked') {
-            await useDialogStore.getState().showAlert(t(outcome.lock));
+          if (!result.canceled && result.filePath) {
+            logger.component('EditorPanel', 'Saving file as', { path: result.filePath });
+            const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
+            if (outcome.status === 'locked') {
+              await useDialogStore.getState().showAlert(t(outcome.lock));
+            }
+            logger.component('EditorPanel', 'File save finished', { status: outcome.status });
           }
-          logger.component('EditorPanel', 'File save finished', { status: outcome.status });
+        } catch (saveAsError) {
+          logger.error('EditorPanel', saveAsError);
+          if (!overtaken()) await useDialogStore.getState().showAlert(t('toolbar.saveError'));
         }
       } else {
         logger.error('EditorPanel', error);
-        await useDialogStore.getState().showAlert(t('toolbar.saveError'));
+        if (!overtaken()) await useDialogStore.getState().showAlert(t('toolbar.saveError'));
       }
     }
   };

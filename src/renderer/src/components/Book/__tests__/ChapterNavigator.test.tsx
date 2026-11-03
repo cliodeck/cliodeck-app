@@ -13,9 +13,10 @@ import type { ResolvedChapter, UnattachedFile } from '@backend/types/book';
 import { ChapterNavigator } from '../ChapterNavigator';
 import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
-import { EditorFileError, useEditorStore } from '../../../stores/editorStore';
+import { EditorFileError, OutgoingSaveError, useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
+import { logger } from '../../../utils/logger';
 import type { EditorFacade } from '@/editor/facade';
 
 const PROJECT_PATH = '/livre';
@@ -191,8 +192,11 @@ describe('ChapterNavigator', () => {
     }
   );
 
-  it('témoin : un chapitre sortant impossible à écrire garde son message', async () => {
-    loadFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+  // Le message brut du système est en anglais et porte le chemin complet : il va au journal.
+  it('un chapitre sortant impossible à écrire : le message parle de l’enregistrement, et la cause reste au journal', async () => {
+    const journal = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const error = new OutgoingSaveError(new Error("EACCES: permission denied, access '/livre/chapters/c1.md'"));
+    loadFile.mockRejectedValue(error);
     setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
     render(<ChapterNavigator />);
 
@@ -200,7 +204,26 @@ describe('ChapterNavigator', () => {
       fireEvent.click(screen.getByText('Deux'));
     });
 
-    expect(useDialogStore.getState().alertMessage).toBe('ENOSPC: no space left on device');
+    expect(useDialogStore.getState().alertMessage).toBe('toolbar.saveError');
+    expect(useProjectStore.getState().currentChapterId).toBe('c1');
+    expect(journal).toHaveBeenCalledWith('ChapterNavigator', error);
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it('témoin : le refus d’un manifeste garde son message', async () => {
+    saveChapters.mockResolvedValue({ success: false, error: 'Le manifeste est verrouillé.' });
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.doubleClick(screen.getByText('Deux'));
+    });
+    fireEvent.change(screen.getByPlaceholderText('book.titlePlaceholder'), { target: { value: 'Autre' } });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByPlaceholderText('book.titlePlaceholder'), { key: 'Enter' });
+    });
+
+    await waitFor(() => expect(useDialogStore.getState().alertMessage).toBe('Le manifeste est verrouillé.'));
     act(() => useDialogStore.getState().closeAlert());
   });
 

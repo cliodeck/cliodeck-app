@@ -55,7 +55,7 @@ export function shouldSkip(): string | null {
  * never touch `~/.config/cliodeck`. The caller receives the path so it
  * can clean up on teardown.
  */
-export async function launchApp(): Promise<LaunchOutcome> {
+export async function launchApp(options: { language?: string } = {}): Promise<LaunchOutcome> {
   const skip = shouldSkip();
   if (skip) return { kind: 'skip', reason: skip };
 
@@ -65,7 +65,10 @@ export async function launchApp(): Promise<LaunchOutcome> {
   // du système, et tout test écrit sur un libellé devient dépendant du poste.
   // On fixe le français, le défaut de l'app. `cliodeck-config.json` est le
   // fichier electron-store, lu au démarrage dans le userData créé ci-dessus.
-  writeFileSync(join(userDataDir, 'cliodeck-config.json'), JSON.stringify({ language: E2E_LANGUAGE }));
+  writeFileSync(
+    join(userDataDir, 'cliodeck-config.json'),
+    JSON.stringify({ language: options.language ?? E2E_LANGUAGE }),
+  );
 
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {

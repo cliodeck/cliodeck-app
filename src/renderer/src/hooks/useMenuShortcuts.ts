@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../stores/dialogStore';
-import { openErrorKey, useEditorStore } from '../stores/editorStore';
+import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { runCitationCheck } from '../services/check-citations';
 import { newDocument } from '../services/new-document';
+import i18n from '../i18n';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
@@ -21,6 +22,12 @@ export function useMenuShortcuts() {
       console.warn('Electron API not available, skipping menu shortcuts setup');
       return;
     }
+
+    // Les messages d'Ouvrir et d'Enregistrer passent par `i18n.t`, pas par `t` : un écouteur
+    // de menu qui n'a pas été retiré garde le `t` du premier rendu, en français, et c'est lui
+    // qui répond le premier. Nouveau fichier et Vérifier les citations reçoivent encore ce `t` :
+    // ils attendent la correction des écouteurs, qui rendra `t` à jour partout.
+
     // File operations
     const handleNewFile = () => {
       void newDocument(t);
@@ -35,12 +42,12 @@ export function useMenuShortcuts() {
         if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
           const outcome = await loadFile(result.filePaths[0]);
           if (outcome.status === 'locked') {
-            await useDialogStore.getState().showAlert(t(outcome.lock));
+            await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
           }
         }
       } catch (error) {
         console.error('Failed to open file:', error);
-        await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
+        await useDialogStore.getState().showAlert(i18n.t(openErrorKey(error, 'toolbar.openError')));
       }
     };
 
@@ -50,9 +57,10 @@ export function useMenuShortcuts() {
       // Hors de tout document, le temps d'un changement de projet : rien à enregistrer.
       if (bufferDetached) return;
 
-      // If no file path exists, open "Save As" dialog
-      if (!filePath) {
-        try {
+      const overtaken = watchSaveOvertaken();
+      try {
+        // If no file path exists, open "Save As" dialog
+        if (!filePath) {
           // Aucun nom proposé : le main place le dialogue dans le dernier dossier, souvent
           // celui du projet, et « document.md » y désignerait le manuscrit à remplacer.
           // L'option d'invite de remplacement n'a d'effet documenté que sous Linux.
@@ -64,15 +72,16 @@ export function useMenuShortcuts() {
           if (!result.canceled && result.filePath) {
             const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
             if (outcome.status === 'locked') {
-              await useDialogStore.getState().showAlert(t(outcome.lock));
+              await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
             }
           }
-        } catch (error) {
-          console.error('Failed to save file:', error);
+        } else {
+          // File path exists, save directly
+          await saveCurrentFile();
         }
-      } else {
-        // File path exists, save directly
-        saveCurrentFile();
+      } catch (error) {
+        console.error('Failed to save file:', error);
+        if (!overtaken()) await useDialogStore.getState().showAlert(i18n.t('toolbar.saveError'));
       }
     };
 
