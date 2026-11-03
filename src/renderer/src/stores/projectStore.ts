@@ -173,11 +173,11 @@ let stopWatchingEditor: (() => void) | null = null;
  * qui reste, jusqu'à ce qu'il le ferme, qu'un fichier s'ouvre dans l'éditeur ou que ce
  * projet ne soit plus à l'écran.
  */
-function notifyDocumentNotOpened(filePath: string, error: unknown, messageKey: string): void {
+function notifyDocumentNotOpened(filePath: string, error: unknown, reasonKey: string): void {
   documentNotOpenedNotice = useNotificationStore.getState().notify({
     level: 'error',
     title: i18n.t('project.documentOpenError'),
-    message: i18n.t(messageKey),
+    message: `${i18n.t(reasonKey)} ${i18n.t('project.documentOpenUntitled')}`,
     details: `${filePath}\n${error instanceof Error ? error.message : String(error)}`,
     duration: 0,
   });
@@ -340,7 +340,7 @@ async function openProjectContents(
       console.log('📝 Document loaded into editor with path tracking');
     } catch (error) {
       console.error('Failed to load document into editor:', error);
-      notifyDocumentNotOpened(documentPath, error, openErrorKey(error, 'project.documentOpenHint'));
+      notifyDocumentNotOpened(documentPath, error, openErrorKey(error, 'project.documentOpenUnchanged'));
       // Il parle du tampon sans titre : un fichier ouvert le rend faux, surtout celui
       // qu'il demandait de convertir puis de rouvrir.
       stopWatchingEditor = useEditorStore.subscribe((state) => {

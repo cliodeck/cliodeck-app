@@ -284,7 +284,8 @@
     "bibNote": "Note (BibTeX)",
     "createReadingNote": "New note",
     "openReadingNote": "Reading note",
-    "readingNoteError": "Reading note: {{error}}"
+    "readingNoteError": "Reading note: {{error}}",
+    "readingNoteNotUtf8": "This reference's reading note is not encoded in UTF-8. Its tags were not changed, because rewriting it would damage its accented characters: it remains untouched on disk. Convert it to UTF-8, then try again."
   },
   "project": {
     "title": "Project",
@@ -295,7 +296,8 @@
     "createErrorNameInvalid": "A project name cannot contain / or \\, and cannot be “.” or “..”.",
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
     "documentOpenError": "This project's document could not be opened",
-    "documentOpenHint": "No file was changed. The editor shows an untitled document: what you write there will not go into the project's document.",
+    "documentOpenUnchanged": "No file was changed.",
+    "documentOpenUntitled": "The editor shows an untitled document: what you write there will not go into the project's document.",
     "newProject": "New project",
     "openProject": "Open a project",
     "closeProject": "Close project",
@@ -2015,6 +2017,7 @@
     "renumberTimedOut": "Renumbering stopped: the disk did not respond for {{minutes}} minutes. Some chapters may have been renumbered, not all: run it again once the disk responds.",
     "renumberRestoreFailed": "Renumbering failed and could not be fully undone: some chapters may remain renumbered. Run it again once the files are accessible.",
     "renumberUnreadable": "Renumbering cancelled: the manuscript is unchanged, because numbering runs across every chapter. {{detail}}",
+    "renumberChapterGone": "A chapter gone from disk is now marked as missing: run the renumbering again and it will be left out.",
     "readIncomplete": "Incomplete result. {{detail}}",
     "unreadableChapters": "Unreadable chapters: {{chapters}}.",
     "unreadableNotUtf8": "A file that is not in UTF-8 remains untouched on disk: convert it to UTF-8, then try again.",

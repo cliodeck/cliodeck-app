@@ -267,7 +267,7 @@ describe('document présent mais illisible : il ne bouge pas', () => {
     expect(toasts()[0]).toMatchObject({
       level: 'error',
       title: i18n.t('project.documentOpenError'),
-      message: i18n.t('editor.notUtf8'),
+      message: `${i18n.t('editor.notUtf8')} ${i18n.t('project.documentOpenUntitled')}`,
     });
   });
 
@@ -294,7 +294,9 @@ describe('document présent mais illisible : il ne bouge pas', () => {
     expect(writesTo).toEqual([]);
     expectUntitledBuffer();
     expect(toasts()).toHaveLength(1);
-    expect(toasts()[0].message).toBe(i18n.t('project.documentOpenHint'));
+    expect(toasts()[0].message).toBe(
+      `${i18n.t('project.documentOpenUnchanged')} ${i18n.t('project.documentOpenUntitled')}`
+    );
     await chmod(documentB, 0o644);
     expect(readFileSync(documentB, 'utf8')).toBe(B_TEXT);
   });
@@ -364,7 +366,7 @@ describe('document présent mais illisible : il ne bouge pas', () => {
     expect(writesTo).toEqual([]);
     expectUntitledBuffer();
     expect(project().chapters.map((c) => c.id)).toEqual(['c1']);
-    expect(toasts()[0].message).toBe(i18n.t('editor.notUtf8'));
+    expect(toasts()[0].message).toContain(i18n.t('editor.notUtf8'));
   });
 });
 

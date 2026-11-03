@@ -50,6 +50,7 @@ Texte libre.
 - **Clé de citation refaite** par la synchronisation : la note suit (front matter, et nom du fichier s'il n'a pas été changé à la main).
 - **Jamais supprimée**, même quand la référence sort de la bibliographie.
 - Un front matter illisible est signalé, jamais réécrit, et ne donne pas lieu à une seconde note créée à côté.
+- Une note qui n'est pas en UTF-8 est refusée à l'ouverture comme à l'ajout d'une étiquette, sans qu'un octet change : la réécrire rendrait définitifs ses accents changés en U+FFFD. Une clé refaite par la synchronisation la laisse telle quelle, sous son nom ; sa `zotero_key`, si elle en a une, la retrouve.
 
 ## Corpus de l'assistant
 

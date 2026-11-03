@@ -194,7 +194,14 @@ export const EditorPanel: React.FC = () => {
     if (isAbandoned()) return null;
     // La numérotation traverse le livre : sans ce chapitre, elle serait fausse partout.
     if (unreadable.length > 0) {
-      return t('book.renumberUnreadable', { detail: unreadableChaptersNote(unreadable, t) });
+      const note = unreadableChaptersNote(unreadable, t);
+      if (!unreadable.some((u) => u.reason === 'absent')) {
+        return t('book.renumberUnreadable', { detail: note });
+      }
+      // Sorti du disque depuis l'ouverture : le manifeste doit l'apprendre, sinon ce refus
+      // se répéterait jusqu'à la réouverture du projet, qui l'écarte comme manquant.
+      await useProjectStore.getState().refreshChapters();
+      return t('book.renumberUnreadable', { detail: `${note} ${t('book.renumberChapterGone')}` });
     }
     if (docs.length === 0) return null;
     if (editorMoved()) return t('book.renumberInterrupted');

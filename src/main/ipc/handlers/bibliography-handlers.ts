@@ -29,6 +29,7 @@ import {
   listReadingNotes,
   setProjectTags,
 } from '../../../../backend/core/bibliography/readingNotes.js';
+import { UnreadableFileError } from '../../../../backend/core/fs/user-files.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -287,7 +288,9 @@ export function setupBibliographyHandlers() {
       return successResponse({ note });
     } catch (error: unknown) {
       console.error('❌ bibliography:reading-notes:set-tags error:', error);
-      return errorResponse(error);
+      return error instanceof UnreadableFileError
+        ? { ...errorResponse(error), code: 'unreadable', reason: error.reason }
+        : errorResponse(error);
     }
   });
 

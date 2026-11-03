@@ -284,7 +284,8 @@
     "bibNote": "Notiz (BibTeX)",
     "createReadingNote": "Neue Notiz",
     "openReadingNote": "Lesenotiz",
-    "readingNoteError": "Lesenotiz: {{error}}"
+    "readingNoteError": "Lesenotiz: {{error}}",
+    "readingNoteNotUtf8": "Die Lesenotiz dieser Referenz ist nicht in UTF-8 kodiert. Ihre Schlagwörter wurden nicht geändert, weil ein erneutes Schreiben ihre Sonderzeichen beschädigen würde: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut."
   },
   "project": {
     "title": "Projekt",
@@ -295,7 +296,8 @@
     "createErrorNameInvalid": "Ein Projektname darf weder / noch \\ enthalten und nicht „.“ oder „..“ lauten.",
     "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
     "documentOpenError": "Das Dokument dieses Projekts konnte nicht geöffnet werden",
-    "documentOpenHint": "Es wurde keine Datei geändert. Der Editor zeigt ein unbenanntes Dokument: Was Sie dort schreiben, gelangt nicht in das Dokument des Projekts.",
+    "documentOpenUnchanged": "Es wurde keine Datei geändert.",
+    "documentOpenUntitled": "Der Editor zeigt ein unbenanntes Dokument: Was Sie dort schreiben, gelangt nicht in das Dokument des Projekts.",
     "newProject": "Neues Projekt",
     "openProject": "Projekt öffnen",
     "closeProject": "Projekt schließen",
@@ -2015,6 +2017,7 @@
     "renumberTimedOut": "Neunummerierung abgebrochen: Der Datenträger hat {{minutes}} Minuten lang nicht geantwortet. Einige Kapitel wurden möglicherweise neu nummeriert, nicht alle: Starten Sie sie erneut, sobald der Datenträger wieder antwortet.",
     "renumberRestoreFailed": "Neunummerierung fehlgeschlagen und nicht vollständig rückgängig gemacht: Einige Kapitel sind möglicherweise weiterhin neu nummeriert. Starten Sie sie erneut, sobald die Dateien wieder erreichbar sind.",
     "renumberUnreadable": "Neunummerierung abgebrochen: Das Manuskript ist unverändert, denn die Nummerierung läuft über alle Kapitel. {{detail}}",
+    "renumberChapterGone": "Ein von der Festplatte verschwundenes Kapitel ist nun als fehlend markiert: Starten Sie die Neunummerierung erneut, es wird dann ausgelassen.",
     "readIncomplete": "Unvollständiges Ergebnis. {{detail}}",
     "unreadableChapters": "Nicht lesbare Kapitel: {{chapters}}.",
     "unreadableNotUtf8": "Eine Datei, die nicht in UTF-8 kodiert ist, bleibt auf der Festplatte unverändert: Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut.",

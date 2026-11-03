@@ -442,6 +442,8 @@ describe('useAutoSave : une écriture en échec', () => {
 
     onWrite = healthy;
     act(() => open(B, 'b0'));
+    // B a déjà du texte à écrire : seul le changement de document dit que cet échec est celui de A.
+    type(' suite');
     await act(async () => {
       gate.release();
       await vi.advanceTimersByTimeAsync(0);
@@ -449,7 +451,6 @@ describe('useAutoSave : une écriture en échec', () => {
 
     expect(toasts()).toHaveLength(0);
 
-    type(' suite');
     await wait(DELAY);
     expect(writes.at(-1)).toEqual([B, 'b0 suite']);
   });

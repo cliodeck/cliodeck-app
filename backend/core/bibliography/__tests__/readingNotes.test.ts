@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import { UnreadableFileError } from '../../fs/user-files';
 import {
   READING_NOTES_DIR,
   ensureReadingNote,
@@ -157,6 +158,78 @@ describe('notes de lecture', () => {
     expect(readFileSync(file, 'utf-8')).toContain('Texte précieux');
     // Et pas de seconde note créée à côté.
     expect(existsSync(path.join(notesDir(), 'Braudel_1949-2.md'))).toBe(false);
+  });
+
+  it('étiquettes posées à la suite : le dernier geste a le dernier mot', async () => {
+    await ensureReadingNote(project, braudel);
+
+    await Promise.all(Array.from({ length: 20 }, (_, i) => setProjectTags(project, braudel, [`geste-${i}`])));
+
+    const [note] = await listReadingNotes(project);
+    expect(note.tags).toEqual(['geste-19']);
+  });
+
+  it('une clé refaite pendant qu’on étiquette : la note suit la clé et garde l’étiquette', async () => {
+    const old = { ...braudel, citekey: 'Braudel_' };
+    await ensureReadingNote(project, old);
+
+    await Promise.all([
+      followRenamedCitekeys(project, [{ zoteroKey: 'ABCD1234', from: 'Braudel_', to: 'Braudel_1949' }]),
+      setProjectTags(project, braudel, ['à-relire']),
+    ]);
+
+    expect(readdirSync(notesDir())).toEqual(['Braudel_1949.md']);
+    const [note] = await listReadingNotes(project);
+    expect(note).toMatchObject({ citekey: 'Braudel_1949', tags: ['à-relire'] });
+  });
+
+  describe('une note qui n’est pas en UTF-8', () => {
+    // Refusée à l'ouverture avec la promesse « il reste intact sur le disque » : le
+    // réécrire ici, après une lecture avec perte, rendrait les U+FFFD définitifs.
+    const latin1Note = (citekey: string) =>
+      Buffer.from(`---\ncitekey: ${citekey}\nzotero_key: ABCD1234\n---\n\n# Dupont\n\nL'évêque a été reçu.\n`, 'latin1');
+
+    function writeLatin1Note(name: string, citekey: string): { file: string; bytes: Buffer } {
+      mkdirSync(notesDir(), { recursive: true });
+      const file = path.join(notesDir(), name);
+      const bytes = latin1Note(citekey);
+      writeFileSync(file, bytes);
+      return { file, bytes };
+    }
+
+    it('étiqueter : refus, pas un octet ne change, et pas de seconde note', async () => {
+      const { file, bytes } = writeLatin1Note('Braudel_1949.md', 'Braudel_1949');
+
+      const refusal = await setProjectTags(project, braudel, ['lu']).catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(UnreadableFileError);
+      expect((refusal as UnreadableFileError).reason).toBe('encoding');
+      expect(readFileSync(file).equals(bytes)).toBe(true);
+      expect(readdirSync(notesDir())).toEqual(['Braudel_1949.md']);
+    });
+
+    it('clé refaite : la note reste telle quelle, sous son nom, et toujours retrouvable', async () => {
+      const { file, bytes } = writeLatin1Note('Braudel_.md', 'Braudel_');
+
+      await followRenamedCitekeys(project, [{ zoteroKey: 'ABCD1234', from: 'Braudel_', to: 'Braudel_1949' }]);
+
+      expect(readFileSync(file).equals(bytes)).toBe(true);
+      expect(readdirSync(notesDir())).toEqual(['Braudel_.md']);
+      expect(findReadingNote(await listReadingNotes(project), { citekey: 'Braudel_1949', zoteroKey: 'ABCD1234' })?.file).toBe(file);
+    });
+
+    it('clé refaite : les autres notes suivent quand même', async () => {
+      const refused = writeLatin1Note('Braudel_.md', 'Braudel_');
+      await ensureReadingNote(project, { citekey: 'Autre_', zoteroKey: 'WXYZ9876' });
+
+      await followRenamedCitekeys(project, [
+        { zoteroKey: 'ABCD1234', from: 'Braudel_', to: 'Braudel_1949' },
+        { zoteroKey: 'WXYZ9876', from: 'Autre_', to: 'Autre_1950' },
+      ]);
+
+      expect(readFileSync(refused.file).equals(refused.bytes)).toBe(true);
+      expect(readdirSync(notesDir()).sort()).toEqual(['Autre_1950.md', 'Braudel_.md']);
+    });
   });
 
   it('donne des noms de fichier valides sous Windows', () => {

@@ -284,7 +284,8 @@
     "bibNote": "Note (BibTeX)",
     "createReadingNote": "Nouvelle note",
     "openReadingNote": "Note de lecture",
-    "readingNoteError": "Note de lecture : {{error}}"
+    "readingNoteError": "Note de lecture : {{error}}",
+    "readingNoteNotUtf8": "La note de lecture de cette référence n'est pas encodée en UTF-8. Ses étiquettes n'ont pas changé, car la réécrire abîmerait ses caractères accentués : elle reste intacte sur le disque. Convertissez-la en UTF-8, puis recommencez."
   },
   "project": {
     "title": "Projet",
@@ -295,7 +296,8 @@
     "createErrorNameInvalid": "Le nom d'un projet ne peut contenir ni / ni \\, et ne peut pas être « . » ou « .. ».",
     "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
     "documentOpenError": "Le document de ce projet n'a pas pu être ouvert",
-    "documentOpenHint": "Aucun fichier n'a été modifié. L'éditeur affiche un document sans titre : ce que vous y écrivez n'ira pas dans le document du projet.",
+    "documentOpenUnchanged": "Aucun fichier n'a été modifié.",
+    "documentOpenUntitled": "L'éditeur affiche un document sans titre : ce que vous y écrivez n'ira pas dans le document du projet.",
     "newProject": "Nouveau projet",
     "openProject": "Ouvrir un projet",
     "closeProject": "Fermer le projet",
@@ -2015,6 +2017,7 @@
     "renumberTimedOut": "Renumérotation arrêtée : le disque n'a pas répondu pendant {{minutes}} minutes. Des chapitres ont pu être renumérotés, pas tous : relancez-la quand le disque répondra.",
     "renumberRestoreFailed": "La renumérotation a échoué et n'a pas pu être annulée partout : des chapitres ont pu rester renumérotés. Relancez-la quand les fichiers seront de nouveau accessibles.",
     "renumberUnreadable": "Renumérotation annulée : le manuscrit est inchangé, car la numérotation traverse tous les chapitres. {{detail}}",
+    "renumberChapterGone": "Un chapitre disparu du disque est désormais marqué comme manquant : relancez la renumérotation, elle le laissera de côté.",
     "readIncomplete": "Résultat incomplet. {{detail}}",
     "unreadableChapters": "Chapitres illisibles : {{chapters}}.",
     "unreadableNotUtf8": "Un fichier qui n'est pas en UTF-8 reste intact sur le disque : convertissez-le en UTF-8, puis relancez.",

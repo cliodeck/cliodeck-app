@@ -193,6 +193,9 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:set-tags', options) as Promise<{
           success: boolean;
           note?: { file: string; citekey: string; zoteroKey?: string; tags: string[] };
+          /** Note qu'on ne sait pas lire : elle n'a pas été touchée, et `reason` dit pourquoi. */
+          code?: 'unreadable';
+          reason?: string;
           error?: string;
         }>,
     },

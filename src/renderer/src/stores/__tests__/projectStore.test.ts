@@ -155,7 +155,7 @@ describe('projectStore.loadProject — le document ne s’ouvre pas', () => {
     expect(toasts()[0]).toMatchObject({
       level: 'error',
       title: i18n.t('project.documentOpenError'),
-      message: i18n.t('project.documentOpenHint'),
+      message: `${i18n.t('project.documentOpenUnchanged')} ${i18n.t('project.documentOpenUntitled')}`,
     });
     expect(toasts()[0].details).toContain(DOCUMENT);
     expectUntitledBuffer();
@@ -173,7 +173,8 @@ describe('projectStore.loadProject — le document ne s’ouvre pas', () => {
 
     expect(stub.fs.writeFile).not.toHaveBeenCalled();
     expect(toasts()).toHaveLength(1);
-    expect(toasts()[0].message).toBe(i18n.t('editor.notUtf8'));
+    // Quoi faire du fichier, et ce que devient ce qu'on tape : l'un ne remplace pas l'autre.
+    expect(toasts()[0].message).toBe(`${i18n.t('editor.notUtf8')} ${i18n.t('project.documentOpenUntitled')}`);
     expectUntitledBuffer();
   });
 

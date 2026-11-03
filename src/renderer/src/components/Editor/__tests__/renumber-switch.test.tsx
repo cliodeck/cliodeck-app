@@ -219,6 +219,50 @@ describe('renumérotation : un chapitre illisible', () => {
   );
 });
 
+describe('renumérotation : un chapitre disparu depuis l’ouverture', () => {
+  it('le refus met le manifeste à jour : le clic suivant passe, comme à la réouverture', async () => {
+    await openBook(DISORDERED);
+    const chaptersOnDisk = Object.keys(DISORDERED).map(chapterOf);
+    window.electron.project.getChapters = vi.fn(async () => ({
+      success: true,
+      chapters: chaptersOnDisk.map((c) => (c.id === 'b' ? { ...c, missing: true } : c)),
+      unattached: [],
+    })) as never;
+    unreadableOnDisk.set('chapters/b.md', 'absent');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    expect(alertMessage()).toBe('book.renumberUnreadable');
+    expect(writes).toEqual([]);
+    expect(window.electron.project.getChapters).toHaveBeenCalledWith(PROJECT);
+    await act(async () => {
+      useDialogStore.getState().closeAlert();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(writes.map(([path]) => path).sort()).toEqual([A, C]);
+    expect(disk[C]).toBe('# C\n\nTexte C[^3].\n\n[^3]: quatre\n');
+    expect(locks()).toEqual(FREE);
+  });
+
+  it('un chapitre encore là mais illisible : le manifeste n’a rien à apprendre', async () => {
+    await openBook(DISORDERED);
+    unreadableOnDisk.set('chapters/b.md', 'encoding');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toBe('book.renumberUnreadable');
+    expect(window.electron.project.getChapters).not.toHaveBeenCalled();
+  });
+});
+
 describe('renumérotation sans bascule', () => {
   it('écrit chaque chapitre dans son fichier, le chapitre ouvert par l’éditeur', async () => {
     await openBook(DISORDERED);

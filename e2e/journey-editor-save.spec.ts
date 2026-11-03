@@ -303,6 +303,7 @@ test('projet au document en Latin-1 : pas un octet ne change, et l’auteur sait
     const toast = window.locator('.status-toast--error');
     await expect(toast).toContainText('document de ce projet', { timeout: 20_000 });
     await expect(toast).toContainText('UTF-8');
+    await expect(toast).toContainText('document sans titre');
     expect(await editorOf(window).textContent()).not.toContain('\uFFFD');
 
     // Le tampon est sans titre : rien de ce qu'on y tape n'atteint le fichier refusé.
@@ -411,6 +412,128 @@ test('livre au chapitre en Latin-1 : Renuméroter refuse sans toucher à un octe
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('livre dont un chapitre disparaît pendant la session : le refus, puis le clic suivant renumérote le reste', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-livre-'));
+  mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  mkdirSync(join(dir, 'chapters'));
+  const projectJson = join(dir, 'project.json');
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000002',
+      name: 'Livre E2E',
+      type: 'book',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      chapters: [
+        { id: 'c1', title: 'Premier', filePath: 'chapters/01.md', order: 0, kind: 'chapter' },
+        { id: 'c2', title: 'Second', filePath: 'chapters/02.md', order: 1, kind: 'chapter' },
+        { id: 'c3', title: 'Troisième', filePath: 'chapters/03.md', order: 2, kind: 'chapter' },
+      ],
+    }),
+  );
+  const first = join(dir, 'chapters', '01.md');
+  const second = join(dir, 'chapters', '02.md');
+  const third = join(dir, 'chapters', '03.md');
+  const FIRST = '# Premier\n\nTexte[^5].\n\n[^5]: Note un.\n';
+  const THIRD = '# Troisième\n\nTexte[^9].\n\n[^9]: Note trois.\n';
+  writeFileSync(first, FIRST);
+  writeFileSync(second, '# Second\n\nTexte[^7].\n\n[^7]: Note deux.\n');
+  writeFileSync(third, THIRD);
+  const renumber = window.locator('button[title="Renuméroter les notes"]').first();
+  const alert = window.locator('#alert-dialog-message');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(editorOf(window)).toContainText('Premier', { timeout: 20_000 });
+
+    rmSync(second);
+    await renumber.click();
+    await expect(alert).toContainText('le manuscrit est inchangé', { timeout: 10_000 });
+    await expect(alert).toContainText('Second');
+    await expect(alert).toContainText('relancez la renumérotation');
+    await window.locator('.alert-dialog-btn-ok').click();
+    expect(readFileSync(third, 'utf8')).toBe(THIRD);
+
+    // Sans quitter le projet : le navigateur sait que le chapitre manque, comme à l'ouverture.
+    await renumber.click();
+    await expect(alert).toContainText('2 chapitre', { timeout: 10_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    expect(readFileSync(third, 'utf8')).toBe(THIRD.replaceAll('[^9]', '[^2]'));
+    await expect.poll(() => readFileSync(first, 'utf8'), { timeout: 15_000 }).toBe(FIRST.replaceAll('[^5]', '[^1]'));
+    expect(existsSync(second)).toBe(false);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('note de lecture en Latin-1 : l’étiqueter refuse sans toucher à un octet, et repart une fois le fichier converti', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  writeFileSync(
+    join(projet.dir, 'references.bib'),
+    '@book{dupont2020,\n  author = {Dupont, Jean},\n  title = {Un titre},\n  year = {2020},\n}\n',
+  );
+  writeFileSync(
+    projet.projectJson,
+    JSON.stringify({
+      ...JSON.parse(readFileSync(projet.projectJson, 'utf8')),
+      bibliographySource: { type: 'file', filePath: 'references.bib' },
+    }),
+  );
+  mkdirSync(join(projet.dir, 'reading-notes'));
+  const note = join(projet.dir, 'reading-notes', 'dupont2020.md');
+  const NOTE = "---\ncitekey: dupont2020\n---\n\n# Dupont\n\nL'évêque a été reçu.\n";
+  const latin1 = Buffer.from(NOTE, 'latin1');
+  writeFileSync(note, latin1);
+  const alert = window.locator('#alert-dialog-message');
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+
+    await window.locator('#left-tab-bibliography').click();
+    await window.locator('.citation-header').filter({ hasText: 'Dupont' }).click();
+    const input = window.locator('.tag-manager .tag-input').first();
+    await input.fill('lu');
+    await input.press('Enter');
+
+    await expect(alert).toContainText('UTF-8', { timeout: 10_000 });
+    await expect(alert).toContainText('étiquettes');
+    await window.locator('.alert-dialog-btn-ok').click();
+    await expect(window.locator('.tag-manager .tag')).toHaveCount(0);
+    expect(readFileSync(note).equals(latin1)).toBe(true);
+    expect(readdirSync(join(projet.dir, 'reading-notes'))).toEqual(['dupont2020.md']);
+
+    // Le remède que le message prescrit.
+    writeFileSync(note, NOTE);
+    await input.fill('lu');
+    await input.press('Enter');
+    await expect(window.locator('.tag-manager .tag')).toHaveCount(1, { timeout: 10_000 });
+    const converted = readFileSync(note, 'utf8');
+    expect(converted).toContain('- lu');
+    expect(converted).toContain("L'évêque a été reçu.");
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
   }
 });
 
