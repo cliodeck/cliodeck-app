@@ -12,7 +12,7 @@
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,6 +84,59 @@ export async function launchApp(options: { language?: string } = {}): Promise<La
 
   const window = await app.firstWindow({ timeout: 30_000 });
   await window.waitForLoadState('domcontentloaded');
+  await stubLeaveDialog(app, join(userDataDir, 'e2e-leave-dialogs.jsonl'));
 
   return { kind: 'ok', value: { app, window, userDataDir } };
+}
+
+/** Ce que le dialogue natif de sortie a demandé à l'auteur. */
+export interface LeaveDialogSeen {
+  message: string;
+  buttons: string[];
+}
+
+interface LeaveDialogStub {
+  __leaveAnswer: number;
+}
+
+const leaveDialogLogs = new WeakMap<ElectronApplication, string>();
+
+/**
+ * Un tampon sans titre non vide, ou une écriture refusée, pose une question native à
+ * la fermeture. Personne n'y répondrait : `app.close()` resterait bloqué, et la suite
+ * avec lui, y compris quand un test échoue en plein milieu. Le dialogue répond donc
+ * « Quitter sans enregistrer » par défaut ; `answerLeaveDialog` change la réponse et
+ * `leaveDialogs` dit ce qui a été demandé.
+ *
+ * Ce qui a été demandé s'écrit dans un fichier, lu côté test : sous Windows et Linux, la
+ * dernière fenêtre fermée emporte l'app, et il n'y aurait plus personne à interroger.
+ */
+async function stubLeaveDialog(app: ElectronApplication, logFile: string): Promise<void> {
+  leaveDialogLogs.set(app, logFile);
+  await app.evaluate(({ dialog }, file) => {
+    const { appendFileSync } = process.getBuiltinModule('node:fs');
+    const stub = globalThis as unknown as LeaveDialogStub;
+    stub.__leaveAnswer = 1;
+    (dialog as unknown as { showMessageBox: unknown }).showMessageBox = async (...args: unknown[]) => {
+      const { message, buttons } = args[args.length - 1] as LeaveDialogSeen;
+      appendFileSync(file, `${JSON.stringify({ message, buttons })}\n`);
+      return { response: stub.__leaveAnswer, checkboxChecked: false };
+    };
+  }, logFile);
+}
+
+export function answerLeaveDialog(app: ElectronApplication, answer: 'stay' | 'leave'): Promise<void> {
+  return app.evaluate((_electron, response) => {
+    (globalThis as unknown as LeaveDialogStub).__leaveAnswer = response;
+  }, answer === 'stay' ? 0 : 1);
+}
+
+export async function leaveDialogs(app: ElectronApplication): Promise<LeaveDialogSeen[]> {
+  const logFile = leaveDialogLogs.get(app);
+  if (!logFile) throw new Error('Cette app n’a pas été lancée par launchApp.');
+  if (!existsSync(logFile)) return [];
+  return readFileSync(logFile, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => JSON.parse(line) as LeaveDialogSeen);
 }

@@ -698,14 +698,18 @@ const api = {
    */
   lifecycle: {
     onFlushBeforeQuit: (callback: () => void): (() => void) => {
-      const listener = (): void => callback();
+      const listener = (): void => {
+        // Le main saura que la page vit, même si sa réponse tarde : il n'a pas à la croire bloquée.
+        ipcRenderer.send('app:flush-received');
+        callback();
+      };
       ipcRenderer.on('app:flush-before-quit', listener);
       return () => {
         ipcRenderer.removeListener('app:flush-before-quit', listener);
       };
     },
-    /** Accusé : le renderer a fini d'écrire, la sortie peut se poursuivre. */
-    flushDone: () => ipcRenderer.send('app:flush-done'),
+    /** Accusé : le renderer a fini d'écrire. Le rapport dit si le texte est à l'abri. */
+    flushDone: (report: { outcome: string; error?: string }) => ipcRenderer.send('app:flush-done', report),
   },
 
   /**

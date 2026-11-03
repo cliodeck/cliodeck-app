@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MainLayout } from './components/Layout/MainLayout';
@@ -18,6 +18,25 @@ import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
 import { useEditorStore } from './stores/editorStore';
 import { useTheme } from './hooks/useTheme';
+
+function AppErrorBoundary({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onReset={() => {
+        // Reset app state if needed
+        window.location.reload();
+      }}
+      onError={(error, errorInfo) => {
+        // Log error to console
+        console.error('Error caught by boundary:', error, errorInfo);
+        // TODO: Send to error tracking service (Sentry, etc.)
+      }}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
 
 function App() {
   const { t } = useTranslation('common');
@@ -101,32 +120,27 @@ function App() {
     */
   }, [initializeLanguage, loadProject, updateEditorSettings]);
 
+  // Deux frontières. L'intérieure arrête le plantage de l'interface : les dialogues restent montés
+  // sur l'écran d'erreur, où le menu vit encore et où l'auteur enregistre son texte. Sans eux, un
+  // enregistrement refusé ne s'y disait pas. L'extérieure garde les dialogues eux-mêmes : hors de
+  // toute frontière, leur plantage effacerait la page, et le filet de sortie avec elle.
   return (
-    <ErrorBoundary
-      FallbackComponent={ErrorFallback}
-      onReset={() => {
-        // Reset app state if needed
-        window.location.reload();
-      }}
-      onError={(error, errorInfo) => {
-        // Log error to console
-        console.error('Error caught by boundary:', error, errorInfo);
-        // TODO: Send to error tracking service (Sentry, etc.)
-      }}
-    >
-      {/* Skip-to-content link (fusion 3.3) — first focusable element,
-          hidden until keyboard-focused. Lets Tab users jump past the
-          workspace mode bar / left tabs straight into the editor. */}
-      <a className="skip-link" href="#main-content">
-        {t('a11y.skipToMain', 'Skip to main content')}
-      </a>
-      {/* Chantier « même éditeur » : les projets presentation passent par le
-          MÊME EditorPanel (toolbar contextuelle + tiroirs slides). */}
-      <MainLayout centerPanel={<EditorPanel />} />
-      <RebuildProgressModal />
+    <AppErrorBoundary>
+      <AppErrorBoundary>
+        {/* Skip-to-content link (fusion 3.3) — first focusable element,
+            hidden until keyboard-focused. Lets Tab users jump past the
+            workspace mode bar / left tabs straight into the editor. */}
+        <a className="skip-link" href="#main-content">
+          {t('a11y.skipToMain', 'Skip to main content')}
+        </a>
+        {/* Chantier « même éditeur » : les projets presentation passent par le
+            MÊME EditorPanel (toolbar contextuelle + tiroirs slides). */}
+        <MainLayout centerPanel={<EditorPanel />} />
+        <RebuildProgressModal />
+      </AppErrorBoundary>
       <AlertDialog />
       <ConfirmDialog />
-    </ErrorBoundary>
+    </AppErrorBoundary>
   );
 }
 

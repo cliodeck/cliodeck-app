@@ -46,5 +46,11 @@
   "close": "Schließen",
   "about": "Über ClioDeck",
   "documentation": "Dokumentation",
-  "reportIssue": "Problem melden"
+  "reportIssue": "Problem melden",
+  "reload": "Neu laden",
+  "forceReload": "Neu laden erzwingen",
+  "unsavedStay": "Bleiben",
+  "unsavedLeave": "Beenden ohne Speichern",
+  "unsavedUntitledMessage": "Dieses unbenannte Dokument ist nirgends gespeichert. Wenn Sie jetzt beenden, geht sein Text verloren.",
+  "unsavedSaveFailedMessage": "Das Dokument konnte nicht gespeichert werden. Wenn Sie jetzt beenden, gehen Ihre letzten Änderungen verloren."
 }

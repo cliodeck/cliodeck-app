@@ -50,6 +50,17 @@
   color: var(--color-danger);
 }
 
+.error-fallback__blocked {
+  color: var(--color-danger);
+  margin-bottom: 1rem;
+}
+
+.error-fallback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .error-fallback__retry {
   padding: 0.5rem 1.5rem;
   background-color: var(--color-accent);
@@ -63,4 +74,24 @@
 
 .error-fallback__retry:hover {
   background-color: var(--color-accent-hover);
+}
+
+.error-fallback__retry:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.error-fallback__reload-anyway {
+  padding: 0.5rem 1.5rem;
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  transition: background-color var(--transition-fast);
+}
+
+.error-fallback__reload-anyway:hover {
+  background-color: color-mix(in srgb, var(--color-danger) 15%, transparent);
 }

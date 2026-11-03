@@ -1,5 +1,16 @@
 import { Menu, MenuItemConstructorOptions, BrowserWindow, app } from 'electron';
 import { t } from './i18n.js';
+import { mayLeaveRenderer } from './renderer-flush.js';
+
+/**
+ * Recharger détruit l'éditeur comme une fermeture : le document s'écrit d'abord. Le rôle
+ * natif `reload` rechargeait sans rien demander à personne.
+ */
+async function reloadAfterFlush(win: BrowserWindow, ignoreCache: boolean): Promise<void> {
+  if (win.isDestroyed() || !(await mayLeaveRenderer(win)) || win.isDestroyed()) return;
+  if (ignoreCache) win.webContents.reloadIgnoringCache();
+  else win.webContents.reload();
+}
 
 /**
  * Creates and returns the application menu with keyboard shortcuts
@@ -218,8 +229,22 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           },
         },
         { type: 'separator' as const },
-        { role: 'reload' as const },
-        { role: 'forceReload' as const },
+        {
+          id: 'view-reload',
+          label: t('reload'),
+          accelerator: 'CmdOrCtrl+R',
+          click: () => {
+            void reloadAfterFlush(mainWindow, false);
+          },
+        },
+        {
+          id: 'view-force-reload',
+          label: t('forceReload'),
+          accelerator: 'Shift+CmdOrCtrl+R',
+          click: () => {
+            void reloadAfterFlush(mainWindow, true);
+          },
+        },
         { role: 'toggleDevTools' as const },
         { type: 'separator' as const },
         { role: 'resetZoom' as const },
