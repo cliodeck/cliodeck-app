@@ -27,6 +27,7 @@ import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
+import { useRebuildStore } from '../rebuildStore';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
 import { useAutoSave } from '../../hooks/useAutoSave';
 
@@ -962,5 +963,258 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     // Pas de délai fixe : sous charge, la lecture de la demande gagnante dépasse 50 ms.
     await eventually(() => expect(store().filePath).toBe(other));
     expect(store().bufferDetached).toBe(false);
+  });
+});
+
+describe('le message d’échec d’une reconstruction suit le projet à l’écran', () => {
+  const CAUSE_A = 'index de A non écrit';
+  const CAUSE_B = 'index de B non écrit';
+  const projectJsonB = () => path.join(dirB, 'project.json');
+
+  const failure = (error: string) => ({
+    current: 90,
+    total: 100,
+    status: `Error: ${error}`,
+    percentage: 90,
+    phase: 'failed' as const,
+    error,
+  });
+
+  /** Tel que le main le publie, pendant qu'il initialise les services du projet. */
+  const rebuildFails = (error: string) =>
+    useRebuildStore.getState().setRebuildProgress(failure(error));
+  const shownFailure = () => useRebuildStore.getState().failure;
+
+  beforeEach(() => {
+    useRebuildStore.getState().resetProgress();
+  });
+
+  describe('le changement a lieu : le message du projet quitté ne le suit pas', () => {
+    it('ouverture : il est parti avant la demande au main', async () => {
+      await openProjectA();
+      rebuildFails(CAUSE_A);
+      let duringLoad: string | null | undefined;
+      whileMainInitializes = () => {
+        duringLoad = shownFailure();
+      };
+
+      await act(async () => {
+        await project().loadProject(projectJsonB());
+      });
+
+      expect(duringLoad).toBeNull();
+      expect(shownFailure()).toBeNull();
+    });
+
+    it('création : de même, et créer change aussi de projet', async () => {
+      await openProjectA();
+      rebuildFails(CAUSE_A);
+      let duringCreate: string | null | undefined;
+      whileMainInitializes = () => {
+        duringCreate = shownFailure();
+      };
+
+      await act(async () => {
+        await project().createProject('Neuf', 'article', root);
+      });
+
+      expect(duringCreate).toBeNull();
+      expect(shownFailure()).toBeNull();
+    });
+  });
+
+  describe('la reconstruction échoue pendant l’ouverture, qui se termine', () => {
+    it('ouverture : le message reste, l’éditeur est sur B, et la frappe s’écrit dans B', async () => {
+      await openProjectA();
+      whileMainInitializes = () => rebuildFails(CAUSE_B);
+
+      await act(async () => {
+        await project().loadProject(projectJsonB());
+      });
+
+      expect(shownFailure()).toBe(CAUSE_B);
+      expect(project().loadState.kind).toBe('ready');
+      expect(project().currentProject?.path).toBe(dirB);
+      expect(store().filePath).toBe(documentB);
+      expect(store().bufferDetached).toBe(false);
+      expect(currentView().state.readOnly).toBe(false);
+
+      // Le message se ferme comme le voile le fait : l'écriture ne dépend pas de lui.
+      act(() => useRebuildStore.getState().resetProgress());
+      await typeAtEnd('Une phrase.');
+      await eventually(() => expect(read(documentB)).toBe(`${B_TEXT}Une phrase.`));
+    });
+
+    it('création : le message reste aussi', async () => {
+      await openProjectA();
+      whileMainInitializes = () => rebuildFails(CAUSE_B);
+
+      await act(async () => {
+        await project().createProject('Neuf', 'article', root);
+      });
+
+      expect(shownFailure()).toBe(CAUSE_B);
+      expect(store().filePath).toBe(path.join(root, 'Neuf', 'document.md'));
+    });
+
+    it('message fermé pendant le chargement : l’éditeur coupé repart quand même sur B', async () => {
+      await openProjectA();
+      const initialization = hold();
+      whileMainInitializes = () => {
+        rebuildFails(CAUSE_B);
+        return initialization.wait();
+      };
+
+      const loading = project().loadProject(projectJsonB());
+      await eventually(() => expect(shownFailure()).toBe(CAUSE_B));
+      expect(store().bufferDetached).toBe(true);
+
+      act(() => useRebuildStore.getState().resetProgress());
+      initialization.release();
+      await act(async () => {
+        await loading;
+      });
+
+      expect(shownFailure()).toBeNull();
+      expect(store().filePath).toBe(documentB);
+      await typeAtEnd('Une phrase.');
+      await eventually(() => expect(read(documentB)).toBe(`${B_TEXT}Une phrase.`));
+    });
+  });
+
+  describe('le changement n’a pas lieu : le message du projet resté ouvert reste aussi', () => {
+    it('verrou posé, à l’ouverture et à la création', async () => {
+      await openProjectA();
+      rebuildFails(CAUSE_A);
+      useEditorStore.setState({ switchLock: 'book.renumberInProgress' });
+
+      const load = project().loadProject(projectJsonB());
+      await eventually(() => expect(dialogs().alertOpen).toBe(true));
+      await act(async () => {
+        dialogs().closeAlert();
+        await load;
+      });
+      expect(shownFailure()).toBe(CAUSE_A);
+
+      const create = project().createProject('Neuf', 'article', root);
+      await eventually(() => expect(dialogs().alertOpen).toBe(true));
+      await act(async () => {
+        dialogs().closeAlert();
+        await create;
+      });
+      expect(shownFailure()).toBe(CAUSE_A);
+    });
+
+    it('un autre changement déjà en cours', async () => {
+      await openProjectA();
+      const initialization = hold();
+      whileMainInitializes = () => initialization.wait();
+      const first = project().loadProject(projectJsonB());
+      await eventually(() => expect(window.electron.project.load).toHaveBeenCalledWith(projectJsonB()));
+      rebuildFails(CAUSE_B);
+
+      await act(async () => {
+        await project().loadProject(path.join(dirA, 'project.json'));
+        await project().createProject('Neuf', 'article', root);
+      });
+      expect(shownFailure()).toBe(CAUSE_B);
+
+      initialization.release();
+      await act(async () => {
+        await first;
+      });
+      expect(shownFailure()).toBe(CAUSE_B);
+    });
+
+    it('l’auteur annule pour garder son tampon sans titre', async () => {
+      await mountWorkbench();
+      await typeAtEnd('Une idée sans titre.');
+      rebuildFails(CAUSE_A);
+
+      const load = project().loadProject(projectJsonB());
+      await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+      await act(async () => {
+        dialogs().resolveConfirm(false);
+        await load;
+      });
+      expect(shownFailure()).toBe(CAUSE_A);
+
+      const create = project().createProject('Neuf', 'article', root);
+      await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+      await act(async () => {
+        dialogs().resolveConfirm(false);
+        await create;
+      });
+      expect(shownFailure()).toBe(CAUSE_A);
+    });
+
+    it('project.json illisible : A ne bouge pas', async () => {
+      await openProjectA();
+      rebuildFails(CAUSE_A);
+      await writeFile(projectJsonB(), '{ pas du JSON');
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow();
+      });
+
+      expect(shownFailure()).toBe(CAUSE_A);
+    });
+
+    it('écriture du sortant impossible : A ne bouge pas', async () => {
+      await openProjectA();
+      await typeAtEnd('Une phrase.');
+      rebuildFails(CAUSE_A);
+      mainCurrent.path = dirB;
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow();
+      });
+
+      expect(store().filePath).toBe(documentA);
+      expect(shownFailure()).toBe(CAUSE_A);
+    });
+  });
+
+  describe('le changement échoue en route : retour sur A', () => {
+    it('la reconstruction de B a échoué avant : son message ne reste pas sur A', async () => {
+      await openProjectA();
+      whileMainInitializes = () => rebuildFails(CAUSE_B);
+      mainFailsAfterSwitch = true;
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow('services');
+      });
+
+      expect(project().currentProject?.path).toBe(dirA);
+      expect(shownFailure()).toBeNull();
+    });
+
+    it('à la création aussi', async () => {
+      await openProjectA();
+      whileMainInitializes = () => rebuildFails(CAUSE_B);
+      mainFailsAfterSwitch = true;
+
+      await act(async () => {
+        await expect(project().createProject('Neuf', 'article', root)).rejects.toThrow('services');
+      });
+
+      expect(project().currentProject?.path).toBe(dirA);
+      expect(shownFailure()).toBeNull();
+    });
+
+    it('le main refuse sans avoir basculé : l’échec du changement parle seul, et A s’écrit', async () => {
+      await openProjectA();
+      rebuildFails(CAUSE_A);
+      mainRefusesBeforeSwitch = true;
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow('refus du main');
+      });
+
+      expect(shownFailure()).toBeNull();
+      expect(store().filePath).toBe(documentA);
+      await typeAtEnd('Une phrase.');
+      await eventually(() => expect(read(documentA)).toBe(`${A_TEXT}Une phrase.`));
+    });
   });
 });

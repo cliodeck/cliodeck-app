@@ -9,6 +9,7 @@ import {
 import i18n from '../i18n';
 import { useDialogStore } from './dialogStore';
 import { useNotificationStore } from './notificationStore';
+import { useRebuildStore } from './rebuildStore';
 
 // MARK: - Types
 
@@ -145,11 +146,15 @@ async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
  * un tampon vide, mais le sortant est sur le disque et l'éditeur n'est pas figé. Sans
  * document d'origine, c'est le texte du tampon sans titre qui revient, sans son annulation.
  * Sur un tampon, aucun chapitre n'est courant, comme quand rien ne s'ouvre.
+ *
+ * L'échec du changement parle seul : si l'index de l'entrant a échoué avant lui, son
+ * message désignerait, sur l'écran du projet d'avant, un projet qui ne s'y trouve pas.
  */
 async function reopenAfterFailedSwitch(
   detached: DetachedEditor,
   set: StoreApi<ProjectState>['setState']
 ): Promise<void> {
+  useRebuildStore.getState().resetProgress();
   const { useEditorStore } = await import('./editorStore');
   const { replaceBuffer } = useEditorStore.getState();
   if (detached.from) {
@@ -408,6 +413,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         return;
       }
 
+      // Le changement a lieu : le message d'échec de l'index du sortant ne le suit pas, et
+      // celui de l'entrant, publié pendant la demande au main, doit rester. Pas plus tôt :
+      // un changement refusé laisse le sortant à l'écran, et son message avec.
+      useRebuildStore.getState().resetProgress();
+
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
 
@@ -464,6 +474,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         return false;
       }
 
+      // Comme à l'ouverture : après les refus, avant la demande au main.
+      useRebuildStore.getState().resetProgress();
+
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
@@ -519,6 +532,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // Clear frontend state
     dismissDocumentNotOpened();
+    // Après la fermeture du main : la base fermée sous une reconstruction la fait échouer.
+    useRebuildStore.getState().resetProgress();
     set({
       currentProject: null,
       chapters: [],

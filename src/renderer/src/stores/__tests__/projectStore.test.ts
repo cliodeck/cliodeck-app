@@ -17,6 +17,7 @@ import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
 import { useNotificationStore } from '../notificationStore';
+import { useRebuildStore } from '../rebuildStore';
 import i18n from '../../i18n';
 
 interface ElectronStub {
@@ -358,6 +359,41 @@ describe('projectStore.closeProject — resets to idle', () => {
     await useProjectStore.getState().closeProject();
     expect(useProjectStore.getState().loadState).toEqual({ kind: 'idle' });
   });
+
+  describe('le message d’échec d’une reconstruction', () => {
+    const failed = {
+      current: 90,
+      total: 100,
+      status: 'Error: disque plein',
+      percentage: 90,
+      phase: 'failed' as const,
+      error: 'disque plein',
+    };
+
+    afterEach(() => useRebuildStore.getState().resetProgress());
+
+    it('part avec le projet fermé', async () => {
+      stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+      await useProjectStore.getState().loadProject('/tmp/p1');
+      useRebuildStore.getState().setRebuildProgress(failed);
+
+      await useProjectStore.getState().closeProject();
+
+      expect(useRebuildStore.getState().failure).toBeNull();
+    });
+
+    it('publié pendant la fermeture du main, il part aussi : la base se ferme sous la reconstruction', async () => {
+      stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+      await useProjectStore.getState().loadProject('/tmp/p1');
+      stub.project.close.mockImplementation(async () => {
+        useRebuildStore.getState().setRebuildProgress(failed);
+      });
+
+      await useProjectStore.getState().closeProject();
+
+      expect(useRebuildStore.getState().failure).toBeNull();
+    });
+  });
 });
 
 describe('projectStore.createProject — same machine', () => {
@@ -419,6 +455,25 @@ describe('projectStore — bascule refusée pendant une renumérotation', () => 
 
     expect(stub.project.close).not.toHaveBeenCalled();
     expect(useProjectStore.getState().currentProject).toBe(opened);
+  });
+
+  it('closeProject refusé : le message d’échec du projet resté ouvert reste aussi', async () => {
+    useRebuildStore.getState().setRebuildProgress({
+      current: 90,
+      total: 100,
+      status: 'Error: disque plein',
+      percentage: 90,
+      phase: 'failed',
+      error: 'disque plein',
+    });
+
+    const refused = Promise.resolve(useProjectStore.getState().closeProject());
+    await vi.waitFor(() => expect(useDialogStore.getState().alertMessage).toBe(inProgress));
+    useDialogStore.getState().closeAlert();
+    await refused;
+
+    expect(useRebuildStore.getState().failure).toBe('disque plein');
+    useRebuildStore.getState().resetProgress();
   });
 
   it('createProject n’appelle pas le main, garde le projet et dit pourquoi', async () => {
