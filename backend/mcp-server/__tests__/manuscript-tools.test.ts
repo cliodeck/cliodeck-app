@@ -11,7 +11,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { discoverManuscript } from '../tools/manuscript.js';
+import { discoverManuscript, registerManuscriptTools } from '../tools/manuscript.js';
+import { createCapturingServer } from './_helpers.js';
+import { symlinkAvailable } from '../../__tests__/helpers/native-guards.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { MCPAccessLogger } from '../logger.js';
+import type { MCPRuntimeConfig } from '../config.js';
 
 let tmp = '';
 
@@ -114,5 +119,91 @@ describe('discoverManuscript', () => {
   it('reports the real size so a long piece cannot look complete', async () => {
     await fs.writeFile(path.join(tmp, 'document.md'), 'x'.repeat(50000));
     expect(discoverManuscript(tmp)[0].chars).toBe(50000);
+  });
+});
+
+/**
+ * Un projet reçu par git ou en zip conserve ses liens : `document.md` peut pointer vers
+ * `~/.ssh/id_ed25519`. Le contrôle lexical ne le voit pas, et `read_manuscript` remettrait
+ * le fichier au client MCP (mesuré : « SECRET-HORS-PROJET » lu).
+ */
+describe.skipIf(!symlinkAvailable)('liens symboliques', () => {
+  const SECRET = 'SECRET-HORS-PROJET';
+  let outside = '';
+
+  async function read(requested: string): Promise<string> {
+    const { server, tools } = createCapturingServer();
+    registerManuscriptTools(
+      server as unknown as McpServer,
+      { workspaceRoot: tmp } as unknown as MCPRuntimeConfig,
+      { log: () => undefined } as unknown as MCPAccessLogger
+    );
+    const result = await tools.get('read_manuscript')!.handler({ path: requested });
+    return result.content[0].text;
+  }
+
+  beforeEach(async () => {
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cliodeck-dehors-'));
+    await fs.writeFile(path.join(outside, 'journal.md'), SECRET);
+  });
+  afterEach(async () => {
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('document.md lié vers l’extérieur : ni listé, ni lisible', async () => {
+    await fs.symlink(path.join(outside, 'journal.md'), path.join(tmp, 'document.md'));
+
+    expect(discoverManuscript(tmp)).toEqual([]);
+    const text = await read('document.md');
+    expect(text).toContain('unknown_piece');
+    expect(text).not.toContain(SECRET);
+  });
+
+  it('un chapitre du manifeste lié vers l’extérieur : ni listé, ni lisible', async () => {
+    await fs.mkdir(path.join(tmp, 'chapters'));
+    await fs.writeFile(path.join(tmp, 'chapters', '01.md'), 'A');
+    await fs.symlink(path.join(outside, 'journal.md'), path.join(tmp, 'chapters', '02.md'));
+    await fs.writeFile(
+      path.join(tmp, 'project.json'),
+      JSON.stringify({
+        chapters: [
+          { filePath: 'chapters/01.md', order: 0, title: 'Un' },
+          { filePath: 'chapters/02.md', order: 1, title: 'Annexe' },
+        ],
+      })
+    );
+
+    expect(discoverManuscript(tmp).map((p) => p.path)).toEqual(['chapters/01.md']);
+    expect(await read('chapters/02.md')).not.toContain(SECRET);
+  });
+
+  it('`chapters` lié hors du projet : rien n’en sort', async () => {
+    await fs.symlink(outside, path.join(tmp, 'chapters'));
+    await fs.writeFile(
+      path.join(tmp, 'project.json'),
+      JSON.stringify({ chapters: [{ filePath: 'chapters/journal.md', order: 0, title: 'Journal' }] })
+    );
+
+    expect(discoverManuscript(tmp)).toEqual([]);
+  });
+
+  it('un lien interne reste accepté, et se lit', async () => {
+    await fs.mkdir(path.join(tmp, 'brouillons'));
+    await fs.writeFile(path.join(tmp, 'brouillons', 'texte.md'), 'Du texte.');
+    await fs.symlink(path.join('brouillons', 'texte.md'), path.join(tmp, 'document.md'));
+
+    expect(discoverManuscript(tmp).map((p) => p.path)).toEqual(['document.md']);
+    expect(await read('document.md')).toContain('Du texte.');
+  });
+
+  it('une racine passée par un lien ne fait rien disparaître', async () => {
+    await fs.writeFile(path.join(tmp, 'document.md'), 'Du texte.');
+    const alias = `${tmp}-alias`;
+    await fs.symlink(tmp, alias);
+    try {
+      expect(discoverManuscript(alias).map((p) => p.path)).toEqual(['document.md']);
+    } finally {
+      await fs.rm(alias, { force: true });
+    }
   });
 });

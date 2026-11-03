@@ -30,6 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
+import { isInside } from '../../core/vector-store/file-identity.js';
 
 const LIST_TOOL = 'list_manuscript';
 const READ_TOOL = 'read_manuscript';
@@ -70,6 +71,9 @@ export function discoverManuscript(root: string): ManuscriptPiece[] {
     // liste blanche, plutôt que dans chaque appelant.
     const inside = path.relative(root, absolute);
     if (inside.startsWith('..') || path.isAbsolute(inside)) return;
+    // Le même projet peut contenir un lien : le contrôle ci-dessus ne le voit pas,
+    // et `statSync` comme `readFileSync` le suivraient jusqu'à son fichier.
+    if (!isInside(root, absolute)) return;
     let stat: fs.Stats;
     try {
       stat = fs.statSync(absolute);
