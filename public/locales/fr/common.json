@@ -1728,6 +1728,13 @@
     }
   },
   "ideas": {
+    "loading": "Chargement des idées…",
+    "saveFailed": "Vos dernières modifications n'ont pas pu être enregistrées : elles sont encore à l'écran, mais pas sur le disque. Une nouvelle tentative a lieu à chaque modification.",
+    "unreadable": {
+      "quarantined": "Le fichier de vos idées était abîmé et n'a pas pu être lu. Il n'est pas perdu : il a été mis de côté, et la liste repart de zéro. Pour retrouver vos idées, ouvrez ce fichier dans un éditeur de texte : ce qui n'est pas abîmé s'y lit encore.",
+      "blocked": "Le fichier de vos idées ne peut pas être lu pour l'instant : le disque ou le dossier réseau n'est peut-être pas accessible, ou les droits d'accès manquent. Il n'a été ni déplacé ni modifié. Les onglets Idées, Tableau et Graphe restent fermés en attendant, car rien n'y serait enregistré.",
+      "retry": "Réessayer"
+    },
     "modeNotice": {
       "message": "Le mode de chat « Brainstorming » cherche des idées dans vos sources, avec 20 extraits et sans votre manuscrit par défaut.",
       "activate": "Activer le mode Brainstorming",

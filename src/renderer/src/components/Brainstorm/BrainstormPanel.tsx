@@ -24,13 +24,14 @@ import {
   Lightbulb,
   Network,
   LayoutGrid,
+  AlertTriangle,
 } from 'lucide-react';
 import { AssistantChat } from '../Chat/AssistantChat';
 import { IdeasPanel } from './IdeasPanel';
 import { IdeasGraph } from './IdeasGraph';
 import { IdeasCanvas } from './IdeasCanvas';
 import { useProjectStore } from '../../stores/projectStore';
-import { useIdeaStore } from '../../stores/ideaStore';
+import { ideasFilePath, useIdeaStore } from '../../stores/ideaStore';
 import { useBrainstormModeNotice } from '../../hooks/useBrainstormModeNotice';
 import './BrainstormPanel.css';
 
@@ -58,6 +59,65 @@ type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 
 type BrainstormTab = 'chat' | 'ideas' | 'canvas' | 'graph';
 
+/**
+ * Ce que l'auteur doit savoir du fichier de ses idées, au-dessus des onglets qui en vivent. Pas
+ * de bouton de fermeture : la mise de côté se dit tant que ce projet est ouvert.
+ */
+const IdeasFileNotices: React.FC<{ projectPath: string }> = ({ projectPath }) => {
+  const { t } = useTranslation('common');
+  const persistence = useIdeaStore((s) => s.persistence);
+  const saveError = useIdeaStore((s) => s.saveError);
+  const loadIdeas = useIdeaStore((s) => s.loadIdeas);
+  const saveIdeas = useIdeaStore((s) => s.saveIdeas);
+
+  return (
+    <>
+      {persistence.kind === 'quarantined' && (
+        <div className="brainstorm-panel__ideas-notice" role="alert">
+          <AlertTriangle size={14} aria-hidden="true" />
+          <div className="brainstorm-panel__ideas-notice-body">
+            <p>{t('ideas.unreadable.quarantined')}</p>
+            <code className="brainstorm-panel__ideas-notice-path">{persistence.backupPath}</code>
+          </div>
+        </div>
+      )}
+      {persistence.kind === 'blocked' && (
+        <div className="brainstorm-panel__ideas-notice" role="alert">
+          <AlertTriangle size={14} aria-hidden="true" />
+          <div className="brainstorm-panel__ideas-notice-body">
+            <p>{t('ideas.unreadable.blocked')}</p>
+            <code className="brainstorm-panel__ideas-notice-path">{ideasFilePath(projectPath)}</code>
+            <code className="brainstorm-panel__ideas-notice-path">{persistence.reason}</code>
+          </div>
+          <button
+            type="button"
+            className="brainstorm-panel__ideas-notice-retry"
+            onClick={() => void loadIdeas(projectPath)}
+          >
+            {t('ideas.unreadable.retry')}
+          </button>
+        </div>
+      )}
+      {saveError && (
+        <div className="brainstorm-panel__ideas-notice" role="alert">
+          <AlertTriangle size={14} aria-hidden="true" />
+          <div className="brainstorm-panel__ideas-notice-body">
+            <p>{t('ideas.saveFailed')}</p>
+            <code className="brainstorm-panel__ideas-notice-path">{saveError}</code>
+          </div>
+          <button
+            type="button"
+            className="brainstorm-panel__ideas-notice-retry"
+            onClick={() => void saveIdeas(projectPath)}
+          >
+            {t('ideas.unreadable.retry')}
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
 export const BrainstormPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const [activeTab, setActiveTab] = useState<BrainstormTab>('chat');
@@ -70,10 +130,24 @@ export const BrainstormPanel: React.FC = () => {
   const [contextOpen, setContextOpen] = useState(false);
   const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   const loadIdeas = useIdeaStore((s) => s.loadIdeas);
+  const ideasLoadedFor = useIdeaStore((s) => s.loadedFor);
+  const ideasLoading = useIdeaStore((s) => s.isLoading);
+  const ideasBlocked = useIdeaStore((s) => s.persistence.kind === 'blocked');
+  // Tant que la liste n'est pas celle de ce projet, on ne la montre pas : elle vient du projet
+  // d'avant, ou elle est vide en attendant le disque (un fichier OneDrive met des secondes à
+  // arriver), et ce qu'on y ferait disparaîtrait au chargement.
+  const ideasShown =
+    currentProjectPath !== null && ideasLoadedFor === currentProjectPath && !ideasLoading;
   const modeNotice = useBrainstormModeNotice();
   // Sans projet, le panneau invite déjà à en ouvrir un : pas deux bandes, et
   // rien à chercher dans des sources qui n'existent pas encore.
   const showModeNotice = modeNotice.visible && status !== 'no_project';
+
+  // Rien à voir avec les consignes ni les recettes ci-dessous : leur échec laissait à l'écran
+  // la liste du projet d'avant.
+  useEffect(() => {
+    if (currentProjectPath) void loadIdeas(currentProjectPath);
+  }, [currentProjectPath, loadIdeas]);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,10 +198,6 @@ export const BrainstormPanel: React.FC = () => {
         }
         if (v.success) {
           setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '' });
-        }
-        // Load persistent ideas
-        if (currentProjectPath) {
-          loadIdeas(currentProjectPath);
         }
         setStatus('ready');
       } catch (e) {
@@ -233,19 +303,18 @@ export const BrainstormPanel: React.FC = () => {
           </section>
         </>
       )}
-      {activeTab === 'ideas' && (
-        <section className="brainstorm-panel__chat">
-          <IdeasPanel />
-        </section>
+      {activeTab !== 'chat' && currentProjectPath && ideasShown && (
+        <IdeasFileNotices projectPath={currentProjectPath} />
       )}
-      {activeTab === 'canvas' && (
+      {activeTab !== 'chat' && (
         <section className="brainstorm-panel__chat">
-          <IdeasCanvas />
-        </section>
-      )}
-      {activeTab === 'graph' && (
-        <section className="brainstorm-panel__chat">
-          <IdeasGraph />
+          {currentProjectPath && !ideasShown && (
+            <p className="brainstorm-panel__muted brainstorm-panel__ideas-loading">{t('ideas.loading')}</p>
+          )}
+          {/* Bloqué : rien de ce qu'on y ferait ne serait enregistré. */}
+          {ideasShown && !ideasBlocked && activeTab === 'ideas' && <IdeasPanel />}
+          {ideasShown && !ideasBlocked && activeTab === 'canvas' && <IdeasCanvas />}
+          {ideasShown && !ideasBlocked && activeTab === 'graph' && <IdeasGraph />}
         </section>
       )}
 

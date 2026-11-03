@@ -1728,6 +1728,13 @@
     }
   },
   "ideas": {
+    "loading": "Ideen werden geladen…",
+    "saveFailed": "Ihre letzten Änderungen konnten nicht gespeichert werden: Sie sind noch auf dem Bildschirm, aber nicht auf dem Datenträger. Bei jeder Änderung wird es erneut versucht.",
+    "unreadable": {
+      "quarantined": "Die Datei mit Ihren Ideen war beschädigt und konnte nicht gelesen werden. Sie ist nicht verloren: Sie wurde beiseitegelegt, und die Liste beginnt wieder leer. Um Ihre Ideen wiederzufinden, öffnen Sie diese Datei in einem Texteditor: Was nicht beschädigt ist, lässt sich dort noch lesen.",
+      "blocked": "Die Datei mit Ihren Ideen kann im Moment nicht gelesen werden: Das Laufwerk oder der Netzwerkordner ist möglicherweise nicht erreichbar, oder es fehlen Zugriffsrechte. Sie wurde weder verschoben noch verändert. Die Tabs Ideen, Board und Graph bleiben bis dahin geschlossen, denn dort würde nichts gespeichert.",
+      "retry": "Erneut versuchen"
+    },
     "modeNotice": {
       "message": "Der Chat-Modus „Brainstorming“ sucht Ideen in Ihren Quellen, mit 20 Auszügen und standardmäßig ohne Ihr Manuskript.",
       "activate": "Brainstorming-Modus aktivieren",
