@@ -106,9 +106,9 @@ const pageWasReloaded = (window: Page) =>
  * Un vrai plantage de rendu, sous la frontière d'erreur : un `setState` dont le calcul
  * lève. Rien n'est simulé après lui : React démonte l'arbre, la vue CodeMirror est détruite.
  */
-async function crashRender(window: Page): Promise<void> {
-  const crashed = await window.evaluate(() => {
-    const node = document.querySelector('.editor-panel');
+async function crashRender(window: Page, selector = '.editor-panel'): Promise<void> {
+  const crashed = await window.evaluate((target) => {
+    const node = document.querySelector(target);
     if (!node) return false;
     type Hook = { queue?: { dispatch?: (update: () => never) => void }; next: Hook | null };
     type Fiber = { tag: number; memoizedState: unknown; return: Fiber | null };
@@ -130,7 +130,7 @@ async function crashRender(window: Page): Promise<void> {
       fiber = fiber.return;
     }
     return false;
-  });
+  }, selector);
   expect(crashed).toBe(true);
   await expect(window.locator('.error-fallback')).toBeVisible({ timeout: 10_000 });
 }
@@ -138,6 +138,15 @@ async function crashRender(window: Page): Promise<void> {
 const retryButton = (window: Page) => window.locator('.error-fallback__retry');
 const blockedMessage = (window: Page) => window.locator('.error-fallback__blocked');
 const reloadAnywayButton = (window: Page) => window.locator('.error-fallback__reload-anyway');
+
+/** Ferme les alertes en file : deux pour un envoi de menu, tant que ses écouteurs sont doublés (S15-1-22). */
+async function dismissAlerts(window: Page): Promise<void> {
+  const ok = window.locator('.alert-dialog-btn-ok');
+  await expect(async () => {
+    if (await ok.isVisible()) await ok.click();
+    await expect(ok).toHaveCount(0, { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+}
 
 /** Un tampon sans titre, hors du projet, avec du texte qui n'existe nulle part ailleurs. */
 async function untitledBuffer(window: Page, text: string): Promise<void> {
@@ -525,9 +534,13 @@ test('plantage de rendu, écriture refusée : Recharger quand même recharge', a
   });
 });
 
-test('plantage de rendu sur un tampon sans titre : le message le dit, Enregistrer le met à l’abri, puis Réessayer recharge', async () => {
+test('plantage de rendu sur un tampon sans titre : le message le dit, un refus se dit aussi, Enregistrer le met à l’abri, puis Réessayer recharge', async () => {
   await withArticle(async (app, window, article) => {
     const chosen = join(article.dir, 'une-idee.md');
+    const chooseSavePath = (path: string) =>
+      app.evaluate(({ dialog }, filePath) => {
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+      }, path);
     await untitledBuffer(window, 'Une idée neuve.');
     await markPage(window);
     await crashRender(window);
@@ -536,10 +549,17 @@ test('plantage de rendu sur un tampon sans titre : le message le dit, Enregistre
     await expect(blockedMessage(window)).toContainText('sans titre', { timeout: 10_000 });
     expect(await pageWasReloaded(window)).toBe(false);
 
+    // L'auteur suit le conseil affiché, et le système refuse : un dossier ne s'écrit pas, sur
+    // aucun système. Ce refus se dit ici aussi, et rien n'est perdu.
+    await chooseSavePath(article.dir);
+    await sendMenu(app, 'menu:save-file');
+    await expect(window.locator('.alert-dialog')).toContainText('Erreur lors de la sauvegarde', { timeout: 10_000 });
+    await dismissAlerts(window);
+    await expect(blockedMessage(window)).toContainText('sans titre');
+    expect(await pageWasReloaded(window)).toBe(false);
+
     // Le menu vit au-dessus de la frontière : le texte est encore dans le store.
-    await app.evaluate(({ dialog }, filePath) => {
-      dialog.showSaveDialog = async () => ({ canceled: false, filePath });
-    }, chosen);
+    await chooseSavePath(chosen);
     await sendMenu(app, 'menu:save-file');
     await expect.poll(() => (existsSync(chosen) ? readFileSync(chosen, 'utf8') : null), { timeout: 10_000 }).toBe(
       'Une idée neuve.',
@@ -547,6 +567,24 @@ test('plantage de rendu sur un tampon sans titre : le message le dit, Enregistre
 
     await retryButton(window).click();
     await expect.poll(() => pageWasReloaded(window), { timeout: 15_000 }).toBe(true);
+  });
+});
+
+test('un dialogue qui plante n’efface pas la page : l’écran d’erreur, et le filet écrit encore', async () => {
+  await withArticle(async (app, window, article) => {
+    chmodSync(article.document, 0o444);
+    await typeAtEnd(window, PHRASE);
+    await sendMenu(app, 'menu:save-file');
+    await expect(window.locator('.alert-dialog')).toBeVisible({ timeout: 10_000 });
+
+    await crashRender(window, '.alert-dialog');
+    await expect(window.locator('.alert-dialog')).toHaveCount(0);
+
+    chmodSync(article.document, 0o644);
+    await closeWindow(app);
+    await expect.poll(() => windowCount(app), { timeout: 15_000 }).toBe(0);
+    expect(readFileSync(article.document, 'utf8')).toBe(`${ARTICLE}${PHRASE}`);
+    expect(await leaveDialogs(app)).toEqual([]);
   });
 });
 
@@ -990,6 +1028,38 @@ test('écriture qui ne répond jamais, et la page occupée quand son plafond tom
     await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
     expect(await windowCount(app)).toBe(1);
     await expect(editor(window)).toContainText(PHRASE);
+  });
+});
+
+test('une page qui répond sans rapport à chaque demande : la question plutôt qu’une fenêtre impossible à fermer, et Quitter part', async () => {
+  await withArticle(async (app, window, article) => {
+    await hangSaves(app);
+    await typeAtEnd(window, PHRASE);
+    // Le pont le permet : `flushDone` est exposé à la page, et rien ne l'oblige à dire quelque chose.
+    await window.evaluate(() => {
+      const { lifecycle } = (window as unknown as {
+        electron: { lifecycle: { onFlushBeforeQuit: (callback: () => void) => void; flushDone: () => void } };
+      }).electron;
+      lifecycle.onFlushBeforeQuit(() => lifecycle.flushDone());
+    });
+    await answerLeaveDialog(app, 'stay');
+
+    await closeWindow(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    const [seen] = await leaveDialogs(app);
+    expect(seen.message).toContain('pas pu être enregistré');
+    expect(await windowCount(app)).toBe(1);
+    await expect(editor(window)).toContainText(PHRASE);
+
+    await quit(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(2);
+    expect(await windowCount(app)).toBe(1);
+
+    await answerLeaveDialog(app, 'leave');
+    await closeWindow(app);
+    await expect.poll(() => windowCount(app), { timeout: 15_000 }).toBe(0);
+    expect(await dialogCount(app)).toBe(3);
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
   });
 });
 

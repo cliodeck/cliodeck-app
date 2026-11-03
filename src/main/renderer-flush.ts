@@ -11,7 +11,7 @@
  * perdre la sauvegarde que la fenêtre ne se ferme pas.
  */
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
-import type { FlushReport } from '../../backend/types/flush-report.js';
+import type { FlushOutcome, FlushReport } from '../../backend/types/flush-report.js';
 import { t } from './i18n.js';
 
 export type { FlushReport };
@@ -19,11 +19,25 @@ export type { FlushReport };
 const FLUSH_TIMEOUT_MS = 4000;
 /** L'ordre des boutons du dialogue : `Rester` est aussi la réponse d'Échap et d'Entrée. */
 const STAY_BUTTON = 0;
+/** Ce que le renderer peut répondre : `timeout` et `no-window` ne se disent que de ce côté. */
+const RENDERER_OUTCOMES: readonly FlushOutcome[] = ['clean', 'saved', 'failed', 'untitled'];
 
 // Une seule fenêtre principale à la fois. Une croix et `Cmd+Q` coup sur coup sont deux
 // gestes pour une seule question : ni deux écritures, ni deux dialogues.
 let flushInFlight: Promise<FlushReport> | null = null;
 let decisionInFlight: Promise<boolean> | null = null;
+
+/**
+ * `lifecycle.flushDone` est exposé à la page, et rien ne garantit ce qu'elle envoie. Un accusé
+ * illisible n'est pas un texte écrit : il se dit comme une écriture ratée, et l'auteur tranche.
+ */
+function readRendererReport(ack: unknown): FlushReport {
+  const { outcome, error } = (ack ?? {}) as Partial<FlushReport>;
+  if (!outcome || !RENDERER_OUTCOMES.includes(outcome)) {
+    return { outcome: 'failed', error: 'Accusé du renderer illisible' };
+  }
+  return typeof error === 'string' ? { outcome, error } : { outcome };
+}
 
 function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promise<FlushReport> {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isCrashed()) {
@@ -42,7 +56,7 @@ function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promi
       ipcMain.removeListener('app:flush-done', onDone);
       resolve(report);
     };
-    const onDone = (_event: unknown, report: FlushReport): void => finish(report);
+    const onDone = (_event: unknown, ack: unknown): void => finish(readRendererReport(ack));
     // Le plafond d'écriture du renderer tombe avant ce délai, mais une page occupée ou une
     // machine chargée peut le retarder. Une page qui a reçu la demande vit : son texte n'est
     // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée.
@@ -81,37 +95,38 @@ async function decideToLeave(win: BrowserWindow | null, timeoutMs: number): Prom
   if (report.outcome !== 'failed' && report.outcome !== 'untitled') return true;
   if (!win || win.isDestroyed()) return true;
 
-  try {
-    // Sous macOS, le dialogue est une feuille de la fenêtre : réduite ou masquée, elle ne
-    // se verrait pas, et la sortie semblerait bloquée.
-    if (win.isMinimized()) win.restore();
-    win.show();
-    const { response } = await dialog.showMessageBox(win, {
-      type: 'warning',
-      message: t(report.outcome === 'untitled' ? 'unsavedUntitledMessage' : 'unsavedSaveFailedMessage'),
-      buttons: [t('unsavedStay'), t('unsavedLeave')],
-      defaultId: STAY_BUTTON,
-      cancelId: STAY_BUTTON,
-      noLink: true,
-    });
-    return response !== STAY_BUTTON;
-  } catch (error) {
-    console.warn('⚠️ [Quit] dialogue de sortie impossible :', error);
-    return true;
-  }
+  // Sous macOS, le dialogue est une feuille de la fenêtre : réduite ou masquée, elle ne
+  // se verrait pas, et la sortie semblerait bloquée.
+  if (win.isMinimized()) win.restore();
+  win.show();
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'warning',
+    message: t(report.outcome === 'untitled' ? 'unsavedUntitledMessage' : 'unsavedSaveFailedMessage'),
+    buttons: [t('unsavedStay'), t('unsavedLeave')],
+    defaultId: STAY_BUTTON,
+    cancelId: STAY_BUTTON,
+    noLink: true,
+  });
+  return response !== STAY_BUTTON;
 }
 
 /**
  * Écrit le document, et rend vrai si le renderer peut être détruit. Un tampon sans titre
  * non vide, ou une écriture ratée, le demandent à l'auteur : rend faux s'il préfère rester.
+ * Ne rejette jamais : une décision impossible ne retient ni la fenêtre ni la sortie.
  */
 export function mayLeaveRenderer(
   win: BrowserWindow | null,
   timeoutMs: number = FLUSH_TIMEOUT_MS
 ): Promise<boolean> {
-  decisionInFlight ??= decideToLeave(win, timeoutMs).finally(() => {
-    decisionInFlight = null;
-  });
+  decisionInFlight ??= decideToLeave(win, timeoutMs)
+    .catch((error: unknown) => {
+      console.warn('⚠️ [Quit] décision de sortie impossible :', error);
+      return true;
+    })
+    .finally(() => {
+      decisionInFlight = null;
+    });
   return decisionInFlight;
 }
 

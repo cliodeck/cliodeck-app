@@ -216,6 +216,33 @@ describe('flushRenderer', () => {
     expect(win.sent).toHaveLength(2);
   });
 
+  it.each<[string, unknown]>([
+    ['sans rapport', undefined],
+    ['nul', null],
+    ['un nombre', 42],
+    ['une chaîne', 'saved'],
+    ['un objet vide', {}],
+    ['un résultat inconnu', { outcome: 'parti' }],
+    ['`timeout`, que seul le main peut dire', { outcome: 'timeout' }],
+    ['`no-window`, que seul le main peut dire', { outcome: 'no-window' }],
+  ])('un accusé illisible (%s) : le texte n’est pas réputé écrit, `failed`', async (_name, ack) => {
+    const win = new FakeWindow();
+    const report = flushRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-done', {}, ack);
+
+    const read = await report;
+    expect(read.outcome).toBe('failed');
+    expect(read.error).toBeTruthy();
+  });
+
+  it('une erreur qui n’est pas un texte ne change rien au résultat, et ne va pas plus loin', async () => {
+    const win = new FakeWindow();
+    const report = flushRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-done', {}, { outcome: 'saved', error: { nope: true } });
+
+    await expect(report).resolves.toStrictEqual({ outcome: 'saved' });
+  });
+
   it('deux accusés pour une demande : le second ne vaut pas pour la demande suivante', async () => {
     const win = new FakeWindow();
     const first = flushRenderer(win.asWindow());
@@ -335,6 +362,35 @@ describe('mayLeaveRenderer', () => {
     expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
   });
 
+  it('un accusé sans rapport : la question, et Quitter part', async () => {
+    const win = new FakeWindow();
+    answerDialog(1);
+    const decision = mayLeaveRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-done', {}, undefined);
+
+    await expect(decision).resolves.toBe(true);
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
+    expect(electron.showMessageBox.mock.calls[0][1].message).toContain('pas pu être enregistré');
+  });
+
+  it('une décision qui lève ne retient personne, et ne bloque pas la demande suivante', async () => {
+    const win = new FakeWindow();
+    win.answer = { outcome: 'untitled' };
+    const healthy = win.isDestroyed;
+    let calls = 0;
+    win.isDestroyed = () => {
+      calls += 1;
+      if (calls > 1) throw new Error('Object has been destroyed');
+      return false;
+    };
+    await expect(mayLeaveRenderer(win.asWindow())).resolves.toBe(true);
+
+    win.isDestroyed = healthy;
+    win.answer = { outcome: 'clean' };
+    await expect(mayLeaveRenderer(win.asWindow())).resolves.toBe(true);
+    expect(win.sent).toHaveLength(2);
+  });
+
   it('le dialogue qui échoue n’empêche jamais de partir', async () => {
     const win = new FakeWindow();
     win.answer = { outcome: 'untitled' };
@@ -384,6 +440,44 @@ describe('guardWindowClose', () => {
     expect(win.sent).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(DELAY);
+    expect(win.closed).toBe(1);
+  });
+
+  it('un accusé sans rapport ne coince pas la croix : la question, Rester redemande, Quitter ferme', async () => {
+    const win = new FakeWindow();
+    answerDialog(0);
+    guardWindowClose(win.asWindow());
+
+    expect(pressClose(win).prevented).toBe(true);
+    electron.ipcMain.emit('app:flush-done', {}, undefined);
+    await settle();
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
+    expect(win.closed).toBe(0);
+
+    // Rien ne reste derrière lui : la croix suivante repose la question au renderer.
+    answerDialog(1);
+    expect(pressClose(win).prevented).toBe(true);
+    expect(win.sent).toHaveLength(2);
+    electron.ipcMain.emit('app:flush-done', {}, undefined);
+    await settle();
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(2);
+    expect(win.closed).toBe(1);
+  });
+
+  it('une décision qui lève ne coince pas la croix : la fenêtre part', async () => {
+    const win = new FakeWindow();
+    win.answer = { outcome: 'untitled' };
+    guardWindowClose(win.asWindow());
+    const healthy = win.isDestroyed;
+    let calls = 0;
+    win.isDestroyed = () => {
+      calls += 1;
+      if (calls === 2) throw new Error('Object has been destroyed');
+      return healthy();
+    };
+
+    expect(pressClose(win).prevented).toBe(true);
+    await settle();
     expect(win.closed).toBe(1);
   });
 
