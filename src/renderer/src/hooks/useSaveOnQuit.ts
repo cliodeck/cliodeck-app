@@ -23,6 +23,7 @@ import {
   watchSaveOvertaken,
   writeOpenDocumentWhileDirty,
 } from '../stores/editorStore';
+import { hasUnwrittenIdeas, useIdeaStore } from '../stores/ideaStore';
 import { logger } from '../utils/logger';
 
 export { needsFlush };
@@ -78,16 +79,44 @@ function writeOpenDocumentBefore(deadline: number): Promise<void> {
 }
 
 /**
- * Écrit le document ouvert, et dit ce qu'il en est advenu. Ne rejette jamais, et répond
- * avant que le main renonce à attendre.
- *
+ * Écrit les idées sous le même plafond, et rend ce qui les empêche d'être sur le disque. Une
+ * idée ne s'écrit qu'au blur d'un champ, et ni `Cmd+Q` ni la croix n'en font un.
+ */
+async function flushIdeasBefore(deadline: number): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    useIdeaStore.getState().flushIdeas(),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, deadline - Date.now());
+    }),
+  ]);
+  clearTimeout(timer);
+  const { saveError } = useIdeaStore.getState();
+  if (saveError) return saveError;
+  return hasUnwrittenIdeas() ? "L'écriture des idées n'a pas répondu à temps" : null;
+}
+
+/**
+ * Écrit le document ouvert et les idées, et dit ce qu'il en est advenu. Ne rejette jamais, et
+ * répond avant que le main renonce à attendre. Un document qui part sans mot dire ne fait pas
+ * oublier des idées non écrites.
+ */
+export async function flushOpenDocument(): Promise<FlushReport> {
+  const deadline = Date.now() + FLUSH_CEILING_MS;
+  const [report, ideasError] = await Promise.all([flushDocument(deadline), flushIdeasBefore(deadline)]);
+  if (ideasError && (report.outcome === 'clean' || report.outcome === 'saved')) {
+    return { outcome: 'failed', error: ideasError };
+  }
+  return report;
+}
+
+/**
  * Après un plantage de rendu, la vue n'est plus là : le texte vivant est alors le miroir du
  * store, où le démontage de la vue a purgé la dernière frappe. Un tampon détaché par un
  * changement de projet n'a rien à perdre : le sortant est déjà écrit, ou abandonné avec
  * l'accord de l'auteur, et le changement n'a pas à lui reposer la question.
  */
-export async function flushOpenDocument(): Promise<FlushReport> {
-  const deadline = Date.now() + FLUSH_CEILING_MS;
+async function flushDocument(deadline: number): Promise<FlushReport> {
   await switchLockReleased();
   const state = useEditorStore.getState();
   if (state.bufferDetached) return { outcome: 'clean' };

@@ -2372,7 +2372,7 @@
     "title": "Quelque chose s'est mal passé",
     "details": "Détail de l'erreur",
     "retry": "Réessayer",
-    "saveFailed": "Le document n'a pas pu être enregistré. Recharger maintenant perdrait vos dernières modifications. Réessayez une fois l'accès au fichier rétabli.",
+    "saveFailed": "Vos dernières modifications n'ont pas pu être enregistrées. Recharger maintenant les perdrait. Réessayez une fois l'accès au fichier rétabli.",
     "untitledUnsaved": "Ce document sans titre n'est enregistré nulle part. Recharger maintenant perdrait son texte. Enregistrez-le d'abord avec Fichier > Sauvegarder, puis réessayez.",
     "reloadAnyway": "Recharger quand même"
   },

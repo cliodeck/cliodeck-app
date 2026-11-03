@@ -8,6 +8,7 @@ import {
 } from '@backend/types/book';
 import i18n from '../i18n';
 import { useDialogStore } from './dialogStore';
+import { useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
 
@@ -133,7 +134,15 @@ interface DetachedEditor {
  * si le sortant ne peut pas être écrit : rien n'a changé, et rien ne se perd.
  */
 async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
-  const { useEditorStore } = await import('./editorStore');
+  const { useEditorStore, OutgoingSaveError } = await import('./editorStore');
+  // Les idées aussi, tant que le main autorise leur écriture, et avec la même règle. Celles d'un
+  // projet déjà fermé n'ont plus où s'écrire : elles ne retiennent pas d'en ouvrir un autre.
+  if (useIdeaStore.getState().loadedFor === useProjectStore.getState().currentProject?.path) {
+    await useIdeaStore.getState().flushIdeas();
+    const { saveError } = useIdeaStore.getState();
+    if (saveError) throw new OutgoingSaveError(saveError);
+  }
+
   const outcome = await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
   if (outcome.status === 'locked') await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
   if (outcome.status !== 'replaced') return null;
@@ -521,6 +530,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (error) {
       console.error('❌ Sauvegarde du document sortant impossible à la fermeture:', error);
     }
+    await useIdeaStore.getState().flushIdeas();
 
     try {
       // Close backend resources (PDF Service, vector store, etc.)

@@ -2372,7 +2372,7 @@
     "title": "Etwas ist schiefgelaufen",
     "details": "Einzelheiten zum Fehler",
     "retry": "Erneut versuchen",
-    "saveFailed": "Das Dokument konnte nicht gespeichert werden. Wenn Sie jetzt neu laden, gehen Ihre letzten Änderungen verloren. Versuchen Sie es erneut, sobald der Zugriff auf die Datei wieder möglich ist.",
+    "saveFailed": "Ihre letzten Änderungen konnten nicht gespeichert werden. Wenn Sie jetzt neu laden, gehen sie verloren. Versuchen Sie es erneut, sobald der Zugriff auf die Datei wieder möglich ist.",
     "untitledUnsaved": "Dieses unbenannte Dokument ist nirgends gespeichert. Wenn Sie jetzt neu laden, geht sein Text verloren. Speichern Sie es zuerst über Datei > Speichern und versuchen Sie es dann erneut.",
     "reloadAnyway": "Trotzdem neu laden"
   },

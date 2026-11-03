@@ -23,6 +23,7 @@ import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
+import { useIdeaStore } from '../ideaStore';
 import { useNotificationStore } from '../notificationStore';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
 import { useAutoSave } from '../../hooks/useAutoSave';
@@ -125,6 +126,9 @@ function installMain(): void {
       onInsertText: () => () => undefined,
     },
     fs: {
+      exists: (filePath: string) => ipc('fs:exists', filePath),
+      readUserFile: (filePath: string) => ipc('fs:read-user-file', filePath),
+      quarantineFile: (filePath: string) => ipc('fs:quarantine-file', filePath),
       writeFile: (filePath: string, content: string, options?: { exclusive?: boolean }) => {
         writesTo.push(filePath);
         return ipc('fs:write-file', filePath, content, options);
@@ -564,5 +568,110 @@ describe('fichier avec BOM : il reste ouvrable, et son BOM ne bouge pas', () => 
     await eventually(() => expect(store().isDirty).toBe(false));
     expect(store().content).toBe(`${TEXT}Suite.`);
     expect(currentView().state.doc.toString()).toBe(`${TEXT}Suite.`);
+  });
+});
+
+describe('les idées du projet qu’on quitte', () => {
+  const ideasOf = (dir: string) => path.join(dir, '.cliodeck', 'ideas.json');
+  const ideasFile = (title: string) =>
+    JSON.stringify({
+      ideas: [{ id: 'i1', title, content: '', tags: [], links: [], origin: { type: 'manual' } }],
+    });
+  const contentOnDisk = async (dir: string) =>
+    (JSON.parse(await readFile(ideasOf(dir), 'utf8')) as { ideas: Array<{ content: string }> }).ideas[0].content;
+  const ideaStore = () => useIdeaStore.getState();
+  const typedWithoutBlur = 'Tapé, jamais quitté le champ.';
+
+  beforeEach(async () => {
+    for (const [dir, title] of [
+      [dirA, 'Idée de A'],
+      [dirB, 'Idée de B'],
+    ]) {
+      await mkdir(path.join(dir, '.cliodeck'));
+      await writeFile(ideasOf(dir), ideasFile(title));
+    }
+    useIdeaStore.setState({
+      ideas: [],
+      isLoading: false,
+      selectedId: null,
+      persistence: { kind: 'ready' },
+      loadedFor: null,
+      saveError: null,
+    });
+    await openProjectA();
+    await ideaStore().loadIdeas(dirA);
+    ideaStore().updateIdea('i1', { content: typedWithoutBlur });
+  });
+
+  it('une frappe dont aucun blur n’est parti s’écrit dans A avant que le main bascule, et B garde sa liste', async () => {
+    const bBefore = await readFile(ideasOf(dirB), 'utf8');
+
+    await openProjectB();
+
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+    expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
+
+    // Ce que le panneau ferait après la bascule : B reçoit sa liste, et l'écriture suivante aussi.
+    await ideaStore().loadIdeas(dirB);
+    expect(ideaStore().ideas.map((idea) => idea.title)).toEqual(['Idée de B']);
+    await ideaStore().saveIdeas(dirB);
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+    expect(await contentOnDisk(dirB)).toBe('');
+  });
+
+  it('une écriture de A encore dans la file part avant la bascule, avec l’état courant', async () => {
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async (filePath: string, content: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return write(filePath, content);
+    };
+    const inFlight = ideaStore().saveIdeas(dirA);
+    await settle(10);
+    ideaStore().updateIdea('i1', { content: 'Tapé pendant la première écriture.' });
+    void ideaStore().saveIdeas(dirA);
+
+    await openProjectB();
+    await inFlight;
+
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(await contentOnDisk(dirA)).toBe('Tapé pendant la première écriture.');
+  });
+
+  it('si elle ne s’écrit pas : pas de bascule, et l’auteur le saura, comme pour le document', async () => {
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    await expect(project().loadProject(projectJsonB())).rejects.toThrow('ENOSPC');
+
+    expect(project().currentProject?.path).toBe(dirA);
+    expect(h.mainCurrent).toBe(dirA);
+    expect(ideaStore().ideas[0].content).toBe(typedWithoutBlur);
+    expect(store().filePath).toBe(documentA);
+  });
+
+  it('fermer un projet dont les idées ne s’écrivent plus n’empêche pas d’en ouvrir un autre', async () => {
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    await act(async () => {
+      await project().closeProject();
+    });
+    await openProjectB();
+
+    expect(project().currentProject?.path).toBe(dirB);
+    await ideaStore().loadIdeas(dirB);
+    expect(ideaStore().ideas.map((idea) => idea.title)).toEqual(['Idée de B']);
+    expect(ideaStore().saveError).toBeNull();
+  });
+
+  it('fermer le projet l’écrit aussi, tant que le main l’autorise', async () => {
+    await act(async () => {
+      await project().closeProject();
+    });
+
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
   });
 });
