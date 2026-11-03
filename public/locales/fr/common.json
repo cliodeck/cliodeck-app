@@ -2000,7 +2000,7 @@
     "removeChapterError": "Impossible de retirer le chapitre",
     "reorderError": "Impossible de réordonner les chapitres",
     "chapterMissing": "Fichier introuvable : {{path}}",
-    "chapterOutsideProject": "Ce chapitre est un lien qui sort du projet : il n'est ni lu, ni indexé, ni exporté. Pour le retrouver, remplacez le lien {{path}} par le fichier lui-même, puis rouvrez le projet.",
+    "chapterOutsideProject": "Ce chapitre passe par un lien qui sort du projet ({{path}} ou son dossier) : il n'est ni lu, ni indexé, ni exporté. Pour le retrouver, remplacez ce lien par le fichier ou le dossier réel, puis rouvrez le projet.",
     "unattachedTitle_one": "{{count}} fichier non rattaché",
     "unattachedTitle_other": "{{count}} fichiers non rattachés",
     "unattachedHint": "Trouvés dans le projet mais absents du manuscrit.",

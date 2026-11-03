@@ -45,7 +45,9 @@ place chaque pièce à l'export.
   reste dans le projet continue de marcher. La comparaison se fait sur les chemins
   réels des deux côtés (`isInside`, `file-identity.ts`) : une racine de projet qui
   passe par un lien ne rend rien manquant. `abstract.md`, `context.md`,
-  `.cliodeck/hints.md` et le document d'une recette d'export suivent la même règle ;
+  `.cliodeck/hints.md` et le document d'une recette d'export suivent la même règle,
+  ainsi que la migration à l'ouverture (`migrator.ts`), qui ne copie ni ne déplace
+  ce qui sort du projet : `.cliobrain/*`, `.cliodeck/v2`, les anciennes bases ;
 - un `.md` trouvé dans le projet mais absent du manifeste remonte comme
   **non rattaché** (`UnattachedFile`), avec une suggestion de titre ;
 - `abstract.md`, `context.md` et `document.md` ne comptent pas comme

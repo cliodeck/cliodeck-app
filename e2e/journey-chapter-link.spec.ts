@@ -10,7 +10,16 @@
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -168,6 +177,7 @@ test('projet ouvert par un lien : rien de manquant à tort, et le chapitre sorta
     const annexe = chapterButton(window, 'Annexe');
     await expect(annexe).toBeDisabled();
     await expect(annexe).toHaveAttribute('title', /lien qui sort du projet/);
+    await expect(annexe).toHaveAttribute('title', /remplacez ce lien par le fichier ou le dossier réel/);
     await expect(annexe).toHaveAttribute('title', /chapters\/02-annexe\.md/);
     await expect(annexe).not.toHaveAttribute('title', /introuvable/);
 
@@ -257,6 +267,131 @@ test('un chapitre déjà indexé par le lien sort de l’index dès l’ouvertur
       chunks: ['Texte du premier chapitre.'],
       fts: ['Texte du premier chapitre.'],
     });
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(book.base, { recursive: true, force: true });
+  }
+});
+
+/** Un livre reçu, sans `.cliodeck` : c'est l'état ordinaire d'un dépôt git. */
+function makeReceivedBook(): { base: string; project: string; outside: string; projectJson: string } {
+  const base = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-recu-'));
+  const project = join(base, 'recu');
+  const outside = join(base, 'dehors');
+  mkdirSync(join(project, 'chapters'), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(project, 'chapters', '01-un.md'), '# Un\n\nTexte ordinaire du livre reçu.\n');
+  const projectJson = join(project, 'project.json');
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000013',
+      name: 'Livre reçu',
+      type: 'book',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      chapters: [{ id: 'c1', title: 'Un', filePath: 'chapters/01-un.md', order: 0, kind: 'chapter' }],
+    }),
+  );
+  return { base, project, outside, projectJson };
+}
+
+const readHints = (window: Page): Promise<unknown> =>
+  window.evaluate(() =>
+    (window as unknown as { electron: { fusion: { hints: { read: () => Promise<unknown> } } } }).electron.fusion.hints.read(),
+  );
+
+test('la migration à l’ouverture n’apporte rien de ce qu’un .cliobrain lie hors du projet', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeReceivedBook();
+  writeFileSync(join(book.outside, 'journal.md'), `${SECRET} : texte privé.\n`);
+  const otherProject = join(book.outside, 'autre-projet');
+  mkdirSync(otherProject);
+  // La base d'un autre projet de l'auteur, avec le texte de son manuscrit.
+  mkdirSync(join(otherProject, '.cliodeck'));
+  seedManuscriptIndex(otherProject);
+  mkdirSync(join(book.project, '.cliobrain'));
+  symlinkSync(join(book.outside, 'journal.md'), join(book.project, '.cliobrain', 'hints.md'));
+  symlinkSync(join(otherProject, '.cliodeck', 'brain.db'), join(book.project, '.cliobrain', 'brain.db'));
+
+  try {
+    await openProject(app, window, book.projectJson);
+    await expect(editor(window)).toContainText('Texte ordinaire du livre reçu', { timeout: 20_000 });
+
+    expect(existsSync(join(book.project, '.cliodeck', 'hints.md'))).toBe(false);
+    const hints = await readHints(window);
+    expect(hints).toMatchObject({ success: true, hints: { present: false } });
+    expect(JSON.stringify(hints)).not.toContain(SECRET);
+
+    // Le projet a sa propre base, et rien de l'autre projet n'y est entré.
+    const brainDb = join(book.project, '.cliodeck', 'brain.db');
+    await expect.poll(() => existsSync(brainDb)).toBe(true);
+    expect(readFileSync(brainDb).includes(SECRET)).toBe(false);
+    expect(manuscriptIndex(otherProject).chunks).toContain(SECRET);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(book.base, { recursive: true, force: true });
+  }
+});
+
+test('un .cliodeck/v2 lié hors du projet : le dossier de l’auteur reste intact', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeReceivedBook();
+  writeFileSync(join(book.outside, 'config.json'), JSON.stringify({ schema_version: 2, name: SECRET }));
+  writeFileSync(join(book.outside, 'hints.md'), `${SECRET} : texte privé.\n`);
+  writeFileSync(join(book.outside, 'lettres.md'), 'Mes lettres.\n');
+  mkdirSync(join(book.project, '.cliodeck'));
+  symlinkSync(book.outside, join(book.project, '.cliodeck', 'v2'));
+
+  try {
+    await openProject(app, window, book.projectJson);
+    await expect(editor(window)).toContainText('Texte ordinaire du livre reçu', { timeout: 20_000 });
+
+    expect(readdirSync(book.outside).sort()).toEqual(['config.json', 'hints.md', 'lettres.md']);
+    expect(existsSync(join(book.project, '.cliodeck', 'lettres.md'))).toBe(false);
+    expect(existsSync(join(book.project, '.cliodeck', 'hints.md'))).toBe(false);
+    expect(readFileSync(join(book.project, '.cliodeck', 'config.json'), 'utf8')).not.toContain(SECRET);
+    expect(JSON.stringify(await readHints(window))).not.toContain(SECRET);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(book.base, { recursive: true, force: true });
+  }
+});
+
+test('quand c’est le dossier chapters qui sort du projet, le message le dit aussi', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeReceivedBook();
+  const linked = join(book.outside, 'chapitres');
+  mkdirSync(linked);
+  writeFileSync(join(linked, '01-un.md'), `# Un\n\n${SECRET}\n`);
+  rmSync(join(book.project, 'chapters'), { recursive: true });
+  symlinkSync(linked, join(book.project, 'chapters'));
+
+  try {
+    await openProject(app, window, book.projectJson);
+    const chapter = chapterButton(window, 'Un');
+    await expect(chapter).toBeDisabled({ timeout: 20_000 });
+    await expect(chapter).toHaveAttribute('title', /chapters\/01-un\.md ou son dossier/);
+    await expect(chapter).toHaveAttribute('title', /le fichier ou le dossier réel/);
+    await expect(editor(window)).not.toContainText(SECRET);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

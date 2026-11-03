@@ -31,7 +31,8 @@ async function autoMigrateWorkspace(projectDir: string): Promise<void> {
         kind: report.kind,
         copied: report.copied.length,
         skipped: report.skipped.length,
-        warnings: report.warnings.length,
+        // Le texte, pas le compte : un lien sortant refusé ne se dit que là.
+        warnings: report.warnings,
       });
     }
   } catch (e) {
