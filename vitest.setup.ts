@@ -41,6 +41,8 @@ if (typeof window !== 'undefined') {
   }
   (window as unknown as { electron: unknown }).electron = {
     fusion: {},
+    // `rebuildStore` s'abonne à son chargement, et `projectStore` l'importe.
+    project: { onRebuildProgress: () => noop },
     ipcRenderer: {
       on: noop,
       removeListener: noop,

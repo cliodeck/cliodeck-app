@@ -95,3 +95,38 @@
   line-height: 1.5;
   color: var(--color-text-secondary, #aaaaaa);
 }
+
+.rebuild-failure-cause {
+  margin: 0;
+  padding: 12px 16px;
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.rebuild-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rebuild-modal-close {
+  min-width: 80px;
+  padding: 8px 20px;
+  background: var(--color-accent-bg);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.rebuild-modal-close:hover {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}

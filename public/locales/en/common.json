@@ -2373,7 +2373,9 @@
   "rebuild": {
     "title": "Rebuilding the search indexes",
     "subtitle": "Optimising search across your corpus…",
-    "progressAria": "Index rebuild progress"
+    "progressAria": "Index rebuild progress",
+    "failedTitle": "The search indexes could not be rebuilt",
+    "failedMessage": "Your text is not affected: you can keep writing. Searching your sources may be incomplete; ClioDeck will try again the next time this project opens."
   },
   "fileTree": {
     "loading": "Loading the files…",

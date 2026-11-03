@@ -10,16 +10,12 @@ import { VectorStore } from '../../../../backend/core/vector-store/VectorStore.j
 import { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 import type { RAGConfig } from '../../../../backend/types/config.js';
 import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
+import type { RebuildProgressEvent } from '../../../../backend/types/rebuild-progress.js';
 
 export type AnyVectorStore = VectorStore | EnhancedVectorStore;
 
 export interface CreateOptions {
-  onRebuildProgress?: (progress: {
-    current: number;
-    total: number;
-    status: string;
-    percentage: number;
-  }) => void;
+  onRebuildProgress?: (progress: RebuildProgressEvent) => void;
 }
 
 export class PdfVectorStore {
@@ -74,7 +70,14 @@ export class PdfVectorStore {
    */
   static maybeRebuild(store: AnyVectorStore): Promise<void> {
     if (!(store instanceof EnhancedVectorStore)) return Promise.resolve();
-    if (!store.needsRebuild()) return Promise.resolve();
+    // needsRebuild lit SQLite : sur une base fermée (bascule de projet), il lève ici,
+    // en synchrone, et l'appelant est un setTimeout, que rien ne rattrape.
+    try {
+      if (!store.needsRebuild()) return Promise.resolve();
+    } catch (error: unknown) {
+      console.error('❌ [PDF-SERVICE] Rebuild check failed:', error);
+      return Promise.resolve();
+    }
 
     console.log('🔨 [PDF-SERVICE] Indexes need rebuild, starting rebuild...');
     return store

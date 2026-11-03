@@ -2373,7 +2373,9 @@
   "rebuild": {
     "title": "Reconstruction des index de recherche",
     "subtitle": "Optimisation de la recherche sur votre corpus…",
-    "progressAria": "Avancement de la reconstruction de l'index"
+    "progressAria": "Avancement de la reconstruction de l'index",
+    "failedTitle": "Les index de recherche n'ont pas pu être reconstruits",
+    "failedMessage": "Votre texte n'est pas concerné : vous pouvez continuer à écrire. La recherche dans vos sources peut être incomplète ; ClioDeck réessaiera à la prochaine ouverture du projet."
   },
   "fileTree": {
     "loading": "Chargement des fichiers…",

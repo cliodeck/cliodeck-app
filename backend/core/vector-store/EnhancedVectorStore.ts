@@ -3,6 +3,7 @@ import { HNSWVectorStore } from './HNSWVectorStore';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
+import type { RebuildProgressEvent } from '../../types/rebuild-progress';
 
 /**
  * Enhanced Vector Store with HNSW indexing and BM25 hybrid search
@@ -40,12 +41,7 @@ export class EnhancedVectorStore {
   } = { current: 0, total: 0, status: 'idle' };
 
   // Callback for progress updates
-  private onRebuildProgress?: (progress: {
-    current: number;
-    total: number;
-    status: string;
-    percentage: number;
-  }) => void;
+  private onRebuildProgress?: (progress: RebuildProgressEvent) => void;
 
   constructor(projectPath: string) {
     console.log('🚀 Initializing Enhanced Vector Store...');
@@ -129,14 +125,7 @@ export class EnhancedVectorStore {
   /**
    * Set progress callback for rebuild operations
    */
-  setRebuildProgressCallback(
-    callback: (progress: {
-      current: number;
-      total: number;
-      status: string;
-      percentage: number;
-    }) => void
-  ): void {
+  setRebuildProgressCallback(callback: (progress: RebuildProgressEvent) => void): void {
     this.onRebuildProgress = callback;
   }
 
@@ -301,7 +290,7 @@ export class EnhancedVectorStore {
     try {
       // Update progress: Starting
       this.rebuildProgress = { current: 0, total: 100, status: 'Initializing...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Clear existing indexes
       await this.hnswStore.clear();
@@ -309,7 +298,7 @@ export class EnhancedVectorStore {
 
       // Update progress: Loading chunks
       this.rebuildProgress = { current: 10, total: 100, status: 'Loading chunks from database...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Get all chunks with embeddings from SQLite
       const chunks = await this.vectorStore.getAllChunksWithEmbeddings();
@@ -317,7 +306,7 @@ export class EnhancedVectorStore {
       if (chunks.length === 0) {
         console.log('⚠️  No chunks to index');
         this.rebuildProgress = { current: 100, total: 100, status: 'No chunks to index' };
-        this.notifyProgress();
+        this.notifyProgress('done');
         return;
       }
 
@@ -329,7 +318,7 @@ export class EnhancedVectorStore {
         total: 100,
         status: `Building HNSW index (${chunks.length} chunks)...`,
       };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Add to HNSW (takes ~70% of time)
       await this.hnswStore.addChunks(chunks);
@@ -340,14 +329,14 @@ export class EnhancedVectorStore {
         total: 100,
         status: `Building BM25 index (${chunks.length} chunks)...`,
       };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Add to BM25
       this.bm25Index.addChunks(chunks.map((c) => c.chunk));
 
       // Update progress: Saving
       this.rebuildProgress = { current: 90, total: 100, status: 'Saving indexes...' };
-      this.notifyProgress();
+      this.notifyProgress('running');
 
       // Save indexes
       await this.save();
@@ -357,12 +346,13 @@ export class EnhancedVectorStore {
 
       // Update progress: Complete
       this.rebuildProgress = { current: 100, total: 100, status: 'Rebuild complete' };
-      this.notifyProgress();
+      this.notifyProgress('done');
     } catch (error) {
       this.indexesStale = true;
       console.error('❌ Failed to rebuild indexes:', error);
-      this.rebuildProgress = { current: 0, total: 100, status: `Error: ${error.message}` };
-      this.notifyProgress();
+      // Le `current` atteint reste : rabattu à 0, l'échec se lisait comme un début.
+      this.rebuildProgress = { ...this.rebuildProgress, status: `Error: ${error.message}` };
+      this.notifyProgress('failed', error.message);
       throw error;
     } finally {
       this.isRebuilding = false;
@@ -372,7 +362,7 @@ export class EnhancedVectorStore {
   /**
    * Notify progress callback
    */
-  private notifyProgress(): void {
+  private notifyProgress(phase: RebuildProgressEvent['phase'], error?: string): void {
     if (this.onRebuildProgress) {
       const percentage =
         this.rebuildProgress.total > 0
@@ -381,6 +371,8 @@ export class EnhancedVectorStore {
       this.onRebuildProgress({
         ...this.rebuildProgress,
         percentage,
+        phase,
+        error,
       });
     }
   }
