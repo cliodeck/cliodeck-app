@@ -309,6 +309,24 @@ describe('les autres boutons de fichier sous le verrou', () => {
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
+  it('Ouvrir un fichier qui n’est pas en UTF-8 : le refus dit quoi faire, et le document reste', async () => {
+    await mount('article', DOCUMENT);
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    })) as never;
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.open'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(useDialogStore.getState().alertMessage).toBe('editor.notUtf8');
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+  });
+
   it('Enregistrer un tampon sans titre dit la vraie raison, et n’écrit rien', async () => {
     await mount('article', DOCUMENT);
     await clickNewFile();

@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
 import { useProjectStore, type Project } from '../../stores/projectStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { RevealJsConfig } from './RevealJsConfig';
@@ -160,7 +160,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: unknown) {
       console.error('Failed to load file:', error);
-      await useDialogStore.getState().showAlert(t('toolbar.openError'));
+      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
     }
   };
 

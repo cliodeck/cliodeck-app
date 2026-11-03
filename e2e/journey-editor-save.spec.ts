@@ -217,6 +217,45 @@ test('projet au document en Latin-1 : pas un octet ne change, et l’auteur sait
   }
 });
 
+test('ouvrir un fichier en Latin-1 : refus expliqué, et le document ouvert reste', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const latin1 = join(projet.dir, 'ancien.md');
+  writeFileSync(latin1, LATIN1);
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+    }, latin1);
+    await window.locator('.toolbar-btn[title="Ouvrir"]').first().click();
+
+    await expect(window.locator('#alert-dialog-message')).toContainText('UTF-8', { timeout: 10_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    await expect(editorOf(window)).toContainText('Texte déjà écrit');
+    expect(readFileSync(latin1).equals(LATIN1)).toBe(true);
+
+    // L'éditeur est toujours sur son document : la frappe y va.
+    await typeAtEnd(window, 'Suite.');
+    await expect
+      .poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 15_000 })
+      .toBe(`${ORIGINAL}Suite.`);
+    expect(readFileSync(latin1).equals(LATIN1)).toBe(true);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
 test('fichier avec BOM : il s’ouvre sans que le BOM se voie, et ses octets reviennent tels quels', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {

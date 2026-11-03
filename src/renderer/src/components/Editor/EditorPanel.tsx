@@ -26,7 +26,7 @@ const SimilarityPanel = lazy(() =>
 const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -116,7 +116,7 @@ export const EditorPanel: React.FC = () => {
       }
     } catch (error) {
       logger.error('EditorPanel', error);
-      await useDialogStore.getState().showAlert(t('toolbar.openError'));
+      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
     }
   };
 

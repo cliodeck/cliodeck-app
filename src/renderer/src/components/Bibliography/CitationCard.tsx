@@ -19,7 +19,7 @@ import { PDFSelectionDialog } from './PDFSelectionDialog';
 import { TagManager } from './TagManager';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import {
   hiddenAutomaticCount,
@@ -107,7 +107,9 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
       }
     } catch (error) {
       await useDialogStore.getState().showAlert(
-        t('bibliography.readingNoteError', { error: error instanceof Error ? error.message : String(error) })
+        t(openErrorKey(error, 'bibliography.readingNoteError'), {
+          error: error instanceof Error ? error.message : String(error),
+        })
       );
     }
   };

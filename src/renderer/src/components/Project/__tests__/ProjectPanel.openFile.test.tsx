@@ -82,4 +82,23 @@ describe('ProjectPanel : clic sur un fichier du projet', () => {
 
     expect(useDialogStore.getState().alertMessage).toBe('toolbar.openError');
   });
+
+  it('un fichier qui n’est pas en UTF-8 : le refus dit quoi faire, et le document ouvert reste', async () => {
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    })) as never;
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('document.md'));
+    });
+
+    expect(useDialogStore.getState().alertMessage).toBe('editor.notUtf8');
+    expect(useEditorStore.getState().filePath).toBe(`${PROJECT}/context.md`);
+  });
 });

@@ -13,7 +13,7 @@ import type { ResolvedChapter, UnattachedFile } from '@backend/types/book';
 import { ChapterNavigator } from '../ChapterNavigator';
 import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
-import { useEditorStore } from '../../../stores/editorStore';
+import { EditorFileError, useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import type { EditorFacade } from '@/editor/facade';
@@ -153,6 +153,20 @@ describe('ChapterNavigator', () => {
 
     expect(useProjectStore.getState().currentChapterId).toBe('c1');
     expect(useDialogStore.getState().alertMessage).toBe('book.renumberInProgress');
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it('chapitre qui n’est pas en UTF-8 : le refus tel quel, et le chapitre courant ne bouge pas', async () => {
+    loadFile.mockRejectedValue(new EditorFileError('unreadable', 'encoding', 'Ce fichier n’est pas en UTF-8.'));
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useProjectStore.getState().currentChapterId).toBe('c1');
+    expect(useDialogStore.getState().alertMessage).toBe('Ce fichier n’est pas en UTF-8.');
     act(() => useDialogStore.getState().closeAlert());
   });
 

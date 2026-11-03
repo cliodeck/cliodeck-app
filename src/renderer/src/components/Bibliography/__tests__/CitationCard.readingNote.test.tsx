@@ -56,6 +56,20 @@ describe('CitationCard : ouvrir la note de lecture', () => {
     expect(useEditorStore.getState().filePath).toBe('/p/document.md');
   });
 
+  it('note qui n’est pas en UTF-8 : le refus dit quoi faire, et le document ouvert ne bouge pas', async () => {
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    })) as never;
+
+    await clickOpenNote();
+
+    expect(useDialogStore.getState().alertMessage).toBe('editor.notUtf8');
+    expect(useEditorStore.getState().filePath).toBe('/p/document.md');
+  });
+
   it('témoin : sans verrou, la note s’ouvre', async () => {
     await clickOpenNote();
 

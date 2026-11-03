@@ -88,6 +88,21 @@ describe('ManuscriptSearch : aller à une occurrence', () => {
     expect(screen.queryByText('search.error')).toBeNull();
   });
 
+  it('chapitre qui n’est pas en UTF-8 : le refus dit quoi faire, et le chapitre courant ne bouge pas', async () => {
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    })) as never;
+
+    await goToHitInB();
+
+    expect(screen.getByText('editor.notUtf8')).toBeInTheDocument();
+    expect(screen.queryByText('search.error')).toBeNull();
+    expect(useProjectStore.getState().currentChapterId).toBe('a');
+  });
+
   it('témoin : la bascule aboutie rattache le chapitre', async () => {
     await goToHitInB();
 

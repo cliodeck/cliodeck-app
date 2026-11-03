@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { waitForEditorFacade } from '../../services/wait-for-facade';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
@@ -110,7 +110,7 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
         facade?.revealLine(line);
       } catch (err) {
         logger.error('ManuscriptSearch', err);
-        setError(t('search.error'));
+        setError(t(openErrorKey(err, 'search.error')));
       }
     },
     [chapters, currentProject, loadFile, setCurrentChapter, t]
