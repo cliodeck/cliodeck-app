@@ -778,19 +778,36 @@ function makeBook(): { dir: string; projectJson: string; chapters: string[] } {
 const firstNotes = (chapters: string[]) =>
   chapters.map((file) => readFileSync(file, 'utf8').match(/\[\^(\d+)\]/)?.[1]);
 
-/** Un disque lent : une renumérotation à laquelle on a le temps de couper la parole. */
-const slowDownSaves = (app: ElectronApplication, delay: number) =>
-  app.evaluate(({ ipcMain }, ms) => {
+/**
+ * Un disque lent : une renumérotation à laquelle on a le temps de couper la parole, ou une
+ * écriture plus lente que le filet. `fastFile` : ce fichier-là s'écrit sans attendre.
+ */
+const slowDownSaves = (app: ElectronApplication, delay: number, fastFile?: string) =>
+  app.evaluate(({ ipcMain }, { ms, fast }) => {
     const handlers = (ipcMain as unknown as {
       _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
     })._invokeHandlers;
     const original = handlers.get('editor:save-file');
     if (!original) throw new Error('editor:save-file introuvable');
     handlers.set('editor:save-file', async (...args: unknown[]) => {
-      await new Promise((r) => setTimeout(r, ms));
+      if (!fast || !String(args[1]).endsWith(fast)) await new Promise((r) => setTimeout(r, ms));
       return original(...args);
     });
-  }, delay);
+  }, { ms: delay, fast: fastFile });
+
+/**
+ * Un disque mort ou un partage réseau coupé : l'écriture part et ne revient jamais. Les
+ * promesses sont retenues, comme le ferait un vrai appel au disque : ramassées, Electron
+ * rejetterait l'appel, et ce ne serait plus une écriture sans réponse.
+ */
+const hangSaves = (app: ElectronApplication) =>
+  app.evaluate(({ ipcMain }) => {
+    const handlers = (ipcMain as unknown as {
+      _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+    })._invokeHandlers;
+    const held: unknown[] = [];
+    handlers.set('editor:save-file', () => new Promise((resolve) => held.push(resolve)));
+  });
 
 test('quitter pendant une renumérotation : aucune question, et le manuscrit n’est pas laissé à mi-chemin', async () => {
   const outcome = await launchApp();
@@ -814,7 +831,7 @@ test('quitter pendant une renumérotation : aucune question, et le manuscrit n�
   rmSync(book.dir, { recursive: true, force: true });
 });
 
-test('fermer pendant une renumérotation qui dure : la fenêtre part à temps, et la frappe du tampon n’est pas perdue', async () => {
+test('fermer pendant une renumérotation qui dure : la frappe du tampon s’écrit à temps, et la fenêtre part sans question', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
@@ -828,17 +845,173 @@ test('fermer pendant une renumérotation qui dure : la fenêtre part à temps, e
     await expect(editor(window)).toContainText('Chapitre 1', { timeout: 20_000 });
     await typeAtEnd(window, 'Avant.');
     await expect.poll(() => readFileSync(book.chapters[0], 'utf8'), { timeout: 15_000 }).toContain('Avant.');
-    // Trois chapitres à 1,5 s l'écriture : plus que ce que le filet accepte d'attendre.
-    await slowDownSaves(app, 1_500);
+    // Les autres chapitres à 3 s l'écriture : plus que ce que le filet accepte d'attendre.
+    // Le chapitre ouvert s'écrit sans attendre : ce parcours regarde le verrou, pas le disque.
+    await slowDownSaves(app, 3_000, 'chapters/01.md');
     await window.locator('button[title="Renuméroter les notes"]').first().click();
     await typeAtEnd(window, ' Pendant.');
     await closeWindow(app);
     await expect.poll(() => windowCount(app), { timeout: 15_000 }).toBe(0);
-    await expect.poll(() => readFileSync(book.chapters[0], 'utf8'), { timeout: 10_000 }).toContain(' Pendant.');
+    expect(readFileSync(book.chapters[0], 'utf8')).toContain(' Pendant.');
     expect(await leaveDialogs(app)).toEqual([]);
   } finally {
     await closeApp(app);
   }
   rmSync(userDataDir, { recursive: true, force: true });
   rmSync(book.dir, { recursive: true, force: true });
+});
+
+test('fermer pendant une renumérotation, sur un disque trop lent pour le tampon : la question, et Rester garde la frappe', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeBook();
+
+  try {
+    await openProject(app, window, book.projectJson);
+    await expect(editor(window)).toContainText('Chapitre 1', { timeout: 20_000 });
+    await typeAtEnd(window, 'Avant.');
+    await expect.poll(() => readFileSync(book.chapters[0], 'utf8'), { timeout: 15_000 }).toContain('Avant.');
+    await slowDownSaves(app, 1_500);
+    await window.locator('button[title="Renuméroter les notes"]').first().click();
+    await typeAtEnd(window, ' Pendant.');
+    await answerLeaveDialog(app, 'stay');
+    await closeWindow(app);
+
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    expect(await windowCount(app)).toBe(1);
+    await expect(editor(window)).toContainText(' Pendant.');
+    await expect.poll(() => readFileSync(book.chapters[0], 'utf8'), { timeout: 20_000 }).toContain(' Pendant.');
+  } finally {
+    await closeApp(app);
+  }
+  rmSync(userDataDir, { recursive: true, force: true });
+  rmSync(book.dir, { recursive: true, force: true });
+});
+
+// MARK: - Une écriture sans réponse, avec un renderer vivant
+
+for (const [gestureName, gesture] of [
+  ['la croix', closeWindow],
+  ['Cmd+Q', quit],
+] as const) {
+  test(`écriture plus lente que le filet, ${gestureName} : la question plutôt qu’un départ muet, et Rester laisse le texte arriver`, async () => {
+    await withArticle(async (app, window, article) => {
+      await slowDownSaves(app, 6_000);
+      await typeAtEnd(window, PHRASE);
+      await answerLeaveDialog(app, 'stay');
+      await gesture(app);
+
+      await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+      const [seen] = await leaveDialogs(app);
+      expect(seen.message).toContain('pas pu être enregistré');
+      expect(seen.buttons).toEqual(['Rester', 'Quitter sans enregistrer']);
+      expect(await windowCount(app)).toBe(1);
+      await expect(editor(window)).toContainText(PHRASE);
+
+      // L'écriture n'était pas annulée : elle arrive, et l'état suit.
+      await expect
+        .poll(() => readFileSync(article.document, 'utf8'), { timeout: 15_000 })
+        .toBe(`${ARTICLE}${PHRASE}`);
+      await closeWindow(app);
+      await expect.poll(() => windowCount(app), { timeout: 15_000 }).toBe(0);
+      expect(await dialogCount(app)).toBe(1);
+    });
+  });
+}
+
+test('Windows et Linux : écriture plus lente que le filet, la croix demande avant que la dernière fenêtre emporte l’app', async () => {
+  await withArticle(async (app, window) => {
+    await app.evaluate(() => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+    });
+    await slowDownSaves(app, 6_000);
+    await typeAtEnd(window, PHRASE);
+    await answerLeaveDialog(app, 'stay');
+
+    await closeWindow(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    expect(await windowCount(app)).toBe(1);
+
+    await answerLeaveDialog(app, 'leave');
+    const exited = app.waitForEvent('close');
+    await closeWindow(app);
+    await exited;
+  });
+});
+
+test('écriture qui ne répond jamais : fermer, Cmd+Q et recharger demandent, et Quitter part', async () => {
+  await withArticle(async (app, window, article) => {
+    await hangSaves(app);
+    await markPage(window);
+    await typeAtEnd(window, PHRASE);
+    await answerLeaveDialog(app, 'stay');
+
+    await closeWindow(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    expect(await windowCount(app)).toBe(1);
+
+    await quit(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(2);
+    expect(await windowCount(app)).toBe(1);
+
+    await clickMenuItem(app, 'view-reload');
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(3);
+    expect(await pageWasReloaded(window)).toBe(false);
+    await expect(editor(window)).toContainText(PHRASE);
+
+    await answerLeaveDialog(app, 'leave');
+    await closeWindow(app);
+    await expect.poll(() => windowCount(app), { timeout: 15_000 }).toBe(0);
+    expect(await dialogCount(app)).toBe(4);
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+  });
+});
+
+test('écriture qui ne répond jamais, et la page occupée quand son plafond tombe : le main demande quand même', async () => {
+  await withArticle(async (app, window) => {
+    await hangSaves(app);
+    await typeAtEnd(window, PHRASE);
+    await answerLeaveDialog(app, 'stay');
+    // La réponse de la page arrivera après le délai du main. Elle a reçu la demande : elle n'est pas bloquée.
+    await window.evaluate(() => {
+      setTimeout(() => {
+        const end = Date.now() + 2_000;
+        while (Date.now() < end) {
+          // L'attente active est le sujet du test.
+        }
+      }, 3_000);
+    });
+
+    await closeWindow(app);
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    expect(await windowCount(app)).toBe(1);
+    await expect(editor(window)).toContainText(PHRASE);
+  });
+});
+
+test('plantage de rendu, écriture qui ne répond jamais : Réessayer ne reste pas figé, le message et le secours arrivent', async () => {
+  await withArticle(async (app, window) => {
+    await hangSaves(app);
+    await markPage(window);
+    await typeAtEnd(window, PHRASE);
+    await crashRender(window);
+    await retryButton(window).click();
+
+    await expect(blockedMessage(window)).toContainText('pas pu être enregistré', { timeout: 10_000 });
+    await expect(retryButton(window)).toBeEnabled();
+    expect(await pageWasReloaded(window)).toBe(false);
+
+    // Le menu vit au-dessus de la frontière : il pose la même question, et ne recharge pas sans réponse.
+    await answerLeaveDialog(app, 'stay');
+    await clickMenuItem(app, 'view-reload');
+    await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
+    expect(await pageWasReloaded(window)).toBe(false);
+
+    await reloadAnywayButton(window).click();
+    await expect.poll(() => pageWasReloaded(window), { timeout: 15_000 }).toBe(true);
+  });
 });

@@ -698,7 +698,11 @@ const api = {
    */
   lifecycle: {
     onFlushBeforeQuit: (callback: () => void): (() => void) => {
-      const listener = (): void => callback();
+      const listener = (): void => {
+        // Le main saura que la page vit, même si sa réponse tarde : il n'a pas à la croire bloquée.
+        ipcRenderer.send('app:flush-received');
+        callback();
+      };
       ipcRenderer.on('app:flush-before-quit', listener);
       return () => {
         ipcRenderer.removeListener('app:flush-before-quit', listener);

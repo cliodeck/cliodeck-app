@@ -32,14 +32,26 @@ function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promi
   const contents = win.webContents;
 
   return new Promise((resolve) => {
+    let received = false;
+    const onReceived = (): void => {
+      received = true;
+    };
     const finish = (report: FlushReport): void => {
       clearTimeout(timer);
+      ipcMain.removeListener('app:flush-received', onReceived);
       ipcMain.removeListener('app:flush-done', onDone);
       resolve(report);
     };
     const onDone = (_event: unknown, report: FlushReport): void => finish(report);
-    const timer = setTimeout(() => finish({ outcome: 'timeout' }), timeoutMs);
+    // Le plafond d'écriture du renderer tombe avant ce délai, mais une page occupée ou une
+    // machine chargée peut le retarder. Une page qui a reçu la demande vit : son texte n'est
+    // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée.
+    const timer = setTimeout(
+      () => finish(received ? { outcome: 'failed', error: 'Réponse du renderer en retard' } : { outcome: 'timeout' }),
+      timeoutMs
+    );
 
+    ipcMain.once('app:flush-received', onReceived);
     ipcMain.once('app:flush-done', onDone);
     try {
       contents.send('app:flush-before-quit');
@@ -64,7 +76,8 @@ async function decideToLeave(win: BrowserWindow | null, timeoutMs: number): Prom
   const report = await flushRenderer(win, timeoutMs);
   console.log(`💾 [Quit] flush éditeur : ${report.outcome}${report.error ? ` (${report.error})` : ''}`);
 
-  // Sans réponse, personne à qui demander : on part. Seul un texte qu'on sait perdu retient.
+  // Un renderer bloqué, ou plus de fenêtre : personne à qui demander, on part. Seul un texte
+  // qu'on sait non écrit retient, et une écriture qui traîne en est un.
   if (report.outcome !== 'failed' && report.outcome !== 'untitled') return true;
   if (!win || win.isDestroyed()) return true;
 

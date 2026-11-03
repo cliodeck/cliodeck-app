@@ -7,7 +7,7 @@
  * rendu, celui qui détruit la vue CodeMirror, est dans `e2e/journey-window-close.spec.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ErrorFallback } from '../ErrorFallback';
 import { useEditorStore } from '../../stores/editorStore';
 
@@ -47,7 +47,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('ErrorFallback', () => {
   it('document modifié : Réessayer écrit AVANT de recharger', async () => {
@@ -127,5 +130,23 @@ describe('ErrorFallback', () => {
     release({ success: true });
     await waitFor(() => expect(resetErrorBoundary).toHaveBeenCalledTimes(1));
     expect(order).toEqual(['write:Dernière phrase.', 'reload']);
+  });
+
+  it('écriture sans réponse : le bouton ne reste pas figé, le message et le secours arrivent', async () => {
+    vi.useFakeTimers();
+    useEditorStore.setState({ filePath: FILE, content: 'Dernière phrase.', isDirty: true });
+    onWrite = () => new Promise(() => undefined);
+    mount();
+    clickRetry();
+    expect(screen.getByRole('button', { name: 'errorFallback.retry' })).toBeDisabled();
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+
+    expect(screen.getByText('errorFallback.saveFailed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'errorFallback.retry' })).toBeEnabled();
+    expect(resetErrorBoundary).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'errorFallback.reloadAnyway' }));
+    expect(resetErrorBoundary).toHaveBeenCalledTimes(1);
   });
 });

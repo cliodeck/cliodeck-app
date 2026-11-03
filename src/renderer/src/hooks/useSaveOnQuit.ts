@@ -13,6 +13,7 @@
  *    fenêtre qui perdait des données ;
  *  - l'accusé part dans tous les cas, y compris en cas d'échec d'écriture, et
  *    le rapport le dit : c'est sur lui que le main décide de demander à l'auteur.
+ *    Une écriture sans réponse aussi : elle a un plafond, plus court que le délai du main.
  */
 import { useEffect } from 'react';
 import type { FlushReport } from '../../../../backend/types/flush-report';
@@ -26,7 +27,14 @@ import { logger } from '../utils/logger';
 
 export { needsFlush };
 
-/** Le main renonce à attendre à 4 s : il doit rester de quoi écrire le tampon. */
+/**
+ * Le plafond de tout le filet, attente du verrou comprise, sous le délai de 4 s du main. Une
+ * écriture qui ne répond pas (disque mort, partage réseau coupé) n'est pas un renderer bloqué :
+ * c'est un texte qu'on sait non écrit, et il se dit avant que le main renonce.
+ */
+const FLUSH_CEILING_MS = 3500;
+
+/** Moins que le plafond : il doit rester de quoi écrire le tampon. */
 const SWITCH_LOCK_WAIT_MS = 2500;
 
 /**
@@ -53,7 +61,25 @@ function switchLockReleased(): Promise<void> {
 }
 
 /**
- * Écrit le document ouvert, et dit ce qu'il en est advenu. Ne rejette jamais.
+ * Écrit le document ouvert, sans attendre au-delà de `deadline`. Une écriture sans réponse ne
+ * s'annule pas : si l'auteur reste, elle peut encore aboutir, et `saveFile` tient alors l'état
+ * à jour. Elle ne relance plus de passe, et son rejet tardif n'a plus personne à prévenir.
+ */
+function writeOpenDocumentBefore(deadline: number): Promise<void> {
+  let expired = false;
+  const writing = writeOpenDocumentWhileDirty(() => !expired);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      expired = true;
+      reject(new Error("L'écriture n'a pas répondu à temps"));
+    }, deadline - Date.now());
+    writing.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+
+/**
+ * Écrit le document ouvert, et dit ce qu'il en est advenu. Ne rejette jamais, et répond
+ * avant que le main renonce à attendre.
  *
  * Après un plantage de rendu, la vue n'est plus là : le texte vivant est alors le miroir du
  * store, où le démontage de la vue a purgé la dernière frappe. Un tampon détaché par un
@@ -61,6 +87,7 @@ function switchLockReleased(): Promise<void> {
  * l'accord de l'auteur, et le changement n'a pas à lui reposer la question.
  */
 export async function flushOpenDocument(): Promise<FlushReport> {
+  const deadline = Date.now() + FLUSH_CEILING_MS;
   await switchLockReleased();
   const state = useEditorStore.getState();
   if (state.bufferDetached) return { outcome: 'clean' };
@@ -73,7 +100,7 @@ export async function flushOpenDocument(): Promise<FlushReport> {
       return { outcome: 'clean' };
     }
     logger.store('SaveOnQuit', 'Sauvegarde avant fermeture', { filePath: state.filePath });
-    await writeOpenDocumentWhileDirty();
+    await writeOpenDocumentBefore(deadline);
     return { outcome: 'saved' };
   } catch (error) {
     logger.error('SaveOnQuit', error);

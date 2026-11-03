@@ -127,6 +127,45 @@ describe('flushRenderer', () => {
     expect(report).toEqual({ outcome: 'timeout' });
   });
 
+  it('un renderer vivant, en retard sur son propre plafond : au délai, `failed`, et pas `timeout`', async () => {
+    const win = new FakeWindow();
+    let report: FlushReport | null = null;
+    void flushRenderer(win.asWindow()).then((r) => {
+      report = r;
+    });
+    electron.ipcMain.emit('app:flush-received');
+
+    await vi.advanceTimersByTimeAsync(DELAY - 1);
+    expect(report).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(report).toMatchObject({ outcome: 'failed' });
+    expect((report as unknown as FlushReport).error).toBeTruthy();
+  });
+
+  it('la réponse du renderer vaut toujours mieux que le délai : son rapport est rendu tel quel', async () => {
+    const win = new FakeWindow();
+    const report = flushRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-received');
+    electron.ipcMain.emit('app:flush-done', {}, { outcome: 'saved' });
+
+    await expect(report).resolves.toEqual({ outcome: 'saved' });
+    expect(electron.ipcMain.listenerCount('app:flush-received')).toBe(0);
+  });
+
+  it('la demande finie, sa réception ne vaut pas pour la suivante', async () => {
+    const win = new FakeWindow();
+    const first = flushRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-received');
+    await vi.advanceTimersByTimeAsync(DELAY);
+    await expect(first).resolves.toMatchObject({ outcome: 'failed' });
+    expect(electron.ipcMain.listenerCount('app:flush-received')).toBe(0);
+
+    const second = flushRenderer(win.asWindow());
+    await vi.advanceTimersByTimeAsync(DELAY);
+    await expect(second).resolves.toEqual({ outcome: 'timeout' });
+    expect(electron.ipcMain.listenerCount('app:flush-received')).toBe(0);
+  });
+
   it('plus de fenêtre, fenêtre ou page détruite, page plantée : personne à qui demander, et aucune attente', async () => {
     await expect(flushRenderer(null)).resolves.toEqual({ outcome: 'no-window' });
 
@@ -189,6 +228,17 @@ describe('flushRenderer', () => {
 });
 
 describe('mayLeaveRenderer', () => {
+  it('un renderer vivant, en retard sur son propre plafond : on demande à l’auteur', async () => {
+    const win = new FakeWindow();
+    answerDialog(0);
+    const leave = mayLeaveRenderer(win.asWindow());
+    electron.ipcMain.emit('app:flush-received');
+    await vi.advanceTimersByTimeAsync(DELAY);
+
+    await expect(leave).resolves.toBe(false);
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
+  });
+
   it.each<FlushReport>([{ outcome: 'clean' }, { outcome: 'saved' }])(
     'rapport $outcome : on part sans rien demander',
     async (report) => {

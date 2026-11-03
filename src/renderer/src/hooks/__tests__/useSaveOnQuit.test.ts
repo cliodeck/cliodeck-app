@@ -215,6 +215,160 @@ describe('flushOpenDocument', () => {
   });
 });
 
+/**
+ * Une écriture qui ne répond pas (disque mort, partage réseau coupé) n'est pas un renderer
+ * bloqué : le renderer vivant la dit `failed` avant que le main renonce à attendre, et
+ * l'écran d'erreur, qui attend le même filet, ne reste pas figé.
+ */
+describe('flushOpenDocument : une écriture sans réponse', () => {
+  const MAIN_GIVES_UP_MS = 4000;
+
+  /** Lance le filet et relève son rapport sans l'attendre. */
+  function flushWatched(): { report: () => FlushReport | null } {
+    let report: FlushReport | null = null;
+    void flushOpenDocument().then((r) => {
+      report = r;
+    });
+    return { report: () => report };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('jamais de réponse : `failed` et sa cause, avant que le main renonce', async () => {
+    openDocument('Texte.', ' Frappe.');
+    onWrite = () => new Promise(() => undefined);
+    const { report } = flushWatched();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(report()).toBeNull();
+
+    // Le temps de répondre, à un main qui n'attend pas plus.
+    await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS - 2000 - 500);
+    expect(report()).toMatchObject({ outcome: 'failed' });
+    expect(report()?.error).toBeTruthy();
+    expect(writes).toEqual([[FILE, 'Texte. Frappe.']]);
+  });
+
+  it('sous le verrou de renumérotation, l’attente et l’écriture partagent le même plafond', async () => {
+    openDocument('Texte.', ' Frappe.');
+    useEditorStore.setState({ switchLock: 'book.renumberInProgress' });
+    onWrite = () => new Promise(() => undefined);
+    const { report } = flushWatched();
+
+    await vi.advanceTimersByTimeAsync(2600);
+    expect(writes).toEqual([[FILE, 'Texte. Frappe.']]);
+    expect(report()).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS - 2600 - 500);
+    expect(report()).toMatchObject({ outcome: 'failed' });
+  });
+
+  it('écriture lente qui finit à temps : `saved`, et plus aucun minuteur ne traîne', async () => {
+    openDocument('Texte.', ' Frappe.');
+    onWrite = () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ success: true }), 1000);
+      });
+    const { report } = flushWatched();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(report()).toEqual({ outcome: 'saved' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('écriture refusée avant le plafond : la vraie cause, et plus aucun minuteur ne traîne', async () => {
+    openDocument('Texte.', ' Frappe.');
+    onWrite = async () => ({ success: false, error: 'EACCES' });
+    const { report } = flushWatched();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(report()).toEqual({ outcome: 'failed', error: 'EACCES' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('une autre écriture a tout mis sur le disque pendant l’attente : rien à signaler au plafond', async () => {
+    openDocument('Texte.', ' Frappe.');
+    onWrite = () => new Promise(() => undefined);
+    const { report } = flushWatched();
+
+    await vi.advanceTimersByTimeAsync(500);
+    useEditorStore.setState({ content: live, isDirty: false, lastSavedAt: 123 });
+
+    await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS - 500 - 500);
+    expect(report()).toEqual({ outcome: 'clean' });
+  });
+
+  it('Rester, puis l’écriture finit par aboutir : l’état est juste', async () => {
+    openDocument('Texte.', ' Frappe.');
+    let answer: (value: { success: boolean }) => void = () => undefined;
+    onWrite = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    const { report } = flushWatched();
+    await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS);
+    expect(report()).toMatchObject({ outcome: 'failed' });
+
+    answer({ success: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().content).toBe('Texte. Frappe.');
+    expect(useEditorStore.getState().lastSavedAt).not.toBeNull();
+    await expect(flushOpenDocument()).resolves.toEqual({ outcome: 'clean' });
+  });
+
+  it('après le plafond, l’écriture qui aboutit n’en relance pas une autre : l’autosave a la main', async () => {
+    openDocument('Texte.', ' Frappe.');
+    let answer: (value: { success: boolean }) => void = () => undefined;
+    onWrite = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    const { report } = flushWatched();
+    await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS);
+    expect(report()).toMatchObject({ outcome: 'failed' });
+
+    // Rester : l'auteur a repris la main, et une frappe attend l'autosave.
+    live += ' Après.';
+    answer({ success: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(writes).toEqual([[FILE, 'Texte. Frappe.']]);
+    expect(useEditorStore.getState().isDirty).toBe(true);
+  });
+
+  it('après le plafond, le rejet tardif de l’écriture ne remonte nulle part', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      openDocument('Texte.', ' Frappe.');
+      let refuse: (error: Error) => void = () => undefined;
+      onWrite = () =>
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        });
+      const { report } = flushWatched();
+      await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS);
+      const atCeiling = report();
+      expect(atCeiling).toMatchObject({ outcome: 'failed' });
+
+      refuse(new Error('disque parti'));
+      await vi.advanceTimersByTimeAsync(0);
+      // `unhandledRejection` part après la file des micro-tâches : il faut un vrai tour de boucle.
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(report()).toBe(atCeiling);
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+});
+
 describe('useSaveOnQuit', () => {
   function mountWithLifecycle() {
     let ask: () => void = () => undefined;
