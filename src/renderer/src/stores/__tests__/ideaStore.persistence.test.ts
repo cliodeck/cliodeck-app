@@ -13,7 +13,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { useIdeaStore, type Idea } from '../ideaStore';
+import { hasUnwrittenIdeas, useIdeaStore, type Idea } from '../ideaStore';
+
+// Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
+vi.setConfig({ testTimeout: 30_000 });
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -60,6 +63,7 @@ const { setupFilesystemHandlers } = await import('../../../../main/ipc/handlers/
 
 const IS_ROOT = process.getuid?.() === 0;
 const QUARANTINE = /^ideas\.json\.illisible-/;
+const IDEAS_IO_DEADLINE_MS = 15_000;
 
 let root: string;
 let dirA: string;
@@ -151,11 +155,35 @@ function mainSwitchesTo(dir: string): void {
   h.mainCurrent = dir;
 }
 
-/** Une nouvelle session : le renderer repart de rien, pas seulement l'état du store. */
-async function nextSession(): Promise<typeof useIdeaStore> {
+/** Pour un test sur la file seule : le main est toujours sur le projet qu'on lui demande. */
+function mainFollowsRequests(): void {
+  const { readUserFile, writeFile } = window.electron.fs;
+  const follow = (filePath: string) => {
+    h.mainCurrent = filePath === ideasB ? dirB : dirA;
+  };
+  Object.assign(window.electron.fs, {
+    readUserFile: (filePath: string) => {
+      follow(filePath);
+      return readUserFile(filePath);
+    },
+    writeFile: (filePath: string, content: string) => {
+      follow(filePath);
+      return writeFile(filePath, content);
+    },
+  });
+}
+
+/** `Cmd+R` : le renderer repart de rien, mais la fenêtre reste, et son `sessionStorage` avec. */
+async function reloadedRenderer(): Promise<typeof useIdeaStore> {
   vi.resetModules();
   const { useIdeaStore: fresh } = await import('../ideaStore');
   return fresh;
+}
+
+/** Une nouvelle session : une autre fenêtre, qui ne reçoit rien de la précédente. */
+async function nextSession(): Promise<typeof useIdeaStore> {
+  sessionStorage.clear();
+  return reloadedRenderer();
 }
 
 beforeEach(() => {
@@ -236,6 +264,8 @@ describe('un ideas.json abîmé est mis de côté, et rien ne se perd', () => {
     ['un champ ideas qui n’est pas une liste', '{"ideas": {"titre": "Braudel"}}'],
     ['une liste de ce qui n’est pas une idée', '{"ideas": ["Braudel", 12]}'],
     ['un objet d’une autre forme, qui porte des données', '{"notes": [{"titre": "Braudel"}]}'],
+    ['un objet d’une autre forme, aux champs tous simples', '{"note": "Relire Braudel"}'],
+    ['ideas à null, à côté d’autre chose', '{"ideas": null, "note": "Relire Braudel"}'],
     ['une virgule en trop après une retouche à la main', '{"ideas": [{"id": "a", "title": "Braudel"},]}'],
   ])('%s : forme inattendue, mise de côté', async (_name, content) => {
     fs.writeFileSync(ideasA, content);
@@ -309,7 +339,6 @@ describe('le faux positif : un fichier sain ne se met jamais de côté', () => {
   it.each([
     ['un objet vide', '{}'],
     ['ideas à null', '{"ideas": null}'],
-    ['un objet de métadonnées sans idées', '{"version": 1}'],
   ])('%s : une liste vide, comme `data.ideas ?? []` depuis le premier jour', async (_name, content) => {
     fs.writeFileSync(ideasA, content);
 
@@ -435,6 +464,58 @@ describe('la bannière vaut pour la session et pour ce projet', () => {
     expect(store().persistence).toEqual({ kind: 'ready' });
     expect(titles()).toEqual(['Idée de B']);
   });
+
+  it('un aller-retour vers un autre projet la garde : le fichier trouvé au retour ne dit plus rien', async () => {
+    const backup = await quarantine();
+    mainSwitchesTo(dirB);
+    await store().loadIdeas(dirB);
+    expect(store().persistence).toEqual({ kind: 'ready' });
+
+    mainSwitchesTo(dirA);
+    await store().loadIdeas(dirA);
+
+    expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: backup });
+  });
+
+  it('un disque débranché puis revenu la rend aussi : `blocked` la remplace, le temps de la panne', async () => {
+    const backup = await quarantine();
+    const unplugged = `${dirA}-debranche`;
+
+    fs.renameSync(dirA, unplugged);
+    await store().loadIdeas(dirA);
+    expect(store().persistence.kind).toBe('blocked');
+
+    fs.renameSync(unplugged, dirA);
+    await store().loadIdeas(dirA);
+    expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: backup });
+  });
+
+  it('`Cmd+R` la garde : la fenêtre est la même, et rien ne la dirait plus', async () => {
+    const backup = await quarantine();
+
+    const reloaded = await reloadedRenderer();
+    await reloaded.getState().loadIdeas(dirA);
+
+    expect(reloaded.getState().persistence).toEqual({ kind: 'quarantined', backupPath: backup });
+  });
+
+  it('sans `sessionStorage` utilisable, le chargement aboutit quand même', async () => {
+    const refused = () => {
+      throw new Error('QuotaExceededError');
+    };
+    vi.stubGlobal('sessionStorage', { getItem: refused, setItem: refused });
+    try {
+      fs.writeFileSync(ideasA, '{ tronqué');
+      await store().loadIdeas(dirA);
+      expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: theBackup(dirA) });
+
+      // Et la lecture suivante n'en fait pas une panne : la liste reste utilisable.
+      await store().loadIdeas(dirA);
+      expect(store().persistence).toEqual({ kind: 'ready' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('une lecture impossible : rien ne bouge, rien ne s’écrit, et on peut réessayer', () => {
@@ -549,8 +630,9 @@ describe('les sauvegardes passent une par une, avec l’état du moment où elle
       release = resolve;
     });
 
+    newIdea('Lefebvre');
     const first = store().saveIdeas(dirA);
-    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
     newIdea('Febvre');
     const second = store().saveIdeas(dirA);
     // Modifiée après l'appel : la sauvegarde qui attend son tour la voit.
@@ -558,7 +640,7 @@ describe('les sauvegardes passent une par une, avec l’état du moment où elle
     release();
     await Promise.all([first, second]);
 
-    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Febvre', 'Bloch']);
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Lefebvre', 'Febvre', 'Bloch']);
   });
 
   it('cent demandes pendant une écriture : une seule attend, et le dernier état est sur le disque', async () => {
@@ -606,6 +688,50 @@ describe('les sauvegardes passent une par une, avec l’état du moment où elle
 
     expect(store().saveError).toBeNull();
     expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Febvre']);
+  });
+
+  it('rien de neuf : un blur ou un clic sur une carte n’écrit rien, donc n’échoue pas', async () => {
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('EACCES: permission denied, write');
+    };
+
+    await store().saveIdeas(dirA);
+
+    expect(store().saveError).toBeNull();
+  });
+
+  it('une écriture ratée, puis l’auteur défait ce qui ne s’écrivait pas : plus rien à signaler', async () => {
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    const id = newIdea('Febvre');
+    await store().saveIdeas(dirA);
+    expect(store().saveError).toContain('ENOSPC');
+
+    store().removeIdea(id);
+    await store().flushIdeas();
+
+    expect(store().saveError).toBeNull();
+    expect(hasUnwrittenIdeas()).toBe(false);
+  });
+
+  it('une liste abandonnée : plus rien à écrire ni à signaler', async () => {
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    newIdea('Febvre');
+    await store().saveIdeas(dirA);
+
+    store().abandonUnwrittenIdeas();
+
+    expect(store().saveError).toBeNull();
+    expect(hasUnwrittenIdeas()).toBe(false);
   });
 
   it('une liste que le disque n’a pas reçue survit à un rechargement du panneau', async () => {
@@ -663,7 +789,7 @@ describe('la file et le chargement', () => {
 
     store().removeIdea(store().ideas[1].id);
     const saving = store().saveIdeas(dirA);
-    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
     // Quitter le Brainstorm et y revenir : le panneau se remonte et recharge.
     const reloading = store().loadIdeas(dirA);
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -683,6 +809,111 @@ describe('la file et le chargement', () => {
 
     expect(store().ideas[0].content).toBe('Tapé, jamais quitté le champ.');
     expect(onDisk(ideasA)[0].content).toBe('Tapé, jamais quitté le champ.');
+  });
+});
+
+describe('un disque sans réponse ne retient pas la file', () => {
+  const never = () => new Promise<never>(() => undefined);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('une lecture sans réponse dans A : A est bloqué après le délai, et B se charge', async () => {
+    fs.writeFileSync(ideasB, ideasFile(['Idée de B']));
+    const read = window.electron.fs.readUserFile;
+    let reading = false;
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = (filePath: string) => {
+      if (filePath !== ideasA) return read(filePath);
+      reading = true;
+      return never();
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    const loadingA = store().loadIdeas(dirA);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reading).toBe(true);
+    await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+    await loadingA;
+
+    expect(store().persistence.kind).toBe('blocked');
+    expect(store().loadedFor).toBe(dirA);
+    expect(store().isLoading).toBe(false);
+    expect(fs.existsSync(ideasA)).toBe(false);
+
+    vi.useRealTimers();
+    mainSwitchesTo(dirB);
+    await store().loadIdeas(dirB);
+    expect(titles()).toEqual(['Idée de B']);
+  });
+
+  it('un dossier de projet qui ne répond plus : bloqué après le délai, sans liste vide à écrire', async () => {
+    let asked = false;
+    (window.electron.fs as { exists: unknown }).exists = () => {
+      asked = true;
+      return never();
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    const loading = store().loadIdeas(dirA);
+    // La vraie lecture rend « absent » sur le vrai disque, hors de l'horloge simulée.
+    await vi.waitFor(() => expect(asked).toBe(true), { timeout: 5000, interval: 20 });
+    await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+    await loading;
+
+    expect(store().persistence.kind).toBe('blocked');
+    expect(store().isLoading).toBe(false);
+  });
+
+  it('une écriture sans réponse : elle se dit après le délai, et la file repart', async () => {
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = never;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    newIdea('Febvre');
+    const saving = store().saveIdeas(dirA);
+    await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+    await saving;
+
+    expect(store().saveError).toBeTruthy();
+    expect(hasUnwrittenIdeas()).toBe(true);
+
+    vi.useRealTimers();
+    (window.electron.fs as { writeFile: unknown }).writeFile = write;
+    await store().saveIdeas(dirA);
+    expect(store().saveError).toBeNull();
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Febvre']);
+  });
+
+  it('une mise de côté qui aboutit après le délai n’est pas oubliée', async () => {
+    fs.writeFileSync(ideasA, '{ tronqué');
+    const quarantineFile = window.electron.fs.quarantineFile;
+    let moving: Promise<unknown> | null = null;
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    (window.electron.fs as { quarantineFile: unknown }).quarantineFile = (filePath: string) => {
+      moving = answered.then(() => quarantineFile(filePath));
+      return moving;
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    const loading = store().loadIdeas(dirA);
+    // `waitFor` fait avancer l'horloge simulée : la relecture a lieu, sur le vrai disque.
+    await vi.waitFor(() => expect(moving).not.toBeNull(), { timeout: 5000, interval: 50 });
+    await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+    await loading;
+    expect(store().persistence.kind).toBe('blocked');
+    vi.useRealTimers();
+
+    answer();
+    await moving;
+    await store().loadIdeas(dirA);
+
+    expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: theBackup(dirA) });
   });
 });
 
@@ -724,7 +955,7 @@ describe('une bascule de projet ne croise jamais deux listes', () => {
 
     newIdea('Febvre');
     const inFlight = store().saveIdeas(dirA);
-    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
     newIdea('Bloch');
     const waiting = store().saveIdeas(dirA);
 
@@ -739,6 +970,86 @@ describe('une bascule de projet ne croise jamais deux listes', () => {
 
     expect(titlesOnDisk(ideasA)).toEqual(['Idée de A', 'Febvre', 'Bloch']);
     expect(titlesOnDisk(ideasB)).toEqual(['Idée de B', 'Idée de B, la seconde']);
+  });
+
+  it('une sauvegarde de B demandée pendant qu’une sauvegarde de A attend ne s’y joint pas : B s’écrit', async () => {
+    await store().loadIdeas(dirA);
+    mainFollowsRequests();
+    let release: () => void = () => undefined;
+    holdWrites = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    newIdea('Febvre');
+    const inFlight = store().saveIdeas(dirA);
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
+    newIdea('Bloch');
+    const waiting = store().saveIdeas(dirA);
+
+    // Une idée arrive dès que B est chargé, avant le tour de sa sauvegarde.
+    const stop = useIdeaStore.subscribe((state, previous) => {
+      if (state.loadedFor === dirB && previous.loadedFor !== dirB) newIdea('Idée de B, la seconde');
+    });
+    const loadingB = store().loadIdeas(dirB);
+    const savingB = store().saveIdeas(dirB);
+    release();
+    await Promise.all([inFlight, waiting, loadingB, savingB]);
+    stop();
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Idée de A', 'Febvre', 'Bloch']);
+    expect(titlesOnDisk(ideasB)).toEqual(['Idée de B', 'Idée de B, la seconde']);
+  });
+
+  it('un chargement dépassé avant son tour ne lit rien', async () => {
+    await store().loadIdeas(dirA);
+    mainFollowsRequests();
+    let release: () => void = () => undefined;
+    holdWrites = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    newIdea('Febvre');
+    const inFlight = store().saveIdeas(dirA);
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
+
+    const reads: string[] = [];
+    const read = window.electron.fs.readUserFile;
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = (filePath: string) => {
+      reads.push(filePath);
+      return read(filePath);
+    };
+    const reloadA = store().loadIdeas(dirA);
+    const loadingB = store().loadIdeas(dirB);
+    release();
+    await Promise.all([inFlight, reloadA, loadingB]);
+
+    expect(reads).toEqual([ideasB]);
+  });
+
+  it('un chargement dépassé pendant sa lecture ne dit pas que tout est chargé', async () => {
+    mainFollowsRequests();
+    const read = window.electron.fs.readUserFile;
+    let reading: string | null = null;
+    const held = new Map<string, () => void>();
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = async (filePath: string) => {
+      reading = filePath;
+      await new Promise<void>((resolve) => {
+        held.set(filePath, resolve);
+      });
+      return read(filePath);
+    };
+
+    const loadingA = store().loadIdeas(dirA);
+    await vi.waitFor(() => expect(reading).toBe(ideasA), { timeout: 5000 });
+    const loadingB = store().loadIdeas(dirB);
+    held.get(ideasA)?.();
+    await loadingA;
+
+    expect(store().isLoading).toBe(true);
+
+    await vi.waitFor(() => expect(reading).toBe(ideasB), { timeout: 5000 });
+    held.get(ideasB)?.();
+    await loadingB;
+    expect(store().isLoading).toBe(false);
+    expect(titles()).toEqual(['Idée de B']);
   });
 
   it('un chargement de B demandé pendant celui de A : la liste de A ne reste pas, ni ne part dans B', async () => {
@@ -763,6 +1074,44 @@ describe('une bascule de projet ne croise jamais deux listes', () => {
   });
 });
 
+describe('la disposition automatique du Tableau n’est pas une modification de l’auteur', () => {
+  const placed = new Map([['idee-Braudel', { x: 40, y: 40 }]]);
+
+  beforeEach(async () => {
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+  });
+
+  it('elle place les cartes sans rien écrire, sans dater l’idée et sans rien laisser à écrire', async () => {
+    const { updatedAt } = store().ideas[0];
+
+    store().arrangeIdeas(placed);
+
+    expect(store().ideas[0].position).toEqual({ x: 40, y: 40 });
+    expect(store().ideas[0].updatedAt).toBe(updatedAt);
+    expect(hasUnwrittenIdeas()).toBe(false);
+    await store().flushIdeas();
+    expect(writes).toEqual([]);
+  });
+
+  it('elle s’écrit avec la première vraie modification', async () => {
+    store().arrangeIdeas(placed);
+
+    newIdea('Febvre');
+    await store().saveIdeas(dirA);
+
+    expect(onDisk(ideasA)[0].position).toEqual({ x: 40, y: 40 });
+  });
+
+  it('elle ne fait pas oublier une modification que le disque attend encore', async () => {
+    newIdea('Febvre');
+
+    store().arrangeIdeas(placed);
+
+    expect(hasUnwrittenIdeas()).toBe(true);
+  });
+});
+
 describe("flushIdeas : ce que ni Cmd+Q ni une bascule n'écrivaient", () => {
   it('écrit une frappe dont aucun blur n’est parti', async () => {
     fs.writeFileSync(ideasA, ideasFile(['Braudel']));
@@ -784,7 +1133,7 @@ describe("flushIdeas : ce que ni Cmd+Q ni une bascule n'écrivaient", () => {
 
     newIdea('Febvre');
     void store().saveIdeas(dirA);
-    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
     newIdea('Bloch');
     void store().saveIdeas(dirA);
 

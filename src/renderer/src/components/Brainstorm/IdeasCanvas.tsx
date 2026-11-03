@@ -29,6 +29,7 @@ export const IdeasCanvas: React.FC = () => {
   const selectedId = useIdeaStore((s) => s.selectedId);
   const setSelected = useIdeaStore((s) => s.setSelected);
   const updateIdea = useIdeaStore((s) => s.updateIdea);
+  const arrangeIdeas = useIdeaStore((s) => s.arrangeIdeas);
   const addIdea = useIdeaStore((s) => s.addIdea);
   const saveIdeas = useIdeaStore((s) => s.saveIdeas);
   const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
@@ -154,14 +155,15 @@ export const IdeasCanvas: React.FC = () => {
     const unpositioned = ideas.filter((i) => !i.position);
     if (unpositioned.length === 0) return;
     const cols = Math.ceil(Math.sqrt(unpositioned.length));
-    unpositioned.forEach((idea, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      updateIdea(idea.id, {
-        position: { x: col * (CARD_WIDTH + 40) + 40, y: row * (CARD_HEIGHT + 40) + 40 },
-      });
-    });
-    if (projectPath) saveIdeas(projectPath);
+    arrangeIdeas(
+      new Map(
+        unpositioned.map((idea, idx) => {
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          return [idea.id, { x: col * (CARD_WIDTH + 40) + 40, y: row * (CARD_HEIGHT + 40) + 40 }];
+        })
+      )
+    );
   }, []); // Only on mount
 
   return (

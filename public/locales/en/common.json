@@ -1730,6 +1730,11 @@
   "ideas": {
     "loading": "Loading ideas…",
     "saveFailed": "Your latest changes could not be saved: they are still on screen, but not on disk. A new attempt is made with every change.",
+    "noResponse": "The disk did not respond in time.",
+    "switchSaveFailedTitle": "Your ideas are not saved",
+    "switchSaveFailed": "Your latest changes to your ideas could not be saved to the ideas file. If you switch projects now, they will be lost; your document is not affected.\n\nCancel: stay in this project, where they are still on screen.\nConfirm: switch projects without saving them.\n\nReason: {{reason}}",
+    "closeSaveFailedTitle": "Your latest ideas are not saved",
+    "closeSaveFailed": "The project closed before your latest changes to your ideas could be written to disk. Reopen this same project so that they get written: opening another project would lose them.",
     "unreadable": {
       "quarantined": "Your ideas file was damaged and could not be read. It is not lost: it has been set aside, and the list starts again from empty. To recover your ideas, open this file in a text editor: whatever is not damaged can still be read there.",
       "blocked": "Your ideas file cannot be read for now: the disk or network folder may not be accessible, or access rights may be missing. It has been neither moved nor changed. The Ideas, Board and Graph tabs stay closed in the meantime, because nothing done there would be saved.",

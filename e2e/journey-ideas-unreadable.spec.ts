@@ -55,11 +55,16 @@ const ideasFile = (...titles: string[]) => JSON.stringify({ ideas: titles.map(id
 const backups = (project: ProjectOnDisk) =>
   readdirSync(join(project.dir, '.cliodeck')).filter((name) => name.startsWith('ideas.json.illisible-'));
 
-async function openProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
+/** Demande le projet au dialogue natif, sans attendre : hors du mode Écrire, l'éditeur est caché. */
+async function pickProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
   }, projectJson);
   await window.locator('button[title="Ouvrir un projet"]').first().click();
+}
+
+async function openProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
+  await pickProject(app, window, projectJson);
   await window.locator('.codemirror-editor .cm-content').waitFor({ timeout: 20_000 });
 }
 
@@ -125,6 +130,142 @@ test('ideas.json tronqué : mis de côté, la bannière donne le chemin, et la p
     });
   } finally {
     rmSync(project.dir, { recursive: true, force: true });
+  }
+});
+
+test('qui reste sur le chat le sait aussi, et la bannière survit à un aller-retour et à Cmd+R', async () => {
+  const whole = ideasFile(...Array.from({ length: 40 }, (_, i) => `Idée ${i}`));
+  const project = makeProject(whole.slice(0, Math.floor(whole.length * 0.6)));
+  const other = makeProject(ideasFile('Febvre'));
+  try {
+    await withApp(async (app, window) => {
+      await openProject(app, window, project.projectJson);
+      await window.locator('.workspace-mode-bar button', { hasText: 'Brainstormer' }).click();
+
+      await expect(banner(window)).toBeVisible({ timeout: 10_000 });
+      await expect(banner(window)).toContainText(backups(project)[0]);
+      await expect(window.locator('.brainstorm-panel__tab.is-active')).toContainText('Chat');
+
+      // Un aller-retour, le chat à l'écran tout du long.
+      await pickProject(app, window, other.projectJson);
+      await window.locator('.brainstorm-panel__tab', { hasText: 'Idées' }).click();
+      await expect(window.locator('.ideas-panel__item', { hasText: 'Febvre' })).toBeVisible({ timeout: 15_000 });
+      await expect(banner(window)).toHaveCount(0);
+      await window.locator('.brainstorm-panel__tab', { hasText: 'Chat' }).click();
+      await pickProject(app, window, project.projectJson);
+      await expect(banner(window)).toContainText(backups(project)[0], { timeout: 15_000 });
+
+      // Le menu : `Cmd+R` recharge après avoir écrit, et aucun projet n'est rouvert tout seul.
+      await window.reload();
+      await window.waitForLoadState('domcontentloaded');
+      await pickProject(app, window, project.projectJson);
+      await window.locator('.workspace-mode-bar button', { hasText: 'Brainstormer' }).click();
+      await expect(banner(window)).toContainText(backups(project)[0], { timeout: 15_000 });
+      expect(backups(project)).toHaveLength(1);
+    });
+  } finally {
+    rmSync(project.dir, { recursive: true, force: true });
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
+
+test('regarder le Tableau d’un fichier en lecture seule ne dit rien et ne retient pas la bascule', async () => {
+  test.skip(process.getuid?.() === 0, 'root écrit partout');
+  test.skip(process.platform === 'win32', 'chmod ne retire pas l’écriture sous Windows');
+  const project = makeProject(ideasFile('Braudel'));
+  const other = makeProject(ideasFile('Febvre'));
+  const content = readFileSync(project.ideasJson);
+  chmodSync(project.ideasJson, 0o444);
+  chmodSync(join(project.dir, '.cliodeck'), 0o555);
+  try {
+    await withApp(async (app, window) => {
+      await openProject(app, window, project.projectJson);
+      await goToTab(window, 'Tableau');
+      await window.locator('.ideas-canvas__card', { hasText: 'Braudel' }).click();
+      await window.waitForTimeout(500);
+      await expect(banner(window)).toHaveCount(0);
+
+      await pickProject(app, window, other.projectJson);
+      await expect(window.locator('.ideas-canvas__card', { hasText: 'Febvre' })).toBeVisible({ timeout: 15_000 });
+      await expect(window.locator('[role="alertdialog"]')).toHaveCount(0);
+    });
+    expect(readFileSync(project.ideasJson).equals(content)).toBe(true);
+  } finally {
+    chmodSync(join(project.dir, '.cliodeck'), 0o755);
+    chmodSync(project.ideasJson, 0o644);
+    rmSync(project.dir, { recursive: true, force: true });
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
+
+test('des idées qui ne s’écrivent pas : la question les nomme, et l’auteur choisit de rester ou de partir', async () => {
+  test.skip(process.getuid?.() === 0, 'root écrit partout');
+  test.skip(process.platform === 'win32', 'chmod ne retire pas l’écriture sous Windows');
+  const project = makeProject(ideasFile('Braudel'));
+  const other = makeProject(ideasFile('Febvre'));
+  chmodSync(project.ideasJson, 0o444);
+  chmodSync(join(project.dir, '.cliodeck'), 0o555);
+  const question = (window: Page) => window.locator('[role="alertdialog"]');
+  try {
+    await withApp(async (app, window) => {
+      await openProject(app, window, project.projectJson);
+      await goToTab(window, 'Idées');
+      await window.locator('button[title="Nouvelle idée"]').first().click();
+      await expect(banner(window)).toContainText('pas pu être enregistrées', { timeout: 10_000 });
+
+      await pickProject(app, window, other.projectJson);
+      await expect(question(window)).toContainText('fichier des idées', { timeout: 10_000 });
+
+      // Rester : la liste et le message n'ont pas bougé.
+      await question(window).locator('.confirm-dialog-btn-cancel').click();
+      await expect(window.locator('.ideas-panel__item')).toHaveCount(2);
+      await expect(banner(window)).toBeVisible();
+
+      await window.locator('button[title="Ouvrir un projet"]').first().click();
+      await question(window).locator('.confirm-dialog-btn-confirm').click();
+      await expect(window.locator('.ideas-panel__item', { hasText: 'Febvre' })).toBeVisible({ timeout: 15_000 });
+      await expect(banner(window)).toHaveCount(0);
+    });
+    // Sortir ensuite n'a rien redemandé : `withApp` ferme l'app sans qu'aucune écriture ne manque.
+    expect(JSON.parse(readFileSync(project.ideasJson, 'utf8')).ideas).toHaveLength(1);
+  } finally {
+    chmodSync(join(project.dir, '.cliodeck'), 0o755);
+    chmodSync(project.ideasJson, 0o644);
+    rmSync(project.dir, { recursive: true, force: true });
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
+
+test('pendant que le main bascule, le champ d’idée n’est plus à l’écran : rien n’y serait écrit', async () => {
+  const project = makeProject(ideasFile('Braudel'));
+  const other = makeProject(ideasFile('Febvre'));
+  try {
+    await withApp(async (app, window) => {
+      await openProject(app, window, project.projectJson);
+      await goToTab(window, 'Idées');
+      await window.locator('.ideas-panel__item', { hasText: 'Braudel' }).click();
+      await window.locator('.idea-editor__content').click();
+      await window.keyboard.type(' TAPE-AVANT-LA-BASCULE');
+
+      await app.evaluate(({ ipcMain }) => {
+        const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, (...args: unknown[]) => unknown> })
+          ._invokeHandlers;
+        const load = handlers.get('project:load') as (...args: unknown[]) => unknown;
+        handlers.set('project:load', async (...args: unknown[]) => {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return load(...args);
+        });
+      });
+      await pickProject(app, window, other.projectJson);
+
+      await expect(window.locator('.brainstorm-panel__ideas-loading')).toBeVisible();
+      await expect(window.locator('.idea-editor__content')).toHaveCount(0);
+      await expect.poll(() => readFileSync(project.ideasJson, 'utf8')).toContain('TAPE-AVANT-LA-BASCULE');
+      await expect(window.locator('.ideas-panel__item', { hasText: 'Febvre' })).toBeVisible({ timeout: 15_000 });
+    });
+  } finally {
+    rmSync(project.dir, { recursive: true, force: true });
+    rmSync(other.dir, { recursive: true, force: true });
   }
 });
 

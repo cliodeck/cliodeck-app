@@ -16,6 +16,9 @@ import { BrainstormPanel } from '../BrainstormPanel';
 import { useIdeaStore, type Idea } from '../../../stores/ideaStore';
 import { useProjectStore } from '../../../stores/projectStore';
 
+// Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
+vi.setConfig({ testTimeout: 30_000 });
+
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   mainCurrent: null as string | null,
@@ -134,7 +137,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useProjectStore.setState({ currentProject: null });
+  useProjectStore.setState({ currentProject: null, loadState: { kind: 'idle' } });
+  sessionStorage.clear();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -160,21 +164,45 @@ describe('fichier mis de côté', () => {
     expect(screen.getByTitle('ideas.create')).toBeInTheDocument();
   });
 
-  it('pas sur le chat, mais sur Idées, Tableau et Graphe, dans tout changement d’onglet', async () => {
+  it('dès l’arrivée sur le chat, l’onglet par défaut : qui ne le quitte pas doit le savoir aussi', async () => {
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+
+    expect(screen.getByTestId('chat')).toBeInTheDocument();
+    const banner = screen.getByRole('alert');
+    expect(within(banner).getByText(QUARANTINED)).toBeInTheDocument();
+    expect(within(banner).getByText(path.join(dirA, '.cliodeck', backups()[0]))).toBeInTheDocument();
+  });
+
+  it('sur tous les onglets, dans tout changement d’onglet', async () => {
     await openedOnIdeas();
 
-    await clickTab('ideas.tabChat');
-    expect(screen.queryByRole('alert')).toBeNull();
-    for (const tab of ['ideas.tabCanvas', 'ideas.tabGraph', 'ideas.tabIdeas']) {
+    for (const tab of ['ideas.tabChat', 'ideas.tabCanvas', 'ideas.tabGraph', 'ideas.tabIdeas']) {
       await clickTab(tab);
       expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
     }
   });
 
+  it('un aller-retour vers un autre projet, sans avoir quitté le chat : elle revient', async () => {
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+
+    openProject(dirB);
+    await settled();
+    expect(screen.queryByText(QUARANTINED)).toBeNull();
+
+    openProject(dirA);
+    await settled();
+    expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
+    expect(screen.getByText(path.join(dirA, '.cliodeck', backups()[0]))).toBeInTheDocument();
+  });
+
   it('elle survit au rechargement du panneau et à la première sauvegarde, sans nouvelle mise de côté', async () => {
     const view = await openedOnIdeas();
     await userEvent.click(screen.getByTitle('ideas.create'));
-    await vi.waitFor(() => expect(fs.existsSync(ideasA)).toBe(true));
+    await vi.waitFor(() => expect(fs.existsSync(ideasA)).toBe(true), { timeout: 5000 });
     const backup = backups();
 
     // Quitter le Brainstorm et y revenir démonte le panneau, et son effet recharge.
@@ -207,6 +235,9 @@ describe('lecture impossible', () => {
       openProject(dirA);
       render(<BrainstormPanel />);
       await settled();
+
+      // Rien n'est en jeu tant qu'on reste sur le chat, et le disque revient peut-être tout seul.
+      expect(screen.queryByText(BLOCKED)).toBeNull();
 
       await clickTab('ideas.tabIdeas');
       expect(screen.getByText(BLOCKED)).toBeInTheDocument();
@@ -249,22 +280,51 @@ describe('écriture ratée', () => {
 
     await userEvent.click(screen.getByTitle('ideas.create'));
 
-    expect(await screen.findByText(SAVE_FAILED)).toBeInTheDocument();
+    expect(await screen.findByText(SAVE_FAILED, undefined, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText(/ENOSPC/)).toBeInTheDocument();
     expect(screen.getByText('ideas.newIdeaTitle')).toBeInTheDocument();
+
+    // Depuis le chat aussi : elle n'attend pas qu'on revienne voir.
+    await clickTab('ideas.tabChat');
+    expect(screen.getByText(SAVE_FAILED)).toBeInTheDocument();
+    await clickTab('ideas.tabIdeas');
 
     (window.electron.fs as { writeFile: unknown }).writeFile = write;
     await userEvent.click(screen.getByRole('button', { name: 'ideas.unreadable.retry' }));
 
-    await vi.waitFor(() => expect(screen.queryByText(SAVE_FAILED)).toBeNull());
+    await vi.waitFor(() => expect(screen.queryByText(SAVE_FAILED)).toBeNull(), { timeout: 5000 });
     expect(fs.readFileSync(ideasA, 'utf8')).toContain('ideas.newIdeaTitle');
+  });
+
+  it('regarder le Tableau d’un fichier en lecture seule n’écrit rien, et rien ne se dit', async () => {
+    const { position: _position, ...unplaced } = idea('Braudel');
+    fs.writeFileSync(ideasA, JSON.stringify({ ideas: [unplaced] }));
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+    const written: string[] = [];
+    (window.electron.fs as { writeFile: unknown }).writeFile = async (filePath: string) => {
+      written.push(filePath);
+      throw new Error('EACCES: permission denied, write');
+    };
+
+    await clickTab('ideas.tabCanvas');
+    const card = await screen.findByText('Braudel', undefined, { timeout: 5000 });
+
+    await userEvent.click(card);
+    await settled();
+
+    expect(written).toEqual([]);
+    expect(screen.queryByText(SAVE_FAILED)).toBeNull();
+    expect(useIdeaStore.getState().ideas[0].position).toBeDefined();
+    expect(useIdeaStore.getState().saveError).toBeNull();
   });
 });
 
 describe('une liste qui n’est pas celle de ce projet ne se montre pas', () => {
   it('pendant le chargement : rien à modifier, ce qu’on y ferait disparaîtrait', async () => {
     fs.writeFileSync(ideasA, ideasFile('Braudel'));
-    let release: () => void = () => undefined;
+    let release: (() => void) | null = null;
     const read = window.electron.fs.readUserFile;
     (window.electron.fs as { readUserFile: unknown }).readUserFile = async (p: string) => {
       await new Promise<void>((resolve) => {
@@ -279,10 +339,10 @@ describe('une liste qui n’est pas celle de ce projet ne se montre pas', () => 
     expect(screen.getByText('ideas.loading')).toBeInTheDocument();
     expect(screen.queryByTitle('ideas.create')).toBeNull();
 
-    await vi.waitFor(() => release !== undefined);
-    release();
+    await vi.waitFor(() => expect(release).not.toBeNull(), { timeout: 5000 });
+    (release as unknown as () => void)();
     await settled();
-    expect(await screen.findByText('Braudel')).toBeInTheDocument();
+    expect(await screen.findByText('Braudel', undefined, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it('pendant le rechargement du même projet aussi : la liste à l’écran va être remplacée', async () => {
@@ -306,14 +366,14 @@ describe('une liste qui n’est pas celle de ce projet ne se montre pas', () => 
     expect(screen.getByText('ideas.loading')).toBeInTheDocument();
     expect(screen.queryByTitle('ideas.create')).toBeNull();
 
-    await vi.waitFor(() => expect(useIdeaStore.getState().isLoading).toBe(true));
+    await vi.waitFor(() => expect(useIdeaStore.getState().isLoading).toBe(true), { timeout: 5000 });
     await act(async () => {
       await vi.waitFor(() => {
         release();
         expect(useIdeaStore.getState().isLoading).toBe(false);
-      });
+      }, { timeout: 5000 });
     });
-    expect(await screen.findByText('Braudel')).toBeInTheDocument();
+    expect(await screen.findByText('Braudel', undefined, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it('au rendu même de la bascule, avant que le chargement parte, la liste d’avant n’est déjà plus là', async () => {

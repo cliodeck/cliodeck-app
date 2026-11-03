@@ -60,10 +60,13 @@ type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
 type BrainstormTab = 'chat' | 'ideas' | 'canvas' | 'graph';
 
 /**
- * Ce que l'auteur doit savoir du fichier de ses idées, au-dessus des onglets qui en vivent. Pas
- * de bouton de fermeture : la mise de côté se dit tant que ce projet est ouvert.
+ * Ce que l'auteur doit savoir du fichier de ses idées, sur tous les onglets : le chargement met
+ * de côté dès l'arrivée sur le chat, l'onglet par défaut, où l'on peut passer toute une session.
+ * Pas de bouton de fermeture : la mise de côté se dit tant que la fenêtre est ouverte. Seule une
+ * lecture impossible attend qu'on vienne aux idées : rien n'est en jeu, et le disque reviendra
+ * peut-être tout seul.
  */
-const IdeasFileNotices: React.FC<{ projectPath: string }> = ({ projectPath }) => {
+const IdeasFileNotices: React.FC<{ projectPath: string; showBlocked: boolean }> = ({ projectPath, showBlocked }) => {
   const { t } = useTranslation('common');
   const persistence = useIdeaStore((s) => s.persistence);
   const saveError = useIdeaStore((s) => s.saveError);
@@ -81,7 +84,7 @@ const IdeasFileNotices: React.FC<{ projectPath: string }> = ({ projectPath }) =>
           </div>
         </div>
       )}
-      {persistence.kind === 'blocked' && (
+      {persistence.kind === 'blocked' && showBlocked && (
         <div className="brainstorm-panel__ideas-notice" role="alert">
           <AlertTriangle size={14} aria-hidden="true" />
           <div className="brainstorm-panel__ideas-notice-body">
@@ -133,11 +136,13 @@ export const BrainstormPanel: React.FC = () => {
   const ideasLoadedFor = useIdeaStore((s) => s.loadedFor);
   const ideasLoading = useIdeaStore((s) => s.isLoading);
   const ideasBlocked = useIdeaStore((s) => s.persistence.kind === 'blocked');
+  const projectSwitching = useProjectStore((s) => s.loadState.kind === 'loading');
   // Tant que la liste n'est pas celle de ce projet, on ne la montre pas : elle vient du projet
   // d'avant, ou elle est vide en attendant le disque (un fichier OneDrive met des secondes à
-  // arriver), et ce qu'on y ferait disparaîtrait au chargement.
+  // arriver), et ce qu'on y ferait disparaîtrait au chargement. Pendant une bascule non plus : le
+  // sortant s'écrit à son début, et une frappe après lui n'aurait plus nulle part où aller.
   const ideasShown =
-    currentProjectPath !== null && ideasLoadedFor === currentProjectPath && !ideasLoading;
+    currentProjectPath !== null && ideasLoadedFor === currentProjectPath && !ideasLoading && !projectSwitching;
   const modeNotice = useBrainstormModeNotice();
   // Sans projet, le panneau invite déjà à en ouvrir un : pas deux bandes, et
   // rien à chercher dans des sources qui n'existent pas encore.
@@ -268,6 +273,10 @@ export const BrainstormPanel: React.FC = () => {
         </button>
       </nav>
 
+      {currentProjectPath && ideasShown && (
+        <IdeasFileNotices projectPath={currentProjectPath} showBlocked={activeTab !== 'chat'} />
+      )}
+
       {/* Tab content */}
       {activeTab === 'chat' && (
         <>
@@ -302,9 +311,6 @@ export const BrainstormPanel: React.FC = () => {
             <AssistantChat variant="full" />
           </section>
         </>
-      )}
-      {activeTab !== 'chat' && currentProjectPath && ideasShown && (
-        <IdeasFileNotices projectPath={currentProjectPath} />
       )}
       {activeTab !== 'chat' && (
         <section className="brainstorm-panel__chat">

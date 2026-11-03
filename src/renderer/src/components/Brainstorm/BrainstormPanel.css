@@ -119,10 +119,6 @@
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
-.brainstorm-panel__ideas-loading {
-  margin: 12px;
-}
-
 /* Chat: takes all available vertical space, above the fold. */
 .brainstorm-panel__chat {
   flex: 1;
@@ -226,6 +222,10 @@
 .brainstorm-panel__muted {
   margin: 4px 0;
   color: var(--text-tertiary);
+}
+
+.brainstorm-panel__ideas-loading {
+  margin: 12px;
 }
 
 .brainstorm-panel__recipes {

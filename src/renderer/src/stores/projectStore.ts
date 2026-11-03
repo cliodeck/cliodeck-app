@@ -113,6 +113,17 @@ async function assertProjectReadable(projectPath: string): Promise<void> {
   if (!metadata.success) throw new Error(metadata.error || 'Failed to load project');
 }
 
+/**
+ * Écrit les idées du projet courant, tant que le main l'autorise, et rend ce qui l'en a empêché.
+ * Celles d'un projet déjà fermé n'ont plus où s'écrire : elles ne retiennent rien.
+ */
+async function flushCurrentProjectIdeas(): Promise<string | null> {
+  const { loadedFor, flushIdeas } = useIdeaStore.getState();
+  if (loadedFor !== useProjectStore.getState().currentProject?.path) return null;
+  await flushIdeas();
+  return useIdeaStore.getState().saveError;
+}
+
 /** Ce que l'éditeur a quitté, à lui rendre si rien ne vient le remplacer. */
 interface DetachedEditor {
   from: string | null;
@@ -129,18 +140,21 @@ interface DetachedEditor {
  * rien ne s'y tape ensuite : une frappe pendant `project:load` n'avait plus nulle
  * part où s'écrire, la bascule rejetait, et le repli réécrivait le document entrant.
  *
- * Rend `null` si le changement n'a pas lieu : l'auteur garde son tampon sans titre,
- * une autre demande a pris le pas, ou le verrou est posé, ce qui lui est dit. Rejette
- * si le sortant ne peut pas être écrit : rien n'a changé, et rien ne se perd.
+ * Rend `null` si le changement n'a pas lieu : l'auteur garde son tampon sans titre ou ses idées
+ * non écrites, une autre demande a pris le pas, ou le verrou est posé, ce qui lui est dit.
+ * Rejette si le document sortant ne peut pas être écrit : rien n'a changé, et rien ne se perd.
  */
 async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
-  const { useEditorStore, OutgoingSaveError } = await import('./editorStore');
-  // Les idées aussi, tant que le main autorise leur écriture, et avec la même règle. Celles d'un
-  // projet déjà fermé n'ont plus où s'écrire : elles ne retiennent pas d'en ouvrir un autre.
-  if (useIdeaStore.getState().loadedFor === useProjectStore.getState().currentProject?.path) {
-    await useIdeaStore.getState().flushIdeas();
-    const { saveError } = useIdeaStore.getState();
-    if (saveError) throw new OutgoingSaveError(saveError);
+  const { useEditorStore } = await import('./editorStore');
+  // Les idées aussi. Si elles ne s'écrivent pas, l'auteur choisit : un fichier d'idées en panne ne
+  // l'enferme pas dans ce projet, et rien ne se perd sans qu'il l'ait dit. La question les nomme,
+  // car le document, lui, n'y est pour rien.
+  const ideasError = await flushCurrentProjectIdeas();
+  if (ideasError) {
+    const leave = await useDialogStore
+      .getState()
+      .showConfirm(i18n.t('ideas.switchSaveFailed', { reason: ideasError }), i18n.t('ideas.switchSaveFailedTitle'));
+    if (!leave) return null;
   }
 
   const outcome = await useEditorStore.getState().replaceBuffer({ kind: 'detach' }, 'project-switch');
@@ -180,6 +194,7 @@ async function reopenAfterFailedSwitch(
 
 let documentNotOpenedNotice: string | null = null;
 let stopWatchingEditor: (() => void) | null = null;
+let ideasNotWrittenNotice: string | null = null;
 
 /**
  * Le document du projet ne s'ouvre pas : l'éditeur montrera un tampon sans titre, qui
@@ -224,6 +239,12 @@ async function openProjectContents(
   detached: DetachedEditor
 ): Promise<void> {
   dismissDocumentNotOpened();
+  if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
+  ideasNotWrittenNotice = null;
+  // Le main a basculé : ce qui ne s'est pas écrit du sortant n'a plus où aller, et l'auteur le
+  // sait. La sortie n'a pas à le lui redemander, y compris si le Brainstorm n'est pas ouvert et
+  // que rien ne recharge la liste. Rouvrir ce même projet, au contraire, le réécrit.
+  if (useIdeaStore.getState().loadedFor !== project.path) useIdeaStore.getState().abandonUnwrittenIdeas();
   set({
     currentProject: {
       ...project,
@@ -530,7 +551,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (error) {
       console.error('❌ Sauvegarde du document sortant impossible à la fermeture:', error);
     }
-    await useIdeaStore.getState().flushIdeas();
+    const ideasError = await flushCurrentProjectIdeas();
+    if (ideasError) {
+      ideasNotWrittenNotice = useNotificationStore.getState().notify({
+        level: 'error',
+        title: i18n.t('ideas.closeSaveFailedTitle'),
+        message: i18n.t('ideas.closeSaveFailed'),
+        details: ideasError,
+        duration: 0,
+      });
+    }
 
     try {
       // Close backend resources (PDF Service, vector store, etc.)

@@ -17,6 +17,7 @@
  */
 
 import { create } from 'zustand';
+import i18n from '../i18n';
 
 // MARK: - Types
 
@@ -70,6 +71,12 @@ interface IdeaState {
   addIdea: (idea: Omit<Idea, 'id' | 'createdAt' | 'updatedAt'>) => string;
   updateIdea: (id: string, patch: Partial<Omit<Idea, 'id' | 'createdAt'>>) => void;
   removeIdea: (id: string) => void;
+  /**
+   * La disposition automatique du Tableau : pas une modification de l'auteur. Regarder ne date
+   * aucune idée, n'écrit rien et ne peut rien faire échouer ; elle s'écrit avec la prochaine
+   * vraie modification, et d'ici là se recalcule à l'identique.
+   */
+  arrangeIdeas: (positions: ReadonlyMap<string, IdeaPosition>) => void;
 
   // Linking
   addLink: (fromId: string, link: IdeaLink) => void;
@@ -91,6 +98,8 @@ interface IdeaState {
    * n'en font un (mesuré dans l'app réelle : la frappe était perdue). Ne rejette jamais.
    */
   flushIdeas: () => Promise<void>;
+  /** Le projet de cette liste n'est plus ouvert : plus rien à écrire ni à redemander à l'auteur. */
+  abandonUnwrittenIdeas: () => void;
 }
 
 function generateId(): string {
@@ -147,8 +156,8 @@ function normalizeIdea(raw: unknown, seenIds: Set<string>): Idea | null {
  * Le contenu d'`ideas.json`, ou `null` s'il n'y a rien à en tirer. Mettre de côté à tort
  * retirerait des idées saines de l'écran, d'où la tolérance : `{ ideas: [...] }` est le seul
  * format jamais écrit, mais le BOM d'un éditeur externe, un tableau nu ou un champ de plus se
- * chargent, et `{}` vaut une liste vide depuis le premier jour. Un objet qui porte d'autres
- * données n'est pas vide pour autant : le réécrire les perdrait, il se met de côté.
+ * chargent, et `{}` vaut une liste vide depuis le premier jour. Un objet qui porte autre chose
+ * n'est pas vide pour autant, même un simple texte : le réécrire le perdrait, il se met de côté.
  */
 function parseIdeasFile(content: string): Idea[] | null {
   let data: unknown;
@@ -160,7 +169,7 @@ function parseIdeasFile(content: string): Idea[] | null {
   }
   let list: unknown = data;
   if (isRecord(data)) {
-    const holdsOtherData = Object.values(data).some((value) => typeof value === 'object' && value !== null);
+    const holdsOtherData = Object.keys(data).some((key) => key !== 'ideas');
     list = data.ideas ?? (holdsOtherData ? null : []);
   }
   if (!Array.isArray(list)) return null;
@@ -178,6 +187,51 @@ function parseIdeasFile(content: string): Idea[] | null {
 /** Le temps de laisser finir un autre processus (synchronisation) qui écrit le fichier. */
 const QUARANTINE_RECHECK_MS = 500;
 
+/**
+ * Un disque qui ne répond plus ne retient pas la file : le projet suivant attendrait derrière
+ * lui, sans bannière ni Réessayer. Passé ce délai, la lecture ou l'écriture compte pour un échec,
+ * qui se dit et se réessaie. Le verrou du main garde l'ordre si elle finit par aboutir.
+ */
+const IO_DEADLINE_MS = 15_000;
+
+async function withinDeadline<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(i18n.t('ideas.noResponse'))), IO_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * La mise de côté de ce projet, le temps de la fenêtre. `persistence` ne dit que la dernière
+ * lecture, et le fichier trouvé ensuite, absent ou neuf, ne dit plus rien : ni un aller-retour
+ * vers un autre projet, ni un disque revenu, ni `Cmd+R` ne doivent faire oublier que les idées
+ * sont ailleurs. `sessionStorage` survit au rechargement et ne survit pas à la fenêtre.
+ */
+const backupKey = (projectPath: string) => `cliodeck.ideas.backup:${projectPath}`;
+
+function rememberBackup(projectPath: string, backupPath: string): void {
+  try {
+    sessionStorage.setItem(backupKey(projectPath), backupPath);
+  } catch (error) {
+    console.warn('Ideas backup not remembered:', error);
+  }
+}
+
+function rememberedBackup(projectPath: string): string | null {
+  try {
+    return sessionStorage.getItem(backupKey(projectPath));
+  } catch {
+    return null;
+  }
+}
+
 type LoadedIdeas =
   | { kind: 'ready'; ideas: Idea[] }
   | { kind: 'quarantined'; backupPath: string }
@@ -185,7 +239,7 @@ type LoadedIdeas =
 
 /** Lire `ideas.json` à l'instant : `null` pour `ideas` si le contenu est à mettre de côté. */
 async function readIdeasOnce(ideasPath: string) {
-  const read = await window.electron.fs.readUserFile(ideasPath);
+  const read = await withinDeadline(window.electron.fs.readUserFile(ideasPath));
   const ideas = read.kind === 'ok' ? parseIdeasFile(read.content) : null;
   const damaged = (read.kind === 'ok' && !ideas) || (read.kind === 'unreadable' && read.reason === 'encoding');
   return { read, ideas, damaged };
@@ -207,7 +261,13 @@ async function readIdeasFile(projectPath: string): Promise<LoadedIdeas> {
     const { read, ideas, damaged } = attempt;
     if (ideas) return { kind: 'ready', ideas };
     if (damaged) {
-      const moved = await window.electron.fs.quarantineFile(ideasPath);
+      // Retenue à la réponse du main, même tardive : le fichier a alors bel et bien bougé.
+      const moved = await withinDeadline(
+        window.electron.fs.quarantineFile(ideasPath).then((outcome) => {
+          if (outcome.success) rememberBackup(projectPath, outcome.backupPath);
+          return outcome;
+        })
+      );
       return moved.success
         ? { kind: 'quarantined', backupPath: moved.backupPath }
         : { kind: 'blocked', reason: moved.error };
@@ -215,7 +275,9 @@ async function readIdeasFile(projectPath: string): Promise<LoadedIdeas> {
     if (read.kind === 'unreadable') return { kind: 'blocked', reason: read.message };
     // `absent` vaut aussi pour un disque débranché : la liste vide s'écrirait à son retour, sur
     // les vraies idées. Le dossier du projet, lui, existe toujours.
-    if (!(await window.electron.fs.exists(projectPath))) return { kind: 'blocked', reason: projectPath };
+    if (!(await withinDeadline(window.electron.fs.exists(projectPath)))) {
+      return { kind: 'blocked', reason: projectPath };
+    }
     return { kind: 'ready', ideas: [] };
   } catch (error) {
     return { kind: 'blocked', reason: error instanceof Error ? error.message : String(error) };
@@ -230,7 +292,7 @@ let queueTail: Promise<void> = Promise.resolve();
 let waitingSave: { projectPath: string; done: Promise<void> } | null = null;
 /** Le dernier chargement demandé : un chargement dépassé ne lit rien. */
 let lastLoad = 0;
-/** La liste telle que le disque la connaît. */
+/** La liste qu'il n'y a plus à écrire : celle du disque, à une disposition automatique près. */
 let writtenIdeas: string | null = null;
 
 function enqueue(job: () => Promise<void>): Promise<void> {
@@ -254,8 +316,7 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
     set({ isLoading: true });
     return enqueue(async () => {
       if (load !== lastLoad) return;
-      const before = get();
-      const sameProject = before.loadedFor === projectPath;
+      const sameProject = get().loadedFor === projectPath;
 
       // Le panneau se démonte sans blur, et relire ferait disparaître ce qui n'est pas écrit.
       // Si l'écriture échoue, la liste à l'écran reste la seule copie : elle reste à l'écran.
@@ -269,12 +330,9 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
       let persistence: IdeaPersistence;
       if (loaded.kind !== 'ready') {
         persistence = loaded;
-      } else if (sameProject && before.persistence.kind === 'quarantined') {
-        // La mise de côté reste à dire tant que ce projet est ouvert : un rechargement trouve
-        // le fichier absent, ou celui que la première sauvegarde vient de créer.
-        persistence = before.persistence;
       } else {
-        persistence = { kind: 'ready' };
+        const backupPath = rememberedBackup(projectPath);
+        persistence = backupPath ? { kind: 'quarantined', backupPath } : { kind: 'ready' };
       }
       // Lire n'écrit rien : même normalisée, la liste chargée n'est pas à réécrire.
       writtenIdeas = serializeIdeas(ideas);
@@ -310,6 +368,17 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
       ideas: state.ideas.filter((i) => i.id !== id),
       selectedId: state.selectedId === id ? null : state.selectedId,
     }));
+  },
+
+  arrangeIdeas: (positions) => {
+    const nothingToWrite = !hasUnwrittenIdeas();
+    set((state) => ({
+      ideas: state.ideas.map((idea) => {
+        const position = positions.get(idea.id);
+        return position ? { ...idea, position } : idea;
+      }),
+    }));
+    if (nothingToWrite) writtenIdeas = serializeIdeas(get().ideas);
   },
 
   addLink: (fromId, link) => {
@@ -385,10 +454,12 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
 
   flushIdeas: () => {
     const { loadedFor, saveIdeas } = get();
-    if (loadedFor !== null && hasUnwrittenIdeas()) return saveIdeas(loadedFor);
-    // L'auteur a défait ce qui ne s'écrivait pas : plus rien à signaler.
+    return loadedFor === null ? Promise.resolve() : saveIdeas(loadedFor);
+  },
+
+  abandonUnwrittenIdeas: () => {
+    writtenIdeas = serializeIdeas(get().ideas);
     set({ saveError: null });
-    return Promise.resolve();
   },
 }));
 
@@ -413,8 +484,14 @@ async function writeCurrentIdeas(projectPath: string): Promise<boolean> {
     return false;
   }
   const data = serializeIdeas(ideas);
+  // Rien de neuf : le blur d'un champ non retouché ou un clic sur une carte n'ont rien à écrire,
+  // donc rien à faire échouer. Et si l'auteur a défait ce qui ne s'écrivait pas, plus rien à dire.
+  if (data === writtenIdeas) {
+    useIdeaStore.setState({ saveError: null });
+    return true;
+  }
   try {
-    await window.electron.fs.writeFile(ideasFilePath(projectPath), data);
+    await withinDeadline(window.electron.fs.writeFile(ideasFilePath(projectPath), data));
     writtenIdeas = data;
     useIdeaStore.setState({ saveError: null });
     return true;
