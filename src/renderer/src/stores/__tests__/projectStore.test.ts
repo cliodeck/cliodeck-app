@@ -382,7 +382,7 @@ describe('projectStore.closeProject — resets to idle', () => {
       expect(useRebuildStore.getState().failure).toBeNull();
     });
 
-    it('publié pendant la fermeture du main, il part aussi : la base se ferme sous la reconstruction', async () => {
+    it('publié juste avant la fermeture du main, il arrive avant sa réponse et part aussi', async () => {
       stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
       await useProjectStore.getState().loadProject('/tmp/p1');
       stub.project.close.mockImplementation(async () => {

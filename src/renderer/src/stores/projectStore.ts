@@ -532,7 +532,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // Clear frontend state
     dismissDocumentNotOpened();
-    // Après la fermeture du main : la base fermée sous une reconstruction la fait échouer.
+    // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
     useRebuildStore.getState().resetProgress();
     set({
       currentProject: null,

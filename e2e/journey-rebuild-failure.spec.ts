@@ -107,6 +107,16 @@ const sendMenu = (app: ElectronApplication, channel: string) =>
     BrowserWindow.getAllWindows()[0].webContents.send(c);
   }, channel);
 
+/** Les événements reçus par le renderer, dans l'ordre, à travers le contextBridge. */
+interface RebuildEvent {
+  phase: string;
+  status: string;
+}
+interface RebuildWatch {
+  electron: { project: { onRebuildProgress: (listener: (event: RebuildEvent) => void) => unknown } };
+  rebuildEvents: RebuildEvent[];
+}
+
 const editor = (window: Page) => window.locator('.codemirror-editor .cm-content');
 const veil = (window: Page) => window.locator('.rebuild-modal');
 const closeButton = (window: Page) => veil(window).getByRole('button', { name: 'Fermer' });
@@ -257,7 +267,7 @@ test('onRebuildProgress rend de quoi se désabonner, à travers le contextBridge
   });
 });
 
-test('vraie reconstruction en échec à l’ouverture : le chargement se termine, le message se ferme, on écrit', async () => {
+test('vraie reconstruction en échec à l’ouverture : un seul message, il se ferme, et la frappe atteint le disque', async () => {
   test.setTimeout(120_000);
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
@@ -270,28 +280,50 @@ test('vraie reconstruction en échec à l’ouverture : le chargement se termine
   const blocker = join(article.dir, '.cliodeck', 'hnsw.index.meta.json.tmp');
   mkdirSync(blocker);
 
+  // Après le préchauffage du modèle d'embeddings, `pdf-service` relance toute
+  // reconstruction due. Le main le dit dans son journal, que l'échec suive ou non.
+  let warmedUp = false;
+  app.on('console', (message) => {
+    const text = message.text();
+    if (text.includes('[WARMUP] Embedding model ready') || text.includes('[WARMUP] Failed')) warmedUp = true;
+  });
+
   try {
+    await window.evaluate(() => {
+      const probe = window as unknown as RebuildWatch;
+      probe.rebuildEvents = [];
+      probe.electron.project.onRebuildProgress(({ phase, status }) => probe.rebuildEvents.push({ phase, status }));
+    });
+
     await openProject(app, window, article.projectJson);
 
     await expect(veil(window)).toContainText('Failed to save HNSW index', { timeout: 60_000 });
     // Le voile n'arrête pas l'ouverture : le document arrive derrière lui.
     await expect(editor(window)).toContainText('Texte déjà enregistré', { timeout: 30_000 });
 
-    // La reconstruction repart une fois après le préchauffage du modèle d'embeddings, et
-    // ce moment dépend du poste : un message peut suivre celui qu'on vient de fermer. On
-    // recommence jusqu'à ce que la frappe atteigne le disque.
-    await expect(async () => {
-      const close = closeButton(window);
-      if (await close.isVisible()) await close.click({ timeout: 2_000 });
-      await editor(window).click({ timeout: 2_000 });
-      await window.keyboard.press('ControlOrMeta+End');
-      await window.keyboard.type('Écrit après l’échec.');
-      await expect
-        .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
-        .toContain('Écrit après l’échec.');
-    }).toPass({ timeout: 90_000 });
+    await closeButton(window).click();
+    await expect(veil(window)).toHaveCount(0);
 
-    expect(readFileSync(article.document, 'utf8').startsWith(ARTICLE)).toBe(true);
+    // Sans clic : ni le bouton d'ouverture, ni la barre d'espace qui le rouvrirait.
+    await expect(editor(window)).toBeFocused();
+    await window.keyboard.press('ControlOrMeta+End');
+    await window.keyboard.type('Écrit après l’échec.');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 15_000 })
+      .toBe(`${ARTICLE}Écrit après l’échec.`);
+
+    // Le message promet la prochaine ouverture : rien ne repart dans celle-ci. Un témoin,
+    // envoyé après le préchauffage sur le même canal, arrive après tout ce qu'il a déclenché.
+    await expect.poll(() => warmedUp, { timeout: 60_000 }).toBe(true);
+    const witness = 'témoin : le préchauffage est passé';
+    await sendProgress(app, { ...DONE, status: witness });
+    const received = () => window.evaluate(() => (window as unknown as RebuildWatch).rebuildEvents);
+    await expect.poll(async () => (await received()).at(-1)?.status, { timeout: 15_000 }).toBe(witness);
+    const events = await received();
+    expect(events.filter((event) => event.phase === 'failed')).toHaveLength(1);
+    expect(events.at(-2)?.phase).toBe('failed');
+    await expect(veil(window)).toHaveCount(0);
+
     // Le blocage est toujours là, et aucun index n'a pu s'écrire : c'est bien cet échec.
     expect(existsSync(blocker)).toBe(true);
     expect(existsSync(join(article.dir, '.cliodeck', 'hnsw.index'))).toBe(false);

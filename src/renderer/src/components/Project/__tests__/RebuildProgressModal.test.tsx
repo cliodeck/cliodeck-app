@@ -7,15 +7,17 @@
  * le menu natif était sa seule sortie, et « Recharger » perdait le texte non enregistré.
  * Vrai magasin, vrais dialogues, même ordre de montage qu'App.tsx.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { RebuildProgressEvent } from '@backend/types/rebuild-progress';
+import type { EditorFacade } from '../../../../../editor/facade';
 
 import { RebuildProgressModal } from '../RebuildProgressModal';
 import { AlertDialog } from '../../common/AlertDialog';
 import { ConfirmDialog } from '../../common/ConfirmDialog';
 import { useRebuildStore } from '../../../stores/rebuildStore';
 import { useDialogStore } from '../../../stores/dialogStore';
+import { useEditorStore } from '../../../stores/editorStore';
 
 const FOCUSABLE =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -75,6 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useEditorStore.getState().setEditorFacade(null);
   act(() => {
     for (let i = 0; i < 20 && (dialogs().alertOpen || dialogs().confirmOpen); i += 1) {
       dialogs().closeAlert();
@@ -169,6 +172,86 @@ describe('RebuildProgressModal', () => {
 
       receive(failed);
       expect(document.activeElement).toBe(closeButton());
+    });
+  });
+
+  describe('le retour à l’écriture', () => {
+    /** La vraie zone d'écriture du document ouvert, derrière sa façade. */
+    function openDocument(): { writing: HTMLElement; focus: ReturnType<typeof vi.fn> } {
+      const writing = screen.getByTestId('writing');
+      const focus = vi.fn(() => writing.focus());
+      useEditorStore.getState().setEditorFacade({ focus } as unknown as EditorFacade);
+      return { writing, focus };
+    }
+
+    /** `trigger` tient le focus quand l'échec arrive. */
+    function renderWith(trigger: React.ReactElement): HTMLElement {
+      render(
+        <>
+          {trigger}
+          <textarea data-testid="writing" />
+          <RebuildProgressModal />
+        </>
+      );
+      const held = screen.getByTestId('trigger');
+      held.focus();
+      return held;
+    }
+
+    const toolbarButton = <button data-testid="trigger">Ouvrir un projet</button>;
+
+    it('l’échec est venu pendant l’ouverture : Fermer ne rend pas le focus au bouton, mais au texte', () => {
+      renderWith(toolbarButton);
+      const { writing } = openDocument();
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      // Laissé au bouton, la barre d'espace rouvrait le dialogue d'ouverture.
+      expect(document.activeElement).toBe(writing);
+    });
+
+    it('Échap fait de même', () => {
+      renderWith(toolbarButton);
+      const { writing } = openDocument();
+      receive(failed);
+
+      pressEscape();
+
+      expect(document.activeElement).toBe(writing);
+    });
+
+    it('aucun document ouvert : le focus revient simplement au bouton', () => {
+      const button = renderWith(toolbarButton);
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(document.activeElement).toBe(button);
+    });
+
+    it('l’auteur écrivait ailleurs, dans le chat : il y revient, l’éditeur ne le lui prend pas', () => {
+      const chat = renderWith(<textarea data-testid="trigger" />);
+      const { focus } = openDocument();
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(document.activeElement).toBe(chat);
+      expect(focus).not.toHaveBeenCalled();
+    });
+
+    it('le message part avec son projet, sans geste de l’auteur : l’éditeur ne prend rien', () => {
+      renderWith(toolbarButton);
+      const { focus } = openDocument();
+      receive(failed);
+
+      act(() => {
+        useRebuildStore.getState().resetProgress();
+      });
+
+      expect(veil()).toBeNull();
+      expect(focus).not.toHaveBeenCalled();
     });
   });
 

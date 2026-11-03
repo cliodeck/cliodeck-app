@@ -70,8 +70,8 @@ export class PdfVectorStore {
    */
   static maybeRebuild(store: AnyVectorStore): Promise<void> {
     if (!(store instanceof EnhancedVectorStore)) return Promise.resolve();
-    // needsRebuild lit SQLite : sur une base fermée (bascule de projet), il lève ici,
-    // en synchrone, et l'appelant est un setTimeout, que rien ne rattrape.
+    // needsRebuild lit SQLite : sur une base illisible, il lève ici, en synchrone,
+    // et l'appelant est un setTimeout, que rien ne rattrape.
     try {
       if (!store.needsRebuild()) return Promise.resolve();
     } catch (error: unknown) {

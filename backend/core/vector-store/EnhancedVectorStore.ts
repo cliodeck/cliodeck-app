@@ -34,6 +34,14 @@ export class EnhancedVectorStore {
    * vecteur, ils gardent ceux des extraits supprimés jusqu'à reconstruction.
    */
   private indexesStale: boolean = false;
+  /**
+   * La dernière reconstruction a échoué, et l'auteur l'a lu : le message lui promet
+   * la prochaine ouverture. Rien ne repart avant, sauf si de nouveaux documents
+   * quittent SQLite : `indexesStale`, un autre motif.
+   */
+  private rebuildFailureReported: boolean = false;
+  /** Ce store n'a plus de projet à l'écran : il n'a plus rien à reconstruire ni à publier. */
+  private closed: boolean = false;
   private rebuildProgress: {
     current: number;
     total: number;
@@ -133,7 +141,9 @@ export class EnhancedVectorStore {
    * Check if indexes need to be rebuilt
    */
   needsRebuild(): boolean {
+    if (this.closed) return false;
     if (this.indexesStale) return true;
+    if (this.rebuildFailureReported) return false;
     const hnswSize = this.hnswStore.getSize();
     const chunks = this.vectorStore.getAllChunksWithEmbeddings();
     return hnswSize === 0 && chunks.length > 0;
@@ -276,6 +286,10 @@ export class EnhancedVectorStore {
    * Rebuild all indexes from SQLite with progress tracking
    */
   async rebuildIndexes(): Promise<void> {
+    // Base fermée : l'échec irait s'afficher sur le projet suivant, et `clear()`
+    // aurait déjà supprimé du disque l'index du projet quitté.
+    if (this.closed) return;
+
     if (this.isRebuilding) {
       throw new Error('Rebuild already in progress');
     }
@@ -284,6 +298,7 @@ export class EnhancedVectorStore {
     // Levé AVANT de lire SQLite : une suppression pendant la reconstruction
     // le remet, et la reconstruction suivante la prendra en compte.
     this.indexesStale = false;
+    this.rebuildFailureReported = false;
     console.log('🔨 Rebuilding all indexes from SQLite...');
     const startTime = Date.now();
 
@@ -348,7 +363,7 @@ export class EnhancedVectorStore {
       this.rebuildProgress = { current: 100, total: 100, status: 'Rebuild complete' };
       this.notifyProgress('done');
     } catch (error) {
-      this.indexesStale = true;
+      this.rebuildFailureReported = true;
       console.error('❌ Failed to rebuild indexes:', error);
       // Le `current` atteint reste : rabattu à 0, l'échec se lisait comme un début.
       this.rebuildProgress = { ...this.rebuildProgress, status: `Error: ${error.message}` };
@@ -607,8 +622,13 @@ export class EnhancedVectorStore {
 
   /**
    * Close database connection
+   *
+   * Une reconstruction ne peut pas être en cours ici : aucune de ses étapes ne rend la
+   * main au fil principal, et une demande de fermeture attend donc qu'elle se termine.
+   * Seule une reconstruction encore à venir (préchauffage, minuteur) est à arrêter.
    */
   close(): void {
+    this.closed = true;
     this.vectorStore.close();
   }
 
