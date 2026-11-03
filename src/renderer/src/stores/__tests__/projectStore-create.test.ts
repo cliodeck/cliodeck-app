@@ -193,6 +193,14 @@ const typeAtEnd = (text: string) =>
     });
   });
 
+/**
+ * Pour les tests dont `beforeWrite` vise l'écriture du sortant : l'autosave à 30 ms peut
+ * partir avant le détachement sur une machine lente, consommer le crochet, et le test
+ * éprouve alors un autre ordre que celui qu'il annonce.
+ */
+const onlyTheDoorWrites = () =>
+  useEditorStore.setState((s) => ({ settings: { ...s.settings, autoSave: false } }));
+
 const settle = (ms: number) =>
   act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -254,7 +262,7 @@ beforeEach(async () => {
     switchLock: null,
     bufferDetached: false,
     documentVersion: s.documentVersion + 1,
-    settings: { ...s.settings, autoSaveDelay: 30 },
+    settings: { ...s.settings, autoSave: true, autoSaveDelay: 30 },
   }));
   useProjectStore.setState({
     currentProject: null,
@@ -913,6 +921,7 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
 
   it('verrou posé pendant l’écriture du sortant : dit à l’auteur, et le projet ne change pas', async () => {
     await openProjectA();
+    onlyTheDoorWrites();
     await typeAtEnd('Dernier mot.');
     beforeWrite = () => store().setSwitchLock('book.renumberInProgress');
     const before = project().loadState;
@@ -934,6 +943,7 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     const other = path.join(dirA, 'context.md');
     await writeFile(other, 'Contexte.\n');
     await openProjectA();
+    onlyTheDoorWrites();
     await typeAtEnd('Dernier mot.');
     beforeWrite = () => {
       beforeWrite = () => undefined;
