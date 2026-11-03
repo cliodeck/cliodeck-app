@@ -11,6 +11,9 @@
  * pas environnemental.
  */
 import { execFileSync } from 'child_process';
+import { mkdtempSync, rmSync, symlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
 import Database from 'better-sqlite3';
 
 /** Message à coller en commentaire au point d'usage, pour un skip lisible. */
@@ -24,6 +27,19 @@ export const sqliteAvailable: boolean = (() => {
     return true;
   } catch {
     return false;
+  }
+})();
+
+/** Créer un lien demande un droit sous Windows : sans lui, ces tests se sautent. */
+export const symlinkAvailable: boolean = (() => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cliodeck-lien-'));
+  try {
+    symlinkSync('cible', path.join(dir, 'lien'));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 })();
 
