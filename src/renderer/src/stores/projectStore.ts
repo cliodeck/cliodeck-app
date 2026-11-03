@@ -99,6 +99,17 @@ async function saveOutgoingEditorIfDirty(): Promise<void> {
   await writeOpenDocumentWhileDirty();
 }
 
+/**
+ * Un project.json illisible : le main refuserait sans basculer, autant le savoir avant de
+ * couper l'éditeur. Détacher détruit la vue, donc les propositions de l'IA en attente, que le
+ * retour sur le document ne rend pas, et pose la question du tampon sans titre pour une
+ * ouverture vouée à l'échec. Ne touche ni au projet courant ni aux récents.
+ */
+async function assertProjectReadable(projectPath: string): Promise<void> {
+  const metadata = await window.electron.project.getMetadata(projectPath);
+  if (!metadata.success) throw new Error(metadata.error || 'Failed to load project');
+}
+
 /** Ce que l'éditeur a quitté, à lui rendre si rien ne vient le remplacer. */
 interface DetachedEditor {
   from: string | null;
@@ -132,8 +143,12 @@ async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
  * l'éditeur y revient. Si le main a déjà basculé, il refuse de relire ce document :
  * un tampon vide, mais le sortant est sur le disque et l'éditeur n'est pas figé. Sans
  * document d'origine, c'est le texte du tampon sans titre qui revient, sans son annulation.
+ * Sur un tampon, aucun chapitre n'est courant, comme quand rien ne s'ouvre.
  */
-async function reopenAfterFailedSwitch(detached: DetachedEditor): Promise<void> {
+async function reopenAfterFailedSwitch(
+  detached: DetachedEditor,
+  set: StoreApi<ProjectState>['setState']
+): Promise<void> {
   const { useEditorStore } = await import('./editorStore');
   const { replaceBuffer } = useEditorStore.getState();
   if (detached.from) {
@@ -144,6 +159,7 @@ async function reopenAfterFailedSwitch(detached: DetachedEditor): Promise<void> 
       console.error('Document sortant impossible à rouvrir:', error);
     }
   }
+  set({ currentChapterId: null });
   await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
@@ -345,6 +361,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ loadState: { kind: 'loading', path: projectPath } });
     let detached: DetachedEditor | null = null;
     try {
+      await assertProjectReadable(projectPath);
       detached = await detachOutgoingEditor();
       if (!detached) {
         set({ loadState: loadStateBefore });
@@ -380,7 +397,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to load project:', error);
-      if (detached) await reopenAfterFailedSwitch(detached);
+      if (detached) await reopenAfterFailedSwitch(detached, set);
       set({
         loadState: {
           kind: 'failed',
@@ -427,7 +444,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return true;
     } catch (error) {
       console.error('Failed to create project:', error);
-      if (detached) await reopenAfterFailedSwitch(detached);
+      if (detached) await reopenAfterFailedSwitch(detached, set);
       set({
         loadState: {
           kind: 'failed',

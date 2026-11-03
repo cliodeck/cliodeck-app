@@ -51,7 +51,7 @@ beforeEach(() => {
       create: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
       getRecent: vi.fn().mockResolvedValue([]),
-      getMetadata: vi.fn(),
+      getMetadata: vi.fn().mockResolvedValue({ success: true, project: fakeProject }),
       removeRecent: vi.fn().mockResolvedValue(undefined),
       getChapters: vi.fn().mockResolvedValue({ success: true, chapters: [] }),
     },

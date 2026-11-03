@@ -19,6 +19,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { undoDepth } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
@@ -53,6 +54,9 @@ let refused: string[];
 /** Après le passage du main sur le projet, avant la réponse : l'initialisation des services. */
 let whileMainInitializes: () => Promise<void> | void;
 let mainFailsAfterSwitch: boolean;
+/** Le main refuse sans avoir basculé, pour une autre raison qu'un project.json illisible. */
+let mainRefusesBeforeSwitch: boolean;
+let adjudications: Array<{ decision: string }>;
 let beforeWrite: () => void;
 let recentPaths: string[];
 
@@ -101,6 +105,7 @@ async function installMain(): Promise<void> {
         } catch (error) {
           return { success: false, error: String(error) };
         }
+        if (mainRefusesBeforeSwitch) return { success: false, error: 'refus du main' };
         const dir = path.dirname(projectJson);
         mainCurrent.path = dir;
         await whileMainInitializes();
@@ -112,10 +117,16 @@ async function installMain(): Promise<void> {
         return { success: true, chapters: manifest.chapters ?? [], unattached: manifest.unattached ?? [] };
       }),
       getRecent: vi.fn(async () => recentPaths),
-      getMetadata: vi.fn(async (projectJson: string) => ({
-        success: true,
-        project: { ...JSON.parse(await readFile(projectJson, 'utf8')), path: path.dirname(projectJson) },
-      })),
+      getMetadata: vi.fn(async (projectJson: string) => {
+        try {
+          return {
+            success: true,
+            project: { ...JSON.parse(await readFile(projectJson, 'utf8')), path: path.dirname(projectJson) },
+          };
+        } catch (error) {
+          return { success: false, error: String(error) };
+        }
+      }),
     },
     editor: {
       loadFile: async (filePath: string) => {
@@ -143,7 +154,11 @@ async function installMain(): Promise<void> {
         await writeFile(await authorizeDocumentPath(filePath, 'write'), content);
       },
     },
-    proposals: { recordAdjudication: () => undefined },
+    proposals: {
+      recordAdjudication: (event: { decision: string }) => {
+        adjudications.push(event);
+      },
+    },
     ipcRenderer: { on: () => undefined, removeListener: () => undefined },
   };
 }
@@ -225,6 +240,8 @@ beforeEach(async () => {
   refused = [];
   whileMainInitializes = () => undefined;
   mainFailsAfterSwitch = false;
+  mainRefusesBeforeSwitch = false;
+  adjudications = [];
   beforeWrite = () => undefined;
   recentPaths = [];
   mainCurrent.path = null;
@@ -481,19 +498,59 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(refused).toEqual([]);
   });
 
-  it('project.load échoue sans que le main ait bougé : le document de A revient, texte et chemin', async () => {
+  it('project.json illisible : l’éditeur ne bouge pas, et le main n’est pas sollicité', async () => {
     await openProjectA();
     await typeAtEnd('Dernier mot.');
+    const view = currentView();
+    const versionBefore = store().documentVersion;
+    const proposal = (
+      window as unknown as {
+        __cliodeckProposals: { inject: (p: Record<string, unknown>) => { id: string } };
+      }
+    ).__cliodeckProposals.inject({
+      range: { from: 0, to: 0 },
+      original: '',
+      proposed: 'Proposition.',
+      category: 'ai-insert',
+      source: { model: 'm', task: 't' },
+    });
+    expect(proposal.id).toBeTruthy();
     await writeFile(projectJsonB(), '{ pas du JSON');
+    const load = window.electron.project.load as unknown as ReturnType<typeof vi.fn>;
+    load.mockClear();
 
     await act(async () => {
       await expect(project().loadProject(projectJsonB())).rejects.toThrow();
+    });
+
+    expect(load).not.toHaveBeenCalled();
+    // Rien n'a été remplacé : la vue, et avec elle l'annulation et la proposition en attente.
+    expect(currentView()).toBe(view);
+    expect(store().documentVersion).toBe(versionBefore);
+    expect(undoDepth(view.state)).toBeGreaterThan(0);
+    expect(adjudications.filter((e) => e.decision === 'expired')).toEqual([]);
+    expect(store().filePath).toBe(documentA);
+    expect(project().currentProject?.path).toBe(dirA);
+    expect(project().loadState.kind).toBe('failed');
+
+    await typeAtEnd(' Encore.');
+    await eventually(() => expect(read(documentA)).toBe(`${A_TEXT}Dernier mot. Encore.`));
+  });
+
+  it('project.load échoue sans que le main ait bougé : le document de A revient, texte, chemin et annulation', async () => {
+    await openProjectA();
+    await typeAtEnd('Dernier mot.');
+    mainRefusesBeforeSwitch = true;
+
+    await act(async () => {
+      await expect(project().loadProject(projectJsonB())).rejects.toThrow('refus du main');
     });
 
     expect(store().filePath).toBe(documentA);
     expect(store().content).toBe(`${A_TEXT}Dernier mot.`);
     expect(store().bufferDetached).toBe(false);
     expect(currentView().state.readOnly).toBe(false);
+    expect(undoDepth(currentView().state)).toBeGreaterThan(0);
     expect(project().loadState.kind).toBe('failed');
     expect(project().currentProject?.path).toBe(dirA);
 
@@ -515,6 +572,60 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(currentView().state.readOnly).toBe(false);
     expect(read(documentA)).toBe(`${A_TEXT}Dernier mot.`);
     expect(read(documentB)).toBe(B_TEXT);
+  });
+
+  describe('livre ouvert, le changement échoue', () => {
+    const chapters = [
+      { id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 0, kind: 'chapter' },
+    ];
+
+    async function openBookA(): Promise<void> {
+      await writeProject(dirA, { id: 'a', name: 'A', type: 'book', chapters });
+      await mkdir(path.join(dirA, 'chapters'));
+      await writeFile(path.join(dirA, 'chapters', '01.md'), '# Un\n');
+      await mountWorkbench();
+      await act(async () => {
+        await project().loadProject(path.join(dirA, 'project.json'));
+      });
+      expect(project().currentChapterId).toBe('c1');
+    }
+
+    // Renommer un « chapitre courant » réécrirait son titre dans le tampon sans titre.
+    it('ouverture, après le passage du main : aucun chapitre annoncé sur le tampon', async () => {
+      await openBookA();
+      mainFailsAfterSwitch = true;
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow('services');
+      });
+
+      expect(store().filePath).toBeNull();
+      expect(project().currentChapterId).toBeNull();
+    });
+
+    it('création, après le passage du main : aucun chapitre annoncé sur le tampon', async () => {
+      await openBookA();
+      mainFailsAfterSwitch = true;
+
+      await act(async () => {
+        await expect(project().createProject('C', 'article', root)).rejects.toThrow('services');
+      });
+
+      expect(store().filePath).toBeNull();
+      expect(project().currentChapterId).toBeNull();
+    });
+
+    it('le chapitre revient : il reste le chapitre courant', async () => {
+      await openBookA();
+      mainRefusesBeforeSwitch = true;
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow('refus du main');
+      });
+
+      expect(store().filePath).toBe(path.join(dirA, 'chapters', '01.md'));
+      expect(project().currentChapterId).toBe('c1');
+    });
   });
 
   it('livre au manifeste vide : plus rien de A, et l’éditeur reste éditable', async () => {
@@ -615,14 +726,34 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
       expect(store().bufferDetached).toBe(false);
     };
 
-    it('project.json illisible : le texte revient', async () => {
-      await writeFile(projectJsonB(), '{ pas du JSON');
+    it('le main refuse sans avoir basculé : le texte revient', async () => {
+      mainRefusesBeforeSwitch = true;
 
-      await typeIdeaAndAccept(() => expect(project().loadProject(projectJsonB())).rejects.toThrow());
+      await typeIdeaAndAccept(() =>
+        expect(project().loadProject(projectJsonB())).rejects.toThrow('refus du main')
+      );
 
       expectIdeaBack();
       expect(project().currentProject).toBeNull();
       expect(project().loadState.kind).toBe('failed');
+    });
+
+    it('project.json illisible : aucune question pour une ouverture vouée à l’échec, le texte reste', async () => {
+      await mountWorkbench();
+      await typeAtEnd(IDEA);
+      const view = currentView();
+      await writeFile(projectJsonB(), '{ pas du JSON');
+
+      await act(async () => {
+        await expect(project().loadProject(projectJsonB())).rejects.toThrow();
+      });
+
+      expect(dialogs().confirmOpen).toBe(false);
+      expect(currentView()).toBe(view);
+      expect(undoDepth(view.state)).toBeGreaterThan(0);
+      expect(project().loadState.kind).toBe('failed');
+      // Le miroir du store suit la vue, qui n'a pas bougé, avec son délai habituel.
+      await eventually(expectIdeaBack);
     });
 
     it('échec après le passage du main : le texte revient quand même', async () => {

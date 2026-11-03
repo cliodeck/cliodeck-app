@@ -87,6 +87,21 @@ async function slowDownProjectLoad(app: ElectronApplication, ms: number): Promis
   }, ms);
 }
 
+/** `project:load` échoue : sans que le main ait basculé, ou après, à l'initialisation des services. */
+async function failProjectLoad(app: ElectronApplication, moment: 'avant' | 'après'): Promise<void> {
+  await app.evaluate(({ ipcMain }, when) => {
+    const handlers = (ipcMain as unknown as {
+      _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+    })._invokeHandlers;
+    const original = handlers.get('project:load');
+    if (!original) throw new Error('project:load introuvable');
+    handlers.set('project:load', async (...args: unknown[]) => {
+      if (when === 'après') await original(...args);
+      return { success: false, error: 'services' };
+    });
+  }, moment);
+}
+
 test('aucun projet ouvert : le texte tapé après « Créer » s’écrit dans le document du projet', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
@@ -271,7 +286,7 @@ test('pendant un project:load long, l’éditeur le dit, et Cmd+S comme Nouveau 
   }
 });
 
-test('ouverture impossible de B : A revient avec son texte, et sa frappe s’écrit toujours', async () => {
+test('project.json illisible : A ne bouge pas, sa proposition en attente reste, et sa frappe s’écrit toujours', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
@@ -286,19 +301,127 @@ test('ouverture impossible de B : A revient avec son texte, et sa frappe s’éc
     await openProject(app, window, a.projectJson);
     await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
     await typeAtEnd(window, 'Avant.');
+    await window.evaluate(() => {
+      (window as unknown as {
+        __cliodeckProposals: { inject: (p: Record<string, unknown>) => unknown };
+      }).__cliodeckProposals.inject({
+        range: { from: 0, to: 0 },
+        original: '',
+        proposed: 'Proposition du modèle.',
+        category: 'ai-insert',
+        source: { model: 'm', task: 't' },
+      });
+    });
+    await expect(window.locator('.cm-proposal-box')).toHaveCount(1);
 
     await openProject(app, window, b.projectJson);
     await expect(window.locator('#alert-dialog-message')).toBeVisible({ timeout: 15_000 });
     await window.locator('.alert-dialog-btn-ok').click();
 
+    await expect(window.locator('.cm-proposal-box')).toHaveCount(1);
     await expect(editor(window)).toContainText('Avant.');
-    expect(readFileSync(a.document, 'utf8')).toBe(`${A_TEXT}Avant.`);
     await typeAtEnd(window, ' Après.');
     await expect.poll(() => readFileSync(a.document, 'utf8'), { timeout: 8_000 }).toBe(`${A_TEXT}Avant. Après.`);
     expect(readFileSync(b.document, 'utf8')).toBe(B_TEXT);
   } finally {
     await app.close().catch(() => undefined);
     rmSync(a.dir, { recursive: true, force: true });
+    rmSync(b.dir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('le main refuse B sans avoir basculé : A revient avec son texte et son annulation', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const a = makeA();
+  const b = makeB();
+
+  try {
+    await openProject(app, window, a.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+    await typeAtEnd(window, 'Avant.');
+
+    await failProjectLoad(app, 'avant');
+    await openProject(app, window, b.projectJson);
+    await expect(window.locator('#alert-dialog-message')).toBeVisible({ timeout: 15_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+
+    await expect(editor(window)).toContainText('Avant.');
+    expect(readFileSync(a.document, 'utf8')).toBe(`${A_TEXT}Avant.`);
+    await editor(window).click();
+    await window.keyboard.press('ControlOrMeta+z');
+    await expect(editor(window)).not.toContainText('Avant.');
+    await typeAtEnd(window, 'Après.');
+    await expect.poll(() => readFileSync(a.document, 'utf8'), { timeout: 8_000 }).toBe(`${A_TEXT}Après.`);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(a.dir, { recursive: true, force: true });
+    rmSync(b.dir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('livre, échec après le passage du main : renommer le chapitre d’avant ne touche pas au tampon', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-projet-'));
+  mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  mkdirSync(join(dir, 'chapters'), { recursive: true });
+  const projectJson = join(dir, 'project.json');
+  const chapterTwo = join(dir, 'chapters', '02-deux.md');
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000044',
+      name: 'Livre A',
+      type: 'book',
+      chapters: [
+        { id: 'c1', title: 'Un', filePath: 'chapters/01-un.md', order: 0, kind: 'chapter' },
+        { id: 'c2', title: 'Deux', filePath: 'chapters/02-deux.md', order: 1, kind: 'chapter' },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+  );
+  writeFileSync(join(dir, 'chapters', '01-un.md'), '# Un\n\nChapitre un.\n');
+  writeFileSync(chapterTwo, '# Deux\n\nChapitre deux.\n');
+  const b = makeB();
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(editor(window)).toContainText('Chapitre un', { timeout: 20_000 });
+    const chapter = window.locator('.chapter-item-open', { hasText: 'Deux' });
+    await chapter.click();
+    await expect(editor(window)).toContainText('Chapitre deux');
+
+    await failProjectLoad(app, 'après');
+    await openProject(app, window, b.projectJson);
+    await expect(window.locator('#alert-dialog-message')).toBeVisible({ timeout: 15_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+    await expect(editor(window)).not.toContainText('Chapitre deux');
+
+    // Le premier clic du double clic tente d'ouvrir le chapitre, que le main refuse :
+    // la saisie s'ouvre derrière l'alerte, et perd le focus en la fermant.
+    await chapter.dblclick();
+    await expect(window.locator('#alert-dialog-message')).toBeVisible({ timeout: 10_000 });
+    await window.locator('.alert-dialog-btn-ok').click();
+    await expect(window.locator('.chapter-title-input')).toHaveCount(0);
+    await window.waitForTimeout(500);
+
+    await expect(editor(window)).not.toContainText('Deux');
+    expect(readFileSync(chapterTwo, 'utf8')).toBe('# Deux\n\nChapitre deux.\n');
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
     rmSync(b.dir, { recursive: true, force: true });
     rmSync(userDataDir, { recursive: true, force: true });
   }
