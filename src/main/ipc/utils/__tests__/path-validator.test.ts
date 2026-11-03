@@ -113,3 +113,46 @@ describe('validateWritePath', () => {
     }
   });
 });
+
+/**
+ * Un lien cassé n'a pas de chemin réel : le repli sur le dossier parent le croyait dans
+ * le projet, et `atomicWriteFile`, qui suit les liens, créait le fichier à l'autre bout.
+ */
+describe('lien symbolique cassé', () => {
+  it('vers l’extérieur : ni lecture ni écriture', async () => {
+    const link = path.join(projectDir, 'casse-dehors.md');
+    await symlink(path.join(tmpRoot, 'dehors', 'pas-encore.md'), link);
+
+    await expect(validateReadPath(link)).rejects.toThrow('Read access denied');
+    await expect(validateWritePath(link)).rejects.toThrow('Write access denied');
+  });
+
+  it('vers l’extérieur par une cible relative : pareil', async () => {
+    const link = path.join(projectDir, 'casse-relatif.md');
+    await symlink('../pas-encore.md', link);
+
+    await expect(validateWritePath(link)).rejects.toThrow('Write access denied');
+  });
+
+  it('vers l’intérieur : le fichier reste à créer dans le projet', async () => {
+    const link = path.join(projectDir, 'casse-dedans.md');
+    await symlink('a-venir.md', link);
+
+    expect(await validateWritePath(link)).toBe(link);
+    expect(await validateReadPath(link)).toBe(link);
+  });
+
+  it('une racine passée par un lien reste valable, fichier présent ou à créer', async () => {
+    const alias = path.join(tmpRoot, 'alias');
+    await symlink(projectDir, alias);
+    const saved = projectPathRef.current;
+    projectPathRef.current = alias;
+    try {
+      expect(await validateReadPath(path.join(alias, 'document.md'))).toBe(path.join(alias, 'document.md'));
+      expect(await validateWritePath(path.join(alias, 'neuf.md'))).toBe(path.join(alias, 'neuf.md'));
+      expect(await validateWritePath(path.join(alias, 'sous', 'neuf.md'))).toBe(path.join(alias, 'sous', 'neuf.md'));
+    } finally {
+      projectPathRef.current = saved;
+    }
+  });
+});

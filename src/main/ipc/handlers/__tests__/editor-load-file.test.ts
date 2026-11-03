@@ -62,6 +62,7 @@ vi.mock('../../../services/history-service.js', () => ({
 
 import { setupEditorHandlers } from '../editor-handlers.js';
 import { validateWritePath } from '../../utils/path-validator.js';
+import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
 
 interface LoadResponse {
   success: boolean;
@@ -118,6 +119,69 @@ describe('editor:load-file', () => {
 
     expect(response).toMatchObject({ success: false, code: 'absent' });
     expect(response.error).toBeTruthy();
+  });
+
+  describe.skipIf(!symlinkAvailable)('chapitre en lien symbolique', () => {
+    let outside: string;
+    let chapters: string;
+
+    beforeEach(() => {
+      outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-dehors-'));
+      chapters = path.join(project, 'chapters');
+      fs.mkdirSync(chapters);
+      fs.writeFileSync(path.join(chapters, '01.md'), '# Un\n');
+      fs.writeFileSync(path.join(outside, 'journal.md'), 'SECRET-HORS-PROJET\n');
+    });
+
+    afterEach(() => {
+      fs.rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('hors du projet : refusé, jamais lu, et rien ne s’écrit à l’autre bout', async () => {
+      const link = path.join(chapters, '02.md');
+      fs.symlinkSync(path.join(outside, 'journal.md'), link);
+
+      const response = await load(link);
+      expect(response).toMatchObject({ success: false, code: 'unreadable', reason: 'refused' });
+      expect(JSON.stringify(response.content ?? '')).not.toContain('SECRET-HORS-PROJET');
+
+      const saved = await call<{ success: boolean }>('editor:save-file', link, 'écrasé');
+      expect(saved.success).toBe(false);
+      expect(fs.readFileSync(path.join(outside, 'journal.md'), 'utf8')).toBe('SECRET-HORS-PROJET\n');
+    });
+
+    it('lien cassé hors du projet : `refused`, jamais `absent` qui autoriserait à le créer', async () => {
+      const link = path.join(chapters, '03.md');
+      fs.symlinkSync(path.join(outside, 'cree-dehors.md'), link);
+
+      expect(await load(link)).toMatchObject({ success: false, code: 'unreadable', reason: 'refused' });
+
+      const saved = await call<{ success: boolean }>('editor:save-file', link, 'écrit dehors');
+      expect(saved.success).toBe(false);
+      expect(fs.existsSync(path.join(outside, 'cree-dehors.md'))).toBe(false);
+    });
+
+    it('un lien interne s’ouvre, et s’enregistre dans son fichier réel', async () => {
+      const link = path.join(chapters, 'copie.md');
+      fs.symlinkSync('01.md', link);
+
+      expect(await load(link)).toEqual({ success: true, content: '# Un\n' });
+
+      await call('editor:save-file', link, '# Un, suite\n');
+      expect(fs.readFileSync(path.join(chapters, '01.md'), 'utf8')).toBe('# Un, suite\n');
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    });
+
+    it('projet ouvert par un chemin en lien : ses chapitres s’ouvrent', async () => {
+      const alias = `${project}-alias`;
+      fs.symlinkSync(project, alias);
+      h.projectPath = alias;
+      try {
+        expect(await load(path.join(alias, 'chapters', '01.md'))).toEqual({ success: true, content: '# Un\n' });
+      } finally {
+        fs.rmSync(alias, { force: true });
+      }
+    });
   });
 
   it('Latin-1 : refusé, et le fichier ne bouge pas d’un octet', async () => {
