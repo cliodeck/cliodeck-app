@@ -189,7 +189,18 @@ const api = {
 
   // Editor
   editor: {
-    loadFile: (filePath: string) => ipcRenderer.invoke('editor:load-file', filePath),
+    /** `code: 'absent'` est le seul échec qui autorise à créer le fichier. */
+    loadFile: (
+      filePath: string
+    ): Promise<
+      | { success: true; content: string }
+      | {
+          success: false;
+          code?: 'absent' | 'unreadable';
+          reason?: 'permission' | 'encoding' | 'not-a-file' | 'io' | 'refused';
+          error: string;
+        }
+    > => ipcRenderer.invoke('editor:load-file', filePath),
     saveFile: (filePath: string, content: string) =>
       ipcRenderer.invoke('editor:save-file', filePath, content),
     insertText: (text: string, metadata?: { modeId?: string; model?: string }) =>

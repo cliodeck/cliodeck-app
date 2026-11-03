@@ -12,7 +12,7 @@
  * l'accompagnement au démarrage, qui n'est pas l'objet du test.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,6 +52,25 @@ function makeProject(): { dir: string; projectJson: string; documentMd: string }
   writeFileSync(documentMd, ORIGINAL);
   return { dir, projectJson, documentMd };
 }
+
+async function openProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+  }, projectJson);
+  await window.locator('button[title="Ouvrir un projet"]').first().click();
+}
+
+const editorOf = (window: Page) => window.locator('.codemirror-editor .cm-content');
+
+async function typeAtEnd(window: Page, text: string): Promise<void> {
+  await editorOf(window).click();
+  await window.keyboard.press('ControlOrMeta+End');
+  await window.keyboard.type(text);
+}
+
+/** « # Été » en Latin-1 : des octets qui ne forment pas de l'UTF-8. */
+const LATIN1 = Buffer.from([0x23, 0x20, 0xc9, 0x74, 0xe9, 0x0a]);
+const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
 test('le texte tapé puis enregistré atteint document.md', async () => {
   const outcome = await launchApp();
@@ -165,5 +184,97 @@ test('le socle de fichiers est joignable depuis le renderer, et décide sur le v
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(projet.dir, { recursive: true, force: true });
     rmSync(dehors, { recursive: true, force: true });
+  }
+});
+
+test('projet au document en Latin-1 : pas un octet ne change, et l’auteur sait quoi faire', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  writeFileSync(projet.documentMd, LATIN1);
+
+  try {
+    await openProject(app, window, projet.projectJson);
+
+    const toast = window.locator('.status-toast--error');
+    await expect(toast).toContainText('document de ce projet', { timeout: 20_000 });
+    await expect(toast).toContainText('UTF-8');
+    expect(await editorOf(window).textContent()).not.toContain('\uFFFD');
+
+    // Le tampon est sans titre : rien de ce qu'on y tape n'atteint le fichier refusé.
+    await typeAtEnd(window, 'Une idée.');
+    await window.waitForTimeout(3_500);
+    expect(readFileSync(projet.documentMd).equals(LATIN1)).toBe(true);
+    expect(readdirSync(projet.dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('fichier avec BOM : il s’ouvre sans que le BOM se voie, et ses octets reviennent tels quels', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const withBom = Buffer.concat([BOM, Buffer.from(ORIGINAL, 'utf8')]);
+  writeFileSync(projet.documentMd, withBom);
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    await expect(window.locator('.status-toast--error')).toHaveCount(0);
+    // Ni caractère de contrôle à l'écran, ni titre de première ligne resté en texte brut.
+    await expect(editorOf(window).locator('.cm-specialChar')).toHaveCount(0);
+
+    await window.locator('.toolbar-btn[title="Enregistrer"]').first().click();
+    await window.waitForTimeout(500);
+    expect(readFileSync(projet.documentMd).equals(withBom)).toBe(true);
+
+    await typeAtEnd(window, 'Suite.');
+    await expect
+      .poll(() => readFileSync(projet.documentMd).equals(Buffer.concat([withBom, Buffer.from('Suite.', 'utf8')])), {
+        timeout: 15_000,
+      })
+      .toBe(true);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('document absent : le gabarit se crée, s’ouvre, et reçoit la frappe', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  rmSync(projet.documentMd);
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Projet E2E', { timeout: 20_000 });
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe('# Projet E2E\n');
+    await expect(window.locator('.status-toast--error')).toHaveCount(0);
+
+    await typeAtEnd(window, 'Première phrase.');
+    await expect
+      .poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 15_000 })
+      .toBe('# Projet E2E\nPremière phrase.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
   }
 });

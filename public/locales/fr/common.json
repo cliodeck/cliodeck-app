@@ -116,6 +116,7 @@
   "editor": {
     "title": "Éditeur",
     "discardUntitledConfirm": "Ce document sans titre n'a jamais été enregistré. L'abandonner ? Son texte sera perdu.",
+    "notUtf8": "Ce fichier n'est pas encodé en UTF-8. ClioDeck ne l'a pas ouvert, car ses caractères accentués seraient abîmés à la première sauvegarde : il reste intact sur le disque. Convertissez-le en UTF-8, puis rouvrez-le.",
     "fontSize": "Taille de police",
     "fontSizeHelp": "Taille du texte dans l'éditeur Markdown",
     "currentSize": "Taille actuelle: {{size}}px",
@@ -291,6 +292,8 @@
     "createErrorFilesExist": "Le dossier « {{name}} » de {{folder}} contient déjà des fichiers que la création remplacerait. Rien n'a été modifié. Choisissez un autre nom ou un autre emplacement.",
     "createErrorNameInvalid": "Le nom d'un projet ne peut contenir ni / ni \\, et ne peut pas être « . » ou « .. ».",
     "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
+    "documentOpenError": "Le document de ce projet n'a pas pu être ouvert",
+    "documentOpenHint": "Aucun fichier n'a été modifié. L'éditeur affiche un document sans titre : ce que vous y écrivez n'ira pas dans le document du projet.",
     "newProject": "Nouveau projet",
     "openProject": "Ouvrir un projet",
     "closeProject": "Fermer le projet",

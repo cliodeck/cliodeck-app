@@ -7,7 +7,8 @@
  * fallback append (aucun éditeur monté).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { useEditorStore } from '../editorStore';
+import { EditorFileError, openErrorKey, useEditorStore } from '../editorStore';
+import i18n from '../../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
 
@@ -444,5 +445,74 @@ describe('saveFile — réponse revenue après un changement de document', () =>
     expect(state.content).toBe('# Un modifié\n');
     expect(state.isDirty).toBe(false);
     expect(state.lastSavedAt).not.toBeNull();
+  });
+});
+
+/** Le contrat de l'erreur : `absent` est le seul cas où le document peut être créé. */
+describe('loadFile — un document qui ne s’ouvre pas', () => {
+  const A = '/p/a.md';
+  const B = '/p/b.md';
+
+  function respondWith(response: Record<string, unknown>): void {
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: { loadFile: async () => response, saveFile: async () => ({ success: true }) },
+    };
+  }
+
+  beforeEach(() => {
+    useEditorStore.setState({ filePath: A, content: '# A\n', isDirty: false, editorFacade: null });
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null });
+  });
+
+  it.each([
+    [{ success: false, code: 'absent', error: 'ENOENT' }, 'absent', undefined],
+    [{ success: false, code: 'unreadable', reason: 'permission', error: 'EACCES' }, 'unreadable', 'permission'],
+    [{ success: false, code: 'unreadable', reason: 'encoding', error: 'pas UTF-8' }, 'unreadable', 'encoding'],
+  ])('%j : l’erreur le porte, et rien n’a changé', async (response, code, reason) => {
+    respondWith(response);
+
+    const error = await useEditorStore
+      .getState()
+      .loadFile(B)
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(EditorFileError);
+    expect(error).toMatchObject({ code, reason });
+    expect(useEditorStore.getState().filePath).toBe(A);
+    expect(useEditorStore.getState().content).toBe('# A\n');
+  });
+
+  it('une réponse qui ne dit pas ce qui se passe n’est jamais lue comme « absent »', async () => {
+    respondWith({ success: false, error: 'tout autre échec' });
+
+    await expect(useEditorStore.getState().loadFile(B)).rejects.toMatchObject({ code: 'unreadable' });
+  });
+
+  it('un fichier qui n’est pas en UTF-8 : le message dit quoi faire, et non « introuvable »', async () => {
+    respondWith({ success: false, code: 'unreadable', reason: 'encoding', error: '/p/b.md n’est pas encodé en UTF-8' });
+
+    const error = await useEditorStore
+      .getState()
+      .loadFile(B)
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe(i18n.t('editor.notUtf8'));
+    expect(openErrorKey(error, 'toolbar.openError')).toBe('editor.notUtf8');
+  });
+
+  it('toute autre erreur garde le message de l’appelant', () => {
+    expect(openErrorKey(new Error('EACCES'), 'toolbar.openError')).toBe('toolbar.openError');
+    expect(openErrorKey(new EditorFileError('absent', undefined, 'x'), 'toolbar.openError')).toBe('toolbar.openError');
+    expect(openErrorKey(new EditorFileError('unreadable', 'permission', 'x'), 'toolbar.openError')).toBe(
+      'toolbar.openError'
+    );
   });
 });

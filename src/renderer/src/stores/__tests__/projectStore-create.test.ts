@@ -679,7 +679,7 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(project().unattachedFiles).toEqual([]);
   });
 
-  it('document illisible, repli impossible : tampon vide plutôt qu’un éditeur figé', async () => {
+  it('document illisible : tampon vide plutôt qu’un éditeur figé', async () => {
     await rm(documentB);
     await mkdir(documentB);
     await openProjectA();
@@ -694,7 +694,7 @@ describe('loadProject : l’éditeur est coupé avant que le main ne passe', () 
     expect(project().loadState.kind).toBe('ready');
   });
 
-  it('livre au premier chapitre illisible, repli impossible : aucun chapitre annoncé sur le tampon vide', async () => {
+  it('livre au premier chapitre illisible : aucun chapitre annoncé sur le tampon vide', async () => {
     const chapters = [{ id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 0, kind: 'chapter' }];
     await writeProject(dirB, { id: 'b', name: 'B', type: 'book', chapters });
     await mkdir(path.join(dirB, 'chapters', '01.md'), { recursive: true });

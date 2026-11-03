@@ -116,6 +116,7 @@
   "editor": {
     "title": "Editor",
     "discardUntitledConfirm": "This untitled document has never been saved. Discard it? Its text will be lost.",
+    "notUtf8": "This file is not encoded in UTF-8. ClioDeck did not open it, because its accented characters would be damaged on the first save: it remains untouched on disk. Convert it to UTF-8, then open it again.",
     "fontSize": "Font size",
     "wordWrap": "Word wrap",
     "minimap": "Show minimap",
@@ -291,6 +292,8 @@
     "createErrorFilesExist": "The folder “{{name}}” in {{folder}} already contains files that creating a project would replace. Nothing was changed. Choose another name or location.",
     "createErrorNameInvalid": "A project name cannot contain / or \\, and cannot be “.” or “..”.",
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
+    "documentOpenError": "This project's document could not be opened",
+    "documentOpenHint": "No file was changed. The editor shows an untitled document: what you write there will not go into the project's document.",
     "newProject": "New project",
     "openProject": "Open a project",
     "closeProject": "Close project",
