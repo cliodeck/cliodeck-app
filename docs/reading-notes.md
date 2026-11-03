@@ -50,6 +50,7 @@ Texte libre.
 - **Clé de citation refaite** par la synchronisation : la note suit (front matter, et nom du fichier s'il n'a pas été changé à la main).
 - **Jamais supprimée**, même quand la référence sort de la bibliographie.
 - Un front matter illisible est signalé, jamais réécrit, et ne donne pas lieu à une seconde note créée à côté.
+- Un lien symbolique qui sort du projet n'est pas une note : il n'est ni lu, ni indexé, ni réécrit par une étiquette, et ce qu'il avait laissé dans l'index en sort à la passe suivante. Un lien interne continue de marcher ; un dossier `reading-notes` lié hors du projet est refusé, et le refus se dit à l'ouverture d'une note.
 - Une note qui n'est pas en UTF-8 est refusée à l'ouverture comme à l'ajout d'une étiquette, sans qu'un octet change : la réécrire rendrait définitifs ses accents changés en U+FFFD. Une clé refaite par la synchronisation la laisse telle quelle, sous son nom ; sa `zotero_key`, si elle en a une, la retrouve.
 
 ## Corpus de l'assistant

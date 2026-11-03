@@ -38,6 +38,7 @@ import {
   type ReadingNoteRecord,
 } from '../../../backend/core/vector-store/ReadingNotesStore.js';
 import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
+import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { clioDeckConfigToRegistryConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
@@ -272,6 +273,12 @@ export class ReadingNotesIndexService {
     const seenIds = new Set<string>();
     for (const file of files) {
       const relativePath = path.relative(workspaceRoot, file);
+      // Un lien qui sort du projet n'est pas une note : ni lu ni envoyé au fournisseur,
+      // et hors de `seenIds` ce qu'il avait laissé dans l'index en sort plus bas.
+      if (!isInside(workspaceRoot, file)) {
+        report.failures.push({ relativePath, reason: 'lien hors du projet' });
+        continue;
+      }
       try {
         const stat = await fs.stat(file);
         if (stat.size > MAX_NOTE_BYTES) {
