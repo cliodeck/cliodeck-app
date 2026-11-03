@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { waitForEditorFacade } from '../../services/wait-for-facade';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
@@ -11,6 +11,7 @@ import {
   type SearchOutcome,
   type SearchableDocument,
 } from '../../services/manuscript-search';
+import { unreadableChaptersNote } from '../../services/unreadable-chapters';
 import { logger } from '../../utils/logger';
 import './ManuscriptSearch.css';
 
@@ -42,6 +43,8 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Des chapitres n'ont pas été lus : « aucun résultat » ne vaudrait pas pour eux. */
+  const [incomplete, setIncomplete] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,13 +65,18 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
     const term = query.trim();
     if (!term) {
       setOutcome(null);
+      setIncomplete(null);
       return;
     }
     setBusy(true);
     setError(null);
+    setIncomplete(null);
     try {
-      const docs = await useManuscriptStore.getState().readManuscript();
-      const searchable: SearchableDocument[] = docs.map((doc) => ({
+      const { documents, unreadable } = await useManuscriptStore.getState().readManuscript();
+      if (unreadable.length > 0) {
+        setIncomplete(t('book.readIncomplete', { detail: unreadableChaptersNote(unreadable, t) }));
+      }
+      const searchable: SearchableDocument[] = documents.map((doc) => ({
         chapterId: doc.chapter.id,
         title: doc.chapter.title,
         filePath: doc.chapter.filePath,
@@ -110,7 +118,7 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
         facade?.revealLine(line);
       } catch (err) {
         logger.error('ManuscriptSearch', err);
-        setError(t('search.error'));
+        setError(t(openErrorKey(err, 'search.error')));
       }
     },
     [chapters, currentProject, loadFile, setCurrentChapter, t]
@@ -160,6 +168,7 @@ export const ManuscriptSearch: React.FC<Props> = ({ onClose }) => {
       <div className="manuscript-search__body">
         {busy && <p className="manuscript-search__note">{t('search.searching')}</p>}
         {error && <p className="manuscript-search__note manuscript-search__note--error">{error}</p>}
+        {incomplete && <p className="manuscript-search__note manuscript-search__note--error">{incomplete}</p>}
 
         {!busy && outcome && outcome.total === 0 && (
           <p className="manuscript-search__note">

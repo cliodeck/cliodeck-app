@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../stores/dialogStore';
-import { useEditorStore } from '../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../stores/editorStore';
 import { useProjectStore } from '../stores/projectStore';
 import { runCitationCheck } from '../services/check-citations';
 import { newDocument } from '../services/new-document';
@@ -40,6 +40,7 @@ export function useMenuShortcuts() {
         }
       } catch (error) {
         console.error('Failed to open file:', error);
+        await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
       }
     };
 

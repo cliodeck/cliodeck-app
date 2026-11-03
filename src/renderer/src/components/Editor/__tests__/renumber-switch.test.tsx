@@ -71,6 +71,8 @@ const DISORDERED = {
 };
 
 let disk: Record<string, string>;
+/** Chapitres que le main refuse de lire, et sa raison. */
+let unreadableOnDisk: Map<string, string>;
 let writes: Array<[string, string]>;
 /** Attente insérée dans la prochaine lecture du disque, puis retirée. */
 let nextRead: Promise<void> | null;
@@ -92,6 +94,7 @@ function chapterOf(path: string, order: number): ResolvedChapter {
 
 async function openBook(files: Record<string, string>, open: string = A): Promise<void> {
   disk = { ...files };
+  unreadableOnDisk = new Map();
   writes = [];
   nextRead = null;
   beforeWrite = () => undefined;
@@ -103,10 +106,11 @@ async function openBook(files: Record<string, string>, open: string = A): Promis
         if (gate) await gate;
         return {
           success: true,
-          files: data.filePaths.map((filePath) => ({
-            filePath,
-            content: disk[`${PROJECT}/${filePath}`],
-          })),
+          files: data.filePaths.map((filePath) =>
+            unreadableOnDisk.has(filePath)
+              ? { filePath, reason: unreadableOnDisk.get(filePath), error: 'illisible' }
+              : { filePath, content: disk[`${PROJECT}/${filePath}`] }
+          ),
         };
       }),
       getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
@@ -191,6 +195,72 @@ afterEach(() => {
   useEditorStore.setState({ editorFacade: null, switchLock: null } as never);
   useProjectStore.setState({ currentProject: null, chapters: [] });
   while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
+});
+
+describe('renumérotation : un chapitre illisible', () => {
+  it.each(['encoding', 'absent', 'permission'])(
+    'fermé et illisible (%s) : refus, aucune écriture, et le chapitre ouvert ne bouge pas',
+    async (reason) => {
+      await openBook(DISORDERED);
+      unreadableOnDisk.set('chapters/b.md', reason);
+      const before = { ...disk };
+
+      await act(async () => {
+        fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+      });
+
+      expect(alertMessage()).toBe('book.renumberUnreadable');
+      expect(writes).toEqual([]);
+      expect(disk).toEqual(before);
+      expect(live()).toBe(DISORDERED[A]);
+      expect(useEditorStore.getState().isDirty).toBe(false);
+      expect(locks()).toEqual(FREE);
+    }
+  );
+});
+
+describe('renumérotation : un chapitre disparu depuis l’ouverture', () => {
+  it('le refus met le manifeste à jour : le clic suivant passe, comme à la réouverture', async () => {
+    await openBook(DISORDERED);
+    const chaptersOnDisk = Object.keys(DISORDERED).map(chapterOf);
+    window.electron.project.getChapters = vi.fn(async () => ({
+      success: true,
+      chapters: chaptersOnDisk.map((c) => (c.id === 'b' ? { ...c, missing: true } : c)),
+      unattached: [],
+    })) as never;
+    unreadableOnDisk.set('chapters/b.md', 'absent');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+    expect(alertMessage()).toBe('book.renumberUnreadable');
+    expect(writes).toEqual([]);
+    expect(window.electron.project.getChapters).toHaveBeenCalledWith(PROJECT);
+    await act(async () => {
+      useDialogStore.getState().closeAlert();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(writes.map(([path]) => path).sort()).toEqual([A, C]);
+    expect(disk[C]).toBe('# C\n\nTexte C[^3].\n\n[^3]: quatre\n');
+    expect(locks()).toEqual(FREE);
+  });
+
+  it('un chapitre encore là mais illisible : le manifeste n’a rien à apprendre', async () => {
+    await openBook(DISORDERED);
+    unreadableOnDisk.set('chapters/b.md', 'encoding');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toBe('book.renumberUnreadable');
+    expect(window.electron.project.getChapters).not.toHaveBeenCalled();
+  });
 });
 
 describe('renumérotation sans bascule', () => {

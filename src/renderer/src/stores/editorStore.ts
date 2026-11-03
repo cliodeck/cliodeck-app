@@ -65,6 +65,32 @@ export type BufferOutcome =
   | { status: 'cancelled' }
   | { status: 'locked'; lock: EditorSwitchLock };
 
+/**
+ * Le document demandé n'a pas pu être lu. `absent` est le seul cas où le créer ne peut
+ * rien écraser ; sous `unreadable` (droits, encodage, chemin refusé), le fichier reste tel quel.
+ */
+export class EditorFileError extends Error {
+  readonly code: 'absent' | 'unreadable';
+  readonly reason: string | undefined;
+
+  constructor(code: 'absent' | 'unreadable', reason: string | undefined, message: string) {
+    super(message);
+    this.name = 'EditorFileError';
+    this.code = code;
+    this.reason = reason;
+  }
+}
+
+const NOT_UTF8_KEY = 'editor.notUtf8';
+
+/**
+ * Le message d'une ouverture impossible. Un fichier qui n'est pas en UTF-8 est refusé
+ * exprès, et l'auteur peut y remédier : « introuvable ou illisible » l'enverrait ailleurs.
+ */
+export function openErrorKey(error: unknown, fallbackKey: string): string {
+  return error instanceof EditorFileError && error.reason === 'encoding' ? NOT_UTF8_KEY : fallbackKey;
+}
+
 /** `saveFileAs` n'est pas un remplacement : le document reste, seul son chemin change. */
 export type SaveAsOutcome =
   | { status: 'saved' }
@@ -242,8 +268,13 @@ async function readDocumentFromDisk(filePath: string): Promise<string> {
   logger.ipc('editor.loadFile', { filePath });
   const result = await window.electron.editor.loadFile(filePath);
   logger.ipc('editor.loadFile response', result);
-  if (result.success && result.content !== undefined) return result.content;
-  throw new Error(result.error || 'Failed to load file');
+  if (result.success) return result.content;
+  // Une réponse qui ne le dit pas n'est jamais « absent » : ce cas autorise à créer le fichier.
+  throw new EditorFileError(
+    result.code === 'absent' ? 'absent' : 'unreadable',
+    result.reason,
+    result.reason === 'encoding' ? i18n.t(NOT_UTF8_KEY) : result.error || 'Failed to load file'
+  );
 }
 
 // MARK: - Store
@@ -409,7 +440,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         // pas le sien. Dans le miroir, une vue l'afficherait à son prochain montage
         // et l'autosave l'écrirait dans le fichier entrant.
         if (get().documentVersion === documentVersion) {
-          set({ content, isDirty: false, lastSavedAt: Date.now() });
+          // L'auteur a pu taper pendant l'écriture : ce qui n'est pas parti reste à écrire,
+          // et le miroir ne revient pas au texte d'avant. `lastSavedAt` relance l'autosave.
+          const live = get().getLiveContent();
+          set({ content: live, isDirty: live !== content, lastSavedAt: Date.now() });
         }
         logger.store('Editor', 'File saved successfully');
       } else {
@@ -444,10 +478,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (lockOnArrival) return { status: 'locked', lock: lockOnArrival };
         if (get().documentVersion !== documentVersion) return { status: 'superseded' };
         // Ce qui a été tapé pendant l'écriture reste à écrire, désormais par l'autosave.
+        const live = get().getLiveContent();
         set({
-          content,
+          content: live,
           filePath: newFilePath,
-          isDirty: get().getLiveContent() !== content,
+          isDirty: live !== content,
           lastSavedAt: Date.now(),
         });
         logger.store('Editor', 'File saved successfully as', { newFilePath });

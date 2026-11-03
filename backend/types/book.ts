@@ -63,6 +63,27 @@ export interface UnattachedFile {
   suggestedTitle?: string;
 }
 
+/** Pourquoi un chapitre demandé n'a pas de texte. */
+export type ChapterUnreadableReason =
+  | 'absent'
+  | 'refused'
+  | 'permission'
+  | 'encoding'
+  | 'not-a-file'
+  | 'io';
+
+/**
+ * Un chapitre lu par `readChapters` : son texte, ou la raison de son absence. Jamais
+ * un texte décodé avec perte : la renumérotation réécrit ce qu'elle a lu.
+ */
+export interface ChapterRead {
+  /** Chemin relatif au dossier du projet. */
+  filePath: string;
+  content?: string;
+  reason?: ChapterUnreadableReason;
+  error?: string;
+}
+
 // ============================================================================
 // Réglages d'ouvrage
 // ============================================================================

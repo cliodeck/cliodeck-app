@@ -107,9 +107,10 @@ describe('readManuscript', () => {
       'chapters/02.md': '# Deux (disque)\n',
     });
 
-    const docs = await useManuscriptStore.getState().readManuscript();
+    const { documents: docs, unreadable } = await useManuscriptStore.getState().readManuscript();
 
     // Seul le chapitre fermé est lu ; le chapitre manquant est écarté.
+    expect(unreadable).toEqual([]);
     expect(readCalls).toEqual([['chapters/02.md']]);
     expect(docs.map((d) => [d.chapter.filePath, d.live])).toEqual([
       ['chapters/01.md', true],
@@ -127,11 +128,37 @@ describe('readManuscript', () => {
         { id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 1 },
       ],
     });
-    const docs = await useManuscriptStore.getState().readManuscript();
+    const { documents: docs } = await useManuscriptStore.getState().readManuscript();
     expect(docs.map((d) => d.chapter.filePath)).toEqual([
       'chapters/02.md',
       'chapters/01.md',
     ]);
+  });
+
+  it('un chapitre que le main n’a pas lu est dit, avec sa raison, jamais retiré en silence', async () => {
+    (globalThis as unknown as { electron: unknown }).electron = {
+      project: {
+        readChapters: vi.fn(async () => ({
+          success: true,
+          files: [{ filePath: 'chapters/02.md', reason: 'encoding', error: 'pas UTF-8' }],
+        })),
+      },
+    } as never;
+
+    const { documents, unreadable } = await useManuscriptStore.getState().readManuscript();
+
+    expect(documents.map((d) => d.chapter.filePath)).toEqual(['chapters/01.md']);
+    expect(unreadable.map((u) => [u.chapter.filePath, u.reason])).toEqual([['chapters/02.md', 'encoding']]);
+  });
+
+  it('un chapitre absent de la réponse compte aussi : rien ne doit manquer sans le dire', async () => {
+    (globalThis as unknown as { electron: unknown }).electron = {
+      project: { readChapters: vi.fn(async () => ({ success: true, files: [] })) },
+    } as never;
+
+    const { unreadable } = await useManuscriptStore.getState().readManuscript();
+
+    expect(unreadable.map((u) => [u.chapter.filePath, u.reason])).toEqual([['chapters/02.md', undefined]]);
   });
 });
 
@@ -148,7 +175,7 @@ describe('bascule de chapitre pendant la lecture du disque', () => {
     const reading = useManuscriptStore.getState().readManuscript();
     switchToChapterTwo();
     release();
-    const docs = await reading;
+    const { documents: docs } = await reading;
 
     expect(docs.map((d) => [d.chapter.filePath, d.content, d.live])).toEqual([
       ['chapters/01.md', '# Un (vivant)\n', true],

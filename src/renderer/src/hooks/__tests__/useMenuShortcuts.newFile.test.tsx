@@ -244,6 +244,36 @@ describe('les entrées de fichier du menu sous le verrou', () => {
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
+  it('menu:open-file sur un fichier qui n’est pas en UTF-8 : le refus se dit, et le document reste', async () => {
+    mount('article');
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    })) as never;
+
+    await menu('menu:open-file');
+
+    expect(dialogs().alertMessage).toBe('editor.notUtf8');
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+  });
+
+  it('menu:open-file sur un fichier illisible : plus d’échec silencieux', async () => {
+    mount('article');
+    window.electron.editor.loadFile = vi.fn(async () => ({
+      success: false,
+      code: 'unreadable',
+      reason: 'permission',
+      error: 'EACCES',
+    })) as never;
+
+    await menu('menu:open-file');
+
+    expect(dialogs().alertMessage).toBe('toolbar.openError');
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+  });
+
   it('menu:save-file sur un tampon sans titre dit la raison du refus', async () => {
     mount('article');
     useEditorStore.setState({ filePath: null, content: '', isDirty: true });

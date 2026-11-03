@@ -1,5 +1,6 @@
 import type { BibliographySliceCreator, ReadingNotesSliceState } from './types';
 import { readingNoteOf } from './referenceTags';
+import { EditorFileError } from '../editorStore';
 
 /** Préférence d'affichage, par poste : un gros utilisateur des tags automatiques ne doit pas les réactiver à chaque lancement. */
 const SHOW_AUTOMATIC_KEY = 'cliodeck.bibliography.showAutomaticZoteroTags';
@@ -48,6 +49,9 @@ export const createReadingNotesSlice: BibliographySliceCreator<ReadingNotesSlice
       year: citation.year || undefined,
       tags,
     });
+    if (result.code === 'unreadable') {
+      throw new EditorFileError('unreadable', result.reason, result.error ?? 'set_tags_failed');
+    }
     if (!result.success || !result.note) {
       throw new Error(result.error ?? 'set_tags_failed');
     }

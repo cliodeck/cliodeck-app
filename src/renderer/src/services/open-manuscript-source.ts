@@ -23,7 +23,7 @@
  */
 
 import type { BrainstormSource } from '../stores/chatStore';
-import { useEditorStore } from '../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../stores/editorStore';
 import { waitForEditorFacade } from './wait-for-facade';
 import { useProjectStore } from '../stores/projectStore';
 import { useWorkspaceModeStore } from '../stores/workspaceModeStore';
@@ -115,7 +115,7 @@ export async function openManuscriptSource(
       }
     } catch (error) {
       logger.error('openManuscriptSource', error);
-      return { success: false, errorKey: 'chat.sources.openFailed' };
+      return { success: false, errorKey: openErrorKey(error, 'chat.sources.openFailed') };
     }
   }
 

@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { ResolvedChapter } from '@backend/types/book';
 import type { EditorFacade } from '@/editor/facade';
-import { useEditorStore } from '../../stores/editorStore';
+import { EditorFileError, useEditorStore } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import {
@@ -203,6 +203,21 @@ describe('openManuscriptSource', () => {
     expect(res.success).toBe(false);
     expect(res.errorKey).toBe('chat.sources.openFailed');
     expect(h.revealed).toEqual([]); // pas de curseur posé sur un chargement raté
+  });
+
+  it('un chapitre qui n’est pas en UTF-8 : remonte le refus, pas un échec sans explication', async () => {
+    const h = setup();
+    useEditorStore.setState({
+      loadFile: async () => {
+        throw new EditorFileError('unreadable', 'encoding', 'pas UTF-8');
+      },
+    });
+
+    const res = await openManuscriptSource({ relativePath: 'chapters/02-corps.md', lineNumber: 3 });
+
+    expect(res.success).toBe(false);
+    expect(res.errorKey).toBe('editor.notUtf8');
+    expect(h.revealed).toEqual([]);
   });
 
   it('verrou posé : remonte sa clé, la vraie raison, sans poser de curseur', async () => {

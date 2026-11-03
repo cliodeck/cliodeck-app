@@ -3,7 +3,12 @@
  */
 import { ipcMain, BrowserWindow } from 'electron';
 import path from 'path';
-import { atomicWriteFile, withFileLock } from '../../../../backend/core/fs/user-files.js';
+import {
+  atomicWriteFile,
+  readUserFile,
+  withFileLock,
+  type UserFileRead,
+} from '../../../../backend/core/fs/user-files.js';
 import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import { projectManager } from '../../services/project-manager.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
@@ -21,17 +26,48 @@ import {
   EditorInsertTextSchema,
 } from '../utils/validation.js';
 
+/**
+ * Le BOM n'est pas du texte. Laissé dans l'éditeur, il s'y affiche comme un caractère de
+ * contrôle, et le `#` d'un titre en première ligne cesse d'être un titre (mesuré). L'éditeur
+ * ne le voit donc pas, et il revient à l'écriture, tel que le fichier le portait.
+ */
+const BOM = '\uFEFF';
+
+async function withOriginalBom(filePath: string, content: string): Promise<string> {
+  if (content.startsWith(BOM)) return content;
+  const current = await readUserFile(filePath);
+  return current.kind === 'ok' && current.content.startsWith(BOM) ? BOM + content : content;
+}
 
 export function setupEditorHandlers() {
   ipcMain.handle('editor:load-file', async (_event, rawFilePath: unknown) => {
     const rawPath = validate(StringPathSchema, rawFilePath);
     console.log('📞 IPC Call: editor:load-file', { filePath: rawPath });
     try {
-      const filePath = await authorizeDocumentPath(rawPath, 'read');
-      const { readFile } = await import('fs/promises');
-      const content = await readFile(filePath, 'utf-8');
-      console.log('📤 IPC Response: editor:load-file', { contentLength: content.length });
-      return successResponse({ content });
+      // Le verrou avant la validation : une lecture demandée après une sauvegarde lit ce
+      // que celle-ci a écrit. La lecture est stricte : un fichier qui n'est pas en UTF-8
+      // est refusé, intact, plutôt qu'ouvert avec ses accents changés en U+FFFD, que
+      // l'autosave rendrait définitifs.
+      const read = await withFileLock(rawPath, async (): Promise<UserFileRead> => {
+        let filePath: string;
+        try {
+          filePath = await authorizeDocumentPath(rawPath, 'read');
+        } catch (error: unknown) {
+          return { kind: 'unreadable', reason: 'refused', message: errorResponse(error).error };
+        }
+        return readUserFile(filePath);
+      });
+      if (read.kind === 'ok') {
+        const content = read.content.startsWith(BOM) ? read.content.slice(BOM.length) : read.content;
+        console.log('📤 IPC Response: editor:load-file', { contentLength: content.length });
+        return successResponse({ content });
+      }
+      console.warn('⚠️ editor:load-file:', read);
+      // `absent` est le seul cas où l'appelant peut créer le fichier : un chemin refusé
+      // n'est jamais « absent », qu'il existe ou non.
+      return read.kind === 'absent'
+        ? { success: false, code: 'absent', error: `${rawPath} n'existe pas` }
+        : { success: false, code: 'unreadable', reason: read.reason, error: read.message };
     } catch (error: unknown) {
       console.error('❌ editor:load-file error:', error);
       return errorResponse(error);
@@ -48,7 +84,7 @@ export function setupEditorHandlers() {
         // deux sauvegardes et laisser la plus ancienne sur le disque.
         const filePath = await withFileLock(rawPath, async () => {
           const authorized = await authorizeDocumentPath(rawPath, 'write');
-          await atomicWriteFile(authorized, content);
+          await atomicWriteFile(authorized, await withOriginalBom(authorized, content));
           return authorized;
         });
 

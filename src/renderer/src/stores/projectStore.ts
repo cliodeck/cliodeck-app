@@ -8,6 +8,7 @@ import {
 } from '@backend/types/book';
 import i18n from '../i18n';
 import { useDialogStore } from './dialogStore';
+import { useNotificationStore } from './notificationStore';
 
 // MARK: - Types
 
@@ -163,6 +164,32 @@ async function reopenAfterFailedSwitch(
   await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
+let documentNotOpenedNotice: string | null = null;
+let stopWatchingEditor: (() => void) | null = null;
+
+/**
+ * Le document du projet ne s'ouvre pas : l'éditeur montrera un tampon sans titre, qui
+ * ressemble à un document vide. L'auteur doit le savoir avant d'y écrire, d'où un message
+ * qui reste, jusqu'à ce qu'il le ferme, qu'un fichier s'ouvre dans l'éditeur ou que ce
+ * projet ne soit plus à l'écran.
+ */
+function notifyDocumentNotOpened(filePath: string, error: unknown, reasonKey: string): void {
+  documentNotOpenedNotice = useNotificationStore.getState().notify({
+    level: 'error',
+    title: i18n.t('project.documentOpenError'),
+    message: `${i18n.t(reasonKey)} ${i18n.t('project.documentOpenUntitled')}`,
+    details: `${filePath}\n${error instanceof Error ? error.message : String(error)}`,
+    duration: 0,
+  });
+}
+
+function dismissDocumentNotOpened(): void {
+  stopWatchingEditor?.();
+  stopWatchingEditor = null;
+  if (documentNotOpenedNotice) useNotificationStore.getState().dismiss(documentNotOpenedNotice);
+  documentNotOpenedNotice = null;
+}
+
 /** Un projet tel que le main le rend : dates sérialisées, et ce qu'il reste à ouvrir. */
 interface ProjectFromMain extends Omit<Project, 'createdAt' | 'lastOpenedAt'> {
   createdAt: string;
@@ -182,6 +209,7 @@ async function openProjectContents(
   set: StoreApi<ProjectState>['setState'],
   detached: DetachedEditor
 ): Promise<void> {
+  dismissDocumentNotOpened();
   set({
     currentProject: {
       ...project,
@@ -275,13 +303,28 @@ async function openProjectContents(
         ? firstChapterPath
         : `${project.path}/document.md`;
 
-  const { useEditorStore } = await import('./editorStore');
+  const { useEditorStore, EditorFileError, openErrorKey } = await import('./editorStore');
   const { replaceBuffer } = useEditorStore.getState();
   // Seul `replaced` sort du détachement : `unchanged` n'arrive pas d'un tampon sans chemin,
   // et `superseded` (un verrou posé pendant la lecture) laisserait l'éditeur figé.
   const openDocument = async (filePath: string): Promise<boolean> => {
     const outcome = await replaceBuffer({ kind: 'open', filePath }, 'project-open');
     return outcome.status === 'replaced';
+  };
+
+  // Seul un fichier absent se crée : le repli prenait toute erreur de lecture pour ce
+  // cas, et réécrivait par « # Nom » un document présent. Et sans pouvoir écraser ce qui
+  // serait apparu entre-temps. Un chapitre de livre ne s'invente pas.
+  const openOrCreate = async (filePath: string): Promise<boolean> => {
+    try {
+      return await openDocument(filePath);
+    } catch (error) {
+      const creatable = error instanceof EditorFileError && error.code === 'absent' && project.type !== 'book';
+      if (!creatable) throw error;
+    }
+    await window.electron.fs.writeFile(filePath, `# ${project.name}\n`, { exclusive: true });
+    console.log('📝 Created document');
+    return openDocument(filePath);
   };
 
   let opened = false;
@@ -293,19 +336,16 @@ async function openProjectContents(
   } else {
     try {
       // Load file FIRST so content is ready in the store
-      opened = await openDocument(documentPath);
+      opened = await openOrCreate(documentPath);
       console.log('📝 Document loaded into editor with path tracking');
     } catch (error) {
       console.error('Failed to load document into editor:', error);
-
-      // If document doesn't exist, create it
-      try {
-        await window.electron.fs.writeFile(documentPath, `# ${project.name}\n`);
-        opened = await openDocument(documentPath);
-        console.log('📝 Created and loaded document');
-      } catch (createError) {
-        console.error('Failed to create document:', createError);
-      }
+      notifyDocumentNotOpened(documentPath, error, openErrorKey(error, 'project.documentOpenUnchanged'));
+      // Il parle du tampon sans titre : un fichier ouvert le rend faux, surtout celui
+      // qu'il demandait de convertir puis de rouvrir.
+      stopWatchingEditor = useEditorStore.subscribe((state) => {
+        if (state.filePath) dismissDocumentNotOpened();
+      });
     }
   }
 
@@ -478,6 +518,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     // Clear frontend state
+    dismissDocumentNotOpened();
     set({
       currentProject: null,
       chapters: [],

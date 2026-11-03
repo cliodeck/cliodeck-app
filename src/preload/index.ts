@@ -52,8 +52,19 @@ const api = {
       kind?: 'chapter' | 'front' | 'back';
     }) => ipcRenderer.invoke('project:create-chapter', data),
     /** Lecture groupée : les fonctions transverses ont besoin des chapitres fermés. */
-    readChapters: (data: { projectPath: string; filePaths: string[] }) =>
-      ipcRenderer.invoke('project:read-chapters', data),
+    readChapters: (data: {
+      projectPath: string;
+      filePaths: string[];
+    }): Promise<{
+      success: boolean;
+      files: Array<{
+        filePath: string;
+        content?: string;
+        reason?: 'absent' | 'refused' | 'permission' | 'encoding' | 'not-a-file' | 'io';
+        error?: string;
+      }>;
+      error?: string;
+    }> => ipcRenderer.invoke('project:read-chapters', data),
     saveBookSettings: (data: {
       projectPath: string;
       settings: {
@@ -182,6 +193,9 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:set-tags', options) as Promise<{
           success: boolean;
           note?: { file: string; citekey: string; zoteroKey?: string; tags: string[] };
+          /** Note qu'on ne sait pas lire : elle n'a pas été touchée, et `reason` dit pourquoi. */
+          code?: 'unreadable';
+          reason?: string;
           error?: string;
         }>,
     },
@@ -189,7 +203,18 @@ const api = {
 
   // Editor
   editor: {
-    loadFile: (filePath: string) => ipcRenderer.invoke('editor:load-file', filePath),
+    /** `code: 'absent'` est le seul échec qui autorise à créer le fichier. */
+    loadFile: (
+      filePath: string
+    ): Promise<
+      | { success: true; content: string }
+      | {
+          success: false;
+          code?: 'absent' | 'unreadable';
+          reason?: 'permission' | 'encoding' | 'not-a-file' | 'io' | 'refused';
+          error: string;
+        }
+    > => ipcRenderer.invoke('editor:load-file', filePath),
     saveFile: (filePath: string, content: string) =>
       ipcRenderer.invoke('editor:save-file', filePath, content),
     insertText: (text: string, metadata?: { modeId?: string; model?: string }) =>

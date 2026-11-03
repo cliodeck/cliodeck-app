@@ -16,6 +16,7 @@ import type { EditorFacade } from '@/editor/facade';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
+import { useNotificationStore } from '../notificationStore';
 import i18n from '../../i18n';
 
 interface ElectronStub {
@@ -28,6 +29,7 @@ interface ElectronStub {
     removeRecent: ReturnType<typeof vi.fn>;
     getChapters: ReturnType<typeof vi.fn>;
   };
+  editor: { loadFile: ReturnType<typeof vi.fn> };
   fs: { writeFile: ReturnType<typeof vi.fn> };
 }
 
@@ -55,9 +57,18 @@ beforeEach(() => {
       removeRecent: vi.fn().mockResolvedValue(undefined),
       getChapters: vi.fn().mockResolvedValue({ success: true, chapters: [] }),
     },
+    editor: { loadFile: vi.fn().mockResolvedValue({ success: true, content: '# Demo\n' }) },
     fs: { writeFile: vi.fn().mockResolvedValue(undefined) },
   };
   (window as unknown as { electron: ElectronStub }).electron = stub;
+  useEditorStore.setState({
+    filePath: null,
+    content: '',
+    isDirty: false,
+    editorFacade: null,
+    bufferDetached: false,
+  });
+  useNotificationStore.getState().dismissAll();
   // Reset store to a clean slate for every test.
   useProjectStore.setState({
     currentProject: null,
@@ -102,6 +113,178 @@ describe('projectStore.loadProject — happy path', () => {
       expect(typeof finalState.loadedAt).toBe('string');
     }
     expect(useProjectStore.getState().currentProject?.id).toBe('p1');
+    // Le document existe : il s'ouvre, et le repli n'a rien à écrire.
+    expect(useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+    expect(useEditorStore.getState().content).toBe('# Demo\n');
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Toute erreur de lecture passait pour un fichier absent : le repli écrivait « # Nom » à
+ * la place d'un document présent. Le piège signalé dès la PR #42.
+ */
+describe('projectStore.loadProject — le document ne s’ouvre pas', () => {
+  const DOCUMENT = '/tmp/p1/document.md';
+  const absent = { success: false, code: 'absent', error: 'ENOENT' };
+  const toasts = () => useNotificationStore.getState().notifications;
+
+  const expectUntitledBuffer = () => {
+    expect(useEditorStore.getState().filePath).toBeNull();
+    expect(useEditorStore.getState().bufferDetached).toBe(false);
+    expect(useProjectStore.getState().loadState.kind).toBe('ready');
+    expect(useProjectStore.getState().currentChapterId).toBeNull();
+  };
+
+  beforeEach(() => {
+    stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+  });
+
+  it.each([
+    ['droits retirés', { success: false, code: 'unreadable', reason: 'permission', error: 'EACCES' }],
+    ['un dossier à la place', { success: false, code: 'unreadable', reason: 'not-a-file', error: 'EISDIR' }],
+    ['erreur du disque', { success: false, code: 'unreadable', reason: 'io', error: 'EIO' }],
+    ['réponse sans code', { success: false, error: 'tout autre échec' }],
+  ])('illisible (%s) : rien n’est écrit, l’auteur est prévenu, tampon sans titre', async (_label, response) => {
+    stub.editor.loadFile.mockResolvedValue(response);
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toMatchObject({
+      level: 'error',
+      title: i18n.t('project.documentOpenError'),
+      message: `${i18n.t('project.documentOpenUnchanged')} ${i18n.t('project.documentOpenUntitled')}`,
+    });
+    expect(toasts()[0].details).toContain(DOCUMENT);
+    expectUntitledBuffer();
+  });
+
+  it('pas en UTF-8 : rien n’est écrit, et le message dit quoi faire', async () => {
+    stub.editor.loadFile.mockResolvedValue({
+      success: false,
+      code: 'unreadable',
+      reason: 'encoding',
+      error: 'pas UTF-8',
+    });
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(toasts()).toHaveLength(1);
+    // Quoi faire du fichier, et ce que devient ce qu'on tape : l'un ne remplace pas l'autre.
+    expect(toasts()[0].message).toBe(`${i18n.t('editor.notUtf8')} ${i18n.t('project.documentOpenUntitled')}`);
+    expectUntitledBuffer();
+  });
+
+  it('le pont lui-même échoue : ce n’est pas un fichier absent', async () => {
+    stub.editor.loadFile.mockRejectedValue(new Error('canal coupé'));
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(toasts()).toHaveLength(1);
+    expectUntitledBuffer();
+  });
+
+  it('absent : créé sans pouvoir écraser, puis ouvert', async () => {
+    stub.editor.loadFile
+      .mockResolvedValueOnce(absent)
+      .mockResolvedValueOnce({ success: true, content: '# Demo\n' });
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).toHaveBeenCalledTimes(1);
+    expect(stub.fs.writeFile).toHaveBeenCalledWith(DOCUMENT, '# Demo\n', { exclusive: true });
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+    expect(useEditorStore.getState().content).toBe('# Demo\n');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('présentation absente : c’est slides.md qui se crée', async () => {
+    stub.project.load.mockResolvedValue({
+      success: true,
+      project: { ...fakeProject, type: 'presentation' },
+    });
+    stub.editor.loadFile
+      .mockResolvedValueOnce(absent)
+      .mockResolvedValueOnce({ success: true, content: '# Demo\n' });
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).toHaveBeenCalledWith('/tmp/p1/slides.md', '# Demo\n', { exclusive: true });
+  });
+
+  it('livre au chapitre absent : rien n’est créé, un manuscrit ne s’invente pas', async () => {
+    stub.project.load.mockResolvedValue({
+      success: true,
+      project: { ...fakeProject, type: 'book' },
+    });
+    stub.project.getChapters.mockResolvedValue({
+      success: true,
+      chapters: [{ id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 0, kind: 'chapter' }],
+    });
+    stub.editor.loadFile.mockResolvedValue(absent);
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(toasts()).toHaveLength(1);
+    expectUntitledBuffer();
+  });
+
+  it('absent, et la création échoue : prévenu, tampon sans titre', async () => {
+    stub.editor.loadFile.mockResolvedValue(absent);
+    stub.fs.writeFile.mockRejectedValue(new Error('EEXIST: file already exists'));
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(stub.fs.writeFile).toHaveBeenCalledTimes(1);
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0].details).toContain('EEXIST');
+    expectUntitledBuffer();
+  });
+
+  it('rouvrir le projet : un seul message, et plus aucun une fois le fichier réparé', async () => {
+    const unreadable = { success: false, code: 'unreadable', reason: 'encoding', error: 'pas UTF-8' };
+    stub.editor.loadFile.mockResolvedValue(unreadable);
+
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    expect(toasts()).toHaveLength(1);
+
+    stub.editor.loadFile.mockResolvedValue({ success: true, content: '# Demo\n' });
+    await useProjectStore.getState().loadProject('/tmp/p1');
+
+    expect(toasts()).toEqual([]);
+    expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
+  });
+
+  it('fermer le projet : le message ne lui survit pas', async () => {
+    stub.editor.loadFile.mockResolvedValue({ success: false, code: 'unreadable', error: 'EACCES' });
+    await useProjectStore.getState().loadProject('/tmp/p1');
+    expect(toasts()).toHaveLength(1);
+
+    await useProjectStore.getState().closeProject();
+
+    expect(toasts()).toEqual([]);
+  });
+
+  it('createProject suit la même règle', async () => {
+    stub.project.create.mockResolvedValue({ success: true, project: fakeProject });
+    stub.editor.loadFile.mockResolvedValue({
+      success: false,
+      code: 'unreadable',
+      reason: 'permission',
+      error: 'EACCES',
+    });
+
+    await useProjectStore.getState().createProject('Demo', 'article', '/tmp');
+
+    expect(stub.fs.writeFile).not.toHaveBeenCalled();
+    expect(toasts()).toHaveLength(1);
+    expect(useEditorStore.getState().filePath).toBeNull();
   });
 });
 

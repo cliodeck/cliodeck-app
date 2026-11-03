@@ -26,7 +26,7 @@ const SimilarityPanel = lazy(() =>
 const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
-import { useEditorStore } from '../../stores/editorStore';
+import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -35,6 +35,7 @@ import { useManuscriptStore, currentRelativePath } from '../../stores/manuscript
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { runCitationCheck } from '../../services/check-citations';
 import { newDocument } from '../../services/new-document';
+import { unreadableChaptersNote } from '../../services/unreadable-chapters';
 import { ExportReadTimedOutError, startExportReadLimit } from '../Export/export-read-limit';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -116,7 +117,7 @@ export const EditorPanel: React.FC = () => {
       }
     } catch (error) {
       logger.error('EditorPanel', error);
-      await useDialogStore.getState().showAlert(t('toolbar.openError'));
+      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'toolbar.openError')));
     }
   };
 
@@ -189,8 +190,20 @@ export const EditorPanel: React.FC = () => {
       currentRelativePath() !== startRel ||
       useProjectStore.getState().currentProject?.path !== project.path;
 
-    const docs = await useManuscriptStore.getState().readManuscript();
-    if (isAbandoned() || docs.length === 0) return null;
+    const { documents: docs, unreadable } = await useManuscriptStore.getState().readManuscript();
+    if (isAbandoned()) return null;
+    // La numérotation traverse le livre : sans ce chapitre, elle serait fausse partout.
+    if (unreadable.length > 0) {
+      const note = unreadableChaptersNote(unreadable, t);
+      if (!unreadable.some((u) => u.reason === 'absent')) {
+        return t('book.renumberUnreadable', { detail: note });
+      }
+      // Sorti du disque depuis l'ouverture : le manifeste doit l'apprendre, sinon ce refus
+      // se répéterait jusqu'à la réouverture du projet, qui l'écarte comme manquant.
+      await useProjectStore.getState().refreshChapters();
+      return t('book.renumberUnreadable', { detail: `${note} ${t('book.renumberChapterGone')}` });
+    }
+    if (docs.length === 0) return null;
     if (editorMoved()) return t('book.renumberInterrupted');
 
     const mode = useProjectStore.getState().bookSettings.noteNumbering;

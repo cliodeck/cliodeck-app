@@ -7,7 +7,8 @@
  * fallback append (aucun éditeur monté).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { useEditorStore } from '../editorStore';
+import { EditorFileError, openErrorKey, useEditorStore } from '../editorStore';
+import i18n from '../../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
 
@@ -444,5 +445,217 @@ describe('saveFile — réponse revenue après un changement de document', () =>
     expect(state.content).toBe('# Un modifié\n');
     expect(state.isDirty).toBe(false);
     expect(state.lastSavedAt).not.toBeNull();
+  });
+});
+
+/**
+ * L'écriture part d'un instantané du texte, et l'auteur continue de taper. Sa réponse
+ * effaçait `isDirty` et remettait le miroir à l'instantané : la frappe de pendant
+ * l'écriture n'était plus annoncée nulle part, et l'autosave ne l'écrivait jamais.
+ */
+describe('saveFile — frappe pendant l’écriture', () => {
+  const A = '/livre/chapters/01.md';
+  const B = '/livre/chapters/02.md';
+  let release: () => void;
+  let saved: Array<{ path: string; content: string }>;
+  let live: string;
+
+  const typingFacade = () => ({ getValue: () => live }) as unknown as EditorFacade;
+
+  beforeEach(() => {
+    saved = [];
+    let held = false;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: {
+        loadFile: async () => ({ success: true, content: '# Deux\n' }),
+        saveFile: async (path: string, content: string) => {
+          saved.push({ path, content });
+          if (!held) {
+            held = true;
+            await gate;
+          }
+          return { success: true };
+        },
+      },
+    };
+    live = 'a v1';
+    useEditorStore.setState({
+      filePath: A,
+      content: 'a v0',
+      isDirty: true,
+      lastSavedAt: null,
+      editorFacade: typingFacade(),
+    });
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null });
+  });
+
+  it('la synchro de la vue a poussé le texte : isDirty reste vrai, et le miroir garde le texte vivant', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    live = 'a v1 v2';
+    useEditorStore.setState({ content: live, isDirty: true });
+
+    release();
+    await writing;
+
+    const state = useEditorStore.getState();
+    expect(saved).toEqual([{ path: A, content: 'a v1' }]);
+    expect(state.isDirty).toBe(true);
+    expect(state.content).toBe('a v1 v2');
+    // Ce qui est parti est bien sur le disque : la date le dit.
+    expect(state.lastSavedAt).not.toBeNull();
+  });
+
+  it('la synchro de la vue n’est pas encore passée : même chose', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    live = 'a v1 v2';
+
+    release();
+    await writing;
+
+    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(useEditorStore.getState().content).toBe('a v1 v2');
+  });
+
+  it('le fichier suivant : la porte écrit ces frappes dans leur fichier', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    live = 'a v1 v2';
+    useEditorStore.setState({ content: live, isDirty: true });
+    release();
+    await writing;
+
+    await useEditorStore.getState().loadFile(B);
+
+    expect(saved).toEqual([
+      { path: A, content: 'a v1' },
+      { path: A, content: 'a v1 v2' },
+    ]);
+    expect(useEditorStore.getState().filePath).toBe(B);
+    expect(useEditorStore.getState().isDirty).toBe(false);
+  });
+
+  it('aucune vue montée : le miroir porte la frappe, et l’écriture ne la lui reprend pas', async () => {
+    useEditorStore.setState({ content: 'a v1', editorFacade: null });
+    const writing = useEditorStore.getState().saveFile();
+    useEditorStore.setState({ content: 'a v1 v2', isDirty: true });
+
+    release();
+    await writing;
+
+    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(useEditorStore.getState().content).toBe('a v1 v2');
+  });
+
+  it('frappe annulée pendant l’écriture : le texte vivant est celui écrit, plus rien à faire', async () => {
+    const writing = useEditorStore.getState().saveFile();
+    live = 'a v1 v2';
+    useEditorStore.setState({ content: live, isDirty: true });
+    live = 'a v1';
+
+    release();
+    await writing;
+
+    expect(useEditorStore.getState().isDirty).toBe(false);
+    expect(useEditorStore.getState().content).toBe('a v1');
+  });
+
+  it('saveFileAs, aucune vue montée : la frappe de pendant l’écriture reste dans le miroir', async () => {
+    useEditorStore.setState({ content: 'a v1', editorFacade: null });
+    const writing = useEditorStore.getState().saveFileAs(B);
+    useEditorStore.setState({ content: 'a v1 v2', isDirty: true });
+
+    release();
+    await writing;
+
+    expect(useEditorStore.getState().filePath).toBe(B);
+    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(useEditorStore.getState().content).toBe('a v1 v2');
+  });
+
+  it('un échec d’écriture ne touche à rien : le texte reste à écrire', async () => {
+    const failing = async () => ({ success: false, error: 'ENOSPC' });
+    (globalThis as unknown as { electron: { editor: { saveFile: unknown } } }).electron.editor.saveFile = failing;
+
+    await expect(useEditorStore.getState().saveFile()).rejects.toThrow('ENOSPC');
+
+    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(useEditorStore.getState().content).toBe('a v0');
+    expect(useEditorStore.getState().lastSavedAt).toBeNull();
+  });
+});
+
+/** Le contrat de l'erreur : `absent` est le seul cas où le document peut être créé. */
+describe('loadFile — un document qui ne s’ouvre pas', () => {
+  const A = '/p/a.md';
+  const B = '/p/b.md';
+
+  function respondWith(response: Record<string, unknown>): void {
+    const g = globalThis as unknown as { window?: unknown };
+    if (!g.window) g.window = g;
+    (globalThis as unknown as { electron: unknown }).electron = {
+      editor: { loadFile: async () => response, saveFile: async () => ({ success: true }) },
+    };
+  }
+
+  beforeEach(() => {
+    useEditorStore.setState({ filePath: A, content: '# A\n', isDirty: false, editorFacade: null });
+  });
+
+  afterEach(() => {
+    useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null });
+  });
+
+  it.each([
+    [{ success: false, code: 'absent', error: 'ENOENT' }, 'absent', undefined],
+    [{ success: false, code: 'unreadable', reason: 'permission', error: 'EACCES' }, 'unreadable', 'permission'],
+    [{ success: false, code: 'unreadable', reason: 'encoding', error: 'pas UTF-8' }, 'unreadable', 'encoding'],
+  ])('%j : l’erreur le porte, et rien n’a changé', async (response, code, reason) => {
+    respondWith(response);
+
+    const error = await useEditorStore
+      .getState()
+      .loadFile(B)
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(EditorFileError);
+    expect(error).toMatchObject({ code, reason });
+    expect(useEditorStore.getState().filePath).toBe(A);
+    expect(useEditorStore.getState().content).toBe('# A\n');
+  });
+
+  it('une réponse qui ne dit pas ce qui se passe n’est jamais lue comme « absent »', async () => {
+    respondWith({ success: false, error: 'tout autre échec' });
+
+    await expect(useEditorStore.getState().loadFile(B)).rejects.toMatchObject({ code: 'unreadable' });
+  });
+
+  it('un fichier qui n’est pas en UTF-8 : le message dit quoi faire, et non « introuvable »', async () => {
+    respondWith({ success: false, code: 'unreadable', reason: 'encoding', error: '/p/b.md n’est pas encodé en UTF-8' });
+
+    const error = await useEditorStore
+      .getState()
+      .loadFile(B)
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe(i18n.t('editor.notUtf8'));
+    expect(openErrorKey(error, 'toolbar.openError')).toBe('editor.notUtf8');
+  });
+
+  it('toute autre erreur garde le message de l’appelant', () => {
+    expect(openErrorKey(new Error('EACCES'), 'toolbar.openError')).toBe('toolbar.openError');
+    expect(openErrorKey(new EditorFileError('absent', undefined, 'x'), 'toolbar.openError')).toBe('toolbar.openError');
+    expect(openErrorKey(new EditorFileError('unreadable', 'permission', 'x'), 'toolbar.openError')).toBe(
+      'toolbar.openError'
+    );
   });
 });

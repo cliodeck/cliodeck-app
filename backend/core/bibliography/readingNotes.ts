@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, rename } from 'fs/promises';
 import path from 'path';
 import yaml from 'js-yaml';
-import { atomicWriteFile } from '../fs/user-files.js';
+import { atomicWriteFile, UnreadableFileError, updateFile, withFileLock } from '../fs/user-files.js';
 
 /**
  * Notes de lecture : un fichier Markdown par référence, dans un dossier
@@ -111,6 +111,15 @@ export function noteFileName(citekey: string): string {
 async function writeAtomically(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   await atomicWriteFile(file, content);
+}
+
+/**
+ * Une mise à jour à la fois dans le dossier des notes, dans l'ordre d'arrivée. Le fichier
+ * d'une note ne se connaît qu'après avoir lu le dossier, et une clé refaite le renomme :
+ * sans ce verrou, une étiquette posée en même temps recréait l'ancien nom à côté du nouveau.
+ */
+function withNotesLock<T>(projectPath: string, fn: () => Promise<T>): Promise<T> {
+  return withFileLock(path.join(projectPath, READING_NOTES_DIR), fn);
 }
 
 /**
@@ -230,25 +239,30 @@ export async function ensureReadingNote(projectPath: string, reference: Referenc
 /**
  * Remplace les étiquettes du projet d'une référence. Crée la note au besoin ;
  * garde intacts le corps et tout ce que l'utilisateur a ajouté au front
- * matter.
+ * matter. Une note qui n'est pas en UTF-8 lève `UnreadableFileError` sans être
+ * touchée : la réécrire rendrait définitifs ses accents changés en U+FFFD.
  */
-export async function setProjectTags(
+export function setProjectTags(
   projectPath: string,
   reference: ReferenceIdentity,
   tags: string[]
 ): Promise<ReadingNoteInfo> {
-  const file = await ensureReadingNote(projectPath, reference);
-  const note = parseNote(await readFile(file, 'utf-8'));
+  return withNotesLock(projectPath, async () => {
+    const file = await ensureReadingNote(projectPath, reference);
+    const cleaned = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
 
-  const cleaned = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
-  if (cleaned.length > 0) note.frontMatter.tags = cleaned;
-  else delete note.frontMatter.tags;
-  // La note rattrape l'identité courante (clé refaite, clé Zotero apparue).
-  note.frontMatter.citekey = reference.citekey;
-  if (reference.zoteroKey) note.frontMatter.zotero_key = reference.zoteroKey;
-
-  await writeAtomically(file, serializeNote(note));
-  return { file, citekey: reference.citekey, zoteroKey: reference.zoteroKey, tags: cleaned };
+    await updateFile(file, (current) => {
+      // Retirée depuis `ensureReadingNote` : elle renaît, il n'y a plus de corps à garder.
+      const note = parseNote(current ?? '');
+      if (cleaned.length > 0) note.frontMatter.tags = cleaned;
+      else delete note.frontMatter.tags;
+      // La note rattrape l'identité courante (clé refaite, clé Zotero apparue).
+      note.frontMatter.citekey = reference.citekey;
+      if (reference.zoteroKey) note.frontMatter.zotero_key = reference.zoteroKey;
+      return serializeNote(note);
+    });
+    return { file, citekey: reference.citekey, zoteroKey: reference.zoteroKey, tags: cleaned };
+  });
 }
 
 /**
@@ -256,26 +270,39 @@ export async function setProjectTags(
  * front matter et renomme le fichier, sauf si son nom a été changé à la main
  * ou si le nouveau nom est déjà pris. Une note n'est jamais supprimée, même
  * quand sa référence sort de la bibliographie : c'est le travail de
- * l'historien.
+ * l'historien. Une note qui n'est pas en UTF-8 reste telle quelle, sous son nom :
+ * sa clé Zotero, si elle en a une, la retrouve, et les autres notes suivent quand même.
  */
 export async function followRenamedCitekeys(
   projectPath: string,
   renames: Array<{ zoteroKey: string; from: string; to: string }>
 ): Promise<void> {
   if (renames.length === 0) return;
-  const notes = await listReadingNotes(projectPath);
+  return withNotesLock(projectPath, async () => {
+    const notes = await listReadingNotes(projectPath);
 
-  for (const { zoteroKey, from, to } of renames) {
-    const note = findReadingNote(notes, { citekey: from, zoteroKey });
-    if (!note) continue;
+    for (const { zoteroKey, from, to } of renames) {
+      const note = findReadingNote(notes, { citekey: from, zoteroKey });
+      if (!note) continue;
 
-    const parsed = parseNote(await readFile(note.file, 'utf-8'));
-    parsed.frontMatter.citekey = to;
-    await writeAtomically(note.file, serializeNote(parsed));
+      try {
+        const { written } = await updateFile(note.file, (current) => {
+          if (current === null) return null;
+          const parsed = parseNote(current);
+          parsed.frontMatter.citekey = to;
+          return serializeNote(parsed);
+        });
+        if (!written) continue;
+      } catch (error) {
+        if (!(error instanceof UnreadableFileError)) throw error;
+        console.warn(`⚠️ Note de lecture laissée telle quelle (clé ${from} → ${to}) : ${error.message}`);
+        continue;
+      }
 
-    const target = path.join(path.dirname(note.file), noteFileName(to));
-    if (path.basename(note.file) === noteFileName(from) && !existsSync(target)) {
-      await rename(note.file, target);
+      const target = path.join(path.dirname(note.file), noteFileName(to));
+      if (path.basename(note.file) === noteFileName(from) && !existsSync(target)) {
+        await rename(note.file, target);
+      }
     }
-  }
+  });
 }

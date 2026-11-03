@@ -13,7 +13,7 @@ import type { ResolvedChapter, UnattachedFile } from '@backend/types/book';
 import { ChapterNavigator } from '../ChapterNavigator';
 import { replaceLeadingHeading } from '@/editor/outline';
 import { useProjectStore } from '../../../stores/projectStore';
-import { useEditorStore } from '../../../stores/editorStore';
+import { EditorFileError, useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import type { EditorFacade } from '@/editor/facade';
@@ -153,6 +153,54 @@ describe('ChapterNavigator', () => {
 
     expect(useProjectStore.getState().currentChapterId).toBe('c1');
     expect(useDialogStore.getState().alertMessage).toBe('book.renumberInProgress');
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it('chapitre qui n’est pas en UTF-8 : le refus expliqué, et le chapitre courant ne bouge pas', async () => {
+    loadFile.mockRejectedValue(new EditorFileError('unreadable', 'encoding', 'Ce fichier n’est pas en UTF-8.'));
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useProjectStore.getState().currentChapterId).toBe('c1');
+    expect(useDialogStore.getState().alertMessage).toBe('editor.notUtf8');
+    act(() => useDialogStore.getState().closeAlert());
+  });
+
+  it.each([
+    ['absent', undefined, '/livre/chapters/c2.md n’existe pas'],
+    ['unreadable', 'not-a-file', '/livre/chapters/c2.md n’est pas un fichier ordinaire'],
+    ['unreadable', 'permission', 'EACCES: permission denied'],
+  ] as const)(
+    'chapitre illisible (%s, %s) : le message traduit, jamais la phrase du main',
+    async (code, reason, mainText) => {
+      loadFile.mockRejectedValue(new EditorFileError(code, reason, mainText));
+      setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+      render(<ChapterNavigator />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Deux'));
+      });
+
+      expect(useProjectStore.getState().currentChapterId).toBe('c1');
+      expect(useDialogStore.getState().alertMessage).toBe('toolbar.openError');
+      act(() => useDialogStore.getState().closeAlert());
+    }
+  );
+
+  it('témoin : un chapitre sortant impossible à écrire garde son message', async () => {
+    loadFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+    setupStore([chapter({ id: 'c1', title: 'Un' }), chapter({ id: 'c2', title: 'Deux' })]);
+    render(<ChapterNavigator />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Deux'));
+    });
+
+    expect(useDialogStore.getState().alertMessage).toBe('ENOSPC: no space left on device');
     act(() => useDialogStore.getState().closeAlert());
   });
 

@@ -4,6 +4,7 @@ import path from 'path';
 import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
+import { readUserFile, withFileLock } from '../../../backend/core/fs/user-files.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
 import {
@@ -14,6 +15,7 @@ import {
   normalizeBookSettings,
   type BookSettings,
   type Chapter,
+  type ChapterRead,
   type ResolvedChapter,
   type UnattachedFile,
 } from '../../../backend/types/book.js';
@@ -479,6 +481,24 @@ export class ProjectManager {
     return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
   }
 
+  private readChapter(projectDir: string, relPath: string): Promise<ChapterRead> {
+    if (!this.isInsideProject(projectDir, relPath)) {
+      return Promise.resolve({
+        filePath: relPath,
+        reason: 'refused',
+        error: `Path "${relPath}" escapes the project directory`,
+      });
+    }
+    const absolute = path.resolve(projectDir, relPath);
+    return withFileLock(absolute, async (): Promise<ChapterRead> => {
+      const read = await readUserFile(absolute);
+      if (read.kind === 'ok') return { filePath: relPath, content: read.content };
+      return read.kind === 'absent'
+        ? { filePath: relPath, reason: 'absent', error: `${relPath}: file not found` }
+        : { filePath: relPath, reason: read.reason, error: read.message };
+    });
+  }
+
   /** Titre suggéré pour un fichier non rattaché : son premier `#`. */
   private async suggestTitle(absPath: string): Promise<string | undefined> {
     try {
@@ -634,38 +654,24 @@ export class ProjectManager {
    * sont PAS ouverts dans l'éditeur. Même garde anti-évasion que le reste :
    * un chemin qui sort du projet est refusé, pas lu.
    *
-   * Un fichier illisible (disparu entre-temps) est retourné avec son
-   * erreur plutôt que de faire échouer toute la lecture : l'appelant décide
-   * s'il peut travailler sans lui.
+   * Un fichier illisible (disparu entre-temps, ou qui n'est pas en UTF-8) est
+   * retourné avec sa raison plutôt que de faire échouer toute la lecture :
+   * l'appelant décide s'il peut travailler sans lui. La lecture est stricte, comme
+   * à l'ouverture : la renumérotation réécrit ce qu'elle lit, et un décodage avec
+   * perte rendrait définitifs les U+FFFD qu'elle y aurait trouvés.
    */
   async readChapters(data: { projectPath: string; filePaths: string[] }): Promise<{
     success: boolean;
-    files: Array<{ filePath: string; content?: string; error?: string }>;
+    files: ChapterRead[];
     error?: string;
   }> {
     try {
       const { projectDir } = this.resolveProjectPaths(data.projectPath);
-      const files: Array<{ filePath: string; content?: string; error?: string }> = [];
-
-      for (const relPath of data.filePaths) {
-        if (!this.isInsideProject(projectDir, relPath)) {
-          files.push({
-            filePath: relPath,
-            error: `Path "${relPath}" escapes the project directory`,
-          });
-          continue;
-        }
-        try {
-          const content = await readFile(path.resolve(projectDir, relPath), 'utf-8');
-          files.push({ filePath: relPath, content });
-        } catch (error: unknown) {
-          files.push({
-            filePath: relPath,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
+      // Tous les verrous dès la réception : une lecture demandée après une écriture lit
+      // ce que celle-ci a écrit.
+      const files = await Promise.all(
+        data.filePaths.map((relPath) => this.readChapter(projectDir, relPath))
+      );
       return { success: true, files };
     } catch (error: unknown) {
       console.error('❌ Failed to read chapters:', error);
