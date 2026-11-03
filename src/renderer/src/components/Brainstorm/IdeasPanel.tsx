@@ -66,6 +66,9 @@ export const IdeasPanel: React.FC = () => {
     setImporting(true);
     try {
       const result = await fusion.vault.importAsIdeas({ maxFiles: 200 });
+      // Une bascule pendant l'attente : ces notes n'ont pas à rejoindre la liste du projet suivant,
+      // et la sortie les y écrirait, sans que l'auteur ait rien fait dans ce projet.
+      if ((useProjectStore.getState().currentProject?.path ?? null) !== projectPath) return;
       if (result.success && result.ideas) {
         const imported = result.ideas as Array<{
           title: string;

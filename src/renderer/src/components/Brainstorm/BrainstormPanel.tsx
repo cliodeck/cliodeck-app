@@ -62,9 +62,9 @@ type BrainstormTab = 'chat' | 'ideas' | 'canvas' | 'graph';
 /**
  * Ce que l'auteur doit savoir du fichier de ses idées, sur tous les onglets : le chargement met
  * de côté dès l'arrivée sur le chat, l'onglet par défaut, où l'on peut passer toute une session.
- * Pas de bouton de fermeture : la mise de côté se dit tant que la fenêtre est ouverte. Seule une
- * lecture impossible attend qu'on vienne aux idées : rien n'est en jeu, et le disque reviendra
- * peut-être tout seul.
+ * Pas de bouton de fermeture : la mise de côté se dit tant que la fenêtre est ouverte et que le
+ * fichier mis de côté est là. Seule une lecture impossible attend qu'on vienne aux idées : rien
+ * n'est en jeu, et le disque reviendra peut-être tout seul.
  */
 const IdeasFileNotices: React.FC<{ projectPath: string; showBlocked: boolean }> = ({ projectPath, showBlocked }) => {
   const { t } = useTranslation('common');

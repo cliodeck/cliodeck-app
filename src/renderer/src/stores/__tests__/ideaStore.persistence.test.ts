@@ -518,6 +518,293 @@ describe('la bannière vaut pour la session et pour ce projet', () => {
   });
 });
 
+describe('un fichier revenu pendant la session ne s’écrase pas', () => {
+  const forty = Array.from({ length: 40 }, (_, i) => `Idée ${i}`);
+
+  async function quarantine(): Promise<string> {
+    const whole = ideasFile(forty);
+    fs.writeFileSync(ideasA, whole.slice(0, Math.floor(whole.length * 0.6)));
+    await store().loadIdeas(dirA);
+    return theBackup(dirA);
+  }
+
+  it('réparé puis renommé par l’auteur : ses idées reviennent à côté de la nouvelle, et plus rien à dire', async () => {
+    const backup = await quarantine();
+    fs.writeFileSync(backup, ideasFile(forty));
+    fs.renameSync(backup, ideasA);
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual([...forty, 'Après coup']);
+    expect(titles()).toEqual([...forty, 'Après coup']);
+    expect(store().saveError).toBeNull();
+    expect(store().persistence).toEqual({ kind: 'ready' });
+  });
+
+  it('remis par une synchronisation : la version complète reste, et la mise de côté aussi', async () => {
+    const backup = await quarantine();
+    const truncated = fs.readFileSync(backup, 'utf8');
+    fs.writeFileSync(ideasA, ideasFile(forty));
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual([...forty, 'Après coup']);
+    expect(fs.readFileSync(backup, 'utf8')).toBe(truncated);
+    expect(quarantined(dirA)).toEqual([backup]);
+    expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: backup });
+  });
+
+  it('revenu encore abîmé : mis de côté à son tour, sans toucher au premier, et l’idée s’écrit', async () => {
+    const first = await quarantine();
+    const firstBytes = fs.readFileSync(first, 'utf8');
+    fs.writeFileSync(ideasA, '{ encore tronqué');
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Après coup']);
+    expect(fs.readFileSync(first, 'utf8')).toBe(firstBytes);
+    const second = quarantined(dirA).filter((file) => file !== first);
+    expect(second).toHaveLength(1);
+    expect(fs.readFileSync(second[0], 'utf8')).toBe('{ encore tronqué');
+    expect(store().persistence).toEqual({ kind: 'quarantined', backupPath: second[0] });
+  });
+
+  it('revenu mais illisible pour l’instant : rien ne s’écrit, ça se dit, et Réessayer le reprend', async () => {
+    await quarantine();
+    fs.writeFileSync(ideasA, ideasFile(forty));
+    h.readTimesOut = ideasA;
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(writes).toEqual([]);
+    expect(fs.readFileSync(ideasA, 'utf8')).toBe(ideasFile(forty));
+    expect(store().saveError).toContain('ETIMEDOUT');
+    expect(titles()).toEqual(['Après coup']);
+    expect(store().persistence.kind).toBe('quarantined');
+    expect(hasUnwrittenIdeas()).toBe(true);
+
+    h.readTimesOut = null;
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual([...forty, 'Après coup']);
+    expect(store().saveError).toBeNull();
+  });
+
+  it('ce qui se tape pendant la relecture part aussi : le maillon écrit l’état du moment où il écrit', async () => {
+    await quarantine();
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    afterRead = async () => {
+      afterRead = null;
+      newIdea('Pendant la relecture');
+    };
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Après coup', 'Pendant la relecture']);
+    expect(titles()).toEqual(['Braudel', 'Après coup', 'Pendant la relecture']);
+  });
+
+  it('un projet sans fichier à l’ouverture, qui en reçoit un ensuite (synchronisation en retard) : même règle', async () => {
+    await store().loadIdeas(dirA);
+    fs.writeFileSync(ideasA, ideasFile(['Braudel', 'Febvre']));
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Febvre', 'Après coup']);
+    expect(store().persistence).toEqual({ kind: 'ready' });
+  });
+
+  it('revenu, puis une écriture ratée : Réessayer ne relit pas ce qu’il a déjà repris, et rien ne se double', async () => {
+    await quarantine();
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(store().saveError).toContain('ENOSPC');
+    expect(titles()).toEqual(['Braudel', 'Après coup']);
+
+    (window.electron.fs as { writeFile: unknown }).writeFile = write;
+    await store().saveIdeas(dirA);
+
+    expect(store().saveError).toBeNull();
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Après coup']);
+  });
+
+  it('encore absent à la première écriture, qui rate ; revenu avant Réessayer : il est repris quand même', async () => {
+    await quarantine();
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+    expect(store().saveError).toContain('ENOSPC');
+
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    (window.electron.fs as { writeFile: unknown }).writeFile = write;
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Après coup']);
+    expect(store().saveError).toBeNull();
+  });
+
+  it('revenu avant un rechargement : celui-ci l’a lu, et la première écriture ne le reprend pas une seconde fois', async () => {
+    await store().loadIdeas(dirA);
+    fs.writeFileSync(ideasA, ideasFile(['Braudel']));
+    await store().loadIdeas(dirA);
+    expect(titles()).toEqual(['Braudel']);
+
+    newIdea('Après coup');
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Braudel', 'Après coup']);
+  });
+
+  it('une fois écrit, le fichier est le nôtre : retirer une idée ne la fait pas revenir', async () => {
+    await quarantine();
+    const removed = newIdea('Retirée');
+    newIdea('Gardée');
+    await store().saveIdeas(dirA);
+    expect(titlesOnDisk(ideasA)).toEqual(['Retirée', 'Gardée']);
+
+    store().removeIdea(removed);
+    await store().saveIdeas(dirA);
+
+    expect(titlesOnDisk(ideasA)).toEqual(['Gardée']);
+    expect(titles()).toEqual(['Gardée']);
+  });
+
+  describe('une écriture qui aboutit après le délai', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function writeThatLandsLate(project: string): Promise<() => Promise<void>> {
+      let land: () => void = () => undefined;
+      holdWrites = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const saving = store().saveIdeas(project);
+      // Pas avant que l'écriture soit partie : le délai tomberait sur la relecture du vrai disque.
+      await vi.waitFor(() => expect(inflightWrites).toBe(1), { timeout: 5000, interval: 50 });
+      await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+      await saving;
+      expect(store().saveError).toBeTruthy();
+      vi.useRealTimers();
+      return async () => {
+        holdWrites = null;
+        land();
+        await vi.waitFor(() => expect(inflightWrites).toBe(0), { timeout: 5000 });
+        // La suite de l'écriture, côté store, passe aux microtâches qui suivent.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+    }
+
+    it('n’est pas prise pour un fichier revenu : ce qu’on a retiré entre-temps ne revient pas', async () => {
+      await quarantine();
+      const removed = newIdea('Retirée');
+      newIdea('Gardée');
+      const landLate = await writeThatLandsLate(dirA);
+
+      await landLate();
+      expect(titlesOnDisk(ideasA)).toEqual(['Retirée', 'Gardée']);
+
+      store().removeIdea(removed);
+      await store().saveIdeas(dirA);
+
+      expect(titlesOnDisk(ideasA)).toEqual(['Gardée']);
+    });
+
+    it('dans A, ne fait pas oublier à B qu’il n’avait pas de fichier', async () => {
+      await quarantine();
+      newIdea('De A');
+      const landLate = await writeThatLandsLate(dirA);
+
+      store().abandonUnwrittenIdeas();
+      mainSwitchesTo(dirB);
+      await store().loadIdeas(dirB);
+      // Validée avant la bascule, une écriture en panne aboutit après : le main ne la refuse plus.
+      mainSwitchesTo(dirA);
+      await landLate();
+      expect(titlesOnDisk(ideasA)).toEqual(['De A']);
+      mainSwitchesTo(dirB);
+
+      fs.writeFileSync(ideasB, ideasFile(['Reçue par synchronisation']));
+
+      newIdea('De B');
+      await store().saveIdeas(dirB);
+
+      expect(titlesOnDisk(ideasB)).toEqual(['Reçue par synchronisation', 'De B']);
+    });
+  });
+});
+
+describe('une mise de côté qui n’est plus là ne se dit plus', () => {
+  async function quarantine(): Promise<string> {
+    fs.writeFileSync(ideasA, '{ tronqué');
+    await store().loadIdeas(dirA);
+    return theBackup(dirA);
+  }
+
+  it('réparée et remise à sa place : au rechargement, les idées, sans message sur un chemin qui n’existe plus', async () => {
+    const backup = await quarantine();
+    fs.writeFileSync(backup, ideasFile(['Braudel', 'Febvre']));
+    fs.renameSync(backup, ideasA);
+
+    await store().loadIdeas(dirA);
+
+    expect(titles()).toEqual(['Braudel', 'Febvre']);
+    expect(store().persistence).toEqual({ kind: 'ready' });
+  });
+
+  it('rangée ailleurs par l’auteur : plus de message non plus, y compris après `Cmd+R`', async () => {
+    const backup = await quarantine();
+    fs.renameSync(backup, path.join(root, 'rangee-ailleurs.json'));
+
+    await store().loadIdeas(dirA);
+    expect(store().persistence).toEqual({ kind: 'ready' });
+
+    const reloaded = await reloadedRenderer();
+    await reloaded.getState().loadIdeas(dirA);
+    expect(reloaded.getState().persistence).toEqual({ kind: 'ready' });
+  });
+
+  it('un dossier qui ne répond plus pendant ce contrôle : bloqué, comme toute lecture sans réponse', async () => {
+    await quarantine();
+    const exists = window.electron.fs.exists;
+    let asked = false;
+    (window.electron.fs as { exists: unknown }).exists = (filePath: string) => {
+      if (!QUARANTINE.test(path.basename(filePath))) return exists(filePath);
+      asked = true;
+      return new Promise(() => undefined);
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const loading = store().loadIdeas(dirA);
+      // Pas avant : le délai tomberait sur la lecture du vrai disque, et le test passerait pour une autre raison.
+      await vi.waitFor(() => expect(asked).toBe(true), { timeout: 5000, interval: 50 });
+      await vi.advanceTimersByTimeAsync(IDEAS_IO_DEADLINE_MS);
+      await loading;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(store().persistence.kind).toBe('blocked');
+  });
+});
+
 describe('une lecture impossible : rien ne bouge, rien ne s’écrit, et on peut réessayer', () => {
   it('une erreur d’E/S (fichier OneDrive sans ses données) : bloqué, fichier intact, aucune écriture', async () => {
     const content = ideasFile(['Braudel']);

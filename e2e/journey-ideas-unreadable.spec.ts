@@ -8,7 +8,17 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
@@ -127,6 +137,34 @@ test('ideas.json tronqué : mis de côté, la bannière donne le chemin, et la p
       await expect(window.locator('.ideas-panel__item')).toHaveCount(1);
       await expect(banner(window)).toHaveCount(0);
       expect(backups(project)).toHaveLength(1);
+    });
+  } finally {
+    rmSync(project.dir, { recursive: true, force: true });
+  }
+});
+
+test('le fichier réparé et remis à sa place pendant la session : la nouvelle idée le rejoint, sans rien écraser', async () => {
+  const whole = ideasFile(...Array.from({ length: 40 }, (_, i) => `Idée ${i}`));
+  const project = makeProject(whole.slice(0, Math.floor(whole.length * 0.6)));
+  try {
+    await withApp(async (app, window) => {
+      await openProject(app, window, project.projectJson);
+      await goToTab(window, 'Idées');
+      await expect(banner(window)).toBeVisible({ timeout: 10_000 });
+
+      // Ce que la bannière invite à faire : réparer le fichier indiqué, puis le remettre.
+      const backup = join(project.dir, '.cliodeck', backups(project)[0]);
+      writeFileSync(backup, whole);
+      renameSync(backup, project.ideasJson);
+
+      await window.locator('button[title="Nouvelle idée"]').first().click();
+
+      await expect(window.locator('.ideas-panel__item')).toHaveCount(41, { timeout: 10_000 });
+      await expect
+        .poll(() => JSON.parse(readFileSync(project.ideasJson, 'utf8')).ideas.length, { timeout: 10_000 })
+        .toBe(41);
+      // Le chemin qu'elle donnait n'existe plus : elle n'a plus rien à dire.
+      await expect(banner(window)).toHaveCount(0);
     });
   } finally {
     rmSync(project.dir, { recursive: true, force: true });

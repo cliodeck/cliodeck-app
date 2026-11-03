@@ -7,6 +7,7 @@
  * l'IPC ; la vraie fenêtre est dans `e2e/journey-ideas-unreadable.spec.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EditorFacade } from '@/editor/facade';
 import { flushOpenDocument } from '../useSaveOnQuit';
 import { useEditorStore } from '../../stores/editorStore';
 import { useIdeaStore } from '../../stores/ideaStore';
@@ -31,7 +32,14 @@ beforeEach(async () => {
       },
     },
   };
-  useEditorStore.setState({ filePath: null, content: '', isDirty: false, switchLock: null, bufferDetached: true });
+  useEditorStore.setState({
+    filePath: null,
+    content: '',
+    isDirty: false,
+    switchLock: null,
+    bufferDetached: true,
+    editorFacade: null,
+  });
   useIdeaStore.setState({
     ideas: [],
     isLoading: false,
@@ -77,6 +85,33 @@ describe('flushOpenDocument et les idées', () => {
 
     const report = await flushOpenDocument();
 
+    expect(report.outcome).toBe('failed');
+    expect(report.error).toContain('ENOSPC');
+  });
+
+  it('un document bien écrit ne fait pas oublier des idées qui échouent : `failed`, sans perdre le document', async () => {
+    const saved: Array<[string, string]> = [];
+    (window.electron as unknown as { editor: unknown }).editor = {
+      saveFile: async (filePath: string, content: string) => {
+        saved.push([filePath, content]);
+        return { success: true };
+      },
+    };
+    useEditorStore.setState({
+      filePath: '/p/document.md',
+      content: 'Texte.',
+      bufferDetached: false,
+      editorFacade: { getValue: () => 'Texte. Frappe.' } as unknown as EditorFacade,
+    });
+    await ideaStore().loadIdeas(PROJECT);
+    ideaStore().updateIdea('i1', { content: 'À écrire.' });
+    onWrite = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+
+    const report = await flushOpenDocument();
+
+    expect(saved).toEqual([['/p/document.md', 'Texte. Frappe.']]);
     expect(report.outcome).toBe('failed');
     expect(report.error).toContain('ENOSPC');
   });

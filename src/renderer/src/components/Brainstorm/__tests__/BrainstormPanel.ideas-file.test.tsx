@@ -13,7 +13,7 @@ import os from 'os';
 import path from 'path';
 
 import { BrainstormPanel } from '../BrainstormPanel';
-import { useIdeaStore, type Idea } from '../../../stores/ideaStore';
+import { hasUnwrittenIdeas, useIdeaStore, type Idea } from '../../../stores/ideaStore';
 import { useProjectStore } from '../../../stores/projectStore';
 
 // Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
@@ -250,7 +250,6 @@ describe('lecture impossible', () => {
 
       await clickTab('ideas.tabGraph');
       expect(screen.getByText(BLOCKED)).toBeInTheDocument();
-      expect(screen.queryByTestId('graphe')).toBeNull();
 
       expect(backups()).toEqual([]);
     } finally {
@@ -263,6 +262,147 @@ describe('lecture impossible', () => {
 
     expect(screen.queryByText(BLOCKED)).toBeNull();
     expect(screen.getByText('Braudel')).toBeInTheDocument();
+  });
+});
+
+describe('la bannière d’un projet ne déborde pas sur le suivant', () => {
+  function holdReadsOf(dir: string): () => void {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const read = window.electron.fs.readUserFile;
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = async (p: string) => {
+      if (p.startsWith(dir)) await held;
+      return read(p);
+    };
+    return () => {
+      release();
+    };
+  }
+
+  it('la mise de côté de A ne se dit plus pendant le chargement de B', async () => {
+    fs.writeFileSync(ideasA, '{ tronqué');
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+    expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
+    const releaseB = holdReadsOf(dirB);
+
+    openProject(dirB);
+    await act(async () => {
+      await vi.waitFor(() => expect(useIdeaStore.getState().isLoading).toBe(true), { timeout: 5000 });
+    });
+
+    expect(useIdeaStore.getState().loadedFor).toBe(dirA);
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    releaseB();
+    await settled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('le Réessayer de A, qui porterait sur B, non plus', async () => {
+    const read = window.electron.fs.readUserFile;
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = async (p: string) =>
+      p === ideasA ? { kind: 'unreadable', reason: 'io', message: 'ETIMEDOUT' } : read(p);
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+    await clickTab('ideas.tabIdeas');
+    expect(screen.getByRole('button', { name: 'ideas.unreadable.retry' })).toBeInTheDocument();
+    const releaseB = holdReadsOf(dirB);
+
+    openProject(dirB);
+    await act(async () => {
+      await vi.waitFor(() => expect(useIdeaStore.getState().isLoading).toBe(true), { timeout: 5000 });
+    });
+
+    expect(useIdeaStore.getState().loadedFor).toBe(dirA);
+    expect(screen.queryByRole('button', { name: 'ideas.unreadable.retry' })).toBeNull();
+
+    releaseB();
+    await settled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('bloqué, le Graphe reste fermé lui aussi', () => {
+  it('même si une liste traîne en mémoire : le graphe vide ne prouverait rien, il ne rend alors rien', async () => {
+    fs.writeFileSync(ideasA, ideasFile('Braudel'));
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+    await clickTab('ideas.tabGraph');
+    // Le témoin : avec cette liste et sans blocage, le graphe est là.
+    expect(screen.getByTestId('graphe')).toBeInTheDocument();
+
+    act(() => {
+      useIdeaStore.setState({ persistence: { kind: 'blocked', reason: 'ETIMEDOUT' } });
+    });
+
+    expect(useIdeaStore.getState().ideas).toHaveLength(1);
+    expect(screen.getByText(BLOCKED)).toBeInTheDocument();
+    expect(screen.queryByTestId('graphe')).toBeNull();
+  });
+});
+
+describe('un import Obsidian qui répond après une bascule', () => {
+  const NOTE = 'NOTE-DU-COFFRE-DE-A';
+  let answerImport: () => void;
+
+  beforeEach(() => {
+    const vault = window.electron.fusion?.vault as unknown as { importAsIdeas: unknown };
+    vault.importAsIdeas = () =>
+      new Promise((resolve) => {
+        answerImport = () =>
+          resolve({
+            success: true,
+            ideas: [{ title: NOTE, content: '', tags: [], wikilinks: [], notePath: 'note.md' }],
+          });
+      });
+  });
+
+  async function importStartedIn(dir: string): Promise<void> {
+    openProject(dir);
+    render(<BrainstormPanel />);
+    await settled();
+    await clickTab('ideas.tabIdeas');
+    await userEvent.click(screen.getByTitle('ideas.importObsidian'));
+  }
+
+  it('ne laisse rien de A dans la liste de B, ni sur son disque à la sortie', async () => {
+    const ideasB = path.join(dirB, '.cliodeck', 'ideas.json');
+    const onDiskB = ideasFile('De B');
+    fs.writeFileSync(ideasB, onDiskB);
+    await importStartedIn(dirA);
+
+    openProject(dirB);
+    await settled();
+    expect(screen.getByText('De B')).toBeInTheDocument();
+
+    await act(async () => {
+      answerImport();
+      // La suite de l'import passe aux microtâches qui suivent sa réponse.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(useIdeaStore.getState().ideas.map((i) => i.title)).toEqual(['De B']);
+    expect(hasUnwrittenIdeas()).toBe(false);
+    await useIdeaStore.getState().flushIdeas();
+    expect(fs.readFileSync(ideasB, 'utf8')).toBe(onDiskB);
+  });
+
+  it('sans bascule, les notes arrivent et s’écrivent', async () => {
+    await importStartedIn(dirA);
+
+    await act(async () => {
+      answerImport();
+      await vi.waitFor(() => expect(fs.existsSync(ideasA)).toBe(true), { timeout: 5000 });
+    });
+
+    expect(fs.readFileSync(ideasA, 'utf8')).toContain(NOTE);
+    expect(useIdeaStore.getState().ideas.map((i) => i.title)).toEqual([NOTE]);
   });
 });
 

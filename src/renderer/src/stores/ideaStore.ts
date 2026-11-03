@@ -13,7 +13,8 @@
  * inaccessible, plus rien ne s'écrit. Seule la liste chargée pour un projet s'écrit dans ce
  * projet, et le verrou du main n'y peut rien : il sérialise des écritures, pas leur contenu.
  * Enfin chargements et sauvegardes passent un par un dans une file, et chaque sauvegarde
- * écrit l'état du moment où vient son tour.
+ * écrit l'état du moment où vient son tour. Et un fichier qu'on n'a jamais lu ne s'écrase pas :
+ * celui qui revient alors qu'on n'en avait plus se relit avant la première écriture.
  */
 
 import { create } from 'zustand';
@@ -232,10 +233,24 @@ function rememberedBackup(projectPath: string): string | null {
   }
 }
 
+/**
+ * La mise de côté à signaler encore. Si l'auteur l'a remise à sa place ou rangée ailleurs, plus
+ * rien à en dire : le message donnerait un chemin qui n'existe plus.
+ */
+async function standingBackup(projectPath: string): Promise<string | null> {
+  const backupPath = rememberedBackup(projectPath);
+  return backupPath && (await withinDeadline(window.electron.fs.exists(backupPath))) ? backupPath : null;
+}
+
 type LoadedIdeas =
-  | { kind: 'ready'; ideas: Idea[] }
+  | { kind: 'ready'; ideas: Idea[]; fileFound: boolean; backupPath: string | null }
   | { kind: 'quarantined'; backupPath: string }
   | { kind: 'blocked'; reason: string };
+
+function persistenceAfter(loaded: LoadedIdeas): IdeaPersistence {
+  if (loaded.kind !== 'ready') return loaded;
+  return loaded.backupPath ? { kind: 'quarantined', backupPath: loaded.backupPath } : { kind: 'ready' };
+}
 
 /** Lire `ideas.json` à l'instant : `null` pour `ideas` si le contenu est à mettre de côté. */
 async function readIdeasOnce(ideasPath: string) {
@@ -259,7 +274,7 @@ async function readIdeasFile(projectPath: string): Promise<LoadedIdeas> {
       attempt = await readIdeasOnce(ideasPath);
     }
     const { read, ideas, damaged } = attempt;
-    if (ideas) return { kind: 'ready', ideas };
+    if (ideas) return { kind: 'ready', ideas, fileFound: true, backupPath: await standingBackup(projectPath) };
     if (damaged) {
       // Retenue à la réponse du main, même tardive : le fichier a alors bel et bien bougé.
       const moved = await withinDeadline(
@@ -278,7 +293,7 @@ async function readIdeasFile(projectPath: string): Promise<LoadedIdeas> {
     if (!(await withinDeadline(window.electron.fs.exists(projectPath)))) {
       return { kind: 'blocked', reason: projectPath };
     }
-    return { kind: 'ready', ideas: [] };
+    return { kind: 'ready', ideas: [], fileFound: false, backupPath: await standingBackup(projectPath) };
   } catch (error) {
     return { kind: 'blocked', reason: error instanceof Error ? error.message : String(error) };
   }
@@ -294,6 +309,8 @@ let waitingSave: { projectPath: string; done: Promise<void> } | null = null;
 let lastLoad = 0;
 /** La liste qu'il n'y a plus à écrire : celle du disque, à une disposition automatique près. */
 let writtenIdeas: string | null = null;
+/** Le projet chargé sans fichier sur le disque : s'il en vient un, il n'est pas à écraser. */
+let noFileFor: string | null = null;
 
 function enqueue(job: () => Promise<void>): Promise<void> {
   const done = queueTail.then(job);
@@ -327,16 +344,16 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
 
       const loaded = await readIdeasFile(projectPath);
       const ideas = loaded.kind === 'ready' ? loaded.ideas : [];
-      let persistence: IdeaPersistence;
-      if (loaded.kind !== 'ready') {
-        persistence = loaded;
-      } else {
-        const backupPath = rememberedBackup(projectPath);
-        persistence = backupPath ? { kind: 'quarantined', backupPath } : { kind: 'ready' };
-      }
       // Lire n'écrit rien : même normalisée, la liste chargée n'est pas à réécrire.
       writtenIdeas = serializeIdeas(ideas);
-      set({ ideas, persistence, loadedFor: projectPath, saveError: null, isLoading: load !== lastLoad });
+      noFileFor = loaded.kind === 'quarantined' || (loaded.kind === 'ready' && !loaded.fileFound) ? projectPath : null;
+      set({
+        ideas,
+        persistence: persistenceAfter(loaded),
+        loadedFor: projectPath,
+        saveError: null,
+        isLoading: load !== lastLoad,
+      });
     });
   },
 
@@ -473,6 +490,24 @@ export function hasUnwrittenIdeas(): boolean {
 }
 
 /**
+ * Le fichier est-il revenu depuis le chargement ? L'auteur a pu réparer celui qu'on avait mis de
+ * côté, un service de synchronisation le rendre, et l'écraser perdrait une liste qu'on n'a jamais
+ * vue, sans copie si la mise de côté a servi à le réparer. Ce qu'il apporte rejoint la liste à
+ * l'écran. Lève s'il ne se lit pas : on ne sait pas ce qu'on écraserait, et la liste à l'écran
+ * reste la seule copie de ce qu'a fait l'auteur, donc pas de `blocked`, qui la fermerait.
+ */
+async function takeInFileThatCameBack(projectPath: string): Promise<void> {
+  const loaded = await readIdeasFile(projectPath);
+  if (loaded.kind === 'blocked') throw new Error(loaded.reason);
+  if (loaded.kind === 'ready') {
+    if (!loaded.fileFound) return;
+    noFileFor = null;
+    useIdeaStore.setState((state) => ({ ideas: [...loaded.ideas, ...state.ideas] }));
+  }
+  useIdeaStore.setState({ persistence: persistenceAfter(loaded) });
+}
+
+/**
  * Le tour d'une sauvegarde : l'état du moment, et seulement dans le projet qui l'a chargé.
  * Sans ce garde, la liste de A partait dans B pendant une bascule, et un clic avant la fin du
  * premier chargement écrasait le fichier par une liste d'une seule idée.
@@ -483,15 +518,22 @@ async function writeCurrentIdeas(projectPath: string): Promise<boolean> {
     console.warn('Ideas not saved:', { projectPath, loadedFor, persistence: persistence.kind });
     return false;
   }
-  const data = serializeIdeas(ideas);
   // Rien de neuf : le blur d'un champ non retouché ou un clic sur une carte n'ont rien à écrire,
   // donc rien à faire échouer. Et si l'auteur a défait ce qui ne s'écrivait pas, plus rien à dire.
-  if (data === writtenIdeas) {
+  if (serializeIdeas(ideas) === writtenIdeas) {
     useIdeaStore.setState({ saveError: null });
     return true;
   }
   try {
-    await withinDeadline(window.electron.fs.writeFile(ideasFilePath(projectPath), data));
+    if (noFileFor === projectPath) await takeInFileThatCameBack(projectPath);
+    // Après la relecture : ce qui s'est tapé pendant part aussi.
+    const data = serializeIdeas(useIdeaStore.getState().ideas);
+    await withinDeadline(
+      // Retenu à la réponse du main, même tardive : le fichier est alors bel et bien le nôtre.
+      window.electron.fs.writeFile(ideasFilePath(projectPath), data).then(() => {
+        if (noFileFor === projectPath) noFileFor = null;
+      })
+    );
     writtenIdeas = data;
     useIdeaStore.setState({ saveError: null });
     return true;
