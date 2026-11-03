@@ -117,6 +117,8 @@
     "title": "Editor",
     "discardUntitledConfirm": "Dieses unbenannte Dokument wurde nie gespeichert. Verwerfen? Sein Text geht verloren.",
     "notUtf8": "Diese Datei ist nicht in UTF-8 kodiert. ClioDeck hat sie nicht geöffnet, weil ihre Sonderzeichen beim ersten Speichern beschädigt würden: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und öffnen Sie sie erneut.",
+    "autoSaveFailed": "Automatisches Speichern nicht möglich",
+    "autoSaveFailedHint": "Ihre letzten Änderungen sind noch im Editor, aber noch nicht auf der Festplatte. ClioDeck versucht es selbstständig weiter. Prüfen Sie den verfügbaren Speicherplatz und den Zugriff auf den Projektordner.",
     "fontSize": "Schriftgröße",
     "fontSizeHelp": "Textgröße im Markdown-Editor",
     "currentSize": "Aktuelle Größe: {{size}}px",

@@ -440,7 +440,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         // pas le sien. Dans le miroir, une vue l'afficherait à son prochain montage
         // et l'autosave l'écrirait dans le fichier entrant.
         if (get().documentVersion === documentVersion) {
-          set({ content, isDirty: false, lastSavedAt: Date.now() });
+          // L'auteur a pu taper pendant l'écriture : ce qui n'est pas parti reste à écrire,
+          // et le miroir ne revient pas au texte d'avant. `lastSavedAt` relance l'autosave.
+          const live = get().getLiveContent();
+          set({ content: live, isDirty: live !== content, lastSavedAt: Date.now() });
         }
         logger.store('Editor', 'File saved successfully');
       } else {
@@ -475,10 +478,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (lockOnArrival) return { status: 'locked', lock: lockOnArrival };
         if (get().documentVersion !== documentVersion) return { status: 'superseded' };
         // Ce qui a été tapé pendant l'écriture reste à écrire, désormais par l'autosave.
+        const live = get().getLiveContent();
         set({
-          content,
+          content: live,
           filePath: newFilePath,
-          isDirty: get().getLiveContent() !== content,
+          isDirty: live !== content,
           lastSavedAt: Date.now(),
         });
         logger.store('Editor', 'File saved successfully as', { newFilePath });

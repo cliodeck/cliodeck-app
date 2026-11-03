@@ -13,7 +13,7 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
@@ -66,6 +66,24 @@ async function typeAtEnd(window: Page, text: string): Promise<void> {
   await editorOf(window).click();
   await window.keyboard.press('ControlOrMeta+End');
   await window.keyboard.type(text);
+}
+
+/** Compte les écritures du document : combien d'essais l'autosave a faits. */
+async function countSaves(app: ElectronApplication): Promise<() => Promise<number>> {
+  await app.evaluate(({ ipcMain }) => {
+    const handlers = (ipcMain as unknown as {
+      _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+    })._invokeHandlers;
+    const original = handlers.get('editor:save-file');
+    if (!original) throw new Error('editor:save-file introuvable');
+    const counter = globalThis as unknown as { __saves: number };
+    counter.__saves = 0;
+    handlers.set('editor:save-file', async (...args: unknown[]) => {
+      counter.__saves += 1;
+      return original(...args);
+    });
+  });
+  return () => app.evaluate(() => (globalThis as unknown as { __saves: number }).__saves);
 }
 
 /** « # Été » en Latin-1 : des octets qui ne forment pas de l'UTF-8. */
@@ -184,6 +202,88 @@ test('le socle de fichiers est joignable depuis le renderer, et décide sur le v
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(projet.dir, { recursive: true, force: true });
     rmSync(dehors, { recursive: true, force: true });
+  }
+});
+
+test('frappe pendant une écriture lente : elle part sur le disque sans autre geste', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+
+    // Un disque lent (clé USB, dossier réseau) : 900 ms par écriture.
+    await app.evaluate(({ ipcMain }) => {
+      const handlers = (ipcMain as unknown as {
+        _invokeHandlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+      })._invokeHandlers;
+      const original = handlers.get('editor:save-file');
+      if (!original) throw new Error('editor:save-file introuvable');
+      handlers.set('editor:save-file', async (...args: unknown[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return original(...args);
+      });
+    });
+
+    await typeAtEnd(window, 'Phrase un.');
+    // Par le menu : un clic sur le bouton retirerait le focus à l'éditeur.
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.send('menu:save-file');
+    });
+    await window.waitForTimeout(100);
+    await window.keyboard.type(' Phrase deux.');
+
+    // Ni frappe, ni clic : l'autosave reprend, car il reste du texte à écrire.
+    await expect
+      .poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 15_000 })
+      .toBe(`${ORIGINAL}Phrase un. Phrase deux.`);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('écriture impossible : un seul message, et le texte part tout seul une fois l’accès revenu', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    const saves = await countSaves(app);
+    const toast = window.locator('.status-toast--error');
+
+    chmodSync(projet.documentMd, 0o444);
+    await typeAtEnd(window, 'Une phrase.');
+
+    await expect(toast).toContainText('Enregistrement automatique impossible', { timeout: 10_000 });
+    await expect.poll(saves, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    await expect(toast).toHaveCount(1);
+    expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
+
+    chmodSync(projet.documentMd, 0o644);
+
+    await expect
+      .poll(() => readFileSync(projet.documentMd, 'utf8'), { timeout: 20_000 })
+      .toBe(`${ORIGINAL}Une phrase.`);
+    await expect(toast).toHaveCount(0);
+  } finally {
+    chmodSync(projet.documentMd, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
   }
 });
 

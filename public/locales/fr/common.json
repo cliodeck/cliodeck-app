@@ -117,6 +117,8 @@
     "title": "Éditeur",
     "discardUntitledConfirm": "Ce document sans titre n'a jamais été enregistré. L'abandonner ? Son texte sera perdu.",
     "notUtf8": "Ce fichier n'est pas encodé en UTF-8. ClioDeck ne l'a pas ouvert, car ses caractères accentués seraient abîmés à la première sauvegarde : il reste intact sur le disque. Convertissez-le en UTF-8, puis rouvrez-le.",
+    "autoSaveFailed": "Enregistrement automatique impossible",
+    "autoSaveFailedHint": "Vos dernières modifications restent dans l'éditeur, mais pas encore sur le disque. ClioDeck réessaie tout seul. Vérifiez la place disponible et l'accès au dossier du projet.",
     "fontSize": "Taille de police",
     "fontSizeHelp": "Taille du texte dans l'éditeur Markdown",
     "currentSize": "Taille actuelle: {{size}}px",
