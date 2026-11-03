@@ -769,6 +769,163 @@ test('Cmd+O vers un fichier sain, alors que le document ouvert refuse l’écrit
   }
 });
 
+for (const door of ['bouton', 'récents'] as const) {
+  test(`changer de projet (${door}) alors que le document ouvert refuse l’écriture : le message parle de l’enregistrement, le texte reste, et le second essai ouvre`, async () => {
+    const outcome = await launchApp();
+    if (outcome.kind === 'skip') {
+      test.skip(true, outcome.reason);
+      return;
+    }
+    const { app, window, userDataDir } = outcome.value;
+    const sortant = makeProject();
+    const demande = makeProject();
+    writeFileSync(demande.documentMd, '# Autre projet\n\nLe texte du projet demandé.\n');
+
+    const askForProject = async (): Promise<void> => {
+      if (door === 'bouton') {
+        await openProject(app, window, demande.projectJson);
+        return;
+      }
+      if (!(await window.locator('.recent-project-content').count())) {
+        await window.getByText('Projets récents').click();
+      }
+      await window.locator('.recent-project-content', { hasText: demande.dir }).click();
+    };
+
+    try {
+      // Le projet demandé entre dans les récents par une première ouverture, sans refus.
+      await openProject(app, window, demande.projectJson);
+      await expect(editorOf(window)).toContainText('Le texte du projet demandé.', { timeout: 20_000 });
+      await openProject(app, window, sortant.projectJson);
+      await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+
+      chmodSync(sortant.documentMd, 0o444);
+      await typeAtEnd(window, 'Une phrase.');
+      await askForProject();
+
+      await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+      await closeAlerts(window);
+      expect(readFileSync(sortant.documentMd, 'utf8')).toBe(ORIGINAL);
+      await expect(editorOf(window)).toContainText('Une phrase.');
+
+      chmodSync(sortant.documentMd, 0o644);
+      await askForProject();
+
+      await expect(editorOf(window)).toContainText('Le texte du projet demandé.', { timeout: 20_000 });
+      expect(readFileSync(sortant.documentMd, 'utf8')).toBe(`${ORIGINAL}Une phrase.`);
+    } finally {
+      chmodSync(sortant.documentMd, 0o644);
+      await app.close();
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(sortant.dir, { recursive: true, force: true });
+      rmSync(demande.dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('créer un projet alors que le document ouvert refuse l’écriture : le message parle de l’enregistrement, la modale garde la saisie, et le second essai crée', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const sortant = makeProject();
+  const parent = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-parent-'));
+  const nameField = window.getByPlaceholder('Mon article');
+  const createButton = window.locator('.form-actions button', { hasText: 'Créer' });
+
+  try {
+    await openProject(app, window, sortant.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+
+    chmodSync(sortant.documentMd, 0o444);
+    await typeAtEnd(window, 'Une phrase.');
+
+    await window.locator('button[title="Nouveau projet"]').first().click();
+    await nameField.fill('Neuf');
+    await stubOpenDialog(app, parent);
+    await window.locator('.path-selector button').click();
+    await expect(window.locator('.path-selector input')).toHaveValue(parent);
+    await createButton.click();
+
+    await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlerts(window);
+    await expect(nameField).toHaveValue('Neuf');
+    expect(existsSync(join(parent, 'Neuf'))).toBe(false);
+    expect(readFileSync(sortant.documentMd, 'utf8')).toBe(ORIGINAL);
+
+    chmodSync(sortant.documentMd, 0o644);
+    await createButton.click();
+
+    await expect.poll(() => existsSync(join(parent, 'Neuf', 'project.json')), { timeout: 15_000 }).toBe(true);
+    expect(readFileSync(sortant.documentMd, 'utf8')).toBe(`${ORIGINAL}Une phrase.`);
+  } finally {
+    chmodSync(sortant.documentMd, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(sortant.dir, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('livre : changer de chapitre alors que le chapitre ouvert refuse l’écriture : le message parle de l’enregistrement, sans le texte du système, et le second essai bascule', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-livre-'));
+  mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  mkdirSync(join(dir, 'chapters'));
+  const projectJson = join(dir, 'project.json');
+  writeFileSync(
+    projectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000002',
+      name: 'Livre E2E',
+      type: 'book',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      chapters: [
+        { id: 'c1', title: 'Premier', filePath: 'chapters/01.md', order: 0, kind: 'chapter' },
+        { id: 'c2', title: 'Second', filePath: 'chapters/02.md', order: 1, kind: 'chapter' },
+      ],
+    }),
+  );
+  const first = join(dir, 'chapters', '01.md');
+  const FIRST = '# Premier\n\nLe texte du premier chapitre.\n';
+  writeFileSync(first, FIRST);
+  writeFileSync(join(dir, 'chapters', '02.md'), '# Second\n\nLe texte du second chapitre.\n');
+  const secondChapter = window.locator('button.chapter-item-open', { hasText: 'Second' });
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(editorOf(window)).toContainText('Le texte du premier chapitre.', { timeout: 20_000 });
+
+    chmodSync(first, 0o444);
+    await typeAtEnd(window, 'Une phrase.');
+    await secondChapter.click();
+
+    await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlerts(window);
+    expect(readFileSync(first, 'utf8')).toBe(FIRST);
+    await expect(editorOf(window)).toContainText('Une phrase.');
+
+    chmodSync(first, 0o644);
+    await secondChapter.click();
+
+    await expect(editorOf(window)).toContainText('Le texte du second chapitre.', { timeout: 15_000 });
+    expect(readFileSync(first, 'utf8')).toBe(`${FIRST}Une phrase.`);
+  } finally {
+    chmodSync(first, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 for (const door of ['bouton', 'menu'] as const) {
   test(`Enregistrer sous (${door}) vers un dossier refusé : l’auteur le sait, le tampon garde son texte, et le second essai l’écrit`, async () => {
     const outcome = await launchApp();

@@ -101,7 +101,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: unknown) {
       console.error('Failed to open project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError'));
+      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'project.openError')));
     }
   };
 
@@ -125,7 +125,7 @@ export const ProjectPanel: React.FC = () => {
       await loadProject(projectPath);
     } catch (error: unknown) {
       console.error('Failed to load recent project:', error);
-      await useDialogStore.getState().showAlert(t('project.openError'));
+      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'project.openError')));
     }
   };
 
