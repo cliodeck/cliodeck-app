@@ -2363,7 +2363,10 @@
   "errorFallback": {
     "title": "Something went wrong",
     "details": "Error details",
-    "retry": "Try again"
+    "retry": "Try again",
+    "saveFailed": "The document could not be saved. Reloading now would lose your latest changes. Try again once access to the file is back.",
+    "untitledUnsaved": "This untitled document is not saved anywhere. Reloading now would lose its text. Save it first with File > Save, then try again.",
+    "reloadAnyway": "Reload anyway"
   },
   "canvas": {
     "zoomIn": "Zoom in",
