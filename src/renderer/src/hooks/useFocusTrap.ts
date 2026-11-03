@@ -9,10 +9,29 @@ interface UseFocusTrapOptions {
   restoreFocus?: boolean
 }
 
+/** Les pièges actifs, du plus ancien au plus récent. */
+const trapStack: React.RefObject<HTMLDivElement>[] = []
+
+/**
+ * Une modale est à l'écran : un piège actif, avec son conteneur. Un panneau qui ne prend
+ * qu'Échap (`focus-trap:escape-only`) n'en a pas, et ne couvre rien.
+ */
+export function isModalOpen(): boolean {
+  return trapStack.some((container) => container.current !== null)
+}
+
 export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTMLDivElement> {
   const { active, onEscape, restoreFocus = true } = options
   const containerRef = useRef<HTMLDivElement>(null!)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!active) return
+    trapStack.push(containerRef)
+    return () => {
+      trapStack.splice(trapStack.lastIndexOf(containerRef), 1)
+    }
+  }, [active])
 
   // Store the previously focused element when the trap activates
   useEffect(() => {

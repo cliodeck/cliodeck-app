@@ -231,6 +231,35 @@ test('un dialogue de la file sur le message : aucun ne bloque l’autre, et la f
   });
 });
 
+test('échec par-dessus les Réglages : ils gardent le focus, et la frappe ne part pas dans le manuscrit', async () => {
+  await withOpenArticle(async (app, window, article) => {
+    await sendMenu(app, 'menu:open-settings');
+    const settings = window.locator('.settings-modal');
+    await expect(settings).toBeVisible();
+    const modeButton = settings.locator('.config-mode-btn').first();
+    await modeButton.click();
+    await expect(modeButton).toBeFocused();
+
+    await sendProgress(app, FAILED);
+    await expect(closeButton(window)).toBeFocused();
+    await closeButton(window).click();
+    await expect(veil(window)).toHaveCount(0);
+
+    await expect(settings).toBeVisible();
+    await expect(modeButton).toBeFocused();
+    await window.keyboard.type('zzz');
+
+    // Un témoin écrit une fois les Réglages refermés : ce que l'autosave porte sur le
+    // disque dit qu'aucune des frappes précédentes n'est arrivée dans le texte.
+    await settings.locator('.close-btn').click();
+    await expect(settings).toHaveCount(0);
+    await typeAtEnd(window, 'Témoin.');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 15_000 })
+      .toBe(`${ARTICLE}Témoin.`);
+  });
+});
+
 test('onRebuildProgress rend de quoi se désabonner, à travers le contextBridge', async () => {
   await withOpenArticle(async (app, window) => {
     interface Probe {

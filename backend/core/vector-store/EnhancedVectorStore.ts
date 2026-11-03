@@ -36,10 +36,18 @@ export class EnhancedVectorStore {
   private indexesStale: boolean = false;
   /**
    * La dernière reconstruction a échoué, et l'auteur l'a lu : le message lui promet
-   * la prochaine ouverture. Rien ne repart avant, sauf si de nouveaux documents
-   * quittent SQLite : `indexesStale`, un autre motif.
+   * la prochaine ouverture. Rien ne repart avant, sauf s'il y a un nouveau motif :
+   * `indexesStale`, parce que des documents ont quitté SQLite, ou que de nouveaux
+   * extraits arrivent sur un index incomplet.
    */
   private rebuildFailureReported: boolean = false;
+  /**
+   * HNSW et BM25 en mémoire ne contiennent pas tout le corpus : une reconstruction les
+   * a vidés et s'est arrêtée avant de les remplir. Cet état-là ne s'écrit jamais sur le
+   * disque : la prochaine ouverture, trouvant un index non vide, ne reconstruirait rien,
+   * et le reste du corpus sortirait de la recherche par le sens, sans un mot.
+   */
+  private indexesIncomplete: boolean = false;
   /** Ce store n'a plus de projet à l'écran : il n'a plus rien à reconstruire ni à publier. */
   private closed: boolean = false;
   private rebuildProgress: {
@@ -174,6 +182,8 @@ export class EnhancedVectorStore {
    * Add a chunk with embedding to all indexes
    */
   async addChunk(chunk: DocumentChunk, embedding: Float32Array): Promise<void> {
+    this.markStaleIfIncomplete();
+
     // Save to SQLite (original store)
     await this.vectorStore.saveChunk(chunk, embedding);
 
@@ -191,6 +201,7 @@ export class EnhancedVectorStore {
     chunks: Array<{ chunk: DocumentChunk; embedding: Float32Array }>
   ): Promise<void> {
     console.log(`📥 [ENHANCED] Adding ${chunks.length} chunks to all indexes...`);
+    this.markStaleIfIncomplete();
 
     // Save to SQLite
     console.log(`📥 [ENHANCED] Step 1: Saving ${chunks.length} chunks to SQLite...`);
@@ -217,6 +228,15 @@ export class EnhancedVectorStore {
     console.log(`📥 [ENHANCED] Step 4: Saving indexes to disk...`);
     await this.save();
     console.log(`📥 [ENHANCED] Step 4 complete: Indexes saved`);
+  }
+
+  /**
+   * De nouveaux extraits sur un index incomplet sont un nouveau motif : la reconstruction
+   * que planifie toute indexation refera le corpus entier. Avant d'écrire : même si
+   * l'ajout échoue en route, SQLite a pu les recevoir.
+   */
+  private markStaleIfIncomplete(): void {
+    if (this.indexesIncomplete) this.indexesStale = true;
   }
 
   /**
@@ -299,6 +319,8 @@ export class EnhancedVectorStore {
     // le remet, et la reconstruction suivante la prendra en compte.
     this.indexesStale = false;
     this.rebuildFailureReported = false;
+    // Dès avant `clear()` : il vide la mémoire d'abord, et peut lever ensuite sur le disque.
+    this.indexesIncomplete = true;
     console.log('🔨 Rebuilding all indexes from SQLite...');
     const startTime = Date.now();
 
@@ -320,6 +342,7 @@ export class EnhancedVectorStore {
 
       if (chunks.length === 0) {
         console.log('⚠️  No chunks to index');
+        this.indexesIncomplete = false;
         this.rebuildProgress = { current: 100, total: 100, status: 'No chunks to index' };
         this.notifyProgress('done');
         return;
@@ -348,6 +371,7 @@ export class EnhancedVectorStore {
 
       // Add to BM25
       this.bm25Index.addChunks(chunks.map((c) => c.chunk));
+      this.indexesIncomplete = false;
 
       // Update progress: Saving
       this.rebuildProgress = { current: 90, total: 100, status: 'Saving indexes...' };
@@ -415,6 +439,10 @@ export class EnhancedVectorStore {
    * Save all indexes to disk
    */
   async save(): Promise<void> {
+    if (this.indexesIncomplete) {
+      console.warn('⚠️  Indexes incomplete after a failed rebuild: not written to disk');
+      return;
+    }
     await this.hnswStore.save();
     // BM25 is rebuilt on load, no need to save
   }

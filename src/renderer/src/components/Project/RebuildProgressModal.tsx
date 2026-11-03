@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useRebuildStore } from '../../stores/rebuildStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useEditorStore } from '../../stores/editorStore';
-import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { isModalOpen, useFocusTrap } from '../../hooks/useFocusTrap';
 import { useTranslation } from 'react-i18next';
 import './RebuildProgressModal.css';
 
@@ -42,11 +42,14 @@ export function RebuildProgressModal() {
 
   // Fermer rend à l'écriture. Le piège vient de rendre le focus, en phase de disposition,
   // à ce qui l'avait : pendant une ouverture, le bouton « Ouvrir un projet », que la
-  // barre d'espace aurait actionné. Sans document ouvert, il n'y a pas de façade.
+  // barre d'espace aurait actionné. Sans document ouvert, il n'y a pas de façade. Une
+  // modale restée ouverte garde le focus : la frappe partirait derrière elle, dans le
+  // manuscrit, et l'autosave la porterait sur le disque.
   useEffect(() => {
     if (failure !== null || !closedByAuthor.current) return;
     closedByAuthor.current = false;
-    if (!isTextEntry(document.activeElement)) useEditorStore.getState().editorFacade?.focus();
+    if (isTextEntry(document.activeElement) || isModalOpen()) return;
+    useEditorStore.getState().editorFacade?.focus();
   }, [failure]);
 
   if (failure !== null) {

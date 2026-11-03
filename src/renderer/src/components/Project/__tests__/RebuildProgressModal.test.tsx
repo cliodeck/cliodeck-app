@@ -18,6 +18,7 @@ import { ConfirmDialog } from '../../common/ConfirmDialog';
 import { useRebuildStore } from '../../../stores/rebuildStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useEditorStore } from '../../../stores/editorStore';
+import { useFocusTrap } from '../../../hooks/useFocusTrap';
 
 const FOCUSABLE =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -252,6 +253,97 @@ describe('RebuildProgressModal', () => {
 
       expect(veil()).toBeNull();
       expect(focus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('une autre modale reste ouverte sous le message', () => {
+    /** Une modale ordinaire : les Réglages, l'export, le signalement d'un problème… */
+    function OrdinaryModal() {
+      const trapRef = useFocusTrap({ active: true, onEscape: vi.fn() });
+      return (
+        <div ref={trapRef} data-testid="modal">
+          <button data-testid="modal-button">Mode expert</button>
+        </div>
+      );
+    }
+
+    /** `below` est monté sous le message, à côté de la zone d'écriture du document ouvert. */
+    function renderOver(below: React.ReactElement | null): ReturnType<typeof vi.fn> {
+      render(
+        <>
+          <button data-testid="toolbar">Ouvrir un projet</button>
+          <textarea data-testid="writing" />
+          {below}
+          <RebuildProgressModal />
+        </>
+      );
+      const writing = screen.getByTestId('writing');
+      const focus = vi.fn(() => writing.focus());
+      useEditorStore.getState().setEditorFacade({ focus } as unknown as EditorFacade);
+      return focus;
+    }
+
+    it('l’auteur avait cliqué sur un bouton de la modale : le focus y reste, la frappe ne part pas dans le manuscrit', () => {
+      const editorFocus = renderOver(<OrdinaryModal />);
+      const button = screen.getByTestId('modal-button');
+      button.focus();
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(veil()).toBeNull();
+      expect(screen.getByTestId('modal')).toBeTruthy();
+      expect(document.activeElement).toBe(button);
+      expect(editorFocus).not.toHaveBeenCalled();
+    });
+
+    it('Échap non plus ne rend pas le focus à l’éditeur, tant que la modale est à l’écran', () => {
+      const editorFocus = renderOver(<OrdinaryModal />);
+      const button = screen.getByTestId('modal-button');
+      button.focus();
+      receive(failed);
+
+      pressEscape();
+
+      expect(veil()).toBeNull();
+      expect(document.activeElement).toBe(button);
+      expect(editorFocus).not.toHaveBeenCalled();
+    });
+
+    it('rien n’y avait le focus : l’éditeur, caché derrière, ne le prend pas pour autant', () => {
+      const editorFocus = renderOver(<OrdinaryModal />);
+      expect(document.activeElement).toBe(document.body);
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(veil()).toBeNull();
+      expect(editorFocus).not.toHaveBeenCalled();
+    });
+
+    it('la modale refermée, le message suivant rend de nouveau au texte', () => {
+      render(<OrdinaryModal />).unmount();
+      const editorFocus = renderOver(null);
+      screen.getByTestId('toolbar').focus();
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(editorFocus).toHaveBeenCalledTimes(1);
+    });
+
+    it('un panneau qui ne prend qu’Échap n’est pas une modale : le texte reprend le focus', () => {
+      function EscapeOnlyPanel() {
+        useFocusTrap({ active: true, onEscape: vi.fn(), restoreFocus: false });
+        return <div>Recherche dans le manuscrit</div>;
+      }
+      const editorFocus = renderOver(<EscapeOnlyPanel />);
+      screen.getByTestId('toolbar').focus();
+      receive(failed);
+
+      fireEvent.click(closeButton() as HTMLElement);
+
+      expect(editorFocus).toHaveBeenCalledTimes(1);
     });
   });
 
