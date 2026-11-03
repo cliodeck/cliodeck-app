@@ -39,6 +39,7 @@ import {
   CHUNKER_VERSION,
   chunkManuscriptChapter,
 } from '../../../backend/core/rag/manuscript-chunker.js';
+import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { parseOutline } from '../../editor/outline.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { projectManager } from './project-manager.js';
@@ -198,15 +199,23 @@ class ManuscriptIndexService {
   /**
    * Énumère les pièces du manuscrit : les chapitres du manifeste pour un
    * livre, `document.md` sinon. Les pièces absentes du disque sont
-   * ignorées — `getChapters` les signale déjà comme `missing`.
+   * ignorées — `getChapters` les signale déjà comme `missing` —, tout comme
+   * un lien qui sort du projet (décision Q16). `excluded` dit qu'une pièce a
+   * été écartée : même sans aucune pièce restante, la passe doit alors purger.
    */
-  private async listPieces(workspaceRoot: string): Promise<ManuscriptPiece[]> {
+  private async listPieces(
+    workspaceRoot: string
+  ): Promise<{ pieces: ManuscriptPiece[]; excluded: boolean }> {
     const res = await projectManager.getChapters(workspaceRoot);
     const pieces: ManuscriptPiece[] = [];
+    let excluded = false;
 
     if (res.success && res.chapters.length > 0) {
       for (const chapter of res.chapters) {
-        if (chapter.missing) continue;
+        if (chapter.missing) {
+          excluded = true;
+          continue;
+        }
         pieces.push({
           relativePath: chapter.filePath,
           absolutePath: path.join(workspaceRoot, chapter.filePath),
@@ -214,12 +223,16 @@ class ManuscriptIndexService {
           order: chapter.order,
         });
       }
-      return pieces;
+      return { pieces, excluded };
     }
 
     // Article / présentation : un document unique.
     for (const candidate of ['document.md', 'slides.md']) {
       const absolutePath = path.join(workspaceRoot, candidate);
+      if (!isInside(workspaceRoot, absolutePath)) {
+        excluded = true;
+        continue;
+      }
       try {
         await fs.access(absolutePath);
         pieces.push({
@@ -233,7 +246,7 @@ class ManuscriptIndexService {
         // pièce absente : on essaie la suivante
       }
     }
-    return pieces;
+    return { pieces, excluded };
   }
 
   /**
@@ -280,8 +293,9 @@ class ManuscriptIndexService {
     }
 
     let pieces: ManuscriptPiece[];
+    let excluded: boolean;
     try {
-      pieces = await this.listPieces(workspaceRoot);
+      ({ pieces, excluded } = await this.listPieces(workspaceRoot));
     } catch (e) {
       report.failures.push({
         relativePath: '(manifeste)',
@@ -290,7 +304,7 @@ class ManuscriptIndexService {
       report.durationMs = Date.now() - started;
       return report;
     }
-    if (pieces.length === 0) {
+    if (pieces.length === 0 && !excluded) {
       report.durationMs = Date.now() - started;
       return report;
     }

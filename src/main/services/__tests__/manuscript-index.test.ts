@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
+import Database from 'better-sqlite3';
+import { sqliteAvailable, symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { ManuscriptStore } from '../../../../backend/core/vector-store/ManuscriptStore.js';
 import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
@@ -231,5 +232,199 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
     expect(report.indexed).toBe(0);
     expect(report.failures).toHaveLength(1);
     expect(report.failures[0].reason).toMatch(/embedding failed/i);
+  });
+
+  /**
+   * Décision Q16 : un chapitre lié hors du projet n'est ni lu ni indexé. Et s'il l'a été
+   * avant, ses extraits sortent de `brain.db` à la passe suivante : sinon il continue
+   * d'alimenter les prompts, et rien n'est gagné.
+   */
+  describe.skipIf(!symlinkAvailable)('liens symboliques', () => {
+    const SECRET = 'SECRETHORSPROJET';
+    let outside = '';
+
+    /** Le contenu réel des tables, pas ce qu'en dit le store. */
+    function tables(root = tmp): { chapters: number; chunks: number; fts: number; text: string } {
+      const db = new Database(path.join(root, '.cliodeck', 'brain.db'), { readonly: true });
+      try {
+        const count = (table: string) =>
+          (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+        const rows = db.prepare('SELECT content FROM manuscript_chunks').all() as Array<{ content: string }>;
+        return {
+          chapters: count('manuscript_chapters'),
+          chunks: count('manuscript_chunks'),
+          fts: count('manuscript_chunks_fts'),
+          text: rows.map((r) => r.content).join('\n'),
+        };
+      } finally {
+        db.close();
+      }
+    }
+
+    beforeEach(() => {
+      outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-dehors-'));
+      fs.writeFileSync(path.join(outside, 'journal.md'), `# Journal\n\n${SECRET} : texte privé.\n`);
+    });
+
+    afterEach(() => {
+      fs.rmSync(outside, { recursive: true, force: true });
+    });
+
+    const CHAPTERS = [
+      { file: '01.md', title: 'Un', body: '# Un\n\nLe port de Danzig.\n' },
+      { file: '02.md', title: 'Annexe', body: '# Annexe\n\nProvisoire.\n' },
+    ];
+
+    function linkOut(file: string): void {
+      const target = path.join(tmp, 'chapters', file);
+      fs.rmSync(target, { force: true });
+      fs.symlinkSync(path.join(outside, 'journal.md'), target);
+    }
+
+    it('un chapitre lié hors du projet n’atteint ni le fournisseur ni la base', async () => {
+      writeProject(tmp, CHAPTERS);
+      linkOut('02.md');
+      manuscriptIndexService.configure(tmp);
+      const embedder = fakeEmbedder();
+
+      const report = await manuscriptIndexService.index(embedder);
+
+      expect(report.indexed).toBe(1);
+      expect(embedder.texts.join('\n')).not.toContain(SECRET);
+      expect(tables().text).not.toContain(SECRET);
+    });
+
+    it('déjà indexé par le lien : la passe suivante retire ses extraits', async () => {
+      // État d'avant ce correctif : le chapitre est un fichier ordinaire au moment de
+      // l'indexation, puis un lien. Le contenu indexé joue le contenu du fichier visé.
+      writeProject(tmp, [CHAPTERS[0], { file: '02.md', title: 'Annexe', body: `# Annexe\n\n${SECRET} : texte privé.\n` }]);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      expect(tables().text).toContain(SECRET);
+      expect(tables().chapters).toBe(2);
+
+      linkOut('02.md');
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.removed).toBe(1);
+      const after = tables();
+      expect(after.chapters).toBe(1);
+      expect(after.text).not.toContain(SECRET);
+      expect(after.fts).toBe(after.chunks);
+      const store = new ManuscriptStore({ dbPath: path.join(tmp, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical(SECRET, 5)).toEqual([]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('le seul chapitre du livre, déjà indexé : retiré quand même', async () => {
+      // Sans pièce à indexer, la passe s'arrêtait avant la purge.
+      writeProject(tmp, [{ file: '01.md', title: 'Seul', body: `# Seul\n\n${SECRET} : texte privé.\n` }]);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      expect(tables().chunks).toBeGreaterThan(0);
+
+      linkOut('01.md');
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.removed).toBe(1);
+      expect(tables()).toMatchObject({ chapters: 0, chunks: 0, fts: 0 });
+    });
+
+    it('un document.md lié hors du projet : pas indexé, et retiré s’il l’était', async () => {
+      const documentMd = path.join(tmp, 'document.md');
+      fs.writeFileSync(documentMd, `# Article\n\n${SECRET} : texte privé.\n`);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      expect(tables().text).toContain(SECRET);
+
+      fs.rmSync(documentMd);
+      fs.symlinkSync(path.join(outside, 'journal.md'), documentMd);
+      const embedder = fakeEmbedder();
+      const report = await manuscriptIndexService.index(embedder);
+
+      expect(embedder.calls).toBe(0);
+      expect(report.removed).toBe(1);
+      expect(tables()).toMatchObject({ chapters: 0, chunks: 0, fts: 0 });
+    });
+
+    it('un document.md devenu lien cassé vers l’extérieur : retiré aussi', async () => {
+      const documentMd = path.join(tmp, 'document.md');
+      fs.writeFileSync(documentMd, `# Article\n\n${SECRET} : texte privé.\n`);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      expect(tables().text).toContain(SECRET);
+
+      fs.rmSync(documentMd);
+      fs.symlinkSync(path.join(outside, 'pas-encore.md'), documentMd);
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.removed).toBe(1);
+      expect(tables()).toMatchObject({ chapters: 0, chunks: 0, fts: 0 });
+    });
+
+    it('un slides.md lié hors du projet : pas indexé non plus', async () => {
+      fs.symlinkSync(path.join(outside, 'journal.md'), path.join(tmp, 'slides.md'));
+      manuscriptIndexService.configure(tmp);
+      const embedder = fakeEmbedder();
+
+      await manuscriptIndexService.index(embedder);
+
+      expect(embedder.texts.join('\n')).not.toContain(SECRET);
+    });
+
+    it('un lien interne reste indexé', async () => {
+      writeProject(tmp, [CHAPTERS[0]]);
+      fs.symlinkSync('01.md', path.join(tmp, 'chapters', 'copie.md'));
+      fs.writeFileSync(
+        path.join(tmp, 'project.json'),
+        JSON.stringify({
+          type: 'book',
+          chapters: [{ id: 'c', title: 'Copie', filePath: 'chapters/copie.md', order: 0, kind: 'chapter' }],
+        })
+      );
+      manuscriptIndexService.configure(tmp);
+
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.indexed).toBe(1);
+      expect(tables().text).toContain('Danzig');
+    });
+
+    it('un projet ouvert par un chemin en lien garde tout son index', async () => {
+      writeProject(tmp, CHAPTERS);
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      manuscriptIndexService.clear();
+
+      const alias = `${tmp}-alias`;
+      fs.symlinkSync(tmp, alias);
+      try {
+        manuscriptIndexService.configure(alias);
+        const embedder = fakeEmbedder();
+        const report = await manuscriptIndexService.index(embedder);
+
+        expect(report).toMatchObject({ indexed: 0, unchanged: 2, removed: 0 });
+        expect(embedder.calls).toBe(0);
+      } finally {
+        manuscriptIndexService.clear();
+        fs.rmSync(alias, { force: true });
+      }
+    });
+
+    it('témoin : un article sans document garde l’index qu’il a, comme avant', async () => {
+      const documentMd = path.join(tmp, 'document.md');
+      fs.writeFileSync(documentMd, '# Article\n\nDu texte.\n');
+      manuscriptIndexService.configure(tmp);
+      await manuscriptIndexService.index(fakeEmbedder());
+      fs.rmSync(documentMd);
+
+      const report = await manuscriptIndexService.index(fakeEmbedder());
+
+      expect(report.removed).toBe(0);
+      expect(tables().chapters).toBe(1);
+    });
   });
 });

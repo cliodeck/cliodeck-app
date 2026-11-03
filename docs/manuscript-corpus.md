@@ -27,6 +27,11 @@ passé quelques chapitres, on ne garde plus tout en tête.
 
 ## Décisions de conception
 
+**Un lien qui sort du projet n'entre pas dans le corpus.** Chapitre, `document.md` ou
+`slides.md` : un projet reçu garde ses liens, et le fichier visé partirait vers le
+fournisseur d'embeddings puis dans les prompts. Déjà indexé, il sort de `manuscript_*`
+à la passe suivante, même s'il était la seule pièce du projet.
+
 **Le disque fait foi, l'indexation se déclenche après sauvegarde.**
 L'alternative — lire l'éditeur vivant — ferait dépendre l'index d'un état
 renderer transitoire et rendrait l'incrémental indécidable : quelle
