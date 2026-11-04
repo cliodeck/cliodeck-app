@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Check, RotateCcw, Save } from 'lucide-react';
 import { RAGConfigSection } from './RAGConfigSection';
@@ -23,8 +23,19 @@ import { ReadingNotesCorpusSection } from './ReadingNotesCorpusSection';
 import { CitationStyleSection } from './CitationStyleSection';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { useRAGQueryStore, type LLMProvider } from '../../stores/ragQueryStore';
 import { isCloudProvider } from '../../stores/cloudConsentStore';
+import { DEFAULT_CONFIG } from '@backend/types/config';
+import {
+  apiKeyFields,
+  diffSection,
+  FORM_DEFAULTS,
+  resetValues,
+  SECTION_NAMES,
+  withFormDefaults,
+  type SectionName,
+  type SettingsSections,
+} from './settings-persist';
 import './ConfigPanel.css';
 
 export interface RAGConfig {
@@ -113,9 +124,19 @@ export interface LLMConfig {
   geminiAPIKey?: string;
   geminiModel?: string;
   useCloudEmbeddings?: boolean;
+  /** Choisi dans le panneau du chat ; le formulaire le relit pour répercuter ce qui est écrit. */
+  generationProvider?: LLMProvider;
 }
 
 type SettingsMode = 'simple' | 'expert';
+
+/** Le titre de la section dans le formulaire : c'est le mot que l'auteur a sous les yeux. */
+const SECTION_TITLES: Record<SectionName, string> = {
+  rag: 'ragConfig.title',
+  llm: 'llm.title',
+  editor: 'editor.title',
+  zotero: 'zotero.title',
+};
 
 export const ConfigPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -124,67 +145,19 @@ export const ConfigPanel: React.FC = () => {
     return (localStorage.getItem('cliodeck-settings-mode') as SettingsMode) || 'simple';
   });
 
-  const [ragConfig, setRagConfig] = useState<RAGConfig>({
-    topK: 10,
-    similarityThreshold: 0.2,
-    chunkingConfig: 'cpuOptimized',
-    summaryGeneration: 'extractive',
-    summaryMaxLength: 750,
-    useGraphContext: false,
-    graphSimilarityThreshold: 0.7,
-    additionalGraphDocs: 3,
-    explorationSimilarityThreshold: 0.7,
-    includeSummaries: true,
-    enableTopicModeling: false,
-    // Phase 1: Custom chunking
-    customChunkingEnabled: false,
-    customMaxChunkSize: 500,
-    customMinChunkSize: 100,
-    customOverlapSize: 75,
-    // Phase 1: Quality filtering
-    enableQualityFiltering: true,
-    minChunkEntropy: 0.3,
-    minUniqueWordRatio: 0.4,
-    // Phase 2: Preprocessing
-    enablePreprocessing: true,
-    enableOCRCleanup: true,
-    enableHeaderFooterRemoval: true,
-    // Phase 2: Deduplication
-    enableDeduplication: true,
-    enableSimilarityDedup: false,
-    dedupSimilarityThreshold: 0.85,
-    // Phase 3: Semantic chunking
-    useSemanticChunking: false,
-    semanticSimilarityThreshold: 0.7,
-    semanticWindowSize: 3,
-    // Context compression
-    enableContextCompression: true, // Enabled by default for performance
-    indexManuscript: true,
-    indexReadingNotes: true,
-    readingNotesCloudConsent: false,
-  });
+  const [ragConfig, setRagConfig] = useState<RAGConfig>(FORM_DEFAULTS.rag);
+  const [llmConfig, setLLMConfig] = useState<LLMConfig>(FORM_DEFAULTS.llm);
+  const [editorConfig, setEditorConfig] = useState<EditorConfig>(FORM_DEFAULTS.editor);
+  const [zoteroConfig, setZoteroConfig] = useState<ZoteroConfig>(FORM_DEFAULTS.zotero);
 
-  const [llmConfig, setLLMConfig] = useState<LLMConfig>({
-    backend: 'ollama',
-    ollamaURL: 'http://127.0.0.1:11434',
-    ollamaEmbeddingModel: 'nomic-embed-text',
-    ollamaChatModel: 'gemma2:2b',
-  });
-
-  const [editorConfig, setEditorConfig] = useState<EditorConfig>({
-    fontSize: 14,
-    wordWrap: true,
-    showMinimap: true,
-    fontFamily: 'system',
-  });
-
-  const [zoteroConfig, setZoteroConfig] = useState<ZoteroConfig>({
-    mode: 'api',
-    userId: '',
-    apiKey: '',
-    autoSync: false,
-    dataDirectory: '',
-  });
+  /**
+   * Les sections telles que chargées ou écrites en dernier, après fusion avec les valeurs du
+   * formulaire : ce qui en diffère a été modifié ici. Sans chargement réussi, on ne sait pas ce
+   * qui a changé, et rien ne part.
+   */
+  const snapshot = useRef<SettingsSections | null>(null);
+  // `isSaving` n'est vu qu'au rendu suivant : une écriture à la fois se garde ici.
+  const writing = useRef(false);
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -209,14 +182,17 @@ export const ConfigPanel: React.FC = () => {
     }
   };
 
-  // Sync editorConfig with editorStore on mount
+  // Sync editorConfig with editorStore. Seuls les champs du magasin : ce que le disque porte en plus
+  // (`theme`, ou un champ inconnu) reste, et un disque sans `fontFamily` en met un `undefined` dans
+  // le magasin (App.tsx), qui passerait ensuite pour une modification.
   useEffect(() => {
-    setEditorConfig({
+    setEditorConfig((current) => ({
+      ...current,
       fontSize: editorSettings.fontSize,
       wordWrap: editorSettings.wordWrap,
       showMinimap: editorSettings.showMinimap,
-      fontFamily: editorSettings.fontFamily,
-    });
+      fontFamily: editorSettings.fontFamily ?? current.fontFamily,
+    }));
   }, [editorSettings]);
 
   const loadConfig = async () => {
@@ -227,123 +203,229 @@ export const ConfigPanel: React.FC = () => {
       const zotero = await window.electron.config.get('zotero');
 
       // Merge with defaults to ensure all properties exist
-      if (rag) {
-        setRagConfig({
-          topK: 10,
-          similarityThreshold: 0.2,
-          chunkingConfig: 'cpuOptimized',
-          summaryGeneration: 'extractive',
-          summaryMaxLength: 750,
-          useGraphContext: false,
-          graphSimilarityThreshold: 0.7,
-          additionalGraphDocs: 3,
-          explorationSimilarityThreshold: 0.7,
-          includeSummaries: true,
-          enableTopicModeling: false,
-          ...rag, // Override with saved values
-        });
-      }
-      if (llm) {
-        setLLMConfig({
-          backend: 'ollama',
-          ollamaURL: 'http://127.0.0.1:11434',
-          ollamaEmbeddingModel: 'nomic-embed-text',
-          ollamaChatModel: 'gemma2:2b',
-          ...llm, // Override with saved values
-        });
-      }
-      if (editor) setEditorConfig(editor);
-      if (zotero) setZoteroConfig(zotero);
+      const loaded: SettingsSections = {
+        rag: withFormDefaults('rag', rag),
+        llm: withFormDefaults('llm', llm),
+        editor: withFormDefaults('editor', editor),
+        zotero: withFormDefaults('zotero', zotero),
+      };
+      snapshot.current = loaded;
+      setRagConfig(loaded.rag);
+      setLLMConfig(loaded.llm);
+      setEditorConfig(loaded.editor);
+      setZoteroConfig(loaded.zotero);
     } catch (error) {
       console.error('Failed to load config:', error);
     }
   };
 
+  /**
+   * Écrit les champs de `next` qui diffèrent de `baseline`, posés sur la section relue à l'instant :
+   * `set('rag')` remplace toute la section. Une section sans changement n'est ni écrite ni relancée
+   * (`config:set('llm')` réinitialise les services). L'instantané n'avance que pour une section
+   * écrite : le prochain Enregistrer réessaie celles qui ont été refusées, et elles seules.
+   */
+  const persist = async (
+    next: Partial<Record<SectionName, object>>,
+    baseline: Partial<Record<SectionName, object>>
+  ) => {
+    const written: Partial<Record<SectionName, object>> = {};
+    const failures: Array<{ section: SectionName; reason: string }> = [];
+    for (const section of SECTION_NAMES) {
+      const target = next[section];
+      if (!target) continue;
+      const diff = diffSection(baseline[section] ?? {}, target);
+      if (Object.keys(diff).length === 0) continue;
+      try {
+        const value = { ...(await window.electron.config.get(section)), ...diff };
+        // Le handler ne lève pas : il répond `{ success: false }`.
+        const response = await window.electron.config.set(section, value);
+        if (response?.success === false) throw new Error(response.error);
+        written[section] = value;
+        if (snapshot.current) {
+          snapshot.current = {
+            ...snapshot.current,
+            [section]: { ...snapshot.current[section], ...diff },
+          };
+        }
+      } catch (error) {
+        console.error(`Failed to save config section ${section}:`, error);
+        failures.push({ section, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return { written, failures };
+  };
+
+  /** Ce qui vient d'être écrit se voit sans redémarrage. Une section refusée ne se répercute pas. */
+  const applyWritten = (written: Partial<Record<SectionName, object>>) => {
+    const query = useRAGQueryStore.getState();
+    const rag = written.rag && withFormDefaults('rag', written.rag);
+    const llm = written.llm && withFormDefaults('llm', written.llm);
+    // La ligne « Recherche : … » du chat prédit si le manuscrit sera
+    // consulté ; sans l'index, il ne l'est jamais, quoi que dise la case.
+    if (rag) query.setManuscriptIndexEnabled(rag.indexManuscript !== false);
+    // Même chose pour les notes de lecture, que le main retire aussi du
+    // prompt quand le fournisseur de génération est distant sans
+    // consentement (docs/reading-notes.md).
+    if (rag || llm) {
+      query.setReadingNotesFlags({
+        indexEnabled: rag ? rag.indexReadingNotes !== false : query.readingNotesIndexEnabled,
+        cloudConsent: rag ? rag.readingNotesCloudConsent === true : query.readingNotesCloudConsent,
+        generationIsCloud: llm ? isCloudProvider(llm).isCloud : query.generationIsCloud,
+      });
+    }
+
+    // Le panneau du chat édite les mêmes champs (modèle, fenêtre de
+    // contexte) : sans cette répercussion, le modèle qu'il tient — et
+    // qu'il envoie désormais au main — l'emporterait sur celui que l'on
+    // vient d'enregistrer ici jusqu'au prochain lancement.
+    if (llm) {
+      query.applyLLMConfig({
+        ollamaChatModel: llm.ollamaChatModel,
+        ollamaNumCtx: llm.ollamaNumCtx,
+        ollamaThink: llm.ollamaThink,
+        generationProvider: llm.generationProvider,
+      });
+    }
+
+    // Update editorStore with new settings
+    if (written.editor) {
+      const editor = withFormDefaults('editor', written.editor);
+      updateSettings({
+        fontSize: editor.fontSize,
+        wordWrap: editor.wordWrap,
+        showMinimap: editor.showMinimap,
+        fontFamily: editor.fontFamily,
+      });
+    }
+  };
+
+  /** Le motif, section par section : `settings.saved` ne se dit que si tout est passé. */
+  const showOutcome = (
+    failures: Array<{ section: SectionName; reason: string }>,
+    failedKey: 'settings.saveFailed' | 'settings.resetFailed'
+  ) => {
+    if (failures.length === 0) {
+      setSaveMessageType('success');
+      setSaveMessage(t('settings.saved'));
+      return;
+    }
+    setSaveMessageType('error');
+    setSaveMessage(
+      t(failedKey, {
+        sections: failures.map(({ section }) => t(SECTION_TITLES[section])).join(', '),
+        reason: [...new Set(failures.map(({ reason }) => reason))].join(' ; '),
+      })
+    );
+  };
+
   const handleSaveConfig = async () => {
+    if (writing.current) return;
+    const baseline = snapshot.current;
+    if (!baseline) {
+      setSaveMessageType('error');
+      setSaveMessage(t('settings.saveError'));
+      return;
+    }
+    writing.current = true;
     setIsSaving(true);
     setSaveMessage('');
 
     try {
-      await window.electron.config.set('rag', ragConfig);
-      await window.electron.config.set('llm', llmConfig);
-      await window.electron.config.set('editor', editorConfig);
-      await window.electron.config.set('zotero', zoteroConfig);
-      // La ligne « Recherche : … » du chat prédit si le manuscrit sera
-      // consulté ; sans l'index, il ne l'est jamais, quoi que dise la case.
-      useRAGQueryStore.getState().setManuscriptIndexEnabled(ragConfig.indexManuscript !== false);
-      // Même chose pour les notes de lecture, que le main retire aussi du
-      // prompt quand le fournisseur de génération est distant sans
-      // consentement (docs/reading-notes.md).
-      useRAGQueryStore.getState().setReadingNotesFlags({
-        indexEnabled: ragConfig.indexReadingNotes !== false,
-        cloudConsent: ragConfig.readingNotesCloudConsent === true,
-        generationIsCloud: isCloudProvider(llmConfig).isCloud,
-      });
-
-      // Le panneau du chat édite les mêmes champs (modèle, fenêtre de
-      // contexte) : sans cette répercussion, le modèle qu'il tient — et
-      // qu'il envoie désormais au main — l'emporterait sur celui que l'on
-      // vient d'enregistrer ici jusqu'au prochain lancement.
-      useRAGQueryStore.getState().applyLLMConfig({
-        ollamaChatModel: llmConfig.ollamaChatModel,
-        ollamaNumCtx: llmConfig.ollamaNumCtx,
-      });
-
-      // Update editorStore with new settings
-      updateSettings({
-        fontSize: editorConfig.fontSize,
-        wordWrap: editorConfig.wordWrap,
-        showMinimap: editorConfig.showMinimap,
-        fontFamily: editorConfig.fontFamily,
-      });
-
-      setSaveMessageType('success');
-      setSaveMessage(t('settings.saved'));
+      const { written, failures } = await persist(
+        { rag: ragConfig, llm: llmConfig, editor: editorConfig, zotero: zoteroConfig },
+        baseline
+      );
+      applyWritten(written);
+      showOutcome(failures, 'settings.saveFailed');
     } catch (error) {
       console.error('Failed to save config:', error);
       setSaveMessageType('error');
       setSaveMessage(t('settings.saveError'));
     } finally {
+      writing.current = false;
       setIsSaving(false);
     }
   };
 
   const handleResetConfig = async () => {
-    if (!await useDialogStore.getState().showConfirm(t('settings.resetConfirm'))) {
+    const question = t('settings.resetConfirm', { model: DEFAULT_CONFIG.llm.ollamaChatModel });
+    if (!await useDialogStore.getState().showConfirm(question)) {
       return;
     }
+    if (writing.current) return;
+    writing.current = true;
+    setIsSaving(true);
+    setSaveMessage('');
 
     try {
-      // Reset to defaults
-      setRagConfig({
-        topK: 10,
-        similarityThreshold: 0.2,
-        chunkingConfig: 'cpuOptimized',
-        summaryGeneration: 'extractive',
-        summaryMaxLength: 750,
-        useGraphContext: false,
-        graphSimilarityThreshold: 0.7,
-        additionalGraphDocs: 3,
-        explorationSimilarityThreshold: 0.7,
-        includeSummaries: true,
-        enableTopicModeling: false,
-      });
-      setLLMConfig({
-        backend: 'ollama',
-        ollamaURL: 'http://127.0.0.1:11434',
-        ollamaEmbeddingModel: 'nomic-embed-text',
-        ollamaChatModel: 'gemma2:2b',
-      });
-      setEditorConfig({
-        fontSize: 14,
-        wordWrap: true,
-        showMinimap: true,
-        fontFamily: 'system',
+      // Le disque fait foi, pas l'instantané : une autre section a pu écrire depuis l'ouverture.
+      const fresh = {
+        rag: await window.electron.config.get('rag'),
+        llm: await window.electron.config.get('llm'),
+        editor: await window.electron.config.get('editor'),
+      };
+      const next = resetValues(fresh);
+      const { written, failures } = await persist(next, {
+        rag: fresh.rag,
+        llm: fresh.llm,
+        editor: withFormDefaults('editor', fresh.editor),
       });
 
-      await handleSaveConfig();
+      // Le formulaire ne suit que ce que le main a accepté, et montre ce que le disque contient.
+      const refused = new Set(failures.map(({ section }) => section));
+      const values: Partial<SettingsSections> = {};
+      if (!refused.has('rag')) {
+        values.rag = withFormDefaults('rag', { ...fresh.rag, ...next.rag });
+        setRagConfig(values.rag);
+      }
+      if (!refused.has('llm')) {
+        values.llm = withFormDefaults('llm', { ...fresh.llm, ...next.llm });
+        setLLMConfig(values.llm);
+      }
+      if (!refused.has('editor')) {
+        values.editor = withFormDefaults('editor', { ...fresh.editor, ...next.editor });
+        setEditorConfig(values.editor);
+      }
+      if (snapshot.current) snapshot.current = { ...snapshot.current, ...values };
+
+      applyWritten(written);
+      showOutcome(failures, 'settings.resetFailed');
     } catch (error) {
       console.error('Failed to reset config:', error);
+      setSaveMessageType('error');
+      setSaveMessage(t('settings.saveError'));
+    } finally {
+      writing.current = false;
+      setIsSaving(false);
+    }
+  };
+
+  /**
+   * Après une révocation, les champs de clés montrent encore le masque chargé à l'ouverture. On
+   * relit ces champs seuls : le reste du formulaire garde ses modifications non enregistrées, et
+   * l'instantané suit, sans quoi le champ vidé passerait pour un effacement à écrire.
+   */
+  const handleKeysRevoked = async () => {
+    let saved: Parameters<typeof apiKeyFields>[0] = { llm: null, zotero: null };
+    try {
+      saved = {
+        llm: await window.electron.config.get('llm'),
+        zotero: await window.electron.config.get('zotero'),
+      };
+    } catch (error) {
+      // La révocation a réussi : mieux vaut des champs vides qu'une clé qui n'existe plus.
+      console.error('Failed to reload keys after revocation:', error);
+    }
+    const keys = apiKeyFields(saved);
+    setLLMConfig((current) => ({ ...current, ...keys.llm }));
+    setZoteroConfig((current) => ({ ...current, ...keys.zotero }));
+    if (snapshot.current) {
+      snapshot.current = {
+        ...snapshot.current,
+        llm: { ...snapshot.current.llm, ...keys.llm },
+        zotero: { ...snapshot.current.zotero, ...keys.zotero },
+      };
     }
   };
 
@@ -381,6 +463,7 @@ export const ConfigPanel: React.FC = () => {
           <button
             className="toolbar-btn"
             onClick={handleResetConfig}
+            disabled={isSaving}
             title={t('settings.tooltipReset')}
           >
             <RotateCcw size={20} strokeWidth={1} />
@@ -465,7 +548,7 @@ export const ConfigPanel: React.FC = () => {
 
             <ArchivesConfigSection />
 
-            <SecurityConfigSection />
+            <SecurityConfigSection onKeysRevoked={handleKeysRevoked} />
 
             <CitationStyleSection />
           </>

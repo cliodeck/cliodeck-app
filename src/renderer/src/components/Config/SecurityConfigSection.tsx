@@ -95,7 +95,12 @@ const MODE_OPTIONS: Array<{ value: InspectorMode; key: string }> = [
   { value: 'block', key: 'block' },
 ];
 
-export const SecurityConfigSection: React.FC = () => {
+interface SecurityConfigSectionProps {
+  /** Les clés ne sont plus : le panneau doit cesser de montrer leur masque. */
+  onKeysRevoked?: () => void;
+}
+
+export const SecurityConfigSection: React.FC<SecurityConfigSectionProps> = ({ onKeysRevoked }) => {
   const { t, i18n } = useTranslation('common');
   const [mode, setMode] = useState<InspectorMode>('warn');
   const [loaded, setLoaded] = useState(false);
@@ -543,6 +548,7 @@ export const SecurityConfigSection: React.FC = () => {
               const s = api();
               const res = await s?.revokeAllKeys?.();
               if (res?.success) {
+                onKeysRevoked?.();
                 setSavedNotice(
                   t('security.revokeSuccess', { count: res.keysDeleted ?? 0 })
                 );

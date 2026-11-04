@@ -46,4 +46,14 @@ describe('ragQueryStore.applyLLMConfig', () => {
     useRAGQueryStore.getState().applyLLMConfig({ ollamaChatModel: '   ' });
     expect(useRAGQueryStore.getState().params.model).toBe('gemma2:2b');
   });
+
+  it('le moteur de génération écrit se voit dans le panneau ; absent, le choix de la session reste', () => {
+    useRAGQueryStore.getState().setParams({ provider: 'embedded' });
+    useRAGQueryStore.getState().applyLLMConfig({ generationProvider: 'auto' });
+    expect(useRAGQueryStore.getState().params.provider).toBe('auto');
+
+    useRAGQueryStore.getState().setParams({ provider: 'embedded' });
+    useRAGQueryStore.getState().applyLLMConfig({});
+    expect(useRAGQueryStore.getState().params.provider).toBe('embedded');
+  });
 });

@@ -82,7 +82,8 @@ export async function launchApp(
 
   const app = await electron.launch({
     cwd: REPO_ROOT,
-    args: ['.', '--no-sandbox', `--user-data-dir=${userDataDir}`],
+    // `--use-mock-keychain` : un test qui enregistre une clé d'API ne touche pas au vrai trousseau.
+    args: ['.', '--no-sandbox', '--use-mock-keychain', `--user-data-dir=${userDataDir}`],
     env,
     timeout: 30_000,
   });
