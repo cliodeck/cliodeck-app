@@ -318,6 +318,45 @@ test('confirmation par-dessus l’éditeur : une proposition en attente n’est 
   }
 });
 
+test('question ouverte au menu depuis l’éditeur : Échap maintenu ne rejette pas la proposition qui retrouve le focus', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await window.locator('.codemirror-editor .cm-line', { hasText: 'Texte du manuscrit' }).click();
+    await window.evaluate(() => {
+      (window as unknown as { __cliodeckProposals: { inject(p: object): void } }).__cliodeckProposals.inject({
+        proposed: 'INJECTÉ',
+      });
+    });
+    const proposal = window.locator('.cm-proposal-box');
+    await expect(proposal).toBeVisible();
+
+    // Le menu, et non le bouton : à la fermeture, le focus retourne dans l'éditeur.
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.send('menu:new-file');
+    });
+    await expect(confirmDialog(window)).toBeVisible({ timeout: 10_000 });
+
+    await window.keyboard.down('Escape');
+    await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(window.locator('.codemirror-editor .cm-content')).toBeFocused();
+
+    await window.keyboard.down('Escape');
+    await window.keyboard.up('Escape');
+    await expect(proposal).toBeVisible();
+
+    // La touche relâchée, Échap rejette de nouveau.
+    await window.keyboard.press('Escape');
+    await expect(proposal).toHaveCount(0);
+  } finally {
+    await app.close();
+  }
+});
+
 test('livre : ce qu’Échap ferme de plus proche ne ferme pas le panneau de recherche', async () => {
   const session = await start();
   if (!session) return;

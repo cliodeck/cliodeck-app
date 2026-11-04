@@ -46,6 +46,22 @@ function topTrap(): ActiveTrap | undefined {
   return trapStack[trapStack.length - 1]
 }
 
+// Échap maintenu : la répétition du clavier n'est pas un second geste. La première frappe a fermé le
+// sommet : la suivante fermerait ce qui est dessous, les Réglages et leurs modifications, ou
+// rejetterait la proposition de l'éditeur qui vient de reprendre le focus. Arrêtée avant tout le monde.
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape' && e.repeat) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+    },
+    true
+  )
+}
+
 function returnFocus(previousFocus: React.MutableRefObject<HTMLElement | null>): void {
   previousFocus.current?.focus()
   previousFocus.current = null
@@ -118,14 +134,6 @@ export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTML
       // ou le sommet lui-même. Une vraie frappe vide les microtâches entre deux écouteurs : le
       // piège qui vient de répondre est déjà démonté, et le suivant se croirait au sommet.
       if (e.defaultPrevented) return
-
-      // Échap maintenu : la répétition du clavier n'est pas un second geste. Le premier a fermé le
-      // sommet, et le suivant fermerait ce qui est dessous : les Réglages et leurs modifications.
-      if (e.key === 'Escape' && e.repeat) {
-        e.preventDefault()
-        return
-      }
-
       if (topTrap()?.container !== containerRef) return
 
       // Échap ne dépend PAS de la ref : le hook est utilisable en deux

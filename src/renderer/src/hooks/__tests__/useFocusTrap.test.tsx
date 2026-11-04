@@ -336,6 +336,17 @@ describe('useFocusTrap — la pile', () => {
       expect(reglages).toHaveBeenCalledTimes(1);
     });
 
+    it('Échap maintenu : la répétition n’atteint pas non plus ce qui reprend le focus, comme une proposition de l’éditeur', () => {
+      const editeur = vi.fn();
+      const { getByLabelText } = render(<input aria-label="editeur" onKeyDown={editeur} />);
+
+      fireEvent.keyDown(getByLabelText('editeur'), { key: 'Escape', repeat: true });
+      expect(editeur).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(getByLabelText('editeur'), { key: 'Escape' });
+      expect(editeur).toHaveBeenCalledTimes(1);
+    });
+
     it('une modale ouverte après un dialogue reste dessous à l’écran : Échap va au dialogue', () => {
       const question = vi.fn();
       const apropos = vi.fn();
