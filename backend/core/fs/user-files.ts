@@ -406,6 +406,21 @@ export function updateFile(
 }
 
 /**
+ * iCloud a évincé ce fichier (macOS < 14) : il ne reste à sa place qu'une trace, `.nom.icloud`.
+ * Tout le dit absent, ENOENT compris, alors qu'il est simplement ailleurs : en créer un nouveau
+ * laisserait au service de synchronisation deux versions à réconcilier.
+ */
+export async function isEvictedByIcloud(filePath: string): Promise<boolean> {
+  const placeholder = path.join(path.dirname(filePath), `.${path.basename(filePath)}.icloud`);
+  const isThere = (p: string): Promise<boolean> =>
+    lstat(p).then(
+      () => true,
+      () => false
+    );
+  return !(await isThere(filePath)) && (await isThere(placeholder));
+}
+
+/**
  * `updateFile` pour un JSON. Un JSON invalide lève `UnreadableFileError` de raison
  * `invalid-json`, mutator non appelé. Par défaut, indentation 2 sans saut final.
  */

@@ -188,6 +188,7 @@
     }
   },
   "bibliography": {
+    "sourceNotSaved": "Die Bibliografie ist geladen, aber das Projekt konnte diese Datei nicht vermerken: project.json wurde nicht verändert, und beim nächsten Öffnen findet das Projekt sie nicht wieder. Prüfen Sie, ob project.json lesbar ist, und importieren Sie diese Datei dann erneut.",
     "title": "Bibliographie",
     "import": "BibTeX-Datei importieren",
     "searchAndFilters": "Suche und Filter",
@@ -297,8 +298,8 @@
     "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
     "configUnreadable": {
       "title": "Projekteinstellungen nicht lesbar",
-      "message": "Die Datei .cliodeck/config.json dieses Projekts lässt sich nicht lesen, oft wegen eines überzähligen Kommas. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind der Obsidian-Vault und die MCP-Server des Projekts nicht verfügbar, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Korrigieren Sie diese Datei oder prüfen Sie, ob sie erreichbar ist, und öffnen Sie das Projekt dann erneut.",
-      "newerSchema": "Die Datei .cliodeck/config.json dieses Projekts stammt aus einer neueren ClioDeck-Version. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind der Obsidian-Vault und die MCP-Server des Projekts nicht verfügbar, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Aktualisieren Sie ClioDeck und öffnen Sie das Projekt dann erneut. Sie müssen diese Datei nicht von Hand ändern."
+      "message": "Die Datei .cliodeck/config.json dieses Projekts lässt sich nicht lesen, oft wegen eines überzähligen Kommas. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind die MCP-Server des Projekts nicht verfügbar, und der Obsidian-Vault kann weder verknüpft noch getrennt noch neu indexiert werden. Seine bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Korrigieren Sie diese Datei oder prüfen Sie, ob sie erreichbar ist, und öffnen Sie das Projekt dann erneut.",
+      "newerSchema": "Die Datei .cliodeck/config.json dieses Projekts stammt aus einer neueren ClioDeck-Version. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind die MCP-Server des Projekts nicht verfügbar, und der Obsidian-Vault kann weder verknüpft noch getrennt noch neu indexiert werden. Seine bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Aktualisieren Sie ClioDeck und öffnen Sie das Projekt dann erneut. Sie müssen diese Datei nicht von Hand ändern."
     },
     "documentOpenError": "Das Dokument dieses Projekts konnte nicht geöffnet werden",
     "documentOpenUnchanged": "Es wurde keine Datei geändert.",
@@ -357,6 +358,7 @@
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
+    "zoteroNotSaved": "Nicht gespeichert: Die Datei project.json dieses Projekts konnte nicht geschrieben werden. Sie wurde nicht verändert. Prüfen Sie, ob sie lesbar und erreichbar ist.",
     "loading": "Projekt wird geöffnet...",
     "chaptersInNavigator_one": "{{count}} Kapitel — siehe Kapitelnavigator",
     "chaptersInNavigator_other": "{{count}} Kapitel — siehe Kapitelnavigator",

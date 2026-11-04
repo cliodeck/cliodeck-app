@@ -29,6 +29,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { isEvictedByIcloud } from '../fs/user-files.js';
 import { isInsideAsync } from '../vector-store/file-identity.js';
 import {
   defaultWorkspaceConfig,
@@ -91,13 +92,14 @@ async function exists(p: string): Promise<boolean> {
 /**
  * `access` suit les liens : un `config.json` lien cassé se lirait absent, et la configuration par
  * défaut s'écrirait à son autre bout. Il est là, simplement illisible, et `configIssue` le dira.
+ * De même pour un fichier évincé par iCloud : une configuration vide s'écrirait à côté de lui.
  */
 async function configPresent(p: string): Promise<boolean> {
   try {
     await fs.lstat(p);
     return true;
   } catch {
-    return false;
+    return isEvictedByIcloud(p);
   }
 }
 

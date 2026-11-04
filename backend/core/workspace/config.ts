@@ -11,6 +11,7 @@ import { lstat, stat } from 'fs/promises';
 import path from 'path';
 import {
   atomicWriteFile,
+  isEvictedByIcloud,
   readUserFile,
   UnreadableFileError,
   updateFile,
@@ -171,7 +172,8 @@ const targetExists = (p: string): Promise<boolean> =>
  * `absent` sur tout ENOENT, et c'est ici qu'on regarde plus haut. Un parent renommé ou un volume
  * débranché font disparaître le dossier du projet : le recréer laisserait un squelette, où
  * l'enregistrement suivant écrirait, et le vrai dossier ne pourrait plus reprendre son nom
- * (ENOTEMPTY). Un lien cassé, lui, écrirait à son autre bout. `null` : la création est permise.
+ * (ENOTEMPTY). Un lien cassé, lui, écrirait à son autre bout, et une configuration vide posée à
+ * côté d'un fichier évincé par iCloud oublierait tout ce qu'il porte. `null` : la création est permise.
  */
 async function whyNotAbsent(workspaceRoot: string, file: string): Promise<string | null> {
   if (!(await isDirectory(workspaceRoot))) return `le dossier du projet est introuvable : ${workspaceRoot}`;
@@ -181,6 +183,9 @@ async function whyNotAbsent(workspaceRoot: string, file: string): Promise<string
   }
   if ((await entryExists(file)) && !(await targetExists(file))) {
     return 'ce fichier est un lien dont la cible est introuvable';
+  }
+  if (await isEvictedByIcloud(file)) {
+    return "iCloud l'a retiré de ce Mac : téléchargez-le depuis le Finder";
   }
   return null;
 }

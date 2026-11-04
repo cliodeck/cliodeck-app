@@ -5,6 +5,7 @@ import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import {
+  isEvictedByIcloud,
   readUserFile,
   UnreadableFileError,
   updateJsonFile,
@@ -163,6 +164,8 @@ interface Project {
   chapters?: Chapter[];
   /** Réglages d'appareil savant (projets « livre »). */
   book?: BookSettings;
+  /** La bibliothèque et la collection Zotero du projet. Les champs inconnus restent. */
+  zotero?: { groupId?: string; collectionKey?: string; libraryID?: number };
 }
 
 /** Un JSON valide qui n'est pas un objet n'est pas un manifeste, et s'écrirait mal. */
@@ -170,6 +173,18 @@ function assertIsManifest(projectFile: string, value: unknown): asserts value is
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new UnreadableFileError(projectFile, 'invalid-json', `${projectFile} n'est pas un manifeste de projet`);
   }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Le bloc `zotero` se change clé par clé, `undefined` effaçant : une synchronisation peut y avoir
+ * posé la collection depuis que le panneau a lu le fichier, et la synchronisation suivante part
+ * d'elle. Ce qui n'est pas un objet ne se fusionne pas : le reçu le remplace tel quel.
+ */
+function zoteroUpdate(stored: unknown, received: unknown): Pick<Project, 'zotero'> | undefined {
+  return isRecord(stored) && isRecord(received) ? { zotero: { ...stored, ...received } } : undefined;
 }
 
 /**
@@ -200,9 +215,7 @@ async function projectFileIsMissing(projectFile: string): Promise<boolean> {
   }
   try {
     const entries = await readdir(path.dirname(projectFile));
-    const name = path.basename(projectFile);
-    // iCloud a évincé le fichier (macOS < 14) : il ne laisse que `.project.json.icloud`.
-    return !entries.includes(name) && !entries.includes(`.${name}.icloud`);
+    return !entries.includes(path.basename(projectFile)) && !(await isEvictedByIcloud(projectFile));
   } catch {
     return false;
   }
@@ -925,14 +938,21 @@ export class ProjectManager {
     try {
       // Seuls les champs reçus changent : le reste vient du disque, pas du renderer.
       const stored = await this.updateProjectFile(projectPath, (project) => {
-        Object.assign(project, updates, { updatedAt: new Date().toISOString() });
+        Object.assign(project, updates, zoteroUpdate(project.zotero, updates.zotero), {
+          updatedAt: new Date().toISOString(),
+        });
       });
       console.log('✅ Project config updated:', projectPath);
 
       // La mémoire garde ce qui s'y résout (chemins en absolu), et le chemin du projet.
       if (this.currentProject && this.isCurrentProject(this.resolveProjectPaths(projectPath).projectDir)) {
         const { path: _excludedPath, ...received } = updates;
-        this.currentProject = { ...this.currentProject, ...received, updatedAt: stored.updatedAt };
+        this.currentProject = {
+          ...this.currentProject,
+          ...received,
+          zotero: stored.zotero,
+          updatedAt: stored.updatedAt,
+        };
       }
 
       return { success: true };

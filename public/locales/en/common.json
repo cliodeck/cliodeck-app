@@ -188,6 +188,7 @@
     }
   },
   "bibliography": {
+    "sourceNotSaved": "The bibliography is loaded, but the project could not record this file: project.json has not been changed, and the next time the project opens it will not find this bibliography. Check that project.json is readable, then import this file again.",
     "title": "Bibliography",
     "import": "Import BibTeX file",
     "searchAndFilters": "Search and filters",
@@ -297,8 +298,8 @@
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
     "configUnreadable": {
       "title": "Project settings unreadable",
-      "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's Obsidian vault and MCP servers are unavailable, and source inspection falls back to “Warn” mode, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
-      "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's Obsidian vault and MCP servers are unavailable, and source inspection falls back to “Warn” mode, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
+      "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection falls back to “Warn” mode, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
+      "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection falls back to “Warn” mode, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
     },
     "documentOpenError": "This project's document could not be opened",
     "documentOpenUnchanged": "No file was changed.",
@@ -357,6 +358,7 @@
     "zoteroCollectionKey": "Collection Key",
     "zoteroCollectionKeyPlaceholder": "Enter collection key (optional)",
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
+    "zoteroNotSaved": "Not saved: this project's project.json file could not be written. It has not been changed. Check that it is readable and accessible.",
     "loading": "Opening project...",
     "chaptersInNavigator_one": "{{count}} chapter — see the chapter navigator",
     "chaptersInNavigator_other": "{{count}} chapters — see the chapter navigator",

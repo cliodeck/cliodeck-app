@@ -4,7 +4,7 @@
  * récente le faisait remplacer en silence par une configuration vide (S11-1-8).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { mkdtemp, readdir, rm, symlink } from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -243,6 +243,54 @@ describe('absent n’est pas pris au mot : on regarde plus haut', () => {
     writeConfig(JSON.stringify(REALISTIC));
     await readOrInitWorkspaceConfig(root);
     expect(await readdir(path.join(root, '.cliodeck'))).toEqual(['config.json']);
+  });
+});
+
+describe('iCloud a évincé le fichier (macOS < 14) : il n’en reste que `.config.json.icloud`', () => {
+  let placeholder: string;
+
+  beforeEach(() => {
+    placeholder = path.join(root, '.cliodeck', '.config.json.icloud');
+    writeFileSync(placeholder, 'bplist00');
+  });
+
+  it.each<[string, () => Promise<unknown>]>([
+    ['readWorkspaceConfig', () => readWorkspaceConfig(root)],
+    ['readOrInit', () => readOrInitWorkspaceConfig(root)],
+    ['update', () => updateWorkspaceConfig(root, () => undefined)],
+  ])('%s : illisible, jamais « absent », et rien n’est créé à côté', async (_label, run) => {
+    expect(await kindOf(run)).toBe('unreadable');
+    expect(existsSync(configFile)).toBe(false);
+    expect(readFileSync(placeholder, 'utf8')).toBe('bplist00');
+  });
+
+  it('update refuse sans appeler le mutateur', async () => {
+    let called = false;
+    await updateWorkspaceConfig(root, () => {
+      called = true;
+    }).catch(() => undefined);
+    expect(called).toBe(false);
+  });
+
+  it('à l’ouverture, c’est un problème à signaler, et le message dit où est le fichier', async () => {
+    expect(await workspaceConfigIssue(root)).toEqual({ kind: 'unreadable', path: configFile });
+    await expect(readWorkspaceConfig(root)).rejects.toThrow(/iCloud/);
+  });
+
+  it('témoin : le fichier revenu à côté de sa trace se lit et s’écrit normalement', async () => {
+    writeConfig(JSON.stringify(REALISTIC));
+    expect((await readWorkspaceConfig(root)).name).toBe('Thèse');
+    await updateWorkspaceConfig(root, (cfg) => {
+      cfg.name = 'Autre';
+    });
+    expect((await readWorkspaceConfig(root)).name).toBe('Autre');
+  });
+
+  it('témoin : la trace d’un autre fichier ne change rien', async () => {
+    rmSync(placeholder);
+    writeFileSync(path.join(root, '.cliodeck', '.hints.md.icloud'), 'bplist00');
+    expect((await readOrInitWorkspaceConfig(root)).schema_version).toBe(2);
+    expect(existsSync(configFile)).toBe(true);
   });
 });
 

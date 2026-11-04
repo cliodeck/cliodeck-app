@@ -57,6 +57,40 @@ async function snapshot(dir: string, prefix = ''): Promise<Record<string, string
   return out;
 }
 
+describe('createProject — le dossier porte déjà un `.cliodeck`', () => {
+  const inDir = async (config: string) => {
+    const dir = path.join(workDir, 'Neuf');
+    await mkdir(path.join(dir, '.cliodeck'), { recursive: true });
+    const file = path.join(dir, '.cliodeck', 'config.json');
+    await writeFile(file, config);
+    return file;
+  };
+
+  it.each<[string, string, string]>([
+    ['virgule en trop', '{"schema_version":2,"vault":{"path":"/Notes"},}', 'invalid_json'],
+    ['format plus récent', '{"schema_version":3,"vault":{"path":"/Notes"}}', 'newer_schema'],
+  ])('%s : créé, l’auteur le saura, et config.json reste identique à l’octet', async (_label, config, kind) => {
+    const file = await inDir(config);
+    const before = await readFile(file);
+
+    const result = await manager.createProject({ name: 'Neuf', type: 'article', path: workDir });
+
+    expect(result).toMatchObject({ success: true, configIssue: { kind, path: file } });
+    expect((await readFile(file)).equals(before)).toBe(true);
+  });
+
+  it('témoin : un config.json qui se lit, ou aucun, ne signale rien', async () => {
+    await inDir('{"schema_version":2}');
+    const withConfig = await manager.createProject({ name: 'Neuf', type: 'article', path: workDir });
+    expect(withConfig.success).toBe(true);
+    expect(withConfig).not.toHaveProperty('configIssue');
+
+    const without = await manager.createProject({ name: 'Autre', type: 'article', path: workDir });
+    expect(without.success).toBe(true);
+    expect(without).not.toHaveProperty('configIssue');
+  });
+});
+
 describe('createProject — un projet existe déjà à cet emplacement', () => {
   it('article : refus project_exists, tous les fichiers intacts', async () => {
     await manager.createProject({ name: 'These', type: 'article', path: workDir });

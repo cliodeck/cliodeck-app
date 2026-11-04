@@ -11,7 +11,7 @@ import {
   LEGACY_V2_SUBDIR,
 } from '../layout.js';
 import { migrateWorkspaceToFlat, type MigrationReport } from '../migrator.js';
-import { readWorkspaceConfig } from '../config.js';
+import { readWorkspaceConfig, workspaceConfigIssue } from '../config.js';
 import { loadWorkspaceHints } from '../../hints/loader.js';
 import { sqliteAvailable, symlinkAvailable } from '../../../__tests__/helpers/native-guards.js';
 
@@ -170,6 +170,49 @@ describe('migrateWorkspaceToFlat — un config.json illisible n’est pas rempla
     expect(report.copied).toEqual([]);
     expect((await fs.lstat(config)).isSymbolicLink()).toBe(true);
     await expect(fs.access(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  describe('config.json évincé par iCloud (`.config.json.icloud`)', () => {
+    const flatConfig = () => path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    const expectNothingWritten = async () => {
+      await expect(fs.access(flatConfig())).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, '.config.json.icloud'), 'utf8')).toBe('bplist00');
+    };
+
+    beforeEach(async () => {
+      await write(path.join(tmpRoot, CLIODECK_DIR, '.config.json.icloud'), 'bplist00');
+    });
+
+    it('dossier d’avant la fusion : aucune configuration par défaut à côté', async () => {
+      const report = await migrateWorkspaceToFlat(tmpRoot);
+
+      expect(report.copied).toEqual([]);
+      await expectNothingWritten();
+      await expect(workspaceConfigIssue(tmpRoot)).resolves.toEqual({ kind: 'unreadable', path: flatConfig() });
+    });
+
+    it('ancien sous-dossier v2 sans config : rien non plus', async () => {
+      await write(path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'hnsw.index'), 'index');
+
+      await migrateWorkspaceToFlat(tmpRoot);
+
+      await expectNothingWritten();
+    });
+
+    it('.cliobrain : ni sa configuration ni celle par défaut', async () => {
+      await write(path.join(tmpRoot, '.cliobrain', 'hints.md'), 'des indices');
+      await write(path.join(tmpRoot, '.cliobrain', 'config.json'), '{"name":"ClioBrain"}');
+
+      await migrateWorkspaceToFlat(tmpRoot);
+
+      await expectNothingWritten();
+    });
+
+    it('--overwrite, la demande explicite : écrit', async () => {
+      await migrateWorkspaceToFlat(tmpRoot, { overwrite: true });
+
+      expect(JSON.parse(await fs.readFile(flatConfig(), 'utf8')).schema_version).toBe(2);
+    });
   });
 
   it('dossier sans config.json : le fichier généré est atomique, et lisible', async () => {

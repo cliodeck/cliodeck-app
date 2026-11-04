@@ -156,7 +156,7 @@ describe('écritures concurrentes : aucune ne perd celle d’à côté', () => {
     expect((disk.book as { numberSections: boolean }).numberSections).toBe(true);
     expect(disk.bibliographySource).toMatchObject({ type: 'file', filePath: 'autre.bib' });
     expect(disk.cslPath).toBe('style.csl');
-    expect(disk.zotero).toEqual({ collectionKey: 'XYZ' });
+    expect(disk.zotero).toEqual({ collectionKey: 'XYZ', libraryID: 3 });
   });
 
   it('createChapter en rafale, avec des réglages : tous les chapitres, deux fichiers distincts par titre', async () => {
@@ -223,6 +223,52 @@ describe('écritures concurrentes : aucune ne perd celle d’à côté', () => {
       });
       expect(disk.zotero).toEqual({ libraryID: 3, collectionKey: collection });
     }
+  });
+
+  it('synchronisation Zotero et bibliothèque choisie, 20 fois : la collection et la bibliothèque restent', async () => {
+    writeProject(realisticProject());
+
+    for (let round = 0; round < 20; round += 1) {
+      const collection = `COLL${round}`;
+      await Promise.all([
+        recordProjectCollection(projectFile, 'bibliography.bib', collection),
+        manager.updateConfig(projectFile, { zotero: { libraryID: round } }),
+      ]);
+
+      expect(onDisk().zotero).toEqual({ collectionKey: collection, libraryID: round });
+    }
+  });
+
+  it('le bloc zotero change clé par clé : ce qui n’est pas reçu reste, `undefined` efface', async () => {
+    writeProject(realisticProject({ zotero: { collectionKey: 'ABC', libraryID: 3, champ_de_demain: 'garde' } }));
+
+    await manager.updateConfig(projectFile, { zotero: { groupId: '42' } });
+    expect(onDisk().zotero).toEqual({ collectionKey: 'ABC', libraryID: 3, champ_de_demain: 'garde', groupId: '42' });
+
+    await manager.updateConfig(projectFile, { zotero: { collectionKey: undefined } });
+    expect(onDisk().zotero).toEqual({ libraryID: 3, champ_de_demain: 'garde', groupId: '42' });
+  });
+
+  it('la mémoire suit ce que le disque a gardé du bloc, pas ce que le renderer a envoyé', async () => {
+    writeProject(realisticProject());
+    await manager.loadProject(projectFile);
+
+    await recordProjectCollection(projectFile, 'bibliography.bib', 'SYNCHRO');
+    await manager.updateConfig(projectFile, { zotero: { libraryID: 4 } });
+
+    const current = manager.getCurrentProject() as unknown as { zotero: unknown };
+    expect(current.zotero).toEqual({ collectionKey: 'SYNCHRO', libraryID: 4 });
+  });
+
+  it.each<[string, unknown]>([
+    ['un tableau', ['a']],
+    ['un texte', 'abc'],
+  ])('zotero sur le disque est %s : remplacé par ce qui est reçu, sans y lire de clés', async (_label, stored) => {
+    writeProject(realisticProject({ zotero: stored }));
+
+    await manager.updateConfig(projectFile, { zotero: { libraryID: 4 } });
+
+    expect(onDisk().zotero).toEqual({ libraryID: 4 });
   });
 
   it('une ouverture et un enregistrement de réglages : la frappe d’à côté reste', async () => {
@@ -324,7 +370,7 @@ describe('un seul format d’octets, et aucun champ calculé sur le disque', () 
     writeProject(realisticProject());
     await manager.updateConfig(projectFile, { path: '/ailleurs', zotero: { collectionKey: 'XYZ' } } as never);
     expect(onDisk().path).toBeUndefined();
-    expect(onDisk().zotero).toEqual({ collectionKey: 'XYZ' });
+    expect(onDisk().zotero).toEqual({ collectionKey: 'XYZ', libraryID: 3 });
   });
 
   it('la mémoire se met à jour à partir du résultat, et garde ce qui est résolu', async () => {
@@ -339,7 +385,7 @@ describe('un seul format d’octets, et aucun champ calculé sur le disque', () 
     const current = manager.getCurrentProject() as unknown as Record<string, unknown>;
     expect((current.chapters as Array<{ id: string }>).map((c) => c.id)).toEqual(['trois']);
     expect((current.book as { numberChapters: boolean }).numberChapters).toBe(true);
-    expect(current.zotero).toEqual({ collectionKey: 'XYZ' });
+    expect(current.zotero).toEqual({ collectionKey: 'XYZ', libraryID: 3 });
     expect(current.bibliographySource).toMatchObject({ type: 'file', filePath: 'autre.bib' });
     expect(current.path).toBe(projectDir);
     expect(current.bibliography).toBe(path.join(projectDir, 'bibliography.bib'));

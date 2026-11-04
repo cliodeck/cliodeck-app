@@ -140,13 +140,20 @@ export const BibliographyPanel: React.FC = () => {
 
         // Save the bibliography source to project.json
         const projectJsonPath = `${currentProject.path}/project.json`;
-        await window.electron.project.setBibliographySource({
+        const saved = await window.electron.project.setBibliographySource({
           projectPath: projectJsonPath,
           type: 'file',
           filePath: bibFileName,
         });
 
-        console.log('✅ Bibliography source saved to project');
+        if (saved?.success) {
+          console.log('✅ Bibliography source saved to project');
+        } else {
+          // Le main rend son refus sans lever. Les références sont bien chargées : le résumé suit.
+          await useDialogStore
+            .getState()
+            .showAlert(withErrorDetails(t('bibliography.sourceNotSaved'), saved?.error ? [saved.error] : []));
+        }
       }
 
       // Show summary modal

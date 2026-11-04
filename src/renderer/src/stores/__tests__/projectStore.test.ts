@@ -814,6 +814,45 @@ describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', 
     });
   });
 
+  // Mesuré (`retrieval-config-unreadable.test.ts`) : le coffre n'est pas hors jeu dans le chat.
+  it.each<[string, { consulted: string; refused: string; falseClaim: RegExp }]>([
+    [
+      'fr',
+      {
+        consulted: "notes déjà indexées restent consultées par l'assistant",
+        refused: 'ni lié, ni délié, ni réindexé',
+        falseClaim: /coffre Obsidian et les serveurs MCP[^.]*indisponibles/,
+      },
+    ],
+    [
+      'en',
+      {
+        consulted: 'already indexed notes are still consulted by the assistant',
+        refused: 'cannot be linked, unlinked or reindexed',
+        falseClaim: /vault and MCP servers are unavailable/,
+      },
+    ],
+    [
+      'de',
+      {
+        consulted: 'bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen',
+        refused: 'weder verknüpft noch getrennt noch neu indexiert',
+        falseClaim: /Vault und die MCP-Server[^.]*nicht verfügbar/,
+      },
+    ],
+  ])('en %s : le coffre ne se dit pas indisponible, ses notes indexées restent consultées', (language, wording) => {
+    const { message, newerSchema } = (
+      JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', language, 'common.json'), 'utf8')) as {
+        project: { configUnreadable: { message: string; newerSchema: string } };
+      }
+    ).project.configUnreadable;
+    for (const text of [message, newerSchema]) {
+      expect(text).toContain(wording.consulted);
+      expect(text).toContain(wording.refused);
+      expect(text).not.toMatch(wording.falseClaim);
+    }
+  });
+
   it('en français : rien n’a été modifié, le mode de sécurité, et quoi faire selon le cas', () => {
     const { message, newerSchema } = (
       JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', 'fr', 'common.json'), 'utf8')) as {

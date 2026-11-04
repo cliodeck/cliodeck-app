@@ -159,6 +159,8 @@ test.describe('config.json illisible', () => {
         await expect(toast).toContainText('.cliodeck/config.json');
         await expect(toast).toContainText("n'a pas été modifié");
         await expect(toast).toContainText('coffre Obsidian');
+        await expect(toast).toContainText("notes déjà indexées restent consultées par l'assistant");
+        await expect(toast).not.toContainText('coffre Obsidian et les serveurs MCP');
         await expect(toast).toContainText('MCP');
         await expect(toast).toContainText('Avertir');
         await expect(toast).toContainText(wording);
@@ -222,8 +224,16 @@ test.describe('config.json illisible', () => {
       await submitNewMcpServer(window);
 
       await expect(reason).toHaveCount(1);
-      // Dans la vue, à côté du bouton : en haut de la section, le formulaire le poussait dehors.
-      await expect(reason).toBeInViewport();
+      // À côté du bouton : en haut de la section, le formulaire le poussait hors de la vue. Pas la
+      // seule position à l'écran : ce robot remplit le formulaire en quelques millisecondes, et une
+      // section plus haut finit parfois de se charger après son clic. Tout descend alors d'environ
+      // 230 px (mesuré), le bouton et le motif avec. Qui regarde le bouton voit le motif.
+      expect(await reason.evaluate((line) => line.nextElementSibling?.textContent)).toContain('Enregistrer & démarrer');
+      const save = window.getByRole('button', { name: 'Enregistrer & démarrer' });
+      await expect(async () => {
+        await save.scrollIntoViewIfNeeded();
+        await expect(reason).toBeInViewport({ timeout: 500 });
+      }).toPass({ timeout: 10_000 });
       await expect(empty).toHaveCount(0);
       expect(readFileSync(project.configJson).equals(before)).toBe(true);
     });
@@ -247,6 +257,24 @@ test.describe('config.json illisible', () => {
 
     expect(lstatSync(project.configJson).isSymbolicLink()).toBe(true);
     expect(existsSync(dirname(target))).toBe(false);
+  });
+
+  test('config.json évincé par iCloud : le projet s’ouvre, l’auteur le sait, et rien ne s’écrit à côté', async () => {
+    const project = makeProject('Projet');
+    const placeholder = join(dirname(project.configJson), '.config.json.icloud');
+    writeFileSync(placeholder, 'bplist00');
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+
+      await expect(configToast(window)).toHaveCount(1, { timeout: 10_000 });
+      expect(existsSync(project.configJson)).toBe(false);
+      expect(readFileSync(placeholder, 'utf8')).toBe('bplist00');
+
+      const status = await window.evaluate(() => window.electron.fusion.vault.status());
+      expect(status).toMatchObject({ success: false });
+      expect(existsSync(project.configJson)).toBe(false);
+    });
   });
 
   test('fichier réparé, projet rouvert : plus de message, le coffre se relit, et les serveurs sont restés sur le disque', async () => {
@@ -467,5 +495,90 @@ test('projet B au project.json invalide : A reste ouvert et s’écrit, et le me
     await window.keyboard.type('Encore A.');
     await window.keyboard.press('Meta+S');
     await expect.poll(() => readFileSync(a.documentMd, 'utf8'), { timeout: 10_000 }).toContain('Encore A.');
+  });
+});
+
+test.describe('project.json refuse une écriture demandée depuis un panneau', () => {
+  test.setTimeout(120_000);
+
+  const manifest = (project: ProjectOnDisk) =>
+    JSON.parse(readFileSync(project.projectJson, 'utf8')) as Record<string, unknown> & { zotero?: unknown };
+
+  test('Paramètres Zotero : la collection d’une synchronisation reste, ce qu’on vide s’efface, et le refus se lit', async () => {
+    const project = makeProject('ProjetZ');
+    writeFileSync(
+      project.projectJson,
+      JSON.stringify({ ...manifest(project), zotero: { collectionKey: 'AVANT', groupId: '1' } }, null, 2),
+    );
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+      await window.getByText('Parametres Zotero').click();
+      const group = window.getByPlaceholder("Entrez l'ID du groupe Zotero");
+      const collection = window.getByPlaceholder('Entrez la cle de collection (optionnel)');
+      await expect(collection).toHaveValue('AVANT');
+      const save = window.locator('.config-section', { has: collection }).getByRole('button', { name: 'Enregistrer' });
+
+      // Une synchronisation pose une autre collection pendant que le panneau est ouvert.
+      writeFileSync(
+        project.projectJson,
+        JSON.stringify({ ...manifest(project), zotero: { collectionKey: 'SYNCHRO', groupId: '1' } }, null, 2),
+      );
+      await group.fill('42');
+      await save.click();
+      await expect.poll(() => manifest(project).zotero, { timeout: 10_000 }).toEqual({
+        collectionKey: 'SYNCHRO',
+        groupId: '42',
+      });
+
+      // Vider le champ passe par le vrai IPC : `undefined` y arrive, et efface.
+      await collection.fill('');
+      await save.click();
+      await expect.poll(() => manifest(project).zotero, { timeout: 10_000 }).toEqual({ groupId: '42' });
+
+      const broken = '{ "name": "ProjetZ", }';
+      writeFileSync(project.projectJson, broken);
+      await group.fill('43');
+      await save.click();
+      await expect(window.locator('.save-message.error')).toContainText('Non enregistré', { timeout: 10_000 });
+      await expect(window.locator('.save-message.error')).toContainText('project.json');
+      expect(readFileSync(project.projectJson, 'utf8')).toBe(broken);
+
+      // Dans son cadre, sous le bouton : le panneau est étroit, et le message long.
+      const refusal = await window.locator('.save-message.error').boundingBox();
+      const frame = await window.locator('.config-section', { has: collection }).boundingBox();
+      const button = await save.boundingBox();
+      expect(refusal && frame && button).toBeTruthy();
+      if (refusal && frame && button) {
+        expect(refusal.x).toBeGreaterThanOrEqual(frame.x);
+        expect(refusal.x + refusal.width).toBeLessThanOrEqual(frame.x + frame.width);
+        expect(refusal.y).toBeGreaterThanOrEqual(button.y + button.height);
+      }
+    });
+  });
+
+  test('import d’un .bib : l’auteur lit que project.json ne l’a pas retenu, et le fichier reste à l’octet', async () => {
+    const project = makeProject('ProjetBib');
+    // Dans le projet : hors de lui, `fs:copy-file` refuse d'abord (S11-1-9, à venir dans L05-5).
+    const bib = join(project.dir, 'import', 'refs.bib');
+    mkdirSync(dirname(bib));
+    writeFileSync(bib, '@book{braudel1949,\n  title={La Méditerranée},\n  author={Braudel, Fernand},\n  year={1949}\n}\n');
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+
+      const broken = '{ "name": "ProjetBib", }';
+      writeFileSync(project.projectJson, broken);
+      await app.evaluate(({ dialog }, filePath) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+      }, bib);
+      await window.locator('#left-tab-bibliography').click();
+      await window.locator('button[title="Importer fichier BibTeX"]').click();
+
+      const message = window.locator('#alert-dialog-message');
+      await expect(message).toContainText('La bibliographie est chargée', { timeout: 15_000 });
+      await expect(message).toContainText("project.json n'a pas été modifié");
+      expect(readFileSync(project.projectJson, 'utf8')).toBe(broken);
+    });
   });
 });
