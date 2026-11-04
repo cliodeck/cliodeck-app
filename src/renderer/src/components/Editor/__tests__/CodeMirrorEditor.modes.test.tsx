@@ -44,14 +44,11 @@ let writes: Array<[string, string]>;
 const editor = () => useEditorStore.getState();
 const mirror = () => editor().content;
 
-/** Ce que MainLayout monte en mode Écriture : l'autosave et l'éditeur, rien dans les autres modes. */
-const WritePanel: React.FC = () => {
-  useAutoSave();
-  return <CodeMirrorEditor />;
-};
+/** Comme App et MainLayout : l'autosave toujours, l'éditeur seulement en mode Écriture. */
 const Workspace: React.FC = () => {
+  useAutoSave();
   const mode = useWorkspaceModeStore((s) => s.active);
-  return mode === 'write' ? <WritePanel /> : null;
+  return mode === 'write' ? <CodeMirrorEditor /> : null;
 };
 
 function currentView(): EditorView {

@@ -7,7 +7,7 @@
  * clé de A, et `chapters/A.md` partait sur le disque avec le texte de B, sous un
  * message de succès. Le texte de A n'existait plus nulle part.
  *
- * Vrais EditorPanel, ChapterNavigator et stores ; seuls le disque (en mémoire,
+ * Vrais EditorPanel, ChapterNavigator, autosave et stores ; seuls le disque (en mémoire,
  * derrière l'IPC) et la vue CM6 sont simulés. La fausse vue suit la vraie
  * (`CodeMirrorEditor`) : recréée sur `documentVersion`, façade retirée
  * au démontage, `setValue` sans effet une fois détruite, `isDirty` posé à chaque
@@ -20,6 +20,7 @@ import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import type { ResolvedChapter } from '@backend/types/book';
 
 import { EditorPanel } from '../EditorPanel';
+import { useAutoSave } from '../../../hooks/useAutoSave';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 import { useProjectStore } from '../../../stores/projectStore';
@@ -51,6 +52,12 @@ vi.mock('../CodeMirrorEditor', async () => {
   };
   return { CodeMirrorEditor };
 });
+
+/** Comme App : l'autosave à côté du panneau, pas dedans. */
+const AutoSave = (): null => {
+  useAutoSave();
+  return null;
+};
 
 const PROJECT = '/p/livre';
 const pathOf = (rel: string) => `${PROJECT}/chapters/${rel}.md`;
@@ -148,7 +155,12 @@ async function openBook(files: Record<string, string>, open: string = A): Promis
     editorFacade: null,
   });
   await act(async () => {
-    render(<EditorPanel />);
+    render(
+      <>
+        <AutoSave />
+        <EditorPanel />
+      </>
+    );
   });
 }
 

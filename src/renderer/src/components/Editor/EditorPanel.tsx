@@ -33,7 +33,6 @@ import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSlidesStore } from '../../stores/slidesStore';
 import { useManuscriptStore, currentRelativePath } from '../../stores/manuscriptStore';
-import { useAutoSave } from '../../hooks/useAutoSave';
 import { runCitationCheck } from '../../services/check-citations';
 import { newDocument } from '../../services/new-document';
 import { unreadableChaptersNote } from '../../services/unreadable-chapters';
@@ -84,9 +83,6 @@ export const EditorPanel: React.FC = () => {
   // Tiroir « chercher dans le livre » (audit item 21) — livres uniquement :
   // Cmd+F reste la recherche du chapitre ouvert.
   const [showManuscriptSearch, setShowManuscriptSearch] = useState(false);
-
-  // Enable auto-save functionality
-  useAutoSave();
 
   // Après la sélection, sans l'effacer : ces boutons ajoutent une diapositive, ils ne remplacent rien.
   const insertSlideSnippet = (text: string) => {

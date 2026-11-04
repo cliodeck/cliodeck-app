@@ -13,13 +13,19 @@ const MAX_RETRY_DELAY_MS = 60_000;
  * - Auto-save is enabled in settings
  * - The document has unsaved changes (isDirty)
  * - A file path exists (not a new unsaved document)
+ * - Aucune renumérotation n'est en cours : elle écrit le manuscrit elle-même, chapitre
+ *   par chapitre. Le texte qui reste à écrire part quand elle relâche le verrou.
  *
  * Tant qu'il reste du texte à écrire, un nouvel essai est prévu : `isDirty` resté vrai
  * ne repasse jamais de faux à vrai, ni après une frappe pendant l'écriture, ni après un
  * échec. Sur un échec, l'auteur est prévenu une fois par série, et les essais s'éloignent.
+ *
+ * Monté au-dessus du panneau d'écriture : le minuteur survit à un changement de mode et à un
+ * plantage de ce panneau. Sans éditeur à l'écran, `saveFile` écrit le miroir, où le démontage
+ * de la vue a purgé la dernière frappe, et aucune commande n'y ajoute plus de gabarit.
  */
 export function useAutoSave(): void {
-  const { isDirty, filePath, documentVersion, lastSavedAt, settings, saveFile } = useEditorStore();
+  const { isDirty, filePath, documentVersion, lastSavedAt, switchLock, settings, saveFile } = useEditorStore();
   const { autoSave, autoSaveDelay } = settings;
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -39,7 +45,12 @@ export function useAutoSave(): void {
     const currentState = useEditorStore.getState();
 
     // Double-check conditions before saving
-    if (!currentState.isDirty || !currentState.filePath || !currentState.settings.autoSave) {
+    if (
+      !currentState.isDirty ||
+      !currentState.filePath ||
+      !currentState.settings.autoSave ||
+      currentState.switchLock
+    ) {
       return;
     }
 
@@ -81,7 +92,8 @@ export function useAutoSave(): void {
     };
   }, []);
 
-  // Une écriture réussie, un autre document, ou plus de panneau d'écriture : la série est finie.
+  // Une écriture réussie ou un autre document : la série est finie. Un changement de mode ne la
+  // finit pas : le texte n'est toujours pas écrit, et les essais continuent.
   useEffect(
     () => () => {
       failuresRef.current = 0;
@@ -99,7 +111,7 @@ export function useAutoSave(): void {
     }
 
     // Only set up auto-save if enabled and conditions are met
-    if (!autoSave || !isDirty || !filePath) {
+    if (!autoSave || !isDirty || !filePath || switchLock) {
       return;
     }
 
@@ -117,5 +129,5 @@ export function useAutoSave(): void {
         timeoutRef.current = null;
       }
     };
-  }, [autoSave, autoSaveDelay, isDirty, filePath, lastSavedAt, finishedAttempts, performAutoSave]);
+  }, [autoSave, autoSaveDelay, isDirty, filePath, lastSavedAt, switchLock, finishedAttempts, performAutoSave]);
 }

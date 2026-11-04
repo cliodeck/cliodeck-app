@@ -15,6 +15,7 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 
 import { EditorPanel } from '../EditorPanel';
+import { useAutoSave } from '../../../hooks/useAutoSave';
 import i18n from '../../../i18n';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
@@ -49,6 +50,12 @@ vi.mock('../CodeMirrorEditor', async () => {
   return { CodeMirrorEditor };
 });
 
+/** Comme App : l'autosave à côté du panneau, pas dedans. */
+const AutoSave = (): null => {
+  useAutoSave();
+  return null;
+};
+
 const PROJECT = '/p/projet';
 const DOCUMENT = `${PROJECT}/document.md`;
 const SLIDES = `${PROJECT}/slides.md`;
@@ -77,7 +84,12 @@ async function mount(type: 'article' | 'presentation' | 'book', open: string): P
   });
   useEditorStore.setState({ filePath: open, content: disk[open], isDirty: false, editorFacade: null });
   await act(async () => {
-    render(<EditorPanel />);
+    render(
+      <>
+        <AutoSave />
+        <EditorPanel />
+      </>
+    );
   });
 }
 

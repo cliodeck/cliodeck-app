@@ -8,7 +8,8 @@
  * white card on a grey backdrop.
  *
  * « Réessayer » recharge la page : le document s'écrit d'abord. Le plantage a démonté
- * l'éditeur et son autosave, mais le texte est encore dans le store.
+ * l'éditeur, mais le texte est encore dans le store. L'autosave, monté au-dessus, l'écrit
+ * aussi de son côté : c'est le même texte, et un seul des deux trouve encore à écrire.
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
