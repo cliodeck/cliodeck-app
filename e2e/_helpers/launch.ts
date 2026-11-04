@@ -55,20 +55,25 @@ export function shouldSkip(): string | null {
  * never touch `~/.config/cliodeck`. The caller receives the path so it
  * can clean up on teardown.
  */
-export async function launchApp(options: { language?: string } = {}): Promise<LaunchOutcome> {
+export async function launchApp(
+  options: { language?: string; userDataDir?: string } = {},
+): Promise<LaunchOutcome> {
   const skip = shouldSkip();
   if (skip) return { kind: 'skip', reason: skip };
 
-  const userDataDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-'));
+  // `options.userDataDir` : un second lancement, qui retrouve les récents du premier.
+  const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'cliodeck-e2e-'));
 
   // Langue fixée avant le premier rendu : sans réglage, l'app suit la langue
   // du système, et tout test écrit sur un libellé devient dépendant du poste.
   // On fixe le français, le défaut de l'app. `cliodeck-config.json` est le
   // fichier electron-store, lu au démarrage dans le userData créé ci-dessus.
-  writeFileSync(
-    join(userDataDir, 'cliodeck-config.json'),
-    JSON.stringify({ language: options.language ?? E2E_LANGUAGE }),
-  );
+  if (!options.userDataDir) {
+    writeFileSync(
+      join(userDataDir, 'cliodeck-config.json'),
+      JSON.stringify({ language: options.language ?? E2E_LANGUAGE }),
+    );
+  }
 
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
