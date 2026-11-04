@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
-import { useProjectStore, type Project } from '../../stores/projectStore';
+import { NotAProjectError, useProjectStore, type Project } from '../../stores/projectStore';
 import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
@@ -124,6 +124,12 @@ export const ProjectPanel: React.FC = () => {
     return true;
   };
 
+  /** Le refus d'une ouverture, dans les mots de l'auteur : le fichier choisi nommé, jamais un code. */
+  const openFailureMessage = (error: unknown): string =>
+    error instanceof NotAProjectError
+      ? t('project.notAProject', { file: error.fileName })
+      : t(openErrorKey(error, 'project.openError'));
+
   const handleOpenProject = async () => {
     try {
       const result = await window.electron.dialog.openFile({
@@ -139,7 +145,7 @@ export const ProjectPanel: React.FC = () => {
       }
     } catch (error: unknown) {
       console.error('Failed to open project:', error);
-      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'project.openError')));
+      await useDialogStore.getState().showAlert(openFailureMessage(error));
     }
   };
 
@@ -163,7 +169,7 @@ export const ProjectPanel: React.FC = () => {
       await loadProject(projectPath);
     } catch (error: unknown) {
       console.error('Failed to load recent project:', error);
-      await useDialogStore.getState().showAlert(t(openErrorKey(error, 'project.openError')));
+      await useDialogStore.getState().showAlert(openFailureMessage(error));
     }
   };
 

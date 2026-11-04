@@ -12,7 +12,7 @@
 import { createElement, type FC } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, act, screen } from '@testing-library/react';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -20,7 +20,7 @@ import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 
-import { useProjectStore } from '../projectStore';
+import { NotAProjectError, useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
 import { useDialogStore } from '../dialogStore';
 import { hasUnwrittenIdeas, useIdeaStore } from '../ideaStore';
@@ -53,7 +53,7 @@ vi.mock('../../../../main/services/project-manager.js', () => ({
   projectManager: { getCurrentProjectPath: () => h.mainCurrent },
 }));
 vi.mock('../../../../main/services/config-manager.js', () => ({
-  configManager: { get: () => undefined, set: () => undefined },
+  configManager: { get: () => undefined, set: () => undefined, addRecentProject: () => undefined },
 }));
 vi.mock('../../../../main/services/manuscript-index-service.js', () => ({
   manuscriptIndexService: { isEnabled: () => false },
@@ -894,5 +894,105 @@ describe('les idées du projet qu’on quitte', () => {
     });
 
     expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+  });
+});
+
+describe('choisir un fichier qui n’est pas un projet (S11-1-18, A35) : A n’est jamais quitté', () => {
+  const FRAPPE = ' Une phrase que rien n’a encore écrite.';
+
+  const folderState = async (dir: string): Promise<Array<[string, number, number, string]>> => {
+    const names = (await readdir(dir)).sort();
+    return Promise.all(
+      names.map(async (name): Promise<[string, number, number, string]> => {
+        const file = path.join(dir, name);
+        const info = await stat(file);
+        return [name, info.size, info.mtimeMs, (await readFile(file)).toString('base64')];
+      })
+    );
+  };
+
+  /** Le vrai garde du main, sur le vrai disque : c'est lui qui décide, pas un simulacre. */
+  const useRealManifestGuard = async () => {
+    const { ProjectManager } = await vi.importActual<typeof import('../../../../main/services/project-manager.js')>(
+      '../../../../main/services/project-manager.js'
+    );
+    const main = new ProjectManager();
+    const load = vi.fn(async (file: string) => {
+      const result = await main.loadProject(file);
+      if (result.success) h.mainCurrent = main.getCurrentProjectPath();
+      return result;
+    });
+    const projectApi = window.electron.project as unknown as Record<string, unknown>;
+    projectApi.getMetadata = (file: string) => main.getProjectMetadata(file);
+    projectApi.load = load;
+    return load;
+  };
+
+  it.each<[string, string, string]>([
+    ['un CSL-JSON', 'references.json', '[{"id":"a","type":"book"}]\n'],
+    ['un package.json', 'package.json', '{"name":"mon-outil","version":"1.0.0"}\n'],
+    ['un .json vide', 'vide.json', ''],
+    ['un project.json sans name ni type', 'project.json', '{"theme":"dark"}\n'],
+  ])('%s : même vue, même document, la frappe reste, et rien ne s’écrit', async (_label, name, content) => {
+    useEditorStore.setState((s) => ({ settings: { ...s.settings, autoSave: false } }));
+    await openProjectA();
+    const load = await useRealManifestGuard();
+    const elsewhere = path.join(root, 'Ailleurs');
+    await mkdir(elsewhere);
+    const chosen = path.join(elsewhere, name);
+    await writeFile(chosen, content);
+    const before = await folderState(elsewhere);
+
+    await typeAtEnd(FRAPPE);
+    const view = currentView();
+    const version = store().documentVersion;
+    const left: unknown[] = [];
+    const stopWatching = useEditorStore.subscribe((state) => {
+      if (state.bufferDetached || state.filePath !== documentA) left.push(state.filePath);
+    });
+    writesTo.length = 0;
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await project().loadProject(chosen).catch((error: unknown) => error);
+    });
+    stopWatching();
+
+    // Ni détaché, ni rouvert : la même vue, sans nouveau montage.
+    expect(left).toEqual([]);
+    expect(currentView()).toBe(view);
+    expect(store().documentVersion).toBe(version);
+    expect(refusal).toBeInstanceOf(NotAProjectError);
+    expect((refusal as NotAProjectError).fileName).toBe(name);
+    expect(view.state.readOnly).toBe(false);
+    expect(view.state.doc.toString()).toContain(FRAPPE);
+    expect(project().currentProject?.path).toBe(dirA);
+    // L'indicateur de chargement ne reste pas en route.
+    expect(project().loadState.kind).not.toBe('loading');
+    // Le main n'a rien eu à faire, et la frappe n'a pas été écrite de force pour un refus.
+    expect(load).not.toHaveBeenCalled();
+    expect(writesTo).toEqual([]);
+    expect(readFileSync(documentA, 'utf8')).toBe(A_TEXT);
+    expect(await folderState(elsewhere)).toEqual(before);
+  });
+
+  it('le refus laisse le projet utilisable : un vrai projet s’ouvre juste après, et A s’écrit en partant', async () => {
+    useEditorStore.setState((s) => ({ settings: { ...s.settings, autoSave: false } }));
+    await openProjectA();
+    await useRealManifestGuard();
+    const chosen = path.join(root, 'package.json');
+    await writeFile(chosen, '{"name":"mon-outil"}\n');
+
+    await typeAtEnd(FRAPPE);
+    await act(async () => {
+      await expect(project().loadProject(chosen)).rejects.toBeInstanceOf(NotAProjectError);
+    });
+    await eventually(() => expect(store().content).toContain(FRAPPE));
+
+    await openProjectB();
+
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(store().filePath).toBe(documentB);
+    expect(readFileSync(documentA, 'utf8')).toContain(FRAPPE);
   });
 });

@@ -296,6 +296,7 @@
     "createErrorFilesExist": "The folder “{{name}}” in {{folder}} already contains files that creating a project would replace. Nothing was changed. Choose another name or location.",
     "createErrorNameInvalid": "A project name cannot contain / or \\, and cannot be “.” or “..”.",
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
+    "notAProject": "“{{file}}” is not a ClioDeck project file. It has not been changed, and whatever was open stays open. To open a project, choose the project.json file that ClioDeck created in its folder.",
     "configUnreadable": {
       "title": "Project settings unreadable",
       "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection falls back to “Warn” mode, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",

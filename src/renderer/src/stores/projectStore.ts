@@ -91,6 +91,27 @@ interface ProjectState {
 // MARK: - Helpers
 
 /**
+ * Le fichier choisi n'est pas un projet : rien n'a été ouvert ni touché. Il porte son nom,
+ * que le panneau affiche dans le message traduit. Le code du main ne se montre jamais.
+ */
+export class NotAProjectError extends Error {
+  readonly fileName: string;
+
+  constructor(fileName: string, message: string) {
+    super(message);
+    this.name = 'NotAProjectError';
+    this.fileName = fileName;
+  }
+}
+
+/** L'erreur d'un refus du main, à `project:get-metadata` comme à `project:load`. */
+function projectRefusal(response: { code?: string; fileName?: string; error?: string }, projectPath: string): Error {
+  const message = response.error || 'Failed to load project';
+  const notAProject = response.code === 'not_a_project' || response.code === 'manifest_invalid';
+  return notAProject ? new NotAProjectError(response.fileName ?? projectPath, message) : new Error(message);
+}
+
+/**
  * Sauvegarde le document ouvert dans l'éditeur s'il a des modifications non
  * écrites, en lisant comme la porte le texte vivant : `isDirty` ne voit ni une
  * frappe que la synchronisation n'a pas poussée, ni une frappe pendant une écriture.
@@ -103,14 +124,14 @@ async function saveOutgoingEditorIfDirty(): Promise<void> {
 }
 
 /**
- * Un project.json illisible : le main refuserait sans basculer, autant le savoir avant de
- * couper l'éditeur. Détacher détruit la vue, donc les propositions de l'IA en attente, que le
- * retour sur le document ne rend pas, et pose la question du tampon sans titre pour une
- * ouverture vouée à l'échec. Ne touche ni au projet courant ni aux récents.
+ * Un project.json illisible, ou un fichier qui n'est pas un projet : le main refuserait sans
+ * basculer, autant le savoir avant de couper l'éditeur. Détacher détruit la vue, donc les
+ * propositions de l'IA en attente, que le retour sur le document ne rend pas, et pose la question
+ * du tampon sans titre pour une ouverture vouée à l'échec. Ne touche ni au projet courant ni aux récents.
  */
 async function assertProjectReadable(projectPath: string): Promise<void> {
   const metadata = await window.electron.project.getMetadata(projectPath);
-  if (!metadata.success) throw new Error(metadata.error || 'Failed to load project');
+  if (!metadata.success) throw projectRefusal(metadata, projectPath);
 }
 
 /**
@@ -477,7 +498,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.electron.project.load(projectPath);
 
       if (!result.success || !result.project) {
-        throw new Error(result.error || 'Failed to load project');
+        throw projectRefusal(result, projectPath);
       }
 
       const project = result.project;
@@ -718,9 +739,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             // Use getMetadata instead of load to avoid initializing services for each project
             const result = await window.electron.project.getMetadata(path);
             if (!result.success || !result.project) {
-              // Seule une absence avérée retire de la liste. Un disque débranché, un dossier
-              // renommé, une réponse qui ne dit rien : caché, et il revient avec son disque.
-              if (result.code === 'project_file_missing') pathsToRemove.push(path);
+              // Seule une absence avérée retire de la liste, ou un fichier qui ne sera jamais un
+              // projet (l'ancienne ouverture a pu l'y mettre). Un disque débranché, un dossier
+              // renommé, un project.json à réparer, une réponse qui ne dit rien : caché, et il
+              // revient avec son disque.
+              if (result.code === 'project_file_missing' || result.code === 'not_a_project') {
+                pathsToRemove.push(path);
+              }
               return null;
             }
             const project = result.project;
@@ -737,7 +762,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       // Remove non-existent projects from the recent list
       if (pathsToRemove.length > 0) {
-        console.log(`🧹 Removing ${pathsToRemove.length} non-existent project(s) from recent list`);
+        console.log(`🧹 Removing ${pathsToRemove.length} non-existent or non-project entries from recent list`);
         for (const path of pathsToRemove) {
           await window.electron.project.removeRecent(path);
         }

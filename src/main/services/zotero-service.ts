@@ -16,7 +16,7 @@ import {
   ZoteroSynchronizer,
   type SyncReport,
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
-import { UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
+import { parseUserJson, UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
@@ -356,7 +356,7 @@ interface ProjectJson {
 
 async function readProjectJson(projectJsonPath: string): Promise<ProjectJson> {
   if (!existsSync(projectJsonPath)) return {};
-  return JSON.parse(await readFile(projectJsonPath, 'utf-8')) as ProjectJson;
+  return parseUserJson<ProjectJson>(await readFile(projectJsonPath, 'utf-8'));
 }
 
 /**

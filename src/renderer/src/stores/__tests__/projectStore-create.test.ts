@@ -297,6 +297,10 @@ afterEach(async () => {
   cleanup();
   while (dialogs().confirmOpen) dialogs().resolveConfirm(false);
   while (dialogs().alertOpen) dialogs().closeAlert();
+  // L'autosave à 30 ms peut partir pendant la bascule : son écriture passe derrière celle de la
+  // porte, sous le verrou de A, et tourner encore ici. Elle poserait son temporaire pendant le
+  // `rm` (ENOTEMPTY), ou son échec s'inscrirait dans le `refused` du test suivant.
+  await withFileLock(documentA, async () => undefined);
   await rm(root, { recursive: true, force: true });
 });
 

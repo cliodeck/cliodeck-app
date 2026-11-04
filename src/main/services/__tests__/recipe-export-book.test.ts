@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, mkdir, symlink, writeFile, rm } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, symlink, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
@@ -58,6 +58,16 @@ describe('recette : step export dans un livre', () => {
     expect(exportCalls).toHaveLength(1);
     expect(exportCalls[0].projectType).toBe('book');
     expect(exportCalls[0].content).toContain('Texte un.');
+    expect(exportCalls[0].content).toContain('Texte deux.');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('un manifeste avec BOM reste celui d’un livre : tout le manuscrit part, sous le type book', async () => {
+    const dir = await makeProject('book', true);
+    const manifest = join(dir, 'project.json');
+    await writeFile(manifest, `﻿${await readFile(manifest, 'utf8')}`);
+    await runStep(dir, {});
+    expect(exportCalls[0].projectType).toBe('book');
     expect(exportCalls[0].content).toContain('Texte deux.');
     await rm(dir, { recursive: true, force: true });
   });

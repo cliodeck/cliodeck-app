@@ -778,6 +778,31 @@ describe('updateJsonFile', () => {
     await expect(updateJsonFile(jsonFile(), () => ({}))).rejects.toMatchObject({ reason: 'invalid-json' });
   });
 
+  it('un BOM en tête n’est pas une faute : le JSON se lit, et le BOM revient à l’écriture', async () => {
+    fs.writeFileSync(jsonFile(), '﻿{"a":1}');
+
+    const result = await updateJsonFile<{ a: number; b?: number }>(jsonFile(), (current) => ({ ...current!, b: 2 }));
+
+    expect(result).toEqual({ written: true, value: { a: 1, b: 2 } });
+    expect(fs.readFileSync(jsonFile()).subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    expect(JSON.parse(fs.readFileSync(jsonFile(), 'utf8').slice(1))).toEqual({ a: 1, b: 2 });
+  });
+
+  it('un BOM, et rien à écrire : le fichier ne bouge pas', async () => {
+    fs.writeFileSync(jsonFile(), '﻿{ "a":   1 }');
+    const before = fs.readFileSync(jsonFile());
+
+    const result = await updateJsonFile<{ a: number }>(jsonFile(), () => null);
+
+    expect(result).toEqual({ written: false, value: { a: 1 } });
+    expect(fs.readFileSync(jsonFile()).equals(before)).toBe(true);
+  });
+
+  it('un BOM seul est un JSON invalide, comme un fichier vide', async () => {
+    fs.writeFileSync(jsonFile(), '﻿');
+    await expect(updateJsonFile(jsonFile(), () => ({}))).rejects.toMatchObject({ reason: 'invalid-json' });
+  });
+
   it('indentation 2 sans saut final par défaut, et rend la valeur', async () => {
     const result = await updateJsonFile<{ a: number }>(jsonFile(), (current) => {
       expect(current).toBeNull();
