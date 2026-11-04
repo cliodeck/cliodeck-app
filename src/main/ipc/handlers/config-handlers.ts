@@ -108,6 +108,35 @@ export function stripMaskedKeys(
   return cleaned;
 }
 
+const isNonFinite = (value: unknown): boolean => typeof value === 'number' && !Number.isFinite(value);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Le fichier est du JSON, où `NaN` devient `null` : aucun nombre non fini ne passe. Un champ retiré
+ * disparaît du disque (`set` remplace la section), et ce qui le lit retombe sur le défaut
+ * (`getRAGConfig`). Le reste ne bouge pas : `undefined` veut dire « efface » pour `setLLMConfig`, et
+ * un `null` n'est pas à cette fonction d'en juger. Un objet que ce retrait vide part avec son contenu.
+ */
+export function stripNonFinite(value: unknown): unknown {
+  if (isNonFinite(value)) return undefined;
+  if (Array.isArray(value)) return value.filter((item) => !isNonFinite(item)).map(stripNonFinite);
+  if (!isPlainObject(value)) return value;
+  const kept: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (isNonFinite(field)) continue;
+    const cleaned = stripNonFinite(field);
+    const emptied =
+      isPlainObject(field) && Object.keys(field).length > 0 && Object.keys(cleaned as object).length === 0;
+    if (!emptied) kept[key] = cleaned;
+  }
+  return kept;
+}
+
 export function setupConfigHandlers() {
   // Configuration handlers
   ipcMain.handle('config:get', (_event, rawKey: unknown) => {
@@ -141,9 +170,12 @@ export function setupConfigHandlers() {
   });
 
   ipcMain.handle('config:set', async (_event, rawKey: unknown, rawValue: unknown) => {
-    const { key, value } = validate(ConfigSetSchema, { key: rawKey, value: rawValue });
+    const { key, value: received } = validate(ConfigSetSchema, { key: rawKey, value: rawValue });
     console.log('IPC Call: config:set', { key });
     try {
+      if (isNonFinite(received)) throw new Error(`config:set: ${key} is not a finite number`);
+      const value = stripNonFinite(received);
+
       // If setting a sensitive key directly, route through secure storage.
       // A value shaped like a mask means "unchanged" — skip the write so a
       // round-tripped mask never replaces the real key, or becomes one.
