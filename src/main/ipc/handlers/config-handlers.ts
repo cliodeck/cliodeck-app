@@ -5,7 +5,7 @@ import { app, ipcMain } from 'electron';
 import os from 'os';
 import { configManager } from '../../services/config-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
-import { isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
+import { isMaskedKey, isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { sandboxStatus } from '../../utils/sandbox-status.js';
 import { localAiSupport } from '../../utils/local-ai-support.js';
@@ -70,29 +70,39 @@ function maskSectionKeys<T extends object>(sectionKey: string, section: T): T {
 }
 
 /**
- * Drop sensitive fields whose value is the mask of the currently stored key:
- * the renderer round-trips masked configs on save, and an unchanged mask must
- * not overwrite the real key. An empty string still means "delete the key".
+ * Drop sensitive fields whose value has the shape of a mask: the renderer
+ * round-trips masked configs on save, and a mask must never overwrite the real
+ * key, nor become one when no key is stored. An empty string still means
+ * "delete the key".
  */
 /**
  * Exporté pour les tests : c'est la garantie « un masque renvoyé par le
  * renderer n'écrase jamais la vraie clé ». Une régression ici effacerait
  * silencieusement les clés d'API à chaque enregistrement des réglages.
  */
-export function stripUnchangedMaskedKeys(
+export function stripMaskedKeys(
   sectionKey: string,
   value: Record<string, unknown>,
 ): Record<string, unknown> {
   const cleaned = { ...value };
   for (const keyPath of SENSITIVE_KEYS) {
     if (!keyPath.startsWith(`${sectionKey}.`)) continue;
-    const field = keyPath.slice(sectionKey.length + 1);
-    if (field.includes('.')) continue;
-    const candidate = cleaned[field];
-    if (typeof candidate !== 'string' || candidate === '') continue;
-    const stored = configManager.getAPIKey(keyPath);
-    if (stored && candidate === maskAPIKey(stored)) {
-      delete cleaned[field];
+    const segments = keyPath.slice(sectionKey.length + 1).split('.');
+    const field = segments.pop() as string;
+    // Clone each object along the path: the caller's copy is never mutated.
+    let cursor: Record<string, unknown> | null = cleaned;
+    for (const seg of segments) {
+      const next: unknown = cursor[seg];
+      if (!next || typeof next !== 'object') {
+        cursor = null;
+        break;
+      }
+      const clone = { ...(next as Record<string, unknown>) };
+      cursor[seg] = clone;
+      cursor = clone;
+    }
+    if (cursor && isMaskedKey(cursor[field])) {
+      delete cursor[field];
     }
   }
   return cleaned;
@@ -135,11 +145,10 @@ export function setupConfigHandlers() {
     console.log('IPC Call: config:set', { key });
     try {
       // If setting a sensitive key directly, route through secure storage.
-      // A value equal to the current mask means "unchanged" — skip the write
-      // so a round-tripped mask never replaces the real key.
+      // A value shaped like a mask means "unchanged" — skip the write so a
+      // round-tripped mask never replaces the real key, or becomes one.
       if (isSensitiveKey(key)) {
-        const stored = configManager.getAPIKey(key);
-        if (!(stored && value === maskAPIKey(stored))) {
+        if (!isMaskedKey(value)) {
           configManager.setAPIKey(key, value as string);
         }
         console.log('IPC Response: config:set (secure) - success');
@@ -149,14 +158,20 @@ export function setupConfigHandlers() {
       // For top-level section keys that contain API keys, use dedicated setters
       if (key === 'llm') {
         configManager.setLLMConfig(
-          stripUnchangedMaskedKeys('llm', value as Record<string, unknown>) as Partial<LLMConfig>,
+          stripMaskedKeys('llm', value as Record<string, unknown>) as Partial<LLMConfig>,
         );
       } else if (key === 'zotero') {
         configManager.setZoteroConfig(
-          stripUnchangedMaskedKeys('zotero', value as Record<string, unknown>) as ZoteroConfig,
+          stripMaskedKeys('zotero', value as Record<string, unknown>) as ZoteroConfig,
         );
       } else {
-        configManager.set(key as keyof AppConfig, value);
+        // `mcp.europeana.apiKey` vit dans une section ordinaire : même porte.
+        configManager.set(
+          key as keyof AppConfig,
+          (value && typeof value === 'object' && !Array.isArray(value)
+            ? stripMaskedKeys(key, value as Record<string, unknown>)
+            : value) as AppConfig[keyof AppConfig],
+        );
       }
 
       // If LLM config changed and there's an active project, reinitialize services

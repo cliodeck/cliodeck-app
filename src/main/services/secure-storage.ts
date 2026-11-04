@@ -41,6 +41,16 @@ export function maskAPIKey(key: string | undefined): string {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
+/**
+ * Une valeur à la forme d'un masque n'est jamais une clé, qu'une clé soit stockée ou non : après
+ * une révocation, ou quand la clé a changé entre-temps, le masque resté dans un formulaire ne vaut
+ * plus celui de la clé actuelle, et il partirait comme jeton vers le fournisseur. `[\s\S]`, parce
+ * que `maskAPIKey` garde les caractères tels quels : une clé collée avec son saut de ligne en a un.
+ */
+export function isMaskedKey(value: unknown): boolean {
+  return typeof value === 'string' && /^(?:\*{4}|[\s\S]{4}\.{3}[\s\S]{4})$/.test(value);
+}
+
 // Minimal interface for the electron-store instance used for secrets
 interface SecretStoreInstance {
   get(key: string): string | undefined;
@@ -121,6 +131,13 @@ export class SecureStorage {
    * before being persisted. Otherwise, it is stored as plain text.
    */
   setKey(name: string, value: string): void {
+    // La dernière porte, pour tous les écrivains (`config:set`, la clé Europeana…). Pas pour les
+    // secrets d'environnement des serveurs MCP : ceux-là ne reviennent jamais masqués du renderer.
+    if (isSensitiveKey(name) && isMaskedKey(value)) {
+      console.warn(`⚠️  [SecureStorage] Valeur à forme de masque ignorée pour "${name}" : ce n'est pas une clé.`);
+      return;
+    }
+
     const store = this.getStore();
     this.unreadable.delete(name);
     this.warned.delete(name);
