@@ -217,6 +217,11 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           type="number"
           value={(value as number | string) ?? ''}
           onChange={(e) => setInputs({ ...inputs, [key]: coerce(key, e.target.value) })}
+          // `1e` ou `-` : le navigateur répond `''` sans effacer ce qu'il montre, et Lancer n'enverrait
+          // rien sous un champ qui dit autre chose. La saisie reste immédiate pour `paramsToLose` (#196).
+          onBlur={(e) => {
+            if (e.currentTarget.validity.badInput) e.currentTarget.value = '';
+          }}
           className="config-input"
           disabled={running}
         />

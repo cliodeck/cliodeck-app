@@ -12,7 +12,11 @@ type NumberInputProps = Omit<
   integer?: boolean;
 } & (
     | {
-        /** Vide veut dire « automatique » : `onCommit(undefined)`, et le champ quitte le fichier. */
+        /**
+         * Vide, zéro ou moins veut dire « automatique » : `onCommit(undefined)`, et le champ quitte le
+         * fichier. `min` ne vaut que pour une valeur positive : c'est la convention de `num_ctx`
+         * (`clampNumCtx`, `ollama.ts`), où `0` n'envoie rien alors que la borne enverrait 512.
+         */
         allowEmpty: true;
         onCommit: (value: number | undefined) => void;
       }
@@ -53,13 +57,15 @@ export const NumberInput: React.FC<NumberInputProps> = ({
     }
     if (draft === null) return;
     setDraft(null);
-    if (draft.trim() === '') {
-      if (allowEmpty && current !== undefined) onCommit(undefined);
-      return;
-    }
-    let next = Number(draft);
+    const blank = draft.trim() === '';
+    let next = blank ? 0 : Number(draft);
     if (!Number.isFinite(next)) return;
     if (integer) next = Math.trunc(next);
+    if (allowEmpty && next <= 0) {
+      if (current !== undefined) onCommit(undefined);
+      return;
+    }
+    if (blank) return;
     if (min !== undefined) next = Math.max(min, next);
     if (max !== undefined) next = Math.min(max, next);
     if (next !== current) onCommit(next);

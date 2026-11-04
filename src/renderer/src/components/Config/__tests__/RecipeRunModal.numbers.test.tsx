@@ -106,6 +106,45 @@ describe('un paramètre numérique vidé', () => {
   });
 });
 
+// À `1e` ou `-`, le navigateur répond `''` sans effacer ce qu'il montre : le champ disait une chose, et
+// Lancer en envoyait une autre. Le geste réel est dans `journey-numeric-fields`.
+describe('du texte que le navigateur ne sait pas lire', () => {
+  const unreadable = () => {
+    fireEvent.change(field(), { target: { value: '' } });
+    Object.defineProperty(field(), 'validity', { configurable: true, value: { badInput: true } });
+  };
+
+  it('disparaît au blur : le champ montre ce qui partira', async () => {
+    await open({ default: 5 });
+    unreadable();
+    const written = vi.spyOn(field(), 'value', 'set');
+
+    fireEvent.blur(field());
+
+    expect(written).toHaveBeenCalledWith('');
+  });
+
+  it('dans un champ requis : le lancement reste bloqué', async () => {
+    await open({ required: true });
+    unreadable();
+    fireEvent.blur(field());
+    expect(runButton().disabled).toBe(true);
+  });
+
+  it('une valeur lisible ne bouge pas au blur, et protège encore la fenêtre (#196)', async () => {
+    await open({ default: 5 });
+    fireEvent.change(field(), { target: { value: '12' } });
+    const written = vi.spyOn(field(), 'value', 'set');
+
+    fireEvent.blur(field());
+    await pressEscape();
+
+    expect(written).not.toHaveBeenCalled();
+    expect(field().value).toBe('12');
+    expect(closeRun).not.toHaveBeenCalled();
+  });
+});
+
 describe('Échap', () => {
   it.each([[Number.NaN], [Number.POSITIVE_INFINITY], ['abc']])(
     'un défaut illisible dans la recette (%s) : rien à perdre, la fenêtre se ferme',

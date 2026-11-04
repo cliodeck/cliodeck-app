@@ -382,6 +382,44 @@ test('les deux fenêtres de contexte : vide veut dire automatique, le champ quit
   }
 });
 
+// `ollama.ts` n'envoie `num_ctx` que s'il est positif. Borné à 512, ce zéro partait à chaque appel, et
+// côté embeddings il tronquait le texte, donc changeait les vecteurs.
+test('zéro dans une fenêtre de contexte veut dire automatique, jamais la borne de 512', async () => {
+  const dir = userData(AUTHOR);
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+  const chat = () => window.locator('.settings-modal input[placeholder="défaut du serveur (4096)"]');
+  const embedding = () => window.locator('.settings-modal input[placeholder="défaut du modèle"]');
+
+  try {
+    await openSettings(window);
+    await section(window, 'Configuration LLM');
+    await expect(chat()).toHaveValue('16384');
+    await expect(embedding()).toHaveValue('4096');
+
+    await typeInto(window, chat(), '0');
+    await typeInto(window, embedding(), '0');
+    await expect(chat()).toHaveValue('');
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+    await expect(embedding()).toHaveValue('');
+
+    const after = readConfig(dir).llm;
+    expect(after).not.toHaveProperty('ollamaNumCtx');
+    expect(after).not.toHaveProperty('ollamaEmbeddingNumCtx');
+    expect(after.ollamaChatModel).toBe('qwen3:14b');
+
+    await closeSettings(window);
+    await openSettings(window);
+    await section(window, 'Configuration LLM');
+    await expect(chat()).toHaveValue('');
+    await expect(embedding()).toHaveValue('');
+  } finally {
+    await app.close();
+  }
+});
+
 test('du texte illisible dans une fenêtre de contexte vide : il disparaît, le champ dit ce que dit le fichier', async () => {
   const { ollamaNumCtx: _chat, ...llm } = AUTHOR.llm;
   const dir = userData({ ...AUTHOR, llm });
@@ -417,6 +455,82 @@ test('du texte illisible dans une fenêtre de contexte vide : il disparaît, le 
     await expect(chat()).toHaveValue('');
     expect(await unreadable()).toBe(false);
     expect(readFileSync(configPath(dir)).equals(bytes)).toBe(true);
+  } finally {
+    await app.close();
+  }
+});
+
+// Ce champ n'est pas un `NumberInput` : sa saisie reste immédiate pour `paramsToLose` (#196).
+test('un paramètre de recette illisible : il disparaît au blur, et Lancer envoie ce que le champ montre', async () => {
+  const dir = userData({ language: 'fr', recentProjects: [] });
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+  const projectJson = article();
+  const recipes = join(dirname(projectJson), '.cliodeck', 'recipes');
+  mkdirSync(recipes, { recursive: true });
+  writeFileSync(
+    join(recipes, 'essai.yaml'),
+    `name: essai
+version: '1'
+description: Une recette à paramètres numériques
+inputs:
+  n:
+    type: number
+    required: false
+    default: 5
+  r:
+    type: number
+    required: true
+steps:
+  - id: s1
+    kind: brainstorm
+`
+  );
+  const overlay = window.locator('.settings-modal .settings-modal');
+  const optional = overlay.locator('input[type="number"]').nth(0);
+  const required = overlay.locator('input[type="number"]').nth(1);
+  const launchRecipe = overlay.getByRole('button', { name: 'Lancer' });
+  const unreadable = (field: typeof optional) => field.evaluate((input: HTMLInputElement) => input.validity.badInput);
+
+  try {
+    await openProject(app, window, projectJson);
+    // Le main garde ce qu'il reçoit, sans rien exécuter : c'est l'envoi qui est jugé ici.
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('fusion:recipes:run');
+      ipcMain.handle('fusion:recipes:run', (_event, _scope, _file, inputs) => {
+        (globalThis as unknown as { e2eRecipeInputs: unknown }).e2eRecipeInputs = inputs;
+        return { success: true, ok: true, outputs: {}, logPath: '/tmp/e2e.jsonl' };
+      });
+    });
+    await openSettings(window);
+    await expert(window);
+    await window.getByRole('button', { name: /Recettes/ }).first().click();
+    await window.locator('li', { hasText: 'essai.yaml' }).getByRole('button', { name: 'Lancer' }).click();
+    await expect(optional).toHaveValue('5');
+
+    // Un champ qui montre un nombre, puis un champ vide : là, `-` ne fait aucun `change`.
+    await typeInto(window, optional, '1e');
+    await required.click();
+    expect(await unreadable(optional)).toBe(false);
+    await expect(optional).toHaveValue('');
+    await window.keyboard.type('-');
+    expect(await unreadable(required)).toBe(true);
+    await optional.click();
+    expect(await unreadable(required)).toBe(false);
+    await expect(launchRecipe).toBeDisabled();
+
+    // Le clic retire d'abord le focus : ce que le champ montrait à ce moment est ce qui part.
+    await typeInto(window, required, '3');
+    await typeInto(window, optional, '1e');
+    await launchRecipe.click();
+    await expect.poll(() => unreadable(optional)).toBe(false);
+    // L'appel traverse l'IPC : il n'est pas encore arrivé quand le clic rend la main.
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { e2eRecipeInputs: unknown }).e2eRecipeInputs))
+      .toEqual({ r: 3 });
+    await expect(required).toHaveValue('3');
+    await expect(crashed(window)).toHaveCount(0);
   } finally {
     await app.close();
   }

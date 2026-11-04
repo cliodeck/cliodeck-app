@@ -283,4 +283,40 @@ describe('allowEmpty', () => {
     fireEvent.blur(input());
     expect(onCommit).toHaveBeenCalledExactlyOnceWith(512);
   });
+
+  // `ollama.ts` n'envoie `num_ctx` que s'il est positif : zéro veut dire « défaut du modèle ». Borné,
+  // il partirait à 512 à chaque appel, et le texte embarqué serait tronqué.
+  it.each([['0'], ['-3'], ['0.5']])('`%s` veut dire automatique, pas la borne', (typed) => {
+    const onCommit = vi.fn();
+    render(<Form initial={8192} allowEmpty integer min={512} onCommit={onCommit} />);
+    type(typed);
+    fireEvent.blur(input());
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(input().value).toBe('');
+  });
+
+  it('déjà automatique : zéro disparaît, sans appel', () => {
+    const onCommit = vi.fn();
+    render(<Form initial={undefined} allowEmpty integer min={512} onCommit={onCommit} />);
+    type('0');
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(input().value).toBe('');
+  });
+
+  it('sans `allowEmpty`, zéro reste une valeur : bornée, ou retenue si les bornes l’admettent', () => {
+    const bounded = vi.fn();
+    const { unmount } = render(<Form initial={7} min={1} onCommit={bounded} />);
+    type('0');
+    fireEvent.blur(input());
+    expect(bounded).toHaveBeenCalledExactlyOnceWith(1);
+    unmount();
+
+    const admitted = vi.fn();
+    render(<Form initial={0.33} min={0} max={1} onCommit={admitted} />);
+    type('0');
+    fireEvent.blur(input());
+    expect(admitted).toHaveBeenCalledExactlyOnceWith(0);
+    expect(input().value).toBe('0');
+  });
 });
