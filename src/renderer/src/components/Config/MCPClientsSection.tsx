@@ -172,15 +172,15 @@ export const MCPClientsSection: React.FC = () => {
     [refresh]
   );
 
+  const errorLine = <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>;
+
   return (
     <CollapsibleSection title={t('mcp.title')} defaultExpanded={false}>
       <div className="config-section">
         <div className="config-section-content">
       <p className="config-hint">{t('mcp.hint')}</p>
 
-      {error && (
-        <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
-      )}
+      {error && !showForm && errorLine}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button
@@ -270,6 +270,8 @@ export const MCPClientsSection: React.FC = () => {
               />
             </div>
           )}
+          {/* À côté du geste : en haut de la section, le formulaire le pousse hors de la vue. */}
+          {error && errorLine}
           <button
             type="button"
             className="toolbar-btn"
@@ -287,9 +289,12 @@ export const MCPClientsSection: React.FC = () => {
       )}
 
       {clients.length === 0 ? (
-        <p className="config-hint" style={{ margin: 0 }}>
-          {t('mcp.empty')}
-        </p>
+        // Avec une erreur, on ne sait pas : le fichier en déclare peut-être.
+        !error && (
+          <p className="config-hint" style={{ margin: 0 }}>
+            {t('mcp.empty')}
+          </p>
+        )
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {clients.map((c) => (

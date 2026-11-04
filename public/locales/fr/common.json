@@ -1847,7 +1847,8 @@
       "title": "Inspection des sources",
       "helpAria": "Comprendre les modes d'inspection",
       "hint": "Avant qu'une source — PDF, note Obsidian, item Tropy — n'atteigne le modèle, ClioDeck peut repérer les tentatives d'injection de consignes cachées. Choisissez le niveau de défense qui convient à votre corpus ; le point d'interrogation ci-dessus en explique les compromis.",
-      "modeGroupAria": "Mode d'inspection des sources"
+      "modeGroupAria": "Mode d'inspection des sources",
+      "modeUnreadable": "Votre choix n'a pas pu être lu. En attendant, c'est le mode « {{mode}} » qui s'applique à ce projet."
     },
     "modes": {
       "warn": {

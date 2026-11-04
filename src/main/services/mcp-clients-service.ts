@@ -34,6 +34,7 @@ import {
   workspaceFiles,
 } from '../../../backend/core/workspace/layout.js';
 import { createWriteStream, type WriteStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
 import {
   deleteClientEnvSecrets,
@@ -102,6 +103,8 @@ class MCPClientsService {
     this.workspaceRoot = root;
 
     try {
+      // Disparu (parent renommé, volume débranché) : surtout ne pas recréer un squelette de projet.
+      await stat(root);
       await ensureWorkspaceDirectories(root);
       this.auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
         flags: 'a',

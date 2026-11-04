@@ -1847,7 +1847,8 @@
       "title": "Source inspection",
       "helpAria": "Understand the inspection modes",
       "hint": "Before a source — a PDF, an Obsidian note, a Tropy item — reaches the model, ClioDeck can spot attempts to smuggle in hidden instructions. Pick the level of defence that suits your corpus; the question mark above explains the trade-offs.",
-      "modeGroupAria": "Source inspection mode"
+      "modeGroupAria": "Source inspection mode",
+      "modeUnreadable": "Your choice could not be read. In the meantime, the “{{mode}}” mode applies to this project."
     },
     "modes": {
       "warn": {

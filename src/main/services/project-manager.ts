@@ -199,7 +199,10 @@ async function projectFileIsMissing(projectFile: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
   }
   try {
-    return !(await readdir(path.dirname(projectFile))).includes(path.basename(projectFile));
+    const entries = await readdir(path.dirname(projectFile));
+    const name = path.basename(projectFile);
+    // iCloud a évincé le fichier (macOS < 14) : il ne laisse que `.project.json.icloud`.
+    return !entries.includes(name) && !entries.includes(`.${name}.icloud`);
   } catch {
     return false;
   }
@@ -682,6 +685,11 @@ export class ProjectManager {
    * Écrit le manifeste. Les chemins sont re-vérifiés côté main : le
    * renderer n'est pas une frontière de confiance suffisante pour laisser
    * entrer un `../..` dans un fichier de projet.
+   *
+   * Seul champ écrit en entier depuis le renderer, parce que lui seul sait ce qu'il a retiré : une
+   * entrée du disque absente de la liste reçue peut être un retrait comme une création d'à côté.
+   * Limite assumée : `createChapter` puis `saveChapters` sur la liste d'avant retire l'entrée du
+   * manifeste. Le fichier reste, et se propose comme non rattaché : aucun texte n'est perdu.
    */
   async saveChapters(data: { projectPath: string; chapters: Chapter[] }) {
     try {

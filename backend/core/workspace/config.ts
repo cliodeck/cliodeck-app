@@ -7,6 +7,7 @@
  * are preserved on save so older clients don't silently strip new settings.
  */
 
+import { lstat, stat } from 'fs/promises';
 import path from 'path';
 import {
   atomicWriteFile,
@@ -122,7 +123,7 @@ function unreadableConfig(filePath: string, detail: string): WorkspaceConfigErro
  * pas atomiques, et il n'y a rien à préserver. Une version inférieure ou absente est acceptée,
  * champs conservés : seul le supérieur se refuse. Une version en texte se lit comme un nombre.
  */
-function parseWorkspaceConfig(filePath: string, raw: string): WorkspaceConfig | null {
+export function parseWorkspaceConfig(filePath: string, raw: string): WorkspaceConfig | null {
   if (raw.trim() === '') return null;
 
   let parsed: unknown;
@@ -149,11 +150,50 @@ function parseWorkspaceConfig(filePath: string, raw: string): WorkspaceConfig | 
   return { ...stored, schema_version: WORKSPACE_SCHEMA_VERSION };
 }
 
+const isDirectory = (p: string): Promise<boolean> =>
+  stat(p).then(
+    (found) => found.isDirectory(),
+    () => false
+  );
+const entryExists = (p: string): Promise<boolean> =>
+  lstat(p).then(
+    () => true,
+    () => false
+  );
+const targetExists = (p: string): Promise<boolean> =>
+  stat(p).then(
+    () => true,
+    () => false
+  );
+
+/**
+ * Pourquoi ce fichier ne peut pas être tenu pour absent, ni donc créé : `readUserFile` rend
+ * `absent` sur tout ENOENT, et c'est ici qu'on regarde plus haut. Un parent renommé ou un volume
+ * débranché font disparaître le dossier du projet : le recréer laisserait un squelette, où
+ * l'enregistrement suivant écrirait, et le vrai dossier ne pourrait plus reprendre son nom
+ * (ENOTEMPTY). Un lien cassé, lui, écrirait à son autre bout. `null` : la création est permise.
+ */
+async function whyNotAbsent(workspaceRoot: string, file: string): Promise<string | null> {
+  if (!(await isDirectory(workspaceRoot))) return `le dossier du projet est introuvable : ${workspaceRoot}`;
+  const dir = path.dirname(file);
+  if ((await entryExists(dir)) && !(await isDirectory(dir))) {
+    return `${path.basename(dir)} n'est pas un dossier accessible`;
+  }
+  if ((await entryExists(file)) && !(await targetExists(file))) {
+    return 'ce fichier est un lien dont la cible est introuvable';
+  }
+  return null;
+}
+
 export async function readWorkspaceConfig(workspaceRoot: string): Promise<WorkspaceConfig> {
   const file = workspaceFiles(workspaceRoot).config;
   // Le verrou : une lecture demandée après une écriture lit ce que celle-ci a écrit.
   const read = await withFileLock(file, () => readUserFile(file));
   if (read.kind === 'unreadable') throw unreadableConfig(file, read.message);
+  if (read.kind === 'absent') {
+    const refusal = await whyNotAbsent(workspaceRoot, file);
+    if (refusal) throw unreadableConfig(file, refusal);
+  }
 
   const cfg = read.kind === 'ok' ? parseWorkspaceConfig(file, read.content) : null;
   if (!cfg) throw new WorkspaceConfigError('absent', file, `${CONFIG_LABEL} est absent.`);
@@ -163,12 +203,12 @@ export async function readWorkspaceConfig(workspaceRoot: string): Promise<Worksp
 /** Initialise sur un fichier absent, et seulement là : tout le reste lève, fichier intact. */
 export function readOrInitWorkspaceConfig(workspaceRoot: string, name?: string): Promise<WorkspaceConfig> {
   return withFileLock(workspaceFiles(workspaceRoot).config, async () => {
-    await ensureWorkspaceDirectories(workspaceRoot);
     try {
       return await readWorkspaceConfig(workspaceRoot);
     } catch (error) {
       if (!(error instanceof WorkspaceConfigError) || error.kind !== 'absent') throw error;
     }
+    await ensureWorkspaceDirectories(workspaceRoot);
     const fresh = defaultWorkspaceConfig(name ?? path.basename(workspaceRoot));
     await writeWorkspaceConfig(workspaceRoot, fresh);
     return fresh;
@@ -209,6 +249,8 @@ export function updateWorkspaceConfig(
 ): Promise<WorkspaceConfig> {
   const file = workspaceFiles(workspaceRoot).config;
   return withFileLock(file, async () => {
+    const refusal = await whyNotAbsent(workspaceRoot, file);
+    if (refusal) throw unreadableConfig(file, refusal);
     await ensureWorkspaceDirectories(workspaceRoot);
     let cfg = defaultWorkspaceConfig(path.basename(workspaceRoot));
     try {

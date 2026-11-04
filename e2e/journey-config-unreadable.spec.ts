@@ -11,6 +11,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -98,14 +99,22 @@ async function openMcpClients(window: Page): Promise<void> {
   await window.getByRole('button', { name: /Clients MCP/i }).first().click();
 }
 
-/** Le formulaire de la section, avec ses vrais gestes ; rend le message de refus qui s'affiche. */
-async function addMcpServerRefused(window: Page, wording: string): Promise<void> {
+/** Le corps des Réglages : le message d'ouverture, lui, dit déjà « ne se lit pas » à côté. */
+const settingsBody = (window: Page) => window.locator('.settings-body');
+
+/**
+ * Le formulaire de la section, avec ses vrais gestes. Rend quand la réponse du main est arrivée :
+ * le bouton se réactive alors. Le formulaire ne se ferme que sur un ajout réussi.
+ */
+async function submitNewMcpServer(window: Page): Promise<void> {
   await window.getByRole('button', { name: 'Ajouter un client' }).click();
   await window.getByPlaceholder('mon-serveur').fill('nouveau');
-  await window.locator('select.config-input').first().selectOption('sse');
+  await window.locator('.config-field', { hasText: 'Transport' }).locator('select').selectOption('sse');
   await window.getByPlaceholder('https://example.com/mcp/sse').fill('http://127.0.0.1:9/sse');
-  await window.getByRole('button', { name: 'Enregistrer & démarrer' }).click();
-  await expect(window.getByText(wording, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
+  const save = window.getByRole('button', { name: 'Enregistrer & démarrer' });
+  await save.click();
+  await expect(save).toBeEnabled({ timeout: 10_000 });
+  await expect(window.getByPlaceholder('mon-serveur')).toHaveValue('nouveau');
 }
 
 async function openBrainstormDrawer(window: Page): Promise<void> {
@@ -157,9 +166,9 @@ test.describe('config.json illisible', () => {
         await expect(toast).not.toContainText(/invalid_json|newer_schema/);
         expect(readFileSync(project.configJson).equals(before)).toBe(true);
 
-        // Le mode choisi (`block`) n'est plus lu : c'est ce que dit le message.
+        // Le mode choisi (`block`) n'est plus lu, et `warn` s'applique : c'est ce que dit le message.
         const mode = await window.evaluate(() => window.electron.fusion.security.getMode());
-        expect(mode).toMatchObject({ success: true, mode: 'warn' });
+        expect(mode).toMatchObject({ success: false, appliedMode: 'warn' });
 
         // Le tiroir du Brainstorm : le motif, pas « vérification… » sans fin.
         await openBrainstormDrawer(window);
@@ -170,7 +179,17 @@ test.describe('config.json illisible', () => {
         await window.locator('.workspace-mode-bar button', { hasText: 'Écrire' }).click();
 
         await openMcpClients(window);
-        await addMcpServerRefused(window, sectionWording);
+        const body = settingsBody(window);
+        // Ce fichier déclare un serveur : « aucun client » serait faux.
+        await expect(body.getByText(sectionWording, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
+        await expect(body.getByText('Aucun client MCP configuré')).toHaveCount(0);
+        // Il dit aussi `block` : aucun choix affiché pour l'auteur, et ce qui s'applique est écrit.
+        await expect(body.locator('input[name="inspector-mode"]:checked')).toHaveCount(0);
+        await expect(body.locator('input[name="inspector-mode"]:disabled')).toHaveCount(3);
+        await expect(body.getByText("c'est le mode « Avertir » qui s'applique", { exact: false })).toBeVisible();
+
+        await submitNewMcpServer(window);
+        await expect(body.getByText(sectionWording, { exact: false }).first()).toBeVisible();
         await window.screenshot({
           path: join(process.env.E2E_SHOTS ?? tmpdir(), `config-${label.replace(/\W+/g, '-')}.png`),
         });
@@ -184,7 +203,53 @@ test.describe('config.json illisible', () => {
     });
   }
 
-  test('fichier réparé, projet rouvert : plus de message, et l’ajout repart de ce que dit le fichier', async () => {
+  test('fichier abîmé une fois la section ouverte : l’ajout est refusé, et le motif apparaît', async () => {
+    const project = makeProject('Projet', JSON.stringify({ schema_version: 2, name: 'Projet E2E' }, null, 2));
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+      await expect(configToast(window)).toHaveCount(0);
+      await openMcpClients(window);
+      const body = settingsBody(window);
+      const empty = body.getByText('Aucun client MCP configuré');
+      await expect(empty).toBeVisible({ timeout: 10_000 });
+
+      writeFileSync(project.configJson, '{ "schema_version": 2, }');
+      const before = readFileSync(project.configJson);
+      const reason = body.getByText('ne se lit pas', { exact: false });
+      await expect(reason).toHaveCount(0);
+
+      await submitNewMcpServer(window);
+
+      await expect(reason).toHaveCount(1);
+      // Dans la vue, à côté du bouton : en haut de la section, le formulaire le poussait dehors.
+      await expect(reason).toBeInViewport();
+      await expect(empty).toHaveCount(0);
+      expect(readFileSync(project.configJson).equals(before)).toBe(true);
+    });
+  });
+
+  test('config.json lien cassé : le projet s’ouvre, l’auteur le sait, et rien n’est écrit à l’autre bout', async () => {
+    const project = makeProject('Projet');
+    const target = join(project.root, 'volume-absent', 'config.json');
+    symlinkSync(target, project.configJson);
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+      await expect(configToast(window)).toHaveCount(1, { timeout: 10_000 });
+
+      const status = await window.evaluate(() => window.electron.fusion.vault.status());
+      expect(status).toMatchObject({ success: false });
+      const server = await window.evaluate(() => window.electron.fusion.mcpServer.get());
+      expect(server).toMatchObject({ success: false });
+      expect(String(server.error)).not.toContain('.tmp');
+    });
+
+    expect(lstatSync(project.configJson).isSymbolicLink()).toBe(true);
+    expect(existsSync(dirname(target))).toBe(false);
+  });
+
+  test('fichier réparé, projet rouvert : plus de message, le coffre se relit, et les serveurs sont restés sur le disque', async () => {
     const project = makeProject('Projet', TRAILING_COMMA);
 
     await withApp(async (app, window) => {
@@ -319,6 +384,58 @@ test.describe('projets récents', () => {
     } finally {
       rmSync(userDataDir, { recursive: true, force: true });
     }
+  });
+});
+
+test('dossier parent renommé pendant la session : aucun squelette recréé, et le dossier reprend son nom', async () => {
+  test.setTimeout(120_000);
+  const project = makeProject('Projet', VALID_CONFIG);
+  const parent = dirname(project.dir);
+  const parked = `${parent}-debranche`;
+  const documentBefore = readFileSync(project.documentMd);
+  const configBefore = readFileSync(project.configJson);
+
+  await withApp(async (app, window) => {
+    await openProject(app, window, project);
+    const editor = window.locator('.codemirror-editor .cm-content');
+    await editor.click();
+    await window.keyboard.press('Meta+End');
+    await window.keyboard.type('Avant.');
+
+    renameSync(parent, parked);
+
+    const save = window.locator('button.toolbar-btn[title="Enregistrer"]').first();
+    const saveRefused = async (): Promise<void> => {
+      await save.click();
+      await expect(window.locator('#alert-dialog-message')).toHaveText('Erreur lors de la sauvegarde du fichier', {
+        timeout: 10_000,
+      });
+      await window.locator('.alert-dialog-btn-ok').click();
+      await expect(window.locator('#alert-dialog-message')).toHaveCount(0);
+    };
+
+    await saveRefused();
+    expect(existsSync(parent)).toBe(false);
+
+    // Le geste qui recréait le squelette : ouvrir les Réglages en mode Expert, sans rien y faire.
+    await openMcpClients(window);
+    await expect(
+      settingsBody(window).getByText('le dossier du projet est introuvable', { exact: false }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    expect(existsSync(parent)).toBe(false);
+    await window.keyboard.press('Escape');
+    await expect(window.getByRole('heading', { name: 'Paramètres' })).toBeHidden({ timeout: 10_000 });
+
+    // L'enregistrement suivant écrivait dans ce squelette, loin du vrai document.
+    await saveRefused();
+    expect(existsSync(parent)).toBe(false);
+
+    // Le nom se rend, ce que ENOTEMPTY empêchait, et le texte tapé part dans le vrai fichier.
+    renameSync(parked, parent);
+    expect(readFileSync(project.documentMd).equals(documentBefore)).toBe(true);
+    expect(readFileSync(project.configJson).equals(configBefore)).toBe(true);
+    await save.click();
+    await expect.poll(() => readFileSync(project.documentMd, 'utf8'), { timeout: 10_000 }).toContain('Avant.');
   });
 });
 

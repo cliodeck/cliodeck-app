@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   purge: vi.fn(),
   addClient: vi.fn(),
   dialogShown: vi.fn(),
+  clients: [] as unknown[],
 }));
 
 vi.mock('electron', () => {
@@ -54,7 +55,11 @@ vi.mock('../../../services/retrieval-service.js', () => ({
 vi.mock('../../../services/secure-storage.js', () => ({ secureStorage: {}, SENSITIVE_KEYS: [] }));
 vi.mock('../../../services/recipe-step-handlers.js', () => ({ recipeStepHandlers: {} }));
 vi.mock('../../../services/mcp-clients-service.js', () => ({
-  mcpClientsService: { subscribe: () => () => undefined, addClient: h.addClient },
+  mcpClientsService: {
+    subscribe: () => () => undefined,
+    addClient: h.addClient,
+    list: () => h.clients,
+  },
 }));
 vi.mock('../../../../../backend/integrations/obsidian/ObsidianVaultStore.js', () => ({
   ObsidianVaultStore: { purgeObsidianData: h.purge },
@@ -144,6 +149,25 @@ describe.each(BROKEN)('%s', (_label, content, wording) => {
     expect(fs.readFileSync(configFile, 'utf8')).toBe(content);
   });
 
+  it('fusion:mcp:list : le motif, pas « aucun client » sur un fichier qui en déclare peut-être', async () => {
+    const response = await call('fusion:mcp:list');
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain('.cliodeck/config.json');
+    expect(String(response.error)).toContain(wording);
+    expect(response.clients).toBeUndefined();
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(content);
+  });
+
+  it('fusion:security:get-mode : le motif, pas « warn » pris pour le choix de l’auteur', async () => {
+    const response = await call('fusion:security:get-mode');
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain('.cliodeck/config.json');
+    expect(String(response.error)).toContain(wording);
+    expect(response.mode).toBeUndefined();
+    expect(response.appliedMode).toBe('warn');
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(content);
+  });
+
   it('unlink refusé : l’index du coffre n’est pas purgé', async () => {
     await call('fusion:vault:unlink');
     expect(h.purge).not.toHaveBeenCalled();
@@ -181,10 +205,65 @@ describe('sources:open-note lit config.json sans jamais l’écrire', () => {
   });
 });
 
+describe('le dossier du projet a disparu pendant la session', () => {
+  let parent: string;
+  let parked: string;
+
+  beforeEach(() => {
+    parent = path.join(root, 'parent');
+    h.projectPath = path.join(parent, 'These');
+    fs.mkdirSync(path.join(h.projectPath, '.cliodeck'), { recursive: true });
+    fs.writeFileSync(path.join(h.projectPath, 'document.md'), '# These\n');
+    fs.writeFileSync(path.join(h.projectPath, '.cliodeck', 'config.json'), VALID);
+    parked = `${parent}-debranche`;
+    fs.renameSync(parent, parked);
+  });
+
+  it.each<[string, () => Promise<Record<string, unknown>>]>([
+    ['fusion:mcpServer:get', () => call('fusion:mcpServer:get')],
+    ['fusion:mcpServer:set', () => call('fusion:mcpServer:set', { enabled: false })],
+    ['fusion:vault:status', () => call('fusion:vault:status')],
+    ['fusion:vault:unlink', () => call('fusion:vault:unlink')],
+    ['fusion:security:set-mode', () => call('fusion:security:set-mode', 'audit')],
+    ['fusion:security:get-mode', () => call('fusion:security:get-mode')],
+    ['fusion:mcp:list', () => call('fusion:mcp:list')],
+    ['fusion:mcp:add', () => call('fusion:mcp:add', { name: 'x', transport: 'sse', url: 'http://127.0.0.1:9/sse' })],
+    ['fusion:hints:write', () => call('fusion:hints:write', '# Contexte', { expectedRaw: '', projectPath: h.projectPath })],
+  ])('%s : refuse, sans recréer de squelette, et le dossier reprend son nom', async (_channel, run) => {
+    const response = await run();
+
+    expect(response.success).toBe(false);
+    expect(fs.existsSync(parent)).toBe(false);
+    fs.renameSync(parked, parent);
+    expect(fs.readFileSync(path.join(h.projectPath, '.cliodeck', 'config.json'), 'utf8')).toBe(VALID);
+  });
+});
+
 describe('config.json lisible', () => {
   it('absent : l’état du coffre répond « aucun coffre », sans erreur', async () => {
     const status = await call('fusion:vault:status');
     expect(status).toMatchObject({ success: true, vaultPath: null });
+  });
+
+  it('absent : la liste des serveurs et le mode répondent, sans erreur', async () => {
+    h.clients = [{ name: 'europeana' }];
+    expect(await call('fusion:mcp:list')).toEqual({ success: true, clients: [{ name: 'europeana' }] });
+    expect(await call('fusion:security:get-mode')).toEqual({ success: true, mode: 'warn' });
+    h.clients = [];
+    expect(fs.existsSync(configFile)).toBe(false);
+  });
+
+  it('aucun projet ouvert : la liste des serveurs reste vide, sans erreur', async () => {
+    h.projectPath = '';
+    expect(await call('fusion:mcp:list')).toEqual({ success: true, clients: [] });
+    expect(await call('fusion:security:get-mode')).toEqual({ success: true, mode: 'warn' });
+  });
+
+  it('lisible : la liste et le mode répondent, et rien ne s’écrit', async () => {
+    fs.writeFileSync(configFile, VALID);
+    expect(await call('fusion:mcp:list')).toEqual({ success: true, clients: [] });
+    expect(await call('fusion:security:get-mode')).toEqual({ success: true, mode: 'warn' });
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(VALID);
   });
 
   it('coffre lié : l’état le rend', async () => {

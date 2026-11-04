@@ -158,6 +158,20 @@ describe('migrateWorkspaceToFlat — un config.json illisible n’est pas rempla
     expect(await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'config.json'), 'utf8')).toBe('{"schema_version":2,}');
   });
 
+  it('config.json lien cassé : rien d’écrit à l’autre bout du lien, et le lien reste', async () => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    const target = path.join(tmpRoot, 'autre-dossier', 'config.json');
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.mkdir(path.dirname(config), { recursive: true });
+    await fs.symlink(target, config);
+
+    const report = await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(report.copied).toEqual([]);
+    expect((await fs.lstat(config)).isSymbolicLink()).toBe(true);
+    await expect(fs.access(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('dossier sans config.json : le fichier généré est atomique, et lisible', async () => {
     await fs.mkdir(path.join(tmpRoot, CLIODECK_DIR), { recursive: true });
     await migrateWorkspaceToFlat(tmpRoot, { name: 'Thèse' });

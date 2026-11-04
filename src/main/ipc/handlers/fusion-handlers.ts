@@ -104,6 +104,21 @@ function contextFailure(error: string, reason?: string) {
   return { ...errorResponse(error), ...(reason ? { reason } : {}) };
 }
 
+/**
+ * L'erreur à rendre si `config.json` est là sans se lire, `null` s'il se lit ou n'existe pas encore.
+ * « Aucun serveur » ou « le mode par défaut » seraient faux : il en déclare peut-être.
+ */
+async function unreadableConfigResponse(root: string | null) {
+  if (!root) return null;
+  try {
+    await readWorkspaceConfig(root);
+    return null;
+  } catch (e) {
+    if (e instanceof WorkspaceConfigError && e.kind === 'absent') return null;
+    return errorResponse(e as Error);
+  }
+}
+
 export function setupFusionHandlers(): void {
   // MARK: - hints
 
@@ -137,8 +152,8 @@ export function setupFusionHandlers(): void {
     // Le verrou avant le premier `await` : deux écritures gardent leur ordre d'arrivée.
     return withFileLock(path.join(root, CONTEXT_FILE), async () => {
       try {
-        // Ensure v2 dir exists before writing.
-        await fs.mkdir(workspaceFiles(root).root, { recursive: true });
+        // Aucun `mkdir` ici : `context.md` vit à la racine du projet, et si elle a disparu, la
+        // recréer ferait écrire ce texte dans un squelette, loin du vrai dossier.
         await writeWorkspaceHints(root, rawMarkdown, { expectedRaw });
         const h = await loadWorkspaceHints(root);
         return successResponse({ hints: h });
@@ -397,6 +412,8 @@ export function setupFusionHandlers(): void {
   // MARK: - MCP clients
 
   ipcMain.handle('fusion:mcp:list', async () => {
+    const refusal = await unreadableConfigResponse(projectManager.getCurrentProjectPath());
+    if (refusal) return refusal;
     return successResponse({ clients: mcpClientsService.list() });
   });
 
@@ -959,7 +976,11 @@ export function setupFusionHandlers(): void {
   // MARK: - security (SourceInspector mode)
 
   ipcMain.handle('fusion:security:get-mode', async () => {
-    return successResponse({ mode: retrievalService.getInspectorMode() });
+    const appliedMode = retrievalService.getInspectorMode();
+    const refusal = await unreadableConfigResponse(projectManager.getCurrentProjectPath());
+    // Le choix de l'auteur est inconnu ; ce qui s'applique en attendant, lui, se dit.
+    if (refusal) return { ...refusal, appliedMode };
+    return successResponse({ mode: appliedMode });
   });
 
   // MARK: - archives connectors (Europeana key)

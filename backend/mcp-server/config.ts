@@ -21,7 +21,7 @@ import {
   type WorkspaceFiles,
 } from '../core/workspace/layout.js';
 import {
-  WORKSPACE_SCHEMA_VERSION,
+  parseWorkspaceConfig,
   type WorkspaceConfig,
 } from '../core/workspace/config.js';
 
@@ -97,7 +97,8 @@ export interface MCPRuntimeConfig {
  *   - the workspace config is missing or unreadable;
  *   - the workspace still uses the pre-flatten `.cliodeck/v2/` layout (open in
  *     ClioDeck once to auto-migrate);
- *   - the schema version is wrong;
+ *   - the schema version is newer than this build (the app's contract: a lower or
+ *     missing one is accepted, and so is a BOM);
  *   - mcpServer.enabled is not `true` (default refusal).
  */
 export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
@@ -117,14 +118,17 @@ export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
     );
   }
 
-  const raw = fs.readFileSync(paths.config, 'utf8');
-  const cfg = JSON.parse(raw) as WorkspaceConfig & {
-    mcpServer?: MCPServerSettings;
-  };
-
-  if (cfg.schema_version !== WORKSPACE_SCHEMA_VERSION) {
+  // Le même contrat que l'app, sinon les Réglages disent « activé » et le client externe échoue.
+  // Le décodage strict aussi : ce que l'app refuse de lire, le serveur ne l'expose pas.
+  const raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+    fs.readFileSync(paths.config)
+  );
+  const cfg = parseWorkspaceConfig(paths.config, raw) as
+    | (WorkspaceConfig & { mcpServer?: MCPServerSettings })
+    | null;
+  if (!cfg) {
     throw new Error(
-      `Unsupported workspace schema_version ${cfg.schema_version} (expected ${WORKSPACE_SCHEMA_VERSION}).`
+      `No ClioDeck workspace at ${abs} (${paths.config} is empty). Open it in the app first.`
     );
   }
 

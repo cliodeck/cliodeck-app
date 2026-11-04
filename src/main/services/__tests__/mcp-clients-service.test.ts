@@ -145,6 +145,22 @@ describe('un config.json illisible n’est pas une configuration vide (S11-1-8)'
     expect(JSON.parse(readFileSync(configFile, 'utf8')).vault).toEqual({ path: '/Volumes/Notes' });
   });
 
+  it('le dossier du projet a disparu : loadProject ne rejette pas, ne recrée rien, ne lance rien', async () => {
+    const gone = path.join(root, 'parent-renomme', 'These');
+    let asked = 0;
+    mcpClientsService.approvalGate = async () => {
+      asked += 1;
+      return 'approved';
+    };
+
+    await expect(mcpClientsService.loadProject(gone)).resolves.toBeUndefined();
+
+    expect(asked).toBe(0);
+    expect(existsSync(path.join(root, 'parent-renomme'))).toBe(false);
+    await expect(mcpClientsService.addClient({ ...CLIENT })).rejects.toMatchObject({ kind: 'unreadable' });
+    expect(existsSync(path.join(root, 'parent-renomme'))).toBe(false);
+  });
+
   it('removeClient garde ce qu’a posé une écriture d’à côté, faite pendant qu’il tournait', async () => {
     writeFileSync(configFile, VALID);
     await mcpClientsService.loadProject(root);

@@ -77,6 +77,81 @@ describe('MCPClientsSection', () => {
   });
 });
 
+describe('MCPClientsSection, sur un config.json illisible', () => {
+  const installList = (list: unknown, add: unknown = vi.fn()) =>
+    installFusion({
+      mcp: {
+        list,
+        add,
+        remove: vi.fn(),
+        restart: vi.fn(),
+        onEvent: () => () => undefined,
+      },
+    });
+
+  it('liste refusée : le motif, jamais « aucun client configuré »', async () => {
+    installList(vi.fn().mockResolvedValue({ success: false, error: REASON }));
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+
+    expect(await screen.findByText(REASON)).toBeTruthy();
+    expect(screen.queryByText('mcp.empty')).toBeNull();
+  });
+
+  it('« Actualiser » redemande : le motif reste, puis la liste revient une fois le fichier réparé', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: REASON })
+      .mockResolvedValueOnce({ success: false, error: REASON })
+      .mockResolvedValue({ success: true, clients: [] });
+    installList(list);
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+    expect(await screen.findByText(REASON)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('mcp.buttons.refresh'));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(REASON)).toBeTruthy();
+    expect(screen.queryByText('mcp.empty')).toBeNull();
+
+    fireEvent.click(screen.getByText('mcp.buttons.refresh'));
+    expect(await screen.findByText('mcp.empty')).toBeTruthy();
+    expect(screen.queryByText(REASON)).toBeNull();
+  });
+
+  const fillAndSubmit = async (): Promise<void> => {
+    fireEvent.click(await screen.findByText('mcp.buttons.addClient'));
+    fireEvent.change(screen.getByPlaceholderText('mcp.form.namePlaceholder'), { target: { value: 'nouveau' } });
+    fireEvent.change(screen.getByPlaceholderText('mcp.form.commandPlaceholder'), { target: { value: 'npx' } });
+    fireEvent.click(screen.getByText('mcp.buttons.save'));
+  };
+
+  it('ajout refusé : le motif s’affiche, et le formulaire reste avec ce qui a été saisi', async () => {
+    const add = vi.fn().mockResolvedValue({ success: false, error: REASON });
+    installList(vi.fn().mockResolvedValue({ success: true, clients: [] }), add);
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+    expect(screen.queryByText(REASON)).toBeNull();
+
+    await fillAndSubmit();
+
+    expect(await screen.findByText(REASON)).toBeTruthy();
+    expect(add).toHaveBeenCalledTimes(1);
+    expect((screen.getByPlaceholderText('mcp.form.namePlaceholder') as HTMLInputElement).value).toBe('nouveau');
+  });
+
+  it('ajout refusé sans motif : un texte, pas de silence', async () => {
+    const add = vi.fn().mockResolvedValue({ success: false });
+    installList(vi.fn().mockResolvedValue({ success: true, clients: [] }), add);
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+
+    await fillAndSubmit();
+
+    expect(await screen.findByText('mcp.errors.addFailed')).toBeTruthy();
+  });
+});
+
 describe('VaultConfigSection', () => {
   const vault = (overrides: Record<string, unknown>) => ({
     status: vi.fn().mockResolvedValue({ success: true, indexed: true, dbPath: '/db', vaultPath: '/Notes' }),
@@ -135,6 +210,50 @@ describe('MCPServerSection', () => {
 });
 
 describe('SecurityConfigSection', () => {
+  it('mode illisible : le motif, aucun choix affiché pour l’auteur, et ce qui s’applique est dit', async () => {
+    installFusion({
+      security: {
+        getMode: vi.fn().mockResolvedValue({ success: false, error: REASON, appliedMode: 'warn' }),
+        setMode: vi.fn(),
+        getEvents: vi.fn().mockResolvedValue({
+          success: true,
+          stats: { total: 0, byKind: {}, bySeverity: { low: 0, medium: 0, high: 0 }, recent: [] },
+        }),
+        getUnreadableKeys: vi.fn().mockResolvedValue({ success: true, keys: [] }),
+        getStorageStatus: vi.fn().mockResolvedValue({ success: true, encrypted: true, plaintextKeys: [] }),
+        revokeAllKeys: vi.fn(),
+      },
+    });
+    render(<SecurityConfigSection />);
+
+    expect(await screen.findByText(REASON)).toBeTruthy();
+    expect(screen.getByText('security.inspection.modeUnreadable')).toBeTruthy();
+    for (const value of ['warn', 'audit', 'block']) {
+      const radio = screen.getByDisplayValue(value) as HTMLInputElement;
+      expect(radio.checked).toBe(false);
+      expect(radio.disabled).toBe(true);
+    }
+  });
+
+  it('mode lisible : pas de message d’illisibilité, et le choix s’affiche', async () => {
+    installFusion({
+      security: {
+        getMode: vi.fn().mockResolvedValue({ success: true, mode: 'warn' }),
+        setMode: vi.fn(),
+        getEvents: vi.fn().mockResolvedValue({
+          success: true,
+          stats: { total: 0, byKind: {}, bySeverity: { low: 0, medium: 0, high: 0 }, recent: [] },
+        }),
+        getUnreadableKeys: vi.fn().mockResolvedValue({ success: true, keys: [] }),
+        getStorageStatus: vi.fn().mockResolvedValue({ success: true, encrypted: true, plaintextKeys: [] }),
+        revokeAllKeys: vi.fn(),
+      },
+    });
+    render(<SecurityConfigSection />);
+    await waitFor(() => expect((screen.getByDisplayValue('warn') as HTMLInputElement).checked).toBe(true));
+    expect(screen.queryByText('security.inspection.modeUnreadable')).toBeNull();
+  });
+
   it('changer de mode refusé : le motif, et le mode revient', async () => {
     const setMode = vi.fn().mockResolvedValue({ success: false, error: REASON });
     installFusion({

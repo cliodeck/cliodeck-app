@@ -1847,7 +1847,8 @@
       "title": "Quellenprüfung",
       "helpAria": "Die Prüfmodi verstehen",
       "hint": "Bevor eine Quelle — ein PDF, eine Obsidian-Notiz, ein Tropy-Objekt — das Modell erreicht, kann ClioDeck Versuche erkennen, verborgene Anweisungen einzuschleusen. Wählen Sie das Schutzniveau, das zu Ihrem Korpus passt; das Fragezeichen oben erläutert die Abwägungen.",
-      "modeGroupAria": "Modus der Quellenprüfung"
+      "modeGroupAria": "Modus der Quellenprüfung",
+      "modeUnreadable": "Ihre Wahl konnte nicht gelesen werden. Bis dahin gilt für dieses Projekt der Modus „{{mode}}“."
     },
     "modes": {
       "warn": {

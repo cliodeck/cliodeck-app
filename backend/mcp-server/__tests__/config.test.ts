@@ -9,6 +9,8 @@ import {
 } from '../../core/workspace/layout.js';
 import {
   defaultWorkspaceConfig,
+  readWorkspaceConfig,
+  WorkspaceConfigError,
   writeWorkspaceConfig,
 } from '../../core/workspace/config.js';
 import { isToolEnabled, loadMCPConfig } from '../config.js';
@@ -65,7 +67,76 @@ describe('loadMCPConfig (2.5)', () => {
     await ensureWorkspaceDirectories(tmp);
     const p = workspaceFiles(tmp);
     await fs.writeFile(p.config, JSON.stringify({ schema_version: 99 }));
-    expect(() => loadMCPConfig(tmp)).toThrow(/schema_version/);
+    expect(() => loadMCPConfig(tmp)).toThrow(/version plus récente/);
+  });
+});
+
+/**
+ * L'app et le serveur lisent le même fichier, sous le même contrat : sinon les Réglages disent
+ * « activé » et le client externe échoue, sur un message qui ne veut rien dire.
+ */
+describe('loadMCPConfig lit config.json comme l’app', () => {
+  const ENABLED = { mcpServer: { enabled: true } };
+
+  async function writeRaw(content: string): Promise<void> {
+    await ensureWorkspaceDirectories(tmp);
+    await fs.writeFile(workspaceFiles(tmp).config, content);
+  }
+
+  it.each<[string, string]>([
+    ['un BOM en tête', `\uFEFF${JSON.stringify({ schema_version: 2, ...ENABLED })}`],
+    ['schema_version "2" en texte', JSON.stringify({ schema_version: '2', ...ENABLED })],
+    ['schema_version 1', JSON.stringify({ schema_version: 1, ...ENABLED })],
+    ['sans schema_version', JSON.stringify(ENABLED)],
+  ])('%s : accepté, comme dans l’app', async (_label, content) => {
+    await writeRaw(content);
+    const appSide = await readWorkspaceConfig(tmp);
+    expect((appSide.mcpServer as { enabled: boolean }).enabled).toBe(true);
+
+    const cfg = loadMCPConfig(tmp);
+
+    expect(cfg.mcp.enabled).toBe(true);
+    expect(cfg.workspace.schema_version).toBe(2);
+  });
+
+  it.each<[string, string, string]>([
+    ['schema_version 3', JSON.stringify({ schema_version: 3, ...ENABLED }), 'newer_schema'],
+    ['schema_version "3" en texte', JSON.stringify({ schema_version: '3', ...ENABLED }), 'newer_schema'],
+    ['virgule en trop', '{"schema_version":2,"mcpServer":{"enabled":true},}', 'invalid_json'],
+    ['un tableau', '[]', 'invalid_json'],
+    ['null', 'null', 'invalid_json'],
+  ])('%s : refusé, même motif que dans l’app', async (_label, content, kind) => {
+    await writeRaw(content);
+    expect(() => loadMCPConfig(tmp)).toThrow(WorkspaceConfigError);
+    try {
+      loadMCPConfig(tmp);
+    } catch (error) {
+      expect((error as WorkspaceConfigError).kind).toBe(kind);
+    }
+  });
+
+  it.each<[string, string]>([
+    ['0 octet', ''],
+    ['des blancs', ' \n'],
+    ['un BOM seul', '\uFEFF'],
+  ])('%s : comme absent, et le serveur refuse de démarrer', async (_label, content) => {
+    await writeRaw(content);
+    expect(() => loadMCPConfig(tmp)).toThrow(/No ClioDeck workspace/);
+  });
+
+  it('pas en UTF-8 : refusé, comme dans l’app, plutôt que lu avec des U+FFFD', async () => {
+    await ensureWorkspaceDirectories(tmp);
+    await fs.writeFile(
+      workspaceFiles(tmp).config,
+      Buffer.from('{"name":"Th\xe8se","mcpServer":{"enabled":true}}', 'latin1')
+    );
+    await expect(readWorkspaceConfig(tmp)).rejects.toMatchObject({ kind: 'unreadable' });
+    expect(() => loadMCPConfig(tmp)).toThrow();
+  });
+
+  it('lisible mais pas activé : le consentement reste exigé', async () => {
+    await writeRaw(`\uFEFF${JSON.stringify({ schema_version: '2' })}`);
+    expect(() => loadMCPConfig(tmp)).toThrow(/disabled/);
   });
 });
 

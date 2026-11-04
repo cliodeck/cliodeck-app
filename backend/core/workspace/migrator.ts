@@ -88,6 +88,19 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * `access` suit les liens : un `config.json` lien cassé se lirait absent, et la configuration par
+ * défaut s'écrirait à son autre bout. Il est là, simplement illisible, et `configIssue` le dira.
+ */
+async function configPresent(p: string): Promise<boolean> {
+  try {
+    await fs.lstat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function safeStat(p: string): Promise<{ size: number; isFile: boolean } | null> {
   try {
     const s = await fs.stat(p);
@@ -851,7 +864,7 @@ async function migrateLegacySubdir(
 
   // Un `v2` lié dehors : déplacer viderait le dossier de l'auteur dans ce projet.
   if (await refuseIfOutside(root, paths.legacyV2Dir, flat.root, report)) {
-    if (!(await exists(flat.config))) {
+    if (!(await configPresent(flat.config))) {
       await writeWorkspaceConfig(root, defaultWorkspaceConfig(opts.name ?? path.basename(root)));
       report.copied.push({ source: '(generated)', target: flat.config });
     }
@@ -880,7 +893,7 @@ async function migrateLegacySubdir(
     );
   }
 
-  if (!(await exists(flat.config))) {
+  if (!(await configPresent(flat.config))) {
     // The v2 subdir lacked a config.json — write a default so the workspace is openable.
     await writeWorkspaceConfig(root, defaultWorkspaceConfig(opts.name ?? path.basename(root)));
     report.copied.push({ source: '(generated)', target: flat.config });
@@ -946,7 +959,7 @@ async function migrateLegacyFlat(
   const report = makeReport('legacy-flat', root);
   const flat = await ensureWorkspaceDirectories(root);
 
-  if (!(await exists(flat.config)) || opts.overwrite) {
+  if (!(await configPresent(flat.config)) || opts.overwrite) {
     await writeWorkspaceConfig(
       root,
       defaultWorkspaceConfig(opts.name ?? path.basename(root)),
@@ -1003,7 +1016,7 @@ async function migrateCliobrain(
         ...legacy,
         schema_version: 2,
       };
-      if (!(await exists(flat.config)) || opts.overwrite) {
+      if (!(await configPresent(flat.config)) || opts.overwrite) {
         await writeWorkspaceConfig(root, merged);
         report.copied.push({ source: cliobrainCfg, target: flat.config });
       } else {
@@ -1018,7 +1031,7 @@ async function migrateCliobrain(
         `Failed to parse ClioBrain config.json: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-  } else if (!(await exists(flat.config))) {
+  } else if (!(await configPresent(flat.config))) {
     await writeWorkspaceConfig(
       root,
       defaultWorkspaceConfig(opts.name ?? path.basename(root)),

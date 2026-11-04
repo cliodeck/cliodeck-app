@@ -1081,6 +1081,8 @@ const api = {
         ipcRenderer.invoke('fusion:security:get-mode') as Promise<{
           success: boolean;
           mode?: 'warn' | 'audit' | 'block';
+          /** `config.json` ne se lit pas : ce qui s'applique en attendant, faute de connaître le choix. */
+          appliedMode?: 'warn' | 'audit' | 'block';
           error?: string;
         }>,
       setMode: (mode: 'warn' | 'audit' | 'block') =>

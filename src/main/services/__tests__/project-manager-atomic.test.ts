@@ -179,6 +179,30 @@ describe('écritures concurrentes : aucune ne perd celle d’à côté', () => {
     expect((disk.book as { numberChapters: boolean }).numberChapters).toBe(true);
   });
 
+  /**
+   * Limite assumée : `chapters` reste écrit en entier depuis le renderer, qui seul sait ce qu'il a
+   * retiré. Le manifeste perd l'entrée, jamais le texte : le fichier reste, et se propose comme non
+   * rattaché. Distinguer retrait et ignorance demande un autre échange avec le renderer.
+   */
+  it('createChapter puis saveChapters sur la liste d’avant : l’entrée part, le fichier reste, non rattaché', async () => {
+    const before = [chapter('un', 0)];
+    writeProject(realisticProject({ chapters: before }));
+    writeFileSync(path.join(projectDir, 'chapters', 'un.md'), '# Un\n');
+
+    const [created, saved] = await Promise.all([
+      manager.createChapter({ projectPath: projectFile, title: 'Neuf' }),
+      manager.saveChapters({ projectPath: projectFile, chapters: before }),
+    ]);
+    expect(created.success).toBe(true);
+    expect(saved.success).toBe(true);
+
+    expect((onDisk().chapters as Array<{ id: string }>).map((c) => c.id)).toEqual(['un']);
+    const filePath = (created as { chapter: { filePath: string } }).chapter.filePath;
+    expect(readFileSync(path.join(projectDir, filePath), 'utf8')).toBe('# Neuf\n\n');
+    const listed = await manager.getChapters(projectFile);
+    expect(listed.unattached.map((file) => file.filePath)).toContain(filePath);
+  });
+
   it('synchronisation Zotero et chapitres, 20 fois : la collection et le plan restent', async () => {
     writeProject(realisticProject({ bibliographySource: undefined, zotero: { libraryID: 3 } }));
     const chapters = [chapter('deux', 0), chapter('un', 1)];
@@ -487,6 +511,11 @@ describe('getProjectMetadata : absent n’est pas indisponible', () => {
   it('dossier présent et lisible, project.json vraiment absent : project_file_missing', async () => {
     const result = await metadataOf(projectFile);
     expect(result).toMatchObject({ success: false, code: 'project_file_missing' });
+  });
+
+  it('iCloud a évincé le fichier (macOS < 14, `.project.json.icloud`) : project_unavailable', async () => {
+    writeFileSync(path.join(projectDir, '.project.json.icloud'), 'bplist00');
+    expect(await metadataOf(projectFile)).toMatchObject({ success: false, code: 'project_unavailable' });
   });
 
   it('dossier absent (disque débranché, parent renommé) : project_unavailable', async () => {

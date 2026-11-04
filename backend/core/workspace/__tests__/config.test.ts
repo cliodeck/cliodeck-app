@@ -4,7 +4,7 @@
  * récente le faisait remplacer en silence par une configuration vide (S11-1-8).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { mkdtemp, readdir, rm, symlink } from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -135,6 +135,114 @@ describe('un config.json illisible n’est jamais réécrit', () => {
       chmodSync(configFile, 0o644);
     }
     expect(bytes().equals(before)).toBe(true);
+  });
+});
+
+describe('absent n’est pas pris au mot : on regarde plus haut', () => {
+  /** Un projet dans un dossier parent qu'on peut renommer sous ses pieds. */
+  function renamedParent(): { parent: string; parked: string; project: string } {
+    const parent = path.join(root, 'parent');
+    const project = path.join(parent, 'Thèse');
+    mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
+    writeFileSync(path.join(project, 'document.md'), '# Thèse\n');
+    writeFileSync(path.join(project, '.cliodeck', 'config.json'), JSON.stringify(REALISTIC));
+    const parked = `${parent}-debranche`;
+    renameSync(parent, parked);
+    return { parent, parked, project };
+  }
+
+  it('dossier parent renommé : tout lève, rien n’est recréé, et le dossier reprend son nom', async () => {
+    const { parent, parked, project } = renamedParent();
+    let called = false;
+
+    expect(await kindOf(() => readWorkspaceConfig(project))).toBe('unreadable');
+    expect(await kindOf(() => readOrInitWorkspaceConfig(project))).toBe('unreadable');
+    expect(
+      await kindOf(() =>
+        updateWorkspaceConfig(project, () => {
+          called = true;
+        })
+      )
+    ).toBe('unreadable');
+    expect(await workspaceConfigIssue(project)).toEqual({
+      kind: 'unreadable',
+      path: path.join(project, '.cliodeck', 'config.json'),
+    });
+
+    expect(called).toBe(false);
+    expect(existsSync(parent)).toBe(false);
+    // Un squelette recréé là ferait échouer ce renommage (ENOTEMPTY).
+    renameSync(parked, parent);
+    expect((await readWorkspaceConfig(project)).vault).toEqual(REALISTIC.vault);
+  });
+
+  it('le message nomme le dossier disparu, pour un historien', async () => {
+    const { project } = renamedParent();
+    const error = (await readOrInitWorkspaceConfig(project).catch((e: unknown) => e)) as WorkspaceConfigError;
+    expect(error).toBeInstanceOf(WorkspaceConfigError);
+    expect(error.message).toContain('.cliodeck/config.json');
+    expect(error.message).toContain("n'a pas été modifié");
+    expect(error.message).toContain('dossier du projet est introuvable');
+    expect(error.message).toContain(project);
+  });
+
+  it.skipIf(!symlinkAvailable)('config.json lien cassé, volume absent : illisible, rien d’écrit', async () => {
+    const target = path.join(root, 'volume-absent', 'config.json');
+    await symlink(target, configFile);
+    let called = false;
+
+    expect(await kindOf(() => readWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('unreadable');
+    expect(
+      await kindOf(() =>
+        updateWorkspaceConfig(root, () => {
+          called = true;
+        })
+      )
+    ).toBe('unreadable');
+    expect(await workspaceConfigIssue(root)).toEqual({ kind: 'unreadable', path: configFile });
+
+    expect(called).toBe(false);
+    expect(lstatSync(configFile).isSymbolicLink()).toBe(true);
+    expect(existsSync(path.dirname(target))).toBe(false);
+  });
+
+  it.skipIf(!symlinkAvailable)('config.json lien cassé, dossier présent : aucun défaut à l’autre bout du lien', async () => {
+    const target = path.join(root, 'autre-dossier', 'config.json');
+    mkdirSync(path.dirname(target));
+    await symlink(target, configFile);
+
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => updateWorkspaceConfig(root, () => undefined))).toBe('unreadable');
+
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it.skipIf(!symlinkAvailable)('.cliodeck lien cassé : illisible, le lien reste', async () => {
+    await rm(path.join(root, '.cliodeck'), { recursive: true });
+    await symlink(path.join(root, 'volume-absent'), path.join(root, '.cliodeck'));
+
+    expect(await kindOf(() => readWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => updateWorkspaceConfig(root, () => undefined))).toBe('unreadable');
+    expect(lstatSync(path.join(root, '.cliodeck')).isSymbolicLink()).toBe(true);
+    expect(existsSync(path.join(root, 'volume-absent'))).toBe(false);
+  });
+
+  it('.cliodeck est un fichier (ENOTDIR) : illisible, intact', async () => {
+    await rm(path.join(root, '.cliodeck'), { recursive: true });
+    writeFileSync(path.join(root, '.cliodeck'), 'pas un dossier');
+
+    expect(await kindOf(() => readWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('unreadable');
+    expect(await kindOf(() => updateWorkspaceConfig(root, () => undefined))).toBe('unreadable');
+    expect(readFileSync(path.join(root, '.cliodeck'), 'utf8')).toBe('pas un dossier');
+  });
+
+  it('lire un projet sain ne crée aucun dossier', async () => {
+    writeConfig(JSON.stringify(REALISTIC));
+    await readOrInitWorkspaceConfig(root);
+    expect(await readdir(path.join(root, '.cliodeck'))).toEqual(['config.json']);
   });
 });
 
