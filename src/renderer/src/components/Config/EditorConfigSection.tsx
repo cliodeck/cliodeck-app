@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { NumberInput } from '../common/NumberInput';
 
 export interface EditorConfig {
   fontSize: number;
@@ -42,12 +43,12 @@ export const EditorConfigSection: React.FC<EditorConfigSectionProps> = ({ config
                 onChange={(e) => handleFieldChange('fontSize', parseInt(e.target.value))}
                 className="config-slider"
               />
-              <input
-                type="number"
-                min="10"
-                max="24"
+              <NumberInput
+                integer
+                min={10}
+                max={24}
                 value={config.fontSize}
-                onChange={(e) => handleFieldChange('fontSize', parseInt(e.target.value))}
+                onCommit={(value) => handleFieldChange('fontSize', value)}
                 className="config-number"
               />
             </div>

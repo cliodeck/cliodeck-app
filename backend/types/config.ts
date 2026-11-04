@@ -231,6 +231,10 @@ export const DEFAULT_CONFIG: AppConfig = {
       maxLength: 750, // ~750 mots = 2-3 paragraphes
       llmModel: 'gemma2:2b', // Pour abstractif si activé
     },
+    summaryMaxLength: 750,
+    // Graph context
+    graphSimilarityThreshold: 0.7,
+    additionalGraphDocs: 3,
     // Enhanced search features (enabled by default)
     useAdaptiveChunking: true, // Structure-aware chunking
     useHNSWIndex: true, // Fast approximate search

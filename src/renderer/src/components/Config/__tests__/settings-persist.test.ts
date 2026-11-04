@@ -230,6 +230,26 @@ describe('withFormDefaults et apiKeyFields', () => {
     expect(withFormDefaults('zotero', undefined)).toEqual(FORM_DEFAULTS.zotero);
   });
 
+  it.each([[null], ['0.5'], ['abc'], [true], [[1]], [{}], [Number.NaN]])(
+    '%j dans un champ dont le défaut du formulaire est un nombre : le défaut',
+    (bad) => {
+      const rag = withFormDefaults('rag', { topK: bad, similarityThreshold: bad, summaryMaxLength: bad, chunkingConfig: 'large' });
+      expect(rag.topK).toBe(DEFAULT_CONFIG.rag.topK);
+      expect(rag.similarityThreshold).toBe(DEFAULT_CONFIG.rag.similarityThreshold);
+      expect(rag.summaryMaxLength).toBe(750);
+      expect(rag.chunkingConfig).toBe('large');
+      expect(withFormDefaults('editor', { fontSize: bad }).fontSize).toBe(DEFAULT_CONFIG.editor.fontSize);
+    }
+  );
+
+  it('un nombre fini reste, zéro compris ; un null hors d’un champ numérique, aussi', () => {
+    const rag = withFormDefaults('rag', { similarityThreshold: 0, customOverlapSize: 0, customSystemPrompt: null });
+    expect(rag.similarityThreshold).toBe(0);
+    expect(rag.customOverlapSize).toBe(0);
+    expect(rag).toHaveProperty('customSystemPrompt', null);
+    expect(withFormDefaults('llm', { embeddedModelPath: null })).toHaveProperty('embeddedModelPath', null);
+  });
+
   it('une section absente ne laisse aucune clé en place', () => {
     expect(apiKeyFields({ llm: undefined, zotero: undefined })).toEqual({
       llm: { claudeAPIKey: undefined, openaiAPIKey: undefined, mistralAPIKey: undefined, geminiAPIKey: undefined },
@@ -291,5 +311,15 @@ describe('les valeurs par défaut du formulaire', () => {
     expect(FORM_DEFAULTS.rag.topK).toBe(DEFAULT_CONFIG.rag.topK);
     expect(FORM_DEFAULTS.llm.ollamaChatModel).toBe(DEFAULT_CONFIG.llm.ollamaChatModel);
     expect(FORM_DEFAULTS.editor.fontSize).toBe(DEFAULT_CONFIG.editor.fontSize);
+  });
+
+  it('chaque nombre du formulaire a son défaut dans DEFAULT_CONFIG : le main répare avec celui-là', () => {
+    for (const section of ['rag', 'llm', 'editor'] as const) {
+      for (const [field, value] of Object.entries(FORM_DEFAULTS[section])) {
+        if (typeof value === 'number') {
+          expect((DEFAULT_CONFIG[section] as unknown as Record<string, unknown>)[field], `${section}.${field}`).toBe(value);
+        }
+      }
+    }
   });
 });

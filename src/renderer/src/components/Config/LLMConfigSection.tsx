@@ -1,5 +1,6 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { NumberInput } from '../common/NumberInput';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -358,18 +359,14 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 {t('llm.chatNumCtxHelp')}
               </span>
             </label>
-            <input
-              type="number"
+            <NumberInput
+              allowEmpty
+              integer
               min={NUM_CTX_MIN}
               max={NUM_CTX_MAX}
               step={1024}
-              value={config.ollamaNumCtx || ''}
-              onChange={(e) =>
-                handleFieldChange(
-                  'ollamaNumCtx',
-                  e.target.value === '' ? 0 : Number(e.target.value)
-                )
-              }
+              value={config.ollamaNumCtx || undefined}
+              onCommit={(value) => handleFieldChange('ollamaNumCtx', value)}
               className="config-input"
               placeholder={t('llm.chatNumCtxPlaceholder')}
             />
@@ -438,17 +435,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 {t('llm.embeddingNumCtxHelp')}
               </span>
             </label>
-            <input
-              type="number"
+            <NumberInput
+              allowEmpty
+              integer
               min={512}
               step={512}
-              value={config.ollamaEmbeddingNumCtx ?? ''}
-              onChange={(e) =>
-                handleFieldChange(
-                  'ollamaEmbeddingNumCtx',
-                  e.target.value === '' ? undefined : Number(e.target.value)
-                )
-              }
+              value={config.ollamaEmbeddingNumCtx}
+              onCommit={(value) => handleFieldChange('ollamaEmbeddingNumCtx', value)}
               className="config-input"
               placeholder={t('llm.embeddingNumCtxPlaceholder')}
             />

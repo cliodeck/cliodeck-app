@@ -110,11 +110,15 @@ async function openSettings(window: Page): Promise<void> {
   await expect(settingsHeading(window)).toBeVisible({ timeout: 15_000 });
 }
 
-/** Réglages → Éditeur → un champ modifié, non enregistré. */
+/**
+ * Réglages → Éditeur → un champ modifié, non enregistré. Tab va jusqu'au bout du geste : un champ
+ * numérique ne vaut qu'une fois validé, et c'est le formulaire qui doit survivre, pas un brouillon.
+ */
 async function changeFontSize(window: Page): Promise<ReturnType<Page['locator']>> {
   await window.getByRole('button', { name: 'Éditeur', exact: true }).click();
   const field = window.locator('.settings-modal input[type="number"]').first();
   await field.fill('21');
+  await field.press('Tab');
   return field;
 }
 

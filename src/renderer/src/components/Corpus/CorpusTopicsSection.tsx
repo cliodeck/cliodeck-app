@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { NumberInput } from '../common/NumberInput';
 import type { GraphData, GraphNode, TopicAnalysisResult } from './corpus-types';
 
 const TopicTimeline = lazy(() =>
@@ -50,12 +51,12 @@ export const CorpusTopicsSection: React.FC<Props> = ({
         <div className="topics-config">
           <label>
             {t('corpus.numTopics')}
-            <input
-              type="number"
-              min="2"
-              max="50"
+            <NumberInput
+              integer
+              min={2}
+              max={50}
               value={numTopics}
-              onChange={(e) => setNumTopics(parseInt(e.target.value) || 10)}
+              onCommit={setNumTopics}
               className="topics-number-input"
             />
           </label>
@@ -90,12 +91,12 @@ export const CorpusTopicsSection: React.FC<Props> = ({
         <div className="topics-actions">
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9em' }}>
             {t('corpus.nbTopics')}
-            <input
-              type="number"
-              min="2"
-              max="50"
+            <NumberInput
+              integer
+              min={2}
+              max={50}
               value={numTopics}
-              onChange={(e) => setNumTopics(parseInt(e.target.value) || 10)}
+              onCommit={setNumTopics}
               className="topics-number-input"
               style={{ width: '60px' }}
             />

@@ -56,7 +56,7 @@ export function shouldSkip(): string | null {
  * can clean up on teardown.
  */
 export async function launchApp(
-  options: { language?: string; userDataDir?: string } = {},
+  options: { language?: string; userDataDir?: string; args?: string[] } = {},
 ): Promise<LaunchOutcome> {
   const skip = shouldSkip();
   if (skip) return { kind: 'skip', reason: skip };
@@ -83,7 +83,7 @@ export async function launchApp(
   const app = await electron.launch({
     cwd: REPO_ROOT,
     // `--use-mock-keychain` : un test qui enregistre une clé d'API ne touche pas au vrai trousseau.
-    args: ['.', '--no-sandbox', '--use-mock-keychain', `--user-data-dir=${userDataDir}`],
+    args: ['.', '--no-sandbox', '--use-mock-keychain', `--user-data-dir=${userDataDir}`, ...(options.args ?? [])],
     env,
     timeout: 30_000,
   });

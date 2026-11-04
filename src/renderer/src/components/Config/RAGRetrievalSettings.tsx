@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { NumberInput } from '../common/NumberInput';
 import type { RAGConfig } from './ConfigPanel';
 
 /**
@@ -83,12 +84,12 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleTopKChange(parseInt(e.target.value))}
                 className="config-slider"
               />
-              <input
-                type="number"
-                min="1"
-                max="20"
+              <NumberInput
+                integer
+                min={1}
+                max={20}
                 value={config.topK}
-                onChange={(e) => handleTopKChange(parseInt(e.target.value))}
+                onCommit={handleTopKChange}
                 className="config-number"
               />
             </div>
@@ -123,13 +124,12 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleThresholdChange(parseFloat(e.target.value))}
                 className="config-slider"
               />
-              <input
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
+              <NumberInput
+                min={0}
+                max={1}
+                step={0.05}
                 value={config.similarityThreshold}
-                onChange={(e) => handleThresholdChange(parseFloat(e.target.value))}
+                onCommit={handleThresholdChange}
                 className="config-number"
               />
             </div>
@@ -226,13 +226,13 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                   onChange={(e) => handleSummaryMaxLengthChange(parseInt(e.target.value))}
                   className="config-slider"
                 />
-                <input
-                  type="number"
-                  min="100"
-                  max="1000"
-                  step="50"
+                <NumberInput
+                  integer
+                  min={100}
+                  max={1000}
+                  step={50}
                   value={config.summaryMaxLength}
-                  onChange={(e) => handleSummaryMaxLengthChange(parseInt(e.target.value))}
+                  onCommit={handleSummaryMaxLengthChange}
                   className="config-number"
                 />
               </div>
@@ -285,12 +285,12 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                     onChange={(e) => handleAdditionalGraphDocsChange(parseInt(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
+                  <NumberInput
+                    integer
+                    min={1}
+                    max={10}
                     value={config.additionalGraphDocs}
-                    onChange={(e) => handleAdditionalGraphDocsChange(parseInt(e.target.value))}
+                    onCommit={handleAdditionalGraphDocsChange}
                     className="config-number"
                   />
                 </div>
@@ -316,13 +316,12 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                     onChange={(e) => handleGraphSimilarityThresholdChange(parseFloat(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="0.5"
-                    max="1"
-                    step="0.05"
+                  <NumberInput
+                    min={0.5}
+                    max={1}
+                    step={0.05}
                     value={config.graphSimilarityThreshold}
-                    onChange={(e) => handleGraphSimilarityThresholdChange(parseFloat(e.target.value))}
+                    onCommit={handleGraphSimilarityThresholdChange}
                     className="config-number"
                   />
                 </div>
@@ -401,13 +400,12 @@ export const RAGRetrievalSettings: React.FC<Props> = ({ config, onChange }) => {
                 onChange={(e) => handleExplorationSimilarityThresholdChange(parseFloat(e.target.value))}
                 className="config-slider"
               />
-              <input
-                type="number"
-                min="0.5"
-                max="0.95"
-                step="0.05"
+              <NumberInput
+                min={0.5}
+                max={0.95}
+                step={0.05}
                 value={config.explorationSimilarityThreshold}
-                onChange={(e) => handleExplorationSimilarityThresholdChange(parseFloat(e.target.value))}
+                onCommit={handleExplorationSimilarityThresholdChange}
                 className="config-number"
               />
             </div>

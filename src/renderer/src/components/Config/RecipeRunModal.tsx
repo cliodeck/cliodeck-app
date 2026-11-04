@@ -97,7 +97,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   // d'autre ne permet encore d'annuler : Échap et le X ferment, après une question qui dit que la
   // recette continue. Hors exécution, le fond et Échap sont des gestes involontaires, comme dans
   // l'assistant : ils ne ferment que si rien de saisi ne s'y perd. Le X reste, lui, un geste franc.
-  const paramsToLose = Object.keys(inputs).some((key) => inputs[key] !== lastInputs[key]);
+  const paramsToLose = Object.keys(inputs).some((key) => !Object.is(inputs[key], lastInputs[key]));
   const closeUnlessLosing = running || paramsToLose ? undefined : onClose;
   const askToCloseWhileRunning = () => {
     void useDialogStore
@@ -120,7 +120,9 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
         setRecipe(res.recipe);
         const initial: Record<string, unknown> = {};
         for (const [k, def] of Object.entries(res.recipe.inputs)) {
-          if (def.default !== undefined) initial[k] = def.default;
+          // Un défaut numérique illisible (`.nan` en YAML) : le champ est vide, pas « NaN ».
+          if (def.type === 'number' && !Number.isFinite(def.default)) initial[k] = '';
+          else if (def.default !== undefined) initial[k] = def.default;
           else if (def.type === 'boolean') initial[k] = false;
           else initial[k] = '';
         }
@@ -160,8 +162,9 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
       if (!recipe) return raw;
       const def = recipe.inputs[key];
       if (def?.type === 'number') {
+        // `Number('')` vaut 0 : un champ vidé lançait la recette avec un zéro que personne n'a demandé.
         const n = Number(raw);
-        return Number.isNaN(n) ? raw : n;
+        return raw.trim() === '' || !Number.isFinite(n) ? '' : n;
       }
       return raw;
     },
@@ -175,8 +178,12 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
     setLastInputs(inputs);
     setEvents([]);
     setResult(null);
+    // Un paramètre numérique vide est absent : le runner refuse `''` (« expected number, got string »).
+    const sent = Object.fromEntries(
+      Object.entries(inputs).filter(([key, value]) => !(recipe.inputs[key]?.type === 'number' && value === ''))
+    );
     try {
-      const res = await r.run(scope, fileName, inputs);
+      const res = await r.run(scope, fileName, sent);
       if (res.success) {
         setResult({
           ok: res.ok ?? false,
@@ -210,6 +217,11 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           type="number"
           value={(value as number | string) ?? ''}
           onChange={(e) => setInputs({ ...inputs, [key]: coerce(key, e.target.value) })}
+          // `1e` ou `-` : le navigateur répond `''` sans effacer ce qu'il montre, et Lancer n'enverrait
+          // rien sous un champ qui dit autre chose. La saisie reste immédiate pour `paramsToLose` (#196).
+          onBlur={(e) => {
+            if (e.currentTarget.validity.badInput) e.currentTarget.value = '';
+          }}
           className="config-input"
           disabled={running}
         />
