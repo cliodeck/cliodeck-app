@@ -253,13 +253,15 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
           )}
         </div>
 
-        <button
-          type="button"
-          className="onboarding-wizard__skip-link"
-          onClick={onSkip}
-        >
-          {t('onboarding.skipSetup')}
-        </button>
+        {currentStep !== 'done' && (
+          <button
+            type="button"
+            className="onboarding-wizard__skip-link"
+            onClick={onSkip}
+          >
+            {t('onboarding.skipSetup')}
+          </button>
+        )}
       </div>
     </div>
   );

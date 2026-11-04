@@ -18,6 +18,7 @@ import path from 'path';
 
 import { installMain, main, passage } from './helpers/real-main';
 import { rememberConsentedPath } from '../../../../main/ipc/utils/user-consented-paths';
+import { CONTEXT_TEMPLATE } from '../../../../../backend/core/hints/loader';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
 import { useEditorStore } from '../../stores/editorStore';
@@ -260,6 +261,32 @@ describe('l’éditeur suit ce qui vient de s’écrire', () => {
   });
 });
 
+/**
+ * Le faux conflit empêcherait d'enregistrer un fichier que personne n'a touché. Le tampon ne porte
+ * pas le BOM, et le disque ne change pas : le rechargement rend « inchangé », et rien d'autre ne
+ * peut dire que ce tampon et ce qui vient de s'écrire sont un seul texte.
+ */
+describe('document ouvert, écrire le texte lu sans rien y changer', () => {
+  it.each<[string, string]>([
+    ['un BOM', `\uFEFF${ORIGINAL}`],
+    ['un BOM et des fins de ligne CRLF', `\uFEFF${ORIGINAL.replace(/\n/g, '\r\n')}`],
+    ['des fins de ligne CRLF', ORIGINAL.replace(/\n/g, '\r\n')],
+    ['pas de saut de ligne final', ORIGINAL.trimEnd()],
+  ])('avec %s : pas de conflit, et les mêmes octets', async (_label, bytes) => {
+    fs.writeFileSync(contextMd, bytes);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    expect(hints.raw).toBe(bytes);
+
+    const saved = await saveOver(hints, hints.raw);
+
+    expect(saved.success).toBe(true);
+    expect(fs.readFileSync(contextMd)).toEqual(Buffer.from(bytes, 'utf8'));
+    expect(editor().isDirty).toBe(false);
+  });
+});
+
 describe('savoir si context.md est le document ouvert', () => {
   it('à la casse près : ouvert par un chemin d’une autre casse, le tampon suit', async () => {
     const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
@@ -407,6 +434,116 @@ describe('readContextFile', () => {
     const res = await readContextFile();
 
     expect(res).toMatchObject({ success: false, error: 'ENOSPC: no space left on device' });
+  });
+});
+
+/**
+ * Le disque se dit vide, l'éditeur tient encore tout le texte. Pris tel quel, rien ne protégeait
+ * ce texte : l'assistant écrivait sans demander, et le rechargement remplaçait le tampon.
+ */
+describe('readContextFile, quand le disque n’a plus le texte que tient l’éditeur', () => {
+  it.each<[string, () => void]>([
+    ['supprimé dehors', () => fs.rmSync(contextMd)],
+    ['vidé dehors', () => fs.writeFileSync(contextMd, '')],
+    ['remis au gabarit dehors', () => fs.writeFileSync(contextMd, CONTEXT_TEMPLATE)],
+  ])('%s, tampon propre : le texte repart sur le disque, et il y a de quoi demander', async (_label, change) => {
+    await open();
+    await mountEditor();
+    change();
+
+    const hints = await read();
+
+    expect(hints.raw).toBe(ORIGINAL);
+    expect(hints.sources.context.blank).toBe(false);
+    expect(disk()).toBe(ORIGINAL);
+    expect(currentView().state.doc.toString()).toBe(ORIGINAL);
+    expect(editor().isDirty).toBe(false);
+  });
+
+  it('supprimé dehors, et le tampon ne s’écrit pas : l’échec remonte, et le texte reste dans l’éditeur', async () => {
+    await open();
+    await mountEditor();
+    fs.rmSync(contextMd);
+    passage.editorSave = async () => ({ success: false, error: 'ENOSPC: no space left on device' });
+
+    const res = await readContextFile();
+
+    expect(res).toMatchObject({ success: false, error: 'ENOSPC: no space left on device' });
+    expect(fs.existsSync(contextMd)).toBe(false);
+    expect(currentView().state.doc.toString()).toBe(ORIGINAL);
+  });
+
+  it.each<[string, string]>([
+    ['vide', ''],
+    ['le gabarit', CONTEXT_TEMPLATE],
+  ])('%s sur le disque comme dans l’éditeur : rien ne s’écrit', async (_label, bytes) => {
+    fs.writeFileSync(contextMd, bytes);
+    await open();
+    await mountEditor();
+    const before = fs.statSync(contextMd).mtimeMs;
+
+    const hints = await read();
+
+    expect(hints.sources.context.blank).toBe(true);
+    expect(fs.statSync(contextMd).mtimeMs).toBe(before);
+  });
+
+  it('changé dehors, tampon propre : le disque fait foi, et il n’est pas réécrit', async () => {
+    await open();
+    await mountEditor();
+    fs.writeFileSync(contextMd, 'Écrit dans un autre logiciel.\n');
+
+    const hints = await read();
+
+    expect(hints.raw).toBe('Écrit dans un autre logiciel.\n');
+    expect(disk()).toBe('Écrit dans un autre logiciel.\n');
+  });
+
+  it('supprimé dehors, éditeur vide : le fichier ne renaît pas', async () => {
+    fs.writeFileSync(contextMd, '');
+    await open();
+    await mountEditor();
+    fs.rmSync(contextMd);
+
+    const hints = await read();
+
+    expect(hints.sources.context.blank).toBe(true);
+    expect(fs.existsSync(contextMd)).toBe(false);
+  });
+
+  it('éditeur vide, gabarit remis dehors : un tampon vide n’a rien à sauver, et n’efface rien', async () => {
+    fs.writeFileSync(contextMd, '');
+    await open();
+    await mountEditor();
+    fs.writeFileSync(contextMd, CONTEXT_TEMPLATE);
+
+    await read();
+
+    expect(disk()).toBe(CONTEXT_TEMPLATE);
+  });
+
+  it('devenu illisible dehors : l’éditeur ne le réécrit pas', async () => {
+    const latin1 = Buffer.from([0x23, 0x20, 0xc9, 0x74, 0xe9, 0x0a]);
+    await open();
+    await mountEditor();
+    fs.writeFileSync(contextMd, latin1);
+
+    const hints = await read();
+
+    expect(hints.sources.context.unreadable).toEqual({ reason: 'encoding' });
+    expect(fs.readFileSync(contextMd)).toEqual(latin1);
+  });
+
+  it('un autre document ouvert : context.md supprimé ne renaît pas', async () => {
+    await open(documentMd);
+    await mountEditor();
+    fs.rmSync(contextMd);
+
+    const hints = await read();
+
+    expect(hints.sources.context.blank).toBe(true);
+    expect(fs.existsSync(contextMd)).toBe(false);
+    expect(fs.readFileSync(documentMd, 'utf8')).toBe('# Manuscrit\n');
   });
 });
 

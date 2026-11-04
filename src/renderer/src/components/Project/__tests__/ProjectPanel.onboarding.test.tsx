@@ -94,6 +94,17 @@ async function replayAssistant(topic: string = TOPIC): Promise<void> {
 const awaitConfirm = () => vi.waitFor(() => expect(dialogs().confirmOpen).toBe(true), { timeout: 10_000, interval: 5 });
 const awaitAlert = () => vi.waitFor(() => expect(dialogs().alertOpen).toBe(true), { timeout: 10_000, interval: 5 });
 const awaitClosed = () => vi.waitFor(() => expect(wizardOpen()).toBe(false), { timeout: 10_000, interval: 5 });
+const doneScreen = () => screen.queryByText('onboarding.doneMessage');
+const awaitDoneScreen = () => vi.waitFor(() => expect(doneScreen()).not.toBeNull(), { timeout: 10_000, interval: 5 });
+
+/** C'est écrit : l'assistant le dit, et c'est l'auteur qui le ferme. */
+async function closeDoneScreen(): Promise<void> {
+  await awaitDoneScreen();
+  await act(async () => {
+    fireEvent.click(screen.getByText('onboarding.startWorking'));
+  });
+  expect(wizardOpen()).toBe(false);
+}
 
 async function answerConfirm(accept: boolean): Promise<void> {
   await act(async () => {
@@ -144,7 +155,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await awaitConfirm();
     expect(dialogs().confirmMessage).toBe('onboarding.appendConfirm');
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written.startsWith(AUTHOR_TEXT.trimEnd())).toBe(true);
@@ -170,12 +181,13 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     expect(fs.readFileSync(contextMd, 'utf8')).toBe(AUTHOR_TEXT);
     expect(fs.statSync(contextMd).mtimeMs).toBe(before);
     expect(wizardOpen()).toBe(true);
+    expect(doneScreen()).toBeNull();
 
     // Il change d'avis : ses réponses sont toujours là.
     await pressFinish();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
     expect(fs.readFileSync(contextMd, 'utf8')).toContain(TOPIC);
   });
 
@@ -214,7 +226,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await pressFinish();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written.startsWith(bytes.trimEnd())).toBe(true);
@@ -231,7 +243,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await replayAssistant();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written.startsWith('﻿# Danzig\r\n\r\nProblématique.\r\n\r\n')).toBe(true);
@@ -246,11 +258,11 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await replayAssistant();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
     const once = fs.readFileSync(contextMd, 'utf8');
 
     await replayAssistant();
-    await awaitClosed();
+    await closeDoneScreen();
 
     expect(dialogs().confirmOpen).toBe(false);
     expect(fs.readFileSync(contextMd, 'utf8')).toBe(once);
@@ -263,12 +275,12 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await replayAssistant();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     await replayAssistant('Hanse tardive');
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written).toContain(TOPIC);
@@ -288,7 +300,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await awaitConfirm();
     expect(dialogs().queue).toHaveLength(1);
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written.split('## Research Topic')).toHaveLength(2);
@@ -312,7 +324,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await pressFinish();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written).toContain('Ajouté ailleurs.');
     expect(written).toContain(TOPIC);
@@ -348,7 +360,7 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     await replayAssistant();
     await awaitConfirm();
     await answerConfirm(true);
-    await awaitClosed();
+    await closeDoneScreen();
 
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written).toContain('Tapé à l’instant.');
@@ -358,12 +370,92 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
   });
 });
 
+describe('l’écran de fin de l’assistant', () => {
+  it('ne vient qu’une fois le fichier écrit, et reste jusqu’à ce que l’auteur le ferme', async () => {
+    fs.writeFileSync(contextMd, AUTHOR_TEXT);
+    let release: () => void = () => undefined;
+    passage.beforeHintsWrite = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    await renderPanel();
+
+    await replayAssistant();
+    await awaitConfirm();
+    await answerConfirm(true);
+    await settle();
+
+    // L'écriture est retenue : rien à annoncer encore.
+    expect(doneScreen()).toBeNull();
+    expect(fs.readFileSync(contextMd, 'utf8')).toBe(AUTHOR_TEXT);
+
+    await act(async () => {
+      release();
+    });
+    await awaitDoneScreen();
+    expect(fs.readFileSync(contextMd, 'utf8')).toContain(TOPIC);
+    expect(wizardOpen()).toBe(true);
+    // Il n'y a plus rien à passer.
+    expect(screen.queryByText('onboarding.skipSetup')).toBeNull();
+
+    await closeDoneScreen();
+  });
+
+  it('rouvrir ensuite repart de la première question', async () => {
+    await renderPanel();
+
+    await replayAssistant();
+    await closeDoneScreen();
+    await act(async () => {
+      fireEvent.click(screen.getByText('project.reopenOnboarding'));
+    });
+
+    expect(screen.getByPlaceholderText('onboarding.topicPlaceholder')).not.toBeNull();
+    expect(doneScreen()).toBeNull();
+  });
+});
+
+describe('context.md ouvert et propre, puis supprimé dehors : l’éditeur tient encore le texte', () => {
+  it('confirmer : la question est posée, et les deux textes sont là, dans le fichier et l’éditeur', async () => {
+    fs.writeFileSync(contextMd, AUTHOR_TEXT);
+    await useEditorStore.getState().loadFile(contextMd);
+    fs.rmSync(contextMd);
+    await renderPanel();
+
+    await replayAssistant();
+    await awaitConfirm();
+    await answerConfirm(true);
+    await closeDoneScreen();
+
+    const written = fs.readFileSync(contextMd, 'utf8');
+    expect(written.startsWith(AUTHOR_TEXT.trimEnd())).toBe(true);
+    expect(written).toContain(TOPIC);
+    expect(useEditorStore.getState().content).toBe(written);
+  });
+
+  it('refuser : l’assistant n’écrit rien, et le texte de l’éditeur reste', async () => {
+    fs.writeFileSync(contextMd, AUTHOR_TEXT);
+    await useEditorStore.getState().loadFile(contextMd);
+    fs.rmSync(contextMd);
+    await renderPanel();
+
+    await replayAssistant();
+    await awaitConfirm();
+    await answerConfirm(false);
+    await settle();
+
+    expect(fs.readFileSync(contextMd, 'utf8')).toBe(AUTHOR_TEXT);
+    expect(useEditorStore.getState().content).toBe(AUTHOR_TEXT);
+    expect(wizardOpen()).toBe(true);
+  });
+});
+
 describe('rejouer l’assistant quand context.md ne porte rien de l’auteur', () => {
   it('absent : il se crée, sans question', async () => {
     await renderPanel();
 
     await replayAssistant();
-    await awaitClosed();
+    await closeDoneScreen();
 
     expect(dialogs().confirmOpen).toBe(false);
     expect(fs.readFileSync(contextMd, 'utf8')).toContain(TOPIC);
@@ -378,7 +470,7 @@ describe('rejouer l’assistant quand context.md ne porte rien de l’auteur', (
     await renderPanel();
 
     await replayAssistant();
-    await awaitClosed();
+    await closeDoneScreen();
 
     expect(dialogs().confirmOpen).toBe(false);
     const written = fs.readFileSync(contextMd, 'utf8');
@@ -399,12 +491,13 @@ describe('quand ça n’aboutit pas, l’assistant le dit et garde les réponses
 
     expect(dialogs().alertMessage).toContain('onboarding.writeError');
     expect(wizardOpen()).toBe(true);
+    expect(doneScreen()).toBeNull();
     expect(fs.readFileSync(contextMd, 'utf8')).toBe(CONTEXT_TEMPLATE);
 
     await closeAlert();
     fs.chmodSync(contextMd, 0o644);
     await pressFinish();
-    await awaitClosed();
+    await closeDoneScreen();
     expect(fs.readFileSync(contextMd, 'utf8')).toContain(TOPIC);
   });
 

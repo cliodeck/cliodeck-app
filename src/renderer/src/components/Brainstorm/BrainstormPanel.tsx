@@ -33,6 +33,7 @@ import { IdeasCanvas } from './IdeasCanvas';
 import { useProjectStore } from '../../stores/projectStore';
 import { ideasFilePath, useIdeaStore } from '../../stores/ideaStore';
 import { useBrainstormModeNotice } from '../../hooks/useBrainstormModeNotice';
+import { contextFailureText, unreadableFailure, type ContextHints } from '../../services/context-file';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -41,13 +42,6 @@ interface RecipeSummary {
   version: string;
   description: string;
   steps: number;
-}
-
-interface HintsState {
-  present: boolean;
-  raw: string;
-  normalized: string;
-  sourcePath: string;
 }
 
 interface VaultStatus {
@@ -124,7 +118,7 @@ const IdeasFileNotices: React.FC<{ projectPath: string; showBlocked: boolean }> 
 export const BrainstormPanel: React.FC = () => {
   const { t } = useTranslation('common');
   const [activeTab, setActiveTab] = useState<BrainstormTab>('chat');
-  const [hints, setHints] = useState<HintsState | null>(null);
+  const [hints, setHints] = useState<ContextHints | null>(null);
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
   const [vault, setVault] = useState<VaultStatus | null>(null);
@@ -218,6 +212,8 @@ export const BrainstormPanel: React.FC = () => {
   }, [currentProjectPath]);
 
   const recipeCount = builtin.length + user.length;
+  // Illisible ou lié hors du projet : pas « aucun fichier », qui inviterait à en créer un.
+  const contextRefused = contextOpen && hints ? unreadableFailure(hints) : null;
 
   return (
     <div className="brainstorm-panel">
@@ -362,16 +358,23 @@ export const BrainstormPanel: React.FC = () => {
               <h3>
                 <FileText size={14} /> {t('chat.brainstorm.workspaceHints')}
               </h3>
+              {contextRefused && (
+                <p className="brainstorm-panel__hints-refused" role="alert">
+                  <AlertTriangle size={14} aria-hidden="true" /> {contextFailureText(t, contextRefused)}
+                </p>
+              )}
               {hints?.present ? (
                 <pre className="brainstorm-panel__hints">
                   {hints.normalized}
                 </pre>
               ) : (
-                <p className="brainstorm-panel__muted">
-                  {t('chat.brainstorm.noHints', {
-                    path: hints?.sourcePath ?? '.cliodeck/hints.md',
-                  })}
-                </p>
+                !contextRefused && (
+                  <p className="brainstorm-panel__muted">
+                    {t('chat.brainstorm.noHints', {
+                      path: hints?.sourcePath ?? '.cliodeck/hints.md',
+                    })}
+                  </p>
+                )
               )}
             </div>
 

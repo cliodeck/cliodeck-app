@@ -358,6 +358,26 @@ describe('pas de faux conflit', () => {
   });
 });
 
+describe('context.md ouvert et propre, puis supprimé dehors', () => {
+  it('la zone part du texte de l’éditeur, pas de rien, et l’ajout le garde', async () => {
+    setAutoSave(false);
+    fs.writeFileSync(contextMd, ORIGINAL);
+    await openInEditor();
+    await mountEditor();
+    fs.rmSync(contextMd);
+
+    await openSettings();
+
+    expect(zone().value).toBe(ORIGINAL);
+    editZone(`${ORIGINAL}\n${PARAGRAPH}\n`);
+    await pressSave();
+    await awaitSaved();
+
+    expect(disk()).toBe(`${ORIGINAL}\n${PARAGRAPH}\n`);
+    await vi.waitFor(() => expect(currentView().state.doc.toString()).toBe(`${ORIGINAL}\n${PARAGRAPH}\n`), DEADLINE);
+  });
+});
+
 describe('ce qu’on ne sait pas écrire se dit, et le bouton le respecte', () => {
   it('pas en UTF-8 : motif affiché, zone et bouton désactivés, fichier intact', async () => {
     const latin1 = Buffer.from([0x23, 0x20, 0xc9, 0x74, 0xe9, 0x0a]);

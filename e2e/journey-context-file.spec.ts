@@ -56,6 +56,14 @@ async function answerQuestions(window: Page, topic: string = TOPIC): Promise<voi
 
 const finish = (window: Page) => window.locator('.onboarding-wizard__btn', { hasText: 'Terminer' });
 
+/** C'est écrit : l'assistant le dit et dit où, puis c'est l'auteur qui le ferme. */
+async function closeDoneScreen(window: Page): Promise<void> {
+  await expect(window.locator('.onboarding-wizard__question')).toContainText('context.md', { timeout: 10_000 });
+  await expect(window.locator('.onboarding-wizard__skip-link')).toHaveCount(0);
+  await window.locator('.onboarding-wizard__btn', { hasText: 'Commencer' }).click();
+  await expect(window.locator('.onboarding-wizard')).toHaveCount(0);
+}
+
 async function openContextSettings(window: Page): Promise<void> {
   await window.evaluate(() => {
     window.dispatchEvent(new CustomEvent('show-settings-modal'));
@@ -66,6 +74,23 @@ async function openContextSettings(window: Page): Promise<void> {
 }
 
 const contextZone = (window: Page) => window.locator('.settings-content textarea.config-textarea');
+
+/** Cmd+Fin ne déplace pas le curseur d'une zone de texte sous macOS : le texte partirait en tête. */
+async function typeAtEndOfZone(window: Page, text: string): Promise<void> {
+  const zone = contextZone(window);
+  await zone.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+  await zone.pressSequentially(text);
+}
+
+/** Le tiroir du Brainstorm, une fois les Réglages fermés : il dit le vrai motif, pas « aucun fichier ». */
+async function expectDrawerToSay(window: Page, reason: string): Promise<void> {
+  await window.keyboard.press('Escape');
+  await expect(window.locator('.settings-content')).toHaveCount(0);
+  await window.locator('.workspace-mode-bar button', { hasText: 'Brainstormer' }).click();
+  await window.locator('.brainstorm-panel__drawer-toggle').click();
+  await expect(window.locator('.brainstorm-panel__hints-refused')).toContainText(reason);
+  await expect(window.locator('#brainstorm-context-drawer')).not.toContainText('Aucun fichier');
+}
 const saveButton = (window: Page) => window.locator('button[title="Enregistrer le contexte du projet"]');
 
 test('rejouer l’assistant sur un context.md écrit à la main : on demande, refuser n’écrit rien, confirmer garde les deux textes', async () => {
@@ -94,7 +119,7 @@ test('rejouer l’assistant sur un context.md écrit à la main : on demande, re
     // Confirmer : les deux textes, dans l'ordre.
     await finish(window).click();
     await window.locator('.confirm-dialog-btn-confirm').click();
-    await expect(window.locator('.onboarding-wizard')).toHaveCount(0, { timeout: 10_000 });
+    await closeDoneScreen(window);
     const written = readFileSync(project.contextMd, 'utf8');
     expect(written.startsWith(WRITTEN_BY_HAND.trimEnd())).toBe(true);
     expect(written).toContain('## Research Topic');
@@ -131,7 +156,7 @@ test('un projet neuf : le gabarit se remplace sans question', async () => {
       await window.locator('.onboarding-wizard__btn', { hasText: 'Suivant' }).click();
     }
     await finish(window).click();
-    await expect(window.locator('.onboarding-wizard')).toHaveCount(0, { timeout: 10_000 });
+    await closeDoneScreen(window);
     await expect(window.locator('.confirm-dialog')).toHaveCount(0);
 
     const written = readFileSync(join(parent, 'Neuf', 'context.md'), 'utf8');
@@ -161,8 +186,7 @@ test('context.md ouvert dans l’éditeur : le paragraphe des Réglages survit �
     await expect(editor).toContainText('Problématique');
 
     await openContextSettings(window);
-    await contextZone(window).press('ControlOrMeta+End');
-    await contextZone(window).pressSequentially(`\n${PARAGRAPH}\n`);
+    await typeAtEndOfZone(window, `\n${PARAGRAPH}\n`);
     await saveButton(window).click();
     await expect(window.locator('.settings-content')).toContainText('enregistré');
     await window.keyboard.press('Escape');
@@ -176,8 +200,8 @@ test('context.md ouvert dans l’éditeur : le paragraphe des Réglages survit �
     // L'autosave est passé quand la frappe est sur le disque : c'est elle qu'on attend.
     await expect.poll(() => readFileSync(project.contextMd, 'utf8'), { timeout: 20_000 }).toContain('Une frappe.');
     const written = readFileSync(project.contextMd, 'utf8');
-    expect(written).toContain(PARAGRAPH);
-    expect(written).toContain('Historiographie');
+    expect(written.startsWith(WRITTEN_BY_HAND)).toBe(true);
+    expect(written.indexOf('Historiographie')).toBeLessThan(written.indexOf(PARAGRAPH));
 
     // Cmd+Z ne ramène pas le texte d'avant l'écriture des Réglages.
     await window.keyboard.press('ControlOrMeta+z');
@@ -204,8 +228,7 @@ test('modifié ailleurs depuis l’ouverture des Réglages : conflit, fichier in
     await openContextSettings(window);
 
     writeFileSync(project.contextMd, `${WRITTEN_BY_HAND}\nAjouté dans un autre logiciel.\n`);
-    await contextZone(window).press('ControlOrMeta+End');
-    await contextZone(window).pressSequentially(PARAGRAPH);
+    await typeAtEndOfZone(window, PARAGRAPH);
     await saveButton(window).click();
 
     await expect(window.locator('.settings-content [role="alert"]')).toContainText('a changé depuis');
@@ -246,16 +269,17 @@ for (const [label, bytes] of [
       await expect.poll(() => readFileSync(project.contextMd, 'utf8')).toBe(bytes);
 
       await openContextSettings(window);
-      await contextZone(window).press('ControlOrMeta+End');
-      await contextZone(window).pressSequentially(PARAGRAPH);
+      await typeAtEndOfZone(window, PARAGRAPH);
       await saveButton(window).click();
       await expect(window.locator('.settings-content')).toContainText('enregistré');
-      expect(readFileSync(project.contextMd, 'utf8')).toContain(PARAGRAPH);
+      const written = readFileSync(project.contextMd, 'utf8');
+      expect(written.endsWith(PARAGRAPH)).toBe(true);
+      expect(written.startsWith('\uFEFF')).toBe(bytes.startsWith('\uFEFF'));
 
       // Un second Enregistrer n'est pas un conflit non plus.
-      await contextZone(window).pressSequentially(' Encore.');
+      await typeAtEndOfZone(window, ' Encore.');
       await saveButton(window).click();
-      await expect.poll(() => readFileSync(project.contextMd, 'utf8')).toContain('Encore.');
+      await expect.poll(() => readFileSync(project.contextMd, 'utf8')).toBe(`${written} Encore.`);
       await expect(window.locator('.settings-content [role="alert"]')).toHaveCount(0);
     } finally {
       await app.close();
@@ -264,6 +288,40 @@ for (const [label, bytes] of [
     }
   });
 }
+
+test('context.md ouvert puis supprimé dehors : l’éditeur tient le texte, donc on demande, et les deux textes restent', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const project = makeProject(WRITTEN_BY_HAND);
+
+  try {
+    await openProject(app, window, project.projectJson);
+    await window.locator('.project-file-item', { hasText: 'context.md' }).click();
+    const editor = window.locator('.codemirror-editor .cm-content');
+    await expect(editor).toContainText('Problématique');
+    rmSync(project.contextMd);
+
+    await answerQuestions(window);
+    await finish(window).click();
+    await expect(window.locator('.confirm-dialog-message')).toContainText('Vos réponses y seront ajoutées à la suite');
+    await window.locator('.confirm-dialog-btn-confirm').click();
+    await closeDoneScreen(window);
+
+    const written = readFileSync(project.contextMd, 'utf8');
+    expect(written.startsWith(WRITTEN_BY_HAND.trimEnd())).toBe(true);
+    expect(written).toContain(TOPIC);
+    await expect(editor).toContainText('Problématique');
+    await expect(editor).toContainText(TOPIC);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(project.dir, { recursive: true, force: true });
+  }
+});
 
 test('pas en UTF-8 : l’assistant et les Réglages le disent, et le fichier reste intact', async () => {
   const outcome = await launchApp();
@@ -294,6 +352,7 @@ test('pas en UTF-8 : l’assistant et les Réglages le disent, et le fichier res
     await expect(window.locator('.settings-content [role="alert"]')).toContainText('pas encodé en UTF-8');
     await expect(saveButton(window)).toBeDisabled();
     await expect(contextZone(window)).toBeDisabled();
+    await expectDrawerToSay(window, 'pas encodé en UTF-8');
     expect(readFileSync(project.contextMd).equals(LATIN1)).toBe(true);
   } finally {
     await app.close();
@@ -332,6 +391,7 @@ test('lien qui sort du projet : dit tel quel, jamais pris pour un fichier à cr�
     await window.getByRole('button', { name: /Consignes de projet/ }).click();
     await expect(window.locator('.settings-content [role="alert"]')).toContainText('un lien qui pointe hors du projet');
     await expect(saveButton(window)).toBeDisabled();
+    await expectDrawerToSay(window, 'un lien qui pointe hors du projet');
 
     expect(readFileSync(journal, 'utf8')).toBe('Texte privé.');
     expect(lstatSync(project.contextMd).isSymbolicLink()).toBe(true);

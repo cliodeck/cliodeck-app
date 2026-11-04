@@ -206,8 +206,8 @@ export class ContextOutsideProjectError extends Error {
  * Écrit le fichier de contexte visible du projet, tout entier ou pas du tout. Avec
  * `expectedRaw`, seulement s'il est resté tel que `loadWorkspaceHints` l'a lu : les
  * deux lectures rendent les mêmes octets, BOM et fins de ligne compris. Un fichier
- * disparu depuis n'a plus rien à perdre et se recrée ; un fichier illisible lève
- * `UnreadableFileError`, sans être touché.
+ * disparu depuis se recrée : ce qui s'écrit part de ce qui a été lu. Un fichier illisible
+ * lève `UnreadableFileError`, sans être touché.
  */
 export async function writeWorkspaceHints(
   workspaceRoot: string,

@@ -96,7 +96,8 @@ export const ProjectPanel: React.FC = () => {
   /**
    * Ajoute les réponses de l'assistant à `context.md`, écrit à la main ou non (décision Q6).
    * Seul un fichier sans rien de l'auteur se remplace sans demander. Rend faux si rien n'a été
-   * écrit : l'assistant reste ouvert, et c'est le fermer qui abandonne les réponses.
+   * écrit : c'est fermer l'assistant qui abandonne les réponses. Rend vrai quand elles sont dans
+   * le fichier : l'assistant passe à son écran de fin, et c'est l'auteur qui le ferme.
    */
   const finishOnboarding = async (section: string, projectPath: string): Promise<boolean> => {
     const { showAlert, showConfirm } = useDialogStore.getState();
@@ -120,7 +121,6 @@ export const ProjectPanel: React.FC = () => {
       const saved = await saveContextFile(next, { expectedRaw: raw, sourcePath, projectPath });
       if (!saved.success) return tellFailure(saved);
     }
-    setOnboarding(null);
     return true;
   };
 

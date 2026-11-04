@@ -60,6 +60,16 @@ async function openedAs(sourcePath: string): Promise<string | null> {
 }
 
 /**
+ * Le disque n'a plus rien de l'auteur, et l'éditeur tient encore son texte : le fichier a été
+ * supprimé, vidé ou remis au gabarit dehors. Le tampon est propre, rien ne l'écrirait, et
+ * l'écriture qui suit croirait n'avoir rien à préserver avant de le remplacer.
+ */
+function heldOnlyByEditor({ raw, sources }: ContextHints): boolean {
+  const live = useEditorStore.getState().getLiveContent();
+  return sources.context.blank && live.trim() !== '' && withoutBom(live) !== withoutBom(raw);
+}
+
+/**
  * Lit `context.md`, sans lever. Ouvert dans l'éditeur, il s'écrit d'abord : le texte qui compte
  * est celui de l'éditeur vivant, et partir de l'ancien mènerait droit à un conflit dès l'autosave.
  */
@@ -68,6 +78,7 @@ export async function readContextFile(): Promise<ContextResponse> {
   try {
     const first = (await hints.read()) as ContextResponse;
     if (!first.success || !(await openedAs(first.hints.sourcePath))) return first;
+    if (heldOnlyByEditor(first.hints)) await useEditorStore.getState().saveFile();
     await writeOpenDocumentWhileDirty();
     return (await hints.read()) as ContextResponse;
   } catch (error) {
