@@ -13,6 +13,14 @@ import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
 import { backdropClose } from '../../utils/backdropClose';
 import { createProjectErrorMessage } from './create-project-error';
+import {
+  appendToContext,
+  contextFailureText,
+  readContextFile,
+  saveContextFile,
+  unreadableFailure,
+  type ContextFailure,
+} from '../../services/context-file';
 
 // Modals are only rendered when opened — keep them off the main chunk.
 const PDFExportModal = lazy(() =>
@@ -46,8 +54,8 @@ export const ProjectPanel: React.FC = () => {
   const [showPDFExportModal, setShowPDFExportModal] = useState(false);
   const [showWordExportModal, setShowWordExportModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingProjectName, setOnboardingProjectName] = useState('');
+  /** Le projet pour lequel l'assistant a été ouvert : ses réponses ne valent que pour lui. */
+  const [onboarding, setOnboarding] = useState<{ name: string; path: string } | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectType, setNewProjectType] = useState<'article' | 'book' | 'presentation'>('article');
   const [newProjectPath, setNewProjectPath] = useState('');
@@ -74,8 +82,7 @@ export const ProjectPanel: React.FC = () => {
       setNewProjectPath('');
       setNewProjectType('article');
       // Launch conversational onboarding
-      setOnboardingProjectName(projectName);
-      setShowOnboarding(true);
+      setOnboarding({ name: projectName, path: useProjectStore.getState().currentProject?.path ?? '' });
     } catch (error: unknown) {
       console.error('Failed to create project:', error);
       await useDialogStore
@@ -84,6 +91,37 @@ export const ProjectPanel: React.FC = () => {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  /**
+   * Ajoute les réponses de l'assistant à `context.md`, écrit à la main ou non (décision Q6).
+   * Seul un fichier sans rien de l'auteur se remplace sans demander. Rend faux si rien n'a été
+   * écrit : c'est fermer l'assistant qui abandonne les réponses. Rend vrai quand elles sont dans
+   * le fichier : l'assistant passe à son écran de fin, et c'est l'auteur qui le ferme.
+   */
+  const finishOnboarding = async (section: string, projectPath: string): Promise<boolean> => {
+    const { showAlert, showConfirm } = useDialogStore.getState();
+    const tellFailure = async (failure: ContextFailure): Promise<boolean> => {
+      await showAlert(`${contextFailureText(t, failure)} ${t('onboarding.writeError')}`);
+      return false;
+    };
+
+    const read = await readContextFile();
+    if (!read.success) return tellFailure(read);
+    const refused = unreadableFailure(read.hints);
+    if (refused) return tellFailure(refused);
+
+    const { raw, sourcePath, sources } = read.hints;
+    const blank = sources.context.blank;
+    const next = blank ? section : appendToContext(raw, section);
+    if (next !== raw) {
+      if (!blank && !(await showConfirm(t('onboarding.appendConfirm'), t('onboarding.appendConfirmTitle')))) {
+        return false;
+      }
+      const saved = await saveContextFile(next, { expectedRaw: raw, sourcePath, projectPath });
+      if (!saved.success) return tellFailure(saved);
+    }
+    return true;
   };
 
   const handleOpenProject = async () => {
@@ -338,10 +376,7 @@ export const ProjectPanel: React.FC = () => {
                 fichier de contexte du projet, il exige donc un projet ouvert. */}
             <button
               className="project-btn"
-              onClick={() => {
-                setOnboardingProjectName(currentProject.name);
-                setShowOnboarding(true);
-              }}
+              onClick={() => setOnboarding({ name: currentProject.name, path: currentProject.path })}
               style={{ marginTop: '1rem', width: '100%' }}
             >
               {t('project.reopenOnboarding')}
@@ -491,18 +526,11 @@ export const ProjectPanel: React.FC = () => {
       )}
 
       {/* Onboarding Wizard — appears after project creation */}
-      {showOnboarding && (
+      {onboarding && (
         <OnboardingWizard
-          projectName={onboardingProjectName}
-          onComplete={async (hints) => {
-            try {
-              await window.electron.fusion.hints.write(hints);
-            } catch (err: unknown) {
-              console.error('Failed to write onboarding hints:', err);
-            }
-            setShowOnboarding(false);
-          }}
-          onSkip={() => setShowOnboarding(false)}
+          projectName={onboarding.name}
+          onComplete={(section) => finishOnboarding(section, onboarding.path)}
+          onSkip={() => setOnboarding(null)}
         />
       )}
     </div>

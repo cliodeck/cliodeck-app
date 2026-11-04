@@ -1490,7 +1490,16 @@
     "errors": {
       "noFusionApi": "Fusion API not exposed by the preload.",
       "noProject": "Open a project to edit its context.",
-      "saveFailed": "Save failed."
+      "conflict": "Your text was not saved, but it is still in this box: copy it, close and reopen Settings to start from the up-to-date file, and paste it back.",
+      "projectChanged": "Your text was not saved, but it is still in this box: copy it if you want to keep it, then close and reopen Settings."
+    },
+    "reasons": {
+      "conflict": "context.md has changed since it was read, in the editor or in another program. What it contains has not been erased.",
+      "outsideProject": "context.md is a link pointing outside the project: ClioDeck neither reads nor writes it, so that a project received from a colleague cannot reach your files. The file it points to is untouched.",
+      "notUtf8": "context.md is not encoded in UTF-8: ClioDeck has neither read nor changed it, because its accented characters would be damaged, and it is not sent to the assistant. Convert it to UTF-8 to make it usable again.",
+      "unreadable": "context.md exists, but ClioDeck cannot read it: access rights, or it is not a regular file. It has not been changed, and it is not sent to the assistant.",
+      "projectChanged": "Another project was opened in the meantime: nothing was written to it.",
+      "writeFailed": "context.md could not be written, and it stays as it was ({{detail}})."
     },
     "buttons": {
       "save": "Save",
@@ -1939,7 +1948,10 @@
       "en": "English",
       "de": "German"
     },
-    "doneMessage": "All set! Your workspace is configured. The assistant now knows your topic and sources. You can edit this anytime in the project settings (.cliohints file)."
+    "doneMessage": "All set! Your workspace is configured. The assistant now knows your topic and sources. You can edit this anytime in the context.md file, at the root of the project.",
+    "appendConfirmTitle": "Add to context.md?",
+    "appendConfirm": "context.md already contains text. Your answers will be added after it, as a new section: nothing already there will be erased. If you cancel, the file stays as it is.",
+    "writeError": "Your answers were not written, but the assistant keeps them: you can try again, or close it without changing anything."
   },
   "usageJournal": {
     "title": "AI Usage Journal",

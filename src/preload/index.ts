@@ -359,6 +359,8 @@ const api = {
     ): Promise<{ success: true; backupPath: string } | { success: false; error: string }> =>
       ipcRenderer.invoke('fs:quarantine-file', filePath),
     copyFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fs:copy-file', sourcePath, targetPath),
+    /** Le même fichier sur le disque, à la casse et aux liens près. Faux pour un chemin refusé. */
+    sameFile: (a: string, b: string): Promise<boolean> => ipcRenderer.invoke('fs:same-file', a, b),
   },
 
   // Zotero (supports both API and local SQLite modes)
@@ -958,8 +960,9 @@ const api = {
     },
     hints: {
       read: () => ipcRenderer.invoke('fusion:hints:read'),
-      write: (markdown: string) =>
-        ipcRenderer.invoke('fusion:hints:write', markdown),
+      /** Seulement sur le texte lu, et dans le projet pour lequel il l'a été. */
+      write: (markdown: string, guard: { expectedRaw: string; projectPath: string }) =>
+        ipcRenderer.invoke('fusion:hints:write', markdown, guard),
     },
     recipes: {
       list: () => ipcRenderer.invoke('fusion:recipes:list'),

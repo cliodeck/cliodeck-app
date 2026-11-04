@@ -224,6 +224,11 @@
   color: var(--text-tertiary);
 }
 
+.brainstorm-panel__hints-refused {
+  margin: 4px 0;
+  color: var(--color-danger);
+}
+
 .brainstorm-panel__ideas-loading {
   margin: 12px;
 }

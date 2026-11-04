@@ -19,8 +19,8 @@ const hints = (normalized: string, present = true): WorkspaceHints => ({
   sourcePath: '/p/context.md',
   present,
   sources: {
-    context: { sourcePath: '/p/context.md', content: normalized, present },
-    legacyHints: { sourcePath: '/p/.cliodeck/hints.md', content: '', present: false },
+    context: { sourcePath: '/p/context.md', content: normalized, present, blank: !present },
+    legacyHints: { sourcePath: '/p/.cliodeck/hints.md', content: '', present: false, blank: true },
   },
 });
 

@@ -283,6 +283,11 @@ export const FsCopyFileSchema = z.object({
   destination: z.string().min(1, 'Destination path is required'),
 });
 
+export const FsSameFileSchema = z.object({
+  a: z.string().min(1, 'File path is required'),
+  b: z.string().min(1, 'File path is required'),
+});
+
 export const DialogOpenFileSchema = z.object({
   title: z.string().optional(),
   defaultPath: z.string().optional(),

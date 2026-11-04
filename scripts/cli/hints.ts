@@ -23,6 +23,8 @@ export async function cmdHintsShow(args: ParsedArgs): Promise<number> {
         present: h.present,
         sourcePath: h.sourcePath,
         content: h.raw,
+        // Vide parce qu'illisible ou lié hors du projet, pas parce qu'absent.
+        unreadable: h.sources.context.unreadable,
       },
       null,
       2

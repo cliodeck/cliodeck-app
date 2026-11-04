@@ -53,9 +53,14 @@ import {
 } from '../utils/validation.js';
 import { isConsentedPath } from '../utils/user-consented-paths.js';
 import {
+  CONTEXT_FILE,
+  ContextConflictError,
+  ContextOutsideProjectError,
   loadWorkspaceHints,
   writeWorkspaceHints,
 } from '../../../../backend/core/hints/loader.js';
+import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
+import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import {
   ensureWorkspaceDirectories,
   workspaceFiles,
@@ -108,6 +113,11 @@ function noProject() {
   return { ...errorResponse('no_project'), error: 'no_project' as const };
 }
 
+/** Le code seul : c'est le renderer qui dit à l'auteur ce qui arrive à son texte. */
+function contextFailure(error: string, reason?: string) {
+  return { ...errorResponse(error), ...(reason ? { reason } : {}) };
+}
+
 export function setupFusionHandlers(): void {
   // MARK: - hints
 
@@ -115,28 +125,45 @@ export function setupFusionHandlers(): void {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
     try {
-      const h = await loadWorkspaceHints(root);
+      // Le verrou : une lecture demandée après une écriture lit ce que celle-ci a écrit,
+      // sans quoi le texte attendu de l'écriture suivante serait déjà périmé.
+      const h = await withFileLock(path.join(root, CONTEXT_FILE), () => loadWorkspaceHints(root));
       return successResponse({ hints: h });
     } catch (e) {
       return errorResponse(e as Error);
     }
   });
 
-  ipcMain.handle('fusion:hints:write', async (_e, rawMarkdown: unknown) => {
+  // Pas d'écriture à l'aveugle : le texte lu et le projet pour lequel il l'a été. Sans ce
+  // dernier, deux gabarits identiques feraient atterrir le texte dans l'autre projet.
+  ipcMain.handle('fusion:hints:write', async (_e, rawMarkdown: unknown, rawGuard: unknown) => {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
     if (typeof rawMarkdown !== 'string') {
       return errorResponse('hints content must be a string');
     }
-    try {
-      // Ensure v2 dir exists before writing.
-      await fs.mkdir(workspaceFiles(root).root, { recursive: true });
-      await writeWorkspaceHints(root, rawMarkdown);
-      const h = await loadWorkspaceHints(root);
-      return successResponse({ hints: h });
-    } catch (e) {
-      return errorResponse(e as Error);
+    const guard = (rawGuard ?? {}) as { expectedRaw?: unknown; projectPath?: unknown };
+    if (typeof guard.expectedRaw !== 'string' || typeof guard.projectPath !== 'string') {
+      return errorResponse('hints write needs the text it read and its project');
     }
+    const { expectedRaw, projectPath } = guard;
+    if (!sameFile(root, projectPath)) return contextFailure('context_project_changed');
+    // Le verrou avant le premier `await` : deux écritures gardent leur ordre d'arrivée.
+    return withFileLock(path.join(root, CONTEXT_FILE), async () => {
+      try {
+        // Ensure v2 dir exists before writing.
+        await fs.mkdir(workspaceFiles(root).root, { recursive: true });
+        await writeWorkspaceHints(root, rawMarkdown, { expectedRaw });
+        const h = await loadWorkspaceHints(root);
+        return successResponse({ hints: h });
+      } catch (e) {
+        if (e instanceof ContextConflictError || e instanceof ContextOutsideProjectError) {
+          return contextFailure(e.code);
+        }
+        if (e instanceof UnreadableFileError) return contextFailure('context_unreadable', e.reason);
+        return errorResponse(e as Error);
+      }
+    });
   });
 
   // MARK: - recipes
