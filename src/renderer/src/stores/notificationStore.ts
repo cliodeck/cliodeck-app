@@ -72,14 +72,7 @@ export const useNotificationStore = create<NotificationState>()((set) => ({
     }));
 
     // Auto-dismiss after duration (unless sticky)
-    if (notif.duration > 0) {
-      setTimeout(() => {
-        set((state) => ({
-          notifications: state.notifications.filter((n) => n.id !== id),
-          expandedId: state.expandedId === id ? null : state.expandedId,
-        }));
-      }, notif.duration);
-    }
+    if (notif.duration > 0) scheduleDismiss(id, notif.duration);
 
     return id;
   },
@@ -97,3 +90,20 @@ export const useNotificationStore = create<NotificationState>()((set) => ({
       expandedId: state.expandedId === id ? null : id,
     })),
 }));
+
+/**
+ * Retire la notification à l'échéance. Dépliée, on y lit ses détails : elle attend l'échéance
+ * suivante, et part à la première où elle est repliée. Déjà fermée, il ne reste rien à faire : la
+ * chaîne s'arrête là, et il n'y a jamais qu'un minuteur par notification.
+ */
+function scheduleDismiss(id: string, ms: number): void {
+  setTimeout(() => {
+    const { notifications, expandedId } = useNotificationStore.getState();
+    if (!notifications.some((n) => n.id === id)) return;
+    if (expandedId === id) {
+      scheduleDismiss(id, ms);
+      return;
+    }
+    useNotificationStore.setState({ notifications: notifications.filter((n) => n.id !== id) });
+  }, ms);
+}
