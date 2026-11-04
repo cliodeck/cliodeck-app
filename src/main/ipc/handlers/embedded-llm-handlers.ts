@@ -128,9 +128,10 @@ export function setupEmbeddedLLMHandlers() {
         console.error('❌ [EMBEDDED] Model downloaded but failed to load - deleting corrupted file');
         dl.deleteCorruptedModel(targetModelId);
 
-        // Clear the config since the model is invalid
+        // Clear the config since the model is invalid. Relue : le chargement a pris du temps, et
+        // `llmConfig` date d'avant ; le réécrire annulerait ce qu'un Enregistrer a posé entre-temps.
         configManager.set('llm', {
-          ...llmConfig,
+          ...configManager.get('llm'),
           embeddedModelPath: undefined,
           embeddedModelId: undefined,
         });
@@ -370,8 +371,9 @@ export function setupEmbeddedLLMHandlers() {
         console.error('❌ [EMBEDDED] Embedding model downloaded but failed to load - deleting corrupted file');
         dl.deleteCorruptedModel(targetModelId, 'embedding');
 
+        // Relue, comme pour le modèle de génération.
         configManager.set('llm', {
-          ...llmConfig,
+          ...configManager.get('llm'),
           embeddedEmbeddingModelPath: undefined,
           embeddedEmbeddingModelId: undefined,
         });
