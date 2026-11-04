@@ -158,9 +158,9 @@ test.describe('config.json illisible', () => {
         await expect(toast).toHaveCount(1, { timeout: 10_000 });
         await expect(toast).toContainText('.cliodeck/config.json');
         await expect(toast).toContainText("n'a pas été modifié");
-        await expect(toast).toContainText('coffre Obsidian');
+        await expect(toast).toContainText('vault Obsidian');
         await expect(toast).toContainText("notes déjà indexées restent consultées par l'assistant");
-        await expect(toast).not.toContainText('coffre Obsidian et les serveurs MCP');
+        await expect(toast).not.toContainText('vault Obsidian et les serveurs MCP');
         await expect(toast).toContainText('MCP');
         await expect(toast).toContainText('Avertir');
         await expect(toast).toContainText(wording);
