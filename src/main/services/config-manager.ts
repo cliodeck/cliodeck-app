@@ -1,5 +1,11 @@
 import type { AppConfig, LLMConfig, RAGConfig, ZoteroConfig } from '../../../backend/types/config.js';
 import { DEFAULT_CONFIG } from '../../../backend/types/config.js';
+import {
+  NUMERIC_SECTIONS,
+  numericDefaults,
+  repairNumbers,
+  type NumericSection,
+} from '../../../backend/core/config/repair-numbers.js';
 import { secureStorage, SENSITIVE_KEYS } from './secure-storage.js';
 import os from 'os';
 import path from 'path';
@@ -125,8 +131,31 @@ export class ConfigManager {
     return pathString;
   }
 
+  /**
+   * Une section dont les nombres ont une règle (`repair-numbers.ts`), telle que tout le monde la lit :
+   * services, IPC, renderer. Abîmée, elle est réparée et le fichier avec, une fois, à la première
+   * lecture. Écrite ici directement : `config:set` n'y est pour rien, aucun service ne repart. Un
+   * fichier sain n'est jamais réécrit. Une écriture refusée n'empêche pas de répondre.
+   */
+  private readSection<S extends NumericSection>(section: S): AppConfig[S] {
+    const saved = this.getStore().get(section);
+    const repaired = repairNumbers(section, saved);
+    if (repaired !== saved) {
+      try {
+        this.getStore().set(section, repaired);
+        console.warn(`⚠️ Config: non-numeric values in "${section}" replaced by their defaults`);
+      } catch (error) {
+        console.error(`Config: could not repair "${section}" on disk:`, error);
+      }
+    }
+    return repaired;
+  }
+
   // Getter générique
   get<K extends keyof AppConfig>(key: K): AppConfig[K] {
+    if ((NUMERIC_SECTIONS as readonly string[]).includes(key)) {
+      return this.readSection(key as NumericSection) as AppConfig[K];
+    }
     return this.getStore().get(key);
   }
 
@@ -164,7 +193,7 @@ export class ConfigManager {
    * a complete LLMConfig object including the API keys.
    */
   getLLMConfig(): LLMConfig {
-    const config = this.getStore().get('llm');
+    const config = this.readSection('llm');
     // Inject API keys from secure storage so downstream consumers see them
     const claudeAPIKey = secureStorage.getKey('llm.claudeAPIKey');
     const openaiAPIKey = secureStorage.getKey('llm.openaiAPIKey');
@@ -203,7 +232,7 @@ export class ConfigManager {
     }
 
     // Only write non-sensitive fields to the main config store
-    const current = this.getStore().get('llm');
+    const current = this.readSection('llm');
     // Also strip any API keys that might already be in the current config
     const {
       claudeAPIKey: _c,
@@ -218,12 +247,13 @@ export class ConfigManager {
 
   // ─── RAG Config ──────────────────────────────────────────────────────
 
+  /** Pour les services : un nombre que le fichier ne donne pas (`stripNonFinite`) retombe sur le défaut. */
   getRAGConfig(): RAGConfig {
-    return this.getStore().get('rag');
+    return { ...numericDefaults('rag'), ...this.readSection('rag') };
   }
 
   setRAGConfig(config: Partial<RAGConfig>): void {
-    const current = this.getRAGConfig();
+    const current = this.readSection('rag');
     this.getStore().set('rag', { ...current, ...config });
     console.log('✅ RAG config updated');
   }
@@ -308,7 +338,12 @@ export class ConfigManager {
 
   // Obtenir toute la config
   getAll(): AppConfig {
-    return this.getStore().store;
+    return {
+      ...this.getStore().store,
+      rag: this.readSection('rag'),
+      llm: this.readSection('llm'),
+      editor: this.readSection('editor'),
+    };
   }
 
   /**
@@ -316,7 +351,7 @@ export class ConfigManager {
    * This should NOT be sent directly to the renderer without redaction.
    */
   getAllWithSecrets(): AppConfig {
-    const config = { ...this.getStore().store };
+    const config = this.getAll();
 
     // Inject LLM API keys
     const claudeAPIKey = secureStorage.getKey('llm.claudeAPIKey');
