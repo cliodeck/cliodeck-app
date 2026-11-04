@@ -35,6 +35,19 @@ describe('discoverManuscript', () => {
     expect(pieces[0].kind).toBe('document');
   });
 
+  it('reads a book manifest that starts with a BOM, instead of taking it for an article', async () => {
+    await fs.mkdir(path.join(tmp, 'chapters'));
+    await fs.writeFile(path.join(tmp, 'chapters', '01-alpha.md'), 'A');
+    await fs.writeFile(
+      path.join(tmp, 'project.json'),
+      `﻿${JSON.stringify({
+        chapters: [{ id: 'a', title: 'Alpha', filePath: 'chapters/01-alpha.md', order: 0 }],
+      })}`
+    );
+    const pieces = discoverManuscript(tmp);
+    expect(pieces[0]).toMatchObject({ path: path.join('chapters', '01-alpha.md'), title: 'Alpha', kind: 'chapter' });
+  });
+
   it("takes a book's order from the manifest, not from the file names", async () => {
     // Le préfixe numérique des noms sert la lisibilité hors ClioDeck et n'a
     // aucune valeur d'autorité (backend/types/book.ts).

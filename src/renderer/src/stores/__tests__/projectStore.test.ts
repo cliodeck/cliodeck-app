@@ -657,6 +657,8 @@ describe('projets récents : seule une absence avérée retire de la liste (S11-
 
   it.each<[string, unknown]>([
     ['project_unavailable', { success: false, code: 'project_unavailable', error: 'ENOENT' }],
+    // Un project.json sans name ni type : il peut se réparer, comme un JSON abîmé.
+    ['manifest_invalid', { success: false, code: 'manifest_invalid', fileName: 'project.json', error: 'x' }],
     ['réponse sans code', { success: false, error: 'tout autre échec' }],
     ['réponse sans projet', { success: true }],
     ['un code inconnu', { success: false, code: 'autre_chose', error: 'x' }],
@@ -688,6 +690,22 @@ describe('projets récents : seule une absence avérée retire de la liste (S11-
 
     expect(stub.project.removeRecent).toHaveBeenCalledTimes(1);
     expect(stub.project.removeRecent).toHaveBeenCalledWith(HERE);
+    expect(shown()).toEqual(['/Users/moi/Article']);
+  });
+
+  it('not_a_project : retiré, car ce fichier ne sera jamais un projet, et il libère sa place', async () => {
+    const stray = '/Users/moi/Thèse/references.json';
+    stub.project.getRecent.mockResolvedValue([stray, OTHER]);
+    stub.project.getMetadata.mockImplementation(async (file: string) =>
+      file === stray
+        ? { success: false, code: 'not_a_project', fileName: 'references.json', error: 'x' }
+        : healthy(file)
+    );
+
+    await useProjectStore.getState().loadRecentProjects();
+
+    expect(stub.project.removeRecent).toHaveBeenCalledTimes(1);
+    expect(stub.project.removeRecent).toHaveBeenCalledWith(stray);
     expect(shown()).toEqual(['/Users/moi/Article']);
   });
 

@@ -140,7 +140,8 @@ export function runHealthChecks(projectPath, db) {
   const projectJson = path.join(projectPath, 'project.json');
   if (existsSync(projectJson)) {
     try {
-      project = JSON.parse(readFileSync(projectJson, 'utf8'));
+      // Le BOM d'un éditeur Windows n'est pas une faute (`parseUserJson` côté app).
+      project = JSON.parse(readFileSync(projectJson, 'utf8').replace(/^\uFEFF/, ''));
       add('projet', 'info', `« ${project.name ?? '?'} », type ${project.type ?? '?'}`);
     } catch {
       add('projet', 'ecart', 'project.json illisible');

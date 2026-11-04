@@ -583,13 +583,21 @@ describe('getProjectMetadata : absent n’est pas indisponible', () => {
     ['JSON invalide', '{ "name": "Thèse", '],
     ['0 octet', ''],
     ['des blancs', '  \n'],
-    ['un tableau', '[]'],
-    ['null', 'null'],
     ['Latin-1', Buffer.from([0x7b, 0x22, 0x6e, 0x22, 0x3a, 0x22, 0xc9, 0x22, 0x7d])],
   ])('%s : project_unavailable, jamais retiré, jamais réécrit', async (_label, content) => {
     writeFileSync(projectFile, content);
     const before = readFileSync(projectFile);
     expect(await metadataOf(projectFile)).toMatchObject({ success: false, code: 'project_unavailable' });
+    expect(readFileSync(projectFile).equals(before)).toBe(true);
+  });
+
+  it.each<[string, string]>([
+    ['un tableau', '[]'],
+    ['null', 'null'],
+  ])('%s : manifest_invalid, que les récents traitent de même : jamais retiré, jamais réécrit', async (_label, content) => {
+    writeFileSync(projectFile, content);
+    const before = readFileSync(projectFile);
+    expect(await metadataOf(projectFile)).toMatchObject({ success: false, code: 'manifest_invalid' });
     expect(readFileSync(projectFile).equals(before)).toBe(true);
   });
 

@@ -420,9 +420,20 @@ export async function isEvictedByIcloud(filePath: string): Promise<boolean> {
   return !(await isThere(filePath)) && (await isThere(placeholder));
 }
 
+const BOM = '\uFEFF';
+
+/**
+ * `JSON.parse` d'un fichier de l'auteur. Le BOM d'un éditeur Windows n'est pas une faute, mais
+ * `JSON.parse` le refuse, et `readUserFile` le garde pour un aller-retour fidèle.
+ */
+export function parseUserJson<T = unknown>(raw: string): T {
+  return JSON.parse(raw.startsWith(BOM) ? raw.slice(BOM.length) : raw) as T;
+}
+
 /**
  * `updateFile` pour un JSON. Un JSON invalide lève `UnreadableFileError` de raison
- * `invalid-json`, mutator non appelé. Par défaut, indentation 2 sans saut final.
+ * `invalid-json`, mutator non appelé. Par défaut, indentation 2 sans saut final. Un BOM en tête
+ * revient à l'écriture : le fichier reste tel qu'il était, sauf ce que le mutator change.
  */
 export async function updateJsonFile<T>(
   filePath: string,
@@ -434,7 +445,7 @@ export async function updateJsonFile<T>(
     let parsed: T | null = null;
     if (current !== null) {
       try {
-        parsed = JSON.parse(current) as T;
+        parsed = parseUserJson<T>(current);
       } catch (error) {
         throw new UnreadableFileError(filePath, 'invalid-json', errorMessage(error));
       }
@@ -444,7 +455,8 @@ export async function updateJsonFile<T>(
     // `undefined` aussi, qu'un mutator rend à l'exécution sans que le type le voie :
     // `JSON.stringify` rendrait `undefined`, et le fichier contiendrait ce mot.
     if (next == null) return null;
-    return `${JSON.stringify(next, null, opts?.indent ?? 2)}${opts?.trailingNewline ? '\n' : ''}`;
+    const bom = current?.startsWith(BOM) ? BOM : '';
+    return `${bom}${JSON.stringify(next, null, opts?.indent ?? 2)}${opts?.trailingNewline ? '\n' : ''}`;
   });
   return { written, value };
 }

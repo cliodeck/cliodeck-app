@@ -20,6 +20,7 @@ import { retrievalService } from './retrieval-service.js';
 import { pdfService } from './pdf-service.js';
 import { pdfExportService } from './pdf-export.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { parseUserJson } from '../../../backend/core/fs/user-files.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import {
   normalizeBookSettings,
@@ -191,7 +192,7 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
 } | null> {
   try {
     const raw = await fs.readFile(path.join(workspaceRoot, 'project.json'), 'utf8');
-    return JSON.parse(raw);
+    return parseUserJson(raw);
   } catch {
     return null;
   }

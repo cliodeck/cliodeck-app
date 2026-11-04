@@ -30,6 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import type { MCPAccessLogger } from '../logger.js';
 import type { MCPRuntimeConfig } from '../config.js';
+import { parseUserJson } from '../../core/fs/user-files.js';
 import { isInside } from '../../core/vector-store/file-identity.js';
 
 const LIST_TOOL = 'list_manuscript';
@@ -93,9 +94,9 @@ export function discoverManuscript(root: string): ManuscriptPiece[] {
 
   // Livre : l'ordre vient du manifeste, jamais du nom des fichiers.
   try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'project.json'), 'utf8')) as {
+    const manifest = parseUserJson<{
       chapters?: Array<{ filePath?: unknown; title?: unknown; order?: unknown }>;
-    };
+    }>(fs.readFileSync(path.join(root, 'project.json'), 'utf8'));
     const chapters = Array.isArray(manifest.chapters) ? [...manifest.chapters] : [];
     chapters.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
     for (const c of chapters) {

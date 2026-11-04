@@ -6,12 +6,13 @@ import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import {
   isEvictedByIcloud,
+  parseUserJson,
   readUserFile,
   UnreadableFileError,
   updateJsonFile,
   withFileLock,
 } from '../../../backend/core/fs/user-files.js';
-import { isInside } from '../../../backend/core/vector-store/file-identity.js';
+import { isInside, sameFile } from '../../../backend/core/vector-store/file-identity.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
 import { workspaceConfigIssue, type WorkspaceConfigIssue } from '../../../backend/core/workspace/config.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
@@ -168,10 +169,31 @@ interface Project {
   zotero?: { groupId?: string; collectionKey?: string; libraryID?: number };
 }
 
+/** Le nom du manifeste : `createProject` n'en a jamais écrit d'autre, et tout le code le relit à ce nom. */
+const PROJECT_FILE = 'project.json';
+
+/** Les types que ClioDeck écrit. Un manifeste qui porte `name` n'a pas à en avoir un connu. */
+const PROJECT_TYPES: ReadonlySet<unknown> = new Set(['article', 'book', 'presentation']);
+
+/**
+ * Ce fichier n'est pas un manifeste de projet. `not_a_project` : il ne porte pas le bon nom, il
+ * n'en sera jamais un, et une ligne des récents qui le désigne peut partir. `manifest_invalid` :
+ * il porte le bon nom sans décrire un projet ; il peut se réparer, et sa ligne reste cachée (Q8).
+ */
+class NotAProjectError extends Error {
+  readonly code: 'not_a_project' | 'manifest_invalid';
+
+  constructor(projectFile: string, code: NotAProjectError['code']) {
+    super(`${projectFile} n'est pas un manifeste de projet`);
+    this.name = 'NotAProjectError';
+    this.code = code;
+  }
+}
+
 /** Un JSON valide qui n'est pas un objet n'est pas un manifeste, et s'écrirait mal. */
 function assertIsManifest(projectFile: string, value: unknown): asserts value is Project {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new UnreadableFileError(projectFile, 'invalid-json', `${projectFile} n'est pas un manifeste de projet`);
+    throw new NotAProjectError(projectFile, 'manifest_invalid');
   }
 }
 
@@ -189,15 +211,34 @@ function zoteroUpdate(stored: unknown, received: unknown): Pick<Project, 'zotero
 
 /**
  * Lit le manifeste, en décodage strict comme à l'écriture : un fichier en Latin-1 se refuse
- * plutôt que de voir ses accents changés en U+FFFD, puis réécrits. Lève si `project.json` est
- * absent, illisible ou invalide.
+ * plutôt que de voir ses accents changés en U+FFFD, puis réécrits. Le BOM d'un éditeur Windows
+ * passe. Lève si `project.json` est absent, illisible ou invalide.
  */
 async function readManifest(projectFile: string): Promise<Project> {
   const read = await readUserFile(projectFile);
   if (read.kind === 'absent') throw new Error(`Project file not found: ${projectFile}`);
   if (read.kind === 'unreadable') throw new UnreadableFileError(projectFile, read.reason, read.message);
-  const project: unknown = JSON.parse(read.content);
+  const project = parseUserJson(read.content);
   assertIsManifest(projectFile, project);
+  return project;
+}
+
+/**
+ * Lit ce qu'on demande d'ouvrir. Le dialogue filtre sur l'extension : n'importe quel `.json` arrive
+ * ici, recevrait `lastOpenedAt`, et son dossier un `.cliodeck`. La seule garde des deux portes :
+ * `project:load`, et `project:get-metadata`, que le renderer interroge avant de quitter le document
+ * ouvert. Tolérante à dessein, car un faux refus fermerait à l'auteur son propre projet : au bon nom,
+ * `name` en texte suffit, ou un type connu. Un fichier mal nommé se refuse sans être lu.
+ */
+async function readManifestToOpen(projectFile: string): Promise<Project> {
+  const name = path.basename(projectFile);
+  if (name.toLowerCase() !== PROJECT_FILE) throw new NotAProjectError(projectFile, 'not_a_project');
+  const project = await readManifest(projectFile);
+  // Sur un disque sans casse, `Project.json` est bien ce que le reste du code relira. Sur un disque
+  // à casse, ce serait un autre fichier ou aucun : le projet s'ouvrirait sans pouvoir se relire.
+  const rereadable = name === PROJECT_FILE || sameFile(projectFile, path.join(path.dirname(projectFile), PROJECT_FILE));
+  const describesProject = typeof project.name === 'string' || PROJECT_TYPES.has(project.type);
+  if (!rereadable || !describesProject) throw new NotAProjectError(projectFile, 'manifest_invalid');
   return project;
 }
 
@@ -245,7 +286,7 @@ export class ProjectManager {
    */
   async getProjectMetadata(projectPath: string) {
     try {
-      const project = await readManifest(projectPath);
+      const project = await readManifestToOpen(projectPath);
       const projectDir = path.dirname(projectPath);
 
       // Load bibliography if configured (resolve relative path to absolute)
@@ -272,8 +313,10 @@ export class ProjectManager {
       // Chaque récent passe ici à chaque ouverture du panneau : pas de pile pour un disque débranché.
       const message = error instanceof Error ? error.message : String(error);
       console.warn('⚠️ Project metadata unavailable:', message);
-      const code = (await projectFileIsMissing(projectPath)) ? 'project_file_missing' : 'project_unavailable';
-      return { success: false as const, code, error: message };
+      const code = error instanceof NotAProjectError
+        ? error.code
+        : (await projectFileIsMissing(projectPath)) ? 'project_file_missing' : 'project_unavailable';
+      return { success: false as const, code, fileName: path.basename(projectPath), error: message };
     }
   }
 
@@ -415,12 +458,16 @@ export class ProjectManager {
     success: boolean;
     project?: Project;
     configIssue?: WorkspaceConfigIssue;
+    code?: NotAProjectError['code'];
+    fileName?: string;
     error?: string;
   }> {
     try {
       // Refusé ici, B n'a rien subi, pas même sa migration, et le projet courant reste en place.
-      await readManifest(projectPath);
+      await readManifestToOpen(projectPath);
       const projectDir = path.dirname(projectPath);
+      // Le nom que relit tout le code, celui du verrou d'écriture, celui que gardent les récents.
+      const projectFile = path.join(projectDir, PROJECT_FILE);
 
       // Promote in-flight v2-subdir or pre-fusion v1 workspaces to flat layout
       // before any service opens DB handles into `.cliodeck/`.
@@ -429,7 +476,7 @@ export class ProjectManager {
       // Le projet s'ouvre quand même : son texte n'y est pour rien. L'interface dit ce qui manque.
       const configIssue = await workspaceConfigIssue(projectDir);
 
-      const project = await this.updateProjectFile(projectPath, (stored) => {
+      const project = await this.updateProjectFile(projectFile, (stored) => {
         // Migration: Convert absolute paths to relative paths
         if (stored.bibliographySource?.filePath && path.isAbsolute(stored.bibliographySource.filePath)) {
           const relativePath = path.relative(projectDir, stored.bibliographySource.filePath);
@@ -488,7 +535,7 @@ export class ProjectManager {
         }
       }
 
-      configManager.addRecentProject(projectPath);
+      configManager.addRecentProject(projectFile);
 
       // Issue #13: Always set path dynamically from projectDir (not from file)
       // This ensures paths are always correct regardless of synchronization
@@ -509,6 +556,9 @@ export class ProjectManager {
     } catch (error: unknown) {
       console.error('❌ Failed to load project:', error);
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof NotAProjectError) {
+        return { success: false, code: error.code, fileName: path.basename(projectPath), error: message };
+      }
       return { success: false, error: message };
     }
   }
@@ -624,7 +674,7 @@ export class ProjectManager {
       let manifest: Chapter[] = [];
       if (existsSync(projectFile)) {
         const raw = await readFile(projectFile, 'utf-8');
-        const project: Project = JSON.parse(raw);
+        const project = parseUserJson<Project>(raw);
         manifest = Array.isArray(project.chapters) ? project.chapters : [];
       }
 
@@ -923,7 +973,7 @@ export class ProjectManager {
       }
 
       const content = await readFile(projectPath, 'utf-8');
-      const project: Project = JSON.parse(content);
+      const project = parseUserJson<Project>(content);
       return project;
     } catch (error: unknown) {
       console.error('❌ Failed to get project config:', error);

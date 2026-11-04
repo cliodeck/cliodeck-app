@@ -91,6 +91,16 @@ describe('bilan de santé — projet sain', () => {
   });
 });
 
+describe('bilan de santé — un project.json avec BOM', () => {
+  it('n’est pas illisible : l’app l’ouvre, le bilan le lit', async () => {
+    write('project.json', `\uFEFF${JSON.stringify({ name: 'Bloc-notes', type: 'article' })}`);
+    createBrain(() => undefined);
+    const findings = await check();
+    expect(ecarts(findings, 'projet')).toEqual([]);
+    expect(findings.find((f) => f.domaine === 'projet')?.message).toContain('Bloc-notes');
+  });
+});
+
 describe('bilan de santé — chaque invariant repère son écart', () => {
   it('PDF : doublons, fichier disparu, extrait sans embedding, document vide', async () => {
     const pdf = write('PDFs/a.pdf', '%PDF-1.4');
