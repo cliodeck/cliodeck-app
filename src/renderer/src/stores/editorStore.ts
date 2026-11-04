@@ -666,10 +666,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Sans curseur posé par l'auteur, l'offset 0 serait au-dessus du titre.
     const offset = editorFacade.hasKnownCursor() ? editorFacade.getCursorOffset() : current.length;
     const newContent = insertDraftAtOffset(current, offset, draft);
-    // Segment exactement inséré par insertDraftAtOffset (padding de bloc
-    // compris) : premier point de divergence des deux chaînes.
-    let at = 0;
-    while (at < current.length && current[at] === newContent[at]) at += 1;
+    // L'ancre est le curseur, et le segment tout ce que insertDraftAtOffset pose après lui, padding
+    // de bloc compris. Le premier point de divergence des deux chaînes ne le dit pas : ce padding
+    // ressemble aux fins de ligne qui suivent, et un balayage quittait le curseur pour le bloc
+    // suivant, où la frappe d'après un rejet serait tombée.
+    const at = Math.min(offset, current.length);
     const inserted = newContent.slice(
       at,
       at + (newContent.length - current.length)

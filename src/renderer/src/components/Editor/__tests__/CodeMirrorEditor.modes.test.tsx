@@ -22,7 +22,8 @@ import { useAutoSave } from '../../../hooks/useAutoSave';
 import { flushOpenDocument } from '../../../hooks/useSaveOnQuit';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
-import { useWorkspaceModeStore, type WorkspaceMode } from '../../../stores/workspaceModeStore';
+import { useWorkspaceModeStore, WORKSPACE_MODES, type WorkspaceMode } from '../../../stores/workspaceModeStore';
+import { WorkspaceModeBar } from '../../Layout/WorkspaceModeBar';
 
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 
@@ -396,6 +397,209 @@ describe('aucun curseur connu', () => {
     propose();
 
     expect(proposalPosition()).toBe(TEXT.length);
+  });
+});
+
+describe('curseur en fin de ligne, là où est celui qui vient d’écrire une phrase', () => {
+  const FIRST_END = TEXT.indexOf('Premier paragraphe.') + 'Premier paragraphe.'.length;
+
+  it('la proposition reste au curseur, et le curseur reste à sa place', async () => {
+    await mountWorkspace();
+    placeCursor(FIRST_END);
+    await switchMode('brainstorm');
+    await switchMode('write');
+
+    propose();
+
+    expect(proposalPosition()).toBe(FIRST_END);
+    expect(head()).toBe(FIRST_END);
+    expect(text()).toBe(TEXT);
+  });
+
+  it('rejeter : le curseur n’a pas bougé, et la frappe suivante reste dans le paragraphe', async () => {
+    await mountWorkspace();
+    placeCursor(FIRST_END);
+    propose();
+
+    reject();
+
+    expect(head()).toBe(FIRST_END);
+    type('SUITE');
+    expect(text()).toBe(TEXT.replace('Premier paragraphe.', 'Premier paragraphe.SUITE'));
+  });
+
+  it('accepter donne un bloc entre les deux paragraphes, le curseur à sa fin', async () => {
+    await mountWorkspace();
+    placeCursor(FIRST_END);
+    propose();
+
+    accept();
+
+    expect(text()).toBe(TEXT.replace('Premier paragraphe.', `Premier paragraphe.\n\n${DRAFT}`));
+    expect(head()).toBe(FIRST_END + `\n\n${DRAFT}`.length);
+  });
+
+  it('un titre suit le paragraphe : la frappe après un rejet n’entre pas dans le titre', async () => {
+    const withHeading = '# Titre\n\nParagraphe.\n\n## Section\n\nSuite.\n';
+    disk[DOC] = withHeading;
+    openInStore(DOC);
+    await mountWorkspace();
+    const end = withHeading.indexOf('Paragraphe.') + 'Paragraphe.'.length;
+    placeCursor(end);
+
+    propose();
+    expect(head()).toBe(end);
+    reject();
+    type('SUITE');
+
+    expect(text()).toBe(withHeading.replace('Paragraphe.', 'Paragraphe.SUITE'));
+  });
+
+  it('présentation : le séparateur de diapositives reste intact', async () => {
+    const slides = `${PROJECT}/slides.md`;
+    const deck = '# Une\n\nTexte de la une.\n\n---\n\n# Deux\n';
+    disk[slides] = deck;
+    setProject(PROJECT, 'presentation');
+    openInStore(slides);
+    await mountWorkspace();
+    const end = deck.indexOf('Texte de la une.') + 'Texte de la une.'.length;
+    placeCursor(end);
+
+    propose();
+    expect(head()).toBe(end);
+    reject();
+    type('SUITE');
+
+    expect(text()).toBe(deck.replace('Texte de la une.', 'Texte de la une.SUITE'));
+    expect(text().split('\n')).toContain('---');
+  });
+});
+
+describe('revenir en Écriture et continuer sans cliquer', () => {
+  const contentHasFocus = () => document.activeElement === currentView().contentDOM;
+
+  /** La barre des modes telle que l'auteur s'en sert : un vrai onglet, cliqué, qui garde le focus. */
+  async function clickModeTab(mode: WorkspaceMode): Promise<void> {
+    const tab = document.querySelectorAll<HTMLButtonElement>('.workspace-mode-bar__tab')[
+      WORKSPACE_MODES.indexOf(mode)
+    ];
+    tab.focus();
+    await act(async () => {
+      fireEvent.click(tab);
+    });
+  }
+
+  async function mountWithModeBar(): Promise<void> {
+    useWorkspaceModeStore.setState({ active: 'write' });
+    await act(async () => {
+      render(
+        <>
+          <WorkspaceModeBar />
+          <input aria-label="champ du chat" />
+          <Workspace />
+        </>
+      );
+    });
+  }
+
+  it('par l’onglet du mode : la vue reprend le focus, curseur conservé', async () => {
+    await mountWithModeBar();
+    placeCursor(MIDDLE);
+    type(PHRASE);
+
+    await clickModeTab('brainstorm');
+    await clickModeTab('write');
+
+    expect(contentHasFocus()).toBe(true);
+    expect(head()).toBe(MIDDLE + PHRASE.length);
+  });
+
+  it('le focus n’est nulle part (le bouton du chat vient de disparaître) : la vue le reprend', async () => {
+    await mountWithModeBar();
+    placeCursor(MIDDLE);
+    await clickModeTab('brainstorm');
+    (document.activeElement as HTMLElement).blur();
+
+    await switchMode('write');
+
+    expect(contentHasFocus()).toBe(true);
+  });
+
+  it('un champ a le focus (le chat du panneau droit) : il le garde', async () => {
+    await mountWithModeBar();
+    placeCursor(MIDDLE);
+    await clickModeTab('brainstorm');
+    const field = document.querySelector<HTMLInputElement>('input');
+    field?.focus();
+
+    await switchMode('write');
+
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('aucun curseur posé : il n’y a rien à reprendre, le focus ne va pas à l’offset 0', async () => {
+    await mountWithModeBar();
+
+    await clickModeTab('brainstorm');
+    await clickModeTab('write');
+
+    expect(contentHasFocus()).toBe(false);
+  });
+
+  it('un changement de chapitre ne prend pas le focus, même vers un chapitre déjà visité', async () => {
+    const A = `${PROJECT}/chapters/a.md`;
+    const B = `${PROJECT}/chapters/b.md`;
+    disk[A] = '# A\n\nTexte A.\n';
+    disk[B] = '# B\n\nTexte B.\n';
+    setProject(PROJECT, 'book');
+    openInStore(A);
+    await mountWithModeBar();
+    placeCursor(disk[A].length);
+
+    await act(async () => {
+      await editor().loadFile(B);
+    });
+    await act(async () => {
+      await editor().loadFile(A);
+    });
+
+    expect(head()).toBe(disk[A].length);
+    expect(contentHasFocus()).toBe(false);
+  });
+
+  it('un chapitre ouvert depuis un autre mode ne prend pas le focus au retour', async () => {
+    const A = `${PROJECT}/chapters/a.md`;
+    const B = `${PROJECT}/chapters/b.md`;
+    disk[A] = '# A\n\nTexte A.\n';
+    disk[B] = '# B\n\nTexte B.\n';
+    setProject(PROJECT, 'book');
+    openInStore(A);
+    await mountWithModeBar();
+    placeCursor(disk[A].length);
+    await act(async () => {
+      await editor().loadFile(B);
+    });
+    placeCursor(disk[B].length);
+    await clickModeTab('brainstorm');
+    await act(async () => {
+      await editor().loadFile(A);
+    });
+
+    await clickModeTab('write');
+
+    expect(text()).toBe(disk[A]);
+    expect(contentHasFocus()).toBe(false);
+  });
+
+  it('pendant un changement de projet, la vue en lecture seule ne prend pas le focus', async () => {
+    await mountWithModeBar();
+    placeCursor(MIDDLE);
+    await clickModeTab('brainstorm');
+    useEditorStore.setState({ bufferDetached: true });
+
+    await clickModeTab('write');
+
+    expect(contentHasFocus()).toBe(false);
   });
 });
 

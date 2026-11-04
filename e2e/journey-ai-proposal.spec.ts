@@ -31,7 +31,7 @@ interface Session {
 
 const toClean: string[] = [];
 
-function tempProject(type: 'article' | 'book', extra: Record<string, unknown> = {}): { dir: string; projectJson: string } {
+function tempProject(type: 'article' | 'book' | 'presentation', extra: Record<string, unknown> = {}): { dir: string; projectJson: string } {
   const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-proposition-'));
   toClean.push(dir);
   mkdirSync(join(dir, '.cliodeck'), { recursive: true });
@@ -194,6 +194,114 @@ test('Écriture → Brainstorm → Écriture : le curseur revient, Cmd+Z annule 
     await expect(editor(window)).toHaveCount(0);
     await toMode(window, 'Écrire');
     await expect.poll(() => window.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(500);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('retour par l’onglet, sans cliquer : Cmd+Z annule la frappe, la suivante entre au curseur, et le clavier n’est pas piégé', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+  const onDisk = () => readFileSync(document, 'utf8');
+  const contentHasFocus = () => editor(window).evaluate((el) => el === el.ownerDocument.activeElement);
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    await typeInSecondParagraph(window);
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(TYPED_TEXT);
+
+    await toMode(window, 'Brainstormer');
+    await expect(editor(window)).toHaveCount(0);
+    await toMode(window, 'Écrire');
+    await expect.poll(contentHasFocus).toBe(true);
+
+    await undo(window);
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(TEXT);
+    await window.keyboard.type('X');
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(TEXT.replace('Deuxième paragraphe', 'Deuxième pXaragraphe'));
+
+    // Au clavier : Entrée sur l'onglet donne le focus au texte sans y poser de saut de ligne, et
+    // Maj+Tab en ressort.
+    const written = onDisk();
+    await toMode(window, 'Exporter');
+    await expect(editor(window)).toHaveCount(0);
+    await window.locator('.workspace-mode-bar__tab', { hasText: 'Écrire' }).focus();
+    await window.keyboard.press('Enter');
+    await expect.poll(contentHasFocus).toBe(true);
+    await window.keyboard.press('Shift+Tab');
+    await expect.poll(contentHasFocus).toBe(false);
+    await window.waitForTimeout(AUTOSAVE_MS);
+    expect(onDisk()).toBe(written);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('curseur en fin de phrase : il reste à sa place, et après un rejet la frappe suivante reste dans le paragraphe', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+  const onDisk = () => readFileSync(document, 'utf8');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    await line(window, 'Deuxième paragraphe').click();
+    await window.keyboard.press('End');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).toContainText('au milieu duquel on écrit.');
+
+    await window.keyboard.press('Escape');
+    await expect(proposal(window)).toHaveCount(0);
+    expect(onDisk()).toBe(TEXT);
+
+    await window.keyboard.type('SUITE');
+    await expect
+      .poll(onDisk, { timeout: 10_000 })
+      .toBe(TEXT.replace('au milieu duquel on écrit.', 'au milieu duquel on écrit.SUITE'));
+  } finally {
+    await stop(session);
+  }
+});
+
+test('présentation, curseur en fin de diapositive : le navigateur n’en change pas pendant l’attente, et le séparateur tient', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { dir, projectJson } = tempProject('presentation');
+  const slides = join(dir, 'slides.md');
+  const deck = Array.from({ length: 6 }, (_, i) => `# Diapo ${i + 1}\n\nTexte de la diapo ${i + 1}.\n`).join('\n---\n\n');
+  writeFileSync(slides, deck);
+  const activeSlide = window.locator('.slide-navigator-item.active');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Texte de la diapo 5')).toBeVisible({ timeout: 20_000 });
+    await line(window, 'Texte de la diapo 5').click();
+    await window.keyboard.press('End');
+    await expect(activeSlide).toContainText('Diapo 5');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(activeSlide).toContainText('Diapo 5');
+
+    await window.keyboard.press('Escape');
+    await expect(proposal(window)).toHaveCount(0);
+    await window.keyboard.type('Suite de mon idée');
+    await expect
+      .poll(() => readFileSync(slides, 'utf8'), { timeout: 10_000 })
+      .toBe(deck.replace('Texte de la diapo 5.', 'Texte de la diapo 5.Suite de mon idée'));
+    await expect(window.locator('.slide-navigator-item')).toHaveCount(6);
   } finally {
     await stop(session);
   }

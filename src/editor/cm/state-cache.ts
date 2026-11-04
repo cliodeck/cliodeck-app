@@ -52,6 +52,8 @@ export interface CachedEditorState {
   scrollTop: number;
   /** L'auteur avait posé son curseur : à défaut, le 0 de la sélection ne vient de personne. */
   cursorPlaced?: boolean;
+  /** Numéro du document à sa mise en cache : le même au retour, c'est un changement de mode. */
+  documentVersion?: number;
 }
 
 /** Champs sérialisés en plus du document et de la sélection. */

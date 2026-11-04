@@ -96,9 +96,16 @@ Entrées dans le contrat aujourd'hui :
 L'éditeur n'est monté qu'en mode Écriture. `sendDraftToWrite` bascule donc
 d'abord (`ensureWriteEditor`), attend l'éditeur, puis propose :
 
-- **au curseur** de l'auteur. Le curseur et l'annulation survivent à un
-  changement de mode : l'état de la vue reste en mémoire, hors du composant
-  (`editor-state-memory.ts`), jusqu'au prochain changement de projet ;
+- **au curseur** de l'auteur. L'ancre de la proposition est le curseur lui-même
+  et le padding de bloc fait partie du texte proposé : rejeter ne le déplace pas,
+  et la frappe suivante reste dans la phrase qu'il écrivait, y compris en fin de
+  ligne, juste avant un titre ou un séparateur de diapositives. Le curseur et
+  l'annulation survivent à un changement de mode : l'état de la vue reste en
+  mémoire, hors du composant (`editor-state-memory.ts`), jusqu'au prochain
+  changement de projet. Revenu sur le même document, l'auteur continue sans
+  cliquer : la vue reprend le focus, sauf si un champ l'a déjà, s'il n'y avait
+  posé aucun curseur ou si un autre document s'ouvre (changement de chapitre,
+  de projet) ;
 - **en fin de document** s'il n'y a posé aucun curseur (document jamais affiché,
   ou état oublié) : à l'offset 0, la proposition tomberait au-dessus du titre ;
 - **nulle part** s'il n'y a rien pour la recevoir (`unavailable` : changement de

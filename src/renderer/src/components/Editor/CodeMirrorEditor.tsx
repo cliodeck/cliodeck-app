@@ -225,6 +225,12 @@ function dynamicExtensions(settings: EditorSettings, dark: boolean): Extension {
   ];
 }
 
+/** Le focus n'est nulle part, ou sur l'onglet du mode qu'on vient de choisir : rien à lui prendre. */
+function focusIsFree(): boolean {
+  const active = document.activeElement;
+  return !active || active === document.body || active.closest('.workspace-mode-bar') !== null;
+}
+
 function createFacade(
   view: EditorView,
   changeListeners: Set<(content: string) => void>,
@@ -511,6 +517,13 @@ export const CodeMirrorEditor: React.FC = () => {
         )
       );
 
+    // Retour de mode sur le document qu'on venait de quitter : continuer d'écrire, ou Cmd+Z, ne
+    // demande pas de cliquer, et ce clic remplacerait le curseur conservé. Un changement de chapitre
+    // porte un autre numéro de document, et un champ qui a le focus le garde.
+    if (cursorPlaced && cached?.documentVersion === ownVersion && !detached && focusIsFree()) {
+      view.focus();
+    }
+
     // Hook de dev (critère d'acceptation Phase 4) : injection d'une
     // proposition factice sans aucun modèle — utilisé par la vérification
     // pilotée et les démonstrations. Voir docs/editor-proposals.md.
@@ -561,6 +574,7 @@ export const CodeMirrorEditor: React.FC = () => {
         editorStates.set(editorStateKey(ownFilePath, ownVersion), {
           ...serializeEditorState(view.state, lastScrollTop),
           cursorPlaced,
+          documentVersion: ownVersion,
         });
       }
       changeListeners.clear();

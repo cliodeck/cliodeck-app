@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EditorFileError, openErrorKey, useEditorStore } from '../editorStore';
+import { insertDraftAtOffset } from '../../components/Brainstorm/messageToDraft';
 import i18n from '../../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
@@ -123,6 +124,44 @@ describe('insertDraftAtCursor — contrat propositionnel (Phase 4)', () => {
     useEditorStore.getState().insertDraftAtCursor('NEW');
 
     expect(calls.proposals[0].range).toEqual({ from: 0, to: 0 });
+  });
+
+  it('curseur en fin de ligne : la proposition reste au curseur, pas au début du bloc suivant', () => {
+    const doc = 'Un.\n\nDeux.\n';
+    const { facade, calls } = fakeFacade(doc, 3);
+    useEditorStore.setState({ content: doc, editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('NEW');
+
+    expect(calls.proposals[0].range).toEqual({ from: 3, to: 3 });
+    expect(calls.proposals[0].proposed).toBe('\n\nNEW');
+  });
+
+  it('un brouillon qui commence comme la suite du texte : la proposition reste au curseur', () => {
+    const doc = 'Un.\n\nNouveau bloc.\n';
+    const { facade, calls } = fakeFacade(doc, 5);
+    useEditorStore.setState({ content: doc, editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('Nouvelle idée');
+
+    expect(calls.proposals[0].range).toEqual({ from: 5, to: 5 });
+    expect(calls.proposals[0].proposed).toBe('Nouvelle idée\n\n');
+  });
+
+  it('à tout endroit du texte : l’ancre est le curseur, et accepter donne le même bloc', () => {
+    const doc = '# Un\n\nDeux\nTrois.\n\n## Quatre\n';
+    for (let offset = 0; offset <= doc.length; offset += 1) {
+      const { facade, calls } = fakeFacade(doc, offset);
+      useEditorStore.setState({ content: doc, editorFacade: facade });
+
+      useEditorStore.getState().insertDraftAtCursor('# Deux idées');
+
+      const { range, proposed } = calls.proposals[0];
+      expect(range).toEqual({ from: offset, to: offset });
+      expect(`${doc.slice(0, offset)}${proposed}${doc.slice(offset)}`).toBe(
+        insertDraftAtOffset(doc, offset, '# Deux idées')
+      );
+    }
   });
 
   it('la vue refuse : unavailable, et aucune écriture de repli', () => {
