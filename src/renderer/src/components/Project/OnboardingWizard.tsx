@@ -12,6 +12,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, X } from 'lucide-react';
+import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import './OnboardingWizard.css';
 
 type Step = 'topic' | 'period' | 'sources' | 'language' | 'done';
@@ -44,6 +46,18 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
   const inputRef = useRef<HTMLInputElement>(null);
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
+
+  // Le fond et Échap sont des gestes involontaires : ils ne ferment que si rien ne s'y perd, tant
+  // que le fichier n'est pas écrit. Le X et le lien « Passer » restent, eux, des gestes francs.
+  const nothingToLose =
+    currentStep === 'done' ||
+    (answers.topic.trim() === '' && answers.period.trim() === '' && answers.sources.length === 0);
+  const trapRef = useFocusTrap({
+    active: true,
+    onEscape: nothingToLose ? onSkip : undefined,
+    // Rendre le focus au bouton « Nouveau projet » ne servirait à rien : c'est écrire qui suit.
+    restoreFocus: false,
+  });
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -97,7 +111,13 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
   };
 
   return (
-    <div className="onboarding-wizard" onClick={onSkip}>
+    <div
+      ref={trapRef}
+      className="onboarding-wizard"
+      {...backdropClose(() => {
+        if (nothingToLose) onSkip();
+      })}
+    >
       <div className="onboarding-wizard__card" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
