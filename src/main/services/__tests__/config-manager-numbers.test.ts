@@ -4,7 +4,7 @@
  * sur les octets. Seul le trousseau est simulé.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -155,6 +155,52 @@ describe('un fichier abîmé', () => {
     expect(console.error).toHaveBeenCalled();
     expect(onDisk().rag).toEqual({ topK: null });
   });
+
+  it('une réparation refusée n’est retentée qu’à la session suivante, section par section', async () => {
+    const manager = await open({ ...AUTHOR, rag: { topK: null }, editor: { fontSize: null } });
+    const store = (manager as unknown as { _store: { set(...args: unknown[]): void } })._store;
+    const set = vi.spyOn(store, 'set').mockImplementation(() => {
+      throw new Error('EACCES');
+    });
+
+    manager.getRAGConfig();
+    manager.get('rag');
+    manager.getAll();
+    expect(set.mock.calls.map(([section]) => section)).toEqual(['rag', 'editor']);
+
+    manager.get('editor');
+    manager.getAll();
+    expect(set).toHaveBeenCalledTimes(2);
+
+    set.mockRestore();
+    const nextSession = new ConfigManager();
+    await nextSession.init();
+    nextSession.getRAGConfig();
+    expect(onDisk().rag).toEqual({ topK: DEFAULT_CONFIG.rag.topK });
+  });
+
+  // Un vrai refus, cette fois : `conf` y insiste une seconde, de façon synchrone, et tout l'IPC attend.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'dossier et fichier en lecture seule : une seule tentative, et la lecture répond réparée',
+    async () => {
+      const manager = await open({ ...AUTHOR, rag: { topK: null } });
+      const store = (manager as unknown as { _store: { set(...args: unknown[]): void } })._store;
+      const set = vi.spyOn(store, 'set');
+      chmodSync(file(), 0o444);
+      chmodSync(place.dir, 0o555);
+
+      try {
+        expect(manager.getRAGConfig().topK).toBe(DEFAULT_CONFIG.rag.topK);
+        expect(manager.get('rag').topK).toBe(DEFAULT_CONFIG.rag.topK);
+        expect(set).toHaveBeenCalledTimes(1);
+        expect(console.error).toHaveBeenCalledTimes(1);
+        expect(onDisk().rag).toEqual({ topK: null });
+      } finally {
+        chmodSync(place.dir, 0o755);
+        chmodSync(file(), 0o644);
+      }
+    }
+  );
 
   it('écrire une section d’après une section abîmée n’y laisse pas le null', async () => {
     const manager = await open({ ...AUTHOR, llm: { ...AUTHOR.llm, ollamaNumCtx: null } });

@@ -145,6 +145,21 @@ describe('vide ou illisible', () => {
     expect(input().value).toBe('8192');
   });
 
+  // Dans un champ déjà vide, `e` ou `-` ne font aucun `change` : la valeur reste `''`, et rien d'autre
+  // ne dit que le champ montre du texte. Le geste réel est dans `journey-numeric-fields`.
+  it.each([['au blur'], ['à Entrée']])('du texte illisible dans un champ vide, sans aucun change, disparaît %s', (geste) => {
+    const onCommit = vi.fn();
+    render(<Form initial={undefined} allowEmpty onCommit={onCommit} />);
+    Object.defineProperty(input(), 'validity', { configurable: true, value: { badInput: true } });
+    const written = vi.spyOn(input(), 'value', 'set');
+
+    if (geste === 'au blur') fireEvent.blur(input());
+    else fireEvent.keyDown(input(), { key: 'Enter' });
+
+    expect(written).toHaveBeenCalledWith('');
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it.each([[Number.NaN], [null], ['abc'], [Number.POSITIVE_INFINITY]])(
     'une valeur illisible du parent (%s) s’affiche vide, sans planter',
     (bad) => {

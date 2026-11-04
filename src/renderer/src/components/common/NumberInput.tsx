@@ -25,8 +25,9 @@ type NumberInputProps = Omit<
  * bouton Enregistrer lit donc la valeur à jour. Échap ne valide pas, et ne s'arrête pas ici : la
  * touche va aux modales (`useFocusTrap`).
  *
- * Reste un `type="number"` : le navigateur y lit la virgule française, et les feuilles de style le
- * visent. Ce qu'il affiche après la saisie est ce qui a été retenu, borné ou non.
+ * Reste un `type="number"` : le navigateur y lit le séparateur décimal de sa locale, celle du système
+ * (ou de `--lang`), pas la langue choisie dans l'app ; et les feuilles de style le visent. Ce qu'il
+ * affiche après la saisie est ce qui a été retenu, borné ou non.
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value,
@@ -43,13 +44,15 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   const current = Number.isFinite(value) ? value : undefined;
 
   const commit = (input: HTMLInputElement): void => {
-    if (draft === null) return;
-    setDraft(null);
-    // `1e` : le navigateur répond `''` sans effacer ce qu'il montre. Ce n'est pas un champ vidé.
+    // `1e` : le navigateur répond `''` sans effacer ce qu'il montre. Ce n'est pas un champ vidé. Et dans
+    // un champ déjà vide, `e` ou `-` ne font aucun `change` : le brouillon n'en sait rien.
     if (input.validity.badInput) {
+      setDraft(null);
       input.value = '';
       return;
     }
+    if (draft === null) return;
+    setDraft(null);
     if (draft.trim() === '') {
       if (allowEmpty && current !== undefined) onCommit(undefined);
       return;

@@ -23,6 +23,7 @@ interface ElectronStoreInstance {
 export class ConfigManager {
   private _store: ElectronStoreInstance | null = null;
   private initialized: boolean = false;
+  private readonly refusedRepairs = new Set<NumericSection>();
 
   private getStore(): ElectronStoreInstance {
     if (!this._store) {
@@ -135,16 +136,19 @@ export class ConfigManager {
    * Une section dont les nombres ont une règle (`repair-numbers.ts`), telle que tout le monde la lit :
    * services, IPC, renderer. Abîmée, elle est réparée et le fichier avec, une fois, à la première
    * lecture. Écrite ici directement : `config:set` n'y est pour rien, aucun service ne repart. Un
-   * fichier sain n'est jamais réécrit. Une écriture refusée n'empêche pas de répondre.
+   * fichier sain n'est jamais réécrit. Une écriture refusée n'empêche pas de répondre, et n'est pas
+   * retentée avant le prochain lancement : `conf` insiste une seconde, de façon synchrone, et tout
+   * l'IPC attend.
    */
   private readSection<S extends NumericSection>(section: S): AppConfig[S] {
     const saved = this.getStore().get(section);
     const repaired = repairNumbers(section, saved);
-    if (repaired !== saved) {
+    if (repaired !== saved && !this.refusedRepairs.has(section)) {
       try {
         this.getStore().set(section, repaired);
         console.warn(`⚠️ Config: non-numeric values in "${section}" replaced by their defaults`);
       } catch (error) {
+        this.refusedRepairs.add(section);
         console.error(`Config: could not repair "${section}" on disk:`, error);
       }
     }

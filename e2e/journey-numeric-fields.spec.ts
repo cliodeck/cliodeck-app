@@ -61,8 +61,8 @@ function userData(config: unknown): string {
 const configPath = (dir: string) => join(dir, 'cliodeck-config.json');
 const readConfig = (dir: string) => JSON.parse(readFileSync(configPath(dir), 'utf8')) as Config;
 
-async function launch(dir: string): Promise<{ app: ElectronApplication; window: Page } | null> {
-  const outcome = await launchApp({ userDataDir: dir });
+async function launch(dir: string, args?: string[]): Promise<{ app: ElectronApplication; window: Page } | null> {
+  const outcome = await launchApp({ userDataDir: dir, args });
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
     return null;
@@ -220,7 +220,8 @@ test('taper une valeur et cliquer tout de suite sur Sauvegarder : la valeur est 
 
 test('la virgule française : 0,5 s’écrit 0.5', async () => {
   const dir = userData(AUTHOR);
-  const session = await launch(dir);
+  // La virgule suit la locale de Chromium, celle du système ou de `--lang`, pas la langue de l'app.
+  const session = await launch(dir, ['--lang=fr']);
   if (!session) return;
   const { app, window } = session;
 
@@ -381,6 +382,75 @@ test('les deux fenêtres de contexte : vide veut dire automatique, le champ quit
   }
 });
 
+test('du texte illisible dans une fenêtre de contexte vide : il disparaît, le champ dit ce que dit le fichier', async () => {
+  const { ollamaNumCtx: _chat, ...llm } = AUTHOR.llm;
+  const dir = userData({ ...AUTHOR, llm });
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+  const chat = () => window.locator('.settings-modal input[placeholder="défaut du serveur (4096)"]');
+  const embedding = () => window.locator('.settings-modal input[placeholder="défaut du modèle"]');
+  const unreadable = () => chat().evaluate((input: HTMLInputElement) => input.validity.badInput);
+
+  try {
+    await openSettings(window);
+    await section(window, 'Configuration LLM');
+    await expect(chat()).toHaveValue('');
+    const bytes = readFileSync(configPath(dir));
+
+    for (const text of ['e', '-']) {
+      await chat().click();
+      await window.keyboard.type(text);
+      expect(await unreadable()).toBe(true);
+      await embedding().click();
+      expect(await unreadable()).toBe(false);
+    }
+
+    await chat().click();
+    await window.keyboard.type('e');
+    await window.keyboard.press('Enter');
+    expect(await unreadable()).toBe(false);
+    await expect(chat()).toBeFocused();
+
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+    await expect(chat()).toHaveValue('');
+    expect(await unreadable()).toBe(false);
+    expect(readFileSync(configPath(dir)).equals(bytes)).toBe(true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('une section éditeur sans taille de police : 14 px dans l’éditeur, et Sauvegarder n’écrit rien', async () => {
+  const dir = userData({ language: 'fr', recentProjects: [], editor: { theme: 'dark' } });
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+  const editorFont = () =>
+    window.evaluate(() => getComputedStyle(document.querySelector('.cm-editor') as Element).fontSize);
+
+  try {
+    await expect(window.locator('.cm-editor').first()).toBeVisible({ timeout: 20_000 });
+    await openSettings(window);
+    await section(window, 'Éditeur');
+    await expect(number(window, '[max="24"]')).toHaveValue('14');
+    // Le formulaire a lu la section après `App` : l'éditeur a déjà reçu ce que `App` en a tiré. Avant
+    // cette lecture il montre le défaut du magasin, ce qui ne prouverait rien.
+    expect(await editorFont()).toBe('14px');
+    const bytes = readFileSync(configPath(dir));
+
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+
+    expect(await editorFont()).toBe('14px');
+    expect(readFileSync(configPath(dir)).equals(bytes)).toBe(true);
+    expect(readConfig(dir).editor).toEqual({ theme: 'dark' });
+  } finally {
+    await app.close();
+  }
+});
+
 test('des valeurs retouchées à la main partout : l’app démarre, tout s’ouvre, seuls les nombres abîmés changent', async () => {
   const dir = userData({
     language: 'fr',
@@ -465,6 +535,27 @@ function article(): string {
   return projectJson;
 }
 
+/** `pdfService.init` écrit cette ligne à chaque démarrage : c'est elle qui compte les relances. */
+const SERVICES_STARTED = '[PDF-SERVICE] RAG optimization config';
+
+function watchServices(app: ElectronApplication): { started(): Promise<number> } {
+  let log = '';
+  let barriers = 0;
+  app.process().stdout?.on('data', (chunk: Buffer) => {
+    log += chunk.toString();
+  });
+  return {
+    async started() {
+      // Le tuyau garde l'ordre : cette ligne lue, tout ce que le main a écrit avant l'est aussi.
+      barriers += 1;
+      const barrier = `e2e-barriere-${barriers}`;
+      await app.evaluate((_electron, line) => console.log(line), barrier);
+      await expect.poll(() => log.includes(barrier)).toBe(true);
+      return log.split(SERVICES_STARTED).length - 1;
+    },
+  };
+}
+
 async function openProject(app: ElectronApplication, window: Page, projectJson: string): Promise<void> {
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
@@ -477,7 +568,6 @@ test('topK et seuil à null : une vraie recherche rend ses sources, et réparer 
   test.setTimeout(120_000);
   const ollama = await startFakeOllama('Réponse du faux modèle.');
   toClean.push(ollama.userDataDir);
-  const healthy = readConfig(ollama.userDataDir);
   // Les services tournent déjà quand le fichier s'abîme : ce sont eux qui lisent la réparation.
   const session = await launch(ollama.userDataDir);
   if (!session) {
@@ -485,10 +575,7 @@ test('topK et seuil à null : une vraie recherche rend ses sources, et réparer 
     return;
   }
   const { app, window } = session;
-  let log = '';
-  app.process().stdout?.on('data', (chunk: Buffer) => {
-    log += chunk.toString();
-  });
+  const services = watchServices(app);
   const projectJson = article();
   const pdf = join(dirname(projectJson), 'source.pdf');
   textPdf(pdf, 3);
@@ -503,14 +590,31 @@ test('topK et seuil à null : une vraie recherche rend ses sources, et réparer 
     const indexed = await window.evaluate(async (file) => window.electron.pdf.index(file), pdf);
     expect(indexed.success).toBe(true);
     expect(await search()).toBeGreaterThan(0);
+    const started = await services.started();
+    expect(started).toBeGreaterThan(0);
 
+    // `llm` aussi : c'est la section dont l'écriture par `config:set` relance les services.
+    const before = readConfig(ollama.userDataDir);
     writeFileSync(
       configPath(ollama.userDataDir),
-      JSON.stringify({ ...readConfig(ollama.userDataDir), llm: healthy.llm, rag: { topK: null, similarityThreshold: null } })
+      JSON.stringify({
+        ...before,
+        llm: { ...before.llm, ollamaNumCtx: 'abc' },
+        rag: { topK: null, similarityThreshold: null },
+      })
     );
     expect(await search()).toBeGreaterThan(0);
+    await window.evaluate(() => window.electron.config.get('llm'));
     await expect.poll(() => readConfig(ollama.userDataDir).rag).toEqual({ topK: 10, similarityThreshold: 0.12 });
-    expect(log).not.toContain('Reinitializing services');
+    expect(readConfig(ollama.userDataDir).llm).toEqual(before.llm);
+
+    // Le témoin : une vraie écriture de `llm` relance, et le compteur le voit. Une relance venue de la
+    // réparation, même encore en cours, s'y ajouterait.
+    const rewritten = await window.evaluate(async () =>
+      window.electron.config.set('llm', await window.electron.config.get('llm'))
+    );
+    expect(rewritten.success).toBe(true);
+    expect(await services.started()).toBe(started + 1);
 
     // Écrit tel quel par `config:set` : ni `null` sur le disque, ni zéro source après.
     const answer = await window.evaluate(async () => {
