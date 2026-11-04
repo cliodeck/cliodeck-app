@@ -80,6 +80,8 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   const [rawYaml, setRawYaml] = useState<string>('');
   /** Le texte du fichier, tel que chargé ou enregistré. */
   const [savedYaml, setSavedYaml] = useState<string>('');
+  /** La dernière modification vient du formulaire, pas du YAML. */
+  const [editedByForm, setEditedByForm] = useState(false);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -126,17 +128,19 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
     return yaml.dump(r, { lineWidth: 120, noRefs: true, quotingType: '"' });
   }, []);
 
-  // Modifiée, c'est-à-dire différente du fichier. Le formulaire réécrit tout le YAML à sa façon :
-  // un champ revenu à sa valeur redonne la réécriture du fichier, pas son texte.
+  // Modifiée, c'est-à-dire différente du fichier. Le formulaire réécrit tout le YAML à sa façon : un
+  // champ revenu à sa valeur redonne la réécriture du fichier, pas son texte. Cette tolérance ne vaut
+  // que pour lui : dans le YAML, la même réécriture a été voulue (un commentaire retiré, par exemple).
   const dirty = useMemo(() => {
     if (readOnly || rawYaml === savedYaml) return false;
+    if (!editedByForm) return true;
     try {
       return rawYaml !== recipeToYaml(normalizeRecipe(yaml.load(savedYaml)));
     } catch {
       return true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- normalizeRecipe ne dépend de rien
-  }, [readOnly, rawYaml, savedYaml, recipeToYaml]);
+  }, [readOnly, rawYaml, savedYaml, editedByForm, recipeToYaml]);
 
   // Une seule question à la fois, et refuser laisse tout en place. Échap, le X et le fond passent
   // tous ici : sans cela, Échap fermait les Réglages et la saisie partait avec eux, sans un mot.
@@ -158,6 +162,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   const syncFormToYaml = useCallback(
     (r: Recipe) => {
       setRawYaml(recipeToYaml(r));
+      setEditedByForm(true);
     },
     [recipeToYaml]
   );
@@ -165,6 +170,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   const handleYamlChange = useCallback((value: string | undefined) => {
     if (value === undefined) return;
     setRawYaml(value);
+    setEditedByForm(false);
     try {
       const parsed = yaml.load(value) as Recipe;
       setRecipe(normalizeRecipe(parsed));

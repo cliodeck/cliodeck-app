@@ -62,8 +62,9 @@ export const ProjectPanel: React.FC = () => {
   const [newProjectPath, setNewProjectPath] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
-  // Fermer ne perd rien : le nom et le dossier restent ici, et la modale rouverte les retrouve.
-  // Pendant la création, rien ne ferme, comme Annuler, désactivé.
+  // Fermer ne perd rien tout de suite : le nom et le dossier restent ici, et la modale rouverte les
+  // retrouve, tant que ce panneau reste monté (changer d'onglet à gauche les emporte, après Annuler
+  // comme après Échap). Pendant la création, rien ne ferme, comme Annuler, désactivé.
   const closeCreateModal = isCreating ? undefined : () => setShowCreateModal(false);
   const createModalRef = useFocusTrap({ active: showCreateModal, onEscape: closeCreateModal });
 

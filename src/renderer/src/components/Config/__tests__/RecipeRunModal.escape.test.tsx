@@ -46,6 +46,25 @@ const endRun = () =>
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 
+/** Une recette à paramètres : le plan part sur plusieurs lignes, dans un `textarea`. */
+function withPlan(): void {
+  const recipes = (window as unknown as { electron: { fusion: { recipes: { read: ReturnType<typeof vi.fn> } } } })
+    .electron.fusion.recipes;
+  recipes.read.mockResolvedValue({
+    success: true,
+    recipe: {
+      name: 'ma-recette',
+      version: '1',
+      description: '',
+      inputs: { plan: { type: 'string', required: true } },
+      steps: [{ id: 's1', kind: 'write' }],
+      outputs: {},
+    },
+  });
+}
+const plan = () => runOverlay().querySelector('textarea') as HTMLTextAreaElement;
+const typePlan = (value: string) => fireEvent.change(plan(), { target: { value } });
+
 async function renderRun(): Promise<void> {
   slot.content = <RecipeRunModal scope="user" fileName="ma-recette.yaml" onClose={closeRun} />;
   render(<SettingsModal isOpen onClose={closeSettings} />);
@@ -104,6 +123,67 @@ describe('RecipeRunModal', () => {
 
     expect(closeRun).toHaveBeenCalledTimes(1);
     expect(closeSettings).not.toHaveBeenCalled();
+  });
+
+  it('des paramètres saisis : ni le fond ni Échap ne ferment, et la saisie reste', async () => {
+    withPlan();
+    await renderRun();
+    typePlan('Un long plan\nsur plusieurs lignes');
+
+    await clickBackdrop();
+    await pressEscape();
+
+    expect(closeRun).not.toHaveBeenCalled();
+    expect(closeSettings).not.toHaveBeenCalled();
+    expect(plan().value).toBe('Un long plan\nsur plusieurs lignes');
+  });
+
+  it('des paramètres saisis : le X reste un geste franc', async () => {
+    withPlan();
+    await renderRun();
+    typePlan('Un plan');
+
+    fireEvent.click(runOverlay().querySelector('.close-btn') as HTMLElement);
+
+    expect(closeRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('un paramètre revenu à sa valeur de départ : plus rien à perdre, le fond ferme', async () => {
+    withPlan();
+    await renderRun();
+    typePlan('Un plan');
+    typePlan('');
+
+    await clickBackdrop();
+
+    expect(closeRun).toHaveBeenCalledTimes(1);
+    expect(closeSettings).not.toHaveBeenCalled();
+  });
+
+  it('rien de saisi : le fond ferme, et lui seul', async () => {
+    withPlan();
+    await renderRun();
+
+    await clickBackdrop();
+
+    expect(closeRun).toHaveBeenCalledTimes(1);
+    expect(closeSettings).not.toHaveBeenCalled();
+  });
+
+  it('une exécution finie avec des paramètres se ferme, tant qu’on ne les a pas modifiés de nouveau', async () => {
+    withPlan();
+    await renderRun();
+    typePlan('Un plan');
+    await startRun();
+    await endRun();
+
+    typePlan('Un autre plan');
+    await clickBackdrop();
+    expect(closeRun).not.toHaveBeenCalled();
+
+    typePlan('Un plan');
+    await clickBackdrop();
+    expect(closeRun).toHaveBeenCalledTimes(1);
   });
 
   it('une exécution finie se ferme par le fond', async () => {

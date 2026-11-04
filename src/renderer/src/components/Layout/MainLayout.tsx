@@ -13,6 +13,7 @@ import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { StatusBar } from './StatusBar';
 import { StatusToast } from '../common/StatusToast';
 import { logger } from '../../utils/logger';
+import { isModalOpen } from '../../hooks/useFocusTrap';
 import './MainLayout.css';
 
 // Lazy-loaded heavy components (panels)
@@ -101,8 +102,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       // ProjectPanel héberge les modales PDF et Word : le quitter pendant un
       // export les démonterait, et l'issue (un échec, des citations non
       // résolues) n'aurait plus d'interface. Le fond de la modale arrête la
-      // souris, pas les accélérateurs de menu : Alt+2 passait à côté.
-      if (useManuscriptStore.getState().exporting) return;
+      // souris, pas les accélérateurs de menu : Alt+2 passait à côté. De même
+      // pour toute modale ouverte : l'assistant de démarrage et la création de
+      // projet partiraient avec ce qui y est saisi, et ailleurs, l'aiguillage
+      // changerait derrière une modale sans que rien ne le montre.
+      if (useManuscriptStore.getState().exporting || isModalOpen()) return;
 
       const customEvent = event as CustomEvent;
       const panel = customEvent.detail;

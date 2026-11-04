@@ -22,7 +22,7 @@ export function RebuildProgressModal() {
   const closedByAuthor = useRef(false);
 
   // Un dialogue de la file s'affiche par-dessus le message et passe d'abord, quel qu'ait
-  // été l'ordre d'arrivée : même z-index, monté après. La pile des pièges, elle, suit
+  // été l'ordre d'arrivée : même z-index, monté après. Entre eux, la pile des pièges suit
   // l'activation : un message arrivé sous un dialogue lui prendrait le focus et Échap.
   const dialogAbove = useDialogStore((s) => s.alertOpen || s.confirmOpen);
   const awaitingAnswer = failure !== null && !dialogAbove;
@@ -34,12 +34,12 @@ export function RebuildProgressModal() {
 
   // Le piège du message d'échec. Pendant la reconstruction, rien de tout cela : le voile
   // n'est pas fermable et le focus reste où il était.
-  const dialogRef = useFocusTrap({ active: awaitingAnswer, onEscape: closeMessage });
+  const dialogRef = useFocusTrap({ active: awaitingAnswer, onEscape: closeMessage, aboveModals: true });
 
   // Le voile de travail n'a pas de bouton, mais il couvre la fenêtre : sans onEscape, il garde la
   // touche, et ce qui est ouvert dessous (les Réglages, un projet ouvert par le menu) ne se ferme
   // pas derrière lui. Le focus ne bouge pas : la frappe continue d'arriver où elle arrivait.
-  const veilRef = useFocusTrap({ active: isRebuilding && !dialogAbove, restoreFocus: false });
+  const veilRef = useFocusTrap({ active: isRebuilding && !dialogAbove, restoreFocus: false, aboveModals: true });
 
   useEffect(() => {
     if (awaitingAnswer) closeButtonRef.current?.focus();

@@ -48,6 +48,8 @@ import { PDFExportModal } from '../PDFExportModal';
 import { WordExportModal } from '../WordExportModal';
 import { PresentationExportModal } from '../PresentationExportModal';
 import { MainLayout } from '../../Layout/MainLayout';
+import { OnboardingWizard } from '../../Project/OnboardingWizard';
+import { useFocusTrap } from '../../../hooks/useFocusTrap';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
 
 interface ExportOutcome {
@@ -523,31 +525,77 @@ describe.each(MODALS.filter(({ name }) => name !== 'présentation'))(
       expect(container.querySelector('.export-error')).toHaveTextContent('xelatex a échoué');
     });
 
-    it('l’export fini, le menu change de nouveau de panneau', async () => {
+    it('l’export fini, la modale fermée : le menu change de nouveau de panneau', async () => {
       const finish = installElectron();
-      const { container } = render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
+      const { container, rerender } = render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
       await startExport(exportLabel, exportingLabel);
       showBibliography();
       finish({ success: false, error: 'xelatex a échoué' });
       await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
 
+      // L'erreur reste à lire : la modale ouverte, le menu ne l'emporte pas davantage.
+      showBibliography();
+      expect(container.querySelector('.export-error')).not.toBeNull();
+      expect(screen.queryByTestId('panneau-bibliographie')).toBeNull();
+
+      rerender(<MainLayout leftPanel={<Modal isOpen={false} onClose={vi.fn()} />} />);
       showBibliography();
 
       expect(screen.getByTestId('panneau-bibliographie')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: exportLabel })).toBeNull();
     });
 
-    it('hors export, le menu change de panneau', async () => {
+    it('la modale ouverte, hors export, le menu ne l’emporte pas ; fermée, il change de panneau', async () => {
       installElectron();
-      render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
+      const { rerender } = render(<MainLayout leftPanel={<Modal isOpen onClose={vi.fn()} />} />);
       await screen.findByRole('button', { name: exportLabel });
 
+      showBibliography();
+      expect(screen.getByRole('button', { name: exportLabel })).toBeInTheDocument();
+      expect(screen.queryByTestId('panneau-bibliographie')).toBeNull();
+
+      rerender(<MainLayout leftPanel={<Modal isOpen={false} onClose={vi.fn()} />} />);
       showBibliography();
 
       expect(screen.getByTestId('panneau-bibliographie')).toBeInTheDocument();
     });
   },
 );
+
+/**
+ * Même chose pour tout ce que le panneau gauche héberge : l'assistant de démarrage perdait ses
+ * réponses sur Alt+2, sans passer par le fond ni par Échap, et la modale de création de même.
+ */
+describe('une modale ouverte dans le panneau gauche', () => {
+  const showBibliography = () =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' }));
+    });
+
+  it('le menu « Bibliographie » ne démonte pas l’assistant de démarrage ni ses réponses', () => {
+    installElectron();
+    render(<MainLayout leftPanel={<OnboardingWizard projectName="demo" onComplete={vi.fn()} onSkip={vi.fn()} />} />);
+    const input = document.querySelector('.onboarding-wizard__input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Un sujet' } });
+
+    showBibliography();
+
+    expect(document.querySelector('.onboarding-wizard__input')).toHaveValue('Un sujet');
+    expect(screen.queryByTestId('panneau-bibliographie')).toBeNull();
+  });
+
+  it('un panneau qui ne prend qu’Échap n’est pas une modale : le menu change de panneau', () => {
+    function EscapeOnlyPanel() {
+      useFocusTrap({ active: true, onEscape: vi.fn(), restoreFocus: false });
+      return <div>Recherche dans le manuscrit</div>;
+    }
+    installElectron();
+    render(<MainLayout leftPanel={<EscapeOnlyPanel />} />);
+
+    showBibliography();
+
+    expect(screen.getByTestId('panneau-bibliographie')).toBeInTheDocument();
+  });
+});
 
 it('le menu « Bibliographie » pendant un export Word ne fait pas perdre les citations non résolues', async () => {
   const finish = installElectron();

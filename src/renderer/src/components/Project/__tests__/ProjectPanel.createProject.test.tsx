@@ -167,6 +167,20 @@ describe('ProjectPanel : fermer la modale de création', () => {
     expect(screen.getByPlaceholderText('projectPanel.pathPlaceholder')).toHaveValue(PARENT);
   });
 
+  it('Échap rend le focus au bouton « Nouveau projet », pas au corps de la page', async () => {
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+    const button = screen.getByTitle('project.newProject');
+    button.focus();
+    await openModal();
+    expect(document.activeElement).toBe(nameField());
+
+    await pressEscape();
+
+    expect(document.activeElement).toBe(button);
+  });
+
   it('un message par-dessus : Échap ne ferme que lui, et la saisie reste à l’écran', async () => {
     useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
     await act(async () => {

@@ -28,6 +28,18 @@ steps:
     kind: brainstorm
 `;
 
+/** Un fichier à la forme de `yaml.dump` (enregistré depuis le formulaire), puis commenté à la main. */
+const WITHOUT_COMMENT = `name: ma-recette
+version: "1"
+description: Une recette
+inputs: {}
+steps:
+  - id: s1
+    kind: brainstorm
+outputs: {}
+`;
+const COMMENT = '# Mon commentaire\n';
+
 const dialogs = () => useDialogStore.getState();
 const closeEditor = vi.fn();
 const closeSettings = vi.fn();
@@ -302,6 +314,40 @@ describe('RecipeEditor : rien à perdre, pas de question', () => {
     await pressEscape();
     expect(dialogs().confirmOpen).toBe(true);
     expect(closeEditor).not.toHaveBeenCalled();
+  });
+});
+
+describe('RecipeEditor : retirer un commentaire d’un fichier déjà à la forme de `yaml.dump`', () => {
+  beforeEach(() => {
+    (window as unknown as { electron: unknown }).electron = {
+      fusion: { recipes: { readYaml: vi.fn(async () => ({ success: true, yaml: COMMENT + WITHOUT_COMMENT })), save } },
+    };
+  });
+
+  it('dans le YAML, c’est une modification : la mention, Enregistrer et la question', async () => {
+    await renderEditor();
+    await toYaml();
+
+    yamlEdit(0, COMMENT.length, '');
+
+    expect(screen.queryByText(/recipeEditor\.unsaved/)).not.toBeNull();
+    expect(screen.getByTitle('recipeEditor.save')).not.toBeDisabled();
+
+    await pressEscape();
+    expect(dialogs().confirmOpen).toBe(true);
+    expect(closeEditor).not.toHaveBeenCalled();
+  });
+
+  it('par le formulaire, un champ revenu à sa valeur n’en est pas une', async () => {
+    await renderEditor();
+
+    typeName('autre-nom');
+    typeName('ma-recette');
+
+    expect(screen.queryByText(/recipeEditor\.unsaved/)).toBeNull();
+    await pressEscape();
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(closeEditor).toHaveBeenCalledTimes(1);
   });
 });
 

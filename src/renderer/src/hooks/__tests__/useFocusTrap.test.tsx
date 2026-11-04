@@ -9,7 +9,7 @@
  * indépendant de la ref ; seul le piégeage du Tab en dépend.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import { isModalOpen, useFocusTrap } from '../useFocusTrap';
@@ -129,15 +129,17 @@ describe('useFocusTrap — la pile', () => {
     active = true,
     onEscape,
     restoreFocus,
+    aboveModals,
     children,
   }: {
     name: string;
     active?: boolean;
     onEscape?: () => void;
     restoreFocus?: boolean;
+    aboveModals?: boolean;
     children?: ReactNode;
   }) {
-    const ref = useFocusTrap({ active, onEscape, restoreFocus });
+    const ref = useFocusTrap({ active, onEscape, restoreFocus, aboveModals });
     return (
       <div ref={ref} data-testid={name}>
         <button>{`${name}-premier`}</button>
@@ -269,10 +271,13 @@ describe('useFocusTrap — la pile', () => {
       const reglages = vi.fn();
       function Scene({ onReglages }: { onReglages: () => void }) {
         const [question, setQuestion] = useState(true);
+        // Stable, comme le dialogue : seul le piège des Réglages se réabonne, et son écouteur passe
+        // après celui de la question. En ligne, les deux se réabonneraient et l'ordre ne bougerait pas.
+        const answer = useCallback(() => flushSync(() => setQuestion(false)), []);
         return (
           <>
             <Modale name="reglages" onEscape={onReglages} />
-            {question && <Modale name="question" onEscape={() => flushSync(() => setQuestion(false))} />}
+            {question && <Modale name="question" onEscape={answer} />}
           </>
         );
       }
@@ -287,6 +292,66 @@ describe('useFocusTrap — la pile', () => {
 
       pressEscape();
       expect(reglages).toHaveBeenCalledTimes(1);
+    });
+
+    it('Échap maintenu : la répétition du clavier ne ferme rien, ni le sommet ni le dessous', () => {
+      const dessous = vi.fn();
+      const dessus = vi.fn();
+      render(
+        <>
+          <Modale name="dessous" onEscape={dessous} />
+          <Modale name="dessus" onEscape={dessus} />
+        </>
+      );
+
+      const event = fireEvent.keyDown(document, { key: 'Escape', repeat: true });
+
+      expect(dessus).not.toHaveBeenCalled();
+      expect(dessous).not.toHaveBeenCalled();
+      // `fireEvent` rend faux quand `preventDefault` a été appelé : la touche ne part pas plus loin.
+      expect(event).toBe(false);
+    });
+
+    it('Échap maintenu : la première frappe ferme le sommet, la suivante ne ferme pas le dessous', () => {
+      const reglages = vi.fn();
+      function Scene() {
+        const [question, setQuestion] = useState(true);
+        return (
+          <>
+            <Modale name="reglages" onEscape={reglages} />
+            {question && <Modale name="question" onEscape={() => setQuestion(false)} />}
+          </>
+        );
+      }
+      const { queryByTestId } = render(<Scene />);
+
+      pressEscape();
+      expect(queryByTestId('question')).toBeNull();
+
+      fireEvent.keyDown(document, { key: 'Escape', repeat: true });
+      expect(reglages).not.toHaveBeenCalled();
+
+      // La touche relâchée puis pressée de nouveau : un vrai second Échap.
+      pressEscape();
+      expect(reglages).toHaveBeenCalledTimes(1);
+    });
+
+    it('une modale ouverte après un dialogue reste dessous à l’écran : Échap va au dialogue', () => {
+      const question = vi.fn();
+      const apropos = vi.fn();
+      const scene = (avecApropos: boolean) => (
+        <>
+          <Modale name="question" onEscape={question} aboveModals />
+          {avecApropos && <Modale name="apropos" onEscape={apropos} />}
+        </>
+      );
+      const { rerender } = render(scene(false));
+      rerender(scene(true));
+
+      pressEscape();
+
+      expect(question).toHaveBeenCalledTimes(1);
+      expect(apropos).not.toHaveBeenCalled();
     });
 
     it('un élément plus proche a déjà pris la touche : le piège ne ferme rien', () => {
@@ -347,6 +412,40 @@ describe('useFocusTrap — la pile', () => {
       expect(document.activeElement).toBe(getByText('dessus-dernier'));
     });
 
+    it('une modale ouverte après un dialogue ne lui prend pas Tab', () => {
+      const scene = (avecApropos: boolean) => (
+        <>
+          <Modale name="question" onEscape={vi.fn()} aboveModals />
+          {avecApropos && <Modale name="apropos" onEscape={vi.fn()} />}
+        </>
+      );
+      const { rerender, getByText } = render(scene(false));
+      rerender(scene(true));
+      getByText('question-dernier').focus();
+
+      pressTab();
+
+      expect(document.activeElement).toBe(getByText('question-premier'));
+    });
+
+    it('un éditeur de texte riche compte parmi les éléments du piège : Tab y boucle au lieu d’en sortir', () => {
+      // `.cm-content` de CodeMirror : un `contenteditable`, sans `tabindex`.
+      const { getByLabelText, getByText } = render(
+        <Modale name="recette" onEscape={vi.fn()}>
+          <div aria-label="yaml" contentEditable suppressContentEditableWarning />
+        </Modale>
+      );
+      const yaml = getByLabelText('yaml');
+      yaml.focus();
+      expect(document.activeElement).toBe(yaml);
+
+      pressTab();
+      expect(document.activeElement).toBe(getByText('recette-premier'));
+
+      pressTab(true);
+      expect(document.activeElement).toBe(yaml);
+    });
+
     it('un panneau sans conteneur ouvert après une modale ne lui prend ni Tab ni Échap', () => {
       const modale = vi.fn();
       const panneau = vi.fn();
@@ -405,6 +504,82 @@ describe('useFocusTrap — la pile', () => {
 
       pressEscape();
 
+      expect(document.activeElement).toBe(declencheur);
+    });
+
+    /** Un piège toujours actif, monté à la demande : l'éditeur de recette, le consentement cloud. */
+    function Declencheur({ restoreFocus, auto }: { restoreFocus?: boolean; auto?: boolean }) {
+      const [ouvert, setOuvert] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOuvert(true)}>ouvrir</button>
+          {ouvert && (
+            <Modale name="modale" onEscape={() => setOuvert(false)} restoreFocus={restoreFocus}>
+              {auto && <input aria-label="champ" autoFocus />}
+            </Modale>
+          )}
+        </>
+      );
+    }
+
+    it('un piège démonté alors qu’il est actif rend le focus à son déclencheur', () => {
+      const { getByText } = render(<Declencheur />);
+      const declencheur = getByText('ouvrir');
+      declencheur.focus();
+      fireEvent.click(declencheur);
+      act(() => getByText('modale-premier').focus());
+
+      pressEscape();
+
+      expect(document.activeElement).toBe(declencheur);
+    });
+
+    it('un champ en autoFocus : le focus revient au déclencheur, pas au corps de la page', () => {
+      const { getByText, getByLabelText } = render(<Declencheur auto />);
+      const declencheur = getByText('ouvrir');
+      declencheur.focus();
+      fireEvent.click(declencheur);
+      expect(document.activeElement).toBe(getByLabelText('champ'));
+
+      pressEscape();
+
+      expect(document.activeElement).toBe(declencheur);
+    });
+
+    it('restoreFocus: false : démonté, il ne rend le focus à personne', () => {
+      const { getByText } = render(<Declencheur restoreFocus={false} />);
+      const declencheur = getByText('ouvrir');
+      declencheur.focus();
+      fireEvent.click(declencheur);
+      act(() => getByText('modale-premier').focus());
+
+      pressEscape();
+
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it('deux pièges en relais dans le même commit : l’entrant retient le déclencheur, pas le bouton du sortant', () => {
+      function Relais() {
+        const [etape, setEtape] = useState<'aucune' | 'alerte' | 'question'>('aucune');
+        return (
+          <>
+            <button onClick={() => setEtape('alerte')}>ouvrir</button>
+            <Modale name="alerte" active={etape === 'alerte'} onEscape={() => setEtape('question')} />
+            <Modale name="question" active={etape === 'question'} onEscape={() => setEtape('aucune')} />
+          </>
+        );
+      }
+      const { getByText } = render(<Relais />);
+      const declencheur = getByText('ouvrir');
+      declencheur.focus();
+      fireEvent.click(declencheur);
+      act(() => getByText('alerte-premier').focus());
+
+      pressEscape(); // L'alerte cède la place à la question, dans le même commit.
+      expect(document.activeElement).toBe(declencheur);
+      act(() => getByText('question-premier').focus());
+
+      pressEscape();
       expect(document.activeElement).toBe(declencheur);
     });
   });

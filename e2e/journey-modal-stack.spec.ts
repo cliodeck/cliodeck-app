@@ -24,6 +24,29 @@ steps:
   - id: s1
     kind: brainstorm
 `;
+/** Déjà à la forme de `yaml.dump`, comme après un enregistrement depuis le formulaire, puis commentée. */
+const RECIPE_FROM_FORM = `# Un commentaire ajouté à la main
+name: depuis-le-formulaire
+version: "1"
+description: Une recette
+inputs: {}
+steps:
+  - id: s1
+    kind: brainstorm
+outputs: {}
+`;
+/** Un paramètre « plan » : le champ est un `textarea`, à plusieurs lignes. */
+const RECIPE_WITH_PLAN = `name: avec-un-plan
+version: '1'
+description: Une recette à paramètres
+inputs:
+  plan:
+    type: string
+    required: true
+steps:
+  - id: s1
+    kind: brainstorm
+`;
 const CAUSE = 'Failed to save HNSW index: EISDIR';
 const RUNNING = { current: 20, total: 100, status: 'Building HNSW index…', percentage: 20, phase: 'running' };
 const DONE = { current: 100, total: 100, status: 'Rebuild complete', percentage: 100, phase: 'done' };
@@ -35,7 +58,7 @@ test.afterEach(() => {
   for (const dir of toClean.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function makeArticle(): { dir: string; projectJson: string; recipe: string } {
+function makeArticle(): { dir: string; projectJson: string; recipe: string; recipeFromForm: string } {
   const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-pile-'));
   toClean.push(dir);
   mkdirSync(join(dir, '.cliodeck', 'recipes'), { recursive: true });
@@ -53,7 +76,10 @@ function makeArticle(): { dir: string; projectJson: string; recipe: string } {
   writeFileSync(join(dir, 'document.md'), DOCUMENT);
   const recipe = join(dir, '.cliodeck', 'recipes', 'ma-recette.yaml');
   writeFileSync(recipe, RECIPE);
-  return { dir, projectJson, recipe };
+  const recipeFromForm = join(dir, '.cliodeck', 'recipes', 'depuis-le-formulaire.yaml');
+  writeFileSync(recipeFromForm, RECIPE_FROM_FORM);
+  writeFileSync(join(dir, '.cliodeck', 'recipes', 'avec-un-plan.yaml'), RECIPE_WITH_PLAN);
+  return { dir, projectJson, recipe, recipeFromForm };
 }
 
 async function start(): Promise<{ app: ElectronApplication; window: Page } | null> {
@@ -93,6 +119,18 @@ async function changeFontSize(window: Page): Promise<ReturnType<Page['locator']>
 }
 
 const resetButton = (window: Page) => window.locator('.settings-modal button[title="Réinitialiser"]');
+
+async function openRecipes(window: Page): Promise<void> {
+  await openSettings(window);
+  await window.getByRole('button', { name: 'Expert', exact: true }).click();
+  await window.getByRole('button', { name: /Recettes/ }).first().click();
+}
+
+const recipeAction = (window: Page, file: string, action: 'Éditer' | 'Lancer') =>
+  window.locator('li', { hasText: file }).getByRole('button', { name: action });
+
+/** La fenêtre ouverte par-dessus les Réglages : l'éditeur de recette ou son exécution. */
+const nestedOverlay = (window: Page) => window.locator('.settings-modal .settings-modal');
 
 const sendProgress = (app: ElectronApplication, event: Record<string, unknown>) =>
   app.evaluate(({ BrowserWindow }, progress) => {
@@ -138,14 +176,78 @@ test('l’écouteur des Réglages passe après celui de la question : le même �
     await resetButton(window).click();
     await expect(confirmDialog(window)).toBeVisible();
 
-    // Un accélérateur de menu (Alt+2) fait refaire son rendu à MainLayout : le `onClose` en ligne
-    // des Réglages change, et leur écouteur repasse après celui de la question sur `document`.
-    await window.evaluate(() => window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' })));
-    await expect(window.locator('.main-layout')).toBeVisible();
+    // Le panneau de droite qui change fait refaire son rendu à MainLayout : le `onClose` en ligne des
+    // Réglages change, et leur écouteur repasse après celui de la question sur `document`.
+    await window.evaluate(() => document.querySelector<HTMLElement>('#right-tab-journal')?.click());
+    await expect(window.locator('#right-tab-journal')).toHaveAttribute('aria-selected', 'true');
 
     await window.keyboard.press('Escape');
 
     await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(settingsHeading(window)).toBeVisible();
+    await expect(field).toHaveValue('21');
+  } finally {
+    await app.close();
+  }
+});
+
+test('Échap maintenu sur une question : la répétition du clavier ne ferme pas les Réglages', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+
+  try {
+    await openSettings(window);
+    const field = await changeFontSize(window);
+    await resetButton(window).click();
+    await expect(confirmDialog(window)).toBeVisible();
+
+    // Deux `down` sans `up` : le second porte `repeat: true`, comme une touche qui reste enfoncée.
+    await window.keyboard.down('Escape');
+    await expect(confirmDialog(window)).toHaveCount(0);
+    await window.keyboard.down('Escape');
+    await window.keyboard.up('Escape');
+
+    await expect(settingsHeading(window)).toBeVisible();
+    await expect(field).toHaveValue('21');
+
+    // La touche relâchée, le geste suivant ferme bien les Réglages.
+    await window.keyboard.press('Escape');
+    await expect(settingsHeading(window)).toBeHidden();
+  } finally {
+    await app.close();
+  }
+});
+
+test('une modale ouverte par le menu pendant une question reste dessous : Tab et Échap vont à la question', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const about = window.locator('.about-modal');
+  const inQuestion = () => window.evaluate(() => document.activeElement?.closest('.confirm-dialog') !== null);
+
+  try {
+    await openSettings(window);
+    const field = await changeFontSize(window);
+    await resetButton(window).click();
+    await expect(confirmDialog(window)).toBeVisible();
+
+    // Même événement que l'entrée du menu.
+    await window.evaluate(() => window.dispatchEvent(new CustomEvent('show-about-dialog')));
+    await expect(about).toBeVisible({ timeout: 15_000 });
+
+    for (let press = 0; press < 4; press += 1) {
+      await window.keyboard.press('Tab');
+      expect(await inQuestion()).toBe(true);
+    }
+
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(about).toBeVisible();
+    await expect(field).toHaveValue('21');
+
+    await window.keyboard.press('Escape');
+    await expect(about).toHaveCount(0);
     await expect(settingsHeading(window)).toBeVisible();
     await expect(field).toHaveValue('21');
   } finally {
@@ -334,6 +436,119 @@ test('éditeur de recette : la question quand il y a à perdre, une seule, et le
   }
 });
 
+test('éditeur de recette : retirer un commentaire dans le YAML s’enregistre, même quand il reste la réécriture du fichier', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, recipeFromForm } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await openRecipes(window);
+    await recipeAction(window, 'depuis-le-formulaire.yaml', 'Éditer').click();
+    const overlay = nestedOverlay(window);
+    await overlay.locator('button[title="YAML"]').click();
+    const yaml = overlay.locator('.cm-content');
+    await expect(yaml).toContainText('Un commentaire ajouté');
+
+    await yaml.click();
+    await window.keyboard.press('ControlOrMeta+ArrowUp');
+    await window.keyboard.press('Shift+ArrowDown');
+    await window.keyboard.press('Delete');
+    await expect(yaml).not.toContainText('Un commentaire ajouté');
+    await expect(overlay.getByText('non enregistré')).toBeVisible();
+
+    // Échap pose la question, et le refus laisse tout en place.
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toBeVisible();
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toHaveCount(0);
+
+    await overlay.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(overlay.getByText('non enregistré')).toHaveCount(0);
+    expect(readFileSync(recipeFromForm, 'utf8')).toBe(RECIPE_FROM_FORM.split('\n').slice(1).join('\n'));
+  } finally {
+    await app.close();
+  }
+});
+
+test('éditeur de recette : Tab depuis le YAML reste dans l’éditeur, et Échap rend le focus à son déclencheur', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await openRecipes(window);
+    const edit = recipeAction(window, 'ma-recette.yaml', 'Éditer');
+    await edit.click();
+    const overlay = nestedOverlay(window);
+    await overlay.locator('button[title="YAML"]').click();
+    const yaml = overlay.locator('.cm-content');
+    await expect(yaml).toContainText('Une recette écrite à la main');
+    await yaml.click();
+
+    for (let press = 0; press < 6; press += 1) {
+      await window.keyboard.press('Tab');
+      expect(
+        await window.evaluate(() => {
+          const nested = document.querySelector('.settings-modal .settings-modal');
+          return nested?.contains(document.activeElement) === true;
+        }),
+      ).toBe(true);
+    }
+
+    await window.keyboard.press('Escape');
+    await expect(overlay).toHaveCount(0);
+    await expect(edit).toBeFocused();
+    await expect(settingsHeading(window)).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
+test('fenêtre d’exécution : un plan saisi ne part ni par un clic à côté ni par Échap, et le X reste un geste franc', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson } = makeArticle();
+  const PLAN = 'Un long plan rédigé à la main\nsur plusieurs lignes';
+
+  try {
+    await openProject(app, window, projectJson);
+    await openRecipes(window);
+    await recipeAction(window, 'avec-un-plan.yaml', 'Lancer').click();
+    const overlay = nestedOverlay(window);
+    const plan = overlay.locator('textarea');
+    await expect(plan).toBeVisible({ timeout: 10_000 });
+
+    await plan.fill(PLAN);
+    const box = await overlay.boundingBox();
+    if (!box) throw new Error('fenêtre introuvable');
+    await window.mouse.click(box.x + 8, box.y + 8);
+    await expect(overlay).toHaveCount(1);
+    await window.keyboard.press('Escape');
+    await expect(overlay).toHaveCount(1);
+    await expect(plan).toHaveValue(PLAN);
+    await expect(settingsHeading(window)).toBeVisible();
+
+    await plan.fill('');
+    await window.mouse.click(box.x + 8, box.y + 8);
+    await expect(overlay).toHaveCount(0);
+    await expect(settingsHeading(window)).toBeVisible();
+
+    await recipeAction(window, 'avec-un-plan.yaml', 'Lancer').click();
+    await expect(plan).toBeVisible({ timeout: 10_000 });
+    await plan.fill(PLAN);
+    await overlay.locator('.close-btn').click();
+    await expect(overlay).toHaveCount(0);
+    await expect(settingsHeading(window)).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
 test('assistant de démarrage : ni un glisser hors de la carte ni un clic à côté ne perdent les réponses', async () => {
   const session = await start();
   if (!session) return;
@@ -370,6 +585,11 @@ test('assistant de démarrage : ni un glisser hors de la carte ni un clic à cô
     await expect(wizard).toHaveCount(1);
     await window.keyboard.press('Escape');
     await expect(wizard).toHaveCount(1);
+    await expect(input).toHaveValue(/Un long sujet/);
+
+    // Un accélérateur de menu (Alt+2) ne le démonte pas davantage.
+    await window.evaluate(() => window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' })));
+    await expect(window.locator('#left-tab-bibliography')).toHaveAttribute('aria-selected', 'false');
     await expect(input).toHaveValue(/Un long sujet/);
 
     // Le lien reste un geste franc.
@@ -419,6 +639,7 @@ test('création de projet : Échap ferme sans rien perdre, et Tab reste dans la 
     await window.keyboard.press('Escape');
     await expect(content).toHaveCount(0);
     await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(window.locator('button[title="Nouveau projet"]').first()).toBeFocused();
 
     await window.locator('button[title="Nouveau projet"]').first().click();
     await expect(name).toHaveValue('Mon projet');

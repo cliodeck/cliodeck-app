@@ -1,21 +1,28 @@
 import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 
 const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled]), [contenteditable="true"]'
 
 interface UseFocusTrapOptions {
   active: boolean
   onEscape?: () => void
   restoreFocus?: boolean
+  /**
+   * À l'écran au-dessus de toute modale (`--z-dialog`) : alerte, confirmation, message et voile de
+   * reconstruction. Une modale ouverte après, par un accélérateur de menu, reste dessous : ce piège
+   * garde donc Échap et Tab, quel que soit l'ordre d'ouverture.
+   */
+  aboveModals?: boolean
 }
 
 interface ActiveTrap {
   container: React.RefObject<HTMLDivElement>
   /** Son rang d'activation : voir `activationRef`. */
   activation: number
+  aboveModals: boolean
 }
 
-/** Les pièges actifs, du plus ancien au plus récent. */
+/** Les pièges actifs, de bas en haut, comme à l'écran. */
 const trapStack: ActiveTrap[] = []
 let activations = 0
 
@@ -39,41 +46,45 @@ function topTrap(): ActiveTrap | undefined {
   return trapStack[trapStack.length - 1]
 }
 
+function returnFocus(previousFocus: React.MutableRefObject<HTMLElement | null>): void {
+  previousFocus.current?.focus()
+  previousFocus.current = null
+}
+
 export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTMLDivElement> {
-  const { active, onEscape, restoreFocus = true } = options
+  const { active, onEscape, restoreFocus = true, aboveModals = false } = options
   const containerRef = useRef<HTMLDivElement>(null!)
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
   // Le rang se prend au rendu, où un parent passe avant ses enfants. Les effets font l'inverse :
   // deux pièges activés dans le même commit s'empileraient à l'envers, et Échap fermerait le
   // parent d'abord. Un piège qui reste actif garde son rang, quels que soient ses rendus.
+  // Le déclencheur aussi se retient au rendu : au commit, un champ en `autoFocus` a déjà le focus.
   const activationRef = useRef(0)
   if (!active) activationRef.current = 0
-  else if (activationRef.current === 0) activationRef.current = ++activations
+  else if (activationRef.current === 0) {
+    activationRef.current = ++activations
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+  }
 
   useEffect(() => {
     if (!active) return
-    const trap: ActiveTrap = { container: containerRef, activation: activationRef.current }
+    const trap: ActiveTrap = { container: containerRef, activation: activationRef.current, aboveModals }
     trapStack.push(trap)
-    trapStack.sort((a, b) => a.activation - b.activation)
+    trapStack.sort((a, b) => Number(a.aboveModals) - Number(b.aboveModals) || a.activation - b.activation)
     return () => {
       trapStack.splice(trapStack.indexOf(trap), 1)
     }
-  }, [active])
+  }, [active, aboveModals])
 
-  // Store the previously focused element when the trap activates
+  // Un piège qui cède la place à celui-ci dans le même commit vient de rendre le focus à son propre
+  // déclencheur, et c'est lui qu'il faudra retrouver, pas le bouton du sortant, vu au rendu. Si le
+  // focus est déjà dans le conteneur, un `autoFocus` l'y a mis : ce qui a été vu au rendu est juste.
   useEffect(() => {
-    if (active) {
-      previousFocusRef.current = document.activeElement as HTMLElement | null
-    }
-
-    return () => {
-      if (!active && restoreFocus && previousFocusRef.current) {
-        previousFocusRef.current.focus()
-        previousFocusRef.current = null
-      }
-    }
-  }, [active, restoreFocus])
+    if (!active) return
+    const focused = document.activeElement as HTMLElement | null
+    if (!containerRef.current?.contains(focused)) previousFocusRef.current = focused
+  }, [active])
 
   // Restore focus when trap deactivates.
   //
@@ -82,12 +93,22 @@ export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTML
   // file), la restauration du sortant doit précéder la capture de l'entrant,
   // quel que soit leur ordre de montage. Sinon le sortant reprend le focus à
   // l'entrant, et celui-ci capture `body` au lieu du déclencheur.
+  //
+  // Pas dans la fermeture de l'effet : elle passe en phase de mutation, et React remet ensuite le
+  // focus sur l'élément qui l'avait, s'il est encore dans la page.
   useLayoutEffect(() => {
-    if (!active && restoreFocus && previousFocusRef.current) {
-      previousFocusRef.current.focus()
-      previousFocusRef.current = null
-    }
+    if (!active && restoreFocus) returnFocus(previousFocusRef)
   }, [active, restoreFocus])
+
+  // Et quand il est démonté encore actif : une modale montée à la demande, comme l'éditeur de
+  // recette ou les Réglages depuis MainLayout. L'élément qui a le focus part avec elle, et React
+  // ne le remet pas.
+  useLayoutEffect(
+    () => () => {
+      if (restoreFocus) returnFocus(previousFocusRef)
+    },
+    [restoreFocus]
+  )
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -97,6 +118,14 @@ export function useFocusTrap(options: UseFocusTrapOptions): React.RefObject<HTML
       // ou le sommet lui-même. Une vraie frappe vide les microtâches entre deux écouteurs : le
       // piège qui vient de répondre est déjà démonté, et le suivant se croirait au sommet.
       if (e.defaultPrevented) return
+
+      // Échap maintenu : la répétition du clavier n'est pas un second geste. Le premier a fermé le
+      // sommet, et le suivant fermerait ce qui est dessous : les Réglages et leurs modifications.
+      if (e.key === 'Escape' && e.repeat) {
+        e.preventDefault()
+        return
+      }
+
       if (topTrap()?.container !== containerRef) return
 
       // Échap ne dépend PAS de la ref : le hook est utilisable en deux

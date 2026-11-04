@@ -125,6 +125,101 @@ describe('par-dessus les Réglages', () => {
     expect(closeSettings).not.toHaveBeenCalled();
   });
 
+  it('une modale ouverte par le menu pendant une question reste dessous : Tab et Échap vont à la question', async () => {
+    const closeAbout = vi.fn();
+    const scene = (about: boolean) => (
+      <>
+        <SettingsModal isOpen onClose={closeSettings} />
+        {about && (
+          <HelpModal isOpen onClose={closeAbout} title="À propos">
+            texte
+          </HelpModal>
+        )}
+        <RebuildProgressModal />
+        <AlertDialog />
+        <ConfirmDialog />
+      </>
+    );
+    const { rerender } = render(scene(false));
+    let answer: boolean | undefined;
+    await act(async () => {
+      void dialogs()
+        .showConfirm('Réinitialiser ?')
+        .then((value) => {
+          answer = value;
+        });
+    });
+
+    rerender(scene(true));
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement?.closest('.confirm-dialog')).not.toBeNull();
+
+    await pressEscape();
+    expect(answer).toBe(false);
+    expect(closeAbout).not.toHaveBeenCalled();
+    expect(closeSettings).not.toHaveBeenCalled();
+
+    await pressEscape();
+    expect(closeAbout).toHaveBeenCalledTimes(1);
+    expect(closeSettings).not.toHaveBeenCalled();
+  });
+
+  it('une modale ouverte par le menu sous le message d’échec : Échap ferme d’abord le message, à l’écran au-dessus', async () => {
+    const closeAbout = vi.fn();
+    const scene = (about: boolean) => (
+      <>
+        <SettingsModal isOpen onClose={closeSettings} />
+        {about && (
+          <HelpModal isOpen onClose={closeAbout} title="À propos">
+            texte
+          </HelpModal>
+        )}
+        <RebuildProgressModal />
+        <AlertDialog />
+        <ConfirmDialog />
+      </>
+    );
+    const { rerender } = render(scene(false));
+    await act(async () => {
+      useRebuildStore.getState().setRebuildProgress(failed);
+    });
+
+    rerender(scene(true));
+
+    await pressEscape();
+    expect(useRebuildStore.getState().failure).toBeNull();
+    expect(closeAbout).not.toHaveBeenCalled();
+    expect(closeSettings).not.toHaveBeenCalled();
+  });
+
+  it('une modale ouverte par le menu sous le voile en cours : Échap ne la ferme pas derrière lui', async () => {
+    const closeAbout = vi.fn();
+    const scene = (about: boolean) => (
+      <>
+        <SettingsModal isOpen onClose={closeSettings} />
+        {about && (
+          <HelpModal isOpen onClose={closeAbout} title="À propos">
+            texte
+          </HelpModal>
+        )}
+        <RebuildProgressModal />
+        <AlertDialog />
+        <ConfirmDialog />
+      </>
+    );
+    const { rerender } = render(scene(false));
+    await act(async () => {
+      useRebuildStore.getState().setRebuildProgress(running);
+    });
+
+    rerender(scene(true));
+
+    await pressEscape();
+    expect(closeAbout).not.toHaveBeenCalled();
+    expect(closeSettings).not.toHaveBeenCalled();
+  });
+
   it('l’aide de la section Sécurité : Échap ne ferme qu’elle', async () => {
     const closeHelp = vi.fn();
     renderApp(
