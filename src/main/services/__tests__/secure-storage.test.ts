@@ -51,7 +51,7 @@ vi.mock('electron-store', () => {
   return { default: FakeStore };
 });
 
-const { SecureStorage, SENSITIVE_KEYS, isSensitiveKey, maskAPIKey } = await import(
+const { SecureStorage, SENSITIVE_KEYS, isMaskedKey, isSensitiveKey, maskAPIKey } = await import(
   '../secure-storage.js'
 );
 
@@ -85,6 +85,60 @@ describe('maskAPIKey', () => {
   it('n’est pas réversible : le masque ne contient pas le cœur de la clé', () => {
     const key = 'sk-SECRETMILIEU-1234';
     expect(maskAPIKey(key)).not.toContain('SECRETMILIEU');
+  });
+});
+
+describe('isMaskedKey', () => {
+  it('reconnaît tout ce que maskAPIKey produit', () => {
+    for (const key of [
+      'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789',
+      'sk-proj-abcdefghijklmnopqrstuvwxyz',
+      'AIzaSyA1234567890abcdefghijklmnopqrstuv',
+      'P9NiZqmistral32caracteresABCDEFG',
+      'court',
+      '123456789012',
+      'a.b.c.d.e.f.g.h.i.j',
+      // Une clé collée avec son saut de ligne : le masque le garde.
+      'sk-une-cle-collee-avec-saut\n',
+      '\nsk-une-cle-collee-apres-saut',
+    ]) {
+      expect(isMaskedKey(maskAPIKey(key)), JSON.stringify(key)).toBe(true);
+    }
+  });
+
+  it('ne prend pour un masque aucune forme réelle de clé', () => {
+    for (const key of [
+      'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789',
+      'sk-proj-abcdefghijklmnopqrstuvwxyz',
+      'sk-abcdefghijklmnop',
+      'AIzaSyA1234567890abcdefghijklmnopqrstuv',
+      'P9NiZqmistral32caracteresABCDEFG',
+      'P9NiZqZoteroKey24Caracte',
+      // 12 caractères ou moins : leur masque est `****`, eux n'en sont pas un.
+      '123456789012',
+      'abcdefghijk',
+      'abc',
+      'a',
+      '*****',
+      '***',
+      // Des points, mais pas à la place d'un masque.
+      'aaaa.bbbb.cccc',
+      'abc...wxyz',
+      'abcd...wxy',
+      'abcde...wxyz',
+      'abcd....wxyz',
+      // Une clé plus longue qui contient un masque.
+      'sk-a...wXyZ-suite',
+    ]) {
+      expect(isMaskedKey(key), key).toBe(false);
+    }
+  });
+
+  it('une valeur vide ou d’un autre type n’est pas un masque : vider garde son sens', () => {
+    expect(isMaskedKey('')).toBe(false);
+    expect(isMaskedKey(undefined)).toBe(false);
+    expect(isMaskedKey(null)).toBe(false);
+    expect(isMaskedKey(1234)).toBe(false);
   });
 });
 
@@ -152,6 +206,29 @@ describe('SecureStorage — repli en clair (ADR 0006)', () => {
     expect(stores[0]['llm.mistralAPIKey']).toBe('ms-clair');
     expect(s.getKey('llm.mistralAPIKey')).toBe('ms-clair');
     warn.mockRestore();
+  });
+});
+
+describe('SecureStorage — un masque n’est jamais une clé', () => {
+  it('une clé de SENSITIVE_KEYS ne le stocke pas, et garde sa valeur', async () => {
+    const s = await freshStorage(true);
+    s.setKey('llm.claudeAPIKey', 'sk-la-vraie-cle-longue');
+    s.setKey('llm.claudeAPIKey', 'sk-a...wXyZ');
+    s.setKey('llm.claudeAPIKey', '****');
+    expect(s.getKey('llm.claudeAPIKey')).toBe('sk-la-vraie-cle-longue');
+
+    s.setKey('mcp.europeana.apiKey', 'abcd...wxyz');
+    expect(s.hasKey('mcp.europeana.apiKey')).toBe(false);
+  });
+
+  it('vider efface toujours ; un secret d’environnement MCP garde la forme qu’il veut', async () => {
+    const s = await freshStorage(true);
+    s.setKey('llm.claudeAPIKey', 'sk-la-vraie-cle-longue');
+    s.setKey('llm.claudeAPIKey', '');
+    expect(s.hasKey('llm.claudeAPIKey')).toBe(false);
+
+    s.setKey('mcp.env.client.TOKEN', 'abcd...wxyz');
+    expect(s.getKey('mcp.env.client.TOKEN')).toBe('abcd...wxyz');
   });
 });
 
@@ -274,6 +351,99 @@ describe('repli en clair visible (dette n° 16)', () => {
     // Illisible, donc pas « en clair » : seules les vraies valeurs en clair sont listées.
     expect(s.plaintextKeys()).toEqual(['zotero.apiKey']);
     expect(warn.mock.calls.some((c) => /aucun trousseau/.test(String(c[0])))).toBe(true);
+    warn.mockRestore();
+  });
+});
+
+describe('un masque déjà stocké (S17-1-29, sur une version antérieure)', () => {
+  /** Tel que `setKey` l'écrivait avant la règle : chiffré comme une vraie clé. */
+  const storedMask = (mask: string) => safeStorageState.encrypt(mask).toString('base64');
+
+  it('n’est pas rendu comme une clé : il partirait comme jeton vers le fournisseur', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    stores[0]['zotero.apiKey'] = storedMask('****');
+
+    expect(s.getKey('llm.openaiAPIKey')).toBe('');
+    expect(s.getKey('zotero.apiKey')).toBe('');
+    // Le champ ne se remontre plus en `****` : `maskAPIKey('')` rend une chaîne vide.
+    expect(maskAPIKey(s.getKey('llm.openaiAPIKey'))).toBe('');
+    warn.mockRestore();
+  });
+
+  it('se liste avec les clés illisibles, avec un seul avertissement par clé, et se supprime', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+
+    s.getKey('llm.openaiAPIKey');
+    s.getKey('llm.openaiAPIKey');
+    expect(s.unreadableKeys()).toEqual(['llm.openaiAPIKey']);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    s.setKey('llm.openaiAPIKey', '');
+    expect(s.unreadableKeys()).toEqual([]);
+    expect(stores[0]['llm.openaiAPIKey']).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it('une vraie clé saisie ensuite le remplace', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    s.setKey('llm.openaiAPIKey', 'sk-nouvelle-cle-valide-0123456789');
+
+    expect(s.getKey('llm.openaiAPIKey')).toBe('sk-nouvelle-cle-valide-0123456789');
+    expect(s.unreadableKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('vaut aussi quand le trousseau manque et que la valeur est en clair', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(false);
+    stores[0]['llm.claudeAPIKey'] = 'sk-a...wXyZ';
+
+    expect(s.getKey('llm.claudeAPIKey')).toBe('');
+    expect(s.unreadableKeys()).toEqual(['llm.claudeAPIKey']);
+    expect(s.plaintextKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('un secret d’environnement MCP garde la forme qu’il veut : la règle ne vise que SENSITIVE_KEYS', async () => {
+    const s = await freshStorage(true);
+    stores[0]['mcp.client.demo.TOKEN'] = storedMask('abcd...wxyz');
+
+    expect(s.getKey('mcp.client.demo.TOKEN')).toBe('abcd...wxyz');
+    expect(s.unreadableKeys()).toEqual([]);
+  });
+
+  it('une révocation efface aussi la liste : plus rien n’est stocké, donc plus rien d’illisible', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    s.revokeAll();
+
+    expect(s.unreadableKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('après une révocation, un nouveau masque se signale de nouveau', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    s.revokeAll();
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });
 });

@@ -19,7 +19,11 @@ export interface FakeOllama {
 /** Celle de nomic-embed-text : les index du projet refusent un vecteur d'une autre taille. */
 const EMBEDDING_DIMENSION = 768;
 
-export async function startFakeOllama(answer: string): Promise<FakeOllama> {
+/**
+ * `onlyItsModel` : le seul modèle « installé » répond ; les autres reçoivent la réponse d'Ollama à un
+ * modèle absent. Le chat doit le dire, et non rester muet.
+ */
+export async function startFakeOllama(answer: string, options: { onlyItsModel?: boolean } = {}): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
   const server: Server = createServer((req, res) => {
     let body = '';
@@ -43,11 +47,17 @@ export async function startFakeOllama(answer: string): Promise<FakeOllama> {
           const count = Array.isArray(input) ? input.length : 1;
           return json({ embeddings: Array.from({ length: count }, () => Array(EMBEDDING_DIMENSION).fill(0.1)) });
         }
-        case '/api/chat':
+        case '/api/chat': {
+          const { model } = JSON.parse(body) as { model: string };
+          if (options.onlyItsModel && model !== MODEL) {
+            res.statusCode = 404;
+            return json({ error: `model '${model}' not found` });
+          }
           res.setHeader('Content-Type', 'application/x-ndjson');
           res.write(`${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: answer }, done: false })}\n`);
           res.end(`${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' })}\n`);
           return undefined;
+        }
         default:
           res.statusCode = 404;
           res.end('{}');

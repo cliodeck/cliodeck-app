@@ -199,7 +199,12 @@ interface RAGQueryState {
    * éditent le même champ : ce qui vient d'être enregistré d'un côté doit
    * se voir de l'autre sans redémarrage.
    */
-  applyLLMConfig: (llm: { ollamaChatModel?: string; ollamaNumCtx?: number; ollamaThink?: boolean }) => void;
+  applyLLMConfig: (llm: {
+    ollamaChatModel?: string;
+    ollamaNumCtx?: number;
+    ollamaThink?: boolean;
+    generationProvider?: LLMProvider;
+  }) => void;
   loadAvailableModels: () => Promise<void>;
   loadAvailableCollections: () => Promise<void>;
   setSelectedCollections: (keys: string[]) => void;
@@ -594,6 +599,8 @@ export const useRAGQueryStore = create<RAGQueryState>()(
             ? llm.ollamaNumCtx
             : DEFAULT_PARAMS.numCtx;
         patch.think = typeof llm.ollamaThink === 'boolean' ? llm.ollamaThink : undefined;
+        // Le panneau affiche ce moteur : après Réinitialiser, il disait encore « embarqué ».
+        if (llm.generationProvider) patch.provider = llm.generationProvider;
         set((state) => ({ params: { ...state.params, ...patch } }));
       },
 

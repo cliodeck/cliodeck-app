@@ -16,6 +16,7 @@ import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../ba
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
 import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
 import type { RebuildProgressEvent } from '../../../backend/types/rebuild-progress.js';
+import type { RAGConfig } from '../../../backend/types/config.js';
 import { configManager } from './config-manager.js';
 import { retrievalService, type SourceType } from './retrieval-service.js';
 import { extractPdfIsolated } from './pdf-extract-isolated.js';
@@ -43,6 +44,8 @@ interface AnalyzeTopicsOptions {
 
 class PDFService {
   private pdfIndexer: PdfIndexer | null = null;
+  /** La section `rag` que l'indexeur a lue. */
+  private appliedRagConfig: string | null = null;
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   private currentProjectPath: string | null = null;
 
@@ -117,21 +120,6 @@ class PDFService {
       // run embedding warmup + a large batched rebuild concurrently.
       PdfVectorStore.configureEnhanced(this.vectorStore, ragConfig);
 
-      // Convertir le nouveau format de config en ancien format pour le summarizer
-      // Support pour compatibilité ascendante et descendante
-      const summarizerConfig = ragConfig.summarizer || {
-        enabled: ragConfig.summaryGeneration !== 'disabled' && ragConfig.summaryGeneration !== undefined,
-        method: ragConfig.summaryGeneration === 'abstractive' ? 'abstractive' : 'extractive',
-        maxLength: ragConfig.summaryMaxLength || 750,
-        llmModel: config.ollamaChatModel
-      };
-
-      console.log('📝 [PDF-SERVICE] Summarizer config:', {
-        enabled: summarizerConfig.enabled,
-        method: summarizerConfig.method,
-        maxLength: summarizerConfig.maxLength
-      });
-
       // Log RAG optimization features
       console.log('📝 [PDF-SERVICE] RAG optimization config:', {
         enableQualityFiltering: ragConfig.enableQualityFiltering ?? true,
@@ -141,18 +129,7 @@ class PDFService {
         customChunkingEnabled: ragConfig.customChunkingEnabled ?? false,
       });
 
-      // Initialiser l'indexeur (façade — la fonction d'embedding et la
-      // construction du backend PDFIndexer vivent maintenant dans
-      // ./pdf/PdfIndexer.ts).
-      if (!this.embedding) {
-        throw new Error('PDF Service: embedding provider not configured');
-      }
-      this.pdfIndexer = new PdfIndexer({
-        vectorStore: this.vectorStore,
-        embeddingProvider: this.embedding,
-        ragConfig,
-        summarizerConfig,
-      });
+      this.createIndexer(ragConfig);
 
       this.currentProjectPath = projectPath;
 
@@ -185,6 +162,57 @@ class PDFService {
       console.error('❌ Failed to initialize PDF Service:', error);
       throw error;
     }
+  }
+
+  /**
+   * Construit l'indexeur (façade — la fonction d'embedding et la construction du backend PDFIndexer
+   * vivent dans ./pdf/PdfIndexer.ts). Le découpage, le filtrage et le résumé s'y figent.
+   */
+  private createIndexer(ragConfig: RAGConfig): void {
+    if (!this.vectorStore) {
+      throw new Error('PDF Service: vector store not open');
+    }
+    if (!this.embedding) {
+      throw new Error('PDF Service: embedding provider not configured');
+    }
+    // Convertir le nouveau format de config en ancien format pour le summarizer
+    // Support pour compatibilité ascendante et descendante
+    const summarizerConfig = ragConfig.summarizer || {
+      enabled: ragConfig.summaryGeneration !== 'disabled' && ragConfig.summaryGeneration !== undefined,
+      method: ragConfig.summaryGeneration === 'abstractive' ? 'abstractive' : 'extractive',
+      maxLength: ragConfig.summaryMaxLength || 750,
+      llmModel: configManager.getLLMConfig().ollamaChatModel,
+    };
+
+    console.log('📝 [PDF-SERVICE] Summarizer config:', {
+      enabled: summarizerConfig.enabled,
+      method: summarizerConfig.method,
+      maxLength: summarizerConfig.maxLength,
+    });
+
+    this.pdfIndexer = new PdfIndexer({
+      vectorStore: this.vectorStore,
+      embeddingProvider: this.embedding,
+      ragConfig,
+      summarizerConfig,
+    });
+    this.appliedRagConfig = JSON.stringify(ragConfig);
+  }
+
+  /**
+   * Répercute la section `rag` qui vient d'être écrite. Sans ça, seul `config:set('llm')` passe par
+   * `init` : un changement de découpage seul restait sans effet jusqu'à la réouverture du projet, et
+   * la réindexation suivante écrivait avec l'ancien préréglage, sans erreur.
+   *
+   * Ce n'est pas une relance : ni magasin fermé, ni fournisseurs refaits. Une indexation en vol finit
+   * avec l'indexeur qu'elle a. Services à l'arrêt : `init` relira la section.
+   */
+  applyRagConfig(): void {
+    if (!this.vectorStore || !this.embedding) return;
+    const ragConfig = configManager.getRAGConfig();
+    if (JSON.stringify(ragConfig) === this.appliedRagConfig) return;
+    PdfVectorStore.configureEnhanced(this.vectorStore, ragConfig);
+    this.createIndexer(ragConfig);
   }
 
   /**

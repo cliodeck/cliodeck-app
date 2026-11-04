@@ -6,7 +6,7 @@ import { ipcMain } from 'electron';
 import { zoteroService } from '../../services/zotero-service.js';
 import { pdfService } from '../../services/pdf-service.js';
 import { configManager } from '../../services/config-manager.js';
-import { maskAPIKey } from '../../services/secure-storage.js';
+import { isMaskedKey } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -20,8 +20,9 @@ import { projectManager } from '../../services/project-manager.js';
 
 /**
  * The renderer only ever receives masked API keys (config:get redaction), so
- * the apiKey it round-trips in handler options may be a mask. Substitute the
- * real stored key when the incoming value matches the mask of the stored one.
+ * the apiKey it round-trips in handler options may be a mask. A value shaped
+ * like a mask is never a key: substitute the stored key, whichever key it was
+ * the mask of, and send nothing rather than a mask when none is stored.
  */
 /**
  * Les handlers Zotero écrivent dans le vector store APRÈS de longs `await`
@@ -48,10 +49,8 @@ function withResolvedZoteroApiKey<T extends object>(options: T): T {
   if (!('apiKey' in options)) return options;
   const incoming = (options as { apiKey?: unknown }).apiKey;
   if (typeof incoming !== 'string') return options;
-  const stored = configManager.getAPIKey('zotero.apiKey');
-  if (!stored) return options;
-  if (incoming === '' || incoming === maskAPIKey(stored)) {
-    return { ...options, apiKey: stored };
+  if (incoming === '' || isMaskedKey(incoming)) {
+    return { ...options, apiKey: configManager.getAPIKey('zotero.apiKey') };
   }
   return options;
 }

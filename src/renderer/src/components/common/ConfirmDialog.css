@@ -20,6 +20,10 @@
   min-width: 320px;
   max-width: 500px;
   width: 90%;
+  /* Une question longue défile dans son corps : ses boutons restent à l'écran. */
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   animation: confirmSlideIn var(--transition-normal) ease-out;
 }
 
@@ -37,6 +41,8 @@
 
 .confirm-dialog-body {
   padding: var(--spacing-lg) var(--spacing-xl);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .confirm-dialog-message {
