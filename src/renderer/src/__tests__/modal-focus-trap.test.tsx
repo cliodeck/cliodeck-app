@@ -110,6 +110,25 @@ describe('câblage des modales', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('la ref du piège est sur le fond ou sur sa carte, pas sur ce qu’une seule vue affiche', () => {
+    // Sinon le conteneur est nul dans les autres vues, et la modale y compte pour un panneau : Tab
+    // en sort, et rien ne la voit ouverte (la Méthodologie, posée sur la fiche d'une fonctionnalité).
+    const offenders = modalFiles(COMPONENTS)
+      .filter((file) => {
+        const src = fs.readFileSync(file, 'utf8');
+        const backdrop = src.indexOf('backdropClose(');
+        const declared = src.match(/const\s+(\w+)\s*=\s*useFocusTrap\(/);
+        if (backdrop < 0 || !declared) return false;
+        const overlay = src.lastIndexOf('<', backdrop);
+        const ref = src.indexOf(`ref={${declared[1]}}`);
+        // Un élément ouvert entre le fond et la ref : le fond lui-même. Deux : sa carte.
+        const opened = ref < overlay ? Infinity : (src.slice(overlay, ref).match(/<[A-Za-z]/g) ?? []).length;
+        return opened > 2;
+      })
+      .map((file) => path.relative(COMPONENTS, file));
+    expect(offenders).toEqual([]);
+  });
+
   it('couvre bien un nombre plausible de modales', () => {
     const withHook = modalFiles(COMPONENTS).filter((f) =>
       fs.readFileSync(f, 'utf8').includes('useFocusTrap(')

@@ -129,6 +129,29 @@ async function openRecipes(window: Page): Promise<void> {
 const recipeAction = (window: Page, file: string, action: 'Éditer' | 'Lancer') =>
   window.locator('li', { hasText: file }).getByRole('button', { name: action });
 
+/** Le rendu est passé : ce qui ne doit pas s'ouvrir n'a pas d'autre résultat à attendre. */
+const settled = (window: Page) =>
+  window.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+/** Même événement que l'entrée du menu, rendu compris. */
+async function fromMenu(window: Page, event: string): Promise<void> {
+  await window.evaluate((name) => {
+    window.dispatchEvent(new CustomEvent(name));
+  }, event);
+  await settled(window);
+}
+
+/**
+ * Ouvre et ferme une modale paresseuse : son module chargé, elle s'ouvrirait dès le rendu suivant.
+ * Qu'elle reste absente veut alors dire quelque chose : sinon, elle serait peut-être encore en route.
+ */
+async function loadLazyModal(window: Page, event: string, modal: ReturnType<Page['locator']>): Promise<void> {
+  await fromMenu(window, event);
+  await expect(modal).toBeVisible({ timeout: 15_000 });
+  await window.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+}
+
 /** La fenêtre ouverte par-dessus les Réglages : l'éditeur de recette ou son exécution. */
 const nestedOverlay = (window: Page) => window.locator('.settings-modal .settings-modal');
 
@@ -219,7 +242,7 @@ test('Échap maintenu sur une question : la répétition du clavier ne ferme pas
   }
 });
 
-test('une modale ouverte par le menu pendant une question reste dessous : Tab et Échap vont à la question', async () => {
+test('le menu pendant une question : rien ne s’ouvre dessous, Tab et Échap vont à la question', async () => {
   const session = await start();
   if (!session) return;
   const { app, window } = session;
@@ -227,14 +250,15 @@ test('une modale ouverte par le menu pendant une question reste dessous : Tab et
   const inQuestion = () => window.evaluate(() => document.activeElement?.closest('.confirm-dialog') !== null);
 
   try {
+    await loadLazyModal(window, 'show-about-dialog', about);
+
     await openSettings(window);
     const field = await changeFontSize(window);
     await resetButton(window).click();
     await expect(confirmDialog(window)).toBeVisible();
 
-    // Même événement que l'entrée du menu.
-    await window.evaluate(() => window.dispatchEvent(new CustomEvent('show-about-dialog')));
-    await expect(about).toBeVisible({ timeout: 15_000 });
+    await fromMenu(window, 'show-about-dialog');
+    await expect(about).toHaveCount(0);
 
     for (let press = 0; press < 4; press += 1) {
       await window.keyboard.press('Tab');
@@ -243,13 +267,113 @@ test('une modale ouverte par le menu pendant une question reste dessous : Tab et
 
     await window.keyboard.press('Escape');
     await expect(confirmDialog(window)).toHaveCount(0);
-    await expect(about).toBeVisible();
-    await expect(field).toHaveValue('21');
-
-    await window.keyboard.press('Escape');
     await expect(about).toHaveCount(0);
     await expect(settingsHeading(window)).toBeVisible();
     await expect(field).toHaveValue('21');
+  } finally {
+    await app.close();
+  }
+});
+
+test('Réglages modifiés, export demandé au menu : rien ne s’ouvre derrière eux, Tab et Échap restent aux Réglages', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson } = makeArticle();
+  const exportModal = window.locator('.pdf-export-modal');
+  const inSettings = () => window.evaluate(() => document.activeElement?.closest('.settings-modal') !== null);
+
+  try {
+    await openProject(app, window, projectJson);
+    await loadLazyModal(window, 'show-pdf-export-dialog', exportModal);
+
+    await openSettings(window);
+    const field = await changeFontSize(window);
+
+    await fromMenu(window, 'show-pdf-export-dialog');
+    await expect(exportModal).toHaveCount(0);
+
+    await field.focus();
+    await window.keyboard.press('Tab');
+    expect(await inSettings()).toBe(true);
+    await expect(field).toHaveValue('21');
+
+    await window.keyboard.press('Escape');
+    await expect(settingsHeading(window)).toHaveCount(0);
+    await expect(exportModal).toHaveCount(0);
+
+    // La demande n'a pas été gardée pour plus tard, et le menu répond de nouveau.
+    await fromMenu(window, 'show-pdf-export-dialog');
+    await expect(exportModal).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
+test('À propos ouvert, Réglages demandés au menu : rien ne s’ouvre, Échap ferme ce qui est à l’écran', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const about = window.locator('.about-modal');
+
+  try {
+    await openSettings(window);
+    await window.keyboard.press('Escape');
+    await expect(settingsHeading(window)).toHaveCount(0);
+
+    await fromMenu(window, 'show-about-dialog');
+    await expect(about).toBeVisible({ timeout: 15_000 });
+
+    await fromMenu(window, 'show-settings-modal');
+    await expect(settingsHeading(window)).toHaveCount(0);
+
+    await window.keyboard.press('Escape');
+    await expect(about).toHaveCount(0);
+    await expect(settingsHeading(window)).toHaveCount(0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('Méthodologie : dans toutes ses vues, Tab y reste et le menu ne change pas de panneau derrière elle', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const modal = window.locator('.methodology-modal');
+  const helpButton = window.locator('.floating-help-btn');
+  const inModal = () => window.evaluate(() => document.activeElement?.closest('.methodology-modal') !== null);
+
+  try {
+    await helpButton.click();
+    await expect(modal).toBeVisible({ timeout: 15_000 });
+
+    // Vue d'ensemble : plus de frappes qu'il n'y a de boutons, pour passer la borne.
+    for (let press = 0; press < 8; press += 1) {
+      await window.keyboard.press('Tab');
+      expect(await inModal()).toBe(true);
+    }
+
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.send('menu:switch-panel', 'bibliography');
+    });
+    await settled(window);
+    await expect(window.locator('#left-tab-bibliography')).toHaveAttribute('aria-selected', 'false');
+
+    // La fiche d'une fonctionnalité : le focus y circule, et sort de la dernière borne vers la première.
+    await modal.locator('.feature-card').first().click();
+    await expect(modal.locator('.feature-detail')).toBeVisible();
+    const before = await window.evaluate(() => document.activeElement?.textContent ?? '');
+    const seen = new Set<string>([before]);
+    for (let press = 0; press < 20; press += 1) {
+      await window.keyboard.press('Tab');
+      expect(await inModal()).toBe(true);
+      seen.add(await window.evaluate(() => document.activeElement?.textContent ?? ''));
+    }
+    expect(seen.size).toBeGreaterThan(1);
+
+    await window.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    expect(await helpButton.evaluate((button) => button === document.activeElement)).toBe(true);
   } finally {
     await app.close();
   }

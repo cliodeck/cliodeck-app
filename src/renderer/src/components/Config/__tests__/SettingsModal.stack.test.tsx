@@ -125,7 +125,10 @@ describe('par-dessus les Réglages', () => {
     expect(closeSettings).not.toHaveBeenCalled();
   });
 
-  it('une modale ouverte par le menu pendant une question reste dessous : Tab et Échap vont à la question', async () => {
+  it.each([
+    ['une question', '.confirm-dialog', () => dialogs().showConfirm('Réinitialiser ?'), false],
+    ['une alerte', '.alert-dialog', () => dialogs().showAlert('Échec de l’enregistrement'), undefined],
+  ])('une modale qui s’ouvre pendant %s reste dessous : Tab et Échap vont à ce qui est au-dessus à l’écran', async (_name, selector, ask, refusal) => {
     const closeAbout = vi.fn();
     const scene = (about: boolean) => (
       <>
@@ -141,22 +144,20 @@ describe('par-dessus les Réglages', () => {
       </>
     );
     const { rerender } = render(scene(false));
-    let answer: boolean | undefined;
+    let answer: unknown = 'en attente';
     await act(async () => {
-      void dialogs()
-        .showConfirm('Réinitialiser ?')
-        .then((value) => {
-          answer = value;
-        });
+      void (ask() as Promise<unknown>).then((value) => {
+        answer = value;
+      });
     });
 
     rerender(scene(true));
 
     fireEvent.keyDown(document, { key: 'Tab' });
-    expect(document.activeElement?.closest('.confirm-dialog')).not.toBeNull();
+    expect(document.activeElement?.closest(selector)).not.toBeNull();
 
     await pressEscape();
-    expect(answer).toBe(false);
+    expect(answer).toBe(refusal);
     expect(closeAbout).not.toHaveBeenCalled();
     expect(closeSettings).not.toHaveBeenCalled();
 

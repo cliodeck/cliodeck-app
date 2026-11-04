@@ -133,16 +133,21 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       }
     };
 
+    // Le menu n'ouvre pas une modale par-dessus une autre. Ses accélérateurs passent par-dessus le
+    // fond, or deux modales de la même couche s'empilent à l'écran dans l'ordre du DOM, et dans la
+    // pile dans l'ordre d'ouverture : l'export demandé depuis les Réglages resterait caché derrière
+    // eux, tout en recevant Tab et Échap. La Méthodologie n'a pas d'entrée au menu, et ses boutons
+    // sont sous le fond.
     const handleShowPDFExport = () => {
-      setShowExportModal(true);
+      if (!isModalOpen()) setShowExportModal(true);
     };
 
     const handleShowSettings = () => {
-      setShowSettingsModal(true);
+      if (!isModalOpen()) setShowSettingsModal(true);
     };
 
     const handleShowUsageJournal = () => {
-      setShowUsageJournalModal(true);
+      if (!isModalOpen()) setShowUsageJournalModal(true);
     };
 
     const handleShowMethodology = (event: Event) => {
@@ -152,7 +157,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
     };
 
     const handleShowAbout = () => {
-      setShowAboutModal(true);
+      if (!isModalOpen()) setShowAboutModal(true);
     };
 
     window.addEventListener('switch-panel', handleSwitchPanel);

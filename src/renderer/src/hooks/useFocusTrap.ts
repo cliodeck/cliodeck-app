@@ -9,8 +9,8 @@ interface UseFocusTrapOptions {
   restoreFocus?: boolean
   /**
    * À l'écran au-dessus de toute modale (`--z-dialog`) : alerte, confirmation, message et voile de
-   * reconstruction. Une modale ouverte après, par un accélérateur de menu, reste dessous : ce piège
-   * garde donc Échap et Tab, quel que soit l'ordre d'ouverture.
+   * reconstruction. Une modale qui s'ouvre après, à l'issue d'un import par exemple, reste dessous :
+   * ce piège garde donc Échap et Tab, quel que soit l'ordre d'ouverture.
    */
   aboveModals?: boolean
 }
