@@ -67,16 +67,60 @@ Cycle de vie :
   changé n'est plus adjudicable tel quel.
 - **Expiration** (arbitrage 5) : à la fermeture du document (destruction de
   la vue), les propositions en attente émettent `expired` — pas de
-  persistance, pas de restauration.
+  persistance, pas de restauration. Changer de mode détruit la vue comme
+  changer de chapitre ou de projet.
+- **Vue en lecture seule** (`bufferDetached`, le temps d'un changement de
+  projet) : `facade.propose` refuse et rend `false`. L'effet passerait, mais
+  accepter journaliserait une décision sans rien écrire. L'appelant garde son
+  texte ; il n'y a pas de repli vers une écriture directe.
+- **Une proposition se voit** : la façade l'amène à l'écran et y place le
+  curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit. Au
+  retour d'un mode, le défilement restauré n'arrive qu'à l'image suivante :
+  `propose` et `revealLine` l'annulent, sinon il repasserait sur eux.
+- **Fins de ligne** : le texte accepté ou modifié entre avec le séparateur du
+  document. CM6 ne découpe une chaîne que sur le séparateur déclaré : un `\n`
+  resterait à l'intérieur d'une ligne d'un fichier CRLF, qui deviendrait mixte.
 
 Entrées dans le contrat aujourd'hui :
 
 - drafts Brainstorm (`insertDraftAtCursor`, catégorie `brainstorm-draft`) ;
+- diapositives générées (`SlideGenerationPanel`, catégorie `slides-generation`) ;
 - contenu IA du canal IPC `editor:insert-text` (`metadata.modeId` présent,
-  catégorie `ai-insert`) ;
+  catégorie `ai-insert`) ; rien ne l'emprunte aujourd'hui ;
 - hook de dev `window.__cliodeckProposals.inject({ proposed: '…', … })`,
   exposé par l'éditeur CM6 — injection d'une proposition factice sans aucun
   modèle (critère d'acceptation de la phase, vérification pilotée).
+
+### Les brouillons (« Envoyer vers Write », file du mode Écriture)
+
+L'éditeur n'est monté qu'en mode Écriture. `sendDraftToWrite` bascule donc
+d'abord (`ensureWriteEditor`), attend l'éditeur, puis propose :
+
+- **au curseur** de l'auteur. L'ancre de la proposition est le curseur lui-même
+  et le padding de bloc fait partie du texte proposé : rejeter ne le déplace pas,
+  et la frappe suivante reste dans la phrase qu'il écrivait, y compris en fin de
+  ligne, juste avant un titre ou un séparateur de diapositives. Le curseur et
+  l'annulation survivent à un changement de mode : l'état de la vue reste en
+  mémoire, hors du composant (`editor-state-memory.ts`), jusqu'au prochain
+  changement de projet. Revenu sur le même document, l'auteur continue sans
+  cliquer : la vue reprend le focus, sauf si un champ l'a déjà, s'il n'y avait
+  posé aucun curseur ou si un autre document s'ouvre (changement de chapitre,
+  de projet) ;
+- **en fin de document** s'il n'y a posé aucun curseur (document jamais affiché,
+  ou état oublié) : à l'offset 0, la proposition tomberait au-dessus du titre ;
+- **nulle part** s'il n'y a rien pour la recevoir (`unavailable` : changement de
+  projet en cours, livre sans chapitre ouvert, éditeur qui ne monte pas). Le
+  miroir ne bouge pas, la réponse part dans la file, et un message le dit à
+  l'auteur.
+
+Dans la file, un brouillon ne sort qu'à la décision : `accepted` ou `modified`
+le retirent ; `rejected`, `invalidated` et `expired` le laissent, et son bouton
+redevient actif. `onceProposalDecided` (`proposals-ipc.ts`) porte cette décision,
+avant le journal et indépendamment de lui. Une proposition restée sans décision
+à la fermeture de l'app laisse le brouillon dans la file : c'est voulu.
+
+Le glisser-déposer d'une carte reste une insertion directe (drop natif CM6,
+annulable, geste de l'auteur), et n'est pas journalisé.
 
 ## 3. Journalisation (4c)
 

@@ -12,6 +12,7 @@
  * reconstruite » — c'est cette croyance qui rendait le défaut invisible.
  */
 import { useEditorStore } from '../stores/editorStore';
+import { useWorkspaceModeStore } from '../stores/workspaceModeStore';
 import type { EditorFacade } from '@/editor/facade';
 
 /**
@@ -50,4 +51,21 @@ export function waitForEditorFacade(
       }
     });
   });
+}
+
+/**
+ * Passe en Écriture et rend la façade de l'éditeur qui s'y trouve, `null` s'il ne monte pas.
+ *
+ * L'éditeur n'est monté qu'en mode Écriture. Hors de ce mode, une façade encore là appartient à
+ * une vue qui part : c'est la suivante qu'on attend. Déjà en Écriture, on ne bascule rien et on
+ * n'attend que si un document est en train d'en remplacer un autre.
+ */
+export function ensureWriteEditor(timeoutMs?: number): Promise<EditorFacade | null> {
+  const workspace = useWorkspaceModeStore.getState();
+  const { editorFacade } = useEditorStore.getState();
+  if (workspace.active === 'write') {
+    return editorFacade ? Promise.resolve(editorFacade) : waitForEditorFacade(null, timeoutMs);
+  }
+  workspace.setActive('write');
+  return waitForEditorFacade(editorFacade, timeoutMs);
 }

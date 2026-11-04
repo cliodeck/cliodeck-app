@@ -50,6 +50,10 @@ export interface CachedEditorState {
   text: string;
   /** Défilement en pixels, restauré après le premier rendu. */
   scrollTop: number;
+  /** L'auteur avait posé son curseur : à défaut, le 0 de la sélection ne vient de personne. */
+  cursorPlaced?: boolean;
+  /** Numéro du document à sa mise en cache : le même au retour, c'est un changement de mode. */
+  documentVersion?: number;
 }
 
 /** Champs sérialisés en plus du document et de la sélection. */
@@ -107,8 +111,8 @@ export function restoreEditorState(
 
 /**
  * Cache borné, ordonné par usage (le plus récemment touché en dernier).
- * Les clés sont des chemins de fichiers absolus : pas de collision entre
- * projets.
+ * Les clés sont des chemins de fichiers absolus, ou le numéro d'un tampon sans
+ * titre : voir `editor-state-memory.ts`.
  */
 export class EditorStateCache {
   private readonly entries = new Map<string, CachedEditorState>();

@@ -26,11 +26,14 @@ export const SlideNavigator: React.FC = () => {
 
   const [activeIndex, setActiveIndex] = useState(0);
   useEffect(() => {
-    if (!editorFacade?.onSelectionChange) return;
-    return editorFacade.onSelectionChange((offset) => {
+    if (!editorFacade) return;
+    const followCursor = (offset: number) => {
       const next = slideIndexAtOffset(deckRef.current, offset);
       setActiveIndex((prev) => (prev === next ? prev : next));
-    });
+    };
+    // Le curseur survit à un changement de mode : il ne bougera pas pour le dire.
+    followCursor(editorFacade.getCursorOffset());
+    return editorFacade.onSelectionChange?.(followCursor);
   }, [editorFacade]);
 
   const handleSlideClick = (lineNumber: number) => {

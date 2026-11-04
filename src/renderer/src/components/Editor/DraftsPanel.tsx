@@ -2,32 +2,47 @@
  * Panneau des brouillons Brainstorm (#7, A13 option c).
  *
  * Panneau flottant du mode Écriture (même famille que SimilarityPanel) :
- * liste des réponses mises de côté depuis le chat, chacune insérable au
+ * liste des réponses mises de côté depuis le chat, chacune proposable au
  * curseur (via `insertDraftAtCursor` — la proposition reste adjudicable
  * et annulable), glissable dans l'éditeur (drop natif CM6 : le texte
  * s'insère à la position exacte du dépôt, Cmd+Z l'annule), ou jetable.
+ * Une proposition ne fait pas sortir le brouillon de la file : seule son
+ * acceptation le fait.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, Check, GripVertical, Inbox, Trash2, X } from 'lucide-react';
 import { useDraftsStore, draftTitle, type BrainstormDraft } from '../../stores/draftsStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { noDocumentForProposal, notifyDraftKept } from '../../services/send-draft-to-write';
+import { onceProposalDecided } from './proposals-ipc';
 import './DraftsPanel.css';
+
+/**
+ * Hors du composant : quand la décision tombe, le panneau a pu se fermer et le mode changer.
+ * Accepté ou modifié, le texte est entré. Rejeté, invalidé ou expiré, il ne serait plus nulle part.
+ */
+function followProposal(draftId: string, proposalId: string): void {
+  useDraftsStore.getState().setProposed(draftId, true);
+  onceProposalDecided(proposalId, (decision) => {
+    const drafts = useDraftsStore.getState();
+    drafts.setProposed(draftId, false);
+    if (decision === 'accepted' || decision === 'modified') drafts.remove(draftId);
+  });
+}
 
 const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
   const { t } = useTranslation('common');
   const remove = useDraftsStore((s) => s.remove);
-  const [inserted, setInserted] = useState(false);
+  const inserted = useDraftsStore((s) => s.proposedIds.includes(draft.id));
 
   const insertAtCursor = () => {
-    const { mode } = useEditorStore
-      .getState()
-      .insertDraftAtCursor(draft.content, draft.source);
-    setInserted(true);
-    // Laisse le feedback visible un instant avant de sortir de la file.
-    setTimeout(() => remove(draft.id), 600);
-    void mode;
+    const outcome = noDocumentForProposal()
+      ? null
+      : useEditorStore.getState().insertDraftAtCursor(draft.content, draft.source);
+    if (outcome?.mode === 'cursor') followProposal(draft.id, outcome.proposalId);
+    else notifyDraftKept(t);
   };
 
   return (

@@ -20,6 +20,7 @@ import type { ResolvedChapter } from '@backend/types/book';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 
 import { CodeMirrorEditor } from '../CodeMirrorEditor';
+import { resetEditorStates } from '../editor-state-memory';
 import { ChapterNavigator } from '../../Book/ChapterNavigator';
 import { useAutoSave } from '../../../hooks/useAutoSave';
 import { useEditorStore } from '../../../stores/editorStore';
@@ -110,6 +111,7 @@ async function mountBook(open: string = A): Promise<void> {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  resetEditorStates();
   disk = { [A]: TEXT_A, [B]: TEXT_B };
   writes = [];
   beforeWrite = () => undefined;

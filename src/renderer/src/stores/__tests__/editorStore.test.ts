@@ -2,12 +2,13 @@
  * Tests for editorStore.insertDraftAtCursor (fusion 2.6, migration CM6).
  *
  * L'éditeur réel exige une EditorView ; la façade est stubée avec les
- * seules méthodes que l'action lit. Trois chemins : proposition (Phase 4,
- * façade avec propose), insertion directe (façade sans propose), et
- * fallback append (aucun éditeur monté).
+ * seules méthodes que l'action lit. Le texte de l'IA n'a qu'un chemin : une
+ * proposition, au curseur s'il est connu, sinon en fin de document. Sans
+ * éditeur, ou sur une vue qui refuse, rien n'entre nulle part.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EditorFileError, openErrorKey, useEditorStore } from '../editorStore';
+import { insertDraftAtOffset } from '../../components/Brainstorm/messageToDraft';
 import i18n from '../../i18n';
 import type { EditorFacade } from '@/editor/facade';
 import type { Proposal } from '@/editor/proposals';
@@ -23,11 +24,12 @@ beforeEach(() => {
 function fakeFacade(
   content: string,
   cursor: number,
-  withPropose: boolean
+  options: { accepts?: boolean; cursorKnown?: boolean } = {}
 ): {
   facade: EditorFacade;
   calls: { setValue: Array<{ text: string; cursor?: number }>; proposals: Array<Partial<Proposal>> };
 } {
+  const { accepts = true, cursorKnown = true } = options;
   const calls = {
     setValue: [] as Array<{ text: string; cursor?: number }>,
     proposals: [] as Array<Partial<Proposal>>,
@@ -37,6 +39,7 @@ function fakeFacade(
     engine: 'cm6',
     getValue: () => current,
     getCursorOffset: () => cursor,
+    hasKnownCursor: () => cursorKnown,
     getSelectionText: () => null,
     replaceSelection: () => undefined,
     setValue: (text, cursorOffset) => {
@@ -46,69 +49,131 @@ function fakeFacade(
     appendText: (text) => {
       current += text;
     },
+    propose: (p: Partial<Proposal>) => {
+      calls.proposals.push(p);
+      return accepts;
+    },
     revealLine: () => undefined,
     focus: () => undefined,
     onContentChange: () => () => undefined,
-    ...(withPropose
-      ? {
-          propose: (p: Partial<Proposal>) => {
-            calls.proposals.push(p);
-            return true;
-          },
-        }
-      : {}),
   };
   return { facade, calls };
 }
 
-describe('insertDraftAtCursor — fallback path (no editor)', () => {
-  it('appends the draft when no editor is mounted', () => {
+describe('insertDraftAtCursor — sans éditeur', () => {
+  it('rend unavailable et ne touche pas au miroir', () => {
     useEditorStore.setState({ content: 'existing' });
     const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
-    expect(mode).toBe('append');
-    expect(useEditorStore.getState().content).toBe('existing\n\nNEW\n');
-    expect(useEditorStore.getState().isDirty).toBe(true);
+    expect(mode).toBe('unavailable');
+    expect(useEditorStore.getState().content).toBe('existing');
+    expect(useEditorStore.getState().isDirty).toBe(false);
   });
 
-  it('handles an empty document by writing the draft alone', () => {
+  it('document vide : rien n’y entre non plus', () => {
     const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
-    expect(mode).toBe('append');
-    expect(useEditorStore.getState().content).toBe('NEW');
+    expect(mode).toBe('unavailable');
+    expect(useEditorStore.getState().content).toBe('');
+    expect(useEditorStore.getState().isDirty).toBe(false);
   });
 });
 
 describe('insertDraftAtCursor — contrat propositionnel (Phase 4)', () => {
   it('soumet une proposition d’insertion au curseur, sans toucher au document', () => {
-    const { facade, calls } = fakeFacade('ABCDE', 3, true);
+    const { facade, calls } = fakeFacade('ABCDE', 3);
     useEditorStore.setState({ content: 'ABCDE', editorFacade: facade });
 
-    const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
-    expect(mode).toBe('cursor');
+    const outcome = useEditorStore.getState().insertDraftAtCursor('NEW');
+    expect(outcome.mode).toBe('cursor');
     expect(calls.proposals).toHaveLength(1);
     const p = calls.proposals[0];
     expect(p.category).toBe('brainstorm-draft');
     expect(p.original).toBe('');
-    expect(p.range?.from).toBe(p.range?.to);
+    expect(p.range).toEqual({ from: 3, to: 3 });
     // Le segment proposé contient le draft avec son padding de bloc.
-    expect(p.proposed).toContain('NEW');
+    expect(p.proposed).toBe('\n\nNEW\n\n');
     // Aucune écriture directe : le document ne change qu'à l'acceptation.
     expect(calls.setValue).toHaveLength(0);
     expect(facade.getValue()).toBe('ABCDE');
+    expect(useEditorStore.getState().isDirty).toBe(false);
   });
-});
 
-describe('insertDraftAtCursor — façade sans propositions (défensif)', () => {
-  it('insère directement au curseur et synchronise le store', () => {
-    const { facade, calls } = fakeFacade('ABCDE', 3, false);
+  it('rend l’identifiant de la proposition : c’est par lui qu’on suit la décision', () => {
+    const { facade, calls } = fakeFacade('ABCDE', 3);
+    useEditorStore.setState({ content: 'ABCDE', editorFacade: facade });
+
+    const outcome = useEditorStore.getState().insertDraftAtCursor('NEW');
+
+    expect(outcome.mode === 'cursor' && outcome.proposalId).toBeTruthy();
+    expect(outcome.mode === 'cursor' && outcome.proposalId).toBe(calls.proposals[0].id);
+  });
+
+  it('aucun curseur connu : la proposition va en fin de document, pas au-dessus du titre', () => {
+    const { facade, calls } = fakeFacade('# Titre\n\nTexte.\n', 0, { cursorKnown: false });
+    useEditorStore.setState({ content: '# Titre\n\nTexte.\n', editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('NEW');
+
+    expect(calls.proposals[0].range).toEqual({ from: 16, to: 16 });
+    expect(calls.proposals[0].proposed).toBe('\nNEW');
+  });
+
+  it('un curseur connu à l’offset 0 reste au début', () => {
+    const { facade, calls } = fakeFacade('# Titre\n', 0);
+    useEditorStore.setState({ content: '# Titre\n', editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('NEW');
+
+    expect(calls.proposals[0].range).toEqual({ from: 0, to: 0 });
+  });
+
+  it('curseur en fin de ligne : la proposition reste au curseur, pas au début du bloc suivant', () => {
+    const doc = 'Un.\n\nDeux.\n';
+    const { facade, calls } = fakeFacade(doc, 3);
+    useEditorStore.setState({ content: doc, editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('NEW');
+
+    expect(calls.proposals[0].range).toEqual({ from: 3, to: 3 });
+    expect(calls.proposals[0].proposed).toBe('\n\nNEW');
+  });
+
+  it('un brouillon qui commence comme la suite du texte : la proposition reste au curseur', () => {
+    const doc = 'Un.\n\nNouveau bloc.\n';
+    const { facade, calls } = fakeFacade(doc, 5);
+    useEditorStore.setState({ content: doc, editorFacade: facade });
+
+    useEditorStore.getState().insertDraftAtCursor('Nouvelle idée');
+
+    expect(calls.proposals[0].range).toEqual({ from: 5, to: 5 });
+    expect(calls.proposals[0].proposed).toBe('Nouvelle idée\n\n');
+  });
+
+  it('à tout endroit du texte : l’ancre est le curseur, et accepter donne le même bloc', () => {
+    const doc = '# Un\n\nDeux\nTrois.\n\n## Quatre\n';
+    for (let offset = 0; offset <= doc.length; offset += 1) {
+      const { facade, calls } = fakeFacade(doc, offset);
+      useEditorStore.setState({ content: doc, editorFacade: facade });
+
+      useEditorStore.getState().insertDraftAtCursor('# Deux idées');
+
+      const { range, proposed } = calls.proposals[0];
+      expect(range).toEqual({ from: offset, to: offset });
+      expect(`${doc.slice(0, offset)}${proposed}${doc.slice(offset)}`).toBe(
+        insertDraftAtOffset(doc, offset, '# Deux idées')
+      );
+    }
+  });
+
+  it('la vue refuse : unavailable, et aucune écriture de repli', () => {
+    const { facade, calls } = fakeFacade('ABCDE', 3, { accepts: false });
     useEditorStore.setState({ content: 'ABCDE', editorFacade: facade });
 
     const { mode } = useEditorStore.getState().insertDraftAtCursor('NEW');
-    expect(mode).toBe('cursor');
-    expect(calls.setValue).toHaveLength(1);
-    // Padding-aware splice: ABC + \n\n + NEW + \n\n + DE
-    expect(calls.setValue[0].text).toBe('ABC\n\nNEW\n\nDE');
-    expect(useEditorStore.getState().content).toBe('ABC\n\nNEW\n\nDE');
-    expect(useEditorStore.getState().isDirty).toBe(true);
+
+    expect(mode).toBe('unavailable');
+    expect(calls.setValue).toHaveLength(0);
+    expect(useEditorStore.getState().content).toBe('ABCDE');
+    expect(useEditorStore.getState().isDirty).toBe(false);
   });
 });
 

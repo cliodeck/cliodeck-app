@@ -133,9 +133,9 @@ export const SlideGenerationPanel: React.FC = () => {
    * devient une proposition adjudicable (accepter/rejeter/modifier,
    * journalisée) — jamais d'écriture IA directe (docs/editor-proposals.md).
    * « Remplacer » = proposition de remplacement du document entier ;
-   * « Ajouter » = proposition d'insertion en fin de document. Repli sur
-   * l'écriture directe uniquement si l'extension de propositions est
-   * indisponible (propose absent ou refusé).
+   * « Ajouter » = proposition d'insertion en fin de document. Une vue qui
+   * refuse (changement de projet en cours) ne reçoit rien : le texte généré
+   * reste ici, et le panneau reste ouvert.
    */
   const applyGenerated = (mode: 'replace' | 'append') => {
     if (!editorFacade || !streamedContent) return;
@@ -144,17 +144,15 @@ export const SlideGenerationPanel: React.FC = () => {
       mode === 'replace' ? { from: 0, to: docLength } : { from: docLength, to: docLength };
     const proposed = mode === 'replace' ? streamedContent : '\n\n' + streamedContent;
 
-    const proposedOk =
-      editorFacade.propose?.({
-        range,
-        proposed,
-        category: 'slides-generation',
-        source: { model: generatedModel, task: 'slides-generate' },
-      }) ?? false;
-
+    const proposedOk = editorFacade.propose({
+      range,
+      proposed,
+      category: 'slides-generation',
+      source: { model: generatedModel, task: 'slides-generate' },
+    });
     if (!proposedOk) {
-      if (mode === 'replace') editorFacade.setValue(proposed);
-      else editorFacade.appendText(proposed);
+      setError(t('editor.proposalUnavailable'));
+      return;
     }
 
     editorFacade.focus();

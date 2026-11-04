@@ -1,15 +1,16 @@
 /**
  * File de brouillons Brainstorm → Écriture (#7, A13 option c).
  *
- * L'option a (insertion immédiate au curseur, `insertDraftAtCursor`)
+ * L'option a (proposition immédiate au curseur, `insertDraftAtCursor`)
  * reste le chemin principal ; cette file est le sas OPTIONNEL pour les
  * sessions longues : mettre de côté plusieurs réponses, les trier, en
- * insérer certaines, jeter le reste — sans qu'elles touchent le
- * manuscrit avant décision.
+ * proposer certaines, jeter le reste — sans qu'elles touchent le
+ * manuscrit avant décision. Un brouillon ne la quitte qu'une fois accepté :
+ * rejeté, invalidé ou expiré, son texte ne serait plus nulle part.
  *
  * Persisté (localStorage) : la file et l'état ouvert/fermé du panneau
  * survivent au changement de mode d'espace de travail et au redémarrage
- * (signal d'acceptation de l'issue).
+ * (signal d'acceptation de l'issue). La file est commune à tous les projets.
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -26,10 +27,16 @@ export interface BrainstormDraft {
 interface DraftsState {
   drafts: BrainstormDraft[];
   isPanelOpen: boolean;
+  /**
+   * Les brouillons dont la proposition attend une décision. Pas persisté : une
+   * proposition ne survit pas à la fermeture, et le bouton resterait bloqué.
+   */
+  proposedIds: string[];
 
   enqueue: (draft: Omit<BrainstormDraft, 'id' | 'createdAt'>) => void;
   remove: (id: string) => void;
   clear: () => void;
+  setProposed: (id: string, proposed: boolean) => void;
   openPanel: () => void;
   closePanel: () => void;
   togglePanel: () => void;
@@ -40,6 +47,7 @@ export const useDraftsStore = create<DraftsState>()(
     (set) => ({
       drafts: [],
       isPanelOpen: false,
+      proposedIds: [],
 
       enqueue: (draft) =>
         set((state) => ({
@@ -58,11 +66,21 @@ export const useDraftsStore = create<DraftsState>()(
 
       clear: () => set({ drafts: [] }),
 
+      setProposed: (id, proposed) =>
+        set((state) => ({
+          proposedIds: proposed
+            ? [...state.proposedIds.filter((d) => d !== id), id]
+            : state.proposedIds.filter((d) => d !== id),
+        })),
+
       openPanel: () => set({ isPanelOpen: true }),
       closePanel: () => set({ isPanelOpen: false }),
       togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
     }),
-    { name: 'cliodeck-drafts' }
+    {
+      name: 'cliodeck-drafts',
+      partialize: ({ drafts, isPanelOpen }) => ({ drafts, isPanelOpen }),
+    }
   )
 );
 

@@ -27,7 +27,6 @@ import { useChatStore, type BrainstormMessage, type BrainstormSource } from '../
 import { useProjectStore } from '../../stores/projectStore';
 import { useBrainstormChat } from '../Brainstorm/useBrainstormChat';
 import { SourcePopover, sourceKindLabelKey } from '../Brainstorm/SourcePopover';
-import { useEditorStore } from '../../stores/editorStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
@@ -44,6 +43,7 @@ import {
 } from '../../stores/ragQueryStore';
 import { useCloudConsentGuard } from './useCloudConsentGuard';
 import { messageToDraft } from '../Brainstorm/messageToDraft';
+import { notifyDraftKept, sendDraftToWrite } from '../../services/send-draft-to-write';
 import { ChatSurface } from './ChatSurface';
 import { ModeSelector } from './ModeSelector';
 import { RAGSettingsPanel } from './RAGSettingsPanel';
@@ -84,13 +84,18 @@ function countSourceFamilies(
   return counts;
 }
 
+/**
+ * Les réponses en attente de l'éditeur, hors du composant : le mode Écriture monte une autre
+ * instance de ce chat. Un second clic pendant l'attente ne fait pas une seconde proposition.
+ */
+const sendingToWrite = new Set<string>();
+
 export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
   const isPanel = variant === 'panel';
   const messages = useChatStore((s) => s.messages);
   const { send, cancel, reset, isStreaming, error } = useBrainstormChat();
-  const setWorkspaceMode = useWorkspaceModeStore((s) => s.setActive);
   const { modes, activeMode, activeModeId } = useModeStore();
   // Nom du mode de chat actif : jusqu'ici visible seulement derrière le
   // bouton de réglages (ModeSelector). Repli sur l'identifiant tant que
@@ -250,40 +255,44 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     }
   }, [isStreaming, ragStatus]);
 
+  const draftSource = useCallback(
+    () => ({
+      model: activeModelRef.current,
+      task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
+    }),
+    []
+  );
+
   // Mise en brouillon (#7, A13 option c) : l'alternative SANS engagement à
   // sendToWrite — la réponse attend dans la file du mode Écriture au lieu
-  // d'être insérée immédiatement.
-  const sendToDrafts = useCallback((m: BrainstormMessage): void => {
-    useDraftsStore.getState().enqueue({
-      content: messageToDraft(m),
-      source: {
-        model: activeModelRef.current,
-        task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
-      },
-    });
-    setDraftedId(m.id);
-  }, []);
-
-  const sendToWrite = useCallback(
-    (m: BrainstormMessage): void => {
-      const editor = useEditorStore.getState();
-      const block = messageToDraft(m);
-      // Insert at the user's current cursor when an editor is mounted;
-      // fall back to append when neither editor exists yet (fusion 2.6,
-      // A13 option a). In CM6 the draft becomes an adjudicable proposal
-      // carrying the active model + mode.
-      editor.insertDraftAtCursor(block, {
-        model: activeModelRef.current,
-        task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
-      });
-      setSentToWriteId(m.id);
-      // Depuis le panneau droit du mode write, on est déjà au bon endroit :
-      // ne pas rebasculer (la proposition apparaît sous les yeux).
-      if (useWorkspaceModeStore.getState().active !== 'write') {
-        setWorkspaceMode('write');
-      }
+  // d'être proposée immédiatement.
+  const sendToDrafts = useCallback(
+    (m: BrainstormMessage, source = draftSource()): void => {
+      useDraftsStore.getState().enqueue({ content: messageToDraft(m), source });
+      setDraftedId(m.id);
     },
-    [setWorkspaceMode]
+    [draftSource]
+  );
+
+  // Une proposition au curseur de l'éditeur, qui porte le modèle et le mode actifs
+  // (fusion 2.6, A13 option a). Passer en Écriture peut démonter ce composant :
+  // la source se lit avant l'attente, et le repli ne dépend que du store. Un
+  // éditeur qui ne monte pas n'efface pas la réponse : elle part au brouillon.
+  const sendToWrite = useCallback(
+    async (m: BrainstormMessage): Promise<void> => {
+      if (sendingToWrite.has(m.id)) return;
+      sendingToWrite.add(m.id);
+      const source = draftSource();
+      const outcome = await sendDraftToWrite(messageToDraft(m), source);
+      sendingToWrite.delete(m.id);
+      if (outcome === 'proposed') {
+        setSentToWriteId(m.id);
+        return;
+      }
+      sendToDrafts(m, source);
+      notifyDraftKept(t);
+    },
+    [draftSource, sendToDrafts, t]
   );
 
   const unifiedMessages = useMemo<AssistantUnifiedMessage[]>(
@@ -511,7 +520,10 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
             <button
               type="button"
               className="chat-surface__inline-btn"
-              onClick={() => sendToWrite(orig)}
+              // Le second clic d'un double clic : deux propositions au même endroit s'invalident.
+              onClick={(e) => {
+                if (e.detail <= 1) void sendToWrite(orig);
+              }}
               title={t('chat.brainstorm.sendToWriteTitle')}
             >
               <ArrowRight size={12} />{' '}

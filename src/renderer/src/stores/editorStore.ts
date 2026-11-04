@@ -1,13 +1,11 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
+import { detectLineSeparator } from '@/editor/cm/fidelity';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
 import { useDialogStore } from './dialogStore';
-import {
-  appendDraftToContent,
-  insertDraftAtOffset,
-} from '../components/Brainstorm/messageToDraft';
+import { insertDraftAtOffset } from '../components/Brainstorm/messageToDraft';
 
 // MARK: - Types
 
@@ -105,6 +103,12 @@ export function openErrorKey(error: unknown, fallbackKey: string): string {
   return error instanceof EditorFileError && error.reason === 'encoding' ? NOT_UTF8_KEY : fallbackKey;
 }
 
+/**
+ * Un brouillon ne devient jamais du texte sans décision : soit une proposition, dont on
+ * suit le sort par son identifiant, soit rien, et l'appelant garde le texte.
+ */
+export type DraftInsertion = { mode: 'cursor'; proposalId: string } | { mode: 'unavailable' };
+
 /** `saveFileAs` n'est pas un remplacement : le document reste, seul son chemin change. */
 export type SaveAsOutcome =
   | { status: 'saved' }
@@ -187,15 +191,14 @@ interface EditorState {
   insertTextAtCursor: (text: string) => void;
 
   /**
-   * Splice a multi-line draft into the document at the user's current
-   * cursor (fusion 2.6, A13 option a). When no editor is mounted the call
-   * falls back to appending. Returns the mode actually used so the caller
-   * can adapt the UX confirmation ("inserted at cursor" vs "appended").
+   * Propose un brouillon au curseur de l'auteur (fusion 2.6, A13 option a), ou
+   * en fin de document s'il n'y a posé aucun curseur. Sans éditeur capable de
+   * recevoir une proposition, rien n'entre nulle part : `unavailable`.
    */
   insertDraftAtCursor: (
     draft: string,
     source?: { model?: string; task?: string }
-  ) => { mode: 'cursor' | 'append' };
+  ) => DraftInsertion;
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => { definitionPosition: number; footnoteNumber: number } | null;
@@ -648,59 +651,47 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   insertDraftAtCursor: (
     draft: string,
     source?: { model?: string; task?: string }
-  ): { mode: 'cursor' | 'append' } => {
-    const { content, editorFacade } = get();
+  ): DraftInsertion => {
+    const { editorFacade } = get();
+    if (!editorFacade) return { mode: 'unavailable' };
 
     // Le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
-    // proposition d'insertion adjudicable au curseur, jamais d'écriture
-    // directe (« aucune fonctionnalité IA d'écriture ne contourne cette
-    // API », docs/editor-proposals.md). Le document ne change qu'à
-    // l'acceptation.
-    if (editorFacade?.propose) {
-      const current = editorFacade.getValue();
-      const offset = editorFacade.getCursorOffset();
-      const newContent = insertDraftAtOffset(current, offset, draft);
-      // Segment exactement inséré par insertDraftAtOffset (padding de bloc
-      // compris) : premier point de divergence des deux chaînes.
-      let at = 0;
-      while (at < current.length && current[at] === newContent[at]) at += 1;
-      const inserted = newContent.slice(
-        at,
-        at + (newContent.length - current.length)
-      );
-      editorFacade.propose({
-        range: { from: at, to: at },
-        original: '',
-        proposed: inserted,
-        category: 'brainstorm-draft',
-        // L'appelant (AssistantChat) transmet le modèle actif quand il le
-        // connaît — le store éditeur ne se couple pas au store chat.
-        source: {
-          model: source?.model ?? 'unknown',
-          task: source?.task ?? 'brainstorm',
-        },
-      });
-      editorFacade.focus();
-      return { mode: 'cursor' };
-    }
-
-    // Façade sans support des propositions (défensif) — insertion directe.
-    if (editorFacade) {
-      const current = editorFacade.getValue();
-      const offset = editorFacade.getCursorOffset();
-      const newContent = insertDraftAtOffset(current, offset, draft);
-      editorFacade.setValue(newContent, offset + (newContent.length - current.length));
-      editorFacade.focus();
-      set({ content: newContent, isDirty: true });
-      return { mode: 'cursor' };
-    }
-
-    // No editor mounted — fall back to append.
-    set({
-      content: appendDraftToContent(content, draft),
-      isDirty: true,
+    // proposition d'insertion adjudicable, jamais d'écriture directe
+    // (« aucune fonctionnalité IA d'écriture ne contourne cette API »,
+    // docs/editor-proposals.md). Le document ne change qu'à l'acceptation.
+    // Les offsets de la façade comptent une fin de ligne pour un caractère : dans un fichier CRLF,
+    // ils ne tombent juste que sur le texte en LF. Accepter rend au fichier ses fins de ligne.
+    const value = editorFacade.getValue();
+    const current = detectLineSeparator(value) === '\r\n' ? value.replace(/\r\n/g, '\n') : value;
+    // Sans curseur posé par l'auteur, l'offset 0 serait au-dessus du titre.
+    const offset = editorFacade.hasKnownCursor() ? editorFacade.getCursorOffset() : current.length;
+    const newContent = insertDraftAtOffset(current, offset, draft);
+    // L'ancre est le curseur, et le segment tout ce que insertDraftAtOffset pose après lui, padding
+    // de bloc compris. Le premier point de divergence des deux chaînes ne le dit pas : ce padding
+    // ressemble aux fins de ligne qui suivent, et un balayage quittait le curseur pour le bloc
+    // suivant, où la frappe d'après un rejet serait tombée.
+    const at = Math.min(offset, current.length);
+    const inserted = newContent.slice(
+      at,
+      at + (newContent.length - current.length)
+    );
+    const proposalId = crypto.randomUUID();
+    const proposed = editorFacade.propose({
+      id: proposalId,
+      range: { from: at, to: at },
+      original: '',
+      proposed: inserted,
+      category: 'brainstorm-draft',
+      // L'appelant (AssistantChat) transmet le modèle actif quand il le
+      // connaît — le store éditeur ne se couple pas au store chat.
+      source: {
+        model: source?.model ?? 'unknown',
+        task: source?.task ?? 'brainstorm',
+      },
     });
-    return { mode: 'append' };
+    if (!proposed) return { mode: 'unavailable' };
+    editorFacade.focus();
+    return { mode: 'cursor', proposalId };
   },
 
   // Direct footnote insertion - returns definition position for scrolling

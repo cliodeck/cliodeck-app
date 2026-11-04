@@ -1,4 +1,4 @@
-import { EditorSelection, type Extension } from '@codemirror/state';
+import { EditorSelection, Text, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { changeOrigin } from '../cm/change-origin';
 import {
@@ -41,6 +41,15 @@ function generateId(): string {
   return `proposal-${Date.now()}-${idCounter}`;
 }
 
+/**
+ * Le texte d'une proposition, en lignes du document. CM6 ne découpe une chaîne que sur le séparateur
+ * déclaré : dans un fichier CRLF, ses `\n` resteraient à l'intérieur d'une « ligne » et le fichier
+ * deviendrait mixte. La longueur d'un `Text` est aussi la seule qui soit en offsets du document.
+ */
+function toDocText(text: string): Text {
+  return Text.of(text.split(/\r\n?|\n/));
+}
+
 export interface ProposalsInstance {
   extension: Extension;
   field: ProposalsField;
@@ -67,9 +76,10 @@ export function proposals(config: ProposalsConfig): ProposalsInstance {
     const p = find(view, id);
     if (!p) return false;
     config.onEvent(makeAdjudicationEvent(p, 'accepted'));
+    const insert = toDocText(p.proposed);
     view.dispatch({
-      changes: { from: p.range.from, to: p.range.to, insert: p.proposed },
-      selection: EditorSelection.cursor(p.range.from + p.proposed.length),
+      changes: { from: p.range.from, to: p.range.to, insert },
+      selection: EditorSelection.cursor(p.range.from + insert.length),
       effects: resolveProposalEffect.of(id),
       annotations: changeOrigin.of('ai-proposal-accepted'),
     });
@@ -114,9 +124,10 @@ export function proposals(config: ProposalsConfig): ProposalsInstance {
     const p = find(view, id);
     if (!p) return false;
     config.onEvent(makeAdjudicationEvent(p, 'modified', { final }));
+    const insert = toDocText(final);
     view.dispatch({
-      changes: { from: p.range.from, to: p.range.to, insert: final },
-      selection: EditorSelection.cursor(p.range.from + final.length),
+      changes: { from: p.range.from, to: p.range.to, insert },
+      selection: EditorSelection.cursor(p.range.from + insert.length),
       effects: resolveProposalEffect.of(id),
       annotations: changeOrigin.of('ai-proposal-modified'),
     });
