@@ -4,9 +4,11 @@ import {
   computeSelectionWrap,
   INLINE_MARKS,
   looksLikeCitationKey,
+  type SelectionWrapOptions,
   type SelectionWrapType,
   type SnippetTemplates,
 } from '../cm/inline-formatting';
+import { parseSlides } from '../slides';
 
 const BOLD = INLINE_MARKS.bold.markers;
 const ITALIC = INLINE_MARKS.italic.markers;
@@ -80,13 +82,20 @@ const TEMPLATES: SnippetTemplates = {
   citationKey: 'clé',
   table: '\n| A | B |\n|---|---|\n| 1 | 2 |\n',
   blockquote: '\n> Première\n> Seconde\n',
+  boldText: 'gras',
+  italicText: 'italique',
 };
 
 /** Le résultat appliqué au document : le texte final, et ce que la sélection y désigne. */
-function wrap(doc: string, selected: string | [number, number], type: SelectionWrapType) {
+function wrap(
+  doc: string,
+  selected: string | [number, number],
+  type: SelectionWrapType,
+  options?: SelectionWrapOptions
+) {
   const [from, to] =
     typeof selected === 'string' ? [doc.indexOf(selected), doc.indexOf(selected) + selected.length] : selected;
-  const r = computeSelectionWrap(doc, from, to, type, TEMPLATES);
+  const r = computeSelectionWrap(doc, from, to, type, TEMPLATES, options);
   const out = doc.slice(0, r.from) + r.insert + doc.slice(r.to);
   return { out, sel: out.slice(r.selFrom, r.selTo), r };
 }
@@ -186,15 +195,70 @@ describe('computeSelectionWrap — la sélection n’est plus écrasée', () => 
       expect(wrap('> Un.\nDeux.', [0, 11], 'blockquote').out).toBe('> > Un.\n> Deux.');
     });
 
-    it('une frontière de diapositive reste une frontière, et ses lignes vides restent vides', () => {
-      const deck = '# Une\n\nTexte.\n\n---\n\n# Deux\n\nSuite.\n';
-      const { out } = wrap(deck, 'Texte.\n\n---\n\n# Deux', 'blockquote');
-      expect(out).toBe('# Une\n\n> Texte.\n\n---\n\n> # Deux\n\nSuite.\n');
-      expect(out.split('\n')).toContain('---');
+    describe('dans un deck', () => {
+      const DECK = { keepSlideSeparators: true };
+
+      it('une frontière de diapositive reste une frontière, et ses lignes vides restent vides', () => {
+        const deck = '# Une\n\nTexte.\n\n---\n\n# Deux\n\nSuite.\n';
+        const { out } = wrap(deck, 'Texte.\n\n---\n\n# Deux', 'blockquote', DECK);
+        expect(out).toBe('# Une\n\n> Texte.\n\n---\n\n> # Deux\n\nSuite.\n');
+        expect(parseSlides(out).slides).toHaveLength(parseSlides(deck).slides.length);
+      });
+
+      it('la ligne vide juste sous une frontière non sélectionnée reste vide', () => {
+        const deck = '---\n\n# Une\n\nNote: un point\n\n---\n\n# Deux\n';
+        const { out } = wrap(deck, [4, deck.indexOf('# Une') + '# Une'.length], 'blockquote', DECK);
+        expect(out).toBe('---\n\n> # Une\n\nNote: un point\n\n---\n\n# Deux\n');
+        expect(parseSlides(deck).slides).toHaveLength(3);
+        expect(parseSlides(out).slides).toHaveLength(3);
+        expect(parseSlides(out).frontmatter).toBeNull();
+      });
+
+      it('la ligne vide juste au-dessus d’une frontière non sélectionnée aussi', () => {
+        const { out } = wrap('# Une\n\n---\n\n# Deux\n', [0, 7], 'blockquote', DECK);
+        expect(out).toBe('> # Une\n\n---\n\n# Deux\n');
+      });
+
+      it('un frontmatter sélectionné reste un frontmatter', () => {
+        const deck = '---\ntitle: Cours\n---\n\n# Une\n\n---\n\n# Deux\n';
+        const { out } = wrap(deck, [0, deck.length], 'blockquote', DECK);
+        expect(out).toBe('---\ntitle: Cours\n---\n\n> # Une\n\n---\n\n> # Deux\n');
+        expect(parseSlides(out).slides).toHaveLength(2);
+        expect(parseSlides(out).frontmatter?.yaml).toBe('title: Cours\n');
+      });
+
+      it('un `---` de bloc de code n’est pas une frontière : il reste dans le bloc, cité avec lui', () => {
+        const deck = '# Une\n\n```\n---\n```\n\n---\n\n# Deux\n';
+        const { out } = wrap(deck, [0, deck.length], 'blockquote', DECK);
+        expect(out).toBe('> # Une\n>\n> ```\n> ---\n> ```\n\n---\n\n> # Deux\n');
+        expect(parseSlides(out).slides).toHaveLength(parseSlides(deck).slides.length);
+      });
+
+      it('fichier mixte : le `\\r` d’une ligne reste à sa place, frontière comprise', () => {
+        expect(wrap('Un.\r\n---\r\nDeux.', [0, 15], 'blockquote', DECK).out).toBe('> Un.\r\n---\r\n> Deux.');
+      });
     });
 
-    it('fichier mixte : le `\\r` d’une ligne reste à sa place, frontière comprise', () => {
-      expect(wrap('Un.\r\n---\r\nDeux.', [0, 15], 'blockquote').out).toBe('> Un.\r\n---\r\n> Deux.');
+    describe('hors d’un deck, `---` est du texte', () => {
+      it('un titre Setext se cite avec son soulignement, et reste un titre', () => {
+        const { out } = wrap('Titre\n---\n\nTexte\n', [0, 16], 'blockquote');
+        expect(out).toBe('> Titre\n> ---\n>\n> Texte\n');
+      });
+
+      it('un filet aussi, et ses lignes vides restent dans le bloc', () => {
+        expect(wrap('Un.\n\n---\n\nDeux.', [0, 15], 'blockquote').out).toBe('> Un.\n>\n> ---\n>\n> Deux.');
+      });
+
+      it('le frontmatter, lui, n’est du texte nulle part', () => {
+        const doc = '---\ntitle: Article\n---\n\nTexte.\n';
+        expect(wrap(doc, [0, doc.length], 'blockquote').out).toBe('---\ntitle: Article\n---\n\n> Texte.\n');
+      });
+
+      it('tout le frontmatter et rien d’autre : rien ne change', () => {
+        const doc = '---\ntitle: Article\n---\n\nTexte.\n';
+        const { r } = wrap(doc, '---\ntitle: Article\n---', 'blockquote');
+        expect(r.insert).toBe(doc.slice(r.from, r.to));
+      });
     });
 
     it('sélection vide : le gabarit', () => {

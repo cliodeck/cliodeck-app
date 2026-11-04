@@ -233,6 +233,8 @@ function snippetTemplates(): SnippetTemplates {
     citationKey: tr('snippets.citationKey'),
     table: `\n| ${c1} | ${c2} |\n|---|---|\n| ${v1} | ${v2} |\n`,
     blockquote: `\n> ${tr('snippets.quoteFirst')}\n> ${tr('snippets.quoteSecond')}\n`,
+    boldText: tr('snippets.boldText'),
+    italicText: tr('snippets.italicText'),
   };
 }
 
@@ -593,15 +595,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
+    const templates = snippetTemplates();
+
     // Gras/italique : bascule wrap/unwrap via la façade — le remplacement
     // par placeholder écrasait la sélection (#10).
     if (type === 'bold' || type === 'italic') {
-      editorFacade.toggleInline?.(type);
+      editorFacade.toggleInline?.(type, type === 'bold' ? templates.boldText : templates.italicText);
       return;
     }
 
-    const templates = snippetTemplates();
-    editorFacade.editSelection((doc, from, to) => computeSelectionWrap(doc, from, to, type, templates));
+    const options = { keepSlideSeparators: editorFacade.isSlideDeck };
+    editorFacade.editSelection((doc, from, to) => computeSelectionWrap(doc, from, to, type, templates, options));
   },
 
   insertTextAtCursor: (text: string) => {

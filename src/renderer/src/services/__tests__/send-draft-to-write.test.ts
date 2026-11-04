@@ -25,6 +25,7 @@ function fakeFacade(proposals: Array<Partial<Proposal>>, accepts = true): Editor
     getCursorOffset: () => 9,
     hasKnownCursor: () => true,
     getSelectionText: () => null,
+    isSlideDeck: false,
     hasFocus: () => false,
     replaceSelection: () => undefined,
     editSelection: () => false,

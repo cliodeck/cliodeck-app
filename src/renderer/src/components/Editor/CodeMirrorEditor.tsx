@@ -22,7 +22,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState, readDocText, toDocText } from '@/editor/cm/fidelity';
+import { createDocState, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
 import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
@@ -237,10 +237,12 @@ function createFacade(
   selectionListeners: Set<(offset: number) => void>,
   proposalsInstance: ProposalsInstance,
   hasKnownCursor: () => boolean,
-  cancelScrollRestore: () => void
+  cancelScrollRestore: () => void,
+  isSlideDeck: boolean
 ): EditorFacade {
   return {
     engine: 'cm6',
+    isSlideDeck,
     getValue: () => readDocText(view.state),
     getCursorOffset: () => view.state.selection.main.head,
     hasKnownCursor,
@@ -249,8 +251,8 @@ function createFacade(
       return from === to ? null : view.state.sliceDoc(from, to);
     },
     hasFocus: () => view.root.activeElement === view.contentDOM,
-    toggleInline: (type) => {
-      toggleInlineMark(view, type);
+    toggleInline: (type, placeholder) => {
+      toggleInlineMark(view, type, placeholder);
     },
     editSelection: (edit, origin) => editSelection(view, edit, origin),
     replaceSelection: (text, origin) => {
@@ -409,6 +411,7 @@ export const CodeMirrorEditor: React.FC = () => {
             ]
           : [],
         history(),
+        EditorView.clipboardInputFilter.of(toDocLineBreaks),
         formattingKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         lineNumbers(),
@@ -516,7 +519,8 @@ export const CodeMirrorEditor: React.FC = () => {
           selectionListeners,
           proposalsInstance,
           () => cursorPlaced,
-          cancelScrollRestore
+          cancelScrollRestore,
+          isPresentation
         )
       );
 

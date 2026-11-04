@@ -18,6 +18,7 @@ import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
+import { openFootnotePopup } from '@/editor/cm/scholarly/footnote-popup';
 import { parseSlides } from '@/editor/slides';
 
 import { CodeMirrorEditor } from '../CodeMirrorEditor';
@@ -100,6 +101,17 @@ function type(typed: string): void {
       selection: EditorSelection.cursor(at + typed.length),
       annotations: Transaction.userEvent.of('input.type'),
     });
+  });
+}
+
+/** Un vrai événement `paste` vers la vue : le presse-papiers du système n'y est pour rien. */
+function paste(text: string): void {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', {
+    value: { getData: (format: string) => (format === 'text/plain' ? text : '') },
+  });
+  act(() => {
+    currentView().contentDOM.dispatchEvent(event);
   });
 }
 
@@ -287,6 +299,20 @@ describe('une sélection n’est plus écrasée', () => {
     expect(docText()).toBe(`Avant[${i18n.t('snippets.linkText')}](url)\n`);
   });
 
+  it.each([
+    ['bold', '**', 'snippets.boldText'],
+    ['italic', '_', 'snippets.italicText'],
+  ] as const)('%s sans sélection : le gabarit est celui de la langue de l’auteur, sélectionné', async (command, mark, key) => {
+    vi.spyOn(i18n, 't').mockImplementation(((asked: string) => `<${asked}>`) as typeof i18n.t);
+    await mount('Avant\n');
+    selectRange(5, 5);
+
+    press(command);
+
+    expect(docText()).toBe(`Avant${mark}<${key}>${mark}\n`);
+    expect(selected()).toBe(`<${key}>`);
+  });
+
   it('Mod-Shift-f : l’appel au curseur, la définition en fin de document, et le curseur dedans', async () => {
     await mount('Un mot ici.\n\nSuite.\n');
     selectRange(6, 6);
@@ -319,6 +345,77 @@ describe('une seule étape de Cmd+Z', () => {
       expect(docText()).toBe('Début tapé\n');
     }
   );
+});
+
+describe('une édition qui ne change rien', () => {
+  const SLIDES = `${PROJECT}/slides.md`;
+  const DECK = '# Une\n\n---\n\n# Deux\n';
+  const FRONTMATTER = '---\ntitle: Cours\n---\n\n# Une\n';
+
+  /** Ni texte, ni isDirty, ni écriture, ni étape vide que le Cmd+Z suivant consommerait. */
+  async function expectNothingHappened(text: string): Promise<void> {
+    await wait(DELAY + 400);
+    expect(docText()).toBe(text);
+    expect(editor().isDirty).toBe(false);
+    expect(writes).toEqual([]);
+    act(() => {
+      expect(undo(currentView())).toBe(false);
+    });
+  }
+
+  it('le seul `---` d’un deck sous une citation en bloc', async () => {
+    setProject('presentation');
+    await mount(DECK, SLIDES);
+    select('---');
+
+    press('blockquote');
+
+    await expectNothingHappened(DECK);
+    expect(selected()).toBe('---');
+  });
+
+  it('une partie du `---` : la sélection reste où l’auteur l’a mise', async () => {
+    setProject('presentation');
+    await mount(DECK, SLIDES);
+    const from = DECK.indexOf('---');
+    selectRange(from, from + 2);
+
+    press('blockquote');
+
+    await expectNothingHappened(DECK);
+    expect(currentView().state.selection.main.from).toBe(from);
+    expect(selected()).toBe('--');
+  });
+
+  it('le frontmatter seul, dans un article', async () => {
+    await mount(FRONTMATTER);
+    selectRange(0, '---\ntitle: Cours\n---'.length);
+
+    press('blockquote');
+
+    await expectNothingHappened(FRONTMATTER);
+  });
+
+  it('le focus revient quand même au texte : le bouton ne semble pas mort', async () => {
+    setProject('presentation');
+    await mount(DECK, SLIDES);
+    select('---');
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    let applied: boolean | undefined;
+    act(() => {
+      applied = editor().editorFacade?.editSelection((doc, from, to) => ({
+        from,
+        to,
+        insert: doc.slice(from, to),
+        selFrom: from,
+        selTo: to,
+      }));
+    });
+
+    expect(applied).toBe(false);
+    expect(document.activeElement).toBe(currentView().contentDOM);
+  });
 });
 
 describe('l’origine des transactions', () => {
@@ -391,7 +488,7 @@ describe('une vue qui n’a pas le droit d’écrire', () => {
     const facade = editor().editorFacade;
 
     act(() => {
-      facade?.toggleInline?.('bold');
+      facade?.toggleInline?.('bold', 'gras');
       facade?.replaceSelection('x');
     });
     let applied: boolean | undefined;
@@ -583,6 +680,128 @@ describe('un fichier CRLF', () => {
     expect(written).toBe(`x\r\ny\r\n${CRLF}`);
   });
 
+  it('un collage en `\\n` : le fichier reste uniforme, et Cmd+Z le rend', async () => {
+    await mount(CRLF);
+    selectRange(0, 0);
+
+    const written = await writtenThenUndone(() => paste('ligne un\nligne deux\n'));
+
+    expect(written).toBe(`ligne un\r\nligne deux\r\n${CRLF}`);
+  });
+
+  it('un collage en vieilles fins de ligne Mac aussi', async () => {
+    await mount(CRLF);
+    selectRange(0, 0);
+
+    const written = await writtenThenUndone(() => paste('ligne un\rligne deux\r'));
+
+    expect(written).toBe(`ligne un\r\nligne deux\r\n${CRLF}`);
+  });
+
+  it('un collage en CRLF reste tel quel', async () => {
+    await mount(CRLF);
+    selectRange(0, 0);
+
+    const written = await writtenThenUndone(() => paste('ligne un\r\nligne deux\r\n'));
+
+    expect(written).toBe(`ligne un\r\nligne deux\r\n${CRLF}`);
+  });
+
+  it('témoin : un collage en CRLF dans un fichier LF ne laisse aucun `\\r` dans le document', async () => {
+    await mount(TEXT);
+    selectRange(0, 0);
+
+    paste('ligne un\r\nligne deux\r\n');
+
+    expect(editor().getLiveContent()).toBe(`ligne un\nligne deux\n${TEXT}`);
+  });
+
+  it('un collage sur une vue en lecture seule ne fait rien', async () => {
+    await mount(CRLF);
+    await act(async () => {
+      await editor().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+
+    paste('ligne un\nligne deux\n');
+
+    expect(docText()).toBe('');
+    expect(editor().isDirty).toBe(false);
+  });
+
+  describe('la popup de note', () => {
+    function openPopup(label: string): HTMLTextAreaElement {
+      act(() => {
+        currentView().dispatch({ effects: openFootnotePopup.of({ label, at: 0 }) });
+      });
+      const textarea = document.querySelector<HTMLTextAreaElement>('.cm-scholarly-popup textarea');
+      if (!textarea) throw new Error('Popup de note absente');
+      return textarea;
+    }
+
+    function saveInPopup(label: string, text: string): void {
+      openPopup(label).value = text;
+      act(() => {
+        document.querySelector<HTMLButtonElement>('.cm-scholarly-popup-save')?.click();
+      });
+    }
+
+    // Fermer la popup lui retire le focus en pleine mise à jour de la vue : un `dispatch` à ce moment
+    // lèverait, et Vitest ferait échouer la suite sur cette exception.
+    it('Échap ferme la popup sans rien écrire', async () => {
+      const text = 'Un mot[^1].\r\n\r\n[^1]: Déjà là.\r\n';
+      await mount(text);
+
+      const textarea = openPopup('1');
+      textarea.value = 'Autre chose.';
+      act(() => {
+        textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      });
+
+      expect(document.querySelector('.cm-scholarly-popup')).toBeNull();
+      expect(editor().getLiveContent()).toBe(text);
+      expect(editor().isDirty).toBe(false);
+    });
+
+    it('un clic ailleurs la ferme aussi : c’est le seul cas où le focus qui s’en va vaut une fermeture', async () => {
+      await mount('Un mot[^1].\r\n\r\n[^1]: Déjà là.\r\n');
+
+      const textarea = openPopup('1');
+      act(() => {
+        textarea.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: currentView().contentDOM }));
+      });
+
+      expect(document.querySelector('.cm-scholarly-popup')).toBeNull();
+    });
+
+    it('une définition existante, réécrite sur plusieurs lignes', async () => {
+      await mount('Un mot[^1].\r\n\r\n[^1]: Déjà là.\r\n');
+
+      saveInPopup('1', 'Première ligne.\nDeuxième ligne.');
+
+      const live = editor().getLiveContent();
+      noBareLf(live);
+      expect(live).toBe('Un mot[^1].\r\n\r\n[^1]: Première ligne.\r\nDeuxième ligne.\r\n');
+    });
+
+    it('une définition créée en fin de document, séparateur compris', async () => {
+      await mount('Un mot[^1].');
+
+      saveInPopup('1', 'Texte.');
+
+      expect(editor().getLiveContent()).toBe('Un mot[^1].\n\n[^1]: Texte.');
+    });
+
+    it('une définition créée en fin de fichier CRLF, séparateur compris', async () => {
+      await mount('Un mot[^1].\r\nSuite.');
+
+      saveInPopup('1', 'Première ligne.\nDeuxième ligne.');
+
+      const live = editor().getLiveContent();
+      noBareLf(live);
+      expect(live).toBe('Un mot[^1].\r\nSuite.\r\n\r\n[^1]: Première ligne.\r\nDeuxième ligne.');
+    });
+  });
+
   it('témoin : un fichier LF reçoit un texte en CRLF et reste en LF', async () => {
     await mount(TEXT);
     selectRange(0, 0);
@@ -622,6 +841,50 @@ describe('présentation et livre', () => {
     expect(parseSlides(docText()).slides).toHaveLength(before);
     undoOnce();
     expect(docText()).toBe(DECK);
+  });
+
+  it('une sélection partie de la ligne vide sous le premier `---` : pas de frontmatter de plus, aucune diapositive de moins', async () => {
+    setProject('presentation');
+    const deck = '---\n\n# Une\n\nNote: un point\n\n---\n\n# Deux\n';
+    await mount(deck, SLIDES);
+    expect(parseSlides(deck).slides).toHaveLength(3);
+    selectRange(4, deck.indexOf('# Une') + '# Une'.length);
+
+    press('blockquote');
+
+    expect(docText()).toBe('---\n\n> # Une\n\nNote: un point\n\n---\n\n# Deux\n');
+    expect(parseSlides(docText()).frontmatter).toBeNull();
+    expect(parseSlides(docText()).slides).toHaveLength(3);
+    undoOnce();
+    expect(docText()).toBe(deck);
+  });
+
+  it('tout sélectionner sur un deck à frontmatter : il reste un frontmatter, et le compte de diapositives ne change pas', async () => {
+    setProject('presentation');
+    const deck = '---\ntitle: Cours\n---\n\n# Une\n\n---\n\n# Deux\n';
+    await mount(deck, SLIDES);
+    selectRange(0, deck.length);
+
+    press('blockquote');
+
+    expect(docText()).toBe('---\ntitle: Cours\n---\n\n> # Une\n\n---\n\n> # Deux\n');
+    expect(parseSlides(docText()).frontmatter?.yaml).toBe('title: Cours\n');
+    expect(parseSlides(docText()).slides).toHaveLength(2);
+    undoOnce();
+    expect(docText()).toBe(deck);
+  });
+
+  it.each(['article', 'book'] as const)('%s : `---` est du texte, et un titre Setext se cite entier', async (kind) => {
+    setProject(kind);
+    const text = 'Titre\n---\n\nTexte\n';
+    await mount(text);
+    select('Titre\n---\n\nTexte');
+
+    press('blockquote');
+
+    expect(docText()).toBe('> Titre\n> ---\n>\n> Texte\n');
+    undoOnce();
+    expect(docText()).toBe(text);
   });
 
   it('les boutons de diapositive insèrent après la sélection, sans l’effacer', async () => {

@@ -18,6 +18,9 @@ export interface EditorFacade {
   /** Le moteur qui implémente cette façade. */
   readonly engine: 'cm6';
 
+  /** Un deck de diapositives : ses `---` y sont des frontières, pas du texte. */
+  readonly isSlideDeck: boolean;
+
   /** Contenu réel de l'éditeur (source de vérité pour la sauvegarde). */
   getValue(): string;
 
@@ -51,14 +54,15 @@ export interface EditorFacade {
    * Bascule une marque inline (gras/italique) sur la sélection : wrap si
    * absente, unwrap si présente, placeholder sélectionné si sélection
    * vide. Contrairement à replaceSelection, n'écrase JAMAIS le texte
-   * sélectionné (#10). Rien sur une vue en lecture seule.
+   * sélectionné (#10). Rien sur une vue en lecture seule. `placeholder` part dans le
+   * manuscrit : il est traduit par l'appelant.
    */
-  toggleInline?(type: 'bold' | 'italic'): void;
+  toggleInline?(type: 'bold' | 'italic', placeholder: string): void;
 
   /**
    * Applique une édition calculée sur la sélection, en une seule étape de Cmd+Z, sélection comprise,
    * et focus. Ses offsets et son texte sont ceux du document : une fin de ligne y vaut 1, quel que
-   * soit le fichier. Rend faux sur une vue en lecture seule, qui ne change rien.
+   * soit le fichier. Rend faux si rien n'a changé : vue en lecture seule, ou texte déjà celui-là.
    */
   editSelection(edit: SelectionEdit, origin?: ChangeOrigin): boolean;
 

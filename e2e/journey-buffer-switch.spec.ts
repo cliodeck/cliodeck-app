@@ -664,3 +664,39 @@ test('article CRLF : tableau, citation en bloc et note gardent un fichier unifor
     rmSync(article.dir, { recursive: true, force: true });
   }
 });
+
+test('article CRLF : un collage garde un fichier uniforme, et Cmd+Z rend les octets', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+  const crlf = ARTICLE.replace(/\n/g, '\r\n');
+  writeFileSync(article.document, crlf);
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await editor(window).locator('.cm-line', { hasText: LAST_WORD }).click();
+    await window.keyboard.press('End');
+    // Un vrai événement vers la vue : le presse-papiers du système n'y est pour rien.
+    await editor(window).evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'ligne un\nligne deux\n');
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(crlf.replace('enregistrés.\r\n', 'enregistrés.ligne un\r\nligne deux\r\n\r\n'));
+
+    await window.keyboard.press('ControlOrMeta+z');
+    await expect.poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 }).toBe(crlf);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});

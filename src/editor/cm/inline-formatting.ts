@@ -17,7 +17,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { isSeparatorLine } from '../slides';
+import { detectFrontmatterLines, parseSlides } from '../slides';
 import { changeOrigin, type ChangeOrigin } from './change-origin';
 
 export interface InlineToggleResult {
@@ -105,8 +105,8 @@ export function computeInlineToggle(
 }
 
 export const INLINE_MARKS = {
-  bold: { markers: ['**', '__'] as const, placeholder: 'texte en gras' },
-  italic: { markers: ['_', '*'] as const, placeholder: 'texte en italique' },
+  bold: { markers: ['**', '__'] as const },
+  italic: { markers: ['_', '*'] as const },
 } as const;
 
 export type InlineMarkType = keyof typeof INLINE_MARKS;
@@ -120,6 +120,13 @@ export interface SnippetTemplates {
   /** Le bloc entier, sauts de ligne compris. */
   table: string;
   blockquote: string;
+  boldText: string;
+  italicText: string;
+}
+
+export interface SelectionWrapOptions {
+  /** Un deck : `---` y est une frontière de diapositive. Ailleurs, un filet ou un titre Setext, donc du texte. */
+  keepSlideSeparators?: boolean;
 }
 
 /**
@@ -144,23 +151,34 @@ export function insertAfterSelection(insert: string): SelectionEdit {
 
 /**
  * Préfixe les lignes touchées, en entier. Une ligne déjà préfixée se préfixe encore : le menu dit
- * « Insérer », et `> >` est du Markdown, qu'un Cmd+Z retire. Une frontière de diapositive ne se
- * met pas en citation, et les lignes vides qui la bordent restent vides : le deck garderait sinon
- * une diapositive de moins.
+ * « Insérer », et `> >` est du Markdown, qu'un Cmd+Z retire.
+ *
+ * Ce qui n'est pas du texte reste tel quel : le frontmatter, partout, et dans un deck les frontières
+ * de diapositive, dont un `---` de bloc de code ne fait pas partie. Les lignes vides qui les bordent
+ * restent vides, sélectionnées ou non : `---` suivi d'une ligne non vide peut ouvrir un frontmatter
+ * (`detectFrontmatterLines`), et le deck y perdrait des diapositives.
  */
-function quoteLines(doc: string, from: number, to: number): InlineToggleResult {
+function quoteLines(doc: string, from: number, to: number, keepSlideSeparators: boolean): InlineToggleResult {
   const lineFrom = from === 0 ? 0 : doc.lastIndexOf('\n', from - 1) + 1;
   // Une sélection qui s'arrête en tête de ligne (triple clic, Maj+flèche) ne prend pas cette ligne.
   const nextBreak = doc.indexOf('\n', doc[to - 1] === '\n' ? to - 1 : to);
   const lineTo = nextBreak === -1 ? doc.length : nextBreak;
-  const lines = doc.slice(lineFrom, lineTo).split('\n');
-  const bordersSeparator = (index: number): boolean =>
-    isSeparatorLine(lines[index - 1] ?? '') || isSeparatorLine(lines[index + 1] ?? '');
+
+  const lines = doc.split('\n');
+  const first = doc.slice(0, lineFrom).split('\n').length - 1;
+  const count = doc.slice(lineFrom, lineTo).split('\n').length;
+  const frontmatter = detectFrontmatterLines(lines);
+  const separators = new Set(keepSlideSeparators ? parseSlides(doc).separatorLines : []);
+  const isNotText = (index: number): boolean =>
+    (frontmatter !== null && index <= frontmatter.closingLine) || separators.has(index);
+
   const insert = lines
-    .map((line, index) => {
-      if (isSeparatorLine(line)) return line;
+    .slice(first, first + count)
+    .map((line, offset) => {
+      const index = first + offset;
+      if (isNotText(index)) return line;
       if (line !== '') return `> ${line}`;
-      return bordersSeparator(index) ? line : '>';
+      return isNotText(index - 1) || isNotText(index + 1) ? line : '>';
     })
     .join('\n');
   return { from: lineFrom, to: lineTo, insert, selFrom: lineFrom, selTo: lineFrom + insert.length };
@@ -175,11 +193,14 @@ export function computeSelectionWrap(
   from: number,
   to: number,
   type: SelectionWrapType,
-  templates: SnippetTemplates
+  templates: SnippetTemplates,
+  options: SelectionWrapOptions = {}
 ): InlineToggleResult {
   if (type === 'table') return insertAt(to, templates.table);
   if (type === 'blockquote') {
-    return from === to ? insertAt(to, templates.blockquote) : quoteLines(doc, from, to);
+    return from === to
+      ? insertAt(to, templates.blockquote)
+      : quoteLines(doc, from, to, options.keepSlideSeparators === true);
   }
 
   // Un triple clic prend aussi la fin de ligne : elle reste hors de ce qu'on enveloppe.
@@ -209,16 +230,23 @@ export function computeSelectionWrap(
 }
 
 /**
- * Applique une édition de la sélection, et rend faux sur une vue en lecture seule : CM6 n'y arrête
- * que les commandes de l'auteur, pas un `dispatch`. Le texte de `doc` n'a que des `\n`, un `\r`
- * n'y est jamais une fin de ligne : un `Text` coupé là reste juste dans un fichier CRLF comme dans un
- * fichier mixte. Sans `isolateHistory`, une transaction sans `userEvent` se fondrait dans la
- * frappe voisine, et Cmd+Z emporterait les deux.
+ * Applique une édition de la sélection, et rend faux si le document n'a pas changé : sur une vue en
+ * lecture seule, où CM6 n'arrête que les commandes de l'auteur et pas un `dispatch` ; et quand le
+ * texte calculé est celui qui est déjà là, que CM6 prendrait pour un changement (`isDirty`, une
+ * écriture, et une étape vide que le Cmd+Z suivant consommerait sans rien faire). Le texte de `doc`
+ * n'a que des `\n`, un `\r` n'y est jamais une fin de ligne : un `Text` coupé là reste juste dans un
+ * fichier CRLF comme dans un fichier mixte. Sans `isolateHistory`, une transaction sans `userEvent`
+ * se fondrait dans la frappe voisine, et Cmd+Z emporterait les deux.
  */
 export function editSelection(view: EditorView, edit: SelectionEdit, origin: ChangeOrigin = 'programmatic'): boolean {
   if (view.state.readOnly) return false;
   const { from, to } = view.state.selection.main;
-  const r = edit(view.state.doc.toString(), from, to);
+  const doc = view.state.doc.toString();
+  const r = edit(doc, from, to);
+  if (r.insert === doc.slice(r.from, r.to)) {
+    view.focus();
+    return false;
+  }
   view.dispatch({
     changes: { from: r.from, to: r.to, insert: Text.of(r.insert.split('\n')) },
     selection: { anchor: r.selFrom, head: r.selTo },
@@ -228,8 +256,8 @@ export function editSelection(view: EditorView, edit: SelectionEdit, origin: Cha
   return true;
 }
 
-/** Commande CM6 : bascule la marque sur la sélection principale. */
-export function toggleInlineMark(view: EditorView, type: InlineMarkType): boolean {
-  const { markers, placeholder } = INLINE_MARKS[type];
+/** Commande CM6 : bascule la marque sur la sélection principale. `placeholder` est traduit par l'appelant. */
+export function toggleInlineMark(view: EditorView, type: InlineMarkType, placeholder: string): boolean {
+  const { markers } = INLINE_MARKS[type];
   return editSelection(view, (doc, from, to) => computeInlineToggle(doc, from, to, markers, placeholder));
 }

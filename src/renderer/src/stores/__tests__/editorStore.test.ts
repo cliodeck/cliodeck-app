@@ -41,6 +41,7 @@ function fakeFacade(
     getCursorOffset: () => cursor,
     hasKnownCursor: () => cursorKnown,
     getSelectionText: () => null,
+    isSlideDeck: false,
     hasFocus: () => false,
     replaceSelection: () => undefined,
     editSelection: () => false,
