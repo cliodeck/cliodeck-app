@@ -11,11 +11,15 @@
  * la façade parle à l'instance d'éditeur vivante.
  */
 import type { ChangeOrigin } from './cm/change-origin';
+import type { SelectionEdit } from './cm/inline-formatting';
 import type { Proposal } from './proposals';
 
 export interface EditorFacade {
   /** Le moteur qui implémente cette façade. */
   readonly engine: 'cm6';
+
+  /** Un deck de diapositives : ses `---` y sont des frontières, pas du texte. */
+  readonly isSlideDeck: boolean;
 
   /** Contenu réel de l'éditeur (source de vérité pour la sauvegarde). */
   getValue(): string;
@@ -33,7 +37,14 @@ export interface EditorFacade {
   getSelectionText(): string | null;
 
   /**
-   * Remplace la sélection courante (ou insère au curseur) et focus.
+   * Le curseur est-il dans le texte ? Il y reste quand la fenêtre perd le focus le temps d'un
+   * menu natif : c'est la question du menu, et `view.hasFocus` répondrait non.
+   */
+  hasFocus(): boolean;
+
+  /**
+   * Remplace la sélection courante (ou insère au curseur) et focus, sauf sur
+   * une vue en lecture seule, qui ne change rien.
    * `origin` : annotation changeOrigin de la transaction (Phase 4a),
    * défaut `programmatic`.
    */
@@ -43,9 +54,17 @@ export interface EditorFacade {
    * Bascule une marque inline (gras/italique) sur la sélection : wrap si
    * absente, unwrap si présente, placeholder sélectionné si sélection
    * vide. Contrairement à replaceSelection, n'écrase JAMAIS le texte
-   * sélectionné (#10).
+   * sélectionné (#10). Rien sur une vue en lecture seule. `placeholder` part dans le
+   * manuscrit : il est traduit par l'appelant.
    */
-  toggleInline?(type: 'bold' | 'italic'): void;
+  toggleInline?(type: 'bold' | 'italic', placeholder: string): void;
+
+  /**
+   * Applique une édition calculée sur la sélection, en une seule étape de Cmd+Z, sélection comprise,
+   * et focus. Ses offsets et son texte sont ceux du document : une fin de ligne y vaut 1, quel que
+   * soit le fichier. Rend faux si rien n'a changé : vue en lecture seule, ou texte déjà celui-là.
+   */
+  editSelection(edit: SelectionEdit, origin?: ChangeOrigin): boolean;
 
   /**
    * Remplace tout le document en une seule édition (annulable d'un coup),

@@ -1,6 +1,7 @@
-import { EditorSelection, Text, type Extension } from '@codemirror/state';
+import { EditorSelection, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { changeOrigin } from '../cm/change-origin';
+import { toDocText } from '../cm/fidelity';
 import {
   addProposalEffect,
   createProposalsField,
@@ -39,15 +40,6 @@ function generateId(): string {
   if (c?.randomUUID) return c.randomUUID();
   idCounter += 1;
   return `proposal-${Date.now()}-${idCounter}`;
-}
-
-/**
- * Le texte d'une proposition, en lignes du document. CM6 ne découpe une chaîne que sur le séparateur
- * déclaré : dans un fichier CRLF, ses `\n` resteraient à l'intérieur d'une « ligne » et le fichier
- * deviendrait mixte. La longueur d'un `Text` est aussi la seule qui soit en offsets du document.
- */
-function toDocText(text: string): Text {
-  return Text.of(text.split(/\r\n?|\n/));
 }
 
 export interface ProposalsInstance {

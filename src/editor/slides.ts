@@ -43,6 +43,8 @@ export interface SlideInfo {
 export interface DeckInfo {
   frontmatter: { from: number; to: number; yaml: string } | null;
   slides: SlideInfo[];
+  /** 0-based : les lignes `---` qui séparent les slides, hors frontmatter et hors blocs de code. */
+  separatorLines: number[];
 }
 
 const MAX_SCAN_LINES = 100;
@@ -193,7 +195,7 @@ export function parseSlides(source: string): DeckInfo {
     });
   }
 
-  return { frontmatter, slides };
+  return { frontmatter, slides, separatorLines: separators };
 }
 
 function lineNumberAt(lines: readonly LineRec[], offset: number): number {

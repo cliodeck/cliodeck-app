@@ -102,33 +102,39 @@ export function useMenuShortcuts() {
       window.dispatchEvent(new CustomEvent('show-pdf-export-dialog'));
     };
 
-    // Formatting operations
+    // Formatting operations. Ces accélérateurs valent pour toute la fenêtre : la touche que la saisie
+    // du chat ne traite pas revient ici, comme le clic dans le menu. Dans l'éditeur, le keymap la
+    // prend avant le menu, et les boutons de la barre d'outils n'y passent pas.
+    const formatIfEditorFocused = (type: Parameters<typeof insertFormatting>[0]) => {
+      if (useEditorStore.getState().editorFacade?.hasFocus()) insertFormatting(type);
+    };
+
     const handleFormatBold = () => {
-      insertFormatting('bold');
+      formatIfEditorFocused('bold');
     };
 
     const handleFormatItalic = () => {
-      insertFormatting('italic');
+      formatIfEditorFocused('italic');
     };
 
     const handleInsertLink = () => {
-      insertFormatting('link');
+      formatIfEditorFocused('link');
     };
 
     const handleInsertCitation = () => {
-      insertFormatting('citation');
+      formatIfEditorFocused('citation');
     };
 
     const handleInsertTable = () => {
-      insertFormatting('table');
+      formatIfEditorFocused('table');
     };
 
     const handleInsertFootnote = () => {
-      insertFormatting('footnote');
+      formatIfEditorFocused('footnote');
     };
 
     const handleInsertBlockQuote = () => {
-      insertFormatting('blockquote');
+      formatIfEditorFocused('blockquote');
     };
 
     // Une seule implémentation, partagée avec le bouton de la barre

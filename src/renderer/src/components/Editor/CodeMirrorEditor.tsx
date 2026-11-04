@@ -22,7 +22,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState, readDocText } from '@/editor/cm/fidelity';
+import { createDocState, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
 import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
@@ -32,7 +32,7 @@ import {
 import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
 import { scholarlyMarkdown } from '@/editor/lezer-extensions';
 import { changeOrigin, changeOriginGuard } from '@/editor/cm/change-origin';
-import { toggleInlineMark } from '@/editor/cm/inline-formatting';
+import { editSelection, toggleInlineMark } from '@/editor/cm/inline-formatting';
 import {
   proposals,
   type Proposal,
@@ -237,10 +237,12 @@ function createFacade(
   selectionListeners: Set<(offset: number) => void>,
   proposalsInstance: ProposalsInstance,
   hasKnownCursor: () => boolean,
-  cancelScrollRestore: () => void
+  cancelScrollRestore: () => void,
+  isSlideDeck: boolean
 ): EditorFacade {
   return {
     engine: 'cm6',
+    isSlideDeck,
     getValue: () => readDocText(view.state),
     getCursorOffset: () => view.state.selection.main.head,
     hasKnownCursor,
@@ -248,12 +250,15 @@ function createFacade(
       const { from, to } = view.state.selection.main;
       return from === to ? null : view.state.sliceDoc(from, to);
     },
-    toggleInline: (type) => {
-      toggleInlineMark(view, type);
+    hasFocus: () => view.root.activeElement === view.contentDOM,
+    toggleInline: (type, placeholder) => {
+      toggleInlineMark(view, type, placeholder);
     },
+    editSelection: (edit, origin) => editSelection(view, edit, origin),
     replaceSelection: (text, origin) => {
+      if (view.state.readOnly) return;
       view.dispatch({
-        ...view.state.replaceSelection(text),
+        ...view.state.replaceSelection(toDocText(text)),
         annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
       view.focus();
@@ -406,6 +411,7 @@ export const CodeMirrorEditor: React.FC = () => {
             ]
           : [],
         history(),
+        EditorView.clipboardInputFilter.of(toDocLineBreaks),
         formattingKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         lineNumbers(),
@@ -513,7 +519,8 @@ export const CodeMirrorEditor: React.FC = () => {
           selectionListeners,
           proposalsInstance,
           () => cursorPlaced,
-          cancelScrollRestore
+          cancelScrollRestore,
+          isPresentation
         )
       );
 
@@ -620,7 +627,7 @@ export const CodeMirrorEditor: React.FC = () => {
         });
       } else {
         view.dispatch({
-          ...view.state.replaceSelection(payload.text),
+          ...view.state.replaceSelection(toDocText(payload.text)),
           annotations: changeOrigin.of('programmatic'),
         });
         view.focus();

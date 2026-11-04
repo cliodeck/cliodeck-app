@@ -7,6 +7,7 @@ import {
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
 import { findDefinition } from './footnote-lookup';
 import { changeOrigin } from '../change-origin';
+import { toDocText } from '../fidelity';
 import type { ScholarlyLabels } from './types';
 
 /**
@@ -28,7 +29,11 @@ interface PopupState {
   at: number;
 }
 
-function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
+function popupTooltip(
+  value: PopupState,
+  labels: ScholarlyLabels,
+  field: StateField<PopupState | null>
+): Tooltip {
   return {
     pos: value.at,
     above: false,
@@ -79,7 +84,7 @@ function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
             changes: {
               from: current.contentFrom,
               to: current.contentTo,
-              insert: text,
+              insert: toDocText(text),
             },
             annotations: changeOrigin.of('programmatic'),
           });
@@ -91,7 +96,7 @@ function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
           view.dispatch({
             changes: {
               from: doc.length,
-              insert: `${sep}[^${value.label}]: ${text}`,
+              insert: toDocText(`${sep}[^${value.label}]: ${text}`),
             },
             annotations: changeOrigin.of('programmatic'),
           });
@@ -110,9 +115,11 @@ function popupTooltip(value: PopupState, labels: ScholarlyLabels): Tooltip {
           save();
         }
       });
-      // Clic hors du popup → annule (focusout couvre clic + Tab).
+      // Clic hors du popup → annule (focusout couvre clic + Tab). Le retirer du document lui prend
+      // aussi le focus, en pleine mise à jour de la vue : il n'y a alors plus rien à fermer, et un
+      // `dispatch` lèverait.
       dom.addEventListener('focusout', (e) => {
-        if (!dom.contains(e.relatedTarget as Node | null)) close();
+        if (view.state.field(field) === value && !dom.contains(e.relatedTarget as Node | null)) close();
       });
 
       return {
@@ -142,7 +149,7 @@ export function footnotePopup(labels: ScholarlyLabels): Extension {
     provide: (f) =>
       showTooltip.compute([f], (state) => {
         const value = state.field(f);
-        return value ? popupTooltip(value, labels) : null;
+        return value ? popupTooltip(value, labels, f) : null;
       }),
   });
   return field;

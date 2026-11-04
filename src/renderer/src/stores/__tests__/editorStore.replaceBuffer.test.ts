@@ -812,7 +812,7 @@ describe('detach : hors de tout document, le temps d’un changement de projet',
 
   it('un texte inséré par programme dans le tampon détaché ne pose aucune question', async () => {
     await detached();
-    store().insertText('[@cle]');
+    useEditorStore.setState({ content: '[@cle]', isDirty: true });
     live = '[@cle]';
 
     const opening = store().replaceBuffer({ kind: 'open', filePath: B }, 'project-open');

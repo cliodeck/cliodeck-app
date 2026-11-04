@@ -10,6 +10,7 @@ import { ErrorFallback } from './components/ErrorFallback';
 import { useMenuShortcuts } from './hooks/useMenuShortcuts';
 import { useUsageModeMirror } from './hooks/useUsageModeMirror';
 import { useSaveOnQuit } from './hooks/useSaveOnQuit';
+import { useAutoSave } from './hooks/useAutoSave';
 import { usePdfLowTextWarnings } from './hooks/usePdfLowTextWarnings';
 import { useSandboxWarning } from './hooks/useSandboxWarning';
 import { useLocalAiSupportWarning } from './hooks/useLocalAiSupportWarning';
@@ -36,6 +37,15 @@ function AppErrorBoundary({ children }: { children: ReactNode }) {
       {children}
     </ErrorBoundary>
   );
+}
+
+/**
+ * Un composant à lui, hors des frontières comme les hooks d'App : chaque essai terminé relance un
+ * rendu, et celui-là n'a pas à repasser par tout l'arbre. Mesuré dans `App.autosave.test.tsx`.
+ */
+function AutoSave() {
+  useAutoSave();
+  return null;
 }
 
 function App() {
@@ -69,7 +79,7 @@ function App() {
 
   // Vider l'éditeur sur le disque avant que l'application ne se ferme.
   // Monté ici, au-dessus de l'éditeur : un panneau démonté ne doit pas
-  // faire disparaître le filet.
+  // faire disparaître le filet. L'autosave (`AutoSave`, plus bas) non plus.
   useSaveOnQuit();
 
   // Initialiser la langue
@@ -125,22 +135,25 @@ function App() {
   // enregistrement refusé ne s'y disait pas. L'extérieure garde les dialogues eux-mêmes : hors de
   // toute frontière, leur plantage effacerait la page, et le filet de sortie avec elle.
   return (
-    <AppErrorBoundary>
+    <>
+      <AutoSave />
       <AppErrorBoundary>
-        {/* Skip-to-content link (fusion 3.3) — first focusable element,
-            hidden until keyboard-focused. Lets Tab users jump past the
-            workspace mode bar / left tabs straight into the editor. */}
-        <a className="skip-link" href="#main-content">
-          {t('a11y.skipToMain', 'Skip to main content')}
-        </a>
-        {/* Chantier « même éditeur » : les projets presentation passent par le
-            MÊME EditorPanel (toolbar contextuelle + tiroirs slides). */}
-        <MainLayout centerPanel={<EditorPanel />} />
-        <RebuildProgressModal />
+        <AppErrorBoundary>
+          {/* Skip-to-content link (fusion 3.3) — first focusable element,
+              hidden until keyboard-focused. Lets Tab users jump past the
+              workspace mode bar / left tabs straight into the editor. */}
+          <a className="skip-link" href="#main-content">
+            {t('a11y.skipToMain', 'Skip to main content')}
+          </a>
+          {/* Chantier « même éditeur » : les projets presentation passent par le
+              MÊME EditorPanel (toolbar contextuelle + tiroirs slides). */}
+          <MainLayout centerPanel={<EditorPanel />} />
+          <RebuildProgressModal />
+        </AppErrorBoundary>
+        <AlertDialog />
+        <ConfirmDialog />
       </AppErrorBoundary>
-      <AlertDialog />
-      <ConfirmDialog />
-    </AppErrorBoundary>
+    </>
   );
 }
 
