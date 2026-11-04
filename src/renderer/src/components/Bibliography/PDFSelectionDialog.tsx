@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ZoteroAttachmentInfo } from '../../stores/bibliographyStore';
 import './PDFSelectionDialog.css';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface PDFSelectionDialogProps {
   citationTitle: string;
@@ -19,9 +20,10 @@ export const PDFSelectionDialog: React.FC<PDFSelectionDialogProps> = ({
   onCancel,
 }) => {
   const { t } = useTranslation('common');
+  const trapRef = useFocusTrap({ active: true, onEscape: onCancel });
 
   return (
-    <div className="pdf-selection-overlay" {...backdropClose(onCancel)}>
+    <div ref={trapRef} className="pdf-selection-overlay" {...backdropClose(onCancel)}>
       <div className="pdf-selection-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="pdf-selection-header">
           <h3>{t('bibliography.selectPDF')}</h3>

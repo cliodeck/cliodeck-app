@@ -98,6 +98,18 @@ describe('câblage des modales', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('tout ce qui se ferme par son fond a son piège', () => {
+    // Sans lui, Échap passe à la modale du dessous ou à rien, Tab sort du cadre, et fermer un
+    // message par-dessus rend la main à l'éditeur, caché derrière.
+    const offenders = modalFiles(COMPONENTS)
+      .filter((file) => {
+        const src = fs.readFileSync(file, 'utf8');
+        return src.includes('backdropClose(') && !src.includes('useFocusTrap(');
+      })
+      .map((file) => path.relative(COMPONENTS, file));
+    expect(offenders).toEqual([]);
+  });
+
   it('couvre bien un nombre plausible de modales', () => {
     const withHook = modalFiles(COMPONENTS).filter((f) =>
       fs.readFileSync(f, 'utf8').includes('useFocusTrap(')
