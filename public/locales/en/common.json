@@ -100,6 +100,7 @@
     "saved": "Configuration saved",
     "saveError": "Error saving configuration",
     "saveFailed": "{{sections}}: not applied ({{reason}}). Other sections are saved; save again to retry.",
+    "savedNotApplied": "{{sections}}: saved, but this setting could not be applied to the open project ({{reason}}). Search and indexing remain stopped: correct this setting, then save again.",
     "resetFailed": "{{sections}}: reset not applied ({{reason}}). Other sections have been reset; reset again to retry.",
     "resetConfirm": "Reset configuration to default values?\n\nBack to default values: LLM Configuration, RAG configuration and Editor. The generation backend returns to Ollama, with the chat model {{model}}: if Ollama or this model is missing, the chat will show an error until you choose another one. An embedded model already downloaded takes over if Ollama does not respond. Sending reading notes to online models is refused again.\n\nKept as they are: the embedding model and provider, along with the Ollama URL and, if it computes them, the online backend; the system prompt language; API keys; Zotero Configuration.\n\nNo re-indexing is needed and your indexed documents do not change: chunking settings only apply to PDFs re-indexed afterwards.",
     "language": "Language",
@@ -1848,7 +1849,7 @@
     },
     "unreadable": {
       "title": "Unreadable keys",
-      "description": "These keys are stored encrypted but cannot be decrypted here: a different keychain key (packaged or development build of the app, recreated \"Safe Storage\" entry), or no keychain available for this launch. ClioDeck treats them as missing and tells you here. Re-enter them in the settings, or delete them.",
+      "description": "These keys are stored, but ClioDeck cannot use them: a different keychain key (packaged or development build of the app, recreated \"Safe Storage\" entry), no keychain available for this launch, or a mask saved in place of the key by an earlier version. ClioDeck treats them as missing and tells you here. Re-enter them in the settings, or delete them.",
       "delete": "Delete",
       "deleted": "Key {{key}} deleted."
     },

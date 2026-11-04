@@ -39,7 +39,7 @@ vi.mock('../../../services/config-manager.js', () => ({
   },
 }));
 vi.mock('../../../services/pdf-service.js', () => ({
-  pdfService: { getCurrentProjectPath: () => null },
+  pdfService: { getCurrentProjectPath: () => null, applyRagConfig: () => undefined },
 }));
 
 const { stripMaskedKeys, setupConfigHandlers } = await import('../config-handlers.js');

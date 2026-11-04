@@ -7,7 +7,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { launchApp } from './_helpers/launch';
 import { startFakeOllama } from './_helpers/fake-ollama';
 
@@ -374,24 +374,177 @@ test('un projet ouvert : rien à écrire ne relance rien ; une écriture refusé
     await expect(saved(window)).toBeVisible();
     expect(restarts()).toBe(0);
 
-    // Claude sans clé : le main écrit, puis la relance des services échoue. C'est dit, avec le motif.
+    // Claude sans clé : le main écrit, puis la relance des services échoue. Le message le dit tel quel.
     await section(window, 'Configuration LLM');
     await window.locator('.settings-modal select').first().selectOption('claude');
     await save(window);
-    await expect(failed(window)).toContainText('Configuration LLM');
+    await expect(failed(window)).toContainText('Configuration LLM : enregistré');
     await expect(failed(window)).toContainText('claudeAPIKey');
     await expect(saved(window)).toHaveCount(0);
-    expect(restarts()).toBe(1);
+    await expect.poll(restarts).toBe(1);
+    expect(readConfig(dir).llm.backend).toBe('claude');
 
-    // La clé saisie : ce qui manquait repart, et cette fois tout est appliqué.
+    // Rien à écrire, mais les services sont à l'arrêt : « sauvegardée » serait faux. On retente.
+    await save(window);
+    await expect.poll(restarts).toBe(2);
+    await expect(failed(window)).toContainText('claudeAPIKey');
+    await expect(saved(window)).toHaveCount(0);
+
+    // La clé saisie : les services repartent, et le message cesse d'être une erreur.
     await window.locator('.settings-modal input[type="password"]').first().fill('sk-ant-api03-une-cle-de-test');
     await save(window);
+    await expect.poll(restarts).toBe(3);
     await expect(saved(window)).toBeVisible();
-    expect(restarts()).toBe(2);
     expect(readConfig(dir).llm.backend).toBe('claude');
     expect(await storedKeys(app, dir)).toEqual({ 'llm.claudeAPIKey': 'sk-ant-api03-une-cle-de-test' });
   } finally {
     await app.close();
+  }
+});
+
+test('Claude sans clé, puis retour à Ollama : le disque suit, les services repartent, et le projet se rouvre', async () => {
+  test.setTimeout(120_000);
+  const dir = userData(AUTHOR);
+  const session = await launch(dir);
+  if (!session) return;
+  let log = '';
+  session.app.process().stdout?.on('data', (chunk: Buffer) => {
+    log += chunk.toString();
+  });
+  const projectJson = article();
+
+  try {
+    const { app, window } = session;
+    await openProject(app, window, projectJson);
+    await openSettings(window);
+    await section(window, 'Configuration LLM');
+    const backend = window.locator('.settings-modal select').first();
+
+    await backend.selectOption('claude');
+    await save(window);
+    await expect(failed(window)).toContainText('claudeAPIKey');
+    expect(readConfig(dir).llm.backend).toBe('claude');
+
+    // Sans l'instantané qui suit le disque, ce retour passait pour « rien à écrire ».
+    await backend.selectOption('ollama');
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+    expect(readConfig(dir).llm.backend).toBe('ollama');
+    await expect.poll(() => log.split('Services reinitialized successfully').length - 1).toBe(1);
+
+    await session.app.close();
+    const relaunched = await launch(dir);
+    if (!relaunched) return;
+    session.app = relaunched.app;
+    await openProject(relaunched.app, relaunched.window, projectJson);
+  } finally {
+    await session.app.close();
+  }
+});
+
+/** Assez de phrases distinctes pour que le préréglage de découpage compte : le texte d'une page tient sur une ligne. */
+function textPdf(filePath: string, pageCount: number): void {
+  const syllables = ['ar', 'chi', 've', 'do', 'cu', 'men', 'ta', 'ti', 'on', 'his', 'toi', 're', 'mu', 'ni', 'ci', 'pa', 'le', 'gou', 'ver', 'ne'];
+  let seed = 7;
+  const next = (max: number): number => {
+    seed = (seed * 1105 + 12345) % 65536;
+    return (seed >> 4) % max;
+  };
+  const word = (): string => Array.from({ length: 2 + next(3) }, () => syllables[next(syllables.length)]).join('');
+  const sentence = (): string => {
+    const text = Array.from({ length: 6 + next(5) }, word).join(' ');
+    return `${text[0].toUpperCase()}${text.slice(1)}.`;
+  };
+  const objects: string[] = [];
+  const pageRefs: string[] = [];
+  for (let page = 0; page < pageCount; page++) {
+    const lines = Array.from({ length: 40 }, () => `(${sentence()}) Tj T*`).join('\n');
+    const stream = `BT /F1 9 Tf 40 780 Td 12 TL\n${lines}\nET`;
+    const contentNumber = 4 + page * 2;
+    const pageNumber = contentNumber + 1;
+    objects[contentNumber] = `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`;
+    objects[pageNumber] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents ${contentNumber} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`;
+    pageRefs.push(`${pageNumber} 0 R`);
+  }
+  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[2] = `<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pageCount} >>`;
+  objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  for (let number = 1; number < objects.length; number++) {
+    offsets[number] = Buffer.byteLength(body);
+    body += `${number} 0 obj\n${objects[number]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(body);
+  const entries = offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+  body += `xref\n0 ${objects.length}\n0000000000 65535 f \n${entries}trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  writeFileSync(filePath, body);
+}
+
+test('un changement de découpage seul : le PDF indexé ensuite le suit, sans relancer les services', async () => {
+  test.setTimeout(180_000);
+  const ollama = await startFakeOllama('Réponse du faux modèle.');
+  toClean.push(ollama.userDataDir);
+  const session = await launch(ollama.userDataDir);
+  if (!session) {
+    await ollama.close();
+    return;
+  }
+  const { app, window } = session;
+  let log = '';
+  app.process().stdout?.on('data', (chunk: Buffer) => {
+    log += chunk.toString();
+  });
+  const restarts = () => log.split('Reinitializing services').length - 1;
+  const projectJson = article();
+  const pdf = join(dirname(projectJson), 'source.pdf');
+  textPdf(pdf, 12);
+  /** Indexe (ou réindexe : un fichier, un document) et rend le nombre d'extraits du projet. */
+  const indexedChunks = () =>
+    window.evaluate(async (file) => {
+      const indexed = await window.electron.pdf.index(file);
+      if (!indexed.success) throw new Error(indexed.error);
+      const { statistics } = await window.electron.pdf.getStatistics();
+      return { documents: statistics.totalDocuments, chunks: statistics.totalChunks };
+    }, pdf);
+
+  try {
+    await openProject(app, window, projectJson);
+    const small = await indexedChunks();
+    expect(small.documents).toBe(1);
+    expect(small.chunks).toBeGreaterThan(10);
+
+    await openSettings(window);
+    await window.locator('.settings-modal').getByRole('button', { name: 'Expert', exact: true }).click();
+    await section(window, 'Configuration RAG');
+    const preset = window.locator('.settings-modal select:has(option[value="cpuOptimized"])');
+    await expect(preset).toHaveValue('cpuOptimized');
+
+    await preset.selectOption('large');
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+    expect(readConfig(ollama.userDataDir).rag.chunkingConfig).toBe('large');
+    expect(restarts()).toBe(0);
+
+    const large = await indexedChunks();
+    expect(large.documents).toBe(1);
+    expect(large.chunks).toBeLessThan(small.chunks);
+
+    // Les deux sections à la fois : une seule relance, et elle voit le découpage écrit. Le compte
+    // est cumulé : il prouve aussi que le changement de découpage seul n'a rien relancé.
+    await preset.selectOption('cpuOptimized');
+    await section(window, 'Configuration LLM');
+    await window.locator('.settings-modal input[placeholder="défaut du serveur (4096)"]').fill('8192');
+    await save(window);
+    await expect.poll(() => readConfig(ollama.userDataDir).llm.ollamaNumCtx).toBe(8192);
+    await expect.poll(restarts).toBe(1);
+    await expect(saved(window)).toBeVisible();
+    expect(restarts()).toBe(1);
+
+    expect((await indexedChunks()).chunks).toBe(small.chunks);
+  } finally {
+    await app.close();
+    await ollama.close();
   }
 });
 

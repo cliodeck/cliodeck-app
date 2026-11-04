@@ -168,6 +168,24 @@ export class SecureStorage {
    * Returns an empty string if the key does not exist.
    */
   getKey(name: string): string {
+    const value = this.readKey(name);
+    // Écrit par une version antérieure, avant la règle de `setKey` (S17-1-29). Rendu tel quel, il
+    // partirait comme jeton vers le fournisseur, et le champ montrerait `****` comme si une clé était là.
+    if (isSensitiveKey(name) && isMaskedKey(value)) {
+      if (!this.warned.has(name)) {
+        this.warned.add(name);
+        console.warn(
+          `⚠️  [SecureStorage] La clé "${name}" contient un masque, pas une clé : traitée comme absente. ` +
+            'Ressaisissez-la, ou supprimez-la dans Réglages → Sécurité.',
+        );
+      }
+      this.unreadable.add(name);
+      return '';
+    }
+    return value;
+  }
+
+  private readKey(name: string): string {
     const store = this.getStore();
     const raw = store.get(name);
 
@@ -293,6 +311,8 @@ export class SecureStorage {
     for (const key of keys) {
       store.delete(key);
     }
+    this.unreadable.clear();
+    this.warned.clear();
     console.log(`🔒 [SecureStorage] Revoked ${keys.length} key(s)`);
     return keys.length;
   }

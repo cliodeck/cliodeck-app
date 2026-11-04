@@ -174,14 +174,23 @@ export function setupConfigHandlers() {
         );
       }
 
-      // If LLM config changed and there's an active project, reinitialize services
-      if (key === 'llm') {
-        const currentProjectPath = pdfService.getCurrentProjectPath();
-        if (currentProjectPath) {
-          console.log('Reinitializing services with new LLM config...');
-          await pdfService.init(currentProjectPath);
-          console.log('Services reinitialized successfully');
+      // Le fichier est écrit : ce qui échoue à partir d'ici ne l'annule pas, et le panneau doit le
+      // savoir. Il prendrait sinon pour non écrit ce que le disque contient déjà.
+      try {
+        if (key === 'llm') {
+          // If LLM config changed and there's an active project, reinitialize services
+          const currentProjectPath = pdfService.getCurrentProjectPath();
+          if (currentProjectPath) {
+            console.log('Reinitializing services with new LLM config...');
+            await pdfService.init(currentProjectPath);
+            console.log('Services reinitialized successfully');
+          }
+        } else if (key === 'rag') {
+          pdfService.applyRagConfig();
         }
+      } catch (error: unknown) {
+        console.error('config:set: written, but not applied:', error);
+        return { ...errorResponse(error), written: true };
       }
 
       console.log('IPC Response: config:set - success');

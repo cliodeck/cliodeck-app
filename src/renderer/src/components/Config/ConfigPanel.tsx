@@ -130,6 +130,11 @@ export interface LLMConfig {
 
 type SettingsMode = 'simple' | 'expert';
 
+interface SectionFailure {
+  section: SectionName;
+  reason: string;
+}
+
 /** Le titre de la section dans le formulaire : c'est le mot que l'auteur a sous les yeux. */
 const SECTION_TITLES: Record<SectionName, string> = {
   rag: 'ragConfig.title',
@@ -158,6 +163,8 @@ export const ConfigPanel: React.FC = () => {
   const snapshot = useRef<SettingsSections | null>(null);
   // `isSaving` n'est vu qu'au rendu suivant : une écriture à la fois se garde ici.
   const writing = useRef(false);
+  /** Sections écrites mais non appliquées au projet ouvert : le prochain Enregistrer retente, même sans rien à écrire. */
+  const notApplied = useRef(new Set<SectionName>());
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -222,25 +229,28 @@ export const ConfigPanel: React.FC = () => {
   /**
    * Écrit les champs de `next` qui diffèrent de `baseline`, posés sur la section relue à l'instant :
    * `set('rag')` remplace toute la section. Une section sans changement n'est ni écrite ni relancée
-   * (`config:set('llm')` réinitialise les services). L'instantané n'avance que pour une section
-   * écrite : le prochain Enregistrer réessaie celles qui ont été refusées, et elles seules.
+   * (`config:set('llm')` réinitialise les services). L'instantané suit le disque : il n'avance pas
+   * pour une section refusée, que le prochain Enregistrer réessaie, elle seule. Il avance quand le
+   * main a écrit puis n'a pas pu relancer les services (`written`) : revenir ensuite à la valeur
+   * précédente est bien un changement à écrire.
    */
   const persist = async (
     next: Partial<Record<SectionName, object>>,
     baseline: Partial<Record<SectionName, object>>
   ) => {
     const written: Partial<Record<SectionName, object>> = {};
-    const failures: Array<{ section: SectionName; reason: string }> = [];
+    const failures: SectionFailure[] = [];
+    const unapplied: SectionFailure[] = [];
     for (const section of SECTION_NAMES) {
       const target = next[section];
       if (!target) continue;
       const diff = diffSection(baseline[section] ?? {}, target);
-      if (Object.keys(diff).length === 0) continue;
+      if (Object.keys(diff).length === 0 && !notApplied.current.has(section)) continue;
       try {
         const value = { ...(await window.electron.config.get(section)), ...diff };
         // Le handler ne lève pas : il répond `{ success: false }`.
         const response = await window.electron.config.set(section, value);
-        if (response?.success === false) throw new Error(response.error);
+        if (response?.success === false && !response.written) throw new Error(response.error);
         written[section] = value;
         if (snapshot.current) {
           snapshot.current = {
@@ -248,12 +258,18 @@ export const ConfigPanel: React.FC = () => {
             [section]: { ...snapshot.current[section], ...diff },
           };
         }
+        if (response?.success === false) {
+          notApplied.current.add(section);
+          unapplied.push({ section, reason: response.error });
+        } else {
+          notApplied.current.delete(section);
+        }
       } catch (error) {
         console.error(`Failed to save config section ${section}:`, error);
         failures.push({ section, reason: error instanceof Error ? error.message : String(error) });
       }
     }
-    return { written, failures };
+    return { written, failures, unapplied };
   };
 
   /** Ce qui vient d'être écrit se voit sans redémarrage. Une section refusée ne se répercute pas. */
@@ -302,21 +318,19 @@ export const ConfigPanel: React.FC = () => {
 
   /** Le motif, section par section : `settings.saved` ne se dit que si tout est passé. */
   const showOutcome = (
-    failures: Array<{ section: SectionName; reason: string }>,
+    { failures, unapplied }: { failures: SectionFailure[]; unapplied: SectionFailure[] },
     failedKey: 'settings.saveFailed' | 'settings.resetFailed'
   ) => {
-    if (failures.length === 0) {
-      setSaveMessageType('success');
-      setSaveMessage(t('settings.saved'));
-      return;
-    }
-    setSaveMessageType('error');
-    setSaveMessage(
-      t(failedKey, {
-        sections: failures.map(({ section }) => t(SECTION_TITLES[section])).join(', '),
-        reason: [...new Set(failures.map(({ reason }) => reason))].join(' ; '),
-      })
-    );
+    const describe = (key: typeof failedKey | 'settings.savedNotApplied', list: SectionFailure[]) =>
+      list.length === 0
+        ? []
+        : t(key, {
+            sections: list.map(({ section }) => t(SECTION_TITLES[section])).join(', '),
+            reason: [...new Set(list.map(({ reason }) => reason))].join(' ; '),
+          });
+    const problems = [describe(failedKey, failures), describe('settings.savedNotApplied', unapplied)].flat();
+    setSaveMessageType(problems.length === 0 ? 'success' : 'error');
+    setSaveMessage(problems.length === 0 ? t('settings.saved') : problems.join(' '));
   };
 
   const handleSaveConfig = async () => {
@@ -332,12 +346,12 @@ export const ConfigPanel: React.FC = () => {
     setSaveMessage('');
 
     try {
-      const { written, failures } = await persist(
+      const outcome = await persist(
         { rag: ragConfig, llm: llmConfig, editor: editorConfig, zotero: zoteroConfig },
         baseline
       );
-      applyWritten(written);
-      showOutcome(failures, 'settings.saveFailed');
+      applyWritten(outcome.written);
+      showOutcome(outcome, 'settings.saveFailed');
     } catch (error) {
       console.error('Failed to save config:', error);
       setSaveMessageType('error');
@@ -366,14 +380,14 @@ export const ConfigPanel: React.FC = () => {
         editor: await window.electron.config.get('editor'),
       };
       const next = resetValues(fresh);
-      const { written, failures } = await persist(next, {
+      const outcome = await persist(next, {
         rag: fresh.rag,
         llm: fresh.llm,
         editor: withFormDefaults('editor', fresh.editor),
       });
 
-      // Le formulaire ne suit que ce que le main a accepté, et montre ce que le disque contient.
-      const refused = new Set(failures.map(({ section }) => section));
+      // Le formulaire ne suit que ce que le main a écrit, et montre ce que le disque contient.
+      const refused = new Set(outcome.failures.map(({ section }) => section));
       const values: Partial<SettingsSections> = {};
       if (!refused.has('rag')) {
         values.rag = withFormDefaults('rag', { ...fresh.rag, ...next.rag });
@@ -389,8 +403,8 @@ export const ConfigPanel: React.FC = () => {
       }
       if (snapshot.current) snapshot.current = { ...snapshot.current, ...values };
 
-      applyWritten(written);
-      showOutcome(failures, 'settings.resetFailed');
+      applyWritten(outcome.written);
+      showOutcome(outcome, 'settings.resetFailed');
     } catch (error) {
       console.error('Failed to reset config:', error);
       setSaveMessageType('error');

@@ -354,3 +354,81 @@ describe('repli en clair visible (dette n° 16)', () => {
     warn.mockRestore();
   });
 });
+
+describe('un masque déjà stocké (S17-1-29, sur une version antérieure)', () => {
+  /** Tel que `setKey` l'écrivait avant la règle : chiffré comme une vraie clé. */
+  const storedMask = (mask: string) => safeStorageState.encrypt(mask).toString('base64');
+
+  it('n’est pas rendu comme une clé : il partirait comme jeton vers le fournisseur', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    stores[0]['zotero.apiKey'] = storedMask('****');
+
+    expect(s.getKey('llm.openaiAPIKey')).toBe('');
+    expect(s.getKey('zotero.apiKey')).toBe('');
+    // Le champ ne se remontre plus en `****` : `maskAPIKey('')` rend une chaîne vide.
+    expect(maskAPIKey(s.getKey('llm.openaiAPIKey'))).toBe('');
+    warn.mockRestore();
+  });
+
+  it('se liste avec les clés illisibles, avec un seul avertissement par clé, et se supprime', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+
+    s.getKey('llm.openaiAPIKey');
+    s.getKey('llm.openaiAPIKey');
+    expect(s.unreadableKeys()).toEqual(['llm.openaiAPIKey']);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    s.setKey('llm.openaiAPIKey', '');
+    expect(s.unreadableKeys()).toEqual([]);
+    expect(stores[0]['llm.openaiAPIKey']).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it('une vraie clé saisie ensuite le remplace', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    s.setKey('llm.openaiAPIKey', 'sk-nouvelle-cle-valide-0123456789');
+
+    expect(s.getKey('llm.openaiAPIKey')).toBe('sk-nouvelle-cle-valide-0123456789');
+    expect(s.unreadableKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('vaut aussi quand le trousseau manque et que la valeur est en clair', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(false);
+    stores[0]['llm.claudeAPIKey'] = 'sk-a...wXyZ';
+
+    expect(s.getKey('llm.claudeAPIKey')).toBe('');
+    expect(s.unreadableKeys()).toEqual(['llm.claudeAPIKey']);
+    expect(s.plaintextKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('un secret d’environnement MCP garde la forme qu’il veut : la règle ne vise que SENSITIVE_KEYS', async () => {
+    const s = await freshStorage(true);
+    stores[0]['mcp.client.demo.TOKEN'] = storedMask('abcd...wxyz');
+
+    expect(s.getKey('mcp.client.demo.TOKEN')).toBe('abcd...wxyz');
+    expect(s.unreadableKeys()).toEqual([]);
+  });
+
+  it('une révocation efface aussi la liste : plus rien n’est stocké, donc plus rien d’illisible', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    s.revokeAll();
+
+    expect(s.unreadableKeys()).toEqual([]);
+    warn.mockRestore();
+  });
+});

@@ -50,13 +50,20 @@ type Section = Record<string, unknown>;
 type Disk = Record<'rag' | 'llm' | 'editor' | 'zotero', Section | undefined>;
 interface Answer {
   success: boolean;
+  /** Le refus est arrivé après l'écriture : le disque a changé. */
+  written?: boolean;
   error?: string;
 }
 
-/** Ce que le main sait faire, avec un `refuse` pour les écritures refusées. */
+/**
+ * Ce que le main sait faire, avec les deux refus qu'il connaît : `refuse`, rien n'est écrit (trousseau
+ * ou disque en échec) ; `restartFails`, le fichier est écrit puis la relance des services échoue,
+ * le cas courant de `config:set('llm')`.
+ */
 function installMain(disk: Disk) {
   const writes: Array<{ section: string; value: Section }> = [];
   const refuse: Record<string, string | undefined> = {};
+  const restartFails: Record<string, string | undefined> = {};
   const held: Record<string, Promise<void> | undefined> = {};
   const set = vi.fn(async (section: keyof Disk, value: Section): Promise<Answer> => {
     writes.push({ section, value });
@@ -64,6 +71,7 @@ function installMain(disk: Disk) {
     if (refuse[section]) return { success: false, error: refuse[section] };
     const merged = section === 'llm' ? { ...disk.llm, ...value } : value;
     disk[section] = JSON.parse(JSON.stringify(merged)) as Section;
+    if (restartFails[section]) return { success: false, written: true, error: restartFails[section] };
     return { success: true };
   });
   const setProvider = vi.fn();
@@ -110,6 +118,7 @@ function installMain(disk: Disk) {
   return {
     writes,
     refuse,
+    restartFails,
     /** Retient l'écriture d'une section jusqu'à l'appel de la fonction rendue. */
     hold(section: string): () => void {
       let release = (): void => undefined;
@@ -401,6 +410,136 @@ describe('Enregistrer lit la réponse du main', () => {
 
     expect(main.written('editor')).toHaveLength(1);
     expect(document.querySelector('.save-message.error')?.textContent).toContain('IPC rompu');
+  });
+});
+
+describe('écrit, mais les services n’ont pas pu repartir', () => {
+  const chatModel = () => screen.getByPlaceholderText('gemma2:2b') as HTMLInputElement;
+  const failure = () => document.querySelector('.save-message.error')?.textContent ?? '';
+
+  async function typeChatModel(model: string): Promise<void> {
+    if (!screen.queryByPlaceholderText('gemma2:2b')) fireEvent.click(screen.getByText('llm.title'));
+    fireEvent.change(await screen.findByPlaceholderText('gemma2:2b'), { target: { value: model } });
+  }
+
+  it('le message dit que c’est enregistré, avec le motif, et pas « sauvegardée » ni « non appliqué »', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'Anthropic backend selected but no claudeAPIKey set in config.';
+    await openPanel();
+
+    await typeChatModel('mistral-nemo');
+    await save();
+
+    expect(disk.llm?.ollamaChatModel).toBe('mistral-nemo');
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(failure()).toContain('Anthropic backend selected');
+    expect(failure()).not.toContain('settings.saveFailed');
+    expect(screen.queryByText('settings.saved')).toBeNull();
+  });
+
+  it('revenir à la valeur précédente réécrit et relance : c’est le chemin de réparation', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'pas de clé';
+    await openPanel();
+
+    await typeChatModel('mistral-nemo');
+    await save();
+    main.restartFails.llm = undefined;
+
+    await typeChatModel('qwen3:14b');
+    await save();
+
+    // Le disque avait la valeur refusée : sans cette écriture, il la gardait, et le projet ne s'ouvrait plus.
+    expect(main.written('llm')).toHaveLength(2);
+    expect(disk.llm?.ollamaChatModel).toBe('qwen3:14b');
+    expect(screen.getByText('settings.saved')).toBeTruthy();
+  });
+
+  it('une écriture partielle se réessaie sur ce qui n’a pas repris, et sur rien d’autre', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'refus';
+    await openPanel();
+
+    fireEvent.change(fontInput(), { target: { value: '18' } });
+    await typeChatModel('mistral-nemo');
+    await save();
+
+    expect(disk.editor?.fontSize).toBe(18);
+    expect(disk.llm?.ollamaChatModel).toBe('mistral-nemo');
+    expect(main.written('llm')).toHaveLength(1);
+    expect(main.written('editor')).toHaveLength(1);
+
+    // Rien à écrire, mais les services sont à l'arrêt : « sauvegardée » serait faux. On retente.
+    await save();
+    expect(main.written('llm')).toHaveLength(2);
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(screen.queryByText('settings.saved')).toBeNull();
+
+    main.restartFails.llm = undefined;
+    await save();
+    expect(main.written('llm')).toHaveLength(3);
+    expect(main.written('editor')).toHaveLength(1);
+    expect(screen.getByText('settings.saved')).toBeTruthy();
+
+    // Repartis : plus rien à retenter.
+    await save();
+    expect(main.written('llm')).toHaveLength(3);
+  });
+
+  it('un refus sans écriture et une relance échouée se disent chacun, dans le même message', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.refuse.editor = 'disque plein';
+    main.restartFails.llm = 'pas de clé';
+    await openPanel();
+
+    fireEvent.change(fontInput(), { target: { value: '18' } });
+    await typeChatModel('mistral-nemo');
+    await save();
+
+    expect(failure()).toContain('settings.saveFailed');
+    expect(failure()).toContain('disque plein');
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(failure()).toContain('pas de clé');
+  });
+
+  it('les répercussions suivent le disque : le chat tient le modèle écrit', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'pas de clé';
+    useRAGQueryStore.getState().setParams({ model: 'qwen3:14b' });
+    await openPanel();
+
+    await typeChatModel('mistral-nemo');
+    await save();
+
+    expect(useRAGQueryStore.getState().params.model).toBe('mistral-nemo');
+  });
+
+  it('Réinitialiser : le disque est réinitialisé, le formulaire le montre, et le message ne le nie pas', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'trousseau verrouillé';
+    await openPanel();
+
+    await confirmReset();
+
+    expect(disk.llm?.ollamaChatModel).toBe(DEFAULT_CONFIG.llm.ollamaChatModel);
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(failure()).toContain('trousseau verrouillé');
+    expect(failure()).not.toContain('settings.resetFailed');
+    fireEvent.click(screen.getByText('llm.title'));
+    expect(chatModel().value).toBe(DEFAULT_CONFIG.llm.ollamaChatModel);
+
+    // L'instantané a suivi : revenir à l'ancien modèle est un changement à écrire.
+    main.restartFails.llm = undefined;
+    fireEvent.change(chatModel(), { target: { value: 'qwen3:14b' } });
+    await save();
+    expect(disk.llm?.ollamaChatModel).toBe('qwen3:14b');
+    expect(screen.getByText('settings.saved')).toBeTruthy();
   });
 });
 

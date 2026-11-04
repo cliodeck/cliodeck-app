@@ -100,6 +100,7 @@
     "saved": "Configuration sauvegardée",
     "saveError": "Erreur lors de la sauvegarde",
     "saveFailed": "{{sections}} : non appliqué ({{reason}}). Les autres sections sont enregistrées ; sauvegardez de nouveau pour réessayer.",
+    "savedNotApplied": "{{sections}} : enregistré, mais ce réglage n'a pas pu être appliqué au projet ouvert ({{reason}}). La recherche et l'indexation restent à l'arrêt : corrigez ce réglage, puis sauvegardez de nouveau.",
     "resetFailed": "{{sections}} : réinitialisation non appliquée ({{reason}}). Les autres sections sont réinitialisées ; recommencez pour réessayer.",
     "resetConfirm": "Réinitialiser la configuration aux valeurs par défaut ?\n\nReviennent aux valeurs par défaut : Configuration LLM, Configuration RAG et Éditeur. Le backend de génération repasse à Ollama, avec le modèle de chat {{model}} : si Ollama ou ce modèle manque, le chat affichera une erreur tant que vous n'en aurez pas choisi un autre. Un modèle embarqué déjà téléchargé prend le relais si Ollama ne répond pas. L'envoi des notes de lecture aux modèles en ligne est de nouveau refusé.\n\nRestent en place : le modèle et le fournisseur d'embeddings, avec l'URL Ollama et, s'il les calcule, le backend en ligne ; la langue du prompt système ; les clés d'API ; la Configuration Zotero.\n\nAucune réindexation n'est nécessaire et vos documents indexés ne changent pas : les réglages de chunking ne valent que pour les PDF réindexés ensuite.",
     "language": "Langue",
@@ -1848,7 +1849,7 @@
     },
     "unreadable": {
       "title": "Clés illisibles",
-      "description": "Ces clés sont stockées chiffrées, mais ne peuvent pas être déchiffrées ici : autre clé de trousseau (version empaquetée ou de développement de l'application, entrée « Safe Storage » recréée), ou trousseau indisponible pour ce lancement. ClioDeck les traite comme absentes et vous le signale ici. Ressaisissez-les dans les réglages, ou supprimez-les.",
+      "description": "Ces clés sont stockées, mais ClioDeck ne peut pas s'en servir : autre clé de trousseau (version empaquetée ou de développement de l'application, entrée « Safe Storage » recréée), trousseau indisponible pour ce lancement, ou masque enregistré à la place de la clé par une version précédente. ClioDeck les traite comme absentes et vous le signale ici. Ressaisissez-les dans les réglages, ou supprimez-les.",
       "delete": "Supprimer",
       "deleted": "Clé {{key}} supprimée."
     },
