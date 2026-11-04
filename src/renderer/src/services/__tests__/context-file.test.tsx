@@ -21,6 +21,7 @@ import { rememberConsentedPath } from '../../../../main/ipc/utils/user-consented
 import { CONTEXT_TEMPLATE } from '../../../../../backend/core/hints/loader';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
+import { resetEditorStates } from '../../components/Editor/editor-state-memory';
 import { useEditorStore } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import {
@@ -104,6 +105,7 @@ const awaitEditorText = (text: string) =>
   vi.waitFor(() => expect(currentView().state.doc.toString()).toBe(text), DEADLINE);
 
 beforeEach(() => {
+  resetEditorStates();
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-contexte-'));
   project = path.join(base, 'projet');
   fs.mkdirSync(project);
@@ -144,6 +146,45 @@ afterEach(() => {
 });
 
 describe('l’éditeur suit ce qui vient de s’écrire', () => {
+  // Le cache d'état survit au démontage de l'éditeur : il ne doit pas pour autant rendre l'ancien
+  // texte après une écriture par les Réglages, que l'éditeur annonce repartir d'un état neuf.
+  it('context.md ouvert, écrit par les Réglages : Cmd+Z ne ramène pas l’ancien texte, éditeur monté', async () => {
+    await open();
+    await mountEditor();
+    typeAtEnd('Une frappe.\n');
+    const hints = await read();
+
+    expect((await saveOver(hints)).success).toBe(true);
+    await awaitEditorText(WITH_PARAGRAPH);
+
+    expect(undoDepth(currentView().state)).toBe(0);
+    act(() => {
+      expect(undo(currentView())).toBe(false);
+    });
+    expect(currentView().state.doc.toString()).toBe(WITH_PARAGRAPH);
+  });
+
+  it('context.md ouvert puis l’éditeur démonté par un changement de mode : Cmd+Z non plus', async () => {
+    await open();
+    await mountEditor();
+    typeAtEnd('Une frappe.\n');
+    const hints = await read();
+    cleanup();
+    expect(editor().editorFacade).toBeNull();
+
+    expect((await saveOver(hints)).success).toBe(true);
+    await vi.waitFor(() => expect(editor().content).toBe(WITH_PARAGRAPH), DEADLINE);
+
+    await mountEditor();
+    expect(currentView().state.doc.toString()).toBe(WITH_PARAGRAPH);
+    expect(undoDepth(currentView().state)).toBe(0);
+    act(() => {
+      expect(undo(currentView())).toBe(false);
+    });
+    expect(currentView().state.doc.toString()).toBe(WITH_PARAGRAPH);
+    expect(disk()).toBe(WITH_PARAGRAPH);
+  });
+
   it('context.md ouvert : le tampon porte le nouveau texte, et rien ne reste à écrire', async () => {
     await open();
     await mountEditor();

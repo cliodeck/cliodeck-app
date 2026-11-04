@@ -75,7 +75,9 @@ repose sur deux mécanismes, l'un **impératif**, l'autre confortable :
 2. **Le cache d'état** ([`src/editor/cm/state-cache.ts`](../src/editor/cm/state-cache.ts)) :
    document, sélection, historique d'annulation et défilement traversent la
    bascule. Revenir sur un chapitre permet d'annuler une frappe faite avant
-   de l'avoir quitté. Cache borné (LRU 24), vidé au changement de projet.
+   de l'avoir quitté. Cache borné (LRU 24), hors du composant pour survivre
+   à un changement de mode ([`editor-state-memory.ts`](../src/renderer/src/components/Editor/editor-state-memory.ts)),
+   et vidé au changement de projet, éditeur monté ou non.
    **Règle de fraîcheur : le disque fait foi** — un état n'est restauré que
    si son texte correspond exactement au fichier rechargé (modifié hors de
    ClioDeck ⇒ état neuf).

@@ -23,11 +23,7 @@ import {
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { createDocState, readDocText } from '@/editor/cm/fidelity';
-import {
-  EditorStateCache,
-  restoreEditorState,
-  serializeEditorState,
-} from '@/editor/cm/state-cache';
+import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
   liveRenderRefresh,
@@ -43,6 +39,7 @@ import {
   type ProposalsInstance,
 } from '@/editor/proposals';
 import type { EditorFacade } from '@/editor/facade';
+import { editorStateKey, editorStates } from './editor-state-memory';
 import { recordAdjudication } from './proposals-ipc';
 import { normalizeInsertPayload } from './insert-payload';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
@@ -232,12 +229,14 @@ function createFacade(
   view: EditorView,
   changeListeners: Set<(content: string) => void>,
   selectionListeners: Set<(offset: number) => void>,
-  proposalsInstance: ProposalsInstance
+  proposalsInstance: ProposalsInstance,
+  hasKnownCursor: () => boolean
 ): EditorFacade {
   return {
     engine: 'cm6',
     getValue: () => readDocText(view.state),
     getCursorOffset: () => view.state.selection.main.head,
+    hasKnownCursor,
     getSelectionText: () => {
       const { from, to } = view.state.selection.main;
       return from === to ? null : view.state.sliceDoc(from, to);
@@ -269,7 +268,14 @@ function createFacade(
       });
     },
     propose: (partial) => {
-      proposalsInstance.inject(view, partial);
+      // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.
+      if (view.state.readOnly) return false;
+      const { range } = proposalsInstance.inject(view, partial);
+      const { head } = view.state.selection.main;
+      view.dispatch({
+        ...(head < range.from || head > range.to ? { selection: EditorSelection.cursor(range.from) } : {}),
+        effects: EditorView.scrollIntoView(range.to, { y: 'center' }),
+      });
       return true;
     },
     revealLine: (lineNumber) => {
@@ -299,10 +305,6 @@ export const CodeMirrorEditor: React.FC = () => {
   const viewRef = useRef<EditorView | null>(null);
   const proposalsRef = useRef<ProposalsInstance | null>(null);
   const dynamicCompartment = useRef(new Compartment()).current;
-  // Cache d'état par document (Phase 2 chapitres) : revenir sur un chapitre
-  // restaure son annulation, son curseur et son défilement. Vidé à la
-  // fermeture du projet — voir l'effet plus bas.
-  const stateCache = useRef(new EditorStateCache()).current;
 
   const documentVersion = useEditorStore((s) => s.documentVersion);
   const settings = useEditorStore((s) => s.settings);
@@ -311,7 +313,6 @@ export const CodeMirrorEditor: React.FC = () => {
   const isPresentation = useProjectStore(
     (s) => s.currentProject?.type === 'presentation'
   );
-  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   const { currentTheme } = useTheme();
   const { t } = useTranslation('common');
 
@@ -338,6 +339,8 @@ export const CodeMirrorEditor: React.FC = () => {
     const selectionListeners = new Set<(offset: number) => void>();
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingSync = false;
+    // Un clic là où le curseur se trouve déjà ne déplace aucune sélection.
+    let cursorPlaced = false;
 
     // `isDirty` n'est posé que si le texte diffère du miroir : la sauvegarde a pu
     // passer avant cette synchro debouncée, et le reposer 300 ms après elle
@@ -430,7 +433,13 @@ export const CodeMirrorEditor: React.FC = () => {
         changeOriginGuard(),
         cliodeckTheme,
         dynamicCompartment.of(dynamicExtensions(settings, currentTheme === 'dark')),
+        EditorView.domEventObservers({
+          mousedown: () => {
+            cursorPlaced = true;
+          },
+        }),
         EditorView.updateListener.of((update) => {
+          if (update.selectionSet) cursorPlaced = true;
           // Curseur : notification synchrone, sans passer par React — les
           // consommateurs (navigateur/preview slides) ne mettent à jour leur
           // état que quand l'index de slide change réellement.
@@ -453,17 +462,26 @@ export const CodeMirrorEditor: React.FC = () => {
     // curseur) SI son texte correspond encore à ce que le store vient de
     // charger. Le disque fait foi — un fichier modifié dehors, ou un
     // remplacement de contenu, repart d'un état neuf.
-    const cached = ownFilePath ? stateCache.get(ownFilePath) : undefined;
+    const cached = editorStates.get(editorStateKey(ownFilePath, ownVersion));
     const restored = restoreEditorState(cached, store.content, documentExtensions);
+    cursorPlaced = restored !== null && cached?.cursorPlaced === true;
 
     const view: EditorView = new EditorView({
       state: restored ?? createDocState(store.content, documentExtensions),
       parent: container,
     });
 
+    // Relevé en continu : quand un changement de mode démonte l'éditeur, son DOM est déjà retiré
+    // au moment du nettoyage, et son défilement n'y vaut plus que 0.
+    let lastScrollTop = 0;
+    view.scrollDOM.addEventListener('scroll', () => {
+      lastScrollTop = view.scrollDOM.scrollTop;
+    });
+
     if (restored && cached) {
       // Le défilement n'appartient pas à l'état : il se repose après le
       // premier rendu.
+      lastScrollTop = cached.scrollTop;
       requestAnimationFrame(() => {
         if (viewRef.current === view) view.scrollDOM.scrollTop = cached.scrollTop;
       });
@@ -473,7 +491,7 @@ export const CodeMirrorEditor: React.FC = () => {
     useEditorStore
       .getState()
       .setEditorFacade(
-        createFacade(view, changeListeners, selectionListeners, proposalsInstance)
+        createFacade(view, changeListeners, selectionListeners, proposalsInstance, () => cursorPlaced)
       );
 
     // Hook de dev (critère d'acceptation Phase 4) : injection d'une
@@ -519,12 +537,13 @@ export const CodeMirrorEditor: React.FC = () => {
       // Mémorisation pour un retour ultérieur sur ce document. La porte a
       // sauvegardé le fichier sortant AVANT de basculer (verrou Phase 0) :
       // le texte de la vue correspond donc à celui du disque, et la règle de
-      // fraîcheur du cache le revérifiera au retour de toute façon.
-      if (ownFilePath && !detached) {
-        stateCache.set(
-          ownFilePath,
-          serializeEditorState(view.state, view.scrollDOM.scrollTop)
-        );
+      // fraîcheur du cache le revérifiera au retour de toute façon. Un tampon
+      // sans titre qu'on remplace n'a pas de retour : son texte ne reste pas ici.
+      if (!detached && (ownFilePath || ownsDocument())) {
+        editorStates.set(editorStateKey(ownFilePath, ownVersion), {
+          ...serializeEditorState(view.state, lastScrollTop),
+          cursorPlaced,
+        });
       }
       changeListeners.clear();
       selectionListeners.clear();
@@ -535,15 +554,6 @@ export const CodeMirrorEditor: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentVersion, isPresentation]);
-
-  // Changement (ou fermeture) de projet : les états mémorisés appartiennent
-  // au manuscrit qu'on quitte — les garder ferait grossir la mémoire et
-  // risquerait de restaurer un homonyme.
-  useEffect(() => {
-    return () => {
-      stateCache.clear();
-    };
-  }, [projectPath, stateCache]);
 
   // Réglages et thème : reconfiguration à chaud, sans recréer la vue.
   useEffect(() => {
@@ -561,7 +571,7 @@ export const CodeMirrorEditor: React.FC = () => {
   useEffect(() => {
     const unsubscribe = window.electron.editor.onInsertText((raw: unknown) => {
       const view = viewRef.current;
-      if (!view) return;
+      if (!view || view.state.readOnly) return;
       const payload = normalizeInsertPayload(raw);
       if (!payload.text) return;
       if (payload.metadata?.modeId && proposalsRef.current) {

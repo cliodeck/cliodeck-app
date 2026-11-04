@@ -23,6 +23,12 @@ export interface EditorFacade {
   /** Offset du curseur (tête de sélection). */
   getCursorOffset(): number;
 
+  /**
+   * L'auteur a-t-il posé son curseur dans ce document ? Sinon, `getCursorOffset` rend 0 sans que
+   * personne l'ait voulu : un document jamais affiché, ou dont l'état n'est plus mémorisé.
+   */
+  hasKnownCursor(): boolean;
+
   /** Texte sélectionné, ou null si la sélection est vide. */
   getSelectionText(): string | null;
 
@@ -52,11 +58,12 @@ export interface EditorFacade {
 
   /**
    * Soumet le texte comme proposition adjudicable (contrat propositionnel,
-   * Phase 4b) plutôt que de l'insérer. Retourne false si l'extension de
-   * propositions n'est pas active — l'appelant retombe alors sur une
-   * insertion directe.
+   * Phase 4b) plutôt que de l'insérer, et l'amène à l'écran, curseur compris :
+   * Tab et Échap n'agissent qu'à son endroit. Retourne false sur une vue en
+   * lecture seule : l'accepter n'y écrirait rien. L'appelant garde alors son
+   * texte, sans jamais retomber sur une insertion directe.
    */
-  propose?(proposal: Partial<Proposal>): boolean;
+  propose(proposal: Partial<Proposal>): boolean;
 
   /** Fait défiler jusqu'à la ligne (1-indexée), y place le curseur, focus. */
   revealLine(lineNumber: number): void;

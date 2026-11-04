@@ -73,32 +73,13 @@ export function messageToDraft(
 }
 
 /**
- * Append a draft to existing editor content, separating with a blank line
- * if the existing content doesn't already end with one. Pure function;
- * the caller commits the result to the editor store.
- */
-export function appendDraftToContent(
-  existing: string,
-  draft: string
-): string {
-  if (!existing) return draft;
-  const sep = existing.endsWith('\n\n')
-    ? ''
-    : existing.endsWith('\n')
-      ? '\n'
-      : '\n\n';
-  return `${existing}${sep}${draft}\n`;
-}
-
-/**
  * Splice a draft block into existing content at `offset`, padding both
  * sides so the inserted markdown sits on a clean block boundary
  * (avoids the case where the draft is concatenated mid-paragraph and
  * the parser fails to recognise the marker line).
  *
- * Used by the cursor-insertion path of `editorStore.insertDraftAtCursor`
- * (fusion 2.6, A13 option a). The "append" path keeps using
- * `appendDraftToContent` above.
+ * Used by `editorStore.insertDraftAtCursor` to compute the proposal
+ * (fusion 2.6, A13 option a).
  */
 export function insertDraftAtOffset(
   existing: string,

@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  appendDraftToContent,
-  insertDraftAtOffset,
-  messageToDraft,
-} from '../messageToDraft';
+import { insertDraftAtOffset, messageToDraft } from '../messageToDraft';
 
 describe('messageToDraft (3.3)', () => {
   it('formats an assistant turn with markers', () => {
@@ -43,15 +39,6 @@ describe('messageToDraft (3.3)', () => {
     expect(() =>
       messageToDraft({ id: 'u', role: 'user', content: 'x' })
     ).toThrow(/assistant/);
-  });
-
-  it('appendDraftToContent inserts blank-line separator', () => {
-    expect(appendDraftToContent('', 'X')).toBe('X');
-    expect(appendDraftToContent('A', 'B')).toBe('A\n\nB\n');
-    // single trailing newline: pad to a blank line before draft
-    expect(appendDraftToContent('A\n', 'B')).toBe('A\n\nB\n');
-    // already has a blank line: no extra padding needed
-    expect(appendDraftToContent('A\n\n', 'B')).toBe('A\n\nB\n');
   });
 });
 
