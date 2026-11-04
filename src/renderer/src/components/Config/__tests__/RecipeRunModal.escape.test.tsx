@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 /**
- * Fermer la fenêtre d'exécution d'une recette : jamais pendant qu'elle tourne.
+ * Fermer la fenêtre d'exécution d'une recette : jamais par mégarde pendant qu'elle tourne.
  *
  * Elle n'avait pas de piège : Échap fermait les Réglages qui la contiennent, et la fenêtre partait
- * avec son journal alors que la recette continuait côté main (S17-1-22).
+ * avec son journal alors que la recette continuait côté main (S17-1-22). Mais Échap était aussi la
+ * seule sortie, le X étant désactivé : une étape bloquée ne doit pas obliger à quitter l'app. Elle
+ * se ferme donc encore pendant l'exécution, après une question qui dit que la recette continue.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -17,9 +19,12 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => ({ t }) };
 });
 
+import { ConfirmDialog } from '../../common/ConfirmDialog';
+import { useDialogStore } from '../../../stores/dialogStore';
 import { RecipeRunModal } from '../RecipeRunModal';
 import { SettingsModal } from '../SettingsModal';
 
+const dialogs = () => useDialogStore.getState();
 const closeRun = vi.fn();
 const closeSettings = vi.fn();
 let finishRun: (result: { success: boolean; ok?: boolean; logPath?: string }) => void;
@@ -67,7 +72,12 @@ const typePlan = (value: string) => fireEvent.change(plan(), { target: { value }
 
 async function renderRun(): Promise<void> {
   slot.content = <RecipeRunModal scope="user" fileName="ma-recette.yaml" onClose={closeRun} />;
-  render(<SettingsModal isOpen onClose={closeSettings} />);
+  render(
+    <>
+      <SettingsModal isOpen onClose={closeSettings} />
+      <ConfirmDialog />
+    </>
+  );
   await settle();
 }
 
@@ -88,7 +98,10 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  while (dialogs().confirmOpen) dialogs().resolveConfirm(false);
+  cleanup();
+});
 
 describe('RecipeRunModal', () => {
   it('avant de lancer : Échap la ferme, et elle seule', async () => {
@@ -100,16 +113,45 @@ describe('RecipeRunModal', () => {
     expect(closeSettings).not.toHaveBeenCalled();
   });
 
-  it('pendant l’exécution : ni Échap ni le fond ne ferment, et le X reste désactivé', async () => {
+  it('pendant l’exécution : le fond ne ferme rien, et Échap ne ferme qu’après une question', async () => {
     await renderRun();
     await startRun();
     expect(screen.getByText('recipeRun.buttons.running')).toBeTruthy();
-    expect(runOverlay().querySelector('.close-btn')).toBeDisabled();
+
+    await clickBackdrop();
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(closeRun).not.toHaveBeenCalled();
 
     await pressEscape();
-    await clickBackdrop();
-
+    expect(dialogs().confirmOpen).toBe(true);
+    expect(dialogs().confirmMessage).toBe('recipeRun.closeWhileRunning');
     expect(closeRun).not.toHaveBeenCalled();
+
+    // Le second Échap répond à la question, en la refusant : la fenêtre reste, et l'exécution aussi.
+    await pressEscape();
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(closeRun).not.toHaveBeenCalled();
+    expect(closeSettings).not.toHaveBeenCalled();
+    expect(screen.getByText('recipeRun.buttons.running')).toBeTruthy();
+    await endRun();
+  });
+
+  it('pendant l’exécution : une étape bloquée ne bloque pas l’app, la fenêtre se ferme par le X après la question', async () => {
+    await renderRun();
+    await startRun();
+    const close = runOverlay().querySelector('.close-btn') as HTMLButtonElement;
+    expect(close).not.toBeDisabled();
+
+    await act(async () => {
+      fireEvent.click(close);
+    });
+    expect(dialogs().confirmOpen).toBe(true);
+    expect(closeRun).not.toHaveBeenCalled();
+
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+    expect(closeRun).toHaveBeenCalledTimes(1);
     expect(closeSettings).not.toHaveBeenCalled();
     await endRun();
   });

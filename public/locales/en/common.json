@@ -1703,6 +1703,8 @@
     }
   },
   "recipeRun": {
+    "closeWhileRunningTitle": "Close this window?",
+    "closeWhileRunning": "The recipe keeps running: closing this window does not stop it, and you will no longer see its progress.",
     "errors": {
       "noFusionApi": "Fusion API not exposed.",
       "loadFailed": "Could not load.",

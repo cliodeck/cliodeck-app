@@ -671,6 +671,51 @@ test('éditeur de recette : Tab depuis le YAML reste dans l’éditeur, et Écha
   }
 });
 
+test('fenêtre d’exécution, étape bloquée : Échap demande, refuser garde tout, et le X permet de sortir sans quitter l’app', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await openRecipes(window);
+    // Une étape qui ne répond plus : le main ne rendra jamais de réponse.
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('fusion:recipes:run');
+      ipcMain.handle('fusion:recipes:run', () => new Promise(() => undefined));
+    });
+    await recipeAction(window, 'avec-un-plan.yaml', 'Lancer').click();
+    const overlay = nestedOverlay(window);
+    const plan = overlay.locator('textarea');
+    await expect(plan).toBeVisible({ timeout: 10_000 });
+    await plan.fill('Un plan');
+    await overlay.getByRole('button', { name: 'Lancer' }).click();
+    await expect(overlay.getByRole('button', { name: 'En cours…' })).toBeVisible();
+
+    const box = await overlay.boundingBox();
+    if (!box) throw new Error('fenêtre introuvable');
+    await window.mouse.click(box.x + 8, box.y + 8);
+    await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(overlay).toHaveCount(1);
+
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toContainText('continue de tourner');
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toHaveCount(0);
+    await expect(overlay).toHaveCount(1);
+    await expect(settingsHeading(window)).toBeVisible();
+
+    await overlay.locator('.close-btn').click();
+    await expect(confirmDialog(window)).toContainText('continue de tourner');
+    await confirmDialog(window).locator('.confirm-dialog-btn-confirm').click();
+    await expect(overlay).toHaveCount(0);
+    await expect(settingsHeading(window)).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
 test('fenêtre d’exécution : un plan saisi ne part ni par un clic à côté ni par Échap, et le X reste un geste franc', async () => {
   const session = await start();
   if (!session) return;
