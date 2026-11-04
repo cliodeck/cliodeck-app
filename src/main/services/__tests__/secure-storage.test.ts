@@ -431,4 +431,19 @@ describe('un masque déjà stocké (S17-1-29, sur une version antérieure)', () 
     expect(s.unreadableKeys()).toEqual([]);
     warn.mockRestore();
   });
+
+  it('après une révocation, un nouveau masque se signale de nouveau', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = await freshStorage(true);
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    s.revokeAll();
+    stores[0]['llm.openaiAPIKey'] = storedMask('sk-u...ngue');
+    s.getKey('llm.openaiAPIKey');
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
 });

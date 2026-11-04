@@ -45,6 +45,7 @@ import { ConfirmDialog } from '../../common/ConfirmDialog';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
+import { notApplied } from '../settings-persist';
 
 type Section = Record<string, unknown>;
 type Disk = Record<'rag' | 'llm' | 'editor' | 'zotero', Section | undefined>;
@@ -156,6 +157,8 @@ const saveButton = () =>
   (screen.queryByTitle('settings.saving') ?? screen.getByTitle('settings.tooltipSave')) as HTMLButtonElement;
 const resetButton = () => screen.getByTitle('settings.tooltipReset') as HTMLButtonElement;
 const fontInput = () => document.querySelector('.config-number') as HTMLInputElement;
+/** Le premier curseur serait celui de la police, ouverte au-dessus. */
+const topKSlider = () => document.querySelector('.config-slider[max="20"]') as HTMLInputElement;
 
 /** Ouvre le panneau et attend le chargement : la police affichée devient celle du disque. */
 async function openPanel(diskFontSize: number | string = 15): Promise<void> {
@@ -185,6 +188,8 @@ async function confirmReset(): Promise<void> {
 
 beforeEach(() => {
   localStorage.removeItem('cliodeck-settings-mode');
+  // Elle survit au démontage du panneau : c'est son rôle, mais pas d'un test à l'autre.
+  notApplied.clear();
   // Le magasin survit au démontage : un test ne doit pas hériter de la police du précédent.
   useEditorStore.getState().updateSettings({ fontSize: 14, wordWrap: true, showMinimap: true, fontFamily: 'system' });
 });
@@ -541,6 +546,56 @@ describe('écrit, mais les services n’ont pas pu repartir', () => {
     expect(disk.llm?.ollamaChatModel).toBe('qwen3:14b');
     expect(screen.getByText('settings.saved')).toBeTruthy();
   });
+
+  it('fermer puis rouvrir les Paramètres n’oublie rien : Sauvegarder retente, sans dire « sauvegardée »', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'pas de clé';
+    await openPanel();
+
+    await typeChatModel('mistral-nemo');
+    await save();
+    expect(failure()).toContain('settings.savedNotApplied');
+
+    // La modale démonte le panneau à la fermeture ; les services, eux, restent à l'arrêt.
+    cleanup();
+    await openPanel();
+    await save();
+
+    expect(main.written('llm')).toHaveLength(2);
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(screen.queryByText('settings.saved')).toBeNull();
+
+    main.restartFails.llm = undefined;
+    await save();
+    expect(main.written('llm')).toHaveLength(3);
+    expect(screen.getByText('settings.saved')).toBeTruthy();
+
+    // Repartis : plus rien à retenter, même après une nouvelle réouverture.
+    cleanup();
+    await openPanel();
+    await save();
+    expect(main.written('llm')).toHaveLength(3);
+    expect(screen.getByText('settings.saved')).toBeTruthy();
+  });
+
+  it('Réinitialiser retente aussi après réouverture, sur une section déjà aux valeurs par défaut', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.restartFails.llm = 'trousseau verrouillé';
+    await openPanel();
+    await confirmReset();
+    expect(failure()).toContain('settings.savedNotApplied');
+    const before = main.written('llm').length;
+
+    cleanup();
+    await openPanel(DEFAULT_CONFIG.editor.fontSize);
+    await confirmReset();
+
+    expect(main.written('llm')).toHaveLength(before + 1);
+    expect(failure()).toContain('settings.savedNotApplied');
+    expect(screen.queryByText('settings.saved')).toBeNull();
+  });
 });
 
 describe('Réinitialiser écrit vraiment', () => {
@@ -688,6 +743,56 @@ describe('Réinitialiser écrit vraiment', () => {
     expect(fontInput().value).toBe(String(DEFAULT_CONFIG.editor.fontSize));
   });
 
+  it('un refus de la section rag : son formulaire garde ses valeurs, le chat aussi', async () => {
+    const disk = authorDisk();
+    localStorage.setItem('cliodeck-settings-mode', 'expert');
+    const main = installMain(disk);
+    main.refuse.rag = 'disque plein';
+    useRAGQueryStore.getState().setParams({ topK: 7 });
+    await openPanel();
+
+    await confirmReset();
+
+    expect(document.querySelector('.save-message.error')?.textContent).toContain('disque plein');
+    expect(disk.rag?.topK).toBe(7);
+    fireEvent.click(screen.getByText('ragConfig.title'));
+    await waitFor(() => expect(topKSlider()).toBeTruthy());
+    expect(topKSlider().value).toBe('7');
+    expect(useRAGQueryStore.getState().params.topK).toBe(7);
+    // Le reste est passé.
+    expect(disk.llm?.ollamaChatModel).toBe(DEFAULT_CONFIG.llm.ollamaChatModel);
+  });
+
+  it('un refus de la section éditeur : la police du formulaire et du magasin ne bouge pas', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.refuse.editor = 'disque plein';
+    useEditorStore.getState().updateSettings({ fontSize: 15 });
+    await openPanel();
+
+    await confirmReset();
+
+    expect(disk.editor?.fontSize).toBe(15);
+    expect(fontInput().value).toBe('15');
+    expect(useEditorStore.getState().settings.fontSize).toBe(15);
+    expect(disk.rag?.topK).toBe(DEFAULT_CONFIG.rag.topK);
+  });
+
+  it('le disque déjà revenu aux valeurs par défaut, l’instantané non : le formulaire suit, et Enregistrer n’écrit rien ensuite', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    await openPanel();
+
+    // Écrit ailleurs après l'ouverture : l'instantané dit 7, le disque 10, et le diff du reset est vide.
+    disk.rag = JSON.parse(JSON.stringify(DEFAULT_CONFIG.rag)) as Section;
+    await confirmReset();
+    expect(main.written('rag')).toEqual([]);
+
+    const count = main.writes.length;
+    await save();
+    expect(main.writes).toHaveLength(count);
+  });
+
   it('le backend en ligne qui calcule les embeddings reste, et le chat le sait', async () => {
     const disk = authorDisk();
     Object.assign(disk.llm as Section, {
@@ -730,6 +835,191 @@ describe('Réinitialiser écrit vraiment', () => {
     await save();
 
     expect(main.writes).toHaveLength(count);
+  });
+});
+
+describe('le panneau du chat suit ce qui vient de changer', () => {
+  const params = () => useRAGQueryStore.getState().params;
+
+  async function openExpertRag(disk: Disk): Promise<ReturnType<typeof installMain>> {
+    localStorage.setItem('cliodeck-settings-mode', 'expert');
+    const main = installMain(disk);
+    await openPanel();
+    fireEvent.click(screen.getByText('ragConfig.title'));
+    await waitFor(() => expect(topKSlider()).toBeTruthy());
+    return main;
+  }
+  const topKNumber = () => topKSlider().parentElement?.querySelector('.config-number') as HTMLInputElement;
+
+  it('Réinitialiser : le chat envoie le topK du disque, pas l’ancien', async () => {
+    const disk = authorDisk();
+    installMain(disk);
+    useRAGQueryStore.getState().setParams({ topK: 7 });
+    await openPanel();
+
+    await confirmReset();
+
+    expect(disk.rag?.topK).toBe(DEFAULT_CONFIG.rag.topK);
+    expect(params().topK).toBe(DEFAULT_CONFIG.rag.topK);
+  });
+
+  it('Enregistrer un nouveau topK : le chat le suit sans redémarrage', async () => {
+    const disk = authorDisk();
+    await openExpertRag(disk);
+    useRAGQueryStore.getState().setParams({ topK: 7 });
+
+    fireEvent.change(topKNumber(), { target: { value: '12' } });
+    await save();
+
+    expect(disk.rag?.topK).toBe(12);
+    expect(params().topK).toBe(12);
+  });
+
+  it('un autre champ de la section : le curseur du chat reste un réglage de session', async () => {
+    const disk = authorDisk();
+    await openExpertRag(disk);
+    useRAGQueryStore.getState().setParams({ topK: 5 });
+
+    const threshold = document.querySelector('.config-number[max="1"][step="0.05"]') as HTMLInputElement;
+    fireEvent.change(threshold, { target: { value: '0.4' } });
+    await save();
+
+    expect(disk.rag?.similarityThreshold).toBe(0.4);
+    expect(params().topK).toBe(5);
+  });
+
+  it('un topK vidé n’atteint pas le chat : NaN passerait `??` côté main', async () => {
+    const disk = authorDisk();
+    await openExpertRag(disk);
+    useRAGQueryStore.getState().setParams({ topK: 7 });
+
+    fireEvent.change(topKNumber(), { target: { value: '' } });
+    await save();
+
+    expect(params().topK).toBe(7);
+  });
+
+  it('Réinitialiser : le prompt personnalisé effacé du disque cesse aussi de partir', async () => {
+    const disk = authorDisk();
+    Object.assign(disk.rag as Section, { useCustomSystemPrompt: true, customSystemPrompt: 'Réponds comme un archiviste.' });
+    installMain(disk);
+    useRAGQueryStore.getState().setParams({ useCustomSystemPrompt: true, customSystemPrompt: 'Réponds comme un archiviste.' });
+    await openPanel();
+
+    await confirmReset();
+
+    expect(disk.rag).not.toHaveProperty('customSystemPrompt');
+    expect(params().useCustomSystemPrompt).toBe(false);
+    expect(params().customSystemPrompt).toBeUndefined();
+  });
+
+  it('le raisonnement suit : Enregistrer transmet `ollamaThink` au chat', async () => {
+    const disk = authorDisk();
+    (disk.llm as Section).ollamaThink = false;
+    installMain(disk);
+    useRAGQueryStore.getState().setParams({ think: undefined });
+    await openPanel();
+
+    fireEvent.click(screen.getByText('llm.title'));
+    fireEvent.change(await screen.findByPlaceholderText('gemma2:2b'), { target: { value: 'mistral-nemo' } });
+    await save();
+
+    expect(params().think).toBe(false);
+  });
+});
+
+describe('le message dit ce qui s’est passé, section par section', () => {
+  const message = () => document.querySelector('.save-message.error')?.textContent ?? '';
+  async function changeChatModel(): Promise<void> {
+    fireEvent.click(screen.getByText('llm.title'));
+    fireEvent.change(await screen.findByPlaceholderText('gemma2:2b'), { target: { value: 'mistral-nemo' } });
+  }
+
+  it('Enregistrer : rien d’autre n’a été écrit, il ne prétend pas que les autres sections le sont', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.refuse.editor = 'disque plein';
+    await openPanel();
+
+    fireEvent.change(fontInput(), { target: { value: '18' } });
+    await save();
+
+    expect(message()).toContain('settings.saveFailed');
+    expect(message()).not.toContain('settings.otherSectionsSaved');
+  });
+
+  it('Enregistrer : une autre section a été écrite, il le dit', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.refuse.llm = 'refus';
+    await openPanel();
+
+    fireEvent.change(fontInput(), { target: { value: '18' } });
+    await changeChatModel();
+    await save();
+
+    expect(message()).toContain('settings.otherSectionsSaved');
+  });
+
+  it('Réinitialiser : tout refusé, aucune phrase sur les autres ; une section passée, si', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    Object.assign(main.refuse, { rag: 'refus', llm: 'refus', editor: 'refus' });
+    await openPanel();
+
+    await confirmReset();
+    expect(message()).toContain('settings.resetFailed');
+    expect(message()).not.toContain('settings.otherSectionsReset');
+
+    main.refuse.editor = undefined;
+    await confirmReset();
+    expect(message()).toContain('settings.otherSectionsReset');
+  });
+
+  it('le même refus sur trois sections ne se répète pas : le fichier temporaire a un nom aléatoire', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    const eacces = (suffix: string) =>
+      `EACCES: permission denied, open '/userData/cliodeck-config.json.tmp-${suffix}'`;
+    Object.assign(main.refuse, {
+      rag: eacces('38151385919e41bd'),
+      llm: eacces('a1b2c3d4e5f60718'),
+      editor: eacces('0f1e2d3c4b5a6978'),
+    });
+    await openPanel();
+
+    await confirmReset();
+
+    expect(message().match(/EACCES/g)).toHaveLength(1);
+    expect(message()).toContain("open '/userData/cliodeck-config.json'");
+    expect(message()).not.toContain('.tmp-');
+  });
+
+  it('des refus différents se disent tous', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    Object.assign(main.refuse, { llm: 'trousseau verrouillé', editor: 'disque plein' });
+    await openPanel();
+
+    fireEvent.change(fontInput(), { target: { value: '18' } });
+    await changeChatModel();
+    await save();
+
+    expect(message()).toContain('trousseau verrouillé');
+    expect(message()).toContain('disque plein');
+  });
+
+  it('la section Zotero s’appelle « Zotero », le mot que l’auteur a sous les yeux', async () => {
+    const disk = authorDisk();
+    const main = installMain(disk);
+    main.refuse.zotero = 'refus';
+    await openPanel();
+
+    fireEvent.click(screen.getByText('Zotero'));
+    fireEvent.change(await screen.findByPlaceholderText('123456'), { target: { value: '999' } });
+    await save();
+
+    expect(message()).toContain('"sections":"Zotero"');
   });
 });
 

@@ -81,7 +81,7 @@ const section = (window: Page, name: string) =>
 /** Le champ numérique de la police : `first()` seul prendrait celui d'une section ouverte au-dessus. */
 const fontField = (window: Page) => window.locator('.settings-modal input[type="number"][max="24"]');
 const save = (window: Page, title = 'Sauvegarder') => window.locator(`.settings-modal button[title="${title}"]`).click();
-const reset = (window: Page) => window.locator('.settings-modal button[title="Réinitialiser"]').click();
+const reset = (window: Page, title = 'Réinitialiser') => window.locator(`.settings-modal button[title="${title}"]`).click();
 const saved = (window: Page) => window.locator('.save-message.success');
 const failed = (window: Page) => window.locator('.save-message.error');
 const question = (window: Page) => window.locator('.confirm-dialog');
@@ -198,6 +198,10 @@ test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le mod�
     await expect(question(window)).toContainText('gemma2:2b');
     await expect(question(window)).toContainText('Restent en place');
     await expect(question(window)).toContainText('Aucune réindexation');
+    await expect(question(window)).toContainText('Corpus manuscrit et Corpus notes de lecture');
+    await expect(question(window)).toContainText('même si vous les aviez désactivés');
+    await expect(question(window)).toContainText('sont effacés sans copie');
+    await expect(question(window)).not.toContainText('Configuration Zotero');
     await window.keyboard.press('Escape');
     await expect(question(window)).toHaveCount(0);
     await expect(window.locator('#settings-modal-title')).toBeVisible();
@@ -209,6 +213,10 @@ test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le mod�
     await expect(fontField(window)).toHaveValue('14');
     // La seule question est la sienne : pas de `providerChangeConfirm` à la suite.
     await expect(question(window)).toHaveCount(0);
+    // Le chat envoie son `topK` : sans répercussion, il gardait l'ancien jusqu'à la relance.
+    const chatTopK = () =>
+      window.evaluate(() => (JSON.parse(localStorage.getItem('rag-query-params') ?? '{}') as { state?: { params?: { topK?: number } } }).state?.params?.topK);
+    await expect.poll(chatTopK).toBe(10);
 
     const after = readConfig(dir);
     expect(after.rag).toMatchObject({ topK: 10, similarityThreshold: 0.12, chunkingConfig: 'cpuOptimized', useSemanticChunking: false });
@@ -249,6 +257,35 @@ test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le mod�
     expect(readFileSync(configPath(dir)).equals(bytes)).toBe(true);
   } finally {
     await session.app.close();
+  }
+});
+
+test('la question de Réinitialiser, longue, garde ses boutons à l’écran dans une petite fenêtre', async () => {
+  const dir = userData({ ...AUTHOR, language: 'de' });
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+
+  try {
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      win.setMinimumSize(200, 200);
+      win.setSize(800, 500);
+    });
+    await openSettings(window);
+    await reset(window, 'Zurücksetzen');
+    await expect(window.locator('.confirm-dialog-btn-confirm')).toBeInViewport({ ratio: 1 });
+    await expect(window.locator('.confirm-dialog')).toBeInViewport({ ratio: 1 });
+    // Le texte reste lisible jusqu'au bout : il défile dans son corps.
+    const scrolls = await window
+      .locator('.confirm-dialog-body')
+      .evaluate((body) => {
+        body.scrollTop = body.scrollHeight;
+        return body.scrollTop > 0;
+      });
+    expect(scrolls).toBe(true);
+  } finally {
+    await app.close();
   }
 });
 
@@ -397,6 +434,56 @@ test('un projet ouvert : rien à écrire ne relance rien ; une écriture refusé
     await expect(saved(window)).toBeVisible();
     expect(readConfig(dir).llm.backend).toBe('claude');
     expect(await storedKeys(app, dir)).toEqual({ 'llm.claudeAPIKey': 'sk-ant-api03-une-cle-de-test' });
+  } finally {
+    await app.close();
+  }
+});
+
+test('écrit mais non appliqué, puis fermer et rouvrir les Paramètres : Sauvegarder retente, sans annoncer « sauvegardée »', async () => {
+  test.setTimeout(120_000);
+  const dir = userData(AUTHOR);
+  const session = await launch(dir);
+  if (!session) return;
+  const { app, window } = session;
+  let log = '';
+  app.process().stdout?.on('data', (chunk: Buffer) => {
+    log += chunk.toString();
+  });
+  const restarts = () => log.split('Reinitializing services').length - 1;
+  const reopen = async () => {
+    await window.keyboard.press('Escape');
+    await expect(window.locator('#settings-modal-title')).toHaveCount(0);
+    await openSettings(window);
+    await openEditorSection(window, 15);
+  };
+
+  try {
+    await openProject(app, window, article());
+    await openSettings(window);
+    await section(window, 'Configuration LLM');
+    await window.locator('.settings-modal select').first().selectOption('claude');
+    await save(window);
+    await expect(failed(window)).toContainText('claudeAPIKey');
+    await expect.poll(restarts).toBe(1);
+
+    // La modale démonte le panneau ; la recherche et l'indexation, elles, restent à l'arrêt.
+    await reopen();
+    await save(window);
+    await expect.poll(restarts).toBe(2);
+    await expect(failed(window)).toContainText('claudeAPIKey');
+    await expect(saved(window)).toHaveCount(0);
+
+    // Réparé : le message cesse d'être une erreur, et plus rien à retenter à la réouverture suivante.
+    await section(window, 'Configuration LLM');
+    await window.locator('.settings-modal select').first().selectOption('ollama');
+    await save(window);
+    await expect.poll(restarts).toBe(3);
+    await expect(saved(window)).toBeVisible();
+
+    await reopen();
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+    expect(restarts()).toBe(3);
   } finally {
     await app.close();
   }

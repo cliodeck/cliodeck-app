@@ -3,6 +3,8 @@
  * s'en remet pas à une liste : il demande au vrai adaptateur quels champs font bouger les
  * embeddings, dans toutes les configurations possibles, et vérifie qu'ils restent.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type LLMConfig } from '@backend/types/config';
 import { clioDeckConfigToRegistryConfig } from '@backend/core/llm/providers/cliodeck-config-adapter';
@@ -155,6 +157,9 @@ describe('Réinitialiser et le reste', () => {
       model: DEFAULT_CONFIG.llm.ollamaChatModel,
       fallback: { provider: 'embedded', modelPath: FULL.embeddedModelPath },
     });
+    // L'identifiant va avec le fichier : c'est lui que la section « Modèle embarqué » affiche.
+    expect(after.embeddedModelId).toBe(FULL.embeddedModelId);
+    expect(after.embeddedModelPath).toBe(FULL.embeddedModelPath);
   });
 
   it('rag : tout revient, découpage compris, sauf la langue du prompt', () => {
@@ -230,6 +235,53 @@ describe('withFormDefaults et apiKeyFields', () => {
       llm: { claudeAPIKey: undefined, openaiAPIKey: undefined, mistralAPIKey: undefined, geminiAPIKey: undefined },
       zotero: { apiKey: '' },
     });
+  });
+});
+
+describe('la question de Réinitialiser dit la vérité (fr, en, de)', () => {
+  const ROOT = path.resolve(__dirname, '../../../../../..');
+  type Locale = Record<string, Record<string, string>>;
+  const locale = (name: string) =>
+    JSON.parse(readFileSync(path.join(ROOT, 'public/locales', name, 'common.json'), 'utf8')) as Locale;
+  const LOCALES = ['fr', 'en', 'de'] as const;
+
+  it.each(LOCALES)('%s : ce qui revient et ce qui reste portent le titre que l’auteur a sous les yeux', (name) => {
+    const c = locale(name);
+    const question = c.settings.resetConfirm;
+    for (const title of [
+      c.llm.title,
+      c.ragConfig.title,
+      c.editor.title,
+      c.manuscriptCorpus.title,
+      c.readingNotesCorpus.title,
+    ]) {
+      expect(question).toContain(title);
+    }
+    // La section s'intitule « Zotero », en dur et dans toutes les langues.
+    expect(question).toContain('Zotero');
+    expect(question).not.toContain(c.zotero.title);
+    expect(question).toContain('{{model}}');
+  });
+
+  // Ce que Réinitialiser annule sans que le mot « défaut » le laisse deviner.
+  const MUST_SAY: Record<(typeof LOCALES)[number], RegExp[]> = {
+    fr: [/désactivés/, /texte du manuscrit repartira vers le fournisseur d'embeddings/, /prompt système personnalisé/, /dictionnaire/, /sans copie/],
+    en: [/turned them off/, /manuscript text will go to the embedding provider again/, /custom system prompt/, /dictionary/, /no copy/],
+    de: [/deaktiviert/, /Manuskripttext wieder an den Embedding-Anbieter/, /benutzerdefinierter System-Prompt/, /Wörterbuch/, /ohne Kopie/],
+  };
+
+  it.each(LOCALES)('%s : les refus annulés et le texte effacé sont dits', (name) => {
+    const question = locale(name).settings.resetConfirm;
+    for (const phrase of MUST_SAY[name]) expect(question).toMatch(phrase);
+  });
+
+  it.each(LOCALES)('%s : ce qui est refusé et ce qui passe se disent à part', (name) => {
+    const { settings } = locale(name);
+    // « Les autres sections… » ne se dit que si l'une a été écrite (`otherSectionsSaved`).
+    expect(settings.otherSectionsSaved).toBeTruthy();
+    expect(settings.otherSectionsReset).toBeTruthy();
+    expect(settings.saveFailed).not.toContain(settings.otherSectionsSaved);
+    expect(settings.resetFailed).not.toContain(settings.otherSectionsReset);
   });
 });
 

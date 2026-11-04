@@ -7,6 +7,7 @@
  * section relue juste avant l'écriture.
  */
 import { DEFAULT_CONFIG, type LLMConfig as StoredLLMConfig } from '@backend/types/config';
+import type { RAGQueryParams } from '../../stores/ragQueryStore';
 import type { LLMConfig, RAGConfig } from './ConfigPanel';
 import type { EditorConfig } from './EditorConfigSection';
 import type { ZoteroConfig } from './ZoteroConfigSection';
@@ -19,6 +20,13 @@ export interface SettingsSections {
 }
 export type SectionName = keyof SettingsSections;
 export const SECTION_NAMES: readonly SectionName[] = ['rag', 'llm', 'editor', 'zotero'];
+
+/**
+ * Sections écrites mais non appliquées au projet ouvert : le prochain Enregistrer retente, même sans
+ * rien à écrire. Hors du montage : la modale démonte le panneau à la fermeture, et les services,
+ * eux, restent à l'arrêt. Une relance de trop après un changement de projet est sans conséquence.
+ */
+export const notApplied = new Set<SectionName>();
 
 /** Une seule source pour ce que le formulaire montre tant que le disque ne dit rien. */
 export const FORM_DEFAULTS: SettingsSections = {
@@ -82,6 +90,27 @@ export function diffSection(before: object, next: object): Record<string, unknow
     diff[key] = value;
   }
   return diff;
+}
+
+/**
+ * Ce que le panneau du chat reprend d'une section `rag` écrite, et seulement ce qui vient de changer :
+ * son curseur de sources et son prompt personnalisé restent des réglages de session. Un `topK` vidé
+ * (NaN) ne le suit pas : il passerait le `??` du main.
+ */
+export function chatParamsFromRagDiff(diff: Record<string, unknown>): Partial<RAGQueryParams> {
+  const params: Partial<RAGQueryParams> = {};
+  if (typeof diff.topK === 'number' && diff.topK > 0) params.topK = diff.topK;
+  if ('useCustomSystemPrompt' in diff) params.useCustomSystemPrompt = diff.useCustomSystemPrompt === true;
+  if ('customSystemPrompt' in diff) params.customSystemPrompt = diff.customSystemPrompt as string | undefined;
+  return params;
+}
+
+/**
+ * Chaque motif une fois. L'écriture passe par un fichier temporaire au nom aléatoire
+ * (`cliodeck-config.json.tmp-<hex>`), qui faisait de chaque section un motif différent.
+ */
+export function distinctReasons(reasons: readonly string[]): string {
+  return [...new Set(reasons.map((reason) => reason.replace(/\.tmp-[0-9a-f]+/g, '')))].join(' ; ');
 }
 
 /** Ce que le main dit des champs de clés : le masque, ou rien. Pour relire après une révocation. */

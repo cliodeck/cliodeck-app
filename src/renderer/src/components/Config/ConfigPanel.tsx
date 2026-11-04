@@ -28,8 +28,11 @@ import { isCloudProvider } from '../../stores/cloudConsentStore';
 import { DEFAULT_CONFIG } from '@backend/types/config';
 import {
   apiKeyFields,
+  chatParamsFromRagDiff,
   diffSection,
+  distinctReasons,
   FORM_DEFAULTS,
+  notApplied,
   resetValues,
   SECTION_NAMES,
   withFormDefaults,
@@ -135,12 +138,23 @@ interface SectionFailure {
   reason: string;
 }
 
-/** Le titre de la section dans le formulaire : c'est le mot que l'auteur a sous les yeux. */
-const SECTION_TITLES: Record<SectionName, string> = {
+interface PersistOutcome {
+  /** Chaque section écrite, telle que le main l'a reçue. */
+  written: Partial<Record<SectionName, object>>;
+  /** Les champs écrits qui ont changé, pour les mêmes sections. */
+  changed: Partial<Record<SectionName, Record<string, unknown>>>;
+  failures: SectionFailure[];
+  unapplied: SectionFailure[];
+}
+
+/**
+ * Le titre de la section dans le formulaire : c'est le mot que l'auteur a sous les yeux. Zotero n'y
+ * figure pas : sa section s'intitule « Zotero » dans toutes les langues.
+ */
+const SECTION_TITLES: Record<Exclude<SectionName, 'zotero'>, string> = {
   rag: 'ragConfig.title',
   llm: 'llm.title',
   editor: 'editor.title',
-  zotero: 'zotero.title',
 };
 
 export const ConfigPanel: React.FC = () => {
@@ -163,8 +177,6 @@ export const ConfigPanel: React.FC = () => {
   const snapshot = useRef<SettingsSections | null>(null);
   // `isSaving` n'est vu qu'au rendu suivant : une écriture à la fois se garde ici.
   const writing = useRef(false);
-  /** Sections écrites mais non appliquées au projet ouvert : le prochain Enregistrer retente, même sans rien à écrire. */
-  const notApplied = useRef(new Set<SectionName>());
 
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -237,21 +249,23 @@ export const ConfigPanel: React.FC = () => {
   const persist = async (
     next: Partial<Record<SectionName, object>>,
     baseline: Partial<Record<SectionName, object>>
-  ) => {
-    const written: Partial<Record<SectionName, object>> = {};
+  ): Promise<PersistOutcome> => {
+    const written: PersistOutcome['written'] = {};
+    const changed: PersistOutcome['changed'] = {};
     const failures: SectionFailure[] = [];
     const unapplied: SectionFailure[] = [];
     for (const section of SECTION_NAMES) {
       const target = next[section];
       if (!target) continue;
       const diff = diffSection(baseline[section] ?? {}, target);
-      if (Object.keys(diff).length === 0 && !notApplied.current.has(section)) continue;
+      if (Object.keys(diff).length === 0 && !notApplied.has(section)) continue;
       try {
         const value = { ...(await window.electron.config.get(section)), ...diff };
         // Le handler ne lève pas : il répond `{ success: false }`.
         const response = await window.electron.config.set(section, value);
         if (response?.success === false && !response.written) throw new Error(response.error);
         written[section] = value;
+        changed[section] = diff;
         if (snapshot.current) {
           snapshot.current = {
             ...snapshot.current,
@@ -259,21 +273,21 @@ export const ConfigPanel: React.FC = () => {
           };
         }
         if (response?.success === false) {
-          notApplied.current.add(section);
+          notApplied.add(section);
           unapplied.push({ section, reason: response.error });
         } else {
-          notApplied.current.delete(section);
+          notApplied.delete(section);
         }
       } catch (error) {
         console.error(`Failed to save config section ${section}:`, error);
         failures.push({ section, reason: error instanceof Error ? error.message : String(error) });
       }
     }
-    return { written, failures, unapplied };
+    return { written, changed, failures, unapplied };
   };
 
   /** Ce qui vient d'être écrit se voit sans redémarrage. Une section refusée ne se répercute pas. */
-  const applyWritten = (written: Partial<Record<SectionName, object>>) => {
+  const applyWritten = ({ written, changed }: PersistOutcome) => {
     const query = useRAGQueryStore.getState();
     const rag = written.rag && withFormDefaults('rag', written.rag);
     const llm = written.llm && withFormDefaults('llm', written.llm);
@@ -304,6 +318,9 @@ export const ConfigPanel: React.FC = () => {
       });
     }
 
+    // Le chat envoie son propre `topK`, qui prime sur la section `rag` côté main.
+    if (changed.rag) query.setParams(chatParamsFromRagDiff(changed.rag));
+
     // Update editorStore with new settings
     if (written.editor) {
       const editor = withFormDefaults('editor', written.editor);
@@ -318,17 +335,25 @@ export const ConfigPanel: React.FC = () => {
 
   /** Le motif, section par section : `settings.saved` ne se dit que si tout est passé. */
   const showOutcome = (
-    { failures, unapplied }: { failures: SectionFailure[]; unapplied: SectionFailure[] },
-    failedKey: 'settings.saveFailed' | 'settings.resetFailed'
+    { written, failures, unapplied }: PersistOutcome,
+    failedKey: 'settings.saveFailed' | 'settings.resetFailed',
+    othersKey: 'settings.otherSectionsSaved' | 'settings.otherSectionsReset'
   ) => {
     const describe = (key: typeof failedKey | 'settings.savedNotApplied', list: SectionFailure[]) =>
       list.length === 0
         ? []
         : t(key, {
-            sections: list.map(({ section }) => t(SECTION_TITLES[section])).join(', '),
-            reason: [...new Set(list.map(({ reason }) => reason))].join(' ; '),
+            sections: list
+              .map(({ section }) => (section === 'zotero' ? 'Zotero' : t(SECTION_TITLES[section])))
+              .join(', '),
+            reason: distinctReasons(list.map(({ reason }) => reason)),
           });
-    const problems = [describe(failedKey, failures), describe('settings.savedNotApplied', unapplied)].flat();
+    const problems = [
+      describe(failedKey, failures),
+      // Seulement si l'une a été écrite : un refus isolé n'a pas d'« autres sections ».
+      failures.length > 0 && Object.keys(written).length > 0 ? t(othersKey) : [],
+      describe('settings.savedNotApplied', unapplied),
+    ].flat();
     setSaveMessageType(problems.length === 0 ? 'success' : 'error');
     setSaveMessage(problems.length === 0 ? t('settings.saved') : problems.join(' '));
   };
@@ -350,8 +375,8 @@ export const ConfigPanel: React.FC = () => {
         { rag: ragConfig, llm: llmConfig, editor: editorConfig, zotero: zoteroConfig },
         baseline
       );
-      applyWritten(outcome.written);
-      showOutcome(outcome, 'settings.saveFailed');
+      applyWritten(outcome);
+      showOutcome(outcome, 'settings.saveFailed', 'settings.otherSectionsSaved');
     } catch (error) {
       console.error('Failed to save config:', error);
       setSaveMessageType('error');
@@ -403,8 +428,8 @@ export const ConfigPanel: React.FC = () => {
       }
       if (snapshot.current) snapshot.current = { ...snapshot.current, ...values };
 
-      applyWritten(outcome.written);
-      showOutcome(outcome, 'settings.resetFailed');
+      applyWritten(outcome);
+      showOutcome(outcome, 'settings.resetFailed', 'settings.otherSectionsReset');
     } catch (error) {
       console.error('Failed to reset config:', error);
       setSaveMessageType('error');
