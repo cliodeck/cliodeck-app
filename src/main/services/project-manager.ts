@@ -1,12 +1,18 @@
-import { writeFile, readFile, mkdir, copyFile, readdir, open, rm, rmdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, copyFile, readdir, open, rm, rmdir, lstat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { dirname, basename, join } from 'path';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
-import { readUserFile, withFileLock } from '../../../backend/core/fs/user-files.js';
+import {
+  readUserFile,
+  UnreadableFileError,
+  updateJsonFile,
+  withFileLock,
+} from '../../../backend/core/fs/user-files.js';
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
+import { workspaceConfigIssue, type WorkspaceConfigIssue } from '../../../backend/core/workspace/config.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
 import {
   CHAPTERS_DIR,
@@ -159,6 +165,46 @@ interface Project {
   book?: BookSettings;
 }
 
+/** Un JSON valide qui n'est pas un objet n'est pas un manifeste, et s'écrirait mal. */
+function assertIsManifest(projectFile: string, value: unknown): asserts value is Project {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new UnreadableFileError(projectFile, 'invalid-json', `${projectFile} n'est pas un manifeste de projet`);
+  }
+}
+
+/**
+ * Lit le manifeste, en décodage strict comme à l'écriture : un fichier en Latin-1 se refuse
+ * plutôt que de voir ses accents changés en U+FFFD, puis réécrits. Lève si `project.json` est
+ * absent, illisible ou invalide.
+ */
+async function readManifest(projectFile: string): Promise<Project> {
+  const read = await readUserFile(projectFile);
+  if (read.kind === 'absent') throw new Error(`Project file not found: ${projectFile}`);
+  if (read.kind === 'unreadable') throw new UnreadableFileError(projectFile, read.reason, read.message);
+  const project: unknown = JSON.parse(read.content);
+  assertIsManifest(projectFile, project);
+  return project;
+}
+
+/**
+ * Le dossier existe, se liste, et `project.json` n'y est vraiment pas. Le seul cas où un projet
+ * récent peut sortir de la liste : un volume débranché ou un parent renommé lisent ENOENT eux
+ * aussi, comme un lien vers un volume absent, que seul `lstat` voit encore.
+ */
+async function projectFileIsMissing(projectFile: string): Promise<boolean> {
+  try {
+    await lstat(projectFile);
+    return false;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+  }
+  try {
+    return !(await readdir(path.dirname(projectFile))).includes(path.basename(projectFile));
+  } catch {
+    return false;
+  }
+}
+
 export class ProjectManager {
   private currentProject: Project | null = null;
   private currentProjectPath: string | null = null;
@@ -183,8 +229,7 @@ export class ProjectManager {
    */
   async getProjectMetadata(projectPath: string) {
     try {
-      const content = await readFile(projectPath, 'utf-8');
-      const project: Project = JSON.parse(content);
+      const project = await readManifest(projectPath);
       const projectDir = path.dirname(projectPath);
 
       // Load bibliography if configured (resolve relative path to absolute)
@@ -206,11 +251,13 @@ export class ProjectManager {
       // Set path dynamically
       project.path = projectDir;
 
-      return { success: true, project };
+      return { success: true as const, project };
     } catch (error: unknown) {
-      console.error('❌ Failed to get project metadata:', error);
+      // Chaque récent passe ici à chaque ouverture du panneau : pas de pile pour un disque débranché.
       const message = error instanceof Error ? error.message : String(error);
-      return { success: false, error: message };
+      console.warn('⚠️ Project metadata unavailable:', message);
+      const code = (await projectFileIsMissing(projectPath)) ? 'project_file_missing' : 'project_unavailable';
+      return { success: false as const, code, error: message };
     }
   }
 
@@ -304,6 +351,8 @@ export class ProjectManager {
 
     // Ensure flat .cliodeck/ layout (with config.json) from day 1. Idempotent.
     await autoMigrateWorkspace(projectPath);
+    // Le dossier pouvait déjà porter un `.cliodeck` : mêmes conséquences qu'à l'ouverture.
+    const configIssue = await workspaceConfigIssue(projectPath);
 
     const projectFile = path.join(projectPath, 'project.json');
 
@@ -315,60 +364,87 @@ export class ProjectManager {
     this.currentProjectPath = projectPath;
 
     console.log('✅ Project created:', projectPath);
-    return { success: true as const, path: projectFile, project };
+    return { success: true as const, path: projectFile, project, ...(configIssue ? { configIssue } : {}) };
   }
 
-  async loadProject(projectPath: string) {
+  /**
+   * La seule porte d'écriture de `project.json`, création exclusive mise à part. Le mutateur part
+   * de ce que dit le disque, sous le verrou du fichier, et n'y pose que ses champs : rien ne vient
+   * de la mémoire, donc rien n'efface la mise à jour d'à côté. Il reste court. Ce qui se calcule
+   * à partir de l'emplacement (`path`, `bibliography`, `cslPath` en absolu) se pose sur le résultat,
+   * après : ni le mutateur ne le voit, ni le disque, où il deviendrait faux au premier déplacement.
+   * Un fichier absent ou illisible lève, sans rien écrire.
+   */
+  private async updateProjectFile(
+    projectFile: string,
+    mutate: (project: Project) => void | Promise<void>
+  ): Promise<Project> {
+    const { value } = await updateJsonFile<Project>(projectFile, async (current) => {
+      if (current === null) throw new Error(`Project file not found: ${projectFile}`);
+      assertIsManifest(projectFile, current);
+      await mutate(current);
+      // Issue #13: path is computed from the file location, never stored.
+      const { path: _excludedPath, ...projectForSave } = current;
+      return projectForSave as Project;
+    });
+    return value as Project;
+  }
+
+  /** Ce projet est-il celui que la mémoire tient ? Le dossier entier, pas un préfixe du chemin. */
+  private isCurrentProject(projectDir: string): boolean {
+    return this.currentProject !== null && this.currentProjectPath === projectDir;
+  }
+
+  async loadProject(projectPath: string): Promise<{
+    success: boolean;
+    project?: Project;
+    configIssue?: WorkspaceConfigIssue;
+    error?: string;
+  }> {
     try {
-      // Load project.json file
-      const content = await readFile(projectPath, 'utf-8');
-      const project: Project = JSON.parse(content);
+      // Refusé ici, B n'a rien subi, pas même sa migration, et le projet courant reste en place.
+      await readManifest(projectPath);
       const projectDir = path.dirname(projectPath);
 
       // Promote in-flight v2-subdir or pre-fusion v1 workspaces to flat layout
       // before any service opens DB handles into `.cliodeck/`.
       await autoMigrateWorkspace(projectDir);
 
-      // Migration: Convert absolute paths to relative paths
-      let needsSave = false;
+      // Le projet s'ouvre quand même : son texte n'y est pour rien. L'interface dit ce qui manque.
+      const configIssue = await workspaceConfigIssue(projectDir);
 
-      // Migrate bibliographySource.filePath
-      if (project.bibliographySource?.filePath && path.isAbsolute(project.bibliographySource.filePath)) {
-        const relativePath = path.relative(projectDir, project.bibliographySource.filePath);
-        console.log('🔄 Migrating bibliography path from absolute to relative:', relativePath);
-        project.bibliographySource.filePath = relativePath;
-        needsSave = true;
-      }
-
-      // Migrate cslPath
-      if (project.cslPath && path.isAbsolute(project.cslPath)) {
-        const relativePath = path.relative(projectDir, project.cslPath);
-        console.log('🔄 Migrating CSL path from absolute to relative:', relativePath);
-        project.cslPath = relativePath;
-        needsSave = true;
-      }
-
-      // Livre : les réglages d'ouvrage sont normalisés (défauts pour les
-      // champs absents, valeurs inconnues ignorées) afin que la suite de la
-      // chaîne — assemblage, template — n'ait jamais à se défendre contre un
-      // `project.json` édité à la main.
-      if (project.type === 'book') {
-        const normalized = normalizeBookSettings(project.book);
-        if (JSON.stringify(normalized) !== JSON.stringify(project.book)) {
-          project.book = normalized;
-          needsSave = true;
+      const project = await this.updateProjectFile(projectPath, (stored) => {
+        // Migration: Convert absolute paths to relative paths
+        if (stored.bibliographySource?.filePath && path.isAbsolute(stored.bibliographySource.filePath)) {
+          const relativePath = path.relative(projectDir, stored.bibliographySource.filePath);
+          console.log('🔄 Migrating bibliography path from absolute to relative:', relativePath);
+          stored.bibliographySource.filePath = relativePath;
         }
-        if (!Array.isArray(project.chapters)) {
-          // Pas de migration (arbitrage 10) : un manifeste vide suffit, la
-          // réconciliation disque proposera de rattacher ce qu'elle trouve.
-          project.chapters = [];
-          needsSave = true;
-        }
-      }
 
-      // Update lastOpenedAt
-      project.lastOpenedAt = new Date().toISOString();
-      needsSave = true;
+        if (stored.cslPath && path.isAbsolute(stored.cslPath)) {
+          const relativePath = path.relative(projectDir, stored.cslPath);
+          console.log('🔄 Migrating CSL path from absolute to relative:', relativePath);
+          stored.cslPath = relativePath;
+        }
+
+        // Livre : les réglages d'ouvrage sont normalisés (défauts pour les
+        // champs absents, valeurs inconnues ignorées) afin que la suite de la
+        // chaîne — assemblage, template — n'ait jamais à se défendre contre un
+        // `project.json` édité à la main.
+        if (stored.type === 'book') {
+          const normalized = normalizeBookSettings(stored.book);
+          if (JSON.stringify(normalized) !== JSON.stringify(stored.book)) {
+            stored.book = normalized;
+          }
+          if (!Array.isArray(stored.chapters)) {
+            // Pas de migration (arbitrage 10) : un manifeste vide suffit, la
+            // réconciliation disque proposera de rattacher ce qu'elle trouve.
+            stored.chapters = [];
+          }
+        }
+
+        stored.lastOpenedAt = new Date().toISOString();
+      });
 
       // Load bibliography if configured (resolve relative path to absolute)
       console.log('🔍 Checking for bibliography source:', project.bibliographySource);
@@ -383,14 +459,6 @@ export class ProjectManager {
         }
       } else {
         console.log('ℹ️ No bibliography source configured');
-      }
-
-      // Save update (including migration if needed)
-      // IMPORTANT: Save before resolving paths to absolute
-      // Issue #13: Exclude path field from saved file (it's computed from file location)
-      if (needsSave) {
-        const { path: _excludedPath, ...projectForSave } = project;
-        await writeFile(projectPath, JSON.stringify(projectForSave, null, 2));
       }
 
       // Resolve cslPath to absolute for runtime use (after saving)
@@ -421,7 +489,7 @@ export class ProjectManager {
         hasBibliographySource: !!project.bibliographySource
       });
 
-      return { success: true, project };
+      return { success: true, project, ...(configIssue ? { configIssue } : {}) };
     } catch (error: unknown) {
       console.error('❌ Failed to load project:', error);
       const message = error instanceof Error ? error.message : String(error);
@@ -431,19 +499,12 @@ export class ProjectManager {
 
   async saveProject(data: { path: string; content: string; bibliography?: string }) {
     try {
-      // Charger le projet existant
-      const projectContent = await readFile(data.path, 'utf-8');
-      const project: Project = JSON.parse(projectContent);
-
-      // Mettre à jour
-      project.updatedAt = new Date().toISOString();
-      if (data.bibliography !== undefined) {
-        project.bibliography = data.bibliography;
-      }
-
-      // Sauvegarder le projet (Issue #13: exclure le champ path)
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(data.path, JSON.stringify(projectForSave, null, 2));
+      await this.updateProjectFile(data.path, (project) => {
+        project.updatedAt = new Date().toISOString();
+        if (data.bibliography !== undefined) {
+          project.bibliography = data.bibliography;
+        }
+      });
 
       // NE PLUS écrire document.md ici. Ce chemin écrivait le contenu reçu
       // dans un `document.md` codé en dur à côté du project.json — dans un
@@ -625,9 +686,6 @@ export class ProjectManager {
   async saveChapters(data: { projectPath: string; chapters: Chapter[] }) {
     try {
       const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
-      if (!existsSync(projectFile)) {
-        throw new Error(`Project file not found: ${projectFile}`);
-      }
 
       for (const chapter of data.chapters) {
         if (!this.isInsideProject(projectDir, chapter.filePath)) {
@@ -637,27 +695,24 @@ export class ProjectManager {
         }
       }
 
-      const raw = await readFile(projectFile, 'utf-8');
-      const project: Project = JSON.parse(raw);
-
       // L'ordre stocké est renormalisé sur l'ordre du tableau reçu : le
       // manifeste fait foi (arbitrage 7), pas les valeurs envoyées.
-      project.chapters = data.chapters.map((c, index) => ({
+      const chapters = data.chapters.map((c, index) => ({
         ...c,
         order: index,
         kind: c.kind ?? 'chapter',
       }));
-      project.updatedAt = new Date().toISOString();
+      await this.updateProjectFile(projectFile, (project) => {
+        project.chapters = chapters;
+        project.updatedAt = new Date().toISOString();
+      });
 
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
-
-      if (this.currentProject && this.currentProjectPath === projectDir) {
-        this.currentProject.chapters = project.chapters;
+      if (this.currentProject && this.isCurrentProject(projectDir)) {
+        this.currentProject.chapters = chapters;
       }
 
-      console.log('✅ Chapters saved:', project.chapters.length);
-      return { success: true, chapters: project.chapters };
+      console.log('✅ Chapters saved:', chapters.length);
+      return { success: true, chapters };
     } catch (error: unknown) {
       console.error('❌ Failed to save chapters:', error);
       const message = error instanceof Error ? error.message : String(error);
@@ -706,21 +761,13 @@ export class ProjectManager {
   }) {
     try {
       const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
-      if (!existsSync(projectFile)) {
-        throw new Error(`Project file not found: ${projectFile}`);
-      }
 
-      const raw = await readFile(projectFile, 'utf-8');
-      const project: Project = JSON.parse(raw);
+      const { book: settings } = await this.updateProjectFile(projectFile, (project) => {
+        project.book = normalizeBookSettings({ ...project.book, ...data.settings });
+        project.updatedAt = new Date().toISOString();
+      });
 
-      const settings = normalizeBookSettings({ ...project.book, ...data.settings });
-      project.book = settings;
-      project.updatedAt = new Date().toISOString();
-
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
-
-      if (this.currentProject && this.currentProjectPath === projectDir) {
+      if (this.currentProject && this.isCurrentProject(projectDir)) {
         this.currentProject.book = settings;
       }
 
@@ -744,57 +791,56 @@ export class ProjectManager {
   }) {
     try {
       const { projectDir, projectFile } = this.resolveProjectPaths(data.projectPath);
-      if (!existsSync(projectFile)) {
-        throw new Error(`Project file not found: ${projectFile}`);
+
+      // Sous le verrou du manifeste : l'ordre et le nom libre se décident sur la liste du disque, et
+      // deux créations ne prennent ni le même numéro, ni le même fichier.
+      let chapter: Chapter | undefined;
+      const { chapters: stored } = await this.updateProjectFile(projectFile, async (project) => {
+        const chapters: Chapter[] = Array.isArray(project.chapters) ? project.chapters : [];
+
+        const order = chapters.length;
+        const chaptersDir = path.join(projectDir, CHAPTERS_DIR);
+        // Le fichier s'écrirait à l'autre bout du lien, et naîtrait manquant.
+        if (this.leavesProject(projectDir, CHAPTERS_DIR)) {
+          throw new Error(
+            `Le dossier ${CHAPTERS_DIR} est un lien qui sort du projet : impossible d'y créer un chapitre.`
+          );
+        }
+        await mkdir(chaptersDir, { recursive: true });
+
+        // Nom libre s'il est déjà pris : le préfixe n'a pas valeur d'autorité,
+        // mais deux fichiers ne peuvent pas partager un nom.
+        // Un lien cassé vers l'extérieur n'est pas un nom libre : `existsSync` ne le voit pas,
+        // et `writeFile` créerait le fichier à l'autre bout.
+        const taken = (name: string): boolean =>
+          existsSync(path.join(chaptersDir, name)) ||
+          this.leavesProject(projectDir, path.join(CHAPTERS_DIR, name));
+        let fileName = chapterFileName(order, data.title);
+        let attempt = 2;
+        while (taken(fileName)) {
+          fileName = chapterFileName(order, `${data.title}-${attempt}`);
+          attempt += 1;
+        }
+
+        await writeFile(path.join(chaptersDir, fileName), `# ${data.title}\n\n`);
+
+        chapter = {
+          id: crypto.randomUUID(),
+          title: data.title,
+          filePath: `${CHAPTERS_DIR}/${fileName}`,
+          order,
+          kind: data.kind ?? 'chapter',
+        };
+
+        project.chapters = [...chapters, chapter];
+        project.updatedAt = new Date().toISOString();
+      });
+
+      if (this.currentProject && this.isCurrentProject(projectDir)) {
+        this.currentProject.chapters = stored;
       }
 
-      const raw = await readFile(projectFile, 'utf-8');
-      const project: Project = JSON.parse(raw);
-      const chapters: Chapter[] = Array.isArray(project.chapters) ? project.chapters : [];
-
-      const order = chapters.length;
-      const chaptersDir = path.join(projectDir, CHAPTERS_DIR);
-      // Le fichier s'écrirait à l'autre bout du lien, et naîtrait manquant.
-      if (this.leavesProject(projectDir, CHAPTERS_DIR)) {
-        throw new Error(
-          `Le dossier ${CHAPTERS_DIR} est un lien qui sort du projet : impossible d'y créer un chapitre.`
-        );
-      }
-      await mkdir(chaptersDir, { recursive: true });
-
-      // Nom libre s'il est déjà pris : le préfixe n'a pas valeur d'autorité,
-      // mais deux fichiers ne peuvent pas partager un nom.
-      // Un lien cassé vers l'extérieur n'est pas un nom libre : `existsSync` ne le voit pas,
-      // et `writeFile` créerait le fichier à l'autre bout.
-      const taken = (name: string): boolean =>
-        existsSync(path.join(chaptersDir, name)) ||
-        this.leavesProject(projectDir, path.join(CHAPTERS_DIR, name));
-      let fileName = chapterFileName(order, data.title);
-      let attempt = 2;
-      while (taken(fileName)) {
-        fileName = chapterFileName(order, `${data.title}-${attempt}`);
-        attempt += 1;
-      }
-
-      await writeFile(path.join(chaptersDir, fileName), `# ${data.title}\n\n`);
-
-      const chapter: Chapter = {
-        id: crypto.randomUUID(),
-        title: data.title,
-        filePath: `${CHAPTERS_DIR}/${fileName}`,
-        order,
-        kind: data.kind ?? 'chapter',
-      };
-
-      project.chapters = [...chapters, chapter];
-      project.updatedAt = new Date().toISOString();
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(projectFile, JSON.stringify(projectForSave, null, 2));
-
-      if (this.currentProject && this.currentProjectPath === projectDir) {
-        this.currentProject.chapters = project.chapters;
-      }
-
+      if (!chapter) throw new Error('Chapter not created');
       console.log('✅ Chapter created:', chapter.filePath);
       return { success: true, chapter };
     } catch (error: unknown) {
@@ -811,8 +857,6 @@ export class ProjectManager {
     zoteroCollection?: string;
   }) {
     try {
-      const projectContent = await readFile(data.projectPath, 'utf-8');
-      const project: Project = JSON.parse(projectContent);
       const projectDir = dirname(data.projectPath);
 
       let relativeFilePath = data.filePath;
@@ -825,17 +869,18 @@ export class ProjectManager {
         }
       }
 
-      project.bibliographySource = {
-        type: data.type,
-        filePath: relativeFilePath,
-        zoteroCollection: data.zoteroCollection,
-      };
+      const { bibliographySource } = await this.updateProjectFile(data.projectPath, (project) => {
+        project.bibliographySource = {
+          type: data.type,
+          filePath: relativeFilePath,
+          zoteroCollection: data.zoteroCollection,
+        };
+        project.updatedAt = new Date().toISOString();
+      });
 
-      project.updatedAt = new Date().toISOString();
-
-      // Issue #13: Exclude path field from saved file
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(data.projectPath, JSON.stringify(projectForSave, null, 2));
+      if (this.currentProject && this.isCurrentProject(projectDir)) {
+        this.currentProject.bibliographySource = bibliographySource;
+      }
 
       console.log('✅ Bibliography source configured:', data.type);
       return { success: true };
@@ -870,29 +915,16 @@ export class ProjectManager {
    */
   async updateConfig(projectPath: string, updates: Partial<Project>): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!existsSync(projectPath)) {
-        throw new Error(`Project file not found: ${projectPath}`);
-      }
-
-      const content = await readFile(projectPath, 'utf-8');
-      const project: Project = JSON.parse(content);
-
-      // Merge updates into project
-      const updatedProject = {
-        ...project,
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Issue #13: Exclude path field from saved file (it's computed from file location)
-      const { path: _excludedPath, ...projectForSave } = updatedProject;
-      await writeFile(projectPath, JSON.stringify(projectForSave, null, 2));
+      // Seuls les champs reçus changent : le reste vient du disque, pas du renderer.
+      const stored = await this.updateProjectFile(projectPath, (project) => {
+        Object.assign(project, updates, { updatedAt: new Date().toISOString() });
+      });
       console.log('✅ Project config updated:', projectPath);
 
-      // Update current project if it's the same (keep path in memory)
-      if (this.currentProjectPath && projectPath.startsWith(this.currentProjectPath)) {
-        updatedProject.path = this.currentProjectPath;
-        this.currentProject = updatedProject;
+      // La mémoire garde ce qui s'y résout (chemins en absolu), et le chemin du projet.
+      if (this.currentProject && this.isCurrentProject(this.resolveProjectPaths(projectPath).projectDir)) {
+        const { path: _excludedPath, ...received } = updates;
+        this.currentProject = { ...this.currentProject, ...received, updatedAt: stored.updatedAt };
       }
 
       return { success: true };
@@ -915,12 +947,8 @@ export class ProjectManager {
         throw new Error('Project path is required');
       }
 
-      if (!existsSync(data.projectPath)) {
-        throw new Error(`Project file not found: ${data.projectPath}`);
-      }
-
-      const projectContent = await readFile(data.projectPath, 'utf-8');
-      const project: Project = JSON.parse(projectContent);
+      // Avant la copie : un manifeste illisible ne fait rien entrer dans le dossier du projet.
+      await readManifest(data.projectPath);
       const projectDir = dirname(data.projectPath);
 
       let relativeCslPath: string | undefined = undefined;
@@ -953,16 +981,17 @@ export class ProjectManager {
         }
       }
 
-      project.cslPath = relativeCslPath;
-      project.updatedAt = new Date().toISOString();
-
-      // Issue #13: Exclude path field from saved file
-      const { path: _excludedPath, ...projectForSave } = project;
-      await writeFile(data.projectPath, JSON.stringify(projectForSave, null, 2));
+      await this.updateProjectFile(data.projectPath, (project) => {
+        project.cslPath = relativeCslPath;
+        project.updatedAt = new Date().toISOString();
+      });
 
       console.log('✅ CSL path configured:', relativeCslPath);
       // Return the absolute path for the UI
       const absolutePath = relativeCslPath ? join(projectDir, relativeCslPath) : undefined;
+      if (this.currentProject && this.isCurrentProject(projectDir)) {
+        this.currentProject.cslPath = absolutePath;
+      }
       return { success: true, cslPath: absolutePath };
     } catch (error: unknown) {
       console.error('❌ Failed to set CSL path:', error);

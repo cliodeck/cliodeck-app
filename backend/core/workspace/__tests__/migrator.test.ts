@@ -125,6 +125,48 @@ describe('migrateWorkspaceToFlat — none / flat', () => {
   });
 });
 
+describe('migrateWorkspaceToFlat — un config.json illisible n’est pas remplacé', () => {
+  it.each<[string, string]>([
+    ['virgule en trop', '{"schema_version":2,"vault":{"path":"/Notes"},}'],
+    ['format plus récent', '{"schema_version":3,"vault":{"path":"/Notes"}}'],
+    ['un tableau', '[]'],
+  ])('%s : à plat, sans demande explicite, identique à l’octet', async (_label, content) => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    await write(config, content);
+
+    const report = await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(report.copied).toEqual([]);
+    expect(await fs.readFile(config, 'utf8')).toBe(content);
+  });
+
+  it('--overwrite, la demande explicite : remplacé', async () => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    await write(config, '{"schema_version":2,}');
+
+    await migrateWorkspaceToFlat(tmpRoot, { overwrite: true });
+
+    expect(JSON.parse(await fs.readFile(config, 'utf8')).schema_version).toBe(2);
+  });
+
+  it('ancien sous-dossier v2 au config.json illisible : déplacé tel quel, jamais reformaté', async () => {
+    const legacy = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'config.json');
+    await write(legacy, '{"schema_version":2,}');
+
+    await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'config.json'), 'utf8')).toBe('{"schema_version":2,}');
+  });
+
+  it('dossier sans config.json : le fichier généré est atomique, et lisible', async () => {
+    await fs.mkdir(path.join(tmpRoot, CLIODECK_DIR), { recursive: true });
+    await migrateWorkspaceToFlat(tmpRoot, { name: 'Thèse' });
+    const cfg = await readWorkspaceConfig(tmpRoot);
+    expect(cfg.name).toBe('Thèse');
+    expect((await fs.readdir(path.join(tmpRoot, CLIODECK_DIR))).filter((n) => n.includes('.tmp'))).toEqual([]);
+  });
+});
+
 describe('migrateWorkspaceToFlat — db consolidation (history → brain)', () => {
   // Fabrique une vraie base SQLite : exige le binding (cf. native-guards).
   it.skipIf(!sqliteAvailable)('renames history.db to brain.db on a flat workspace', async () => {
@@ -636,8 +678,6 @@ describe('readWorkspaceConfig', () => {
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       JSON.stringify({ schema_version: 99 }),
     );
-    await expect(readWorkspaceConfig(tmpRoot)).rejects.toThrow(
-      /Unsupported workspace schema_version/,
-    );
+    await expect(readWorkspaceConfig(tmpRoot)).rejects.toMatchObject({ kind: 'newer_schema' });
   });
 });

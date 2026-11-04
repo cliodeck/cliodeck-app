@@ -799,6 +799,14 @@ describe('updateJsonFile', () => {
     expect(fs.readFileSync(jsonFile(), 'utf8')).toBe('{"a":1}');
   });
 
+  it('un mutator qui ne rend rien à l’exécution (undefined) n’écrit pas le texte « undefined »', async () => {
+    fs.writeFileSync(jsonFile(), '{"a":1}');
+    const forgetful = (() => undefined) as unknown as () => { a: number };
+    const result = await updateJsonFile<{ a: number }>(jsonFile(), forgetful);
+    expect(result).toEqual({ written: false, value: { a: 1 } });
+    expect(fs.readFileSync(jsonFile(), 'utf8')).toBe('{"a":1}');
+  });
+
   it('20 mises à jour concurrentes : aucune ne se perd', async () => {
     fs.writeFileSync(jsonFile(), '{"items":[]}');
     await Promise.all(

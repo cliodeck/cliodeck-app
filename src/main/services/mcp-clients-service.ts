@@ -11,8 +11,9 @@
  *
  * Design: this service is intentionally thin. All lifecycle / retry logic
  * lives in `MCPClientManager`. Persistence (read/write) is delegated to
- * `readWorkspaceConfig` / `writeWorkspaceConfig` so the single source of
- * truth for workspace state stays the v2 config.json file.
+ * `readOrInitWorkspaceConfig` / `updateWorkspaceConfig` so the single source
+ * of truth for workspace state stays the v2 config.json file. Démarrer un
+ * serveur peut prendre des minutes : jamais sous le verrou de ce fichier.
  */
 
 import { MCPClientManager } from '../../../backend/integrations/mcp-clients/manager.js';
@@ -23,17 +24,15 @@ import type {
 } from '../../../backend/integrations/mcp-clients/types.js';
 import { realMCPClientFactory } from '../../../backend/integrations/mcp-clients/sdk-factory.js';
 import {
-  readWorkspaceConfig,
-  writeWorkspaceConfig,
-  defaultWorkspaceConfig,
+  readOrInitWorkspaceConfig,
+  updateWorkspaceConfig,
+  WorkspaceConfigError,
   type MCPClientConfig as WorkspaceClientConfig,
-  type WorkspaceConfig,
 } from '../../../backend/core/workspace/config.js';
 import {
   ensureWorkspaceDirectories,
   workspaceFiles,
 } from '../../../backend/core/workspace/layout.js';
-import path from 'path';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
 import {
@@ -98,17 +97,6 @@ class MCPClientsService {
     }
   }
 
-  private async readOrInitConfig(root: string): Promise<WorkspaceConfig> {
-    await ensureWorkspaceDirectories(root);
-    try {
-      return await readWorkspaceConfig(root);
-    } catch {
-      const fresh = defaultWorkspaceConfig(path.basename(root));
-      await writeWorkspaceConfig(root, fresh);
-      return fresh;
-    }
-  }
-
   async loadProject(root: string): Promise<void> {
     await this.unload();
     this.workspaceRoot = root;
@@ -143,24 +131,32 @@ class MCPClientsService {
       },
     });
 
-    const cfg = await this.readOrInitConfig(root);
-    const clients = cfg.mcpClients ?? [];
+    let clients: WorkspaceClientConfig[];
+    try {
+      clients = (await readOrInitWorkspaceConfig(root)).mcpClients ?? [];
+    } catch (e) {
+      // Illisible : le fichier reste tel quel, aucun serveur ne démarre, et le projet s'ouvre
+      // quand même. L'interface l'a dit par `configIssue` ; un ajout le redira.
+      if (!(e instanceof WorkspaceConfigError)) throw e;
+      console.warn('[mcp-clients] config.json illisible, aucun serveur démarré:', e.message);
+      return;
+    }
 
     // Fusion 1.5: any sensitive env value still in plain text inside
     // `config.json` is migrated to `secureStorage` on first load. The
     // config is only rewritten when at least one secret was actually
     // moved, so opening a workspace with no secrets is a no-op.
-    let migrated = false;
-    for (const w of clients) {
-      if (migrateClientEnvSecrets(w)) migrated = true;
-    }
-    if (migrated) {
-      cfg.mcpClients = clients;
-      try {
-        await writeWorkspaceConfig(root, cfg);
-      } catch (e) {
-        console.warn('[mcp-clients] failed to persist secret migration:', e);
-      }
+    try {
+      const cfg = await updateWorkspaceConfig(root, (current) => {
+        let migrated = false;
+        for (const w of current.mcpClients ?? []) {
+          if (migrateClientEnvSecrets(w)) migrated = true;
+        }
+        return migrated ? undefined : false;
+      });
+      clients = cfg.mcpClients ?? [];
+    } catch (e) {
+      console.warn('[mcp-clients] failed to persist secret migration:', e);
     }
 
     // Ne JAMAIS démarrer ce que porte `config.json` sans l'avoir validé et
@@ -230,17 +226,17 @@ class MCPClientsService {
     if (!this.workspaceRoot || !this.manager) {
       throw new Error('No project loaded');
     }
-    const cfg = await this.readOrInitConfig(this.workspaceRoot);
-    const existing = cfg.mcpClients ?? [];
-    if (existing.some((c) => c.name === client.name)) {
-      throw new Error(`MCP client "${client.name}" already exists`);
-    }
-    // Route fresh secrets straight to `secureStorage` so they never
-    // touch `config.json`. The migration step above handles previously
-    // persisted plain values; this catches new ones at the door.
-    migrateClientEnvSecrets(client);
-    cfg.mcpClients = [...existing, client];
-    await writeWorkspaceConfig(this.workspaceRoot, cfg);
+    await updateWorkspaceConfig(this.workspaceRoot, (cfg) => {
+      const existing = cfg.mcpClients ?? [];
+      if (existing.some((c) => c.name === client.name)) {
+        throw new Error(`MCP client "${client.name}" already exists`);
+      }
+      // Route fresh secrets straight to `secureStorage` so they never
+      // touch `config.json`. The migration step above handles previously
+      // persisted plain values; this catches new ones at the door.
+      migrateClientEnvSecrets(client);
+      cfg.mcpClients = [...existing, client];
+    });
     this.manager.register(toManagerConfig(client));
     return this.manager.start(client.name);
   }
@@ -249,10 +245,11 @@ class MCPClientsService {
     if (!this.workspaceRoot || !this.manager) {
       throw new Error('No project loaded');
     }
-    const cfg = await this.readOrInitConfig(this.workspaceRoot);
-    const removed = (cfg.mcpClients ?? []).find((c) => c.name === name);
-    cfg.mcpClients = (cfg.mcpClients ?? []).filter((c) => c.name !== name);
-    await writeWorkspaceConfig(this.workspaceRoot, cfg);
+    let removed: WorkspaceClientConfig | undefined;
+    await updateWorkspaceConfig(this.workspaceRoot, (cfg) => {
+      removed = (cfg.mcpClients ?? []).find((c) => c.name === name);
+      cfg.mcpClients = (cfg.mcpClients ?? []).filter((c) => c.name !== name);
+    });
     if (removed) deleteClientEnvSecrets(removed);
     await this.manager.stop(name);
   }

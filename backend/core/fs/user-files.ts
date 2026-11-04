@@ -426,7 +426,9 @@ export async function updateJsonFile<T>(
     }
     const next = await mutator(parsed);
     value = next ?? parsed;
-    if (next === null) return null;
+    // `undefined` aussi, qu'un mutator rend à l'exécution sans que le type le voie :
+    // `JSON.stringify` rendrait `undefined`, et le fichier contiendrait ce mot.
+    if (next == null) return null;
     return `${JSON.stringify(next, null, opts?.indent ?? 2)}${opts?.trailingNewline ? '\n' : ''}`;
   });
   return { written, value };

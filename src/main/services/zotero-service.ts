@@ -16,6 +16,7 @@ import {
   ZoteroSynchronizer,
   type SyncReport,
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
+import { UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
@@ -375,27 +376,36 @@ async function readLocalBibliography(bibtexPath: string, projectPath: string): P
   return BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata);
 }
 
-/** Mémorise dans `project.json` la collection que suit la bibliographie. */
-async function recordProjectCollection(
+/**
+ * Mémorise dans `project.json` la collection que suit la bibliographie, sous le verrou du fichier :
+ * la synchronisation dure, et le plan ou les réglages ont pu changer pendant ce temps.
+ */
+export async function recordProjectCollection(
   projectJsonPath: string,
   bibFile: string,
   collectionKey: string
 ): Promise<void> {
-  if (!existsSync(projectJsonPath)) return;
-  const project = await readProjectJson(projectJsonPath);
-  const already =
-    project.bibliographySource?.type === 'zotero' &&
-    project.bibliographySource.zoteroCollection === collectionKey &&
-    project.bibliographySource.filePath === bibFile &&
-    project.zotero?.collectionKey === collectionKey;
-  if (already) return;
+  await updateJsonFile<ProjectJson>(projectJsonPath, (project) => {
+    if (project === null) return null;
+    if (typeof project !== 'object' || Array.isArray(project)) {
+      throw new UnreadableFileError(projectJsonPath, 'invalid-json', `${projectJsonPath} n'est pas un manifeste de projet`);
+    }
+    const already =
+      project.bibliographySource?.type === 'zotero' &&
+      project.bibliographySource.zoteroCollection === collectionKey &&
+      project.bibliographySource.filePath === bibFile &&
+      project.zotero?.collectionKey === collectionKey;
+    if (already) return null;
 
-  project.bibliographySource = { type: 'zotero', filePath: bibFile, zoteroCollection: collectionKey };
-  project.zotero = { ...(project.zotero ?? {}), collectionKey };
-  project.updatedAt = new Date().toISOString();
-  // `path` se déduit de l'emplacement du fichier : ne jamais l'y écrire (#13).
-  const { path: _computed, ...toSave } = project;
-  await writeFile(projectJsonPath, JSON.stringify(toSave, null, 2));
+    // `path` se déduit de l'emplacement du fichier : ne jamais l'y écrire (#13).
+    const { path: _computed, ...toSave } = project;
+    return {
+      ...toSave,
+      bibliographySource: { type: 'zotero', filePath: bibFile, zoteroCollection: collectionKey },
+      zotero: { ...(project.zotero ?? {}), collectionKey },
+      updatedAt: new Date().toISOString(),
+    };
+  });
 }
 
 /** Clé BibTeX → collections Zotero de la notice correspondante. */

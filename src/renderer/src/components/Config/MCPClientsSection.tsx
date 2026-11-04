@@ -147,13 +147,14 @@ export const MCPClientsSection: React.FC = () => {
       if (!a) return;
       setBusy(true);
       try {
-        await a.remove(name);
-        await refresh();
+        const res = await a.remove(name);
+        if (res.success) await refresh();
+        else setError(res.error ?? t('mcp.errors.removeFailed'));
       } finally {
         setBusy(false);
       }
     },
-    [refresh]
+    [refresh, t]
   );
 
   const restart = useCallback(

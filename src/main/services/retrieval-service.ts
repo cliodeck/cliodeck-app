@@ -480,7 +480,10 @@ class RetrievalService {
       const cfg = await readWorkspaceConfig(this.workspaceRoot);
       const m = cfg.security?.sourceInspectorMode;
       this.inspectorMode = m ?? DEFAULT_INSPECTOR_MODE;
-    } catch {
+    } catch (e) {
+      // Un auteur qui a choisi `block` passe ainsi en `warn` : la notification de `configIssue` le
+      // dit à l'ouverture. Changer ce repli serait un choix de l'auteur, pas un détail de code.
+      console.warn('[retrieval] mode de sécurité par défaut :', e instanceof Error ? e.message : String(e));
       this.inspectorMode = DEFAULT_INSPECTOR_MODE;
     }
   }

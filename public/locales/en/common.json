@@ -295,6 +295,11 @@
     "createErrorFilesExist": "The folder “{{name}}” in {{folder}} already contains files that creating a project would replace. Nothing was changed. Choose another name or location.",
     "createErrorNameInvalid": "A project name cannot contain / or \\, and cannot be “.” or “..”.",
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
+    "configUnreadable": {
+      "title": "Project settings unreadable",
+      "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's Obsidian vault and MCP servers are unavailable, and source inspection falls back to “Warn” mode, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
+      "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's Obsidian vault and MCP servers are unavailable, and source inspection falls back to “Warn” mode, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
+    },
     "documentOpenError": "This project's document could not be opened",
     "documentOpenUnchanged": "No file was changed.",
     "documentOpenUntitled": "The editor shows an untitled document: what you write there will not go into the project's document.",
@@ -804,6 +809,7 @@
       "vaultReady": "Index ready at {{path}}",
       "vaultNotIndexed": "Not indexed yet — link a vault from Settings.",
       "vaultChecking": "checking…",
+      "vaultUnavailable": "Vault status unavailable for now.",
       "recipesHeading": "Recipes ({{count}})",
       "noRecipes": "No recipes available.",
       "fusionApiMissing": "Fusion API not exposed by preload — rebuild the preload bundle.",
@@ -1453,6 +1459,7 @@
       "noFusionApi": "Fusion API not exposed by the preload.",
       "noProject": "Open a project to configure the vault.",
       "statusFailed": "Could not read the vault status.",
+      "unlinkFailed": "The vault could not be unlinked.",
       "configRefused": "Configuration refused.",
       "indexFailed": "Indexing failed."
     },
@@ -1568,7 +1575,8 @@
     "errors": {
       "noFusionApi": "Fusion API not exposed.",
       "listFailed": "List unavailable.",
-      "addFailed": "Add refused."
+      "addFailed": "Add refused.",
+      "removeFailed": "Removal refused."
     },
     "buttons": {
       "refresh": "Refresh",
@@ -1775,6 +1783,8 @@
     "created": "Created",
     "delete": "Delete",
     "importObsidian": "Import from Obsidian vault",
+    "importFailed": "Vault import failed",
+    "importNoVault": "No vault is linked to this project: link one in Settings.",
     "relatedIdeas": "Related ideas",
     "removeLink": "Remove the link"
   },
