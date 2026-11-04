@@ -59,6 +59,7 @@ import {
   rememberConsentedPath,
 } from '../../utils/user-consented-paths.js';
 import { setupFusionHandlers } from '../fusion-handlers.js';
+import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
 
 type Response = { success: boolean; error?: string } & Record<string, unknown>;
 
@@ -93,6 +94,141 @@ function workspaceConfig(): Record<string, unknown> {
   const p = path.join(project, '.cliodeck', 'config.json');
   return fs.existsSync(p) ? (JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>) : {};
 }
+
+/**
+ * « Rejouer l'assistant » et les Réglages écrivaient `context.md` d'un bloc, sans relire
+ * (S17-1-0, S17-1-24). L'écriture porte désormais ce qui a été lu et le projet pour lequel.
+ */
+describe('fusion:hints:write — sur le texte lu, dans le projet pour lequel il a été lu', () => {
+  const contextMd = () => path.join(project, 'context.md');
+  const write = (markdown: unknown, guard?: unknown) => invoke('fusion:hints:write', markdown, guard);
+  const guarded = (expectedRaw: string) => ({ expectedRaw, projectPath: project });
+
+  it('refuse un texte qui n’est pas une chaîne', async () => {
+    const res = await write(42, guarded(''));
+
+    expect(res.success).toBe(false);
+    expect(fs.existsSync(contextMd())).toBe(false);
+  });
+
+  it.each<[string, unknown]>([
+    ['sans rien', undefined],
+    ['sans texte attendu', { projectPath: 'x' }],
+    ['sans projet', { expectedRaw: '' }],
+    ['avec un attendu qui n’est pas une chaîne', { expectedRaw: 3, projectPath: 'x' }],
+  ])('n’offre pas d’écriture à l’aveugle : %s', async (_label, guard) => {
+    fs.writeFileSync(contextMd(), 'Consignes.');
+
+    const res = await write('Écrasé.', guard);
+
+    expect(res.success).toBe(false);
+    expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Consignes.');
+  });
+
+  it('écrit sur le texte lu, et rend le nouveau texte', async () => {
+    fs.writeFileSync(contextMd(), 'Consignes.');
+
+    const res = await write('Nouveau.', guarded('Consignes.'));
+
+    expect(res.success).toBe(true);
+    expect((res.hints as { raw: string }).raw).toBe('Nouveau.');
+    expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Nouveau.');
+  });
+
+  it('texte périmé : context_conflict, fichier inchangé', async () => {
+    fs.writeFileSync(contextMd(), 'Modifié dans l’éditeur.');
+
+    const res = await write('Nouveau.', guarded('Lu à l’ouverture.'));
+
+    expect(res).toMatchObject({ success: false, error: 'context_conflict' });
+    expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Modifié dans l’éditeur.');
+  });
+
+  it('fichier illisible : context_unreadable et sa raison, fichier inchangé', async () => {
+    const latin1 = Buffer.from([0x23, 0x20, 0xc9, 0x74, 0xe9, 0x0a]);
+    fs.writeFileSync(contextMd(), latin1);
+
+    const res = await write('Nouveau.', guarded(''));
+
+    expect(res).toMatchObject({ success: false, error: 'context_unreadable', reason: 'encoding' });
+    expect(fs.readFileSync(contextMd())).toEqual(latin1);
+  });
+
+  it.skipIf(!symlinkAvailable)('lien qui sort du projet : ni conflit, ni illisible, et rien d’écrit dehors', async () => {
+    const journal = path.join(outside, 'journal.md');
+    fs.writeFileSync(journal, 'Texte privé.');
+    fs.symlinkSync(journal, contextMd());
+
+    const res = await write('Nouveau.', guarded(''));
+
+    expect(res).toMatchObject({ success: false, error: 'context_outside_project' });
+    expect(fs.readFileSync(journal, 'utf8')).toBe('Texte privé.');
+    expect(fs.lstatSync(contextMd()).isSymbolicLink()).toBe(true);
+  });
+
+  it('un autre projet ouvert depuis : rien n’y est écrit, même si les deux fichiers sont identiques', async () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-fusion-autre-'));
+    try {
+      fs.writeFileSync(contextMd(), 'Identique.');
+      fs.writeFileSync(path.join(other, 'context.md'), 'Identique.');
+      h.projectPath = other;
+
+      const res = await write('Pour le projet d’avant.', guarded('Identique.'));
+
+      expect(res).toMatchObject({ success: false, error: 'context_project_changed' });
+      expect(fs.readFileSync(path.join(other, 'context.md'), 'utf8')).toBe('Identique.');
+      expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Identique.');
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!symlinkAvailable)('le même projet désigné par un lien n’est pas un autre projet', async () => {
+    const alias = `${project}-alias`;
+    fs.symlinkSync(project, alias);
+    try {
+      fs.writeFileSync(contextMd(), 'Consignes.');
+
+      const res = await write('Nouveau.', { expectedRaw: 'Consignes.', projectPath: alias });
+
+      expect(res.success).toBe(true);
+      expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Nouveau.');
+    } finally {
+      fs.rmSync(alias);
+    }
+  });
+
+  it('deux écritures sur le même texte lu : la seconde perd, sans rien effacer', async () => {
+    fs.writeFileSync(contextMd(), 'Consignes.');
+
+    const [first, second] = await Promise.all([
+      write('Première.', guarded('Consignes.')),
+      write('Seconde.', guarded('Consignes.')),
+    ]);
+
+    expect(first.success).toBe(true);
+    expect(second).toMatchObject({ success: false, error: 'context_conflict' });
+    expect(fs.readFileSync(contextMd(), 'utf8')).toBe('Première.');
+  });
+
+  it('une lecture demandée après une écriture la voit', async () => {
+    fs.writeFileSync(contextMd(), 'Consignes.');
+
+    const writing = write('Nouveau.', guarded('Consignes.'));
+    const read = await invoke('fusion:hints:read');
+    await writing;
+
+    expect((read.hints as { raw: string }).raw).toBe('Nouveau.');
+  });
+
+  it('sans projet ouvert : no_project', async () => {
+    h.projectPath = '';
+
+    const res = await write('Nouveau.', guarded(''));
+
+    expect(res).toMatchObject({ success: false, error: 'no_project' });
+  });
+});
 
 describe('fusion:vault:set-path — seulement un dossier choisi dans le dialogue', () => {
   it('refuse un dossier que l’utilisateur n’a pas choisi, sans rien écrire', async () => {

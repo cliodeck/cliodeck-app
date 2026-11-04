@@ -10,6 +10,7 @@ import {
   withFileLock,
   type UserFileRead,
 } from '../../../../backend/core/fs/user-files.js';
+import { realLocation, sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
 import { rememberConsentedPath } from '../utils/user-consented-paths.js';
@@ -21,6 +22,7 @@ import {
   FsWriteFileSchema,
   FsReadFileSchema,
   FsCopyFileSchema,
+  FsSameFileSchema,
   StringPathSchema,
   StringUrlSchema,
   DialogOpenFileSchema,
@@ -138,6 +140,19 @@ export function setupFilesystemHandlers() {
       return refused;
     }
     return readUserFile(validatedPath);
+  });
+
+  // Le disque tranche, pas les chaînes : casse différente sous macOS, racine passant par un
+  // lien. C'est donc où mène le chemin qui passe par le validateur : sa casse et ses liens
+  // n'en font pas un chemin refusé, et ce qui mène hors du projet n'y est le même que rien.
+  ipcMain.handle('fs:same-file', async (_event, rawA: unknown, rawB: unknown) => {
+    const { a, b } = validate(FsSameFileSchema, { a: rawA, b: rawB });
+    try {
+      for (const filePath of [a, b]) await validateReadPath(realLocation(filePath) ?? filePath);
+    } catch {
+      return false;
+    }
+    return sameFile(a, b);
   });
 
   ipcMain.handle('fs:write-file', async (_event, rawFilePath: unknown, rawContent: unknown, rawOptions?: unknown) => {

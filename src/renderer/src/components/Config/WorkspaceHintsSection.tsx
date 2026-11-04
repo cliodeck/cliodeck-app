@@ -1,33 +1,26 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Save } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
-
-interface HintsPayload {
-  present: boolean;
-  raw: string;
-  normalized: string;
-  /** `context.md` à la racine du projet : la face visible, éditée ici. */
-  sourcePath: string;
-  /** Détail par source ; `legacyHints` = `.cliodeck/hints.md` hérité. */
-  sources?: {
-    context: { sourcePath: string; content: string; present: boolean };
-    legacyHints: { sourcePath: string; content: string; present: boolean };
-  };
-}
-
-interface HintsApi {
-  read(): Promise<{ success: boolean; hints?: HintsPayload; error?: string }>;
-  write(markdown: string): Promise<{ success: boolean; hints?: HintsPayload; error?: string }>;
-}
-
-function api(): HintsApi | null {
-  return (window.electron?.fusion?.hints as HintsApi | undefined) ?? null;
-}
+import { useProjectStore } from '../../stores/projectStore';
+import {
+  contextFailureText,
+  readContextFile,
+  saveContextFile,
+  unreadableFailure,
+} from '../../services/context-file';
 
 export const WorkspaceHintsSection: React.FC = () => {
   const { t } = useTranslation();
   const [value, setValue] = useState('');
+  /**
+   * Le fichier tel qu'il a été lu, à l'octet près : l'écriture se compare à lui, pas à la zone,
+   * qui rend ses fins de ligne en LF dès la première frappe. Et pour quel projet.
+   */
+  const [loadedRaw, setLoadedRaw] = useState('');
+  const [projectPath, setProjectPath] = useState('');
+  /** Illisible, ou lié hors du projet : rien à éditer ici, et rien à y écrire. */
+  const [blocked, setBlocked] = useState(false);
   const [sourcePath, setSourcePath] = useState<string>('context.md');
   // `.cliodeck/hints.md` d'un projet antérieur : toujours lu et injecté, mais
   // il ne s'édite plus ici — on le signale pour que son contenu ne devienne
@@ -38,41 +31,56 @@ export const WorkspaceHintsSection: React.FC = () => {
   >({ kind: 'idle' });
   const [loaded, setLoaded] = useState(false);
 
+  // Une seule lecture par ouverture : relire au changement de langue, juste au-dessus dans ce
+  // même panneau, remplacerait ce qui est tapé dans la zone.
+  const tRef = useRef(t);
+  tRef.current = t;
+
   useEffect(() => {
-    const h = api();
-    if (!h) {
-      setStatus({ kind: 'error', message: t('hints.errors.noFusionApi') });
+    const tr = tRef.current;
+    if (!window.electron?.fusion?.hints) {
+      setStatus({ kind: 'error', message: tr('hints.errors.noFusionApi') });
       return;
     }
-    void h.read().then((res) => {
-      if (res.success && res.hints) {
+    setProjectPath(useProjectStore.getState().currentProject?.path ?? '');
+    void readContextFile().then((res) => {
+      if (res.success) {
         setValue(res.hints.raw);
+        setLoadedRaw(res.hints.raw);
         setSourcePath(res.hints.sourcePath);
-        const legacy = res.hints.sources?.legacyHints;
+        const legacy = res.hints.sources.legacyHints;
         setLegacyHints(
-          legacy?.present ? { path: legacy.sourcePath, content: legacy.content } : null
+          legacy.present ? { path: legacy.sourcePath, content: legacy.content } : null
         );
-      } else if (res.error === 'no_project') {
-        setStatus({ kind: 'error', message: t('hints.errors.noProject') });
-      } else if (res.error) {
-        setStatus({ kind: 'error', message: res.error });
+        const refused = unreadableFailure(res.hints);
+        setBlocked(refused !== null);
+        if (refused) setStatus({ kind: 'error', message: contextFailureText(tr, refused) });
+      } else {
+        setStatus({ kind: 'error', message: contextFailureText(tr, res) });
       }
       setLoaded(true);
     });
-  }, [t]);
+  }, []);
 
   const save = useCallback(async () => {
-    const h = api();
-    if (!h) return;
     setStatus({ kind: 'saving' });
-    const res = await h.write(value);
+    const res = await saveContextFile(value, { expectedRaw: loadedRaw, sourcePath, projectPath });
     if (res.success) {
+      // Le texte attendu avance avec le fichier : un second Enregistrer n'est pas un conflit.
+      setLoadedRaw(res.hints.raw);
       setStatus({ kind: 'ok' });
-      setTimeout(() => setStatus({ kind: 'idle' }), 1500);
+      setTimeout(() => setStatus((now) => (now.kind === 'ok' ? { kind: 'idle' } : now)), 1500);
     } else {
-      setStatus({ kind: 'error', message: res.error ?? t('hints.errors.saveFailed') });
+      // Ce que devient le texte de la zone : il n'est perdu que si on l'y laisse en partant.
+      const kept =
+        res.error === 'context_conflict'
+          ? t('hints.errors.conflict')
+          : res.error === 'context_project_changed'
+            ? t('hints.errors.projectChanged')
+            : '';
+      setStatus({ kind: 'error', message: `${contextFailureText(t, res)} ${kept}`.trim() });
     }
-  }, [value, t]);
+  }, [value, loadedRaw, sourcePath, projectPath, t]);
 
   return (
     <CollapsibleSection title={t('hints.title')} defaultExpanded={false}>
@@ -91,7 +99,7 @@ export const WorkspaceHintsSection: React.FC = () => {
         className="config-textarea"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        disabled={!loaded || status.kind === 'saving'}
+        disabled={!loaded || blocked || status.kind === 'saving'}
         rows={10}
         placeholder={t('hints.placeholder')}
         style={{
@@ -111,7 +119,7 @@ export const WorkspaceHintsSection: React.FC = () => {
           type="button"
           className="toolbar-btn"
           onClick={save}
-          disabled={!loaded || status.kind === 'saving'}
+          disabled={!loaded || blocked || status.kind === 'saving'}
           title={t('hints.buttons.saveTitle')}
         >
           <Save size={16} strokeWidth={1} /> {t('hints.buttons.save')}
@@ -121,7 +129,7 @@ export const WorkspaceHintsSection: React.FC = () => {
         )}
         {status.kind === 'saving' && <span>…</span>}
         {status.kind === 'error' && (
-          <span style={{ color: 'var(--color-danger)' }}>{status.message}</span>
+          <span role="alert" style={{ color: 'var(--color-danger)' }}>{status.message}</span>
         )}
       </div>
         </div>

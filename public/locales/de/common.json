@@ -1490,7 +1490,16 @@
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "noProject": "Öffnen Sie ein Projekt, um seinen Kontext zu bearbeiten.",
-      "saveFailed": "Speichern fehlgeschlagen."
+      "conflict": "Ihr Text wurde nicht gespeichert, steht aber weiterhin in diesem Feld: Kopieren Sie ihn, schließen und öffnen Sie die Einstellungen erneut, um von der aktuellen Datei auszugehen, und fügen Sie ihn wieder ein.",
+      "projectChanged": "Ihr Text wurde nicht gespeichert, steht aber weiterhin in diesem Feld: Kopieren Sie ihn, wenn Sie ihn behalten möchten, und schließen und öffnen Sie dann die Einstellungen erneut."
+    },
+    "reasons": {
+      "conflict": "context.md wurde seit dem Lesen geändert, im Editor oder in einem anderen Programm. Der Inhalt wurde nicht gelöscht.",
+      "outsideProject": "context.md ist ein Link, der aus dem Projekt herausführt: ClioDeck liest und schreibt ihn nicht, damit ein von Kollegen erhaltenes Projekt nicht auf Ihre Dateien zugreifen kann. Die Zieldatei bleibt unverändert.",
+      "notUtf8": "context.md ist nicht in UTF-8 kodiert: ClioDeck hat die Datei weder gelesen noch geändert, weil Akzentzeichen beschädigt würden, und sie wird nicht an die Assistenz übermittelt. Konvertieren Sie sie in UTF-8, um sie wieder nutzen zu können.",
+      "unreadable": "context.md existiert, aber ClioDeck kann die Datei nicht lesen: Zugriffsrechte, oder es ist keine gewöhnliche Datei. Sie wurde nicht geändert und wird nicht an die Assistenz übermittelt.",
+      "projectChanged": "Inzwischen wurde ein anderes Projekt geöffnet: Dort wurde nichts geschrieben.",
+      "writeFailed": "context.md konnte nicht geschrieben werden und bleibt unverändert ({{detail}})."
     },
     "buttons": {
       "save": "Speichern",
@@ -1939,7 +1948,10 @@
       "en": "Englisch",
       "de": "Deutsch"
     },
-    "doneMessage": "Fertig! Ihr Arbeitsbereich ist konfiguriert. Der Assistent kennt jetzt Ihr Thema und Ihre Quellen. Sie können diese Angaben jederzeit in den Projekteinstellungen ändern (Datei .cliohints)."
+    "doneMessage": "Fertig! Ihr Arbeitsbereich ist konfiguriert. Der Assistent kennt jetzt Ihr Thema und Ihre Quellen. Sie können diese Angaben jederzeit in der Datei context.md im Projektstamm ändern.",
+    "appendConfirmTitle": "Zu context.md hinzufügen?",
+    "appendConfirm": "context.md enthält bereits Text. Ihre Antworten werden dahinter als neuer Abschnitt angefügt: Nichts von dem, was dort steht, wird gelöscht. Wenn Sie abbrechen, bleibt die Datei unverändert.",
+    "writeError": "Ihre Antworten wurden nicht geschrieben, der Assistent behält sie aber: Sie können es erneut versuchen oder ihn schließen, ohne etwas zu ändern."
   },
   "usageJournal": {
     "title": "KI-Nutzungsjournal",

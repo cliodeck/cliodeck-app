@@ -3,7 +3,7 @@
  *
  * Inspired by The Historian's Desktop: a short "interview" that asks the
  * researcher about their topic, sources, and preferred language, then
- * generates an initial .cliohints file so the LLM immediately has context.
+ * generates an initial context.md so the LLM immediately has context.
  *
  * Appears as a modal after project creation. Each step is a simple
  * question/answer — no LLM needed.
@@ -25,7 +25,8 @@ interface OnboardingAnswers {
 
 interface Props {
   projectName: string;
-  onComplete: (hints: string) => void;
+  /** Rend faux si rien n'a été écrit : l'assistant reste ouvert, avec les réponses de l'auteur. */
+  onComplete: (hints: string) => Promise<boolean>;
   onSkip: () => void;
 }
 
@@ -41,6 +42,8 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
     language: 'fr',
   });
   const inputRef = useRef<HTMLInputElement>(null);
+  const [finishing, setFinishing] = useState(false);
+  const finishingRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -49,17 +52,29 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
   const stepIndex = STEPS.indexOf(currentStep);
   const progress = Math.round((stepIndex / (STEPS.length - 1)) * 100);
 
+  // L'écran de fin ne vient qu'une fois le fichier écrit : il ne doit rien annoncer avant, et
+  // tant que rien n'est écrit, les réponses restent ici. Un second clic poserait de nouveau la
+  // question et ajouterait une seconde section.
+  const finish = useCallback(async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setFinishing(true);
+    try {
+      if (await onComplete(generateHints(projectName, answers))) setCurrentStep('done');
+    } finally {
+      finishingRef.current = false;
+      setFinishing(false);
+    }
+  }, [answers, projectName, onComplete]);
+
   const advance = useCallback(() => {
     const idx = STEPS.indexOf(currentStep);
     if (idx < STEPS.length - 1) {
       const next = STEPS[idx + 1];
-      setCurrentStep(next);
-      if (next === 'done') {
-        const hints = generateHints(projectName, answers);
-        onComplete(hints);
-      }
+      if (next === 'done') void finish();
+      else setCurrentStep(next);
     }
-  }, [currentStep, answers, projectName, onComplete]);
+  }, [currentStep, finish]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -211,6 +226,7 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
                   type="button"
                   className="onboarding-wizard__btn"
                   onClick={advance}
+                  disabled={finishing}
                 >
                   {t('onboarding.finish')} <Check size={14} />
                 </button>

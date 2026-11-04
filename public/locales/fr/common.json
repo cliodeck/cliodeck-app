@@ -1490,7 +1490,16 @@
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
       "noProject": "Ouvrez un projet pour éditer son contexte.",
-      "saveFailed": "Échec de la sauvegarde."
+      "conflict": "Votre texte n'a pas été enregistré, mais il reste dans cette zone : copiez-le, fermez puis rouvrez les Paramètres pour repartir du fichier à jour, et recollez-le.",
+      "projectChanged": "Votre texte n'a pas été enregistré, mais il reste dans cette zone : copiez-le si vous voulez le garder, puis fermez et rouvrez les Paramètres."
+    },
+    "reasons": {
+      "conflict": "context.md a changé depuis qu'il a été lu, dans l'éditeur ou dans un autre logiciel. Ce qui s'y trouve n'a pas été effacé.",
+      "outsideProject": "context.md est un lien qui pointe hors du projet : ClioDeck ne le lit ni ne l'écrit, pour qu'un projet reçu d'un collègue n'aille pas chercher vos fichiers. Le fichier visé reste intact.",
+      "notUtf8": "context.md n'est pas encodé en UTF-8 : ClioDeck ne l'a ni lu ni modifié, car ses caractères accentués seraient abîmés, et il ne part pas à l'assistant. Convertissez-le en UTF-8 pour qu'il redevienne utilisable.",
+      "unreadable": "context.md existe, mais ClioDeck ne peut pas le lire : droits d'accès, ou ce n'est pas un fichier ordinaire. Il n'a pas été modifié, et il ne part pas à l'assistant.",
+      "projectChanged": "Un autre projet a été ouvert entre-temps : rien n'y a été écrit.",
+      "writeFailed": "context.md n'a pas pu être écrit, et il est resté tel quel ({{detail}})."
     },
     "buttons": {
       "save": "Enregistrer",
@@ -1939,7 +1948,10 @@
       "en": "Anglais",
       "de": "Allemand"
     },
-    "doneMessage": "Parfait ! Votre espace de travail est configure. L'assistant connait maintenant votre sujet et vos sources. Vous pouvez modifier ces informations a tout moment dans les parametres du projet (fichier .cliohints)."
+    "doneMessage": "Parfait ! Votre espace de travail est configuré. L'assistant connaît maintenant votre sujet et vos sources. Vous pouvez modifier ces informations à tout moment dans le fichier context.md, à la racine du projet.",
+    "appendConfirmTitle": "Ajouter à context.md ?",
+    "appendConfirm": "context.md contient déjà du texte. Vos réponses y seront ajoutées à la suite, en une nouvelle section : rien de ce qui s'y trouve ne sera effacé. Si vous annulez, le fichier reste tel quel.",
+    "writeError": "Vos réponses n'ont pas été écrites, mais l'assistant les garde : vous pouvez réessayer, ou le fermer sans rien changer."
   },
   "usageJournal": {
     "title": "Journal d'usage IA",
