@@ -22,7 +22,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState, readDocText } from '@/editor/cm/fidelity';
+import { createDocState, readDocText, toDocText } from '@/editor/cm/fidelity';
 import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
@@ -32,7 +32,7 @@ import {
 import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
 import { scholarlyMarkdown } from '@/editor/lezer-extensions';
 import { changeOrigin, changeOriginGuard } from '@/editor/cm/change-origin';
-import { toggleInlineMark } from '@/editor/cm/inline-formatting';
+import { editSelection, toggleInlineMark } from '@/editor/cm/inline-formatting';
 import {
   proposals,
   type Proposal,
@@ -248,12 +248,15 @@ function createFacade(
       const { from, to } = view.state.selection.main;
       return from === to ? null : view.state.sliceDoc(from, to);
     },
+    hasFocus: () => view.root.activeElement === view.contentDOM,
     toggleInline: (type) => {
       toggleInlineMark(view, type);
     },
+    editSelection: (edit, origin) => editSelection(view, edit, origin),
     replaceSelection: (text, origin) => {
+      if (view.state.readOnly) return;
       view.dispatch({
-        ...view.state.replaceSelection(text),
+        ...view.state.replaceSelection(toDocText(text)),
         annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
       view.focus();
@@ -620,7 +623,7 @@ export const CodeMirrorEditor: React.FC = () => {
         });
       } else {
         view.dispatch({
-          ...view.state.replaceSelection(payload.text),
+          ...view.state.replaceSelection(toDocText(payload.text)),
           annotations: changeOrigin.of('programmatic'),
         });
         view.focus();

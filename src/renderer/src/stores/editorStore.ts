@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
 import { detectLineSeparator } from '@/editor/cm/fidelity';
+import { computeSelectionWrap, type SnippetTemplates } from '@/editor/cm/inline-formatting';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
@@ -185,8 +186,6 @@ interface EditorState {
   /** Contenu réel : l'éditeur vivant s'il est monté, sinon le miroir du store. */
   getLiveContent: () => string;
 
-  insertText: (text: string) => void;
-  insertCitation: (citationKey: string) => void;
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => void;
   insertTextAtCursor: (text: string) => void;
 
@@ -217,6 +216,25 @@ const DEFAULT_SETTINGS: EditorSettings = {
   autoSave: true,
   autoSaveDelay: 3000, // 3 seconds
 };
+
+/**
+ * Ces gabarits sont écrits DANS le manuscrit de l'auteur, pas dans
+ * l'interface : les laisser en français donnait « texte en gras » à un
+ * germanophone, à l'intérieur de son propre document.
+ */
+function snippetTemplates(): SnippetTemplates {
+  const tr = i18n.t.bind(i18n);
+  const c1 = tr('snippets.column', { n: 1 });
+  const c2 = tr('snippets.column', { n: 2 });
+  const v1 = tr('snippets.cell', { n: 1 });
+  const v2 = tr('snippets.cell', { n: 2 });
+  return {
+    linkText: tr('snippets.linkText'),
+    citationKey: tr('snippets.citationKey'),
+    table: `\n| ${c1} | ${c2} |\n|---|---|\n| ${v1} | ${v2} |\n`,
+    blockquote: `\n> ${tr('snippets.quoteFirst')}\n> ${tr('snippets.quoteSecond')}\n`,
+  };
+}
 
 // MARK: - La porte
 
@@ -554,18 +572,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return editorFacade ? editorFacade.getValue() : content;
   },
 
-  insertText: (text: string) => {
-    set((state) => ({
-      content: state.content + text,
-      isDirty: true,
-    }));
-  },
-
-  insertCitation: (citationKey: string) => {
-    const citationText = `[@${citationKey}]`;
-    get().insertText(citationText);
-  },
-
   saveCurrentFile: async () => {
     await get().saveFile();
   },
@@ -574,78 +580,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   insertFormatting: (type: 'bold' | 'italic' | 'link' | 'citation' | 'table' | 'footnote' | 'blockquote') => {
     logger.store('Editor', 'insertFormatting called', { type });
-    const { content, editorFacade } = get();
+    const { editorFacade, switchLock } = get();
+
+    // Sans éditeur, rien : ajouté au miroir, le gabarit partait sur le disque sans être jamais passé
+    // à l'écran. Sous le verrou, le texte ouvert est en train d'être réécrit : cette touche ferait
+    // défaire toute la renumérotation. `isDirty` vient de la vue, et seulement si le texte a changé.
+    if (!editorFacade || switchLock) return;
 
     // Footnote : offset exact du curseur via la façade.
     if (type === 'footnote') {
-      if (editorFacade) {
-        get().insertFootnoteAtPosition(editorFacade.getCursorOffset());
-      } else {
-        logger.error('Editor', 'No editor available for footnote insertion');
-      }
+      get().insertFootnoteAtPosition(editorFacade.getCursorOffset());
       return;
     }
 
     // Gras/italique : bascule wrap/unwrap via la façade — le remplacement
-    // par placeholder écrasait la sélection (#10). Repli sur l'ancien
-    // comportement seulement sans façade montée.
-    if ((type === 'bold' || type === 'italic') && editorFacade?.toggleInline) {
-      editorFacade.toggleInline(type);
-      set({ isDirty: true });
+    // par placeholder écrasait la sélection (#10).
+    if (type === 'bold' || type === 'italic') {
+      editorFacade.toggleInline?.(type);
       return;
     }
 
-    // Ces gabarits sont écrits DANS le manuscrit de l'auteur, pas dans
-    // l'interface : les laisser en français donnait « texte en gras » à un
-    // germanophone, à l'intérieur de son propre document.
-    const tr = i18n.t.bind(i18n);
-    let textToInsert = '';
-    switch (type) {
-      case 'bold':
-        textToInsert = `**${tr('snippets.boldText')}**`;
-        break;
-      case 'italic':
-        textToInsert = `_${tr('snippets.italicText')}_`;
-        break;
-      case 'link':
-        textToInsert = `[${tr('snippets.linkText')}](url)`;
-        break;
-      case 'citation':
-        textToInsert = `[@${tr('snippets.citationKey')}]`;
-        break;
-      case 'table': {
-        const c1 = tr('snippets.column', { n: 1 });
-        const c2 = tr('snippets.column', { n: 2 });
-        const v1 = tr('snippets.cell', { n: 1 });
-        const v2 = tr('snippets.cell', { n: 2 });
-        textToInsert = `\n| ${c1} | ${c2} |\n|---|---|\n| ${v1} | ${v2} |\n`;
-        break;
-      }
-      case 'blockquote':
-        textToInsert = `\n> ${tr('snippets.quoteFirst')}\n> ${tr('snippets.quoteSecond')}\n`;
-        break;
-    }
-
-    if (editorFacade) {
-      editorFacade.replaceSelection(textToInsert);
-      set({ isDirty: true });
-      return;
-    }
-
-    // Aucun éditeur monté : append au contenu.
-    set({
-      content: content + textToInsert,
-      isDirty: true,
-    });
+    const templates = snippetTemplates();
+    editorFacade.editSelection((doc, from, to) => computeSelectionWrap(doc, from, to, type, templates));
   },
 
   insertTextAtCursor: (text: string) => {
     logger.store('Editor', 'insertTextAtCursor called', { text });
-    const { editorFacade } = get();
-    if (editorFacade) {
-      editorFacade.replaceSelection(text);
-      set({ isDirty: true });
-    }
+    get().editorFacade?.replaceSelection(text);
   },
 
   insertDraftAtCursor: (
@@ -696,58 +657,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // Direct footnote insertion - returns definition position for scrolling
   insertFootnoteAtPosition: (markdownPosition: number) => {
-    const content = get().getLiveContent();
+    const { editorFacade } = get();
+    if (!editorFacade) return null;
 
-    // Prochain numéro par parse Lezer : un `[^99]` dans un bloc de code
-    // n'est pas une note (l'ancienne regex comptait tout le contenu).
-    const footnoteNumber = nextFootnoteNumber(content);
+    let inserted: { definitionPosition: number; footnoteNumber: number } | null = null;
+    // L'éditeur reçoit l'édition directement, curseur dans la définition. Le miroir suit par la vue, et
+    // une vue en lecture seule refuse. `content` et la position sont en offsets du document : le texte
+    // d'un fichier CRLF ne s'y lit pas, et la définition tomberait hors du document.
+    const applied = editorFacade.editSelection((content) => {
+      // Prochain numéro par parse Lezer : un `[^99]` dans un bloc de code
+      // n'est pas une note (l'ancienne regex comptait tout le contenu).
+      const footnoteNumber = nextFootnoteNumber(content);
 
-    const refText = `[^${footnoteNumber}]`;
-    const defText = `[^${footnoteNumber}]: `;
+      const refText = `[^${footnoteNumber}]`;
+      const defText = `[^${footnoteNumber}]: `;
 
-    // Insert reference at the specified position
-    const beforeRef = content.slice(0, markdownPosition);
-    const afterRef = content.slice(markdownPosition);
+      // Insert reference at the specified position
+      const afterRef = content.slice(markdownPosition);
 
-    // Check if there are existing footnote definitions at the end
-    // and insert the new definition before them
-    const defRegex = /\n\n(\[\^\d+\]:[\s\S]*)$/;
-    const defMatch = afterRef.match(defRegex);
+      // Check if there are existing footnote definitions at the end
+      // and insert the new definition before them
+      const defRegex = /\n\n(\[\^\d+\]:[\s\S]*)$/;
+      const defMatch = afterRef.match(defRegex);
 
-    let newContent: string;
-    let definitionPosition: number;
+      let insert: string;
+      if (defMatch) {
+        // There are existing definitions - insert new def after them (at the end)
+        const afterRefWithoutDefs = afterRef.slice(0, defMatch.index);
+        const existingDefs = defMatch[1].trimEnd();
+        insert = refText + afterRefWithoutDefs + '\n\n' + existingDefs + '\n\n' + defText;
+      } else {
+        // No existing definitions - add at the end
+        insert = refText + afterRef.trimEnd() + '\n\n' + defText;
+      }
 
-    if (defMatch) {
-      // There are existing definitions - insert new def after them (at the end)
-      const afterRefWithoutDefs = afterRef.slice(0, defMatch.index);
-      const existingDefs = defMatch[1].trimEnd();
-      newContent = beforeRef + refText + afterRefWithoutDefs + '\n\n' + existingDefs + '\n\n' + defText;
       // Definition position is at the very end, after the defText marker
-      definitionPosition = newContent.length;
-    } else {
-      // No existing definitions - add at the end
-      const trimmedAfter = afterRef.trimEnd();
-      newContent = beforeRef + refText + trimmedAfter + '\n\n' + defText;
-      // Definition position is at the end, after the defText marker
-      definitionPosition = beforeRef.length + refText.length + trimmedAfter.length + 2 + defText.length;
-    }
-
-    logger.store('Editor', 'Footnote inserted at position', {
-      number: footnoteNumber,
-      position: markdownPosition,
-      definitionPosition,
+      const definitionPosition = markdownPosition + insert.length;
+      inserted = { definitionPosition, footnoteNumber };
+      logger.store('Editor', 'Footnote inserted at position', {
+        number: footnoteNumber,
+        position: markdownPosition,
+        definitionPosition,
+      });
+      return {
+        from: markdownPosition,
+        to: content.length,
+        insert,
+        selFrom: definitionPosition,
+        selTo: definitionPosition,
+      };
     });
 
-    const { editorFacade } = get();
-    if (editorFacade) {
-      // L'éditeur reçoit l'édition directement, curseur dans la définition.
-      editorFacade.setValue(newContent, definitionPosition);
-      editorFacade.focus();
-      set({ content: newContent, isDirty: true });
-    } else {
-      set({ content: newContent, isDirty: true });
-    }
-
-    return { definitionPosition, footnoteNumber };
+    return applied ? inserted : null;
   },
 }));

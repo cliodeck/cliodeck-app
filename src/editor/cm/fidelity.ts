@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from '@codemirror/state';
+import { EditorState, Text, type Extension } from '@codemirror/state';
 
 /**
  * Fidélité octet par octet (plan CM6, décision cadre n°1).
@@ -60,6 +60,16 @@ export function createDocState(
  */
 export function readDocText(state: EditorState): string {
   return state.sliceDoc();
+}
+
+/**
+ * Un texte venu d'ailleurs, prêt à entrer dans un document. Une chaîne passée telle quelle n'est
+ * coupée que sur le séparateur déclaré : dans un fichier CRLF, ses `\n` resteraient à l'intérieur
+ * d'une « ligne » et le fichier deviendrait mixte. La longueur d'un `Text` est aussi la seule qui
+ * soit en offsets du document.
+ */
+export function toDocText(text: string): Text {
+  return Text.of(text.split(/\r\n?|\n/));
 }
 
 /** Charge puis restitue sans édition — la boucle du test de fidélité. */

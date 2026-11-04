@@ -1,5 +1,6 @@
 /**
- * Basculement des marques inline markdown (gras/italique) — #10.
+ * Basculement des marques inline markdown (gras/italique) — #10 — et mise en
+ * forme de la sélection (lien, citation, citation en bloc, tableau).
  *
  * L'ancien chemin (`insertFormatting`) remplaçait la sélection par un
  * placeholder : sélectionner un mot puis Cmd+B **écrasait** le mot. Ici la
@@ -9,10 +10,15 @@
  *
  * La logique est une fonction pure sur (doc, from, to) pour être testable
  * sous vitest node (pas d'EditorView hors DOM) ; le wrapper CM6 ne fait
- * que dispatcher le résultat.
+ * que dispatcher le résultat. `doc` est `state.doc.toString()` : une fin de
+ * ligne y vaut 1, comme dans les offsets de CM6, quel que soit le fichier.
+ * Jamais `readDocText` ou `facade.getValue()`, qui rendent les CRLF.
  */
+import { isolateHistory } from '@codemirror/commands';
+import { Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { changeOrigin } from './change-origin';
+import { isSeparatorLine } from '../slides';
+import { changeOrigin, type ChangeOrigin } from './change-origin';
 
 export interface InlineToggleResult {
   /** Bornes du remplacement dans le document d'origine. */
@@ -24,6 +30,9 @@ export interface InlineToggleResult {
   selFrom: number;
   selTo: number;
 }
+
+/** Ce qu'une commande fait de la sélection principale : une fonction pure, en offsets du document. */
+export type SelectionEdit = (doc: string, from: number, to: number) => InlineToggleResult;
 
 /**
  * `markers` : la première entrée est la marque écrite au wrap ; toutes
@@ -102,22 +111,125 @@ export const INLINE_MARKS = {
 
 export type InlineMarkType = keyof typeof INLINE_MARKS;
 
-/** Commande CM6 : bascule la marque sur la sélection principale. */
-export function toggleInlineMark(view: EditorView, type: InlineMarkType): boolean {
-  const { markers, placeholder } = INLINE_MARKS[type];
+export type SelectionWrapType = 'link' | 'citation' | 'blockquote' | 'table';
+
+/** Les gabarits à écrire dans le manuscrit, traduits par l'appelant : ce module ne lit aucun store. */
+export interface SnippetTemplates {
+  linkText: string;
+  citationKey: string;
+  /** Le bloc entier, sauts de ligne compris. */
+  table: string;
+  blockquote: string;
+}
+
+/**
+ * Une clé par sa forme : ni espace ni saut de ligne, commence par une lettre, finit par une lettre ou
+ * un chiffre, et porte un chiffre, un `:` ou un `_`, comme `Smith2020`. Un mot ordinaire n'en est
+ * pas une : `histoire` ne doit pas devenir `[@histoire]`, ni `1914` ou `1er`. Une clé sans rien de
+ * tout cela (`braudel`) reçoit le gabarit à côté d'elle : rien de perdu, et Cmd+Z la rend.
+ */
+export function looksLikeCitationKey(text: string): boolean {
+  return /^\p{L}([\p{L}\p{N}_:.#$%&+?<>~-]*[\p{L}\p{N}_])?$/u.test(text) && /[\d:_]/.test(text);
+}
+
+/** Insère à cet endroit, le curseur derrière. */
+function insertAt(at: number, insert: string): InlineToggleResult {
+  return { from: at, to: at, insert, selFrom: at + insert.length, selTo: at + insert.length };
+}
+
+/** Pour une édition qui laisse la sélection intacte : un bouton de diapositive, un tableau. */
+export function insertAfterSelection(insert: string): SelectionEdit {
+  return (_doc, _from, to) => insertAt(to, insert);
+}
+
+/**
+ * Préfixe les lignes touchées, en entier. Une ligne déjà préfixée se préfixe encore : le menu dit
+ * « Insérer », et `> >` est du Markdown, qu'un Cmd+Z retire. Une frontière de diapositive ne se
+ * met pas en citation, et les lignes vides qui la bordent restent vides : le deck garderait sinon
+ * une diapositive de moins.
+ */
+function quoteLines(doc: string, from: number, to: number): InlineToggleResult {
+  const lineFrom = from === 0 ? 0 : doc.lastIndexOf('\n', from - 1) + 1;
+  // Une sélection qui s'arrête en tête de ligne (triple clic, Maj+flèche) ne prend pas cette ligne.
+  const nextBreak = doc.indexOf('\n', doc[to - 1] === '\n' ? to - 1 : to);
+  const lineTo = nextBreak === -1 ? doc.length : nextBreak;
+  const lines = doc.slice(lineFrom, lineTo).split('\n');
+  const bordersSeparator = (index: number): boolean =>
+    isSeparatorLine(lines[index - 1] ?? '') || isSeparatorLine(lines[index + 1] ?? '');
+  const insert = lines
+    .map((line, index) => {
+      if (isSeparatorLine(line)) return line;
+      if (line !== '') return `> ${line}`;
+      return bordersSeparator(index) ? line : '>';
+    })
+    .join('\n');
+  return { from: lineFrom, to: lineTo, insert, selFrom: lineFrom, selTo: lineFrom + insert.length };
+}
+
+/**
+ * Lien, citation, citation en bloc, tableau : la sélection est enveloppée ou laissée telle quelle,
+ * jamais remplacée par le gabarit. Sélection vide : le gabarit, le curseur derrière.
+ */
+export function computeSelectionWrap(
+  doc: string,
+  from: number,
+  to: number,
+  type: SelectionWrapType,
+  templates: SnippetTemplates
+): InlineToggleResult {
+  if (type === 'table') return insertAt(to, templates.table);
+  if (type === 'blockquote') {
+    return from === to ? insertAt(to, templates.blockquote) : quoteLines(doc, from, to);
+  }
+
+  // Un triple clic prend aussi la fin de ligne : elle reste hors de ce qu'on enveloppe.
+  let end = to;
+  while (end > from && doc[end - 1] === '\n') end -= 1;
+  const sel = doc.slice(from, end);
+
+  if (type === 'link') {
+    if (sel === '') return insertAt(to, `[${templates.linkText}](url)`);
+    const urlFrom = end + '[]('.length;
+    return { from, to: end, insert: `[${sel}](url)`, selFrom: urlFrom, selTo: urlFrom + 'url'.length };
+  }
+
+  if (sel === '') return insertAt(to, `[@${templates.citationKey}]`);
+  if (looksLikeCitationKey(doc.slice(from, to))) {
+    const insert = `[@${sel}]`;
+    return { from, to: end, insert, selFrom: from + insert.length, selTo: from + insert.length };
+  }
+  const keyFrom = end + ' [@'.length;
+  return {
+    from: end,
+    to: end,
+    insert: ` [@${templates.citationKey}]`,
+    selFrom: keyFrom,
+    selTo: keyFrom + templates.citationKey.length,
+  };
+}
+
+/**
+ * Applique une édition de la sélection, et rend faux sur une vue en lecture seule : CM6 n'y arrête
+ * que les commandes de l'auteur, pas un `dispatch`. Le texte de `doc` n'a que des `\n`, un `\r`
+ * n'y est jamais une fin de ligne : un `Text` coupé là reste juste dans un fichier CRLF comme dans un
+ * fichier mixte. Sans `isolateHistory`, une transaction sans `userEvent` se fondrait dans la
+ * frappe voisine, et Cmd+Z emporterait les deux.
+ */
+export function editSelection(view: EditorView, edit: SelectionEdit, origin: ChangeOrigin = 'programmatic'): boolean {
+  if (view.state.readOnly) return false;
   const { from, to } = view.state.selection.main;
-  const r = computeInlineToggle(
-    view.state.doc.toString(),
-    from,
-    to,
-    markers,
-    placeholder
-  );
+  const r = edit(view.state.doc.toString(), from, to);
   view.dispatch({
-    changes: { from: r.from, to: r.to, insert: r.insert },
+    changes: { from: r.from, to: r.to, insert: Text.of(r.insert.split('\n')) },
     selection: { anchor: r.selFrom, head: r.selTo },
-    annotations: changeOrigin.of('programmatic'),
+    annotations: [changeOrigin.of(origin), isolateHistory.of('full')],
   });
   view.focus();
   return true;
+}
+
+/** Commande CM6 : bascule la marque sur la sélection principale. */
+export function toggleInlineMark(view: EditorView, type: InlineMarkType): boolean {
+  const { markers, placeholder } = INLINE_MARKS[type];
+  return editSelection(view, (doc, from, to) => computeInlineToggle(doc, from, to, markers, placeholder));
 }

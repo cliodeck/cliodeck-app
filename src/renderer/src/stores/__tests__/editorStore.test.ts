@@ -41,7 +41,9 @@ function fakeFacade(
     getCursorOffset: () => cursor,
     hasKnownCursor: () => cursorKnown,
     getSelectionText: () => null,
+    hasFocus: () => false,
     replaceSelection: () => undefined,
+    editSelection: () => false,
     setValue: (text, cursorOffset) => {
       current = text;
       calls.setValue.push({ text, cursor: cursorOffset });
