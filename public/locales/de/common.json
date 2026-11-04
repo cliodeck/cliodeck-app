@@ -188,6 +188,7 @@
     }
   },
   "bibliography": {
+    "sourceNotSaved": "Die Bibliografie ist geladen, aber das Projekt konnte diese Datei nicht vermerken: project.json wurde nicht verändert, und beim nächsten Öffnen findet das Projekt sie nicht wieder. Prüfen Sie, ob project.json lesbar ist, und importieren Sie diese Datei dann erneut.",
     "title": "Bibliographie",
     "import": "BibTeX-Datei importieren",
     "searchAndFilters": "Suche und Filter",
@@ -295,6 +296,11 @@
     "createErrorFilesExist": "Der Ordner „{{name}}“ in {{folder}} enthält bereits Dateien, die beim Erstellen ersetzt würden. Es wurde nichts geändert. Wählen Sie einen anderen Namen oder Speicherort.",
     "createErrorNameInvalid": "Ein Projektname darf weder / noch \\ enthalten und nicht „.“ oder „..“ lauten.",
     "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
+    "configUnreadable": {
+      "title": "Projekteinstellungen nicht lesbar",
+      "message": "Die Datei .cliodeck/config.json dieses Projekts lässt sich nicht lesen, oft wegen eines überzähligen Kommas. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind die MCP-Server des Projekts nicht verfügbar, und der Obsidian-Vault kann weder verknüpft noch getrennt noch neu indexiert werden. Seine bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Korrigieren Sie diese Datei oder prüfen Sie, ob sie erreichbar ist, und öffnen Sie das Projekt dann erneut.",
+      "newerSchema": "Die Datei .cliodeck/config.json dieses Projekts stammt aus einer neueren ClioDeck-Version. Sie wurde nicht verändert, und Ihr Text ist nicht betroffen. Bis dahin sind die MCP-Server des Projekts nicht verfügbar, und der Obsidian-Vault kann weder verknüpft noch getrennt noch neu indexiert werden. Seine bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen, und die Quellenprüfung fällt auf den Modus „Warnen“ zurück, unabhängig von Ihrer Wahl. Aktualisieren Sie ClioDeck und öffnen Sie das Projekt dann erneut. Sie müssen diese Datei nicht von Hand ändern."
+    },
     "documentOpenError": "Das Dokument dieses Projekts konnte nicht geöffnet werden",
     "documentOpenUnchanged": "Es wurde keine Datei geändert.",
     "documentOpenUntitled": "Der Editor zeigt ein unbenanntes Dokument: Was Sie dort schreiben, gelangt nicht in das Dokument des Projekts.",
@@ -352,6 +358,7 @@
     "zoteroCollectionKey": "Sammlungsschlüssel",
     "zoteroCollectionKeyPlaceholder": "Sammlungsschlüssel eingeben (optional)",
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
+    "zoteroNotSaved": "Nicht gespeichert: Die Datei project.json dieses Projekts konnte nicht geschrieben werden. Sie wurde nicht verändert. Prüfen Sie, ob sie lesbar und erreichbar ist.",
     "loading": "Projekt wird geöffnet...",
     "chaptersInNavigator_one": "{{count}} Kapitel — siehe Kapitelnavigator",
     "chaptersInNavigator_other": "{{count}} Kapitel — siehe Kapitelnavigator",
@@ -804,6 +811,7 @@
       "vaultReady": "Index bereit unter {{path}}",
       "vaultNotIndexed": "Noch nicht indiziert — verknüpfen Sie einen Vault in den Einstellungen.",
       "vaultChecking": "Prüfung läuft…",
+      "vaultUnavailable": "Vault-Status derzeit nicht verfügbar.",
       "recipesHeading": "Rezepte ({{count}})",
       "noRecipes": "Keine Rezepte verfügbar.",
       "fusionApiMissing": "Fusion-API nicht durch das Preload-Skript exponiert — erstellen Sie das Preload-Bundle neu.",
@@ -1453,6 +1461,7 @@
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "noProject": "Öffnen Sie ein Projekt, um den Vault zu konfigurieren.",
       "statusFailed": "Vault-Status konnte nicht gelesen werden.",
+      "unlinkFailed": "Der Vault konnte nicht getrennt werden.",
       "configRefused": "Konfiguration abgelehnt.",
       "indexFailed": "Indizierung fehlgeschlagen."
     },
@@ -1568,7 +1577,8 @@
     "errors": {
       "noFusionApi": "Fusion-API nicht exponiert.",
       "listFailed": "Liste nicht verfügbar.",
-      "addFailed": "Hinzufügen abgelehnt."
+      "addFailed": "Hinzufügen abgelehnt.",
+      "removeFailed": "Entfernen abgelehnt."
     },
     "buttons": {
       "refresh": "Aktualisieren",
@@ -1775,6 +1785,8 @@
     "created": "Erstellt am",
     "delete": "Löschen",
     "importObsidian": "Aus Obsidian-Vault importieren",
+    "importFailed": "Vault-Import nicht möglich",
+    "importNoVault": "Mit diesem Projekt ist kein Vault verknüpft: Verknüpfen Sie einen in den Einstellungen.",
     "relatedIdeas": "Verwandte Ideen",
     "removeLink": "Verknüpfung entfernen"
   },
@@ -1837,7 +1849,8 @@
       "title": "Quellenprüfung",
       "helpAria": "Die Prüfmodi verstehen",
       "hint": "Bevor eine Quelle — ein PDF, eine Obsidian-Notiz, ein Tropy-Objekt — das Modell erreicht, kann ClioDeck Versuche erkennen, verborgene Anweisungen einzuschleusen. Wählen Sie das Schutzniveau, das zu Ihrem Korpus passt; das Fragezeichen oben erläutert die Abwägungen.",
-      "modeGroupAria": "Modus der Quellenprüfung"
+      "modeGroupAria": "Modus der Quellenprüfung",
+      "modeUnreadable": "Ihre Wahl konnte nicht gelesen werden. Bis dahin gilt für dieses Projekt der Modus „{{mode}}“."
     },
     "modes": {
       "warn": {

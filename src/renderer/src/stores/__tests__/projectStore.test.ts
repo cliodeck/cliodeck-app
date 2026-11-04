@@ -12,6 +12,8 @@
  * with stubs so the store's behaviour is exercised in isolation.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
 import type { EditorFacade } from '@/editor/facade';
 import { useProjectStore } from '../projectStore';
 import { useEditorStore } from '../editorStore';
@@ -629,5 +631,240 @@ describe('projectStore — le document sortant, avant de quitter son projet', ()
 
     expect(writes).toEqual([]);
     expect(useEditorStore.getState().filePath).toBe(B);
+  });
+});
+
+describe('projets récents : seule une absence avérée retire de la liste (S11-2-8)', () => {
+  const HERE = '/Volumes/Disque/These/project.json';
+  const OTHER = '/Users/moi/Article/project.json';
+
+  const healthy = async (file: string) => ({
+    success: true,
+    project: { ...fakeProject, path: file.replace('/project.json', '') },
+  });
+
+  beforeEach(() => {
+    stub.project.getRecent.mockResolvedValue([HERE, OTHER]);
+    stub.project.getMetadata.mockImplementation(healthy);
+  });
+
+  const metadataOfHere = (response: unknown) => {
+    stub.project.getMetadata.mockImplementation(async (file: string) =>
+      file === HERE ? response : healthy(file)
+    );
+  };
+  const shown = () => useProjectStore.getState().recentProjects.map((p) => p.path);
+
+  it.each<[string, unknown]>([
+    ['project_unavailable', { success: false, code: 'project_unavailable', error: 'ENOENT' }],
+    ['réponse sans code', { success: false, error: 'tout autre échec' }],
+    ['réponse sans projet', { success: true }],
+    ['un code inconnu', { success: false, code: 'autre_chose', error: 'x' }],
+  ])('%s : entrée non affichée, et removeRecent jamais appelé', async (_label, response) => {
+    metadataOfHere(response);
+
+    await useProjectStore.getState().loadRecentProjects();
+
+    expect(stub.project.removeRecent).not.toHaveBeenCalled();
+    expect(shown()).toEqual(['/Users/moi/Article']);
+  });
+
+  it('une exception de l’IPC : entrée non affichée, et removeRecent jamais appelé', async () => {
+    stub.project.getMetadata.mockImplementation(async (file: string) => {
+      if (file === HERE) throw new Error('canal coupé');
+      return healthy(file);
+    });
+
+    await useProjectStore.getState().loadRecentProjects();
+
+    expect(stub.project.removeRecent).not.toHaveBeenCalled();
+    expect(shown()).toEqual(['/Users/moi/Article']);
+  });
+
+  it('project_file_missing : removeRecent appelé, pour celui-là seulement', async () => {
+    metadataOfHere({ success: false, code: 'project_file_missing', error: 'ENOENT' });
+
+    await useProjectStore.getState().loadRecentProjects();
+
+    expect(stub.project.removeRecent).toHaveBeenCalledTimes(1);
+    expect(stub.project.removeRecent).toHaveBeenCalledWith(HERE);
+    expect(shown()).toEqual(['/Users/moi/Article']);
+  });
+
+  it('le disque revient : le projet aussi, sans rien refaire', async () => {
+    metadataOfHere({ success: false, code: 'project_unavailable', error: 'ENOENT' });
+    await useProjectStore.getState().loadRecentProjects();
+    expect(shown()).toEqual(['/Users/moi/Article']);
+
+    stub.project.getMetadata.mockImplementation(healthy);
+    await useProjectStore.getState().loadRecentProjects();
+
+    expect(shown()).toEqual(['/Volumes/Disque/These', '/Users/moi/Article']);
+    expect(stub.project.removeRecent).not.toHaveBeenCalled();
+  });
+});
+
+describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', () => {
+  const ISSUE = { kind: 'invalid_json', path: '/tmp/p1/.cliodeck/config.json' };
+  const NEWER = { kind: 'newer_schema', path: '/tmp/p1/.cliodeck/config.json' };
+  const toasts = () => useNotificationStore.getState().notifications;
+
+  const loadedWith = (configIssue: unknown) =>
+    stub.project.load.mockResolvedValue({ success: true, project: fakeProject, configIssue });
+
+  it('invalid_json : un message qui reste, avec le chemin dans les détails', async () => {
+    loadedWith(ISSUE);
+
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toMatchObject({
+      level: 'error',
+      duration: 0,
+      title: i18n.t('project.configUnreadable.title'),
+      message: i18n.t('project.configUnreadable.message'),
+      details: ISSUE.path,
+    });
+    expect(useProjectStore.getState().loadState.kind).toBe('ready');
+    expect(useProjectStore.getState().currentProject?.path).toBe('/tmp/p1');
+  });
+
+  it('newer_schema : l’autre variante', async () => {
+    loadedWith(NEWER);
+
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0].message).toBe(i18n.t('project.configUnreadable.newerSchema'));
+  });
+
+  it('unreadable : la variante générale', async () => {
+    loadedWith({ kind: 'unreadable', path: ISSUE.path });
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    expect(toasts()[0].message).toBe(i18n.t('project.configUnreadable.message'));
+  });
+
+  it('le message vient une fois le projet ouvert, jamais pendant le changement', async () => {
+    loadedWith(ISSUE);
+    const seenDuring: string[] = [];
+    const unsubscribe = useNotificationStore.subscribe((state) => {
+      if (state.notifications.length > 0) seenDuring.push(useProjectStore.getState().loadState.kind);
+    });
+
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    unsubscribe();
+
+    expect(seenDuring).not.toContain('loading');
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it('une seule fois par ouverture : rouvrir n’empile pas, et réparé il n’y a plus rien', async () => {
+    loadedWith(ISSUE);
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    await useProjectStore.getState().loadRecentProjects();
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    expect(toasts()).toHaveLength(1);
+
+    loadedWith(undefined);
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('fermer le projet : le message ne lui survit pas', async () => {
+    loadedWith(ISSUE);
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+
+    await useProjectStore.getState().closeProject();
+
+    expect(toasts()).toEqual([]);
+  });
+
+  it('la bascule échoue : aucun message', async () => {
+    stub.project.load.mockResolvedValue({ success: false, error: 'services', configIssue: ISSUE });
+
+    await expect(useProjectStore.getState().loadProject('/tmp/p1/project.json')).rejects.toThrow();
+
+    expect(toasts()).toEqual([]);
+  });
+
+  it('createProject suit la même règle', async () => {
+    stub.project.create.mockResolvedValue({ success: true, project: fakeProject, configIssue: NEWER });
+
+    await useProjectStore.getState().createProject('Demo', 'article', '/tmp');
+
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0].message).toBe(i18n.t('project.configUnreadable.newerSchema'));
+  });
+
+  describe.each(['fr', 'en', 'de'])('texte en %s', (language) => {
+    const locale = () =>
+      (JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', language, 'common.json'), 'utf8')) as {
+        project: { configUnreadable: { title: string; message: string; newerSchema: string } };
+      }).project.configUnreadable;
+
+    it('nomme le fichier et ce qui reste indisponible, sans aucun code', () => {
+      const { title, message, newerSchema } = locale();
+      expect(title).toBeTruthy();
+      for (const text of [message, newerSchema]) {
+        expect(text).toContain('.cliodeck/config.json');
+        expect(text).toContain('Obsidian');
+        expect(text).toContain('MCP');
+        expect(text).not.toMatch(/invalid_json|newer_schema|project_unavailable/);
+      }
+    });
+  });
+
+  // Mesuré (`retrieval-config-unreadable.test.ts`) : le coffre n'est pas hors jeu dans le chat.
+  it.each<[string, { consulted: string; refused: string; falseClaim: RegExp }]>([
+    [
+      'fr',
+      {
+        consulted: "notes déjà indexées restent consultées par l'assistant",
+        refused: 'ni lié, ni délié, ni réindexé',
+        falseClaim: /coffre Obsidian et les serveurs MCP[^.]*indisponibles/,
+      },
+    ],
+    [
+      'en',
+      {
+        consulted: 'already indexed notes are still consulted by the assistant',
+        refused: 'cannot be linked, unlinked or reindexed',
+        falseClaim: /vault and MCP servers are unavailable/,
+      },
+    ],
+    [
+      'de',
+      {
+        consulted: 'bereits indexierten Notizen werden vom Assistenten weiterhin herangezogen',
+        refused: 'weder verknüpft noch getrennt noch neu indexiert',
+        falseClaim: /Vault und die MCP-Server[^.]*nicht verfügbar/,
+      },
+    ],
+  ])('en %s : le coffre ne se dit pas indisponible, ses notes indexées restent consultées', (language, wording) => {
+    const { message, newerSchema } = (
+      JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', language, 'common.json'), 'utf8')) as {
+        project: { configUnreadable: { message: string; newerSchema: string } };
+      }
+    ).project.configUnreadable;
+    for (const text of [message, newerSchema]) {
+      expect(text).toContain(wording.consulted);
+      expect(text).toContain(wording.refused);
+      expect(text).not.toMatch(wording.falseClaim);
+    }
+  });
+
+  it('en français : rien n’a été modifié, le mode de sécurité, et quoi faire selon le cas', () => {
+    const { message, newerSchema } = (
+      JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', 'fr', 'common.json'), 'utf8')) as {
+        project: { configUnreadable: { message: string; newerSchema: string } };
+      }
+    ).project.configUnreadable;
+    for (const text of [message, newerSchema]) {
+      expect(text).toContain("n'a pas été modifié");
+      expect(text).toContain('Avertir');
+    }
+    expect(message).toContain('Corrigez');
+    expect(newerSchema).toContain('Mettez ClioDeck à jour');
+    expect(newerSchema).not.toContain('Corrigez');
   });
 });

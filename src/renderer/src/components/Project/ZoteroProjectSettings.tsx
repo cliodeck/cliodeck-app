@@ -13,6 +13,31 @@ interface ProjectZoteroConfig {
   libraryID?: number;
 }
 
+const blankToUndefined = <T,>(value: T | ''): T | undefined => (value === '' ? undefined : value);
+
+/**
+ * Ce que l'auteur a changé depuis la lecture du fichier, rien d'autre : une synchronisation a pu y
+ * poser une autre collection entre-temps, et l'écraser par ce qui est à l'écran ferait repartir la
+ * synchronisation suivante de l'ancienne. Une clé à `undefined` efface.
+ */
+function changedFields(
+  loaded: ProjectZoteroConfig,
+  edited: ProjectZoteroConfig,
+  mode: 'api' | 'local'
+): ProjectZoteroConfig {
+  const changes: ProjectZoteroConfig = {};
+  if (blankToUndefined(edited.collectionKey) !== blankToUndefined(loaded.collectionKey)) {
+    changes.collectionKey = blankToUndefined(edited.collectionKey);
+  }
+  if (mode === 'api' && blankToUndefined(edited.groupId) !== blankToUndefined(loaded.groupId)) {
+    changes.groupId = blankToUndefined(edited.groupId);
+  }
+  if (mode === 'local' && edited.libraryID !== loaded.libraryID) {
+    changes.libraryID = edited.libraryID;
+  }
+  return changes;
+}
+
 interface ZoteroLibraryInfo {
   libraryID: number;
   type: 'user' | 'group';
@@ -25,8 +50,10 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
 }) => {
   const { t } = useTranslation('common');
   const [config, setConfig] = useState<ProjectZoteroConfig>({});
+  const [loaded, setLoaded] = useState<ProjectZoteroConfig>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
   const [zoteroMode, setZoteroMode] = useState<'api' | 'local'>('api');
   const [libraries, setLibraries] = useState<ZoteroLibraryInfo[]>([]);
   const [isLoadingLibraries, setIsLoadingLibraries] = useState(false);
@@ -49,13 +76,13 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
 
       // Load project-specific Zotero config from project.json
       const projectConfig = await window.electron.project.getConfig(projectFilePath);
-      if (projectConfig?.zotero) {
-        setConfig({
-          groupId: projectConfig.zotero.groupId || '',
-          collectionKey: projectConfig.zotero.collectionKey || '',
-          libraryID: projectConfig.zotero.libraryID,
-        });
-      }
+      const stored: ProjectZoteroConfig = {
+        groupId: projectConfig?.zotero?.groupId || '',
+        collectionKey: projectConfig?.zotero?.collectionKey || '',
+        libraryID: projectConfig?.zotero?.libraryID,
+      };
+      setConfig(stored);
+      setLoaded(stored);
 
       // If local mode, load libraries
       if (mode === 'local' && globalConfig?.dataDirectory) {
@@ -83,24 +110,23 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     setSaveMessage('');
+    setSaveFailed(false);
     try {
-      const zoteroConfig: Record<string, any> = {
-        collectionKey: config.collectionKey || undefined,
-      };
-
-      if (zoteroMode === 'api') {
-        zoteroConfig.groupId = config.groupId || undefined;
-      } else {
-        zoteroConfig.libraryID = config.libraryID;
-      }
-
-      await window.electron.project.updateConfig(projectFilePath, {
-        zotero: zoteroConfig,
+      const result = await window.electron.project.updateConfig(projectFilePath, {
+        zotero: changedFields(loaded, config, zoteroMode),
       });
+      if (!result?.success) {
+        console.error('Project Zotero config refused:', result?.error);
+        setSaveFailed(true);
+        setSaveMessage(t('project.zoteroNotSaved'));
+        return;
+      }
+      setLoaded(config);
       setSaveMessage(t('settings.saved'));
       setTimeout(() => setSaveMessage(''), 3000);
     } catch (error) {
       console.error('Failed to save project Zotero config:', error);
+      setSaveFailed(true);
       setSaveMessage(t('settings.saveError'));
     } finally {
       setIsSaving(false);
@@ -182,7 +208,8 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
             </span>
           </div>
 
-          <div className="config-actions" style={{ marginTop: '12px' }}>
+          {/* Le panneau est étroit : à côté du bouton, un message long écrase et déborde. */}
+          <div className="config-actions" style={{ marginTop: '12px', flexWrap: 'wrap' }}>
             <button
               className="config-btn primary"
               onClick={handleSave}
@@ -192,7 +219,9 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
               {isSaving ? t('settings.saving') : t('settings.save')}
             </button>
             {saveMessage && (
-              <span className="save-message">{saveMessage}</span>
+              <span className={saveFailed ? 'save-message error' : 'save-message'} role={saveFailed ? 'alert' : undefined}>
+                {saveMessage}
+              </span>
             )}
           </div>
         </div>

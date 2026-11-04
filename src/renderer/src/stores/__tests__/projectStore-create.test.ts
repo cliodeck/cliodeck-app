@@ -22,6 +22,7 @@ import path from 'path';
 import { undoDepth } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { atomicWriteFile, withFileLock } from '@backend/core/fs/user-files';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 
 import { useProjectStore } from '../projectStore';
@@ -52,6 +53,10 @@ let documentA: string;
 let documentB: string;
 /** Chaque écriture refusée par le main : celles que l'auteur ne verrait jamais. */
 let refused: string[];
+/** Sous le verrou du fichier, avant son écriture : le temps de la garder en vol. */
+let whileWriting: () => Promise<void> | void;
+/** Écriture finie, verrou rendu, réponse pas encore partie. */
+let afterWrite: () => void;
 /** Après le passage du main sur le projet, avant la réponse : l'initialisation des services. */
 let whileMainInitializes: () => Promise<void> | void;
 let mainFailsAfterSwitch: boolean;
@@ -130,10 +135,14 @@ async function installMain(): Promise<void> {
       }),
     },
     editor: {
+      // Lecture et écriture comme le vrai main (`editor-handlers.ts`) : sous le verrou, et par
+      // renommage. Avec un `writeFile` nu, l'autosave en vol tronquait le fichier sous la relecture.
       loadFile: async (filePath: string) => {
         try {
-          const authorized = await authorizeDocumentPath(filePath, 'read');
-          return { success: true, content: await readFile(authorized, 'utf8') };
+          const content = await withFileLock(filePath, async () =>
+            readFile(await authorizeDocumentPath(filePath, 'read'), 'utf8')
+          );
+          return { success: true, content };
         } catch (error) {
           return { success: false, error: String(error) };
         }
@@ -141,7 +150,12 @@ async function installMain(): Promise<void> {
       saveFile: async (filePath: string, content: string) => {
         beforeWrite();
         try {
-          await writeFile(await authorizeDocumentPath(filePath, 'write'), content);
+          await withFileLock(filePath, async () => {
+            const authorized = await authorizeDocumentPath(filePath, 'write');
+            await whileWriting();
+            await atomicWriteFile(authorized, content);
+          });
+          afterWrite();
           return { success: true };
         } catch (error) {
           refused.push(filePath);
@@ -152,7 +166,9 @@ async function installMain(): Promise<void> {
     },
     fs: {
       writeFile: async (filePath: string, content: string) => {
-        await writeFile(await authorizeDocumentPath(filePath, 'write'), content);
+        await withFileLock(filePath, async () => {
+          await atomicWriteFile(await authorizeDocumentPath(filePath, 'write'), content);
+        });
       },
     },
     proposals: {
@@ -247,6 +263,8 @@ beforeEach(async () => {
   await writeFile(documentA, A_TEXT);
   await writeFile(documentB, B_TEXT);
   refused = [];
+  whileWriting = () => undefined;
+  afterWrite = () => undefined;
   whileMainInitializes = () => undefined;
   mainFailsAfterSwitch = false;
   mainRefusesBeforeSwitch = false;
@@ -394,6 +412,48 @@ describe('createProject ouvre le document du projet créé', () => {
     expect(currentView().state.readOnly).toBe(false);
     expect(project().loadState.kind).toBe('failed');
     expect(project().currentProject?.path).toBe(dirA);
+    expect(read(documentA)).toBe(`${A_TEXT}Dernière phrase.`);
+  });
+
+  it('création refusée, une écriture d’autosave encore en vol à la relecture : le texte revient entier', async () => {
+    await openProjectA();
+    // Le minuteur n'y est pour rien : l'écriture en vol part ici, à l'instant voulu.
+    onlyTheDoorWrites();
+    await typeAtEnd('Dernière phrase.');
+    await writeProject(path.join(root, 'Pris'), { id: 'pris', name: 'Pris', type: 'article' });
+
+    // La porte écrit ; derrière elle, l'autosave part sur le même texte et reste en vol.
+    const autosave = hold();
+    const order: string[] = [];
+    afterWrite = () => {
+      afterWrite = () => undefined;
+      whileWriting = async () => {
+        await autosave.wait();
+        order.push('écriture');
+      };
+      void store().saveFile();
+    };
+    const load = window.electron.editor.loadFile;
+    (window.electron.editor as { loadFile: unknown }).loadFile = async (filePath: string) => {
+      const reading = load(filePath).then((response: unknown) => {
+        order.push('lecture');
+        return response;
+      });
+      // Le main fait attendre la lecture : on lui laisse le temps de la faire passer devant s'il
+      // ne la faisait pas attendre, puis l'écriture repart.
+      await Promise.race([reading, new Promise((resolve) => setTimeout(resolve, 50))]);
+      autosave.release();
+      return reading;
+    };
+
+    await act(async () => {
+      await expect(project().createProject('Pris', 'article', root)).rejects.toThrow('project_exists');
+    });
+
+    expect(order).toEqual(['écriture', 'lecture']);
+    expect(store().filePath).toBe(documentA);
+    expect(store().content).toBe(`${A_TEXT}Dernière phrase.`);
+    expect(currentView().state.doc.toString()).toBe(`${A_TEXT}Dernière phrase.`);
     expect(read(documentA)).toBe(`${A_TEXT}Dernière phrase.`);
   });
 

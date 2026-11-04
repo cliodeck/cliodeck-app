@@ -11,7 +11,7 @@ import {
   LEGACY_V2_SUBDIR,
 } from '../layout.js';
 import { migrateWorkspaceToFlat, type MigrationReport } from '../migrator.js';
-import { readWorkspaceConfig } from '../config.js';
+import { readWorkspaceConfig, workspaceConfigIssue } from '../config.js';
 import { loadWorkspaceHints } from '../../hints/loader.js';
 import { sqliteAvailable, symlinkAvailable } from '../../../__tests__/helpers/native-guards.js';
 
@@ -122,6 +122,105 @@ describe('migrateWorkspaceToFlat — none / flat', () => {
     const r = await migrateWorkspaceToFlat(tmpRoot);
     expect(r.kind).toBe('none');
     expect(r.noop).toMatch(/already at flat/);
+  });
+});
+
+describe('migrateWorkspaceToFlat — un config.json illisible n’est pas remplacé', () => {
+  it.each<[string, string]>([
+    ['virgule en trop', '{"schema_version":2,"vault":{"path":"/Notes"},}'],
+    ['format plus récent', '{"schema_version":3,"vault":{"path":"/Notes"}}'],
+    ['un tableau', '[]'],
+  ])('%s : à plat, sans demande explicite, identique à l’octet', async (_label, content) => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    await write(config, content);
+
+    const report = await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(report.copied).toEqual([]);
+    expect(await fs.readFile(config, 'utf8')).toBe(content);
+  });
+
+  it('--overwrite, la demande explicite : remplacé', async () => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    await write(config, '{"schema_version":2,}');
+
+    await migrateWorkspaceToFlat(tmpRoot, { overwrite: true });
+
+    expect(JSON.parse(await fs.readFile(config, 'utf8')).schema_version).toBe(2);
+  });
+
+  it('ancien sous-dossier v2 au config.json illisible : déplacé tel quel, jamais reformaté', async () => {
+    const legacy = path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'config.json');
+    await write(legacy, '{"schema_version":2,}');
+
+    await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, 'config.json'), 'utf8')).toBe('{"schema_version":2,}');
+  });
+
+  it('config.json lien cassé : rien d’écrit à l’autre bout du lien, et le lien reste', async () => {
+    const config = path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    const target = path.join(tmpRoot, 'autre-dossier', 'config.json');
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.mkdir(path.dirname(config), { recursive: true });
+    await fs.symlink(target, config);
+
+    const report = await migrateWorkspaceToFlat(tmpRoot);
+
+    expect(report.copied).toEqual([]);
+    expect((await fs.lstat(config)).isSymbolicLink()).toBe(true);
+    await expect(fs.access(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  describe('config.json évincé par iCloud (`.config.json.icloud`)', () => {
+    const flatConfig = () => path.join(tmpRoot, CLIODECK_DIR, 'config.json');
+    const expectNothingWritten = async () => {
+      await expect(fs.access(flatConfig())).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readFile(path.join(tmpRoot, CLIODECK_DIR, '.config.json.icloud'), 'utf8')).toBe('bplist00');
+    };
+
+    beforeEach(async () => {
+      await write(path.join(tmpRoot, CLIODECK_DIR, '.config.json.icloud'), 'bplist00');
+    });
+
+    it('dossier d’avant la fusion : aucune configuration par défaut à côté', async () => {
+      const report = await migrateWorkspaceToFlat(tmpRoot);
+
+      expect(report.copied).toEqual([]);
+      await expectNothingWritten();
+      await expect(workspaceConfigIssue(tmpRoot)).resolves.toEqual({ kind: 'unreadable', path: flatConfig() });
+    });
+
+    it('ancien sous-dossier v2 sans config : rien non plus', async () => {
+      await write(path.join(tmpRoot, CLIODECK_DIR, LEGACY_V2_SUBDIR, 'hnsw.index'), 'index');
+
+      await migrateWorkspaceToFlat(tmpRoot);
+
+      await expectNothingWritten();
+    });
+
+    it('.cliobrain : ni sa configuration ni celle par défaut', async () => {
+      await write(path.join(tmpRoot, '.cliobrain', 'hints.md'), 'des indices');
+      await write(path.join(tmpRoot, '.cliobrain', 'config.json'), '{"name":"ClioBrain"}');
+
+      await migrateWorkspaceToFlat(tmpRoot);
+
+      await expectNothingWritten();
+    });
+
+    it('--overwrite, la demande explicite : écrit', async () => {
+      await migrateWorkspaceToFlat(tmpRoot, { overwrite: true });
+
+      expect(JSON.parse(await fs.readFile(flatConfig(), 'utf8')).schema_version).toBe(2);
+    });
+  });
+
+  it('dossier sans config.json : le fichier généré est atomique, et lisible', async () => {
+    await fs.mkdir(path.join(tmpRoot, CLIODECK_DIR), { recursive: true });
+    await migrateWorkspaceToFlat(tmpRoot, { name: 'Thèse' });
+    const cfg = await readWorkspaceConfig(tmpRoot);
+    expect(cfg.name).toBe('Thèse');
+    expect((await fs.readdir(path.join(tmpRoot, CLIODECK_DIR))).filter((n) => n.includes('.tmp'))).toEqual([]);
   });
 });
 
@@ -636,8 +735,6 @@ describe('readWorkspaceConfig', () => {
       path.join(tmpRoot, CLIODECK_DIR, 'config.json'),
       JSON.stringify({ schema_version: 99 }),
     );
-    await expect(readWorkspaceConfig(tmpRoot)).rejects.toThrow(
-      /Unsupported workspace schema_version/,
-    );
+    await expect(readWorkspaceConfig(tmpRoot)).rejects.toMatchObject({ kind: 'newer_schema' });
   });
 });

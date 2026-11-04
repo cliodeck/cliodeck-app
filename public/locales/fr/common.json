@@ -188,6 +188,7 @@
     }
   },
   "bibliography": {
+    "sourceNotSaved": "La bibliographie est chargée, mais le projet n'a pas pu retenir ce fichier : project.json n'a pas été modifié, et à la prochaine ouverture le projet ne la retrouvera pas. Vérifiez que project.json est lisible, puis importez ce fichier de nouveau.",
     "title": "Bibliographie",
     "import": "Importer fichier BibTeX",
     "searchAndFilters": "Recherche et filtres",
@@ -295,6 +296,11 @@
     "createErrorFilesExist": "Le dossier « {{name}} » de {{folder}} contient déjà des fichiers que la création remplacerait. Rien n'a été modifié. Choisissez un autre nom ou un autre emplacement.",
     "createErrorNameInvalid": "Le nom d'un projet ne peut contenir ni / ni \\, et ne peut pas être « . » ou « .. ».",
     "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
+    "configUnreadable": {
+      "title": "Réglages du projet illisibles",
+      "message": "Le fichier .cliodeck/config.json de ce projet ne se lit pas, souvent à cause d'une virgule en trop. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources revient au mode « Avertir », quel que soit votre choix. Corrigez ce fichier ou vérifiez qu'il est accessible, puis rouvrez le projet.",
+      "newerSchema": "Le fichier .cliodeck/config.json de ce projet vient d'une version plus récente de ClioDeck. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources revient au mode « Avertir », quel que soit votre choix. Mettez ClioDeck à jour, puis rouvrez le projet. Inutile de retoucher ce fichier à la main."
+    },
     "documentOpenError": "Le document de ce projet n'a pas pu être ouvert",
     "documentOpenUnchanged": "Aucun fichier n'a été modifié.",
     "documentOpenUntitled": "L'éditeur affiche un document sans titre : ce que vous y écrivez n'ira pas dans le document du projet.",
@@ -352,6 +358,7 @@
     "zoteroCollectionKey": "Cle de collection",
     "zoteroCollectionKeyPlaceholder": "Entrez la cle de collection (optionnel)",
     "zoteroCollectionKeyHelp": "La cle d'une collection specifique (optionnel)",
+    "zoteroNotSaved": "Non enregistré : le fichier project.json de ce projet n'a pas pu être écrit. Il n'a pas été modifié. Vérifiez qu'il est lisible et accessible.",
     "loading": "Ouverture du projet...",
     "chaptersInNavigator_one": "{{count}} chapitre — voir le navigateur de chapitres",
     "chaptersInNavigator_other": "{{count}} chapitres — voir le navigateur de chapitres",
@@ -804,6 +811,7 @@
       "vaultReady": "Index prêt à {{path}}",
       "vaultNotIndexed": "Pas encore indexé — liez un vault depuis les Réglages.",
       "vaultChecking": "vérification…",
+      "vaultUnavailable": "État du vault indisponible pour l'instant.",
       "recipesHeading": "Recettes ({{count}})",
       "noRecipes": "Aucune recette disponible.",
       "fusionApiMissing": "API Fusion non exposée par le preload — reconstruisez le bundle preload.",
@@ -1453,6 +1461,7 @@
       "noFusionApi": "Fusion API non exposée par le preload.",
       "noProject": "Ouvrez un projet pour configurer le vault.",
       "statusFailed": "Impossible de lire le statut du vault.",
+      "unlinkFailed": "Le vault n'a pas pu être délié.",
       "configRefused": "Configuration refusée.",
       "indexFailed": "Indexation échouée."
     },
@@ -1568,7 +1577,8 @@
     "errors": {
       "noFusionApi": "Fusion API non exposée.",
       "listFailed": "Liste indisponible.",
-      "addFailed": "Ajout refusé."
+      "addFailed": "Ajout refusé.",
+      "removeFailed": "Retrait refusé."
     },
     "buttons": {
       "refresh": "Actualiser",
@@ -1775,6 +1785,8 @@
     "created": "Créée le",
     "delete": "Supprimer",
     "importObsidian": "Importer depuis le vault Obsidian",
+    "importFailed": "Import du vault impossible",
+    "importNoVault": "Aucun vault n'est lié à ce projet : liez-en un dans les Réglages.",
     "relatedIdeas": "Idées liées",
     "removeLink": "Supprimer le lien"
   },
@@ -1837,7 +1849,8 @@
       "title": "Inspection des sources",
       "helpAria": "Comprendre les modes d'inspection",
       "hint": "Avant qu'une source — PDF, note Obsidian, item Tropy — n'atteigne le modèle, ClioDeck peut repérer les tentatives d'injection de consignes cachées. Choisissez le niveau de défense qui convient à votre corpus ; le point d'interrogation ci-dessus en explique les compromis.",
-      "modeGroupAria": "Mode d'inspection des sources"
+      "modeGroupAria": "Mode d'inspection des sources",
+      "modeUnreadable": "Votre choix n'a pas pu être lu. En attendant, c'est le mode « {{mode}} » qui s'applique à ce projet."
     },
     "modes": {
       "warn": {

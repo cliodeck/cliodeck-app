@@ -30,7 +30,12 @@ interface SecurityEventStatsRecord {
 }
 
 interface SecurityApi {
-  getMode(): Promise<{ success: boolean; mode?: InspectorMode; error?: string }>;
+  getMode(): Promise<{
+    success: boolean;
+    mode?: InspectorMode;
+    appliedMode?: InspectorMode;
+    error?: string;
+  }>;
   setMode(mode: InspectorMode): Promise<{
     success: boolean;
     mode?: InspectorMode;
@@ -94,6 +99,8 @@ export const SecurityConfigSection: React.FC = () => {
   const { t, i18n } = useTranslation('common');
   const [mode, setMode] = useState<InspectorMode>('warn');
   const [loaded, setLoaded] = useState(false);
+  /** `config.json` ne se lit pas : le choix de l'auteur est inconnu, et rien ne s'y écrirait. */
+  const [modeUnreadable, setModeUnreadable] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -152,8 +159,13 @@ export const SecurityConfigSection: React.FC = () => {
       return;
     }
     void s.getMode().then((res) => {
-      if (res.success && res.mode) setMode(res.mode);
-      else if (res.error) setError(res.error);
+      if (res.success && res.mode) {
+        setMode(res.mode);
+      } else {
+        if (res.appliedMode) setMode(res.appliedMode);
+        setModeUnreadable(true);
+        if (res.error) setError(res.error);
+      }
       setLoaded(true);
     });
     void refreshStats();
@@ -194,6 +206,11 @@ export const SecurityConfigSection: React.FC = () => {
       {error && (
         <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
       )}
+      {modeUnreadable && (
+        <p className="config-hint">
+          {t('security.inspection.modeUnreadable', { mode: t(`security.modes.${mode}.label`) })}
+        </p>
+      )}
 
       <div
         role="radiogroup"
@@ -202,7 +219,7 @@ export const SecurityConfigSection: React.FC = () => {
       >
         {MODE_OPTIONS.map((opt) => {
           const id = `inspector-mode-${opt.value}`;
-          const checked = mode === opt.value;
+          const checked = !modeUnreadable && mode === opt.value;
           return (
             <label
               key={opt.value}
@@ -215,7 +232,7 @@ export const SecurityConfigSection: React.FC = () => {
                 name="inspector-mode"
                 value={opt.value}
                 checked={checked}
-                disabled={!loaded}
+                disabled={!loaded || modeUnreadable}
                 onChange={() => void handleChange(opt.value)}
               />
               <span className="security-mode-label">

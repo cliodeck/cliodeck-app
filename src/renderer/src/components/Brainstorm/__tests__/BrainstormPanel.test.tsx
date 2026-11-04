@@ -196,3 +196,51 @@ describe('BrainstormPanel — context.md dans le tiroir', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
+
+/**
+ * `config.json` illisible : l'état du coffre répond par une erreur, et le tiroir disait
+ * « vérification… » sans fin (S11-1-8).
+ */
+describe('BrainstormPanel — état du coffre indisponible', () => {
+  async function openDrawer(status: unknown): Promise<void> {
+    (window as unknown as { electron: { fusion: unknown } }).electron = {
+      ...(window as unknown as { electron: Record<string, unknown> }).electron,
+      fusion: {
+        hints: { read: vi.fn().mockResolvedValue({ success: true, hints: await loadWorkspaceHints(os.tmpdir()) }) },
+        recipes: { list: vi.fn().mockResolvedValue({ success: true, builtin: [], user: [] }) },
+        vault: { status: vi.fn().mockResolvedValue(status) },
+      },
+    };
+    useProjectStore.setState({
+      currentProject: {
+        id: 'p1',
+        name: 'Danzig',
+        path: '/tmp/danzig',
+        type: 'article',
+        createdAt: new Date(),
+        lastOpenedAt: new Date(),
+      },
+    });
+    render(<BrainstormPanel />);
+    fireEvent.click(await screen.findByText('chat.brainstorm.projectContext'));
+  }
+
+  it('config.json illisible : le motif, et plus de « vérification… »', async () => {
+    const reason = ".cliodeck/config.json ne se lit pas : ce fichier n'a pas été modifié.";
+    await openDrawer({ success: false, error: reason });
+
+    expect(await screen.findByText(reason)).toBeTruthy();
+    expect(screen.queryByText('chat.brainstorm.vaultChecking')).toBeNull();
+  });
+
+  it.each<[string, unknown]>([
+    ['sans motif', { success: false }],
+    ['le code no_project', { success: false, error: 'no_project' }],
+  ])('%s : un texte pour l’auteur, jamais un code', async (_label, status) => {
+    await openDrawer(status);
+
+    expect(await screen.findByText('chat.brainstorm.vaultUnavailable')).toBeTruthy();
+    expect(screen.queryByText('no_project')).toBeNull();
+    expect(screen.queryByText('chat.brainstorm.vaultChecking')).toBeNull();
+  });
+});

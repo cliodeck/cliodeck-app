@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useIdeaStore, type Idea, type IdeaLink } from '../../stores/ideaStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useNotificationStore } from '../../stores/notificationStore';
 import './IdeasPanel.css';
 
 export const IdeasPanel: React.FC = () => {
@@ -94,6 +95,13 @@ export const IdeasPanel: React.FC = () => {
           });
         }
         if (projectPath) saveIdeas(projectPath);
+      } else if (!result.success) {
+        // Sans cela, le bouton ne fait rien : l'auteur ne sait ni pourquoi, ni quoi faire.
+        useNotificationStore.getState().notify({
+          level: 'error',
+          title: t('ideas.importFailed'),
+          message: result.error === 'no_vault_configured' ? t('ideas.importNoVault') : result.error,
+        });
       }
     } catch (e) {
       console.error('Obsidian import failed:', e);

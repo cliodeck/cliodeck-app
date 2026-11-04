@@ -195,6 +195,30 @@ async function reopenAfterFailedSwitch(
 let documentNotOpenedNotice: string | null = null;
 let stopWatchingEditor: (() => void) | null = null;
 let ideasNotWrittenNotice: string | null = null;
+let configIssueNotice: string | null = null;
+
+function dismissConfigIssue(): void {
+  if (configIssueNotice) useNotificationStore.getState().dismiss(configIssueNotice);
+  configIssueNotice = null;
+}
+
+/**
+ * `config.json` illisible : le projet est ouvert, mais son coffre et ses serveurs manquent, et le
+ * mode de sécurité n'est plus celui de l'auteur. Un message qui reste, une fois par ouverture, une
+ * fois le projet à l'écran : jamais pendant le changement, et rien s'il échoue.
+ */
+function notifyConfigIssue(issue?: { kind: string; path: string }): void {
+  if (!issue) return;
+  configIssueNotice = useNotificationStore.getState().notify({
+    level: 'error',
+    title: i18n.t('project.configUnreadable.title'),
+    message: i18n.t(
+      issue.kind === 'newer_schema' ? 'project.configUnreadable.newerSchema' : 'project.configUnreadable.message'
+    ),
+    details: issue.path,
+    duration: 0,
+  });
+}
 
 /**
  * Le document du projet ne s'ouvre pas : l'éditeur montrera un tampon sans titre, qui
@@ -239,6 +263,7 @@ async function openProjectContents(
   detached: DetachedEditor
 ): Promise<void> {
   dismissDocumentNotOpened();
+  dismissConfigIssue();
   if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
   ideasNotWrittenNotice = null;
   // Le main a basculé : ce qui ne s'est pas écrit du sortant n'a plus où aller, et l'auteur le
@@ -475,6 +500,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           path: projectPath,
         },
       });
+      notifyConfigIssue(result.configIssue);
     } catch (error) {
       console.error('Failed to load project:', error);
       if (detached) await reopenAfterFailedSwitch(detached, set);
@@ -524,6 +550,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           path,
         },
       });
+      notifyConfigIssue(result.configIssue);
       return true;
     } catch (error) {
       console.error('Failed to create project:', error);
@@ -572,6 +599,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // Clear frontend state
     dismissDocumentNotOpened();
+    dismissConfigIssue();
     // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
     useRebuildStore.getState().resetProgress();
     set({
@@ -690,8 +718,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             // Use getMetadata instead of load to avoid initializing services for each project
             const result = await window.electron.project.getMetadata(path);
             if (!result.success || !result.project) {
-              // Project doesn't exist anymore, mark for removal
-              pathsToRemove.push(path);
+              // Seule une absence avérée retire de la liste. Un disque débranché, un dossier
+              // renommé, une réponse qui ne dit rien : caché, et il revient avec son disque.
+              if (result.code === 'project_file_missing') pathsToRemove.push(path);
               return null;
             }
             const project = result.project;
@@ -701,8 +730,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
             };
           } catch {
-            // Project doesn't exist anymore, mark for removal
-            pathsToRemove.push(path);
             return null;
           }
         })

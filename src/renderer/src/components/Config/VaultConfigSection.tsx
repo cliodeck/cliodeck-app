@@ -171,7 +171,11 @@ export const VaultConfigSection: React.FC = () => {
     }
     setBusy(true);
     try {
-      await api.unlink();
+      const res = await api.unlink();
+      if (!res.success) {
+        setError(res.error ?? t('vault.errors.unlinkFailed'));
+        return;
+      }
       setLastReport(null);
       await refresh();
     } finally {
@@ -189,6 +193,8 @@ export const VaultConfigSection: React.FC = () => {
         <p style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</p>
       )}
 
+      {/* État illisible : ne pas dire « aucun vault lié », il y en a peut-être un dans ce fichier. */}
+      {(status || !error) && (
       <div
         style={{
           padding: 10,
@@ -217,6 +223,7 @@ export const VaultConfigSection: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button

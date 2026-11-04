@@ -61,16 +61,13 @@ import {
 } from '../../../../backend/core/hints/loader.js';
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
-import {
-  ensureWorkspaceDirectories,
-  workspaceFiles,
-} from '../../../../backend/core/workspace/layout.js';
+import { workspaceFiles } from '../../../../backend/core/workspace/layout.js';
 import { clampNumCtx } from '../../../../backend/core/llm/context-windows.js';
 import {
-  defaultWorkspaceConfig,
+  readOrInitWorkspaceConfig,
   readWorkspaceConfig,
-  writeWorkspaceConfig,
-  type WorkspaceConfig,
+  updateWorkspaceConfig,
+  WorkspaceConfigError,
 } from '../../../../backend/core/workspace/config.js';
 import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js';
 import { RecipeRunner, recipeCallsLLM } from '../../../../backend/recipes/runner.js';
@@ -94,17 +91,6 @@ interface VaultConfigBlock {
   path?: string;
 }
 
-async function readOrInitWorkspaceConfig(root: string): Promise<WorkspaceConfig> {
-  await ensureWorkspaceDirectories(root);
-  try {
-    return await readWorkspaceConfig(root);
-  } catch {
-    const fresh = defaultWorkspaceConfig(path.basename(root));
-    await writeWorkspaceConfig(root, fresh);
-    return fresh;
-  }
-}
-
 const BUILTIN_RECIPES_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'recipes-builtin')
   : path.join(process.cwd(), 'backend', 'recipes', 'builtin');
@@ -116,6 +102,21 @@ function noProject() {
 /** Le code seul : c'est le renderer qui dit à l'auteur ce qui arrive à son texte. */
 function contextFailure(error: string, reason?: string) {
   return { ...errorResponse(error), ...(reason ? { reason } : {}) };
+}
+
+/**
+ * L'erreur à rendre si `config.json` est là sans se lire, `null` s'il se lit ou n'existe pas encore.
+ * « Aucun serveur » ou « le mode par défaut » seraient faux : il en déclare peut-être.
+ */
+async function unreadableConfigResponse(root: string | null) {
+  if (!root) return null;
+  try {
+    await readWorkspaceConfig(root);
+    return null;
+  } catch (e) {
+    if (e instanceof WorkspaceConfigError && e.kind === 'absent') return null;
+    return errorResponse(e as Error);
+  }
 }
 
 export function setupFusionHandlers(): void {
@@ -151,8 +152,8 @@ export function setupFusionHandlers(): void {
     // Le verrou avant le premier `await` : deux écritures gardent leur ordre d'arrivée.
     return withFileLock(path.join(root, CONTEXT_FILE), async () => {
       try {
-        // Ensure v2 dir exists before writing.
-        await fs.mkdir(workspaceFiles(root).root, { recursive: true });
+        // Aucun `mkdir` ici : `context.md` vit à la racine du projet, et si elle a disparu, la
+        // recréer ferait écrire ce texte dans un squelette, loin du vrai dossier.
         await writeWorkspaceHints(root, rawMarkdown, { expectedRaw });
         const h = await loadWorkspaceHints(root);
         return successResponse({ hints: h });
@@ -411,6 +412,8 @@ export function setupFusionHandlers(): void {
   // MARK: - MCP clients
 
   ipcMain.handle('fusion:mcp:list', async () => {
+    const refusal = await unreadableConfigResponse(projectManager.getCurrentProjectPath());
+    if (refusal) return refusal;
     return successResponse({ clients: mcpClientsService.list() });
   });
 
@@ -451,6 +454,16 @@ export function setupFusionHandlers(): void {
     // case `addClient` will reject with "No project loaded" below anyway).
     const root = projectManager.getCurrentProjectPath();
     const auditPath = root ? workspaceFiles(root).mcpAccessLog : null;
+
+    // Avant la question : l'auteur ne confirme pas un ajout voué au refus, et le message dit le
+    // vrai motif, y compris quand le service n'a pas encore chargé ce projet.
+    if (root) {
+      try {
+        await readOrInitWorkspaceConfig(root);
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
+    }
 
     // 1. Whitelist validation (command + env shape).
     const check = validateMcpAddRequest(normalized);
@@ -618,33 +631,32 @@ export function setupFusionHandlers(): void {
         return errorResponse(e as Error);
       }
       try {
-        const cfg = await readOrInitWorkspaceConfig(root);
-        const current =
-          (cfg.mcpServer as
-            | { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }
-            | undefined) ?? {};
         const next: {
           enabled: boolean;
           serverName?: string;
           tools?: Record<string, boolean>;
-        } = {
-          enabled:
-            typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled === true,
-        };
-        // Fusion et non remplacement : le panneau n'envoie que l'outil qu'on
-        // vient de cocher.
-        const mergedTools = { ...(current.tools ?? {}), ...(patch.tools ?? {}) };
-        if (Object.keys(mergedTools).length > 0) next.tools = mergedTools;
-        if (typeof patch.serverName === 'string') {
-          // Enregistré sous sa forme valide : le nom affiché dans le panneau
-          // est celui qu'utiliseront les clients.
-          const trimmed = patch.serverName.trim();
-          if (trimmed.length > 0) next.serverName = mcpServerName(trimmed);
-        } else if (typeof current.serverName === 'string') {
-          next.serverName = current.serverName;
-        }
-        cfg.mcpServer = next;
-        await writeWorkspaceConfig(root, cfg);
+        } = { enabled: false };
+        await updateWorkspaceConfig(root, (cfg) => {
+          const current =
+            (cfg.mcpServer as
+              | { enabled?: boolean; serverName?: string; tools?: Record<string, boolean> }
+              | undefined) ?? {};
+          next.enabled =
+            typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled === true;
+          // Fusion et non remplacement : le panneau n'envoie que l'outil qu'on
+          // vient de cocher.
+          const mergedTools = { ...(current.tools ?? {}), ...(patch.tools ?? {}) };
+          if (Object.keys(mergedTools).length > 0) next.tools = mergedTools;
+          if (typeof patch.serverName === 'string') {
+            // Enregistré sous sa forme valide : le nom affiché dans le panneau
+            // est celui qu'utiliseront les clients.
+            const trimmed = patch.serverName.trim();
+            if (trimmed.length > 0) next.serverName = mcpServerName(trimmed);
+          } else if (typeof current.serverName === 'string') {
+            next.serverName = current.serverName;
+          }
+          cfg.mcpServer = next;
+        });
         return successResponse({
           enabled: next.enabled,
           tools: next.tools ?? {},
@@ -795,8 +807,10 @@ export function setupFusionHandlers(): void {
       try {
         const cfg = await readWorkspaceConfig(root);
         vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path ?? null;
-      } catch {
-        // v2 config not initialised yet.
+      } catch (e) {
+        // Absent : rien d'initialisé encore. Illisible, c'est autre chose : répondre « aucun coffre »
+        // inviterait à en lier un, et l'écriture serait refusée.
+        if (!(e instanceof WorkspaceConfigError) || e.kind !== 'absent') throw e;
       }
       return successResponse({ indexed: exists, dbPath, vaultPath });
     } catch (e) {
@@ -827,9 +841,9 @@ export function setupFusionHandlers(): void {
       return errorResponse('vault path does not exist');
     }
     try {
-      const cfg = await readOrInitWorkspaceConfig(root);
-      cfg.vault = { ...((cfg.vault as VaultConfigBlock) ?? {}), path: vaultPath };
-      await writeWorkspaceConfig(root, cfg);
+      await updateWorkspaceConfig(root, (cfg) => {
+        cfg.vault = { ...((cfg.vault as VaultConfigBlock) ?? {}), path: vaultPath };
+      });
       return successResponse({ vaultPath });
     } catch (e) {
       return errorResponse(e as Error);
@@ -840,9 +854,9 @@ export function setupFusionHandlers(): void {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
     try {
-      const cfg = await readOrInitWorkspaceConfig(root);
-      delete cfg.vault;
-      await writeWorkspaceConfig(root, cfg);
+      await updateWorkspaceConfig(root, (cfg) => {
+        delete cfg.vault;
+      });
       // brain.db est partagé (PDF, Tropy, journal) : on ne supprime que les
       // tables obsidian_*, jamais le fichier lui-même.
       ObsidianVaultStore.purgeObsidianData(obsidianStorePath(root));
@@ -962,7 +976,11 @@ export function setupFusionHandlers(): void {
   // MARK: - security (SourceInspector mode)
 
   ipcMain.handle('fusion:security:get-mode', async () => {
-    return successResponse({ mode: retrievalService.getInspectorMode() });
+    const appliedMode = retrievalService.getInspectorMode();
+    const refusal = await unreadableConfigResponse(projectManager.getCurrentProjectPath());
+    // Le choix de l'auteur est inconnu ; ce qui s'applique en attendant, lui, se dit.
+    if (refusal) return { ...refusal, appliedMode };
+    return successResponse({ mode: appliedMode });
   });
 
   // MARK: - archives connectors (Europeana key)
@@ -1022,9 +1040,9 @@ export function setupFusionHandlers(): void {
     const root = projectManager.getCurrentProjectPath();
     if (!root) return noProject();
     try {
-      const cfg = await readOrInitWorkspaceConfig(root);
-      cfg.security = { ...(cfg.security ?? {}), sourceInspectorMode: rawMode };
-      await writeWorkspaceConfig(root, cfg);
+      await updateWorkspaceConfig(root, (cfg) => {
+        cfg.security = { ...(cfg.security ?? {}), sourceInspectorMode: rawMode };
+      });
       retrievalService.setInspectorMode(rawMode);
       return successResponse({ mode: rawMode });
     } catch (e) {

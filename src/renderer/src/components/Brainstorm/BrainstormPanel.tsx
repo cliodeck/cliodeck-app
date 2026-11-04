@@ -122,6 +122,7 @@ export const BrainstormPanel: React.FC = () => {
   const [builtin, setBuiltin] = useState<RecipeSummary[]>([]);
   const [user, setUser] = useState<RecipeSummary[]>([]);
   const [vault, setVault] = useState<VaultStatus | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
@@ -157,6 +158,7 @@ export const BrainstormPanel: React.FC = () => {
       setBuiltin([]);
       setUser([]);
       setVault(null);
+      setVaultError(null);
       setLoadError(null);
       return;
     }
@@ -197,6 +199,10 @@ export const BrainstormPanel: React.FC = () => {
         }
         if (v.success) {
           setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '' });
+          setVaultError(null);
+        } else {
+          // Sans cela, le tiroir dirait « vérification… » sans fin.
+          setVaultError(v.error && v.error !== 'no_project' ? v.error : t('chat.brainstorm.vaultUnavailable'));
         }
         setStatus('ready');
       } catch (e) {
@@ -382,7 +388,9 @@ export const BrainstormPanel: React.FC = () => {
               <h3>
                 <Database size={14} /> {t('chat.brainstorm.obsidianVault')}
               </h3>
-              {vault ? (
+              {vaultError ? (
+                <p className="brainstorm-panel__muted">{vaultError}</p>
+              ) : vault ? (
                 <p className="brainstorm-panel__muted">
                   {vault.indexed
                     ? t('chat.brainstorm.vaultReady', { path: vault.dbPath })
