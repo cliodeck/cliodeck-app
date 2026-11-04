@@ -53,4 +53,23 @@ describe('backdropClose', () => {
     props.onClick(event(backdrop)); // clic sans pression préalable sur le fond
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('une modale ouverte dans une autre : le mouseDown qui remonte jusqu’au fond extérieur n’efface pas le geste', () => {
+    // L'éditeur de recette vit dans les Réglages : l'événement traverse leur fond aussi.
+    const inner = {} as EventTarget;
+    const outer = {} as EventTarget;
+    const onInner = vi.fn();
+    const onOuter = vi.fn();
+    const innerProps = backdropClose(onInner);
+    const outerProps = backdropClose(onOuter);
+    const on = (currentTarget: EventTarget) =>
+      ({ target: inner, currentTarget }) as unknown as MouseEvent<HTMLElement>;
+
+    innerProps.onMouseDown(on(inner));
+    outerProps.onMouseDown(on(outer));
+    innerProps.onClick(on(inner));
+
+    expect(onInner).toHaveBeenCalledTimes(1);
+    expect(onOuter).not.toHaveBeenCalled();
+  });
 });

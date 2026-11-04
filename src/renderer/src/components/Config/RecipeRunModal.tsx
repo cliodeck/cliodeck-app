@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { X, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -86,6 +87,12 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
     error?: string;
   } | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Pendant l'exécution, rien ne ferme, comme le X, désactivé : la recette continue côté main, et
+  // la fenêtre partirait avec son journal. Sans `onEscape`, le piège garde la touche : les
+  // Réglages, dessous, ne se ferment pas non plus.
+  const closeUnlessRunning = running ? undefined : onClose;
+  const trapRef = useFocusTrap({ active: true, onEscape: closeUnlessRunning });
 
   useEffect(() => {
     const r = api();
@@ -227,8 +234,9 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
 
   return (
     <div
+      ref={trapRef}
       className="settings-modal"
-      {...backdropClose(onClose)}
+      {...backdropClose(() => closeUnlessRunning?.())}
       style={{ zIndex: 1100 }}
     >
       <div

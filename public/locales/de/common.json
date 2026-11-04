@@ -1554,6 +1554,7 @@
   "recipeEditor": {
     "readOnly": "schreibgeschützt",
     "unsaved": "nicht gespeichert",
+    "discardConfirm": "Dieses Rezept hat nicht gespeicherte Änderungen. Verwerfen? Sie gehen verloren.",
     "modeForm": "Formular",
     "modeYaml": "YAML",
     "save": "Speichern",

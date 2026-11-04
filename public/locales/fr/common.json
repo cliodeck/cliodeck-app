@@ -1554,6 +1554,7 @@
   "recipeEditor": {
     "readOnly": "lecture seule",
     "unsaved": "non enregistré",
+    "discardConfirm": "Cette recette a des modifications non enregistrées. Les abandonner ? Elles seront perdues.",
     "modeForm": "Formulaire",
     "modeYaml": "YAML",
     "save": "Enregistrer",

@@ -1554,6 +1554,7 @@
   "recipeEditor": {
     "readOnly": "read-only",
     "unsaved": "unsaved",
+    "discardConfirm": "This recipe has unsaved changes. Discard them? They will be lost.",
     "modeForm": "Form",
     "modeYaml": "YAML",
     "save": "Save",
