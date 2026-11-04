@@ -7,7 +7,7 @@
  * bouton, vrai chat (un faux Ollama local répond), vraie vue, vrai autosave, et **le fichier**.
  */
 
-import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -105,6 +105,41 @@ async function typeInSecondParagraph(window: Page): Promise<void> {
   await window.keyboard.press('Home');
   for (let i = 0; i < 10; i += 1) await window.keyboard.press('ArrowRight');
   await window.keyboard.type(TYPED);
+}
+
+const LONG_DOCUMENT = `# Long document\n\n${Array.from(
+  { length: 400 },
+  (_, i) => `Paragraphe numéro ${i + 1}, avec assez de texte pour remplir la ligne et faire défiler l’éditeur.\n`,
+).join('\n')}`;
+
+const scrollTop = (window: Page) => window.locator('.cm-scroller').evaluate((el) => el.scrollTop);
+
+/** L'auteur fait défiler, sans cliquer : ce qu'il lit n'est pas là où est son curseur. */
+async function scrollAway(window: Page): Promise<void> {
+  await window.locator('.cm-scroller').evaluate((el) => {
+    el.scrollTop = 6000;
+  });
+  await expect.poll(() => scrollTop(window)).toBeGreaterThan(5000);
+}
+
+/**
+ * Dans la zone visible de l'éditeur. `toBeVisible` ne le dit pas : une proposition hors écran reste
+ * rendue, et le défilement restauré n'arrive qu'à l'image suivante. On laisse donc passer deux
+ * images avant de regarder.
+ */
+async function expectOnScreen(window: Page, target: Locator): Promise<void> {
+  await window.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  await expect
+    .poll(() =>
+      target.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const zone = (el.closest('.cm-scroller') as Element).getBoundingClientRect();
+        return box.top < zone.bottom && box.bottom > zone.top;
+      }),
+    )
+    .toBe(true);
 }
 
 /** Une vraie question au vrai chat : la réponse apporte le bouton. */
@@ -255,6 +290,160 @@ test('aucun curseur connu : la proposition va en fin de document, et un clic au 
     await expect(window.locator('.workspace-mode-bar__tab--active')).toHaveText('Écrire');
     await expect(firstLine(window).locator('.cm-proposal-box')).toBeVisible();
     expect(readFileSync(second.document, 'utf8')).toBe(otherText);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('l’auteur lisait loin de son curseur : la proposition arrive à l’écran, à son curseur', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle(LONG_DOCUMENT);
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Paragraphe numéro 2,')).toBeVisible({ timeout: 20_000 });
+    await line(window, 'Paragraphe numéro 2,').click();
+    await scrollAway(window);
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).toContainText('Paragraphe numéro 2,');
+    await expectOnScreen(window, proposal(window));
+    expect(readFileSync(document, 'utf8')).toBe(LONG_DOCUMENT);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('l’auteur lisait sans avoir cliqué : la proposition arrive à l’écran, en fin de document', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle(LONG_DOCUMENT);
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Paragraphe numéro 2,')).toBeVisible({ timeout: 20_000 });
+    await scrollAway(window);
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(lastLine(window).locator('.cm-proposal-box')).toBeVisible();
+    await expectOnScreen(window, proposal(window));
+    expect(readFileSync(document, 'utf8')).toBe(LONG_DOCUMENT);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('un fichier CRLF garde ses fins de ligne : rien n’est écrit sans décision, puis aucun LF nu', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const crlf = TEXT.replace(/\n/g, '\r\n');
+  const { projectJson, document } = makeArticle(crlf);
+  const onDisk = () => readFileSync(document, 'utf8');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Premier paragraphe')).toBeVisible({ timeout: 20_000 });
+    await line(window, 'Premier paragraphe').click();
+    await window.keyboard.press('End');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    expect(onDisk()).toBe(crlf);
+
+    await acceptProposal(window);
+    await expect.poll(onDisk, { timeout: 10_000 }).toContain(ANSWER);
+    const written = onDisk();
+    // Tout au même format, et le texte accepté en bloc entre « Premier » et « Deuxième ».
+    expect(written.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(written).toMatch(/sans histoire\.\r\n\r\n<!-- cliodeck:brainstorm-draft/);
+    expect(written).toContain('<!-- /cliodeck:brainstorm-draft -->\r\n\r\nDeuxième paragraphe');
+
+    await undo(window);
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(crlf);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('« Ouvrir la source » vers un chapitre déjà visité : le passage est à l’écran, pas l’ancienne position', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { dir, projectJson } = tempProject('book', {
+    chapters: [
+      { id: 'c1', title: 'Un', filePath: 'chapters/01.md', order: 0, kind: 'chapter' },
+      { id: 'c2', title: 'Deux', filePath: 'chapters/02.md', order: 1, kind: 'chapter' },
+    ],
+  });
+  mkdirSync(join(dir, 'chapters'));
+  writeFileSync(join(dir, 'chapters', '01.md'), '# Un\n\nCourt.\n');
+  const segments = Array.from(
+    { length: 40 },
+    (_, i) => `Segment numéro ${i + 1}, sur le corridor de Danzig et ce qu’il faut pour remplir la ligne.\n`,
+  ).join('\n');
+  writeFileSync(
+    join(dir, 'chapters', '02.md'),
+    `# Deux\n\n${Array.from({ length: 10 }, (_, k) => `## Section ${k + 1}\n\n${segments}`).join('\n')}`,
+  );
+  const chapter = (title: string) => window.locator('button.chapter-item-open', { hasText: title }).first();
+  const snippets = window.locator('.brainstorm-chat__source-snippet');
+  const popover = window.locator('.source-popover');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Court')).toBeVisible({ timeout: 20_000 });
+    // Visité une fois, sans défiler : son état mémorisé porte un défilement à 0.
+    await chapter('Deux').click();
+    await expect(line(window, 'Segment numéro 1,')).toBeVisible();
+    await chapter('Un').click();
+    await expect(line(window, 'Court')).toBeVisible();
+
+    await window.evaluate(() =>
+      (window as unknown as { electron: { manuscript: { index(): Promise<unknown> } } }).electron.manuscript.index(),
+    );
+
+    await toMode(window, 'Brainstormer');
+    await window.locator('.center-panel textarea').first().fill('Qu’ai-je déjà écrit sur le corridor de Danzig ?');
+    await window.keyboard.press('ControlOrMeta+Enter');
+    await expect(sendToWriteButton(window)).toBeVisible({ timeout: 30_000 });
+    await window.locator('.brainstorm-chat__sources summary').first().click();
+
+    // L'extrait le plus loin dans le chapitre Deux.
+    let farthest = -1;
+    let farthestLine = 0;
+    for (let i = 0; i < (await snippets.count()); i += 1) {
+      await snippets.nth(i).click();
+      const match = (await popover.innerText()).match(/02\.md · L(\d+)/);
+      if (match && Number(match[1]) > farthestLine) {
+        farthest = i;
+        farthestLine = Number(match[1]);
+      }
+      await snippets.nth(i).click();
+      await expect(popover).toHaveCount(0);
+    }
+    expect(farthestLine).toBeGreaterThan(40);
+
+    await snippets.nth(farthest).click();
+    await window.getByRole('button', { name: 'Ouvrir la source' }).click();
+
+    await expect(window.locator('.workspace-mode-bar__tab--active')).toHaveText('Écrire');
+    await expect(line(window, 'Segment numéro')).toBeVisible();
+    await expectOnScreen(window, window.locator('.cm-cursorLayer .cm-cursor').first());
+    expect(await scrollTop(window)).toBeGreaterThan(0);
   } finally {
     await stop(session);
   }

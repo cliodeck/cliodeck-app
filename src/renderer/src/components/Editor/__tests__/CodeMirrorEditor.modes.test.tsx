@@ -399,6 +399,56 @@ describe('aucun curseur connu', () => {
   });
 });
 
+describe('le défilement restauré ne passe pas sur une demande de défilement', () => {
+  const FAR = 700;
+  const scrollTop = () => currentView().scrollDOM.scrollTop;
+
+  /** L'auteur a fait défiler, loin de son curseur, puis un aller-retour de mode. */
+  async function comeBackScrolled(): Promise<void> {
+    await mountWorkspace();
+    placeCursor(MIDDLE);
+    const { scrollDOM } = currentView();
+    scrollDOM.scrollTop = FAR;
+    fireEvent.scroll(scrollDOM);
+    await switchMode('brainstorm');
+    await switchMode('write');
+  }
+
+  it('rien ne demande d’aller ailleurs : le défilement revient', async () => {
+    await comeBackScrolled();
+    await wait(50);
+    expect(scrollTop()).toBe(FAR);
+  });
+
+  it('une proposition posée au retour reste la dernière à décider du défilement', async () => {
+    await comeBackScrolled();
+    propose();
+    await wait(50);
+    expect(scrollTop()).not.toBe(FAR);
+  });
+
+  it('« Ouvrir la source » au retour reste la dernière à décider du défilement', async () => {
+    await comeBackScrolled();
+    act(() => editor().editorFacade?.revealLine(3));
+    await wait(50);
+    expect(scrollTop()).not.toBe(FAR);
+  });
+
+  it('une proposition que la vue refuse ne demande rien : le défilement revient', async () => {
+    await mountWorkspace();
+    const { scrollDOM } = currentView();
+    scrollDOM.scrollTop = FAR;
+    fireEvent.scroll(scrollDOM);
+    await switchMode('brainstorm');
+    useEditorStore.setState({ bufferDetached: true });
+    await switchMode('write');
+
+    expect(editor().editorFacade?.propose({ proposed: DRAFT })).toBe(false);
+    await wait(50);
+    expect(scrollTop()).toBe(FAR);
+  });
+});
+
 describe('le cache suit le projet, éditeur monté ou non', () => {
   it('changer de projet hors du mode Écriture puis y revenir : aucun état restauré', async () => {
     await mountWorkspace();
@@ -612,6 +662,51 @@ describe('livre : les chapitres d’un mode à l’autre', () => {
 
     expect(text()).toBe('# A\n\nRéécrit dehors.\n');
     expect(undoDepth(currentView().state)).toBe(0);
+  });
+});
+
+describe('un fichier CRLF', () => {
+  const CRLF_TEXT = TEXT.replace(/\n/g, '\r\n');
+  const FIRST_PARAGRAPH_END = TEXT.indexOf('Premier paragraphe.') + 'Premier paragraphe.'.length;
+  const BLOCK = 'Ligne une.\n\nLigne deux.';
+  const toCrlf = (value: string) => value.replace(/\n/g, '\r\n');
+
+  async function proposeAndAccept(source: string): Promise<string> {
+    disk[DOC] = source;
+    openInStore(DOC);
+    await mountWorkspace();
+    placeCursor(FIRST_PARAGRAPH_END);
+    act(() => {
+      expect(editor().insertDraftAtCursor(BLOCK, { model: 'm', task: 't' }).mode).toBe('cursor');
+    });
+    accept();
+    return editor().getLiveContent();
+  }
+
+  it('une proposition acceptée rend le même texte qu’en LF, avec ses fins de ligne', async () => {
+    const accepted = await proposeAndAccept(CRLF_TEXT);
+    cleanup();
+    const asLf = await proposeAndAccept(TEXT);
+    expect(asLf).toContain(`Premier paragraphe.\n\n${BLOCK}\n\n${SECOND}`);
+    expect(accepted).toBe(toCrlf(asLf));
+  });
+
+  it('sans curseur connu, la proposition va en fin de document', async () => {
+    disk[DOC] = CRLF_TEXT;
+    openInStore(DOC);
+    await mountWorkspace();
+    propose();
+    expect(proposalPosition()).toBe(currentView().state.doc.length);
+    accept();
+    expect(editor().getLiveContent()).toBe(`${CRLF_TEXT}\r\n${DRAFT}`);
+  });
+
+  it('accepté, le texte part sur le disque sans LF nu', async () => {
+    await proposeAndAccept(CRLF_TEXT);
+    await wait(10_000);
+    const written = writes.at(-1)?.[1] ?? '';
+    expect(written).toContain(toCrlf(BLOCK));
+    expect(written.replace(/\r\n/g, '')).not.toContain('\n');
   });
 });
 

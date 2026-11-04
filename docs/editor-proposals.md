@@ -74,7 +74,12 @@ Cycle de vie :
   accepter journaliserait une décision sans rien écrire. L'appelant garde son
   texte ; il n'y a pas de repli vers une écriture directe.
 - **Une proposition se voit** : la façade l'amène à l'écran et y place le
-  curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit.
+  curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit. Au
+  retour d'un mode, le défilement restauré n'arrive qu'à l'image suivante :
+  `propose` et `revealLine` l'annulent, sinon il repasserait sur eux.
+- **Fins de ligne** : le texte accepté ou modifié entre avec le séparateur du
+  document. CM6 ne découpe une chaîne que sur le séparateur déclaré : un `\n`
+  resterait à l'intérieur d'une ligne d'un fichier CRLF, qui deviendrait mixte.
 
 Entrées dans le contrat aujourd'hui :
 

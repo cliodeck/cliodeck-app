@@ -77,7 +77,9 @@ repose sur deux mécanismes, l'un **impératif**, l'autre confortable :
    bascule. Revenir sur un chapitre permet d'annuler une frappe faite avant
    de l'avoir quitté. Cache borné (LRU 24), hors du composant pour survivre
    à un changement de mode ([`editor-state-memory.ts`](../src/renderer/src/components/Editor/editor-state-memory.ts)),
-   et vidé au changement de projet, éditeur monté ou non.
+   et vidé au changement de projet, éditeur monté ou non. Le défilement se
+   repose après le premier rendu, sauf si une proposition ou `revealLine` a
+   demandé d'aller ailleurs entre-temps.
    **Règle de fraîcheur : le disque fait foi** — un état n'est restauré que
    si son texte correspond exactement au fichier rechargé (modifié hors de
    ClioDeck ⇒ état neuf).

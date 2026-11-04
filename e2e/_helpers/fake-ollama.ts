@@ -16,6 +16,9 @@ export interface FakeOllama {
   close(): Promise<void>;
 }
 
+/** Celle de nomic-embed-text : les index du projet refusent un vecteur d'une autre taille. */
+const EMBEDDING_DIMENSION = 768;
+
 export async function startFakeOllama(answer: string): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
   const server: Server = createServer((req, res) => {
@@ -38,7 +41,7 @@ export async function startFakeOllama(answer: string): Promise<FakeOllama> {
         case '/api/embed': {
           const { input } = JSON.parse(body) as { input: unknown };
           const count = Array.isArray(input) ? input.length : 1;
-          return json({ embeddings: Array.from({ length: count }, () => Array(8).fill(0.1)) });
+          return json({ embeddings: Array.from({ length: count }, () => Array(EMBEDDING_DIMENSION).fill(0.1)) });
         }
         case '/api/chat':
           res.setHeader('Content-Type', 'application/x-ndjson');

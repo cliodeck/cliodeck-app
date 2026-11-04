@@ -73,13 +73,16 @@ export const SlidePreviewPanel: React.FC = () => {
   // Synchro curseur → slide active : re-génération de la preview quand le
   // curseur entre dans une autre slide (pas de script dans l'iframe, CSP).
   useEffect(() => {
-    if (!editorFacade?.onSelectionChange) return;
-    return editorFacade.onSelectionChange((offset) => {
+    if (!editorFacade) return;
+    const followCursor = (offset: number) => {
       const index = slideIndexAtOffset(deckRef.current, offset);
       if (index === activeIndexRef.current) return;
       activeIndexRef.current = index;
       void loadPreview(lastTextRef.current);
-    });
+    };
+    // Le curseur survit à un changement de mode : il ne bougera pas pour le dire.
+    followCursor(editorFacade.getCursorOffset());
+    return editorFacade.onSelectionChange?.(followCursor);
   }, [editorFacade, loadPreview]);
 
   return (

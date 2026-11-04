@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
+import { detectLineSeparator } from '@/editor/cm/fidelity';
 import type { EditorFacade } from '@/editor/facade';
 import { nextFootnoteNumber } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
@@ -658,7 +659,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // proposition d'insertion adjudicable, jamais d'écriture directe
     // (« aucune fonctionnalité IA d'écriture ne contourne cette API »,
     // docs/editor-proposals.md). Le document ne change qu'à l'acceptation.
-    const current = editorFacade.getValue();
+    // Les offsets de la façade comptent une fin de ligne pour un caractère : dans un fichier CRLF,
+    // ils ne tombent juste que sur le texte en LF. Accepter rend au fichier ses fins de ligne.
+    const value = editorFacade.getValue();
+    const current = detectLineSeparator(value) === '\r\n' ? value.replace(/\r\n/g, '\n') : value;
     // Sans curseur posé par l'auteur, l'offset 0 serait au-dessus du titre.
     const offset = editorFacade.hasKnownCursor() ? editorFacade.getCursorOffset() : current.length;
     const newContent = insertDraftAtOffset(current, offset, draft);

@@ -230,7 +230,8 @@ function createFacade(
   changeListeners: Set<(content: string) => void>,
   selectionListeners: Set<(offset: number) => void>,
   proposalsInstance: ProposalsInstance,
-  hasKnownCursor: () => boolean
+  hasKnownCursor: () => boolean,
+  cancelScrollRestore: () => void
 ): EditorFacade {
   return {
     engine: 'cm6',
@@ -270,6 +271,7 @@ function createFacade(
     propose: (partial) => {
       // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.
       if (view.state.readOnly) return false;
+      cancelScrollRestore();
       const { range } = proposalsInstance.inject(view, partial);
       const { head } = view.state.selection.main;
       view.dispatch({
@@ -279,6 +281,7 @@ function createFacade(
       return true;
     },
     revealLine: (lineNumber) => {
+      cancelScrollRestore();
       const line = view.state.doc.line(
         Math.max(1, Math.min(lineNumber, view.state.doc.lines))
       );
@@ -478,12 +481,19 @@ export const CodeMirrorEditor: React.FC = () => {
       lastScrollTop = view.scrollDOM.scrollTop;
     });
 
+    // Le défilement n'appartient pas à l'état : il se repose après le premier rendu. La façade est
+    // là bien avant : qui lui demande d'aller ailleurs (une proposition, « Ouvrir la source ») ne
+    // doit pas se voir ramené à l'ancienne position une image plus tard.
+    let scrollRestore: number | null = null;
+    const cancelScrollRestore = () => {
+      if (scrollRestore !== null) cancelAnimationFrame(scrollRestore);
+      scrollRestore = null;
+    };
     if (restored && cached) {
-      // Le défilement n'appartient pas à l'état : il se repose après le
-      // premier rendu.
       lastScrollTop = cached.scrollTop;
-      requestAnimationFrame(() => {
-        if (viewRef.current === view) view.scrollDOM.scrollTop = cached.scrollTop;
+      scrollRestore = requestAnimationFrame(() => {
+        scrollRestore = null;
+        view.scrollDOM.scrollTop = cached.scrollTop;
       });
     }
 
@@ -491,7 +501,14 @@ export const CodeMirrorEditor: React.FC = () => {
     useEditorStore
       .getState()
       .setEditorFacade(
-        createFacade(view, changeListeners, selectionListeners, proposalsInstance, () => cursorPlaced)
+        createFacade(
+          view,
+          changeListeners,
+          selectionListeners,
+          proposalsInstance,
+          () => cursorPlaced,
+          cancelScrollRestore
+        )
       );
 
     // Hook de dev (critère d'acceptation Phase 4) : injection d'une
@@ -524,6 +541,7 @@ export const CodeMirrorEditor: React.FC = () => {
     });
 
     return () => {
+      cancelScrollRestore();
       unsubscribeBibliography();
       unsubscribeFilePath();
       // Ordre : retirer la façade, purger la sync en attente vers le store,
