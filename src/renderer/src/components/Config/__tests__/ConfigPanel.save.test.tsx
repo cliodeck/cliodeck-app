@@ -160,6 +160,12 @@ const fontInput = () => document.querySelector('.config-number') as HTMLInputEle
 /** Le premier curseur serait celui de la police, ouverte au-dessus. */
 const topKSlider = () => document.querySelector('.config-slider[max="20"]') as HTMLInputElement;
 
+/** Le geste réel, jusqu'au bout : un champ numérique ne vaut qu'au blur, et un clic ailleurs le déclenche. */
+function typeNumber(input: HTMLInputElement, value: string): void {
+  fireEvent.change(input, { target: { value } });
+  fireEvent.blur(input);
+}
+
 /** Ouvre le panneau et attend le chargement : la police affichée devient celle du disque. */
 async function openPanel(diskFontSize: number | string = 15): Promise<void> {
   render(
@@ -210,7 +216,7 @@ describe('Enregistrer n’écrit que ce qui a changé', () => {
     (disk.llm as Section).embeddingProvider = 'embedded';
     (disk.llm as Section).embeddedModelPath = '/modeles/qwen.gguf';
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await save();
 
     expect(disk.rag?.systemPromptLanguage).toBe('en');
@@ -267,7 +273,7 @@ describe('Enregistrer n’écrit que ce qui a changé', () => {
     installMain(disk);
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await save();
 
     expect(disk.editor).toEqual({ ...authorDisk().editor, fontSize: 18 });
@@ -290,7 +296,7 @@ describe('Enregistrer n’écrit que ce qui a changé', () => {
 
     // Enregistrer repasse par le magasin, donc par l'effet : la seconde fois, plus rien à écrire,
     // et `engine` est toujours là.
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await save();
     await save();
     expect(main.written('editor')).toHaveLength(1);
@@ -315,16 +321,18 @@ describe('Enregistrer n’écrit que ce qui a changé', () => {
     expect(main.writes).toEqual([]);
   });
 
-  it('un NaN n’est écrit qu’une fois : il ne passe pas pour un changement à chaque Enregistrer', async () => {
+  it('une police vidée n’écrit rien : le champ revient à la dernière valeur, à chaque Enregistrer', async () => {
     const disk = authorDisk();
     const main = installMain(disk);
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '' } });
+    typeNumber(fontInput(), '');
     await save();
     await save();
 
-    expect(main.written('editor')).toHaveLength(1);
+    expect(main.written('editor')).toEqual([]);
+    expect(disk.editor?.fontSize).toBe(15);
+    expect(fontInput().value).toBe('15');
   });
 });
 
@@ -364,7 +372,7 @@ describe('Enregistrer lit la réponse du main', () => {
     main.refuse.llm = 'refus';
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     fireEvent.click(screen.getByText('llm.title'));
     fireEvent.change(await screen.findByPlaceholderText('gemma2:2b'), { target: { value: 'mistral-nemo' } });
     await save();
@@ -390,7 +398,7 @@ describe('Enregistrer lit la réponse du main', () => {
     await openPanel();
     const before = useEditorStore.getState().settings.fontSize;
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await save();
 
     expect(useEditorStore.getState().settings.fontSize).toBe(before);
@@ -408,7 +416,7 @@ describe('Enregistrer lit la réponse du main', () => {
       return real(section, value);
     });
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     fireEvent.click(screen.getByText('llm.title'));
     fireEvent.change(await screen.findByPlaceholderText('gemma2:2b'), { target: { value: 'mistral-nemo' } });
     await save();
@@ -468,7 +476,7 @@ describe('écrit, mais les services n’ont pas pu repartir', () => {
     main.restartFails.llm = 'refus';
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await typeChatModel('mistral-nemo');
     await save();
 
@@ -501,7 +509,7 @@ describe('écrit, mais les services n’ont pas pu repartir', () => {
     main.restartFails.llm = 'pas de clé';
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await typeChatModel('mistral-nemo');
     await save();
 
@@ -714,7 +722,7 @@ describe('Réinitialiser écrit vraiment', () => {
     const disk = authorDisk();
     const main = installMain(disk);
     await openPanel();
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
 
     fireEvent.click(resetButton());
     fireEvent.click(await screen.findByText('dialog.cancel'));
@@ -868,7 +876,7 @@ describe('le panneau du chat suit ce qui vient de changer', () => {
     await openExpertRag(disk);
     useRAGQueryStore.getState().setParams({ topK: 7 });
 
-    fireEvent.change(topKNumber(), { target: { value: '12' } });
+    typeNumber(topKNumber(), '12');
     await save();
 
     expect(disk.rag?.topK).toBe(12);
@@ -881,22 +889,24 @@ describe('le panneau du chat suit ce qui vient de changer', () => {
     useRAGQueryStore.getState().setParams({ topK: 5 });
 
     const threshold = document.querySelector('.config-number[max="1"][step="0.05"]') as HTMLInputElement;
-    fireEvent.change(threshold, { target: { value: '0.4' } });
+    typeNumber(threshold, '0.4');
     await save();
 
     expect(disk.rag?.similarityThreshold).toBe(0.4);
     expect(params().topK).toBe(5);
   });
 
-  it('un topK vidé n’atteint pas le chat : NaN passerait `??` côté main', async () => {
+  it('un topK vidé n’atteint ni le disque ni le chat', async () => {
     const disk = authorDisk();
     await openExpertRag(disk);
     useRAGQueryStore.getState().setParams({ topK: 7 });
 
-    fireEvent.change(topKNumber(), { target: { value: '' } });
+    typeNumber(topKNumber(), '');
     await save();
 
     expect(params().topK).toBe(7);
+    expect(disk.rag?.topK).toBe(7);
+    expect(topKNumber().value).toBe('7');
   });
 
   it('Réinitialiser : le prompt personnalisé effacé du disque cesse aussi de partir', async () => {
@@ -941,7 +951,7 @@ describe('le message dit ce qui s’est passé, section par section', () => {
     main.refuse.editor = 'disque plein';
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await save();
 
     expect(message()).toContain('settings.saveFailed');
@@ -954,7 +964,7 @@ describe('le message dit ce qui s’est passé, section par section', () => {
     main.refuse.llm = 'refus';
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await changeChatModel();
     await save();
 
@@ -1001,7 +1011,7 @@ describe('le message dit ce qui s’est passé, section par section', () => {
     Object.assign(main.refuse, { llm: 'trousseau verrouillé', editor: 'disque plein' });
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await changeChatModel();
     await save();
 
@@ -1030,7 +1040,7 @@ describe('pas deux écritures croisées', () => {
     const release = main.hold('editor');
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await act(async () => {
       fireEvent.click(saveButton());
     });
@@ -1051,7 +1061,7 @@ describe('pas deux écritures croisées', () => {
     const release = main.hold('editor');
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     fireEvent.click(resetButton());
     await screen.findByText('dialog.confirm');
     await act(async () => {
@@ -1105,7 +1115,7 @@ describe('révocation des clés', () => {
     const main = installMain(disk);
     await openPanel();
 
-    fireEvent.change(fontInput(), { target: { value: '18' } });
+    typeNumber(fontInput(), '18');
     await revoke();
     await waitFor(() => {
       expect(fontInput().value).toBe('18');

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Settings } from 'lucide-react';
 import { useDialogStore } from '../../stores/dialogStore';
+import { mergeDefined } from '../../utils/merge-defined';
+import { NumberInput } from '../common/NumberInput';
 import './PresentationConfig.css';
 
 export interface RevealJsConfig {
@@ -54,7 +56,7 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
       if (exists) {
         const content = await window.electron.fs.readFile(configPath);
         const loadedConfig = JSON.parse(content);
-        setConfig({ ...DEFAULT_CONFIG, ...loadedConfig });
+        setConfig(mergeDefined(DEFAULT_CONFIG, loadedConfig));
       }
     } catch (error) {
       console.error('Failed to load presentation config:', error);
@@ -202,12 +204,12 @@ export const PresentationConfig: React.FC<PresentationConfigProps> = ({
 
       <div className="config-section">
         <label>Défilement automatique (secondes)</label>
-        <input
-          type="number"
-          min="0"
-          step="1"
+        <NumberInput
+          integer
+          min={0}
+          step={1}
           value={config.autoSlide / 1000}
-          onChange={(e) => handleChange('autoSlide', parseInt(e.target.value) * 1000)}
+          onCommit={(seconds) => handleChange('autoSlide', seconds * 1000)}
           disabled={isSaving}
           placeholder={t('presentationConfig.zeroDisabled')}
         />

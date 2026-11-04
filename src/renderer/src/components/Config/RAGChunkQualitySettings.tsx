@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Target, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { NumberInput } from '../common/NumberInput';
 import type { RAGConfig } from './ConfigPanel';
 
 /**
@@ -126,12 +127,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleCustomMaxChunkSizeChange(parseInt(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="100"
-                    max="1500"
+                  <NumberInput
+                    integer
+                    min={100}
+                    max={1500}
                     value={config.customMaxChunkSize ?? 500}
-                    onChange={(e) => handleCustomMaxChunkSizeChange(parseInt(e.target.value))}
+                    onCommit={handleCustomMaxChunkSizeChange}
                     className="config-number"
                   />
                 </div>
@@ -149,12 +150,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleCustomMinChunkSizeChange(parseInt(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="20"
-                    max="200"
+                  <NumberInput
+                    integer
+                    min={20}
+                    max={200}
                     value={config.customMinChunkSize ?? 100}
-                    onChange={(e) => handleCustomMinChunkSizeChange(parseInt(e.target.value))}
+                    onCommit={handleCustomMinChunkSizeChange}
                     className="config-number"
                   />
                 </div>
@@ -172,12 +173,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleCustomOverlapSizeChange(parseInt(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="0"
-                    max="200"
+                  <NumberInput
+                    integer
+                    min={0}
+                    max={200}
                     value={config.customOverlapSize ?? 75}
-                    onChange={(e) => handleCustomOverlapSizeChange(parseInt(e.target.value))}
+                    onCommit={handleCustomOverlapSizeChange}
                     className="config-number"
                   />
                 </div>
@@ -218,13 +219,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleMinChunkEntropyChange(parseFloat(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="0"
-                    max="0.8"
-                    step="0.05"
+                  <NumberInput
+                    min={0}
+                    max={0.8}
+                    step={0.05}
                     value={config.minChunkEntropy ?? 0.3}
-                    onChange={(e) => handleMinChunkEntropyChange(parseFloat(e.target.value))}
+                    onCommit={handleMinChunkEntropyChange}
                     className="config-number"
                   />
                 </div>
@@ -245,13 +245,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleMinUniqueWordRatioChange(parseFloat(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="0.2"
-                    max="0.8"
-                    step="0.05"
+                  <NumberInput
+                    min={0.2}
+                    max={0.8}
+                    step={0.05}
                     value={config.minUniqueWordRatio ?? 0.4}
-                    onChange={(e) => handleMinUniqueWordRatioChange(parseFloat(e.target.value))}
+                    onCommit={handleMinUniqueWordRatioChange}
                     className="config-number"
                   />
                 </div>
@@ -355,13 +354,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                       onChange={(e) => handleDedupSimilarityThresholdChange(parseFloat(e.target.value))}
                       className="config-slider"
                     />
-                    <input
-                      type="number"
-                      min="0.7"
-                      max="0.95"
-                      step="0.05"
+                    <NumberInput
+                      min={0.7}
+                      max={0.95}
+                      step={0.05}
                       value={config.dedupSimilarityThreshold ?? 0.85}
-                      onChange={(e) => handleDedupSimilarityThresholdChange(parseFloat(e.target.value))}
+                      onCommit={handleDedupSimilarityThresholdChange}
                       className="config-number"
                     />
                   </div>
@@ -415,13 +413,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleSemanticSimilarityThresholdChange(parseFloat(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="0.5"
-                    max="0.9"
-                    step="0.05"
+                  <NumberInput
+                    min={0.5}
+                    max={0.9}
+                    step={0.05}
                     value={config.semanticSimilarityThreshold ?? 0.7}
-                    onChange={(e) => handleSemanticSimilarityThresholdChange(parseFloat(e.target.value))}
+                    onCommit={handleSemanticSimilarityThresholdChange}
                     className="config-number"
                   />
                 </div>
@@ -438,12 +435,12 @@ export const RAGChunkQualitySettings: React.FC<Props> = ({ config, onChange }) =
                     onChange={(e) => handleSemanticWindowSizeChange(parseInt(e.target.value))}
                     className="config-slider"
                   />
-                  <input
-                    type="number"
-                    min="2"
-                    max="5"
+                  <NumberInput
+                    integer
+                    min={2}
+                    max={5}
                     value={config.semanticWindowSize ?? 3}
-                    onChange={(e) => handleSemanticWindowSizeChange(parseInt(e.target.value))}
+                    onCommit={handleSemanticWindowSizeChange}
                     className="config-number"
                   />
                 </div>
