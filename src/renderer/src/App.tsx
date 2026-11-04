@@ -19,6 +19,7 @@ import { useLanguageStore } from './stores/languageStore';
 import { useProjectStore } from './stores/projectStore';
 import { useEditorStore } from './stores/editorStore';
 import { useTheme } from './hooks/useTheme';
+import { withFormDefaults } from './components/Config/settings-persist';
 
 function AppErrorBoundary({ children }: { children: ReactNode }) {
   return (
@@ -93,8 +94,10 @@ function App() {
     // Charger les settings éditeur
     const initEditorSettings = async () => {
       try {
-        const editorConfig = await window.electron.config.get('editor');
-        if (editorConfig) {
+        const saved = await window.electron.config.get('editor');
+        if (saved) {
+          // Un champ que le fichier n'a pas : le magasin et le formulaire tombent sur le même défaut.
+          const editorConfig = withFormDefaults('editor', saved);
           updateEditorSettings({
             fontSize: editorConfig.fontSize,
             wordWrap: editorConfig.wordWrap,

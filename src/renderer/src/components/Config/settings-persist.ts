@@ -8,6 +8,7 @@
  */
 import { DEFAULT_CONFIG, type LLMConfig as StoredLLMConfig } from '@backend/types/config';
 import type { RAGQueryParams } from '../../stores/ragQueryStore';
+import { mergeDefined } from '../../utils/merge-defined';
 import type { LLMConfig, RAGConfig } from './ConfigPanel';
 import type { EditorConfig } from './EditorConfigSection';
 import type { ZoteroConfig } from './ZoteroConfigSection';
@@ -31,7 +32,7 @@ export const notApplied = new Set<SectionName>();
 /** Une seule source pour ce que le formulaire montre tant que le disque ne dit rien. */
 export const FORM_DEFAULTS: SettingsSections = {
   rag: {
-    // Champs que le formulaire exige et que DEFAULT_CONFIG ne renseigne pas.
+    // Champs que le formulaire exige et que le type de DEFAULT_CONFIG laisse optionnels.
     summaryGeneration: 'extractive',
     summaryMaxLength: 750,
     useGraphContext: false,
@@ -51,10 +52,13 @@ export const FORM_DEFAULTS: SettingsSections = {
   zotero: { mode: 'api', userId: '', apiKey: '', autoSync: false, dataDirectory: '' },
 };
 
-/** La section telle que le formulaire la montre. Sur le disque, `undefined` n'existe pas (JSON). */
+/**
+ * La section telle que le formulaire la montre. Sur le disque, `undefined` n'existe pas (JSON). Un
+ * nombre abîmé retombe sur le défaut : le main l'a déjà réparé à la lecture (`repair-numbers.ts`), et
+ * le fichier avec. Ce n'est plus qu'un filet : ici, un `null` démonterait toute l'interface.
+ */
 export function withFormDefaults<S extends SectionName>(section: S, saved: unknown): SettingsSections[S] {
-  const present = Object.entries((saved ?? {}) as object).filter(([, value]) => value !== undefined);
-  return { ...FORM_DEFAULTS[section], ...Object.fromEntries(present) };
+  return mergeDefined(FORM_DEFAULTS[section], saved as Partial<SettingsSections[S]>);
 }
 
 /**
@@ -94,8 +98,7 @@ export function diffSection(before: object, next: object): Record<string, unknow
 
 /**
  * Ce que le panneau du chat reprend d'une section `rag` écrite, et seulement ce qui vient de changer :
- * son curseur de sources et son prompt personnalisé restent des réglages de session. Un `topK` vidé
- * (NaN) ne le suit pas : il passerait le `??` du main.
+ * son curseur de sources et son prompt personnalisé restent des réglages de session.
  */
 export function chatParamsFromRagDiff(diff: Record<string, unknown>): Partial<RAGQueryParams> {
   const params: Partial<RAGQueryParams> = {};
