@@ -6,11 +6,12 @@
  * avec la vraie vue, le vrai autosave, le vrai dialogue et **le fichier** sur le disque.
  *
  * Les accélérateurs natifs ne passent pas par Playwright : le menu est simulé par
- * `webContents.send`, ce que fait le main à la réception du raccourci.
+ * `webContents.send`, ce que fait le main à la réception du raccourci. Et Cmd+Maj+Q n'est jamais
+ * envoyé au système, où il ferme la session : il part de la page, vers la vue.
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
@@ -94,6 +95,46 @@ const sendMenu = (app: ElectronApplication, channel: string) =>
 
 const answerConfirm = (window: Page, answer: 'confirm' | 'cancel') =>
   window.locator(`.confirm-dialog .confirm-dialog-btn-${answer}`).click();
+
+const toMode = (window: Page, label: 'Brainstormer' | 'Écrire') =>
+  window.locator('.workspace-mode-bar').getByRole('button', { name: label }).click();
+
+const FORMAT_MENU = [
+  'menu:format-bold',
+  'menu:format-italic',
+  'menu:insert-link',
+  'menu:insert-citation',
+  'menu:insert-table',
+  'menu:insert-footnote',
+  'menu:insert-blockquote',
+];
+
+/** Le dernier mot de « …déjà enregistrés. », point exclu, sélectionné au clavier. */
+const LAST_WORD = 'enregistrés';
+async function selectLastWord(window: Page): Promise<void> {
+  await editor(window).locator('.cm-line', { hasText: LAST_WORD }).click();
+  await window.keyboard.press('End');
+  await window.keyboard.press('ArrowLeft');
+  for (let i = 0; i < LAST_WORD.length; i += 1) await window.keyboard.press('Shift+ArrowLeft');
+}
+
+/** Mod-Shift-<touche> tel que la vue le reçoit, sans passer par le système. */
+const shortcutToView = (window: Page, key: 'Q' | 'T' | 'F') =>
+  editor(window).evaluate((el, pressed) => {
+    const modifier = navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: pressed,
+        keyCode: pressed.charCodeAt(0),
+        shiftKey: true,
+        ...modifier,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, key);
+
+const noBareLf = (bytes: string) => expect(bytes.replace(/\r\n/g, '')).not.toContain('\n');
 
 test('livre : la bascule immédiate écrit chaque chapitre chez lui, et le retour garde l’annulation', async () => {
   const outcome = await launchApp();
@@ -362,5 +403,264 @@ test('deux projets : frappe pendant une écriture lente, puis ouverture de B : l
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(a.dir, { recursive: true, force: true });
     rmSync(b.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : le menu de mise en forme, le focus dans la saisie du chat, ne touche pas au document', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    const chat = window.locator('.right-panel textarea').first();
+    await chat.click();
+    await expect(chat).toBeFocused();
+    for (const channel of FORMAT_MENU) await sendMenu(app, channel);
+
+    await expect(chat).toBeFocused();
+    await window.waitForTimeout(4_000);
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+    await expect(editor(window).locator('.cm-line')).toHaveCount(4);
+
+    // Témoin : une commande du menu, le curseur dans le texte, écrit bien le fichier. Elle s'exécute
+    // encore deux fois (S15-1-22, écouteurs jamais retirés) : pas le gras, qui se défait, ni un
+    // résultat exact.
+    await selectLastWord(window);
+    await sendMenu(app, 'menu:insert-link');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toContain(`[${LAST_WORD}](`);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : le menu de mise en forme en Brainstorm n’ajoute rien, ni au retour en Écriture ni à la fermeture', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await toMode(window, 'Brainstormer');
+    await expect(window.locator('.codemirror-editor')).toHaveCount(0);
+    await window.locator('.center-panel textarea').first().click();
+    for (const channel of FORMAT_MENU) await sendMenu(app, channel);
+
+    await window.waitForTimeout(4_000);
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+
+    await toMode(window, 'Écrire');
+    await expect(editor(window)).toContainText('Huit mille mots');
+    await window.waitForTimeout(4_000);
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+
+    await app.close();
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : le curseur dans le texte, le menu agit encore quand la fenêtre a perdu le focus', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await selectLastWord(window);
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].blur();
+    });
+    // Playwright émule le focus : `document.hasFocus()` reste vrai, même après `blur()`. C'est pourtant
+    // ce qu'un clic dans un menu natif peut rendre faux, sous Windows et Linux.
+    await window.evaluate(() => {
+      document.hasFocus = () => false;
+    });
+    // Le résultat exact attend la fin de la double exécution du menu (S15-1-22).
+    await sendMenu(app, 'menu:insert-link');
+
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toContain(`[${LAST_WORD}](`);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : une frappe juste avant le passage en Brainstorm part sur le disque, sans revenir', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await typeAtEnd(window, 'Dernière phrase.');
+    await toMode(window, 'Brainstormer');
+    await expect(window.locator('.codemirror-editor')).toHaveCount(0);
+
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(`${ARTICLE}Dernière phrase.`);
+
+    // Et le retour rend le même texte, annulation comprise.
+    await toMode(window, 'Écrire');
+    await expect(editor(window)).toContainText('Dernière phrase.');
+    await editor(window).click();
+    await window.keyboard.press('ControlOrMeta+z');
+    await expect(editor(window)).not.toContainText('Dernière phrase.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : le message d’échec de l’autosave survit au passage en Brainstorm, et part avec la réussite', async () => {
+  test.skip(process.platform === 'win32', 'chmod ne retire pas l’écriture sous Windows');
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+  const failure = window.locator('.status-toast--error', { hasText: 'Enregistrement automatique impossible' });
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    chmodSync(article.document, 0o444);
+    await typeAtEnd(window, 'Dernière phrase.');
+    await expect(failure).toBeVisible({ timeout: 15_000 });
+
+    await toMode(window, 'Brainstormer');
+    await expect(window.locator('.codemirror-editor')).toHaveCount(0);
+    await expect(failure).toBeVisible();
+    expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+
+    // Toujours en Brainstorm : le disque revenu, les essais trouvent le texte.
+    chmodSync(article.document, 0o644);
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 30_000 })
+      .toBe(`${ARTICLE}Dernière phrase.`);
+    await expect(failure).toHaveCount(0);
+  } finally {
+    chmodSync(article.document, 0o644);
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article : la sélection n’est plus écrasée : lien au clavier, citation en bloc, et Cmd+Z rend tout', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    await selectLastWord(window);
+    await window.keyboard.press('ControlOrMeta+l');
+    // `url` est sélectionné : la frappe le remplace.
+    await window.keyboard.type('https://exemple.org');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(ARTICLE.replace(LAST_WORD, `[${LAST_WORD}](https://exemple.org)`));
+
+    // Le texte tapé ici et la mise en forme sont deux étapes de Cmd+Z.
+    await window.keyboard.press('ControlOrMeta+z');
+    await window.keyboard.press('ControlOrMeta+z');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(ARTICLE);
+
+    await shortcutToView(window, 'Q');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(ARTICLE.replace('Huit mille', '> Huit mille'));
+    await window.keyboard.press('ControlOrMeta+z');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toBe(ARTICLE);
+
+    // Par le menu : le texte reste, préfixé (deux fois tant que dure S15-1-22).
+    await sendMenu(app, 'menu:insert-blockquote');
+    await expect
+      .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
+      .toContain('> Huit mille mots déjà enregistrés.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});
+
+test('article CRLF : tableau, citation en bloc et note gardent un fichier uniforme, et Cmd+Z rend les octets', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const article = makeArticle();
+  const crlf = ARTICLE.replace(/\n/g, '\r\n');
+  writeFileSync(article.document, crlf);
+
+  try {
+    await openProject(app, window, article.projectJson);
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+
+    for (const key of ['T', 'Q', 'F'] as const) {
+      await selectLastWord(window);
+      await shortcutToView(window, key);
+      await expect.poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 }).not.toBe(crlf);
+      noBareLf(readFileSync(article.document, 'utf8'));
+      await window.keyboard.press('ControlOrMeta+z');
+      await expect.poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 }).toBe(crlf);
+    }
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
   }
 });
