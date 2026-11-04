@@ -16,6 +16,7 @@ import { useProjectStore } from '../../../stores/projectStore';
 import { EditorFileError, OutgoingSaveError, useEditorStore } from '../../../stores/editorStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useManuscriptStore } from '../../../stores/manuscriptStore';
+import { useFocusTrap } from '../../../hooks/useFocusTrap';
 import { logger } from '../../../utils/logger';
 import type { EditorFacade } from '@/editor/facade';
 
@@ -370,6 +371,29 @@ describe('renommer un chapitre', () => {
     cleanup();
     useEditorStore.setState({ filePath: null, editorFacade: null });
     vi.restoreAllMocks();
+  });
+
+  it('Échap annule le renommage, et lui seul : le panneau de recherche ouvert à côté reste', () => {
+    const closeSearch = vi.fn();
+    function SearchPanel() {
+      useFocusTrap({ active: true, onEscape: closeSearch, restoreFocus: false });
+      return null;
+    }
+    render(
+      <>
+        <ChapterNavigator />
+        <SearchPanel />
+      </>
+    );
+    fireEvent.doubleClick(screen.getByText('Un'));
+
+    fireEvent.keyDown(screen.getByPlaceholderText('book.titlePlaceholder'), { key: 'Escape' });
+
+    expect(screen.queryByPlaceholderText('book.titlePlaceholder')).toBeNull();
+    expect(closeSearch).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(closeSearch).toHaveBeenCalledTimes(1);
   });
 
   it('le chapitre ouvert : son titre suit dans le texte', async () => {

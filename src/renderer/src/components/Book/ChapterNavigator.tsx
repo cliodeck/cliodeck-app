@@ -307,7 +307,11 @@ export const ChapterNavigator: React.FC = () => {
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') void submitEditing();
-        if (e.key === 'Escape') cancelEditing();
+        if (e.key === 'Escape') {
+          // La touche s'arrête au renommage : le panneau de recherche, ouvert à côté, reste.
+          e.preventDefault();
+          cancelEditing();
+        }
       }}
       onBlur={() => void submitEditing()}
       placeholder={t('book.titlePlaceholder')}

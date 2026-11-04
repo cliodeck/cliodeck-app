@@ -9,7 +9,9 @@
  * indépendant de la ref ; seul le piégeage du Tab en dépend.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, fireEvent, cleanup } from '@testing-library/react';
+import { useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
+import { render, fireEvent, cleanup, act } from '@testing-library/react';
 import { isModalOpen, useFocusTrap } from '../useFocusTrap';
 
 afterEach(() => cleanup());
@@ -117,5 +119,293 @@ describe('useFocusTrap — isModalOpen', () => {
 
     second.unmount();
     expect(isModalOpen()).toBe(false);
+  });
+});
+
+describe('useFocusTrap — la pile', () => {
+  /** Une modale nommée : ses deux boutons disent à qui ils appartiennent. */
+  function Modale({
+    name,
+    active = true,
+    onEscape,
+    restoreFocus,
+    children,
+  }: {
+    name: string;
+    active?: boolean;
+    onEscape?: () => void;
+    restoreFocus?: boolean;
+    children?: ReactNode;
+  }) {
+    const ref = useFocusTrap({ active, onEscape, restoreFocus });
+    return (
+      <div ref={ref} data-testid={name}>
+        <button>{`${name}-premier`}</button>
+        <button>{`${name}-dernier`}</button>
+        {children}
+      </div>
+    );
+  }
+
+  /** Un panneau qui ne prend qu'Échap, sans conteneur : `ManuscriptSearch`. */
+  function Panneau({ onEscape }: { onEscape: () => void }) {
+    useFocusTrap({ active: true, onEscape, restoreFocus: false });
+    return <input aria-label="panneau" />;
+  }
+
+  const pressEscape = () => fireEvent.keyDown(document, { key: 'Escape' });
+  const pressTab = (shiftKey = false) => fireEvent.keyDown(document, { key: 'Tab', shiftKey });
+
+  describe('Échap', () => {
+    it('deux pièges actifs : seul le dernier répond', () => {
+      const dessous = vi.fn();
+      const dessus = vi.fn();
+      render(
+        <>
+          <Modale name="dessous" onEscape={dessous} />
+          <Modale name="dessus" onEscape={dessus} />
+        </>
+      );
+
+      pressEscape();
+
+      expect(dessus).toHaveBeenCalledTimes(1);
+      expect(dessous).not.toHaveBeenCalled();
+    });
+
+    it('le dernier démonté, le suivant répond', () => {
+      const dessous = vi.fn();
+      const dessus = vi.fn();
+      const { rerender } = render(
+        <>
+          <Modale name="dessous" onEscape={dessous} />
+          <Modale name="dessus" onEscape={dessus} />
+        </>
+      );
+
+      rerender(<Modale name="dessous" onEscape={dessous} />);
+      pressEscape();
+
+      expect(dessous).toHaveBeenCalledTimes(1);
+      expect(dessus).not.toHaveBeenCalled();
+    });
+
+    it('un sommet sans onEscape garde la touche : celui du dessous ne se ferme pas', () => {
+      const dessous = vi.fn();
+      render(
+        <>
+          <Modale name="dessous" onEscape={dessous} />
+          <Modale name="dessus" />
+        </>
+      );
+
+      pressEscape();
+
+      expect(dessous).not.toHaveBeenCalled();
+    });
+
+    it('activés dans le même commit, l’enfant est au-dessus de son parent', () => {
+      // Les effets enfants passent avant les parents : empilés dans cet ordre,
+      // le parent se retrouverait au sommet et Échap le fermerait lui.
+      const parent = vi.fn();
+      const enfant = vi.fn();
+      render(
+        <Modale name="parent" onEscape={parent}>
+          <Modale name="enfant" onEscape={enfant} />
+        </Modale>
+      );
+
+      pressEscape();
+
+      expect(enfant).toHaveBeenCalledTimes(1);
+      expect(parent).not.toHaveBeenCalled();
+    });
+
+    it('un piège inactif ne garde pas sa place : réactivé, il passe au sommet', () => {
+      const premier = vi.fn();
+      const second = vi.fn();
+      const scene = (actif: boolean) => (
+        <>
+          <Modale name="premier" active={actif} onEscape={premier} />
+          <Modale name="second" onEscape={second} />
+        </>
+      );
+      const { rerender } = render(scene(true));
+
+      rerender(scene(false));
+      pressEscape();
+      expect(second).toHaveBeenCalledTimes(1);
+      expect(premier).not.toHaveBeenCalled();
+
+      rerender(scene(true));
+      pressEscape();
+      expect(premier).toHaveBeenCalledTimes(1);
+      expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    it('un onEscape fraîchement changé ne fait perdre sa place à aucun des deux', () => {
+      const scene = (dessous: () => void, dessus: () => void) => (
+        <>
+          <Modale name="dessous" onEscape={dessous} />
+          <Modale name="dessus" onEscape={dessus} />
+        </>
+      );
+      const dessous = vi.fn();
+      const dessus = vi.fn();
+      const { rerender } = render(scene(vi.fn(), vi.fn()));
+
+      // Le piège du dessous repose son écouteur : il passe APRÈS celui du dessus sur `document`.
+      rerender(scene(dessous, dessus));
+      pressEscape();
+
+      expect(dessus).toHaveBeenCalledTimes(1);
+      expect(dessous).not.toHaveBeenCalled();
+    });
+
+    it('l’écouteur du dessous passe après celui du sommet : le sommet fermé, il ne se croit pas au sommet', () => {
+      // Une vraie frappe : entre deux écouteurs, le navigateur vide les microtâches, et React a
+      // déjà démonté le piège qui vient de répondre. `fireEvent` ne laisse aucune microtâche
+      // passer : `flushSync` fait ce travail au même moment.
+      const reglages = vi.fn();
+      function Scene({ onReglages }: { onReglages: () => void }) {
+        const [question, setQuestion] = useState(true);
+        return (
+          <>
+            <Modale name="reglages" onEscape={onReglages} />
+            {question && <Modale name="question" onEscape={() => flushSync(() => setQuestion(false))} />}
+          </>
+        );
+      }
+      const { rerender, queryByTestId } = render(<Scene onReglages={vi.fn()} />);
+      // Comme `onClose` en ligne des Réglages, qui change à chaque rendu de MainLayout.
+      rerender(<Scene onReglages={reglages} />);
+
+      pressEscape();
+
+      expect(queryByTestId('question')).toBeNull();
+      expect(reglages).not.toHaveBeenCalled();
+
+      pressEscape();
+      expect(reglages).toHaveBeenCalledTimes(1);
+    });
+
+    it('un élément plus proche a déjà pris la touche : le piège ne ferme rien', () => {
+      // La popup de note, le panneau de recherche et les propositions de CM6 appellent
+      // `preventDefault` sur leur Échap, avant que l'événement n'atteigne `document`.
+      const onEscape = vi.fn();
+      const { getByLabelText } = render(
+        <Modale name="modale" onEscape={onEscape}>
+          <input
+            aria-label="popup"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') e.preventDefault();
+            }}
+          />
+        </Modale>
+      );
+
+      fireEvent.keyDown(getByLabelText('popup'), { key: 'Escape' });
+      expect(onEscape).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(onEscape).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Tab', () => {
+    it('ne boucle que dans le sommet', () => {
+      const { getByText } = render(
+        <>
+          <Modale name="dessous" onEscape={vi.fn()} />
+          <Modale name="dessus" onEscape={vi.fn()} />
+        </>
+      );
+      getByText('dessus-dernier').focus();
+
+      pressTab();
+
+      expect(document.activeElement).toBe(getByText('dessus-premier'));
+    });
+
+    it('le focus est resté dans la modale du dessous : Tab le ramène au sommet au lieu de le perdre', () => {
+      // HelpModal, ou l'éditeur de recette, s'ouvrent sans prendre le focus : il reste sur leur
+      // déclencheur, dans les Réglages. Le piège des Réglages ne répond plus : sans ce retour,
+      // le navigateur le ferait sortir de la modale, vers la page derrière.
+      const { getByText } = render(
+        <>
+          <Modale name="dessous" onEscape={vi.fn()} />
+          <Modale name="dessus" onEscape={vi.fn()} />
+        </>
+      );
+      getByText('dessous-dernier').focus();
+
+      pressTab();
+      expect(document.activeElement).toBe(getByText('dessus-premier'));
+
+      getByText('dessous-premier').focus();
+      pressTab(true);
+      expect(document.activeElement).toBe(getByText('dessus-dernier'));
+    });
+
+    it('un panneau sans conteneur ouvert après une modale ne lui prend ni Tab ni Échap', () => {
+      const modale = vi.fn();
+      const panneau = vi.fn();
+      const { getByText } = render(
+        <>
+          <Modale name="modale" onEscape={modale} />
+          <Panneau onEscape={panneau} />
+        </>
+      );
+      getByText('modale-dernier').focus();
+
+      pressTab();
+      expect(document.activeElement).toBe(getByText('modale-premier'));
+
+      pressEscape();
+      expect(modale).toHaveBeenCalledTimes(1);
+      expect(panneau).not.toHaveBeenCalled();
+    });
+
+    it('un panneau seul garde Échap et laisse circuler Tab', () => {
+      const panneau = vi.fn();
+      const { getByLabelText } = render(<Panneau onEscape={panneau} />);
+      getByLabelText('panneau').focus();
+
+      const event = fireEvent.keyDown(document, { key: 'Tab' });
+
+      // `fireEvent` rend faux quand `preventDefault` a été appelé : Tab reste au navigateur.
+      expect(event).toBe(true);
+      expect(document.activeElement).toBe(getByLabelText('panneau'));
+
+      pressEscape();
+      expect(panneau).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('le retour du focus, sur deux niveaux', () => {
+    function DeuxNiveaux() {
+      const [question, setQuestion] = useState(false);
+      return (
+        <>
+          <Modale name="reglages" onEscape={vi.fn()}>
+            <button onClick={() => setQuestion(true)}>reinitialiser</button>
+          </Modale>
+          <Modale name="question" active={question} onEscape={() => setQuestion(false)} />
+        </>
+      );
+    }
+
+    it('Échap sur la question rend le focus au déclencheur, dans la modale du dessous', () => {
+      const { getByText } = render(<DeuxNiveaux />);
+      const declencheur = getByText('reinitialiser');
+      declencheur.focus();
+
+      fireEvent.click(declencheur);
+      act(() => getByText('question-premier').focus());
+
+      pressEscape();
+
+      expect(document.activeElement).toBe(declencheur);
+    });
   });
 });
