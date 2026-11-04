@@ -13,9 +13,12 @@ import type { MouseEvent } from 'react';
  *
  * Une variable de module suffit : il n'y a qu'un pointeur, donc qu'un
  * geste en cours. Ce n'est pas un hook, pour pouvoir servir dans les
- * composants qui rendent `null` avant d'atteindre leur JSX.
+ * composants qui rendent `null` avant d'atteindre leur JSX. Elle retient
+ * l'élément pressé, pas un booléen : une modale ouverte dans une autre
+ * (l'éditeur de recette dans les Réglages) voit le `mousedown` remonter
+ * jusqu'au fond extérieur, qui n'en est pas la cible et aurait tout effacé.
  */
-let pressedOnBackdrop = false;
+let pressedOn: EventTarget | null = null;
 
 export function backdropClose(onClose: () => void): {
   onMouseDown: (e: MouseEvent<HTMLElement>) => void;
@@ -23,11 +26,11 @@ export function backdropClose(onClose: () => void): {
 } {
   return {
     onMouseDown: (e) => {
-      pressedOnBackdrop = e.target === e.currentTarget;
+      pressedOn = e.target;
     },
     onClick: (e) => {
-      const startedHere = pressedOnBackdrop;
-      pressedOnBackdrop = false;
+      const startedHere = pressedOn === e.currentTarget;
+      pressedOn = null;
       if (startedHere && e.target === e.currentTarget) onClose();
     },
   };

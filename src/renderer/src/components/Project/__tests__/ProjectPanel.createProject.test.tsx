@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 
 import { ProjectPanel } from '../ProjectPanel';
+import { AlertDialog } from '../../common/AlertDialog';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
 import { useDialogStore } from '../../../stores/dialogStore';
@@ -125,5 +126,119 @@ describe('ProjectPanel : créer un projet', () => {
     expect(create).not.toHaveBeenCalled();
     expect(screen.queryByTestId('onboarding')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('projectPanel.namePlaceholder')).toHaveValue('Neuf');
+  });
+});
+
+describe('ProjectPanel : fermer la modale de création', () => {
+  const nameField = () => screen.queryByPlaceholderText('projectPanel.namePlaceholder');
+  const overlay = () => document.querySelector('.create-project-modal') as HTMLElement;
+  const pressEscape = () =>
+    act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  const openModal = () =>
+    act(async () => {
+      fireEvent.click(screen.getByTitle('project.newProject'));
+    });
+
+  /** Remplit la modale, sans cliquer sur Créer. */
+  async function fillModal(name: string): Promise<void> {
+    await openModal();
+    fireEvent.change(nameField() as HTMLElement, { target: { value: name } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('actions.browse'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  it('Échap ferme sans rien perdre : rouverte, elle a gardé le nom et le dossier', async () => {
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+    await fillModal('Neuf');
+
+    await pressEscape();
+    expect(nameField()).not.toBeInTheDocument();
+    expect(dialogs().confirmOpen).toBe(false);
+
+    await openModal();
+    expect(nameField()).toHaveValue('Neuf');
+    expect(screen.getByPlaceholderText('projectPanel.pathPlaceholder')).toHaveValue(PARENT);
+  });
+
+  it('Échap rend le focus au bouton « Nouveau projet », pas au corps de la page', async () => {
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+    const button = screen.getByTitle('project.newProject');
+    button.focus();
+    await openModal();
+    expect(document.activeElement).toBe(nameField());
+
+    await pressEscape();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('un message par-dessus : Échap ne ferme que lui, et la saisie reste à l’écran', async () => {
+    useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
+    await act(async () => {
+      render(
+        <>
+          <ProjectPanel />
+          <AlertDialog />
+        </>
+      );
+    });
+    await submitCreation('Neuf');
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    await pressEscape();
+
+    expect(dialogs().alertOpen).toBe(false);
+    expect(nameField()).toHaveValue('Neuf');
+  });
+
+  it('pendant la création, ni Échap ni le fond ne ferment : Annuler est désactivé pour la même raison', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    create.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+    await submitCreation('Neuf');
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('actions.cancel')).toBeDisabled();
+
+    await pressEscape();
+    expect(nameField()).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.mouseDown(overlay());
+      fireEvent.click(overlay());
+    });
+    expect(nameField()).toBeInTheDocument();
+
+    await act(async () => {
+      finish({ success: false, error: 'non' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it('Tab ne sort pas de la modale', async () => {
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+    await openModal();
+    const cancel = screen.getByText('actions.cancel');
+    const submit = screen.getByText('actions.create');
+    // « Créer » est désactivé tant que les champs sont vides : Annuler est le dernier focalisable.
+    expect(submit).toBeDisabled();
+    cancel.focus();
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(overlay().contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(cancel);
   });
 });

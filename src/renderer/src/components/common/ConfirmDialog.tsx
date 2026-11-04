@@ -14,6 +14,7 @@ export function ConfirmDialog() {
     active: confirmOpen,
     onEscape: () => resolveConfirm(false),
     restoreFocus: true,
+    aboveModals: true,
   })
 
   // Le focus initial va sur ANNULER, jamais sur Confirmer.

@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { X, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useDialogStore } from '../../stores/dialogStore';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -87,6 +89,26 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   } | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
+  /** Les valeurs de départ, puis celles de la dernière exécution : ce qui ne se perd pas à fermer. */
+  const [lastInputs, setLastInputs] = useState<Record<string, unknown>>({});
+
+  // Pendant l'exécution, le fond ne ferme rien : la recette continue côté main, et la fenêtre
+  // partirait avec son journal. Mais une étape bloquée ne doit pas obliger à quitter l'app, et rien
+  // d'autre ne permet encore d'annuler : Échap et le X ferment, après une question qui dit que la
+  // recette continue. Hors exécution, le fond et Échap sont des gestes involontaires, comme dans
+  // l'assistant : ils ne ferment que si rien de saisi ne s'y perd. Le X reste, lui, un geste franc.
+  const paramsToLose = Object.keys(inputs).some((key) => inputs[key] !== lastInputs[key]);
+  const closeUnlessLosing = running || paramsToLose ? undefined : onClose;
+  const askToCloseWhileRunning = () => {
+    void useDialogStore
+      .getState()
+      .showConfirm(t('recipeRun.closeWhileRunning'), t('recipeRun.closeWhileRunningTitle'))
+      .then((close) => {
+        if (close) onClose();
+      });
+  };
+  const trapRef = useFocusTrap({ active: true, onEscape: running ? askToCloseWhileRunning : closeUnlessLosing });
+
   useEffect(() => {
     const r = api();
     if (!r) {
@@ -103,6 +125,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           else initial[k] = '';
         }
         setInputs(initial);
+        setLastInputs(initial);
       } else {
         setLoadError(res.error ?? t('recipeRun.errors.loadFailed'));
       }
@@ -149,6 +172,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
     const r = api();
     if (!r || !recipe) return;
     setRunning(true);
+    setLastInputs(inputs);
     setEvents([]);
     setResult(null);
     try {
@@ -227,8 +251,9 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
 
   return (
     <div
+      ref={trapRef}
       className="settings-modal"
-      {...backdropClose(onClose)}
+      {...backdropClose(() => closeUnlessLosing?.())}
       style={{ zIndex: 1100 }}
     >
       <div
@@ -248,7 +273,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
               </span>
             )}
           </h3>
-          <button className="close-btn" onClick={onClose} disabled={running}>
+          <button className="close-btn" onClick={running ? askToCloseWhileRunning : onClose}>
             <X size={20} />
           </button>
         </div>

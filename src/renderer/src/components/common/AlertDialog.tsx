@@ -14,6 +14,7 @@ export function AlertDialog() {
     active: alertOpen,
     onEscape: closeAlert,
     restoreFocus: true,
+    aboveModals: true,
   })
 
   // Focus the OK button when dialog opens — et à chaque demande : deux alertes

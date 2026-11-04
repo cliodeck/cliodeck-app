@@ -9,7 +9,7 @@
  * builtin recipes open in read-only mode.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   X,
@@ -24,6 +24,8 @@ import {
 import { YamlEditor } from '../common/YamlEditor';
 import yaml from 'js-yaml';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useDialogStore } from '../../stores/dialogStore';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -76,11 +78,14 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   const { t } = useTranslation();
   const [mode, setMode] = useState<'form' | 'yaml'>('form');
   const [rawYaml, setRawYaml] = useState<string>('');
+  /** Le texte du fichier, tel que chargé ou enregistré. */
+  const [savedYaml, setSavedYaml] = useState<string>('');
+  /** La dernière modification vient du formulaire, pas du YAML. */
+  const [editedByForm, setEditedByForm] = useState(false);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
   const readOnly = scope === 'builtin';
 
@@ -93,6 +98,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
     void r.readYaml(scope, fileName).then((res) => {
       if (res.success && res.yaml) {
         setRawYaml(res.yaml);
+        setSavedYaml(res.yaml);
         try {
           const parsed = yaml.load(res.yaml) as Recipe;
           setRecipe(normalizeRecipe(parsed));
@@ -122,10 +128,41 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
     return yaml.dump(r, { lineWidth: 120, noRefs: true, quotingType: '"' });
   }, []);
 
+  // Modifiée, c'est-à-dire différente du fichier. Le formulaire réécrit tout le YAML à sa façon : un
+  // champ revenu à sa valeur redonne la réécriture du fichier, pas son texte. Cette tolérance ne vaut
+  // que pour lui : dans le YAML, la même réécriture a été voulue (un commentaire retiré, par exemple).
+  const dirty = useMemo(() => {
+    if (readOnly || rawYaml === savedYaml) return false;
+    if (!editedByForm) return true;
+    try {
+      return rawYaml !== recipeToYaml(normalizeRecipe(yaml.load(savedYaml)));
+    } catch {
+      return true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- normalizeRecipe ne dépend de rien
+  }, [readOnly, rawYaml, savedYaml, editedByForm, recipeToYaml]);
+
+  // Une seule question à la fois, et refuser laisse tout en place. Échap, le X et le fond passent
+  // tous ici : sans cela, Échap fermait les Réglages et la saisie partait avec eux, sans un mot.
+  const askingRef = useRef(false);
+  const requestClose = useCallback(async () => {
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    if (askingRef.current) return;
+    askingRef.current = true;
+    const discard = await useDialogStore.getState().showConfirm(t('recipeEditor.discardConfirm'));
+    askingRef.current = false;
+    if (discard) onClose();
+  }, [dirty, onClose, t]);
+
+  const trapRef = useFocusTrap({ active: true, onEscape: () => void requestClose() });
+
   const syncFormToYaml = useCallback(
     (r: Recipe) => {
       setRawYaml(recipeToYaml(r));
-      setDirty(true);
+      setEditedByForm(true);
     },
     [recipeToYaml]
   );
@@ -133,7 +170,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   const handleYamlChange = useCallback((value: string | undefined) => {
     if (value === undefined) return;
     setRawYaml(value);
-    setDirty(true);
+    setEditedByForm(false);
     try {
       const parsed = yaml.load(value) as Recipe;
       setRecipe(normalizeRecipe(parsed));
@@ -152,7 +189,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
     try {
       const res = await r.save(fileName, rawYaml);
       if (res.success) {
-        setDirty(false);
+        setSavedYaml(rawYaml);
         onSaved?.();
       } else {
         setSaveError(res.error ?? 'Save failed');
@@ -225,7 +262,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
   };
 
   return (
-    <div className="settings-modal" {...backdropClose(onClose)} style={{ zIndex: 1100 }}>
+    <div ref={trapRef} className="settings-modal" {...backdropClose(() => void requestClose())} style={{ zIndex: 1100 }}>
       <div
         className="settings-content"
         role="dialog"
@@ -242,7 +279,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
                 ({t('recipeEditor.readOnly')})
               </span>
             )}
-            {dirty && !readOnly && (
+            {dirty && (
               <span style={{ fontSize: 11, color: 'var(--color-accent)', fontWeight: 400 }}>
                 ({t('recipeEditor.unsaved')})
               </span>
@@ -277,7 +314,7 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
                 <Save size={14} /> {t('recipeEditor.save')}
               </button>
             )}
-            <button className="close-btn" onClick={onClose}>
+            <button className="close-btn" onClick={() => void requestClose()}>
               <X size={20} />
             </button>
           </div>

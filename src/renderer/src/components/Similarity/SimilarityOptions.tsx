@@ -12,6 +12,7 @@ import { CollectionMultiSelect } from '../Chat/CollectionMultiSelect';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import './SimilarityOptions.css';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface SimilarityOptionsProps {
   onClose: () => void;
@@ -20,6 +21,8 @@ interface SimilarityOptionsProps {
 export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose }) => {
   const { t } = useTranslation('common');
   const { options, setOptions } = useSimilarityStore();
+  // Les options s'appliquent à mesure : Échap vaut le bouton Terminé, rien n'est perdu.
+  const trapRef = useFocusTrap({ active: true, onEscape: onClose });
 
   // Collections Zotero pour le filtre (#21) : le backend acceptait
   // options.collectionFilter depuis toujours, seul ce contrôle manquait.
@@ -63,7 +66,7 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
   };
 
   return (
-    <div className="similarity-options-overlay" {...backdropClose(onClose)}>
+    <div ref={trapRef} className="similarity-options-overlay" {...backdropClose(onClose)}>
       <div className="similarity-options-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="similarity-options-header">

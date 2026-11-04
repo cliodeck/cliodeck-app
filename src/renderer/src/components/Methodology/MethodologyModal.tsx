@@ -55,7 +55,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
     if (!feature) return null;
 
     return (
-      <div ref={trapRef} className="feature-detail">
+      <div className="feature-detail">
         <h2>{feature.title}</h2>
         <p className="feature-description">{feature.description}</p>
 
@@ -95,7 +95,7 @@ export const MethodologyModal: React.FC<Props> = ({ isOpen, onClose, initialFeat
   };
 
   return (
-    <div className="methodology-modal-overlay" {...backdropClose(onClose)}>
+    <div ref={trapRef} className="methodology-modal-overlay" {...backdropClose(onClose)}>
       <div
         className="methodology-modal"
         role="dialog"

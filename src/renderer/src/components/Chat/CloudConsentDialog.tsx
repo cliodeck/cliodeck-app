@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { CloudOff, Shield } from 'lucide-react';
 import './CloudConsentDialog.css';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface Props {
   providerName: string;
@@ -25,9 +26,11 @@ export const CloudConsentDialog: React.FC<Props> = ({
   onCancel,
 }) => {
   const { t } = useTranslation('common');
+  // Échap vaut le refus, comme le fond : seul le bouton d'accord envoie quoi que ce soit.
+  const trapRef = useFocusTrap({ active: true, onEscape: onCancel });
 
   return (
-    <div className="cloud-consent-overlay" {...backdropClose(onCancel)}>
+    <div ref={trapRef} className="cloud-consent-overlay" {...backdropClose(onCancel)}>
       <div className="cloud-consent-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="cloud-consent-dialog__icon">
           <CloudOff size={32} />

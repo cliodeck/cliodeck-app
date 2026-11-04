@@ -12,6 +12,7 @@ import { ZoteroProjectSettings } from './ZoteroProjectSettings';
 import { OnboardingWizard } from './OnboardingWizard';
 import './ProjectPanel.css';
 import { backdropClose } from '../../utils/backdropClose';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { createProjectErrorMessage } from './create-project-error';
 import {
   appendToContext,
@@ -60,6 +61,12 @@ export const ProjectPanel: React.FC = () => {
   const [newProjectType, setNewProjectType] = useState<'article' | 'book' | 'presentation'>('article');
   const [newProjectPath, setNewProjectPath] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+
+  // Fermer ne perd rien tout de suite : le nom et le dossier restent ici, et la modale rouverte les
+  // retrouve, tant que ce panneau reste monté (changer d'onglet à gauche les emporte, après Annuler
+  // comme après Échap). Pendant la création, rien ne ferme, comme Annuler, désactivé.
+  const closeCreateModal = isCreating ? undefined : () => setShowCreateModal(false);
+  const createModalRef = useFocusTrap({ active: showCreateModal, onEscape: closeCreateModal });
 
   useEffect(() => {
     loadRecentProjects();
@@ -440,7 +447,7 @@ export const ProjectPanel: React.FC = () => {
 
       {/* Create Project Modal */}
       {showCreateModal && (
-        <div className="create-project-modal" {...backdropClose(() => setShowCreateModal(false))}>
+        <div ref={createModalRef} className="create-project-modal" {...backdropClose(() => closeCreateModal?.())}>
           <div className="create-project-content" onClick={(e) => e.stopPropagation()}>
             <h3>{t('project.createNewProject')}</h3>
 

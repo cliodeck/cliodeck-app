@@ -1554,6 +1554,7 @@
   "recipeEditor": {
     "readOnly": "lecture seule",
     "unsaved": "non enregistré",
+    "discardConfirm": "Cette recette a des modifications non enregistrées. Les abandonner ? Elles seront perdues.",
     "modeForm": "Formulaire",
     "modeYaml": "YAML",
     "save": "Enregistrer",
@@ -1702,6 +1703,8 @@
     }
   },
   "recipeRun": {
+    "closeWhileRunningTitle": "Fermer cette fenêtre ?",
+    "closeWhileRunning": "La recette continue de tourner : fermer cette fenêtre ne l'arrête pas, et vous n'en verrez plus le déroulement.",
     "errors": {
       "noFusionApi": "Fusion API non exposée.",
       "loadFailed": "Chargement impossible.",

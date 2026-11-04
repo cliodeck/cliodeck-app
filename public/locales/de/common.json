@@ -1554,6 +1554,7 @@
   "recipeEditor": {
     "readOnly": "schreibgeschützt",
     "unsaved": "nicht gespeichert",
+    "discardConfirm": "Dieses Rezept hat nicht gespeicherte Änderungen. Verwerfen? Sie gehen verloren.",
     "modeForm": "Formular",
     "modeYaml": "YAML",
     "save": "Speichern",
@@ -1702,6 +1703,8 @@
     }
   },
   "recipeRun": {
+    "closeWhileRunningTitle": "Dieses Fenster schließen?",
+    "closeWhileRunning": "Das Rezept läuft weiter: Das Schließen dieses Fensters hält es nicht an, und Sie sehen seinen Ablauf nicht mehr.",
     "errors": {
       "noFusionApi": "Fusion-API nicht exponiert.",
       "loadFailed": "Laden nicht möglich.",

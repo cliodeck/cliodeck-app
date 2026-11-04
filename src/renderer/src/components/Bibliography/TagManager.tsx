@@ -52,6 +52,8 @@ export const TagManager: React.FC<TagManagerProps> = ({
         addTag(inputValue);
       }
     } else if (e.key === 'Escape') {
+      // S'il y avait à vider, la touche s'arrête ici : le panneau de recherche, ouvert à côté, reste.
+      if (inputValue || showSuggestions) e.preventDefault();
       setShowSuggestions(false);
       setInputValue('');
     } else if (e.key === 'Backspace' && inputValue === '' && tags.length > 0) {
