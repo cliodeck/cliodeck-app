@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useStickyWarning } from './useStickyWarning';
 
 /**
- * Prévient, sous macOS 12 ou 13, qu'Ollama ne peut pas y être installé, et
+ * Prévient, sous macOS 13, qu'Ollama ne peut pas y être installé, et
  * dit ce qui reste pour une IA locale.
  *
  * ClioDeck y démarre, mais Ollama exige macOS 14 : on ne l'apprenait qu'en

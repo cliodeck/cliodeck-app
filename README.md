@@ -10,7 +10,7 @@ Desktop application (Electron + React + TypeScript) for the full historian workf
 
 **[Download v1.0.0-rc.5](https://github.com/cliodeck/cliodeck-app/releases/tag/v1.0.0-rc.5)** — release candidate.
 
-- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app. ClioDeck starts on macOS 12, but **Ollama needs macOS 14 (Sonoma) or later**. On an older macOS, local AI means the embedded models (their engine is built for macOS 14 too; the generation model did answer on macOS 12 when tried, with no guarantee below), or use a cloud provider
+- **macOS** — DMG for Apple Silicon and Intel, **signed and notarized by Apple**: it opens like any downloaded app. ClioDeck needs **macOS 13 (Ventura) or later** (macOS 12 was dropped with Electron 45; on macOS 12, use v1.0.0-rc.5 or earlier), and **Ollama needs macOS 14 (Sonoma) or later**. On macOS 13, local AI means the embedded models (their engine is built for macOS 14 too; generation and embeddings did answer on macOS 12 when tried, with no guarantee below 14), or use a cloud provider
 - **Linux** — AppImage and `.deb` for **x86_64** (`uname -m` prints `x86_64`); no arm64 build. On Ubuntu 24.04 and later, prefer the `.deb`: the AppImage cannot use Chromium's sandbox there
 - **Windows** — no build shipped; the code should work on Windows but is **untested**
 
@@ -146,7 +146,7 @@ Full documentation lives in the **[ClioDeck Wiki](https://github.com/cliodeck/cl
 
 | Layer | Technologies |
 |-------|--------------|
-| **Frontend** | Electron 43, React 18, TypeScript, CodeMirror 6 / Lezer, Zustand, Vite |
+| **Frontend** | Electron 45, React 18, TypeScript, CodeMirror 6 / Lezer, Zustand, Vite |
 | **Backend** | Node.js, better-sqlite3, hnswlib-node, pdfjs-dist, chokidar |
 | **LLM layer** | Embedded (`node-llama-cpp`), Ollama, OpenAI-compatible, Anthropic, Mistral, Gemini (typed provider registry) |
 | **Embeddings** | nomic-embed-text, mxbai-embed-large, Nomic Embed v2 (embedded), OpenAI / Mistral / Gemini embeddings |

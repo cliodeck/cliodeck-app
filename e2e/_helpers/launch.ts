@@ -89,7 +89,14 @@ export async function launchApp(
   });
 
   const window = await app.firstWindow({ timeout: 30_000 });
-  await window.waitForLoadState('domcontentloaded');
+  // Depuis Electron 45, la première page rendue est le document vide de la
+  // fenêtre, avant que `loadFile` ne charge l'app : attendre son seul
+  // `domcontentloaded` rendait la main avant le montage de React, et un
+  // événement envoyé aussitôt (`show-settings-modal`) se perdait.
+  await window.waitForURL((url) => url.protocol === 'file:' || url.protocol.startsWith('http'), {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000,
+  });
   await stubLeaveDialog(app, join(userDataDir, 'e2e-leave-dialogs.jsonl'));
 
   return { kind: 'ok', value: { app, window, userDataDir } };
