@@ -88,12 +88,18 @@ describe('maskAPIKey', () => {
   });
 });
 
+// Fausses clés au format réel, assemblées en morceaux : écrites d'un seul
+// tenant, le secret scanning de GitHub les signale comme des fuites.
+const FAKE_ANTHROPIC_KEY = 'sk-ant-' + 'api03-abcdefghijklmnopqrstuvwxyz0123456789';
+const FAKE_OPENAI_KEY = 'sk-' + 'proj-abcdefghijklmnopqrstuvwxyz';
+const FAKE_GEMINI_KEY = 'AI' + 'zaSyA1234567890abcdefghijklmnopqrstuv';
+
 describe('isMaskedKey', () => {
   it('reconnaît tout ce que maskAPIKey produit', () => {
     for (const key of [
-      'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789',
-      'sk-proj-abcdefghijklmnopqrstuvwxyz',
-      'AIzaSyA1234567890abcdefghijklmnopqrstuv',
+      FAKE_ANTHROPIC_KEY,
+      FAKE_OPENAI_KEY,
+      FAKE_GEMINI_KEY,
       'P9NiZqmistral32caracteresABCDEFG',
       'court',
       '123456789012',
@@ -108,10 +114,10 @@ describe('isMaskedKey', () => {
 
   it('ne prend pour un masque aucune forme réelle de clé', () => {
     for (const key of [
-      'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789',
-      'sk-proj-abcdefghijklmnopqrstuvwxyz',
+      FAKE_ANTHROPIC_KEY,
+      FAKE_OPENAI_KEY,
       'sk-abcdefghijklmnop',
-      'AIzaSyA1234567890abcdefghijklmnopqrstuv',
+      FAKE_GEMINI_KEY,
       'P9NiZqmistral32caracteresABCDEFG',
       'P9NiZqZoteroKey24Caracte',
       // 12 caractères ou moins : leur masque est `****`, eux n'en sont pas un.

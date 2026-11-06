@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, ChevronDown, Search, Shrink, Timer, Waypoints } from 'lucide-react';
+import { AlertTriangle, Bot, ChevronDown, Search, Shrink, Timer, Waypoints } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { RAGExplanation } from '../../stores/chatStore';
 
@@ -45,7 +45,12 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
   return (
     <div className="message-explanation">
       {explanation.search.retrievalStatus && (
-        <div role="status" className="retrieval-warning">
+        <div
+          role="status"
+          className="retrieval-warning"
+          data-status={explanation.search.retrievalStatus}
+        >
+          <AlertTriangle size={14} aria-hidden="true" />
           {explanation.search.retrievalStatus === 'empty'
             ? t('chat.explanation.retrievalEmpty', 'Aucune source pertinente trouvée.')
             : explanation.search.retrievalStatus === 'partial'

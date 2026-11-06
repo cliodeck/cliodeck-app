@@ -868,11 +868,12 @@ class FusionChatService {
             });
             const ownHits = manuscriptHits ?? [];
             const noteHits = readingNoteHits ?? [];
-            const attempted = stats.search.corpora.filter((corpus) => corpus.attempted);
-            const failures = attempted.filter((corpus) => !corpus.ok);
             const noHits = hits.length === 0 && ownHits.length === 0 && noteHits.length === 0;
-            if (noHits && attempted.length === 0) return null;
+            if (noHits && !stats.search.corpora.some((corpus) => corpus.attempted)) return null;
+            // Un seul calcul des échecs : le statut affiché et les consignes
+            // au modèle ne peuvent pas diverger.
             const status = retrievalStatus(stats.search.corpora, noHits);
+            const someFailed = status === 'partial' || status === 'failed';
 
             // --- Compression du contexte (#28) --------------------------
             // ContextCompressor existait depuis la fusion sans aucun site
@@ -948,12 +949,19 @@ class FusionChatService {
             // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
             // modèle que bibliographie et archives ont été interrogées en vain
             // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
-            // porte alors le périmètre.
-            const sourcesBlock = ownOnly || (effectiveHits.length === 0 && failures.length > 0)
+            // porte alors le périmètre. Sources en échec sans extrait : pas
+            // d'en-tête non plus (elles n'ont pas répondu « rien »), mais le
+            // texte de l'utilisateur qui suit garde son préambule — sinon le
+            // modèle peut le citer comme une source.
+            const sourcesBlock = ownOnly
               ? ''
-              : formatContextAsSystemPrompt(effectiveHits, promptLang, {
-                  ownBlocksFollow: ownHits.length + noteHits.length > 0,
-                });
+              : effectiveHits.length === 0 && someFailed
+                ? ownHits.length + noteHits.length > 0
+                  ? CONTEXT_TEXT[promptLang].ownPassagesNotSources
+                  : ''
+                : formatContextAsSystemPrompt(effectiveHits, promptLang, {
+                    ownBlocksFollow: ownHits.length + noteHits.length > 0,
+                  });
             const manuscriptBlock = formatManuscriptContext(ownHits, promptLang, manuscript.wording);
             const notesBlock = formatReadingNotesContext(noteHits, promptLang, readingNotes.wording);
             const contextChars = {
@@ -992,12 +1000,12 @@ class FusionChatService {
 
             return {
               systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock +
-                (failures.length > 0
+                (someFailed
                   ? (promptLang === 'fr'
                     ? '\nCertaines recherches ont échoué. Les éléments disponibles peuvent être incomplets ; ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.'
                     : '\nSome requested source searches failed. The available evidence may be incomplete; do not imply that failed sources were consulted or invent citations.')
                   : '') +
-                (noHits && (ownOnly || failures.length > 0)
+                (noHits && (ownOnly || someFailed)
                   ? (promptLang === 'fr'
                     ? '\nAucun extrait n’a été fourni. Ne prétends pas disposer de preuves et ne fabrique pas de citations.'
                     : '\nNo evidence was retrieved. Do not imply that evidence was provided or invent citations.')
@@ -1074,6 +1082,7 @@ class FusionChatService {
         retriever,
         retrievalOptions: args.retrievalOptions,
         systemPrompt: systemPromptConfig,
+        promptLanguage: promptLang,
         compactor,
         hooks: {
           onStatus: (status) => {
@@ -1437,6 +1446,8 @@ interface ContextText {
   /** Ajouté à la règle des sources quand un bloc manuscrit ou notes suit. */
   ownBlocksFollow: string;
   noSources: string;
+  /** Préambule du texte de l'utilisateur quand aucune source ne le précède. */
+  ownPassagesNotSources: string;
   /** Consigne de rappel : dire à l'utilisateur ce qu'il a déjà écrit. */
   manuscript: string[];
   /** Arrière-plan d'un brainstorm : ce qu'il pense déjà, à ne pas reformuler. */
@@ -1464,7 +1475,9 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
     ownBlocksFollow:
       "Les blocs MANUSCRIT et NOTES DE LECTURE qui suivent les sources ne sont PAS des sources : leurs numéros [M…] et [L…] ne se citent jamais à l'appui d'une affirmation.",
     noSources:
-      "Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le. Les passages qui suivent, s'il y en a, sont le texte de l'utilisateur ou ses notes de lecture : ne les présente JAMAIS comme le contenu d'une source.",
+      'Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le.',
+    ownPassagesNotSources:
+      "Les passages qui suivent, s'il y en a, sont le texte de l'utilisateur ou ses notes de lecture : ne les présente JAMAIS comme le contenu d'une source.",
     manuscript: [
       "--- MANUSCRIT DE L'UTILISATEUR (hors sources) ---",
       "Passages du MANUSCRIT EN COURS : le texte que l'utilisateur est lui-même en train d'écrire. Ce n'est PAS une source, et les numéros [M…] ne désignent aucun des documents numérotés ci-dessus.",
@@ -1513,7 +1526,9 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
     ownBlocksFollow:
       'The MANUSCRIPT and READING NOTES blocks that follow the sources are NOT sources: their [M…] and [L…] numbers are never cited in support of a claim.',
     noSources:
-      "No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so. The passages that follow, if any, are the user's own text or their reading notes: NEVER present them as the content of a source.",
+      'No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so.',
+    ownPassagesNotSources:
+      "The passages that follow, if any, are the user's own text or their reading notes: NEVER present them as the content of a source.",
     manuscript: [
       "--- THE USER'S MANUSCRIPT (not a source) ---",
       'Passages from the MANUSCRIPT IN PROGRESS: the text the user is writing themselves. It is NOT a source, and the [M…] numbers refer to none of the numbered documents above.',
@@ -1611,7 +1626,7 @@ export function formatContextAsSystemPrompt(
   // Aucune source mais des extraits du manuscrit ou des notes de lecture :
   // l'en-tête « réponds UNIQUEMENT à partir des sources ci-dessous » serait
   // suivi du seul texte de l'utilisateur, que le modèle prendrait pour elles.
-  if (hits.length === 0) return text.noSources;
+  if (hits.length === 0) return `${text.noSources} ${text.ownPassagesNotSources}`;
   const SNIPPET_CHARS = 1500;
   const DOC_HEADER_RE = /^\[Doc:[^\]]*\]\s*/;
 
