@@ -9,6 +9,8 @@
  */
 
 import { ChildProcess, spawn } from 'child_process';
+import { randomBytes } from 'crypto';
+import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -69,7 +71,9 @@ interface AnalyzeResponse {
 
 export class TopicModelingService {
   private pythonProcess?: ChildProcess;
-  private serviceURL: string = 'http://127.0.0.1:8001';
+  private serviceURL: string = ''; // Port libre choisi à chaque start()
+  // Jeton tiré à chaque start(), attendu par main.py dans l'en-tête x-cliodeck-token
+  private token: string = '';
   private isStarting: boolean = false;
   private isRunning: boolean = false;
   private startupTimeout: number = 120000; // 120 secondes (chargement de torch/transformers peut être lent)
@@ -242,56 +246,19 @@ export class TopicModelingService {
   }
 
   /**
-   * Tue les processus Python zombies qui occupent le port 8001
+   * Demande au système un port libre sur 127.0.0.1. Le port est relâché
+   * aussitôt, puis transmis à main.py qui l'écoute.
    */
-  private async killZombieProcesses(): Promise<void> {
-    try {
-      console.log('🔍 Checking for zombie Python processes on port 8001...');
-
-      // Trouver les processus qui utilisent le port 8001
-      const { spawn } = await import('child_process');
-      const lsof = spawn('lsof', ['-ti:8001']);
-
-      let pids = '';
-      lsof.stdout?.on('data', (data) => {
-        pids += data.toString();
+  private async pickFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        server.close(() => (port ? resolve(port) : reject(new Error('No free port available'))));
       });
-
-      await new Promise<void>((resolve) => {
-        lsof.on('exit', (code) => {
-          if (code === 0 && pids.trim()) {
-            // Des processus utilisent le port
-            const pidList = pids.trim().split('\n').filter(p => p);
-            console.log(`⚠️  Found ${pidList.length} zombie process(es) on port 8001: ${pidList.join(', ')}`);
-
-            // Tuer chaque processus
-            pidList.forEach(pid => {
-              try {
-                process.kill(parseInt(pid), 'SIGTERM');
-                console.log(`✅ Killed process ${pid}`);
-              } catch (err) {
-                console.warn(`⚠️  Could not kill process ${pid}:`, err);
-              }
-            });
-
-            // Attendre un peu pour que les processus se terminent
-            setTimeout(() => resolve(), 500);
-          } else {
-            console.log('✅ No zombie processes found');
-            resolve();
-          }
-        });
-
-        lsof.on('error', () => {
-          // lsof n'est peut-être pas disponible, continuer
-          console.log('⚠️  lsof not available, skipping zombie check');
-          resolve();
-        });
-      });
-    } catch (error) {
-      console.warn('⚠️  Could not check for zombie processes:', error);
-      // Ne pas lancer d'erreur, continuer le démarrage
-    }
+    });
   }
 
   /**
@@ -314,9 +281,6 @@ export class TopicModelingService {
 
     try {
       console.log('🚀 Starting topic modeling service...');
-
-      // Tuer les processus zombies au démarrage
-      await this.killZombieProcesses();
 
       // Déterminer le chemin vers le script Python
       const __filename = fileURLToPath(import.meta.url);
@@ -368,16 +332,28 @@ export class TopicModelingService {
       const pythonExecutable = this.getVenvPythonPath(venvDir);
       console.log(`🐍 Using Python from venv: ${pythonExecutable}`);
 
+      // Un port libre et un jeton neufs à chaque lancement : le service ne
+      // touche plus à aucun processus qu'il n'a pas lancé, et une page web
+      // ne peut pas lui parler.
+      const port = await this.pickFreePort();
+      this.token = randomBytes(32).toString('hex');
+      this.serviceURL = `http://127.0.0.1:${port}`;
+
       // Démarrer le subprocess Python avec le venv
       // -u: mode unbuffered pour voir les logs immédiatement
       // PYTHONUNBUFFERED: même effet que -u, pour être sûr
+      // Port et jeton passent par l'environnement, jamais par les arguments
+      // (ps les afficherait). stdin reste ouvert : main.py sort de lui-même
+      // quand il se ferme, c'est-à-dire quand Electron meurt.
       this.pythonProcess = spawn(pythonExecutable, ['-u', 'main.py'], {
         cwd: pythonServicePath,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,
           NUMBA_DISABLE_JIT: '1',
           PYTHONUNBUFFERED: '1',
+          CLIODECK_TOPIC_PORT: String(port),
+          CLIODECK_TOPIC_TOKEN: this.token,
         },
       });
 
@@ -585,6 +561,7 @@ export class TopicModelingService {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          'x-cliodeck-token': this.token,
         },
       });
 
@@ -593,7 +570,7 @@ export class TopicModelingService {
       }
 
       const data = (await response.json()) as HealthResponse;
-      return data.status === 'healthy';
+      return data.status === 'healthy' && data.service === 'topic-modeling';
     } catch (error) {
       return false;
     }
@@ -653,6 +630,7 @@ export class TopicModelingService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-cliodeck-token': this.token,
         },
         body: JSON.stringify(requestBody),
       });

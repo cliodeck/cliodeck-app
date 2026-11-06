@@ -35,11 +35,27 @@ pip install -r requirements.txt
 
 ### Démarrer le service
 
+ClioDeck lance le service lui-même, sur un port libre choisi à chaque démarrage,
+avec un jeton aléatoire. Les deux passent par l'environnement :
+
+- `CLIODECK_TOPIC_PORT` : port d'écoute sur `127.0.0.1` (obligatoire, le service
+  sort avec un message s'il manque) ;
+- `CLIODECK_TOPIC_TOKEN` : jeton attendu dans l'en-tête `x-cliodeck-token`. Toute
+  requête sans ce jeton reçoit 403, `/health` compris ; sans la variable, tout est
+  refusé.
+
+Pour un lancement de développement, depuis un terminal :
+
 ```bash
-python main.py
+CLIODECK_TOPIC_PORT=8001 CLIODECK_TOPIC_TOKEN=dev python main.py
 ```
 
-Le service démarre sur `http://127.0.0.1:8001`
+Le service sort de lui-même à la fin de son entrée standard (c'est ainsi qu'il
+disparaît quand ClioDeck meurt) : ne pas le lancer avec `< /dev/null`, et
+Ctrl+D l'arrête.
+
+Aucune règle CORS : le seul client est le processus principal d'Electron, et
+aucune page web n'est autorisée à appeler le service.
 
 ### Endpoints
 
@@ -159,13 +175,14 @@ topic-modeling/
 
 Tester le health check :
 ```bash
-curl http://127.0.0.1:8001/health
+curl -H "x-cliodeck-token: dev" http://127.0.0.1:8001/health
 ```
 
 Tester l'analyse (avec des données simulées) :
 ```bash
 curl -X POST http://127.0.0.1:8001/analyze \
   -H "Content-Type: application/json" \
+  -H "x-cliodeck-token: dev" \
   -d @test_data.json
 ```
 
@@ -174,8 +191,8 @@ curl -X POST http://127.0.0.1:8001/analyze \
 Le service est conçu pour être lancé comme subprocess depuis Electron via `TopicModelingService.ts` (Phase 2.2).
 
 **Workflow :**
-1. Electron démarre le service Python via `child_process.spawn()`
-2. Health check pour vérifier que le service est prêt
+1. Electron choisit un port libre, tire un jeton et démarre le service Python via `child_process.spawn()` (port et jeton dans l'environnement, stdin gardé ouvert)
+2. Health check (avec le jeton) pour vérifier que le service est prêt
 3. Electron envoie des requêtes HTTP POST avec les embeddings
 4. Le service retourne les topics
 5. Electron arrête le service à la fermeture de l'app
