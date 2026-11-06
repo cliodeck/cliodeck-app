@@ -274,8 +274,14 @@ export class EnhancedVectorStore {
         documentIds,
         this.useHybrid
       );
+    } else if (this.vectorStore.getStatistics().embeddingCount === 0) {
+      // Aucun extrait embarqué dans SQLite : la bibliographie est vide (projet
+      // neuf, sans PDF), il n'y a rien à trouver. Lever faisait rapporter le
+      // corpus en échec, et le chat disait une panne à chaque question (P212-F).
+      return [];
     } else {
-      // HNSW not available - return empty results instead of slow linear search
+      // Des extraits existent mais l'index ne les atteint pas : c'est une
+      // panne, pas un corpus vide. Pas de recherche linéaire, trop lente.
       console.warn('⚠️  HNSW index empty - indexes may need to be rebuilt');
       throw new Error(
         'Search indexes are not available. Please wait for the project to finish loading.'
