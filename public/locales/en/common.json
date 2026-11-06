@@ -1668,11 +1668,11 @@
     "serverNameHint": "Display name shown to connected clients. Defaults to the project folder name. Claude Code only accepts letters, digits, “-” and “_”: other characters are adapted (spaces become “-”).",
     "binary": "Wrapper binary",
     "binaryMissing": "Binary not found — run `npm run build` in the cliodeck-app repo first.",
-    "disabledNote": "The server refuses to start until this toggle is on, even if a client tries to launch it.",
+    "disabledNote": "The server refuses to start until this toggle is on, even if a client tries to launch it. A server a client has already launched now refuses every call, without restarting the client.",
     "tools": {
       "title": "Tools exposed to connected clients",
       "limits": "Each tool accepts topK up to 200 (default 10) and returns content chunks truncated to 4 000 characters (2 000 for Gallica/HAL snippets).",
-      "optIn": "An unchecked tool is not registered at all: the client never sees it. The change takes effect the next time the server starts, so after restarting the client.",
+      "optIn": "An unchecked tool is not registered at all: the client never sees it. Unchecking applies from the next call: a running server refuses the tool, even if the client still lists it until it restarts. Checking only takes effect the next time the server starts, so after restarting the client.",
       "manuscriptNote": "Reading the manuscript is the exception: it is withheld until you grant it. The search tools expose sources you have already gathered; these hand your unpublished text, word for word, to a third-party program. `context.md` and your house rules (`hints.md`) stay excluded either way."
     },
     "snippets": {

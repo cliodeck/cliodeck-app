@@ -163,3 +163,29 @@ export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
     mcp,
   };
 }
+
+export type ToolCallGate = { ok: true } | { ok: false; reason: string };
+
+/**
+ * L'accord relu à chaque appel d'outil. Claude Desktop garde le serveur
+ * vivant des jours durant : décocher l'interrupteur, ou retirer un outil,
+ * doit valoir au prochain appel, pas au prochain redémarrage du client.
+ *
+ * Mêmes règles qu'au démarrage (`loadMCPConfig`, `isToolEnabled`, garde de
+ * lien comprise). Ne lève jamais : toute erreur de lecture vaut refus — un
+ * accord qu'on ne peut pas lire n'est pas un accord.
+ */
+export function checkToolCall(workspaceRoot: string, toolName: string): ToolCallGate {
+  try {
+    const { mcp } = loadMCPConfig(workspaceRoot);
+    // Le manuscrit : un seul accord pour ses deux outils, comme à l'enregistrement.
+    const needed = TOOLS_REQUIRING_CONSENT.has(toolName) ? [...TOOLS_REQUIRING_CONSENT] : [toolName];
+    if (!needed.every((name) => isToolEnabled(mcp, name))) {
+      return { ok: false, reason: `Tool ${toolName} is not granted for this workspace.` };
+    }
+    return { ok: true };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, reason: message.split('\n')[0] };
+  }
+}
