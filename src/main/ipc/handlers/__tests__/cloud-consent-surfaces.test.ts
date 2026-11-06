@@ -226,3 +226,61 @@ describe('fusion:recipes:run — consentement distant', () => {
     expect(h.showMessageBox).not.toHaveBeenCalled();
   });
 });
+
+describe('modèle Ollama hébergé dans les réglages (L04-1)', () => {
+  const hosted = { backend: 'ollama', ollamaURL: 'http://127.0.0.1:11434', ollamaChatModel: 'qwen3.5:cloud' };
+  let tmp = '';
+
+  beforeEach(() => {
+    h.llmConfig = { ...hosted };
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-consent-hosted-'));
+    h.projectPath = tmp;
+    vi.spyOn(similarityService, 'analyzeDocument').mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('diapositives : dialogue nommant ollama.com, registre non construit sur refus', async () => {
+    const res = await invoke('slides:generate', { text: 'Mon chapitre', language: 'fr' });
+    expect(res.success).toBe(false);
+    expect(h.showMessageBox).toHaveBeenCalledTimes(1);
+    expect(lastDialogDetail()).toContain('ollama.com');
+    expect(h.createRegistry).not.toHaveBeenCalled();
+  });
+
+  it('similarité : dialogue affiché, registre non construit sur refus', async () => {
+    const res = await invoke('similarity:analyze', 'Un paragraphe.', {});
+    expect(res.success).toBe(false);
+    expect(h.showMessageBox).toHaveBeenCalledTimes(1);
+    expect(h.createRegistry).not.toHaveBeenCalled();
+    expect(similarityService.analyzeDocument).not.toHaveBeenCalled();
+  });
+
+  it('recette : dialogue affiché, registre non construit sur refus', async () => {
+    const dir = path.join(tmp, '.cliodeck', 'recipes');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'llm.yaml'),
+      'name: essai\nversion: 0.1.0\ndescription: essai\ninputs:\n  sujet:\n    type: string\n    required: true\nsteps:\n  - id: etape\n    kind: brainstorm\n    with:\n      prompt: Des pistes sur {{ inputs.sujet }}\n'
+    );
+    const res = await invoke('fusion:recipes:run', 'user', 'llm.yaml', { sujet: 'Schuman' });
+    expect(res.success).toBe(false);
+    expect(h.showMessageBox).toHaveBeenCalledTimes(1);
+    expect(h.createRegistry).not.toHaveBeenCalled();
+    expect(h.llmComplete).not.toHaveBeenCalled();
+  });
+
+  it('fusion:consent:status et grant classent sur le modèle enregistré', async () => {
+    expect(await invoke('fusion:consent:status')).toMatchObject({
+      isCloud: true,
+      providerName: 'Ollama Cloud (ollama.com)',
+    });
+    expect(await invoke('fusion:consent:grant', 'Ollama Cloud (ollama.com)')).toMatchObject({ granted: true });
+    // Accordé pour ce fournisseur : la génération suivante ne redemande pas.
+    expect((await invoke('slides:generate', { text: 'Mon chapitre', language: 'fr' })).success).toBe(true);
+    expect(h.showMessageBox).not.toHaveBeenCalled();
+  });
+});

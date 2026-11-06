@@ -41,7 +41,7 @@ class InstrumentedLLM implements LLMProvider {
     private readonly providerId: string,
     baseUrl?: string
   ) {
-    this.isLocal = isLocalProvider(providerId, baseUrl);
+    this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
   }
 
   get id(): string {
@@ -150,7 +150,7 @@ class InstrumentedEmbedding implements EmbeddingProvider {
     private readonly providerId: string,
     baseUrl?: string
   ) {
-    this.isLocal = isLocalProvider(providerId, baseUrl);
+    this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
   }
 
   get id(): string {

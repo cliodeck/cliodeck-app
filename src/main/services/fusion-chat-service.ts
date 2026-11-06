@@ -58,9 +58,8 @@ import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import {
-  classifyProvider,
   cloudConsentRefusalMessage,
-  decideCloudConsent,
+  egressGate,
   type ConsentPrompt,
 } from '../../../backend/security/cloud-consent.js';
 import { appendSecurityEvent } from '../../../backend/security/source-inspector.js';
@@ -215,23 +214,6 @@ export function readingNoteHitsToSources(
 function readingNoteLabel(h: ReadingNoteMappedSearchResult): string {
   const title = h.document.title && h.document.title !== h.source.relativePath ? h.document.title : null;
   return title ? `@${h.source.citekey} — ${title}` : `@${h.source.citekey}`;
-}
-
-/**
- * Les notes de lecture entrent-elles dans ce tour ?
- *
- * Elles sont le travail personnel de l'historien, plus intime que ses
- * sources publiées : un fournisseur distant ne les reçoit que si l'auteur
- * l'a accepté dans les réglages. Le consentement de session (ADR 0005) ne
- * suffit pas — il autorise l'envoi du tour, pas celui de ce corpus.
- */
-export function shouldIncludeReadingNotes(opts: {
-  enabled: boolean;
-  isCloud: boolean;
-  cloudConsent: boolean;
-}): boolean {
-  if (!opts.enabled) return false;
-  return !opts.isCloud || opts.cloudConsent;
 }
 
 // La place du manuscrit dans un tour est une politique à part entière
@@ -631,11 +613,14 @@ class FusionChatService {
     // La garde vit ici, et non plus seulement dans le renderer : le main est
     // le seul à savoir quel fournisseur va réellement être appelé. Une
     // nouvelle surface d'envoi qui oublierait le dialogue est arrêtée ici.
-    // Sans fenêtre (headless), on refuse plutôt que de supposer.
+    // Sans fenêtre (headless), on refuse plutôt que de supposer. `cfg` est
+    // celle du registre, modèle du panneau compris : un modèle Ollama
+    // hébergé part chez ollama.com par l'hôte local.
     try {
-      const decision = await decideCloudConsent(
-        { backend: cfg.backend, ollamaURL: cfg.ollamaURL },
-        this.consentPrompt()
+      const decision = await egressGate(
+        { kind: 'generation', target: cfg },
+        { kind: 'session-send', surface: 'chat' },
+        { prompt: this.consentPrompt() }
       );
       if (decision.allowed === false) {
         const message = cloudConsentRefusalMessage(decision);
@@ -827,14 +812,20 @@ class FusionChatService {
             // Cinquième corpus : les notes de lecture — l'autre voix de
             // l'auteur. Leur existence pour ce tour tient à l'index
             // (`rag.indexReadingNotes`) et au consentement d'envoi hors d'un
-            // fournisseur local (`rag.readingNotesCloudConsent`) ; leur place,
-            // à la même politique que le manuscrit, à ceci près qu'une
-            // sélection de documents les cadre au lieu de les écarter.
-            const notesAvailable = shouldIncludeReadingNotes({
-              enabled: readingNotesIndexService.isEnabled(),
-              isCloud: classifyProvider({ backend: cfg.backend, ollamaURL: cfg.ollamaURL }).isCloud,
-              cloudConsent: readingNotesIndexService.cloudConsent(),
-            });
+            // fournisseur local (`rag.readingNotesCloudConsent`), décidé par
+            // la même porte que le tour, sur la même configuration ; leur
+            // place, à la même politique que le manuscrit, à ceci près
+            // qu'une sélection de documents les cadre au lieu de les écarter.
+            // Le consentement de session (ADR 0005) ne suffit pas : il
+            // autorise l'envoi du tour, pas celui de ce corpus.
+            const notesAvailable =
+              readingNotesIndexService.isEnabled() &&
+              (
+                await egressGate(
+                  { kind: 'generation', target: cfg },
+                  { kind: 'reading-notes', consent: readingNotesIndexService.cloudConsent() }
+                )
+              ).allowed;
             const readingNotes = resolveReadingNotesPolicy({
               enabled: notesAvailable,
               requested: options?.includeReadingNotes,

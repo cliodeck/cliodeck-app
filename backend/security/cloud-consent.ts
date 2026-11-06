@@ -14,7 +14,8 @@
  * la boîte de dialogue est injectée par l'appelant.
  *
  * Politique retenue :
- *   - fournisseur local (Ollama en loopback) : aucun consentement requis ;
+ *   - fournisseur local (Ollama en loopback avec un modèle non hébergé,
+ *     modèle embarqué) : aucun consentement requis ;
  *   - fournisseur distant, consentement déjà accordé pour la session : passe ;
  *   - fournisseur distant sans consentement, avec une fenêtre pour demander :
  *     dialogue natif, la réponse est mémorisée pour la session ;
@@ -31,7 +32,33 @@ export interface ProviderClassification {
   providerName: string;
 }
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
+/** Noms d'hôte de la machine elle-même. Seule copie : `is-local.ts` l'importe. */
+export const LOCAL_HOSTS: ReadonlySet<string> = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+  '0.0.0.0',
+]);
+
+/** Libellé des modèles qu'Ollama relaie vers ses propres serveurs. */
+export const OLLAMA_CLOUD_PROVIDER_NAME = 'Ollama Cloud (ollama.com)';
+
+/**
+ * Le modèle est-il hébergé chez ollama.com ? Depuis sa 0.12, Ollama sert
+ * par le démon local — même URL, même `/api/tags` — des modèles exécutés
+ * sur ses serveurs, reconnaissables à leur étiquette : `gpt-oss:120b-cloud`,
+ * `qwen3.5:cloud`. L'hôte seul ne dit donc plus où part le prompt.
+ *
+ * Règle du nom seulement : un modèle local renommé `xxx-cloud` coûte un
+ * dialogue de trop, sans dommage ; un alias sans le suffixe (`ollama cp`)
+ * reste invisible.
+ */
+export function isOllamaCloudModel(model?: string): boolean {
+  const name = model?.trim().toLowerCase().replace(/:latest$/, '');
+  if (!name) return false;
+  return name.endsWith('-cloud') || name.endsWith(':cloud');
+}
 
 const CLOUD_BACKENDS: Record<string, string> = {
   claude: 'Anthropic Claude',
@@ -42,13 +69,16 @@ const CLOUD_BACKENDS: Record<string, string> = {
 
 /**
  * Un fournisseur est « distant » dès que les données quittent la machine.
- * Miroir exact de `isCloudProvider` côté renderer : les deux doivent
- * classer identiquement, sans quoi l'utilisateur verrait un dialogue là où
- * le main n'en attend pas (ou l'inverse).
+ * Miroir de `isCloudProvider` côté renderer : les deux doivent classer
+ * identiquement, sans quoi l'utilisateur verrait un dialogue là où le main
+ * n'en attend pas (ou l'inverse). Le renderer ignore encore le modèle : pour
+ * un modèle hébergé, c'est le dialogue natif du main qui demande.
  */
 export function classifyProvider(config: {
   backend?: string;
   ollamaURL?: string;
+  /** Modèle Ollama effectivement appelé : un modèle hébergé sort par l'Ollama local. */
+  model?: string;
 }): ProviderClassification {
   const backend = config.backend ?? '';
 
@@ -66,7 +96,47 @@ export function classifyProvider(config: {
     }
   }
 
+  if (backend === 'ollama' && isOllamaCloudModel(config.model)) {
+    return { isCloud: true, providerName: OLLAMA_CLOUD_PROVIDER_NAME };
+  }
+
   return { isCloud: false, providerName: 'local' };
+}
+
+/** Ce qui décide où part une génération : les champs de `LLMConfig` qu'en lit l'adaptateur. */
+export interface GenerationTarget {
+  backend?: string;
+  ollamaURL?: string;
+  ollamaChatModel?: string;
+  generationProvider?: string;
+  embeddedModelPath?: string;
+}
+
+/**
+ * Où part la génération construite pour cette configuration ? Lit les
+ * mêmes champs que `clioDeckConfigToRegistryConfig` : passer la
+ * configuration du tour (modèle du panneau compris, après
+ * `applyChatModelOverride`), celle qui construit le registre.
+ *
+ * - backend absent ou inconnu : l'adaptateur construit un Ollama, la
+ *   classification aussi (avant, un backend absent passait pour local quel
+ *   que soit l'hôte) ;
+ * - génération embarquée effective (`embedded` avec un modèle présent) :
+ *   llama.cpp en processus, rien ne part ;
+ * - sinon le modèle Ollama de la configuration, avec le défaut de
+ *   l'adaptateur.
+ */
+export function classifyGeneration(target: GenerationTarget): ProviderClassification {
+  const backend = target.backend || 'ollama';
+  if (CLOUD_BACKENDS[backend]) return classifyProvider({ backend });
+  if (target.generationProvider === 'embedded' && target.embeddedModelPath) {
+    return { isCloud: false, providerName: 'local' };
+  }
+  return classifyProvider({
+    backend: 'ollama',
+    ollamaURL: target.ollamaURL,
+    model: target.ollamaChatModel || 'llama3.2',
+  });
 }
 
 /**
@@ -185,12 +255,20 @@ export type CloudConsentDecision =
  * lancée ensuite vers le même fournisseur.
  */
 export async function decideCloudConsent(
-  config: { backend?: string; ollamaURL?: string },
+  config: GenerationTarget,
   prompt: ConsentPrompt | null,
   registry: CloudConsentRegistry = cloudConsent,
   surface: CloudSendSurface = 'chat'
 ): Promise<CloudConsentDecision> {
-  const { isCloud, providerName } = classifyProvider(config);
+  return decideForClassification(classifyGeneration(config), prompt, registry, surface);
+}
+
+async function decideForClassification(
+  { isCloud, providerName }: ProviderClassification,
+  prompt: ConsentPrompt | null,
+  registry: CloudConsentRegistry,
+  surface: CloudSendSurface
+): Promise<CloudConsentDecision> {
   if (!isCloud) return { allowed: true, reason: 'local' };
   // Le consentement vaut pour UN fournisseur, pas pour « le cloud » en
   // général. `consentedProvider()` existait déjà mais n'était jamais
@@ -208,14 +286,85 @@ export async function decideCloudConsent(
   return { allowed: true, reason: 'granted-now' };
 }
 
+/** Où part le contenu : une génération, ou un calcul d'embeddings. */
+export type EgressDestination =
+  | { kind: 'generation'; target: GenerationTarget }
+  | { kind: 'embedding'; target: { provider: string; baseUrl?: string; model?: string } };
+
+/**
+ * Ce qui part : un envoi de session (tour, recette, diapositives,
+ * reclassement — dialogue ADR 0005), ou les notes de lecture, qui ont leur
+ * propre réglage (`rag.readingNotesCloudConsent`) et n'ouvrent jamais de
+ * dialogue : le consentement de session autorise le tour, pas ce corpus.
+ */
+export type EgressContent =
+  | { kind: 'session-send'; surface: CloudSendSurface }
+  | { kind: 'reading-notes'; consent: boolean };
+
+export type EgressVerdict =
+  | {
+      allowed: true;
+      isCloud: boolean;
+      providerName: string;
+      reason: 'local' | 'already-granted' | 'granted-now' | 'corpus-consent';
+    }
+  | {
+      allowed: false;
+      isCloud: true;
+      providerName: string;
+      reason: 'declined' | 'no-interface' | 'corpus-withheld';
+    };
+
+/**
+ * Seule décision de sortie : classe la destination (modèle compris), puis
+ * applique la règle du contenu. Le tour de chat et l'éligibilité de ses
+ * notes de lecture passaient par deux classifications distinctes, toutes
+ * deux aveugles au modèle — un modèle hébergé chez ollama.com recevait le
+ * tour et les notes sans un mot.
+ */
+export async function egressGate(
+  destination: EgressDestination,
+  content: EgressContent,
+  deps: { prompt?: ConsentPrompt | null; registry?: CloudConsentRegistry } = {}
+): Promise<EgressVerdict> {
+  const classification =
+    destination.kind === 'generation'
+      ? classifyGeneration(destination.target)
+      : classifyEmbeddingTarget(destination.target);
+  const { isCloud, providerName } = classification;
+
+  if (content.kind === 'reading-notes') {
+    if (!isCloud) return { allowed: true, isCloud, providerName, reason: 'local' };
+    return content.consent
+      ? { allowed: true, isCloud, providerName, reason: 'corpus-consent' }
+      : { allowed: false, isCloud, providerName, reason: 'corpus-withheld' };
+  }
+
+  const decision = await decideForClassification(
+    classification,
+    deps.prompt ?? null,
+    deps.registry ?? cloudConsent,
+    content.surface
+  );
+  if (decision.allowed === false) {
+    return { allowed: false, isCloud: true, providerName, reason: decision.reason };
+  }
+  return { allowed: true, isCloud, providerName, reason: decision.reason };
+}
+
 /** Message de refus lisible, commun à toutes les surfaces. */
 export function cloudConsentRefusalMessage(
-  decision: Extract<CloudConsentDecision, { allowed: false }>
+  decision: Extract<CloudConsentDecision | EgressVerdict, { allowed: false }>
 ): string {
   const { providerName, reason } = decision;
-  return reason === 'no-interface'
-    ? `Envoi vers ${providerName} refusé : aucun consentement accordé pour cette session.`
-    : `Envoi vers ${providerName} annulé.`;
+  switch (reason) {
+    case 'no-interface':
+      return `Envoi vers ${providerName} refusé : aucun consentement accordé pour cette session.`;
+    case 'corpus-withheld':
+      return `Notes de lecture non envoyées à ${providerName} : aucun consentement dans les réglages.`;
+    case 'declined':
+      return `Envoi vers ${providerName} annulé.`;
+  }
 }
 
 /**
@@ -231,6 +380,7 @@ export function cloudConsentRefusalMessage(
 export function classifyEmbeddingTarget(embedding: {
   provider: string;
   baseUrl?: string;
+  model?: string;
 }): ProviderClassification {
   switch (embedding.provider) {
     case 'embedded':
@@ -239,6 +389,7 @@ export function classifyEmbeddingTarget(embedding: {
       return classifyProvider({
         backend: 'ollama',
         ollamaURL: embedding.baseUrl ?? 'http://127.0.0.1:11434',
+        model: embedding.model,
       });
     case 'openai-compatible':
       if (embedding.baseUrl) {

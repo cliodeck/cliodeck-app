@@ -11,7 +11,6 @@ import {
   resolveTurnOptions,
   retrievalStatus,
   shouldIncludeManuscript,
-  shouldIncludeReadingNotes,
 } from '../fusion-chat-service.js';
 
 import type {
@@ -227,13 +226,6 @@ describe('notes de lecture dans le chat', () => {
     similarity: 0.7,
     sourceType: 'readingNotes',
   };
-
-  it('exclut les notes d’un fournisseur distant sans consentement, jamais d’un local', () => {
-    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: false, cloudConsent: false })).toBe(true);
-    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: true, cloudConsent: false })).toBe(false);
-    expect(shouldIncludeReadingNotes({ enabled: true, isCloud: true, cloudConsent: true })).toBe(true);
-    expect(shouldIncludeReadingNotes({ enabled: false, isCloud: false, cloudConsent: true })).toBe(false);
-  });
 
   it('nomme la référence commentée et garde de quoi rouvrir la note', () => {
     expect(readingNoteHitsToSources([hit])).toEqual([

@@ -80,6 +80,13 @@ describe('ReadingNotesIndexService — consentement lu sur la configuration', ()
     expect((await indexWithDefaults()).withheldFrom).toBe('Ollama (gpu.labo.example)');
   });
 
+  it('s’abstient avec un modèle d’embeddings Ollama hébergé, même en loopback', async () => {
+    h.llm = { backend: 'ollama', ollamaURL: 'http://127.0.0.1:11434', ollamaEmbeddingModel: 'embeddinggemma:cloud' };
+    const r = await indexWithDefaults();
+    expect(r.withheldFrom).toBe('Ollama Cloud (ollama.com)');
+    expect(r.calls).toBe(0);
+  });
+
   it('indexe vers un service en ligne quand l’auteur y a consenti', async () => {
     h.llm = { backend: 'mistral', mistralAPIKey: 'sk-test', useCloudEmbeddings: true };
     h.rag = { readingNotesCloudConsent: true };
