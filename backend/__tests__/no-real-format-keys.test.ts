@@ -2,7 +2,7 @@
  * Aucune fausse clé d'API au format réel n'est écrite d'un seul tenant.
  *
  * Les tests ont besoin de clés qui ressemblent aux vraies (`AIza…`,
- * `sk-ant-api03-…`, `sk-proj-…`) : c'est leur forme qu'ils éprouvent. Écrites
+ * `sk-ant-api03…`, `sk-proj…`) : c'est leur forme qu'ils éprouvent. Écrites
  * d'un seul tenant, le secret scanning de GitHub les signale comme des fuites
  * (#212). On les assemble donc à partir de morceaux, et ce garde-fou empêche
  * le retour d'une clé entière. Ses propres motifs sont assemblés de même.
