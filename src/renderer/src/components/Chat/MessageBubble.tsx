@@ -40,6 +40,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
       new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(date);
 
     const pending = message.pending && !message.content;
+    // A reply made only of forbidden tags sanitizes to '': show it as escaped
+    // text, never as raw HTML (a lone <style> would restyle the whole app).
+    const filtered = !pending && !htmlContent && message.content.trim() !== '';
 
     return (
       <div className={`message-bubble ${isUser ? 'user' : isSystem ? 'system' : 'assistant'}`}>
@@ -62,10 +65,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
         <div className="message-content">
           {isUser || isSystem ? (
             <p>{message.content}</p>
+          ) : filtered ? (
+            <p className="message-markdown">{message.content}</p>
           ) : (
             <div
               className="message-markdown"
-              dangerouslySetInnerHTML={{ __html: htmlContent || message.content || (pending ? '…' : '') }}
+              dangerouslySetInnerHTML={{ __html: htmlContent || (pending ? '…' : '') }}
             />
           )}
         </div>
