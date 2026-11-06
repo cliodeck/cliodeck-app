@@ -9,10 +9,11 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
+import { startFakeOllama } from './_helpers/fake-ollama';
 
 const DOCUMENT = '# Article\n\nTexte du manuscrit.\n';
 /** Écrite à la main : `yaml.dump` n'y remettrait ni le commentaire ni les guillemets. */
@@ -704,19 +705,84 @@ test('fenêtre d’exécution, étape bloquée : Échap demande, refuser garde t
     await expect(overlay).toHaveCount(1);
 
     await window.keyboard.press('Escape');
-    await expect(confirmDialog(window)).toContainText('continue de tourner');
+    await expect(confirmDialog(window)).toContainText('arrête la recette');
     await window.keyboard.press('Escape');
     await expect(confirmDialog(window)).toHaveCount(0);
     await expect(overlay).toHaveCount(1);
     await expect(settingsHeading(window)).toBeVisible();
 
     await overlay.locator('.close-btn').click();
-    await expect(confirmDialog(window)).toContainText('continue de tourner');
+    await expect(confirmDialog(window)).toContainText('arrête la recette');
     await confirmDialog(window).locator('.confirm-dialog-btn-confirm').click();
     await expect(overlay).toHaveCount(0);
     await expect(settingsHeading(window)).toBeVisible();
   } finally {
     await app.close();
+  }
+});
+
+/** Deux étapes au modèle : la seconde ne doit jamais partir une fois la recette annulée. */
+const RECIPE_TWO_LLM_STEPS = `name: pense-longtemps
+version: '1'
+description: Deux questions au modèle
+steps:
+  - id: premiere
+    kind: brainstorm
+    with:
+      prompt: Des pistes
+  - id: seconde
+    kind: brainstorm
+    with:
+      prompt: Encore des pistes
+`;
+
+test('fenêtre d’exécution, modèle bloqué : fermer et confirmer arrête la recette côté main (D20)', async () => {
+  const ollama = await startFakeOllama('jamais', { hangChat: true });
+  toClean.push(ollama.userDataDir);
+  const outcome = await launchApp({ userDataDir: ollama.userDataDir });
+  if (outcome.kind === 'skip') {
+    await ollama.close();
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window } = outcome.value;
+  const { dir, projectJson } = makeArticle();
+  writeFileSync(join(dir, '.cliodeck', 'recipes', 'pense-longtemps.yaml'), RECIPE_TWO_LLM_STEPS);
+  const runsDir = join(dir, '.cliodeck', 'recipes-runs');
+  const runLogs = () => (existsSync(runsDir) ? readdirSync(runsDir).map((f) => readFileSync(join(runsDir, f), 'utf8')) : []);
+
+  try {
+    await openProject(app, window, projectJson);
+    await openRecipes(window);
+    await recipeAction(window, 'pense-longtemps.yaml', 'Lancer').click();
+    const overlay = nestedOverlay(window);
+    await overlay.getByRole('button', { name: 'Lancer' }).click();
+    await expect(overlay.getByRole('button', { name: 'En cours…' })).toBeVisible();
+    // La première étape attend le modèle, qui ne répondra pas.
+    await expect.poll(() => ollama.chatRequests(), { timeout: 20_000 }).toBe(1);
+
+    await window.keyboard.press('Escape');
+    await expect(confirmDialog(window)).toContainText('arrête la recette');
+    await confirmDialog(window).locator('.confirm-dialog-btn-confirm').click();
+    await expect(overlay).toHaveCount(0);
+    await expect(settingsHeading(window)).toBeVisible();
+
+    // Le main a coupé la demande au modèle, et la passe s'est dite annulée.
+    await expect.poll(() => ollama.chatAborted(), { timeout: 15_000 }).toBe(1);
+    await expect.poll(() => runLogs().length, { timeout: 15_000 }).toBe(1);
+    const log = runLogs()[0];
+    expect(log).toContain('"run_cancelled"');
+    expect(log).not.toContain('"run_completed"');
+    expect(log).not.toContain('"step_ok"');
+    expect(log).not.toContain('"seconde"');
+
+    // Plus rien n'arrive ensuite : ni seconde demande au modèle, ni autre écriture.
+    await window.waitForTimeout(2000);
+    expect(ollama.chatRequests()).toBe(1);
+    expect(runLogs()).toEqual([log]);
+  } finally {
+    await app.close();
+    await ollama.close();
   }
 });
 

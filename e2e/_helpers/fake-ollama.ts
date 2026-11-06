@@ -13,6 +13,9 @@ import { join } from 'node:path';
 export interface FakeOllama {
   /** `cliodeck-config.json` d'un userData temporaire réglé sur ce faux serveur, à donner à `launchApp`. */
   userDataDir: string;
+  /** Avec `hangChat` : les demandes de chat reçues, et celles que l'app a coupées sans attendre la réponse. */
+  chatRequests(): number;
+  chatAborted(): number;
   close(): Promise<void>;
 }
 
@@ -22,9 +25,16 @@ const EMBEDDING_DIMENSION = 768;
 /**
  * `onlyItsModel` : le seul modèle « installé » répond ; les autres reçoivent la réponse d'Ollama à un
  * modèle absent. Le chat doit le dire, et non rester muet.
+ *
+ * `hangChat` : le chat ne répond jamais, comme un modèle bloqué ; seule l'app peut couper la demande.
  */
-export async function startFakeOllama(answer: string, options: { onlyItsModel?: boolean } = {}): Promise<FakeOllama> {
+export async function startFakeOllama(
+  answer: string,
+  options: { onlyItsModel?: boolean; hangChat?: boolean } = {},
+): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
+  let chatRequests = 0;
+  let chatAborted = 0;
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => {
@@ -52,6 +62,13 @@ export async function startFakeOllama(answer: string, options: { onlyItsModel?: 
           if (options.onlyItsModel && model !== MODEL) {
             res.statusCode = 404;
             return json({ error: `model '${model}' not found` });
+          }
+          if (options.hangChat) {
+            chatRequests += 1;
+            res.on('close', () => {
+              if (!res.writableEnded) chatAborted += 1;
+            });
+            return undefined;
           }
           res.setHeader('Content-Type', 'application/x-ndjson');
           res.write(`${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: answer }, done: false })}\n`);
@@ -86,6 +103,13 @@ export async function startFakeOllama(answer: string, options: { onlyItsModel?: 
 
   return {
     userDataDir,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    chatRequests: () => chatRequests,
+    chatAborted: () => chatAborted,
+    close: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        // Une demande laissée en suspens retiendrait la fermeture.
+        server.closeAllConnections();
+      }),
   };
 }

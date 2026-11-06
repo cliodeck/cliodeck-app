@@ -11,7 +11,7 @@
  * uncaught exception.
  */
 
-import { ipcMain, dialog, app, shell } from 'electron';
+import { ipcMain, dialog, app, shell, type IpcMainInvokeEvent } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -94,6 +94,9 @@ import { successResponse, errorResponse } from '../utils/error-handler.js';
 interface VaultConfigBlock {
   path?: string;
 }
+
+/** L'identifiant d'une passe de recette, choisi par le renderer. */
+const RUN_ID_PATTERN = /^[\w-]{1,64}$/;
 
 const BUILTIN_RECIPES_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'recipes-builtin')
@@ -181,6 +184,13 @@ export function setupFusionHandlers(): void {
   });
 
   // MARK: - recipes
+
+  /**
+   * Les passes en cours, par identifiant : fermer la fenêtre d'une recette l'annule (D20).
+   * L'identifiant vient du renderer avec la demande, pour qu'une annulation tardive ne
+   * vise jamais la passe suivante.
+   */
+  const recipeRuns = new Map<string, AbortController>();
 
   ipcMain.handle('fusion:recipes:list', async () => {
     try {
@@ -299,7 +309,8 @@ export function setupFusionHandlers(): void {
       event,
       rawScope: unknown,
       rawFileName: unknown,
-      rawInputs: unknown
+      rawInputs: unknown,
+      rawRunId: unknown
     ) => {
       const root = projectManager.getCurrentProjectPath();
       if (!root) return noProject();
@@ -315,65 +326,101 @@ export function setupFusionHandlers(): void {
       } catch (e) {
         return errorResponse(e as Error);
       }
-      // Même une recette intégrée : son journal de passe s'écrit dans `recipes-runs/`.
-      const linked = await linkedOutsideResponse(root);
-      if (linked) return linked;
-      const baseDir =
-        rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : workspaceFiles(root).recipesDir;
-      let recipe: Recipe;
-      try {
-        const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
-        recipe = parseRecipe(raw);
-      } catch (e) {
-        return errorResponse(e as Error);
+      const runId =
+        rawRunId === undefined
+          ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+          : rawRunId;
+      if (typeof runId !== 'string' || !RUN_ID_PATTERN.test(runId)) {
+        return errorResponse('invalid recipe runId');
       }
-
-      const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const cfg = configManager.getLLMConfig();
-      // Les étapes brainstorm / write envoient leurs prompts interpolés au
-      // LLM : consentement distant avant de construire le registre (ADR 0005).
-      if (recipeCallsLLM(recipe)) {
-        const refusal = await cloudConsentRefusal('recipe', cfg, event.sender);
-        if (refusal) return errorResponse(refusal);
-      }
-      let registry;
+      if (recipeRuns.has(runId)) return errorResponse('recipe runId already running');
+      // Inscrite avant le premier `await` : une annulation partie juste après la demande la trouve.
+      const controller = new AbortController();
+      recipeRuns.set(runId, controller);
       try {
-        registry = createRegistryFromClioDeckConfig(cfg);
-      } catch (e) {
-        return errorResponse(e as Error);
-      }
-
-      const runner = new RecipeRunner({
-        registry,
-        workspaceRoot: root,
-        stepHandlers: recipeStepHandlers,
-        onEvent: (e) => {
-          try {
-            if (!event.sender.isDestroyed()) {
-              event.sender.send('fusion:recipes:event', { runId, event: e });
-            }
-          } catch {
-            // Renderer gone — keep running regardless.
-          }
-        },
-      });
-
-      try {
-        const result = await runner.run(recipe, inputs);
-        return successResponse({
-          runId,
-          ok: result.ok,
-          outputs: result.outputs,
-          logPath: result.logPath,
-          failedStep: result.failedStep,
-        });
-      } catch (e) {
-        return errorResponse(e as Error);
+        return await runRecipe(event, root, rawScope, rawFileName, inputs, runId, controller.signal);
       } finally {
-        await registry.dispose().catch(() => undefined);
+        recipeRuns.delete(runId);
       }
     }
   );
+
+  ipcMain.handle('fusion:recipes:cancel', (_event, rawRunId: unknown) => {
+    if (typeof rawRunId !== 'string') return errorResponse('invalid recipe runId');
+    // Rien à attendre : la passe rend la main d'elle-même, et une passe déjà finie n'est plus là.
+    recipeRuns.get(rawRunId)?.abort();
+    return successResponse({});
+  });
+
+  async function runRecipe(
+    event: IpcMainInvokeEvent,
+    root: string,
+    rawScope: 'builtin' | 'user',
+    rawFileName: string,
+    inputs: Record<string, unknown>,
+    runId: string,
+    signal: AbortSignal
+  ) {
+    // Même une recette intégrée : son journal de passe s'écrit dans `recipes-runs/`.
+    const linked = await linkedOutsideResponse(root);
+    if (linked) return linked;
+    const baseDir =
+      rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : workspaceFiles(root).recipesDir;
+    let recipe: Recipe;
+    try {
+      const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
+      recipe = parseRecipe(raw);
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+
+    const cfg = configManager.getLLMConfig();
+    // Les étapes brainstorm / write envoient leurs prompts interpolés au
+    // LLM : consentement distant avant de construire le registre (ADR 0005).
+    if (recipeCallsLLM(recipe)) {
+      const refusal = await cloudConsentRefusal('recipe', cfg, event.sender);
+      if (refusal) return errorResponse(refusal);
+    }
+    // Fermée pendant la question : rien n'a commencé, il n'y a rien à tracer.
+    if (signal.aborted) return successResponse({ runId, ok: false, cancelled: true, outputs: {} });
+    let registry;
+    try {
+      registry = createRegistryFromClioDeckConfig(cfg);
+    } catch (e) {
+      return errorResponse(e as Error);
+    }
+
+    const runner = new RecipeRunner({
+      registry,
+      workspaceRoot: root,
+      stepHandlers: recipeStepHandlers,
+      onEvent: (e) => {
+        try {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('fusion:recipes:event', { runId, event: e });
+          }
+        } catch {
+          // Renderer gone — keep running regardless.
+        }
+      },
+    });
+
+    try {
+      const result = await runner.run(recipe, inputs, signal);
+      return successResponse({
+        runId,
+        ok: result.ok,
+        cancelled: result.cancelled,
+        outputs: result.outputs,
+        logPath: result.logPath,
+        failedStep: result.failedStep,
+      });
+    } catch (e) {
+      return errorResponse(e as Error);
+    } finally {
+      await registry.dispose().catch(() => undefined);
+    }
+  }
 
   // MARK: - chat (streaming)
 

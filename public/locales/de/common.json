@@ -1715,8 +1715,8 @@
     }
   },
   "recipeRun": {
-    "closeWhileRunningTitle": "Dieses Fenster schließen?",
-    "closeWhileRunning": "Das Rezept läuft weiter: Das Schließen dieses Fensters hält es nicht an, und Sie sehen seinen Ablauf nicht mehr.",
+    "closeWhileRunningTitle": "Rezept anhalten?",
+    "closeWhileRunning": "Das Schließen dieses Fensters hält das Rezept an: Der laufende Schritt wird abgebrochen, und die folgenden Schritte werden nicht ausgeführt.",
     "errors": {
       "noFusionApi": "Fusion-API nicht exponiert.",
       "loadFailed": "Laden nicht möglich.",

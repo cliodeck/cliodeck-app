@@ -92,6 +92,7 @@ beforeEach(() => {
           recipe: { name: 'ma-recette', version: '1', description: '', inputs: {}, steps: [{ id: 's1', kind: 'write' }], outputs: {} },
         })),
         run: vi.fn(() => new Promise((resolve) => (finishRun = resolve))),
+        cancel: vi.fn(async () => ({ success: true })),
         onEvent: vi.fn(() => () => undefined),
       },
     },
@@ -237,5 +238,70 @@ describe('RecipeRunModal', () => {
 
     expect(closeRun).toHaveBeenCalledTimes(1);
     expect(closeSettings).not.toHaveBeenCalled();
+  });
+});
+
+/** Fermer la fenêtre d'une recette en cours l'annule (D20), et seulement celle-là. */
+describe('RecipeRunModal : fermer annule', () => {
+  const recipes = () =>
+    (window as unknown as {
+      electron: { fusion: { recipes: { run: ReturnType<typeof vi.fn>; cancel: ReturnType<typeof vi.fn> } } };
+    }).electron.fusion.recipes;
+  const runIdSent = () => recipes().run.mock.calls[0][3] as string;
+
+  it('confirmer la fermeture d’une recette en cours annule la passe lancée par cette fenêtre', async () => {
+    await renderRun();
+    await startRun();
+
+    await pressEscape();
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+
+    expect(closeRun).toHaveBeenCalledTimes(1);
+    expect(runIdSent()).toEqual(expect.any(String));
+    expect(recipes().cancel).toHaveBeenCalledTimes(1);
+    expect(recipes().cancel).toHaveBeenCalledWith(runIdSent());
+    await endRun();
+  });
+
+  it('refuser la question n’annule rien', async () => {
+    await renderRun();
+    await startRun();
+
+    await pressEscape();
+    await pressEscape();
+
+    expect(recipes().cancel).not.toHaveBeenCalled();
+    await endRun();
+  });
+
+  it('une recette terminée se ferme sans question et sans annulation', async () => {
+    await renderRun();
+    await startRun();
+    await endRun();
+
+    fireEvent.click(runOverlay().querySelector('.close-btn') as HTMLElement);
+
+    expect(dialogs().confirmOpen).toBe(false);
+    expect(closeRun).toHaveBeenCalledTimes(1);
+    expect(recipes().cancel).not.toHaveBeenCalled();
+  });
+
+  it('chaque lancement a son identifiant : annuler ne vise jamais une passe précédente', async () => {
+    await renderRun();
+    await startRun();
+    await endRun();
+    await startRun();
+
+    await pressEscape();
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+
+    const [first, second] = recipes().run.mock.calls.map((call) => call[3] as string);
+    expect(second).not.toBe(first);
+    expect(recipes().cancel).toHaveBeenCalledWith(second);
+    await endRun();
   });
 });
