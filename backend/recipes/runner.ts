@@ -314,7 +314,9 @@ export class RecipeRunner {
             })
         );
         const { output, stub } = await (cancelled ? Promise.race([working, cancelled]) : working);
-        // Un modèle interrompu peut rendre sa réponse partielle sans lever (Ollama).
+        // La course écarte ce qu'une étape rend après l'annulation (la réponse partielle
+        // d'Ollama, par exemple). Reste l'étape réglée juste avant : la course la retient,
+        // puisqu'elle est inscrite avant le rejet, et ce contrôle la jette.
         if (signal?.aborted) return cancel(step.id);
         priorOutputs[step.id] = output;
         emit({

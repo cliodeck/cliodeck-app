@@ -380,9 +380,9 @@ steps:
     expect(kinds).toEqual(['run_started', 'step_start', 'run_cancelled']);
   });
 
-  it('un modèle interrompu qui rend une réponse partielle sans lever : ni succès, ni étape suivante', async () => {
-    // Le fournisseur Ollama finit sur `finishReason: 'cancelled'` et `complete` rend ce qu'il a :
-    // sans regard au signal, la passe continuait avec une réponse vide.
+  it('un modèle interrompu qui rend une réponse partielle sans lever : la course l’écarte, ni succès, ni étape suivante', async () => {
+    // Le fournisseur Ollama finit sur `finishReason: 'cancelled'` et `complete` rend ce qu'il a.
+    // L'écouteur du runner est inscrit avant celui du fournisseur : son rejet gagne la course.
     const next = vi.fn(async () => ({ output: 'ne doit pas tourner' }));
     const controller = new AbortController();
     const llm: LLMProvider = {
@@ -420,6 +420,32 @@ steps:
     expect(kinds).not.toContain('step_ok');
     expect(kinds).not.toContain('run_failed');
     expect(kinds.at(-1)).toBe('run_cancelled');
+  });
+
+  it('une étape déjà réglée quand l’annulation arrive : son résultat est jeté', async () => {
+    // L'étape rend son résultat et l'annulation tombe avant que le runner reprenne la main :
+    // la course retient le résultat (inscrit le premier), seul le contrôle d'après la jette.
+    const next = vi.fn(async () => ({ output: 'ne doit pas tourner' }));
+    const controller = new AbortController();
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: async () => {
+          controller.abort();
+          return { output: 'réglé juste avant' };
+        },
+        graph: next,
+      },
+    });
+
+    const res = await runner.run(twoSteps, {}, controller.signal);
+
+    expect(res.cancelled).toBe(true);
+    expect(res.outputs).toEqual({});
+    expect(next).not.toHaveBeenCalled();
+    const kinds = (await readLog(res.logPath)).map((e) => e.kind);
+    expect(kinds).toEqual(['run_started', 'step_start', 'run_cancelled']);
   });
 
   it('une étape qui lève parce qu’on l’a interrompue : cancelled, pas failed', async () => {

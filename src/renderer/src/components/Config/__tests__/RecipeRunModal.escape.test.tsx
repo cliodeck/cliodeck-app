@@ -288,6 +288,28 @@ describe('RecipeRunModal : fermer annule', () => {
     expect(recipes().cancel).not.toHaveBeenCalled();
   });
 
+  it('une fenêtre démontée en pleine exécution, sans question, annule sa passe', async () => {
+    // Dans l'app, c'est ce chemin qui annule quand `onClose` retire la fenêtre.
+    await renderRun();
+    await startRun();
+
+    cleanup();
+
+    expect(recipes().cancel).toHaveBeenCalledTimes(1);
+    expect(recipes().cancel).toHaveBeenCalledWith(runIdSent());
+    await endRun();
+  });
+
+  it('une fenêtre démontée après la fin de sa recette n’annule rien', async () => {
+    await renderRun();
+    await startRun();
+    await endRun();
+
+    cleanup();
+
+    expect(recipes().cancel).not.toHaveBeenCalled();
+  });
+
   it('chaque lancement a son identifiant : annuler ne vise jamais une passe précédente', async () => {
     await renderRun();
     await startRun();
