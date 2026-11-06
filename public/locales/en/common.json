@@ -308,6 +308,10 @@
       "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection switches to the strictest mode, “Block”, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
       "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection switches to the strictest mode, “Block”, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
     },
+    "workspaceLinkedOutside": {
+      "title": "The .cliodeck folder is outside the project",
+      "message": "This project's .cliodeck folder, or one of its files (named below), is a link leading outside this project. ClioDeck does not open it and writes nothing to it: it has not been changed, and neither has the link. Your text remains editable, and saves and exports normally. Until then, what this folder holds is unavailable: searching your sources, the sources the assistant consults, the research history, the AI usage journal, the project's recipes and its MCP servers. Move this folder or file back into the project, in place of the link, then reopen the project."
+    },
     "documentOpenError": "This project's document could not be opened",
     "documentOpenUnchanged": "No file was changed.",
     "documentOpenUntitled": "The editor shows an untitled document: what you write there will not go into the project's document.",

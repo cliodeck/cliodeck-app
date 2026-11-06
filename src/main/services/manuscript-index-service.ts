@@ -40,6 +40,7 @@ import {
   chunkManuscriptChapter,
 } from '../../../backend/core/rag/manuscript-chunker.js';
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
+import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { parseOutline } from '../../editor/outline.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { projectManager } from './project-manager.js';
@@ -165,6 +166,12 @@ class ManuscriptIndexService {
   private getStore(): ManuscriptStore | null {
     if (!this.workspaceRoot) return null;
     if (this.store) return this.store;
+    // `.cliodeck` lié hors du projet (D18) : la base est celle d'un autre, rien ne s'y écrit.
+    const linked = workspaceLinkOutsideSync(this.workspaceRoot);
+    if (linked) {
+      console.warn('[manuscript-index] lien hors du projet, base non ouverte :', linked);
+      return null;
+    }
     try {
       // Dimension omise : elle se verrouille au premier embedding écrit.
       // Ouvrir sans elle permet de tester les empreintes AVANT d'appeler

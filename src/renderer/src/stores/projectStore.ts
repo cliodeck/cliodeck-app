@@ -230,11 +230,17 @@ function dismissConfigIssue(): void {
  */
 function notifyConfigIssue(issue?: { kind: string; path: string }): void {
   if (!issue) return;
+  // `.cliodeck` lié hors du projet (D18) : le même état, mais rien n'est illisible, et bien plus manque.
+  const linked = issue.kind === 'linked_outside';
   configIssueNotice = useNotificationStore.getState().notify({
     level: 'error',
-    title: i18n.t('project.configUnreadable.title'),
+    title: i18n.t(linked ? 'project.workspaceLinkedOutside.title' : 'project.configUnreadable.title'),
     message: i18n.t(
-      issue.kind === 'newer_schema' ? 'project.configUnreadable.newerSchema' : 'project.configUnreadable.message'
+      linked
+        ? 'project.workspaceLinkedOutside.message'
+        : issue.kind === 'newer_schema'
+          ? 'project.configUnreadable.newerSchema'
+          : 'project.configUnreadable.message'
     ),
     details: issue.path,
     duration: 0,

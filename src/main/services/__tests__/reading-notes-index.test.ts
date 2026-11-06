@@ -322,3 +322,41 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — consentement dis
     });
   });
 });
+
+/**
+ * D18 : `.cliodeck` lié hors du projet. La passe d'indexation ouvrait `brain.db` à travers le lien,
+ * et les notes de l'auteur partaient dans la base d'un autre projet.
+ */
+describe.skipIf(!sqliteAvailable || !symlinkAvailable)('ReadingNotesIndexService — .cliodeck lié hors du projet', () => {
+  let outside = '';
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-'));
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-ailleurs-'));
+    service = new ReadingNotesIndexService({
+      isEnabled: () => true,
+      openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
+    });
+    service.configure(tmp);
+  });
+
+  afterEach(() => {
+    service.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('ni base ouverte, ni fournisseur appelé, rien à l’autre bout', async () => {
+    writeNote(tmp, 'Braudel_1949.md', BRAUDEL, 'La longue durée.\n');
+    fs.symlinkSync(outside, path.join(tmp, '.cliodeck'));
+    const embedder = fakeEmbedder();
+
+    await service.index(embedder);
+    await service.reindexAll(embedder);
+
+    expect(service.stats()).toBeNull();
+    expect(service.getSearchStore()).toBeNull();
+    expect(embedder.calls).toBe(0);
+    expect(fs.readdirSync(outside)).toEqual([]);
+  });
+});

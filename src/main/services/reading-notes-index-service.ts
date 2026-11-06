@@ -38,6 +38,7 @@ import {
   type ReadingNoteRecord,
 } from '../../../backend/core/vector-store/ReadingNotesStore.js';
 import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
+import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
@@ -173,6 +174,12 @@ export class ReadingNotesIndexService {
   private getStore(): ReadingNotesStore | null {
     if (!this.workspaceRoot) return null;
     if (this.store) return this.store;
+    // `.cliodeck` lié hors du projet (D18) : la base est celle d'un autre, rien ne s'y écrit.
+    const linked = workspaceLinkOutsideSync(this.workspaceRoot);
+    if (linked) {
+      console.warn('[reading-notes-index] lien hors du projet, base non ouverte :', linked);
+      return null;
+    }
     try {
       this.store = this.deps.openStore(this.workspaceRoot);
       return this.store;

@@ -14,6 +14,7 @@ import {
   writeWorkspaceConfig,
 } from '../../core/workspace/config.js';
 import { isToolEnabled, loadMCPConfig } from '../config.js';
+import { symlinkAvailable } from '../../__tests__/helpers/native-guards.js';
 
 let tmp = '';
 
@@ -157,5 +158,39 @@ describe('isToolEnabled', () => {
   it('leaves the other tools alone', () => {
     const mcp = { enabled: true, tools: { search_documents: false } };
     expect(isToolEnabled(mcp, 'search_tropy')).toBe(true);
+  });
+});
+
+/**
+ * D18 : `.cliodeck` ou `brain.db` lié hors du projet. Le serveur lisait la base d'un autre projet
+ * et l'exposait au client externe comme le corpus de celui-ci.
+ */
+describe.skipIf(!symlinkAvailable)('loadMCPConfig — espace de travail lié hors du projet', () => {
+  let outside = '';
+
+  beforeEach(async () => {
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cliodeck-mcp-cfg-ailleurs-'));
+  });
+  afterEach(async () => {
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  const enabled = { ...defaultWorkspaceConfig('autre'), mcpServer: { enabled: true } } as never;
+
+  it('.cliodeck lié dehors : refusé, le chemin nommé', async () => {
+    await ensureWorkspaceDirectories(outside);
+    await writeWorkspaceConfig(outside, enabled);
+    await fs.symlink(path.join(outside, '.cliodeck'), path.join(tmp, '.cliodeck'));
+
+    expect(() => loadMCPConfig(tmp)).toThrow(/outside the project.*\.cliodeck/s);
+  });
+
+  it('brain.db seul lié dehors : refusé', async () => {
+    await ensureWorkspaceDirectories(tmp);
+    await writeWorkspaceConfig(tmp, enabled);
+    await fs.writeFile(path.join(outside, 'brain.db'), '');
+    await fs.symlink(path.join(outside, 'brain.db'), workspaceFiles(tmp).brainDb);
+
+    expect(() => loadMCPConfig(tmp)).toThrow(/outside the project.*brain\.db/s);
   });
 });

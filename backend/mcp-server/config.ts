@@ -24,6 +24,7 @@ import {
   parseWorkspaceConfig,
   type WorkspaceConfig,
 } from '../core/workspace/config.js';
+import { workspaceLinkOutsideSync } from '../core/workspace/link-guard.js';
 
 export interface MCPServerSettings {
   enabled: boolean;
@@ -105,6 +106,16 @@ export function loadMCPConfig(workspaceRoot: string): MCPRuntimeConfig {
   const abs = path.resolve(workspaceRoot);
   const paths = workspaceFiles(abs);
   const legacyV2Config = path.join(workspacePaths(abs).legacyV2Dir, 'config.json');
+
+  // `.cliodeck` ou l'un de ses fichiers lié hors du projet : la base d'un autre projet serait servie
+  // comme le corpus de celui-ci. L'app refuse aussi de l'ouvrir (D18).
+  const linked = workspaceLinkOutsideSync(abs);
+  if (linked) {
+    throw new Error(
+      `Workspace at ${abs}: a link leads outside the project (${linked}). ` +
+        `Move the .cliodeck folder back into the project, then retry.`
+    );
+  }
 
   if (!fs.existsSync(paths.config)) {
     if (fs.existsSync(legacyV2Config)) {

@@ -15,6 +15,7 @@ import {
 import { isInside, sameFile } from '../../../backend/core/vector-store/file-identity.js';
 import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator.js';
 import { workspaceConfigIssue, type WorkspaceConfigIssue } from '../../../backend/core/workspace/config.js';
+import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
 import {
   CHAPTERS_DIR,
@@ -30,6 +31,9 @@ import {
 } from '../../../backend/types/book.js';
 
 async function autoMigrateWorkspace(projectDir: string): Promise<void> {
+  // `.cliodeck` lié hors du projet (D18) : la migration y créerait ou déplacerait des fichiers, à
+  // l'autre bout du lien. Rien n'y touche ; `configIssue` le dit à l'écran.
+  if (await workspaceLinkOutside(projectDir)) return;
   // Best-effort: a failed migration must not block project load. The next
   // load will retry. Most-common case (already-flat workspace) is a no-op.
   try {
