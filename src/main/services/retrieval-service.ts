@@ -1085,7 +1085,10 @@ class RetrievalService {
     const store = this.getVaultStore();
     if (!store) return [];
     const embedding = await this.getQueryEmbedding(query);
-    const hits = this.withoutAuthorText(store.search(embedding, query, options.topK));
+    const hits = this.withoutAuthorText(
+      store.search(embedding, query, options.topK),
+      await this.configuredVaultPath()
+    );
     const mapped = hits.map(
       (h): VaultMappedSearchResult => ({
         chunk: {
@@ -1125,25 +1128,42 @@ class RetrievalService {
   /**
    * Un coffre qui contient le projet a pu indexer notes de lecture et manuscrit avant que le
    * lecteur ne les écarte (S09-1-13) : ces extraits ne passent pas par le canal « vault », qui
-   * n'applique ni leur consentement ni leur politique. Chaque note porte le coffre qui l'a
-   * indexée, d'où les exclusions se recalculent sans relire la configuration ni réindexer.
+   * n'applique ni leur consentement ni leur politique. Une note est écartée si le coffre de la
+   * configuration l'exclut, ou celui qu'elle porte en base. Le premier couvre un coffre renommé ou
+   * déplacé puis relié : son ancien chemin n'existe plus, et la réindexation ne réécrit pas les
+   * extraits que le lecteur écarte. Le second tient quand la configuration ne se lit pas.
    */
   private withoutAuthorText<T extends { note: { relativePath: string; vaultPath?: string } }>(
-    hits: T[]
+    hits: T[],
+    configuredVault: string | null
   ): T[] {
     const root = this.workspaceRoot;
     if (!root) return hits;
     const byVault = new Map<string, string[]>();
-    return hits.filter((h) => {
-      const vaultPath = h.note.vaultPath;
-      if (!vaultPath) return true;
+    const exclusionsOf = (vaultPath: string): string[] => {
       let exclusions = byVault.get(vaultPath);
       if (!exclusions) {
         exclusions = authorTextInVault(vaultPath, root);
         byVault.set(vaultPath, exclusions);
       }
-      return !isExcludedFromVault(h.note.relativePath, exclusions);
+      return exclusions;
+    };
+    return hits.filter((h) => {
+      const vaults = [configuredVault, h.note.vaultPath].filter((v): v is string => !!v);
+      return !vaults.some((v) => isExcludedFromVault(h.note.relativePath, exclusionsOf(v)));
     });
+  }
+
+  /** Le coffre que la configuration du projet relie, ou `null` si elle n'en relie aucun ou ne se lit pas. */
+  private async configuredVaultPath(): Promise<string | null> {
+    if (!this.workspaceRoot) return null;
+    try {
+      const cfg = await readWorkspaceConfig(this.workspaceRoot);
+      const vault = cfg.vault as { path?: unknown } | undefined;
+      return typeof vault?.path === 'string' && vault.path ? vault.path : null;
+    } catch {
+      return null;
+    }
   }
 
   private async searchManuscript(

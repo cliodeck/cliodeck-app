@@ -75,6 +75,30 @@ describe('RetrievalService — coffre qui contient le projet', () => {
     expect(paths).toEqual(['Journal/2026-11-06.md']);
   });
 
+  it('un coffre renommé puis relié : la configuration courante écarte ce que l’ancien chemin ne retrouve plus', async () => {
+    // Les lignes gardent le chemin du coffre au moment de l'indexation. Après un renommage, ce
+    // chemin n'existe plus, et la réindexation ne réécrit pas les extraits que le lecteur écarte.
+    const ancien = `${vault}-ancien-nom`;
+    const project = path.join(vault, 'these');
+    fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
+    fs.writeFileSync(
+      path.join(project, '.cliodeck', 'config.json'),
+      JSON.stringify({ schema_version: 2, vault: { path: vault } })
+    );
+    vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      search: () => [
+        vaultHit('these/reading-notes/Braudel_1949.md', ancien),
+        vaultHit('these/document.md', ancien),
+        vaultHit('Journal/2026-11-06.md', ancien),
+      ],
+    });
+
+    const { hits } = await retrievalService.search({ query: 'Braudel', sourceType: 'vault' });
+
+    const paths = hits.map((h) => (h.sourceType === 'vault' ? h.source.relativePath : null));
+    expect(paths).toEqual(['Journal/2026-11-06.md']);
+  });
+
   it('un coffre disjoint du projet garde toutes ses notes', async () => {
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-autre-coffre-'));
     try {
