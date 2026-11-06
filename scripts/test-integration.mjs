@@ -4,10 +4,13 @@
  *
  *   node scripts/test-integration.mjs [arguments passés à vitest…]
  *
- * Les suites qui ouvrent `brain.db` sont sautées en local, où better-sqlite3
- * est compilé pour Electron : elles ne tournent qu'ici et en CI. D'où la
- * recompilation avant, et **surtout** celle d'après — sans elle,
- * l'application ne démarre plus.
+ * Les suites qui ouvrent `brain.db` étaient sautées en local, où
+ * better-sqlite3 12 était compilé pour Electron : elles ne tournaient qu'ici
+ * et en CI. D'où la recompilation avant, et **surtout** celle d'après — sans
+ * elle, l'application ne démarrait plus. Depuis better-sqlite3 13 (N-API,
+ * binaire précompilé commun à Node et à Electron), ces deux recompilations
+ * ne changent plus rien et les suites tournent aussi par `npx vitest run` ;
+ * le contrôle final, qui ouvre une base sous Electron, reste ce qui compte.
  *
  * Ce script remplace `npm rebuild better-sqlite3 && vitest run; npm run
  * rebuild:native` : le `;` qui garantissait la restauration est une écriture

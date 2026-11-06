@@ -2,13 +2,12 @@
  * Gardes d'environnement partagées pour les suites dépendant de binaires
  * natifs ou de services locaux.
  *
- * better-sqlite3 est recompilé pour l'ABI d'Electron par le postinstall
- * (`electron-builder install-app-deps`) : sous le node de vitest, le binding
- * peut être incompatible (NODE_MODULE_VERSION différent). Les suites SQLite
- * se gardent alors par `describe.skipIf(!sqliteAvailable)` — elles tournent
- * en CI et après `npm rebuild better-sqlite3` ; les tests purs tournent
- * toujours. Ne JAMAIS utiliser ces gardes pour masquer un échec qui n'est
- * pas environnemental.
+ * Depuis better-sqlite3 13 (N-API), le même binaire sert à Node et à
+ * Electron : les suites SQLite tournent aussi en local. La garde
+ * `describe.skipIf(!sqliteAvailable)` ne joue plus que si le binding manque
+ * vraiment (plateforme sans binaire précompilé et compilation impossible) ;
+ * les tests purs tournent toujours. Ne JAMAIS utiliser ces gardes pour
+ * masquer un échec qui n'est pas environnemental.
  */
 import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync, symlinkSync } from 'fs';
@@ -18,8 +17,8 @@ import Database from 'better-sqlite3';
 
 /** Message à coller en commentaire au point d'usage, pour un skip lisible. */
 export const SQLITE_SKIP_REASON =
-  'binding better-sqlite3 compilé pour Electron (ABI ≠ node de vitest) — ' +
-  'lancer `npm rebuild better-sqlite3` ou exécuter en CI';
+  'binding better-sqlite3 introuvable (ni binaire précompilé ni compilation) — ' +
+  'lancer `npm run rebuild:native` (`npm rebuild better-sqlite3` ne compile plus rien depuis la 13) ou exécuter en CI';
 
 export const sqliteAvailable: boolean = (() => {
   try {

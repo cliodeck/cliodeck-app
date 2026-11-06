@@ -1,11 +1,13 @@
 name: Tests
 
 # Aucun job n'exécutait les tests jusqu'ici : la « suite verte » l'était
-# sur les postes de développement, où les gardes `native-guards.ts` sautent
-# les suites SQLite (better-sqlite3 y est compilé pour l'ABI d'Electron par
-# le `postinstall`). Huit échecs réels s'y cachaient — voir
-# docs/archive/audits-2026-07-19.md. Ce job tourne sur l'ABI **Node**, où les
-# gardes ne masquent plus que l'indisponibilité authentique du binding.
+# sur les postes de développement, où les gardes `native-guards.ts` sautaient
+# les suites SQLite (better-sqlite3 12 y était compilé pour l'ABI d'Electron
+# par le `postinstall`). Huit échecs réels s'y cachaient — voir
+# docs/archive/audits-2026-07-19.md. Depuis better-sqlite3 13 (N-API, DEP-1),
+# le binaire précompilé se charge sous Node comme sous Electron : les gardes
+# ne masquent plus que l'indisponibilité authentique du binding, ici comme
+# en local.
 
 on:
   push:
@@ -37,8 +39,13 @@ jobs:
         run: npm ci
 
       - name: Recompiler better-sqlite3 pour l'ABI Node
-        # Sans cette étape, les suites SQLite seraient sautées et la CI
-        # serait verte sans rien avoir vérifié.
+        # Superflue depuis better-sqlite3 13 (N-API) : le paquet déclare
+        # `gypfile: false` et charge son binaire précompilé
+        # (`prebuilds/linux-x64.node`), commun à Node et à Electron ; cette
+        # commande ne compile donc plus rien. Gardée parce qu'elle ne coûte
+        # rien. Si le binding venait à manquer, c'est `npm run
+        # rebuild:native` qui compile (binding.gyp lit prebuild_exists=0),
+        # et le récapitulatif des tests sautés le montrerait.
         run: npm rebuild better-sqlite3
 
       - name: Build
