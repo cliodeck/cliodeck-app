@@ -16,7 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ensureWorkspaceDirectories, workspaceFiles } from '../../core/workspace/layout.js';
 import { defaultWorkspaceConfig, writeWorkspaceConfig } from '../../core/workspace/config.js';
-import { loadMCPConfig, type MCPServerSettings } from '../config.js';
+import { loadMCPConfig, MCP_TOOL_NAMES, type MCPServerSettings } from '../config.js';
 import { createMcpServer, type ClioDeckMcpServer } from '../server.js';
 
 const SECRET = 'Le chapitre inédit sur la grève de 1906, mot pour mot.';
@@ -51,13 +51,20 @@ async function writeSettings(mcp: MCPServerSettings): Promise<void> {
   await writeWorkspaceConfig(tmp, cfg as never);
 }
 
-/** Un projet article dont le manuscrit est lisible, et un client connecté. */
-async function connect(): Promise<Client> {
+/**
+ * Un projet article dont le manuscrit est lisible, et un client connecté.
+ * `beforeConnect` enregistre des outils supplémentaires sur le serveur créé.
+ */
+async function connect(
+  settings: MCPServerSettings = GRANTED,
+  beforeConnect?: (s: ClioDeckMcpServer) => void
+): Promise<Client> {
   await ensureWorkspaceDirectories(tmp);
   await fs.writeFile(path.join(tmp, 'document.md'), SECRET, 'utf8');
-  await writeSettings(GRANTED);
+  await writeSettings(settings);
 
   running = createMcpServer(loadMCPConfig(tmp));
+  beforeConnect?.(running);
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await running.server.connect(serverSide);
   client = new Client({ name: 'test-client', version: '0.0.0' });
@@ -75,6 +82,25 @@ async function readManuscript(c: Client): Promise<CallResult> {
 }
 
 const textOf = (r: CallResult): string => r.content.map((p) => p.text ?? '').join('\n');
+
+type JsonSchemaProp = { type?: string; enum?: unknown[]; minimum?: number };
+
+/** Des arguments minimaux, mais valides, pour chaque champ requis du schéma. */
+function argumentsFor(schema: {
+  properties?: Record<string, object>;
+  required?: string[];
+}): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  for (const key of schema.required ?? []) {
+    const prop = (schema.properties?.[key] ?? {}) as JsonSchemaProp;
+    if (prop.enum && prop.enum.length > 0) args[key] = prop.enum[0];
+    else if (prop.type === 'number' || prop.type === 'integer') args[key] = prop.minimum ?? 1;
+    else if (prop.type === 'boolean') args[key] = false;
+    else if (prop.type === 'array') args[key] = [];
+    else args[key] = 'x';
+  }
+  return args;
+}
 
 async function accessLog(): Promise<Array<Record<string, unknown>>> {
   const raw = await fs.readFile(workspaceFiles(tmp).mcpAccessLog, 'utf8');
@@ -139,6 +165,45 @@ describe('serveur MCP — accord relu à chaque appel', () => {
     expect(String((refusal?.output as Record<string, unknown>).error)).toContain('tool_refused');
     expect(JSON.stringify(refusal)).not.toContain('document.md');
     expect(JSON.stringify(refusal)).not.toContain(SECRET);
+  });
+
+  it('gates a tool registered with registerTool as well as with tool()', async () => {
+    // `server.tool` est déprécié au profit de `registerTool` : un outil
+    // migré, ou ajouté sous cette forme, doit repasser par l'accord lui aussi.
+    const c = await connect(GRANTED, (s) => {
+      s.server.registerTool('probe_tool', { description: 'probe' }, () => ({
+        content: [{ type: 'text' as const, text: SECRET }],
+      }));
+    });
+    const call = async (): Promise<CallResult> =>
+      (await c.callTool({ name: 'probe_tool', arguments: {} })) as CallResult;
+    expect(textOf(await call())).toContain(SECRET);
+
+    await writeSettings({ ...GRANTED, enabled: false });
+    const refused = await call();
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).not.toContain(SECRET);
+    expect(JSON.parse(textOf(refused))).toMatchObject({ error: 'tool_refused' });
+  });
+
+  it('refuses every exposed tool once the server toggle is off', async () => {
+    // Tous les outils accordés : chacun doit être refusé, pas seulement le
+    // manuscrit. Les arguments suivent le schéma annoncé, pour que le refus
+    // vienne de l'accord et non de la validation des arguments.
+    const all = Object.fromEntries(MCP_TOOL_NAMES.map((n) => [n, true]));
+    const c = await connect({ enabled: true, tools: all });
+    const { tools } = await c.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual([...MCP_TOOL_NAMES].sort());
+
+    await writeSettings({ enabled: false, tools: all });
+    for (const tool of tools) {
+      const refused = (await c.callTool({
+        name: tool.name,
+        arguments: argumentsFor(tool.inputSchema),
+      })) as CallResult;
+      expect(refused.isError, tool.name).toBe(true);
+      expect(JSON.parse(textOf(refused)), tool.name).toMatchObject({ error: 'tool_refused' });
+    }
   });
 
   it('refuses when config.json is a link leading outside the project, and writes nothing through it', async () => {

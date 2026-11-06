@@ -106,45 +106,58 @@ type ToolHandler = (...args: unknown[]) => unknown;
  * (`tools/list`) garde les outils déjà vus jusqu'à son redémarrage ; seul
  * l'appel est refusé.
  *
- * On enveloppe `server.tool` sur l'instance plutôt que chaque outil : aucun
- * fichier d'outil n'a à s'en souvenir, et un outil ajouté plus tard est
- * couvert d'office. Le gestionnaire est toujours le dernier argument.
+ * On enveloppe les deux portes d'enregistrement du SDK sur l'instance —
+ * `tool` (dépréciée, celle des outils actuels) et `registerTool` (qui la
+ * remplace) — plutôt que chaque outil : aucun fichier d'outil n'a à s'en
+ * souvenir, et un outil ajouté ou migré plus tard est couvert d'office. Dans
+ * les deux formes, le gestionnaire est le dernier argument. Un test appelle
+ * chaque outil exposé après l'interrupteur coupé.
  */
 function gateToolCalls(server: McpServer, cfg: MCPRuntimeConfig, logger: MCPAccessLogger): void {
-  const target = server as unknown as { tool: ToolHandler };
-  const register = target.tool.bind(server);
-  target.tool = (...args: unknown[]): unknown => {
-    const name = args[0];
-    const handler = args[args.length - 1];
-    if (typeof name === 'string' && typeof handler === 'function') {
-      const inner = handler as ToolHandler;
-      args[args.length - 1] = (...callArgs: unknown[]): unknown => {
-        const gate = checkToolCall(cfg.workspaceRoot, name);
-        // `in` plutôt que `gate.ok` : sans strictNullChecks (tsconfig.node), un booléen ne discrimine pas.
-        if (!('reason' in gate)) return inner(...callArgs);
-        // Les arguments du client ne sont pas écrits. Et rien ne s'écrit à
-        // travers un lien qui mène hors du projet (D18) : le journal serait
-        // celui d'un autre.
-        if (!workspaceLinkOutsideSync(cfg.workspaceRoot)) {
-          logger.log({
-            kind: 'tool_call',
-            at: new Date().toISOString(),
-            name,
-            input: {},
-            output: { error: `tool_refused: ${gate.reason}` },
-          });
-        }
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ error: 'tool_refused', reason: gate.reason }),
-            },
-          ],
-        };
-      };
+  const target = server as unknown as Record<'tool' | 'registerTool', ToolHandler>;
+  for (const method of ['tool', 'registerTool'] as const) {
+    const register = target[method].bind(server);
+    target[method] = (...args: unknown[]): unknown => {
+      const name = args[0];
+      const handler = args[args.length - 1];
+      if (typeof name === 'string' && typeof handler === 'function') {
+        args[args.length - 1] = gatedHandler(name, handler as ToolHandler, cfg, logger);
+      }
+      return register(...args);
+    };
+  }
+}
+
+function gatedHandler(
+  name: string,
+  inner: ToolHandler,
+  cfg: MCPRuntimeConfig,
+  logger: MCPAccessLogger
+): ToolHandler {
+  return (...callArgs: unknown[]): unknown => {
+    const gate = checkToolCall(cfg.workspaceRoot, name);
+    // `in` plutôt que `gate.ok` : sans strictNullChecks (tsconfig.node), un booléen ne discrimine pas.
+    if (!('reason' in gate)) return inner(...callArgs);
+    // Les arguments du client ne sont pas écrits. Et rien ne s'écrit à
+    // travers un lien qui mène hors du projet (D18) : le journal serait
+    // celui d'un autre.
+    if (!workspaceLinkOutsideSync(cfg.workspaceRoot)) {
+      logger.log({
+        kind: 'tool_call',
+        at: new Date().toISOString(),
+        name,
+        input: {},
+        output: { error: `tool_refused: ${gate.reason}` },
+      });
     }
-    return register(...args);
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ error: 'tool_refused', reason: gate.reason }),
+        },
+      ],
+    };
   };
 }
