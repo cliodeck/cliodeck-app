@@ -167,6 +167,15 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
     return chosen.healthCheck();
   }
 
+  /**
+   * Le fournisseur qui servira l'appel suivant (sondage compris). Un cache rangé par modèle doit lire
+   * sa clé sur lui : `model` et `dimension` ne disent que le dernier choix, ou le primaire avant tout
+   * sondage, et `embed` peut basculer entre les deux.
+   */
+  resolve(): Promise<EmbeddingProvider> {
+    return this.picker.pick();
+  }
+
   async embed(
     texts: string[],
     opts: { signal?: AbortSignal } = {}
@@ -178,4 +187,18 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
   async dispose(): Promise<void> {
     await Promise.allSettled([this.primary.dispose(), this.fallback.dispose()]);
   }
+}
+
+/**
+ * Le fournisseur qui servira le prochain `embed` de `provider`. Un repli (`FallbackEmbeddingProvider`)
+ * sonde et choisit ; tout autre fournisseur se désigne lui-même. Passe aussi à travers le décorateur
+ * du journal d'usage (`instrumentEmbedding`), qui enveloppe toujours le repli dans le vrai registre :
+ * un `instanceof FallbackEmbeddingProvider` ne le voit jamais.
+ */
+export function resolveEmbeddingProvider(provider: EmbeddingProvider): Promise<EmbeddingProvider> {
+  const candidate = provider as EmbeddingProvider & { resolve?: unknown };
+  if (typeof candidate.resolve === 'function') {
+    return (candidate as EmbeddingProvider & { resolve(): Promise<EmbeddingProvider> }).resolve();
+  }
+  return Promise.resolve(provider);
 }

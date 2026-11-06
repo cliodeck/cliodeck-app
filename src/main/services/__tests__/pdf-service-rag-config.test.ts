@@ -97,7 +97,8 @@ describe('applyRagConfig', () => {
 
     expect(state.store.close).not.toHaveBeenCalled();
     expect(state.create).toHaveBeenCalledTimes(1);
-    expect(state.buildRegistry).toHaveBeenCalledTimes(1);
+    // Ceux de `init` seulement : un registre par moitié, génération et embeddings.
+    expect(state.buildRegistry).toHaveBeenCalledTimes(2);
     expect(state.dispose).not.toHaveBeenCalled();
   });
 

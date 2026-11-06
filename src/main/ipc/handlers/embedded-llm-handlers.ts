@@ -4,15 +4,28 @@
  */
 
 import { ipcMain, app, BrowserWindow } from 'electron';
-import { retrievalService } from '../../services/retrieval-service.js';
 import { ModelDownloader, type DownloadProgress } from '../../../../backend/core/llm/ModelDownloader.js';
 import { EMBEDDED_MODELS, DEFAULT_EMBEDDED_MODEL, EMBEDDED_EMBEDDING_MODELS, DEFAULT_EMBEDDED_EMBEDDING_MODEL } from '../../../../backend/core/llm/EmbeddedLLMClient.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { validate, OptionalModelIdSchema, EmbeddedLLMProviderSchema } from '../utils/validation.js';
 import { configManager } from '../../services/config-manager.js';
-import { pdfService } from '../../services/pdf-service.js';
+import { refreshProviders } from '../../services/provider-refresh.js';
 
 let downloader: ModelDownloader | null = null;
+
+/**
+ * Refait les fournisseurs de tous les services après un changement de modèle embarqué. `false` si la
+ * configuration ne se construit plus : c'est le signal d'échec qu'attendent les téléchargements.
+ */
+async function refreshAfterModelChange(embeddingChanged: boolean): Promise<boolean> {
+  try {
+    await refreshProviders({ embeddingChanged });
+    return true;
+  } catch (e: unknown) {
+    console.error('❌ [EMBEDDED] Failed to refresh providers after a model change:', e);
+    return false;
+  }
+}
 
 /**
  * Initialise le downloader avec le chemin userData
@@ -119,9 +132,8 @@ export function setupEmbeddedLLMHandlers() {
         embeddedModelId: targetModelId,
       });
 
-      // Charger immédiatement le modèle dans le LLMProviderManager si un projet est ouvert
-      // Cela permet d'utiliser le modèle sans avoir à recharger le projet
-      const modelLoadSuccess = await pdfService.updateEmbeddedModel(modelPath, targetModelId);
+      // Refaire les fournisseurs : le modèle sert sans avoir à recharger le projet
+      const modelLoadSuccess = await refreshAfterModelChange(false);
 
       if (!modelLoadSuccess) {
         // Model failed to load - it's likely corrupted despite passing basic checks
@@ -182,8 +194,8 @@ export function setupEmbeddedLLMHandlers() {
           embeddedModelId: undefined,
         });
 
-        // Désactiver le modèle dans le LLMProviderManager
-        await pdfService.disableEmbeddedModel();
+        // Plus aucun service ne doit tenir le modèle supprimé
+        await refreshAfterModelChange(false);
       }
 
       console.log('📤 IPC Response: embedded-llm:delete-model', { deleted });
@@ -364,8 +376,8 @@ export function setupEmbeddedLLMHandlers() {
         embeddedEmbeddingModelId: targetModelId,
       });
 
-      // Charger immédiatement le modèle dans le LLMProviderManager
-      const modelLoadSuccess = await pdfService.updateEmbeddedEmbeddingModel(modelPath, targetModelId);
+      // Refaire les fournisseurs, indexeur PDF compris : il embarquerait sinon avec l'ancien modèle
+      const modelLoadSuccess = await refreshAfterModelChange(true);
 
       if (!modelLoadSuccess) {
         console.error('❌ [EMBEDDED] Embedding model downloaded but failed to load - deleting corrupted file');
@@ -410,8 +422,8 @@ export function setupEmbeddedLLMHandlers() {
           embeddedEmbeddingModelId: undefined,
         });
 
-        // Désactiver le modèle dans le LLMProviderManager
-        await pdfService.disableEmbeddedEmbeddingModel();
+        // Plus aucun service ne doit tenir le modèle supprimé, l'indexeur PDF compris
+        await refreshAfterModelChange(true);
       }
 
       console.log('📤 IPC Response: embedded-embedding:delete-model', { deleted });
@@ -435,8 +447,11 @@ export function setupEmbeddedLLMHandlers() {
       // Écrire la config ne suffisait pas : le registre gardait l'ancien
       // fournisseur jusqu'au redémarrage. Requêtes et index se retrouvaient
       // dans deux espaces vectoriels différents, sans erreur — `cosine()`
-      // compare sur la longueur minimale.
-      retrievalService.rebuildEmbeddingProvider();
+      // compare sur la longueur minimale. Tous les services, indexeur PDF et
+      // Tropy compris : la réindexation demandée ensuite doit écrire dans
+      // l'espace des requêtes. Un échec (configuration qui ne se construit
+      // plus) est journalisé : le choix, lui, est écrit.
+      await refreshAfterModelChange(true);
       console.log('📤 IPC Response: embedded-embedding:set-provider - success');
       return successResponse({ provider, reindexRequired: true });
     } catch (error: unknown) {

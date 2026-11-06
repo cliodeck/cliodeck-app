@@ -63,6 +63,7 @@ import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { readWorkspaceConfig, WorkspaceConfigError } from '../../../backend/core/workspace/config.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
+import { resolveEmbeddingProvider } from '../../../backend/core/llm/providers/fallback.js';
 import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 
 /**
@@ -76,9 +77,9 @@ const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
  * Module-scope embedding cache. The embedding of a query string is
  * invariant across project changes (same text → same vector for a given
  * provider), so we deliberately keep this cache across `configure()` /
- * `clear()` calls. Provider-scoped invalidation is available via
- * `queryEmbeddingCache.invalidateProvider(providerId)` when a provider's
- * embedding model actually changes.
+ * `clear()` calls. Entries are keyed by provider id, model and dimension
+ * (`providerKey`): a model change misses the cache instead of serving
+ * the previous model's vectors.
  */
 const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
 
@@ -524,22 +525,33 @@ class RetrievalService {
     readingNotesIndexService.clear();
   }
 
-  private getProviderId(): string | undefined {
-    // Stable provider id from the typed embedding (e.g. `ollama-embed:nomic-embed-text`).
-    return this.embedding?.id;
+  /**
+   * Le fournisseur qui fera l'embedding. En mode « auto », le repli choisit au moment de l'appel :
+   * on le fait choisir d'abord, pour que la clé du cache et le vecteur viennent du même modèle.
+   */
+  private async resolveEmbedding(): Promise<EmbeddingProvider> {
+    if (!this.embedding) {
+      throw new Error(
+        'retrieval-service: embedding provider not configured (call configure() first)'
+      );
+    }
+    // Le repli arrive enveloppé par le décorateur du journal : `resolveEmbeddingProvider` le traverse.
+    return resolveEmbeddingProvider(this.embedding);
+  }
+
+  private static providerKey(provider: EmbeddingProvider): string {
+    // `id` est une constante par famille (`'ollama-embedding'`, quel que soit le modèle) : seul, il
+    // resservait après un changement de modèle les vecteurs de l'ancien. Le modèle et la dimension
+    // complètent la clé.
+    return `${provider.id}:${provider.model}:${provider.dimension}`;
   }
 
   /**
    * Embed a single query through the typed provider. Returns a Float32Array
    * (the rest of the pipeline — HNSW, BM25 — expects this shape).
    */
-  private async embedQuery(text: string): Promise<Float32Array> {
-    if (!this.embedding) {
-      throw new Error(
-        'retrieval-service: embedding provider not configured (call configure() first)'
-      );
-    }
-    const [vec] = await this.embedding.embed([text]);
+  private static async embedQuery(provider: EmbeddingProvider, text: string): Promise<Float32Array> {
+    const [vec] = await provider.embed([text]);
     return Float32Array.from(vec);
   }
 
@@ -549,11 +561,17 @@ class RetrievalService {
       for (const [fr, ens] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
         terms.push(fr, ...ens);
       }
-      const providerId = this.getProviderId();
+      let provider: EmbeddingProvider;
+      try {
+        provider = await this.resolveEmbedding();
+      } catch {
+        return;
+      }
+      const providerId = RetrievalService.providerKey(provider);
       for (const term of terms) {
         if (queryEmbeddingCache.has(term, providerId)) continue;
         try {
-          const emb = await this.embedQuery(term);
+          const emb = await RetrievalService.embedQuery(provider, term);
           queryEmbeddingCache.set(term, emb, providerId);
         } catch {
           // Warmup is best-effort: a provider may be unavailable at boot.
@@ -644,10 +662,11 @@ class RetrievalService {
   }
 
   private async getQueryEmbedding(query: string): Promise<Float32Array> {
-    const providerId = this.getProviderId();
+    const provider = await this.resolveEmbedding();
+    const providerId = RetrievalService.providerKey(provider);
     const cached = queryEmbeddingCache.get(query, providerId);
     if (cached) return cached;
-    const embedding = await this.embedQuery(query);
+    const embedding = await RetrievalService.embedQuery(provider, query);
     queryEmbeddingCache.set(query, embedding, providerId);
     return embedding;
   }

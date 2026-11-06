@@ -176,6 +176,70 @@ describe('EmbeddedEmbeddingProvider', () => {
   });
 });
 
+/**
+ * Double qui se comporte comme le vrai client : `dispose` libère le modèle, et l'appeler ensuite sans
+ * recharger lève, comme `EmbeddedLLMClient`.
+ */
+function disposableClient(): { client: EmbeddedLLMClient; loads: { embedding: number; generation: number } } {
+  const loads = { embedding: 0, generation: 0 };
+  let loaded = false;
+  const client = {
+    async initialize() {
+      loads.generation++;
+      loaded = true;
+      return true;
+    },
+    async initializeEmbedding() {
+      loads.embedding++;
+      loaded = true;
+      return true;
+    },
+    getEmbeddingDimensions: () => (loaded ? 768 : 0),
+    async generateEmbedding() {
+      if (!loaded) throw new Error('Embedded embedding model not initialized. Call initializeEmbedding() first.');
+      return new Float32Array(768).fill(0.1);
+    },
+    async *generateResponseStream() {
+      if (!loaded) throw new Error('Model not initialized');
+      yield 'bonjour';
+    },
+    async dispose() {
+      loaded = false;
+    },
+  };
+  return { client: client as unknown as EmbeddedLLMClient, loads };
+}
+
+describe('après dispose, le modèle se recharge', () => {
+  // Un registre reconstruit libère l'ancien fournisseur ; celui qui le tenait encore (l'indexeur
+  // PDF) le croyait chargé, et chaque PDF échouait sur « not initialized » jusqu'à la réouverture.
+  it('embeddings : embed, dispose, embed recharge au lieu de lever', async () => {
+    const { client, loads } = disposableClient();
+    const p = new EmbeddedEmbeddingProvider({ modelPath: MODEL_PATH, dimension: 768, client });
+
+    await p.embed(['avant']);
+    await p.dispose();
+    const out = await p.embed(['après']);
+
+    expect(out[0]).toHaveLength(768);
+    expect(loads.embedding).toBe(2);
+    expect(p.getStatus().state).toBe('ready');
+  });
+
+  it('génération : même chose, `loading` est remis à null', async () => {
+    const { client, loads } = disposableClient();
+    const p = new EmbeddedProvider({ modelPath: MODEL_PATH, client });
+
+    await collect(p.chat([{ role: 'user', content: 'avant' }]));
+    await p.dispose();
+    const chunks = await collect(p.chat([{ role: 'user', content: 'après' }]));
+
+    expect(chunks.map((c) => c.delta).join('')).toBe('bonjour');
+    expect(chunks.at(-1)?.finishReason).toBe('stop');
+    expect(loads.generation).toBe(2);
+  });
+});
+
 /** Provider minimal pour piloter le repli sans dépendance réseau. */
 function stubLLM(state: ProviderStatus['state'], tag: string): LLMProvider {
   return {

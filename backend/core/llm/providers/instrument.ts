@@ -27,6 +27,7 @@ import type {
 } from './base.js';
 import { getJournalContext, recordInference } from '../../usage-journal/context.js';
 import { isLocalProvider } from '../../usage-journal/is-local.js';
+import { resolveEmbeddingProvider } from './fallback.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
 function estimateTokens(chars: number): number {
@@ -148,9 +149,19 @@ class InstrumentedEmbedding implements EmbeddingProvider {
   constructor(
     private readonly inner: EmbeddingProvider,
     private readonly providerId: string,
-    baseUrl?: string
+    private readonly baseUrl?: string
   ) {
     this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
+  }
+
+  /**
+   * Repli enveloppé : le fournisseur choisi, enveloppé à son tour. Le déballer contournerait le
+   * journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la clé du dernier
+   * choix, pas celle du modèle qui produira le vecteur.
+   */
+  async resolve(): Promise<EmbeddingProvider> {
+    const chosen = await resolveEmbeddingProvider(this.inner);
+    return chosen === this.inner ? this : new InstrumentedEmbedding(chosen, this.providerId, this.baseUrl);
   }
 
   get id(): string {

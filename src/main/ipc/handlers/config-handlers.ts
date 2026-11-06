@@ -5,6 +5,7 @@ import { app, ipcMain } from 'electron';
 import os from 'os';
 import { configManager } from '../../services/config-manager.js';
 import { pdfService } from '../../services/pdf-service.js';
+import { providerChanges, refreshProviders } from '../../services/provider-refresh.js';
 import { isMaskedKey, isSensitiveKey, maskAPIKey, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { sandboxStatus } from '../../utils/sandbox-status.js';
@@ -176,6 +177,9 @@ export function setupConfigHandlers() {
       if (isNonFinite(received)) throw new Error(`config:set: ${key} is not a finite number`);
       const value = stripNonFinite(received);
 
+      // Lue avant l'écriture : c'est l'écart qui dit quels fournisseurs refaire.
+      const llmBefore = key === 'llm' ? configManager.getLLMConfig() : null;
+
       // If setting a sensitive key directly, route through secure storage.
       // A value shaped like a mask means "unchanged" — skip the write so a
       // round-tripped mask never replaces the real key, or becomes one.
@@ -209,13 +213,18 @@ export function setupConfigHandlers() {
       // Le fichier est écrit : ce qui échoue à partir d'ici ne l'annule pas, et le panneau doit le
       // savoir. Il prendrait sinon pour non écrit ce que le disque contient déjà.
       try {
-        if (key === 'llm') {
-          // If LLM config changed and there's an active project, reinitialize services
-          const currentProjectPath = pdfService.getCurrentProjectPath();
-          if (currentProjectPath) {
-            console.log('Reinitializing services with new LLM config...');
-            await pdfService.init(currentProjectPath);
-            console.log('Services reinitialized successfully');
+        if (key === 'llm' && llmBefore && pdfService.getCurrentProjectPath()) {
+          // Projet ouvert : refaire les fournisseurs que l'enregistrement touche, dans tous les services
+          // (Tropy compris). Plus de réouverture : `init` attendait les indexations en vol et fermait le
+          // magasin pour un simple changement de modèle de chat. La section `rag` a son propre chemin.
+          // Des fournisseurs manquants (dernière construction en échec) se retentent, même sans écart :
+          // « sauvegardée » serait faux tant que les services sont à l'arrêt.
+          const changes = providerChanges(llmBefore, configManager.getLLMConfig());
+          const missing = pdfService.providersMissing();
+          if (changes.generation || changes.embedding || missing) {
+            console.log('Refreshing providers with new LLM config...', changes);
+            await refreshProviders({ embeddingChanged: changes.embedding || missing });
+            console.log('Providers refreshed successfully');
           }
         } else if (key === 'rag') {
           pdfService.applyRagConfig();

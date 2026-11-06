@@ -7,6 +7,7 @@ import type {
   ProviderStatus,
 } from '../../llm/providers/base.js';
 import { instrumentEmbedding, instrumentLLM } from '../../llm/providers/instrument.js';
+import { FallbackEmbeddingProvider, resolveEmbeddingProvider } from '../../llm/providers/fallback.js';
 import {
   runBatch,
   setBatchSink,
@@ -159,5 +160,33 @@ describe('usage-journal provider instrumentation', () => {
     expect(await isLocal('gpt-oss:120b-cloud', 'http://127.0.0.1:11434')).toBe(false);
     expect(await isLocal('qwen3.5:cloud', 'http://127.0.0.1:11434')).toBe(false);
     expect(await isLocal('llama3.2', 'http://gpu.labo.example:11434')).toBe(false);
+  });
+
+  it('un repli enveloppé se résout à travers le décorateur, sans quitter le journal', async () => {
+    const named = (model: string, up: boolean): EmbeddingProvider => {
+      const base = new FakeEmbedding();
+      return {
+        id: base.id,
+        name: base.name,
+        dimension: base.dimension,
+        model,
+        getStatus: () => READY,
+        healthCheck: async () => (up ? READY : { state: 'failed' }),
+        embed: (texts) => base.embed(texts),
+        dispose: async () => undefined,
+      };
+    };
+    const emb = instrumentEmbedding(
+      new FallbackEmbeddingProvider(named('primaire', false), named('secours', true)),
+      'ollama'
+    );
+    const chosen = await resolveEmbeddingProvider(emb);
+    expect(chosen.model).toBe('secours');
+    await chosen.embed(['abcd']);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'embedding', provider: 'ollama', model: 'secours' });
+
+    const plain = instrumentEmbedding(new FakeEmbedding(), 'ollama');
+    expect(await resolveEmbeddingProvider(plain)).toBe(plain);
   });
 });
