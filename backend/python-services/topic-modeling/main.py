@@ -7,11 +7,18 @@ Reçoit des embeddings pré-calculés depuis Electron/Ollama.
 Endpoints:
 - GET /health : Health check
 - POST /analyze : Analyse de topics à partir d'embeddings
+
+Lancement : port dans CLIODECK_TOPIC_PORT, jeton dans CLIODECK_TOPIC_TOKEN.
+Toute requête sans l'en-tête x-cliodeck-token correspondant reçoit 403.
 """
 
+import os
+import secrets
+import sys
+import threading
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 import numpy as np
 import uvicorn
@@ -128,14 +135,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS pour permettre les requêtes depuis Electron
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En production, restreindre aux origines autorisées
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Pas de CORS : le seul client est le processus main d'Electron (fetch de Node),
+# qui n'en a pas besoin. Une page web n'obtient aucune autorisation d'origine,
+# et le jeton tiré par Electron à chaque lancement filtre tout le reste.
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    """Refuse (403) toute requête sans le jeton, avant de lire son corps."""
+    expected = os.environ.get("CLIODECK_TOPIC_TOKEN", "")
+    provided = request.headers.get("x-cliodeck-token", "")
+    if not expected or not secrets.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    ):
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Forbidden"})
+    return await call_next(request)
 
 
 # MARK: - Endpoints
@@ -225,12 +237,26 @@ async def analyze_topics(request: AnalyzeRequest):
 
 # MARK: - Main
 
+def exit_when_parent_dies():
+    """
+    Electron garde notre stdin ouvert : la fin de fichier signifie qu'il est
+    mort. Le service sort alors de lui-même, sans fichier PID ni kill.
+    """
+    sys.stdin.buffer.read()
+    os._exit(0)
+
+
 if __name__ == "__main__":
-    # Lancer le serveur sur le port 8001
+    port_value = os.environ.get("CLIODECK_TOPIC_PORT", "")
+    if not port_value.isdigit():
+        sys.exit("CLIODECK_TOPIC_PORT manquant ou invalide : le port est choisi par ClioDeck.")
+
+    threading.Thread(target=exit_when_parent_dies, daemon=True).start()
+
     uvicorn.run(
         "main:app",
         host="127.0.0.1",
-        port=8001,
+        port=int(port_value),
         reload=False,  # Désactiver auto-reload en production
         log_level="info",
     )
