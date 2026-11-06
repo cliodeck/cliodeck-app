@@ -3,6 +3,8 @@
  * ExplanationPanel — collapse/expand + renders search stats & timing.
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ExplanationPanel } from '../ExplanationPanel';
 import type { RAGExplanation } from '../../../stores/chatStore';
@@ -38,6 +40,28 @@ describe('ExplanationPanel', () => {
     render(<ExplanationPanel explanation={{ ...fixture, search: { ...fixture.search, retrievalStatus: 'partial' } }} />);
     expect(screen.getByRole('status').textContent).toContain('échoué');
     expect(screen.queryByTestId('explanation-content')).not.toBeInTheDocument();
+  });
+
+  it('marque l’avertissement d’une icône lucide et de sa gravité (retouches #212)', () => {
+    for (const status of ['empty', 'partial', 'failed'] as const) {
+      const { container } = render(
+        <ExplanationPanel explanation={{ ...fixture, search: { ...fixture.search, retrievalStatus: status } }} />
+      );
+      const warning = container.querySelector('.retrieval-warning');
+      expect(warning?.querySelector('svg.lucide-triangle-alert, svg.lucide-alert-triangle')).not.toBeNull();
+      expect(warning?.getAttribute('data-status')).toBe(status);
+      cleanup();
+    }
+  });
+
+  it('style l’avertissement avec les jetons du thème, sans couleur en dur (retouches #212)', () => {
+    const css = fs.readFileSync(path.join(__dirname, '../MessageBubble.css'), 'utf8');
+    const rules = [...css.matchAll(/\.retrieval-warning[^{]*\{([^}]*)\}/g)].map((m) => m[1]);
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules.join('\n')).toContain('var(--color-danger)');
+    for (const body of rules) {
+      expect(body).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+    }
   });
 
   it('is collapsed by default and expands on toggle click', () => {
