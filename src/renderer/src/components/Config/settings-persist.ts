@@ -164,6 +164,18 @@ const LLM_ON_RESET: Record<keyof StoredLLMConfig, 'keep' | 'default'> = {
   generationProvider: 'default',
 };
 
+/**
+ * Ce que Réinitialiser laisse dans la section RAG : la langue du prompt, et ce que l'auteur a écrit
+ * lui-même, sans copie ailleurs. Le prompt personnalisé et le dictionnaire d'expansion de requêtes
+ * s'effaçaient (D12) ; ils restent, et le prompt reste actif s'il l'était.
+ */
+const RAG_KEPT_ON_RESET: ReadonlySet<string> = new Set([
+  'systemPromptLanguage',
+  'customSystemPrompt',
+  'useCustomSystemPrompt',
+  'queryExpansionDictionary',
+]);
+
 /** Même règle que `clioDeckConfigToRegistryConfig` : Anthropic n'a pas d'embeddings. */
 function backendComputesEmbeddings(llm: Partial<StoredLLMConfig>): boolean {
   return llm.useCloudEmbeddings === true && ['gemini', 'openai', 'mistral'].includes(llm.backend ?? '');
@@ -194,7 +206,7 @@ export function resetValues(fresh: {
 }): { rag: Record<string, unknown>; llm: Record<string, unknown>; editor: EditorConfig } {
   const llm = fresh.llm ?? {};
   return {
-    rag: resetSection(fresh.rag ?? {}, DEFAULT_CONFIG.rag, (key) => key === 'systemPromptLanguage'),
+    rag: resetSection(fresh.rag ?? {}, DEFAULT_CONFIG.rag, (key) => RAG_KEPT_ON_RESET.has(key)),
     llm: resetSection(
       llm,
       DEFAULT_CONFIG.llm,
