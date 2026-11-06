@@ -80,6 +80,12 @@ class PDFService {
   private llmRegistry: ProviderRegistry | null = null;
   private llm: LLMProvider | null = null;
   private embedding: EmbeddingProvider | null = null;
+  /**
+   * Pourquoi la dernière construction des registres a échoué (clé cloud absente ou illisible…), ou
+   * null. Un registre invalide n'empêche plus d'ouvrir le projet : seule l'indexation, qui a besoin
+   * des embeddings, le refuse, en citant cette cause.
+   */
+  private registryError: string | null = null;
 
   /**
    * Initialise le PDF Service pour un projet spécifique
@@ -101,6 +107,10 @@ class PDFService {
       await this.drainInFlightIndexing();
       this.vectorStore.close();
     }
+    // Plus rien ne pointe sur le magasin fermé : si l'ouverture du nouveau échoue, les lectures disent
+    // « not initialized » et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    this.vectorStore = null;
+    this.pdfIndexer = null;
 
     try {
       const config = configManager.getLLMConfig();
@@ -109,7 +119,7 @@ class PDFService {
       // Build the typed provider registry from the active config.
       // Replaces the previous `new OllamaClient(...)` + `new LLMProviderManager(...)`
       // pair (the latter held a *third* OllamaClient internally — that's
-      // gone now too).
+      // gone now too). Ne lève pas : un registre invalide laisse le projet s'ouvrir sans fournisseurs.
       await this.rebuildLLMRegistry();
 
       // Initialiser VectorStore (Enhanced ou Standard selon config)
@@ -140,7 +150,9 @@ class PDFService {
         customChunkingEnabled: ragConfig.customChunkingEnabled ?? false,
       });
 
-      this.createIndexer(ragConfig);
+      if (this.embedding) {
+        this.createIndexer(ragConfig);
+      }
 
       this.currentProjectPath = projectPath;
 
@@ -171,6 +183,11 @@ class PDFService {
       });
     } catch (error: unknown) {
       console.error('❌ Failed to initialize PDF Service:', error);
+      // La recherche a pu rester configurée sur le magasin qu'on vient de fermer.
+      this.vectorStore = null;
+      this.pdfIndexer = null;
+      this.currentProjectPath = null;
+      retrievalService.clear();
       throw error;
     }
   }
@@ -247,8 +264,10 @@ class PDFService {
    * native handles / HTTP agents they own are released cleanly. With
    * `embedding: false`, only the generation half is rebuilt. Used by
    * `init()` and `refreshProviders()`.
+   *
+   * Ne lève pas : rend la cause d'un échec (et la garde dans `registryError`), null sinon.
    */
-  private async rebuildLLMRegistry({ embedding = true }: { embedding?: boolean } = {}): Promise<void> {
+  private async rebuildLLMRegistry({ embedding = true }: { embedding?: boolean } = {}): Promise<string | null> {
     const previous = embedding ? [this.llmRegistry, this.registry] : [this.llmRegistry];
     this.llmRegistry = null;
     this.llm = null;
@@ -266,6 +285,7 @@ class PDFService {
         this.registry = createRegistryFromClioDeckConfig(llmConfig);
         this.embedding = this.registry.getEmbedding();
       }
+      this.registryError = null;
     } catch (e) {
       console.error('❌ [PDF-SERVICE] Failed to build provider registry:', e);
       // Tout à null : une configuration qui ne se construit pas ne laisse aucun fournisseur servir.
@@ -275,8 +295,9 @@ class PDFService {
       this.llm = null;
       this.embedding = null;
       await Promise.all(failed.map((r) => r?.dispose().catch(() => undefined)));
-      throw e;
+      this.registryError = e instanceof Error ? e.message : String(e);
     }
+    return this.registryError;
   }
 
   /**
@@ -309,12 +330,12 @@ class PDFService {
 
   private async rebuildProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
     if (embeddingChanged) await this.drainInFlightIndexing();
-    try {
-      await this.rebuildLLMRegistry({ embedding: embeddingChanged });
-    } catch (e) {
-      // Un échec libère tout : l'indexeur tiendrait un fournisseur libéré.
+    const cause = await this.rebuildLLMRegistry({ embedding: embeddingChanged });
+    if (cause !== null) {
+      // Un échec libère tout : l'indexeur tiendrait un fournisseur libéré. L'erreur remonte au
+      // panneau des réglages, qui dit que la configuration n'est pas appliquée.
       this.pdfIndexer = null;
-      throw e;
+      throw new Error(cause);
     }
     if (embeddingChanged) {
       this.pdfIndexer = null;
@@ -330,11 +351,22 @@ class PDFService {
   }
 
   /**
-   * Vérifie si le service est initialisé
+   * Vérifie que le magasin est ouvert. Les lectures n'ont pas besoin des fournisseurs : une clé
+   * cloud illisible ne doit pas cacher la bibliographie.
    */
-  private ensureInitialized() {
-    if (!this.vectorStore || !this.pdfIndexer || !this.llm || !this.embedding) {
+  private ensureStore() {
+    if (!this.vectorStore) {
       throw new Error('PDF Service not initialized. Call init(projectPath) first.');
+    }
+  }
+
+  /** Vérifie que l'indexation est possible : magasin ouvert et fournisseur d'embeddings construit. */
+  private ensureIndexer() {
+    this.ensureStore();
+    if (!this.pdfIndexer) {
+      throw new Error(
+        `Fournisseur d'embeddings indisponible : ${this.registryError ?? 'registre non construit'}`
+      );
     }
   }
 
@@ -365,7 +397,7 @@ class PDFService {
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
     while (this.providerRefresh) await this.providerRefresh;
-    this.ensureInitialized();
+    this.ensureIndexer();
     const job = this.pdfIndexer!.indexPDF(
       filePath,
       bibtexKey,
@@ -478,7 +510,7 @@ class PDFService {
       includeVault?: boolean;
     }
   ) {
-    this.ensureInitialized();
+    this.ensureStore();
     const { hits } = await retrievalService.search({
       query,
       topK: options?.topK,
@@ -492,7 +524,7 @@ class PDFService {
   }
 
   async getAllDocuments() {
-    this.ensureInitialized();
+    this.ensureStore();
     return this.vectorStore!.getAllDocuments();
   }
 
@@ -500,21 +532,21 @@ class PDFService {
    * Get a specific document by its ID
    */
   async getDocument(documentId: string) {
-    this.ensureInitialized();
+    this.ensureStore();
     // Indexed lookup — avoids hydrating the full document list (+ N
     // chunk-count queries) just to find one by id.
     return PdfVectorStore.getDocumentById(this.vectorStore!, documentId) || null;
   }
 
   async deleteDocument(documentId: string) {
-    this.ensureInitialized();
+    this.ensureStore();
     const result = this.vectorStore!.deleteDocument(documentId);
     this.scheduleIndexRebuild();
     return result;
   }
 
   async getStatistics() {
-    this.ensureInitialized();
+    this.ensureStore();
     return this.vectorStore!.getStatistics();
   }
 
@@ -547,7 +579,7 @@ class PDFService {
    * Construit et retourne le graphe de connaissances
    */
   async buildKnowledgeGraph(options?: KnowledgeGraphOptions): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-    this.ensureInitialized();
+    this.ensureStore();
 
     // Récupérer le seuil de similarité depuis la configuration utilisateur
     const ragConfig = configManager.get('rag');
@@ -572,7 +604,7 @@ class PDFService {
    * Lightweight: builds the full graph once, then filters. Useful for per-turn visualization.
    */
   async getSubgraphForDocuments(documentIds: string[]): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-    this.ensureInitialized();
+    this.ensureStore();
     if (documentIds.length === 0) return { nodes: [], edges: [] };
 
     const full = await this.buildKnowledgeGraph({
@@ -602,7 +634,7 @@ class PDFService {
    * Retourne les statistiques du corpus
    */
   async getCorpusStatistics() {
-    this.ensureInitialized();
+    this.ensureStore();
 
     const stats = await this.vectorStore!.getStatistics();
     const documents = await this.vectorStore!.getAllDocuments();
@@ -646,7 +678,7 @@ class PDFService {
    * Analyse textométrique du corpus
    */
   async getTextStatistics(options?: { topN?: number }) {
-    this.ensureInitialized();
+    this.ensureStore();
 
     const documents = await this.vectorStore!.getAllDocuments();
 
@@ -705,7 +737,7 @@ class PDFService {
    * Analyse les topics du corpus avec BERTopic
    */
   async analyzeTopics(options?: AnalyzeTopicsOptions): Promise<TopicAnalysisResult> {
-    this.ensureInitialized();
+    this.ensureStore();
 
     const documents = await this.vectorStore!.getAllDocuments();
 
@@ -870,7 +902,7 @@ class PDFService {
    * Charge la dernière analyse de topics sauvegardée
    */
   loadTopicAnalysis() {
-    this.ensureInitialized();
+    this.ensureStore();
 
     const result = this.vectorStore!.loadLatestTopicAnalysis();
     return result;
@@ -880,7 +912,7 @@ class PDFService {
    * Récupère les données temporelles des topics (pour stream graph)
    */
   getTopicTimeline() {
-    this.ensureInitialized();
+    this.ensureStore();
 
     const result = this.vectorStore!.getTopicTimeline();
     return result;
@@ -890,7 +922,7 @@ class PDFService {
    * Purge toutes les données de la base vectorielle
    */
   purgeAllData() {
-    this.ensureInitialized();
+    this.ensureStore();
 
     console.log('🗑️ Purging all data from vector store...');
     this.vectorStore!.purgeAllData();
@@ -901,7 +933,7 @@ class PDFService {
    * Nettoie les chunks orphelins (sans document parent)
    */
   cleanOrphanedChunks() {
-    this.ensureInitialized();
+    this.ensureStore();
 
     console.log('🧹 Cleaning orphaned chunks from vector store...');
     this.vectorStore!.cleanOrphanedChunks();
