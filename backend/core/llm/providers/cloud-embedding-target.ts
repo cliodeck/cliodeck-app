@@ -2,7 +2,8 @@
  * Le fournisseur d'embeddings en ligne qu'une configuration désigne, s'il y
  * en a un. Seule copie de la règle : l'adaptateur du registre la suit pour
  * construire le fournisseur, et les Réglages la consultent avant de changer
- * de backend — `useCloudEmbeddings` est un drapeau global, mais le service
+ * de backend et pour décider si Réinitialiser garde le backend
+ * (`settings-persist.ts`) — `useCloudEmbeddings` est un drapeau global, mais le service
  * qui reçoit le corpus dépend du backend choisi (S17-1-31).
  *
  * Pur, sans import Node : le renderer l'importe.
@@ -18,9 +19,9 @@ export interface CloudEmbeddingTarget {
   baseUrl?: string;
 }
 
-type CloudEmbeddingFields = Pick<
-  LLMConfig,
-  'backend' | 'useCloudEmbeddings' | 'geminiAPIKey' | 'openaiAPIKey' | 'mistralAPIKey'
+/** Partiel : Réinitialiser l'interroge sur la section lue du disque, où tout peut manquer. */
+type CloudEmbeddingFields = Partial<
+  Pick<LLMConfig, 'backend' | 'useCloudEmbeddings' | 'geminiAPIKey' | 'openaiAPIKey' | 'mistralAPIKey'>
 >;
 
 /**

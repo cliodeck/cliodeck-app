@@ -6,6 +6,7 @@
  * d'embeddings, modèle supprimé) : seuls les champs modifiés partent désormais, posés sur la
  * section relue juste avant l'écriture.
  */
+import { cloudEmbeddingTarget } from '@backend/core/llm/providers/cloud-embedding-target';
 import { DEFAULT_CONFIG, type LLMConfig as StoredLLMConfig } from '@backend/types/config';
 import type { RAGQueryParams } from '../../stores/ragQueryStore';
 import { mergeDefined } from '../../utils/merge-defined';
@@ -176,9 +177,13 @@ const RAG_KEPT_ON_RESET: ReadonlySet<string> = new Set([
   'queryExpansionDictionary',
 ]);
 
-/** Même règle que `clioDeckConfigToRegistryConfig` : Anthropic n'a pas d'embeddings. */
+/**
+ * La règle de l'adaptateur, pas une copie : `cloudEmbeddingTarget`. Anthropic n'a pas
+ * d'embeddings, et sans clé le backend n'en calcule pas non plus. Les clés lues par `config:get`
+ * sont masquées mais non vides : la règle s'y applique telle quelle.
+ */
 function backendComputesEmbeddings(llm: Partial<StoredLLMConfig>): boolean {
-  return llm.useCloudEmbeddings === true && ['gemini', 'openai', 'mistral'].includes(llm.backend ?? '');
+  return cloudEmbeddingTarget(llm) !== null;
 }
 
 function resetSection(
