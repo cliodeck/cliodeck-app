@@ -54,6 +54,13 @@ export type RunEvent =
       at: string;
       recipe: string;
       error: { code: string; message: string };
+    }
+  | {
+      /** Annulée : la fenêtre de la recette a été fermée (D20). `stepId` : l'étape interrompue. */
+      kind: 'run_cancelled';
+      at: string;
+      recipe: string;
+      stepId?: string;
     };
 
 export interface StepContext {
@@ -81,6 +88,8 @@ export interface RunResult {
   outputs: Record<string, unknown>;
   logPath: string;
   failedStep?: { stepId: string; message: string };
+  /** Annulée par le signal : ni réussie, ni en échec. */
+  cancelled?: boolean;
 }
 
 export interface RunnerOptions {
@@ -193,6 +202,13 @@ const defaultHandlers: Record<StepKind, StepHandler> = {
 
 // MARK: - Runner
 
+class RecipeCancelledError extends Error {
+  constructor() {
+    super('Recipe cancelled');
+    this.name = 'RecipeCancelledError';
+  }
+}
+
 export class RecipeRunner {
   private readonly registry: ProviderRegistry;
   private readonly workspaceRoot: string;
@@ -248,7 +264,24 @@ export class RecipeRunner {
 
     const priorOutputs: Record<string, unknown> = {};
 
+    // Une annulation n'attend pas l'étape : celle qui ignore le signal (une recherche, un
+    // graphe) rendrait la main bien plus tard, et ce qu'elle rendra alors ne compte plus.
+    const cancelled = signal
+      ? new Promise<never>((_, reject) => {
+          const stop = () => reject(new RecipeCancelledError());
+          if (signal.aborted) stop();
+          else signal.addEventListener('abort', stop, { once: true });
+        })
+      : null;
+    cancelled?.catch(() => undefined);
+    const cancel = async (stepId?: string): Promise<RunResult> => {
+      emit({ kind: 'run_cancelled', at: now(), recipe: recipe.name, stepId });
+      await this.flush(logPath, events);
+      return { ok: false, cancelled: true, outputs: priorOutputs, logPath };
+    };
+
     for (const step of recipe.steps) {
+      if (signal?.aborted) return cancel();
       emit({ kind: 'step_start', at: now(), stepId: step.id, stepKind: step.kind });
       const handler = this.handlers[step.kind];
       // Les gabarits `{{ inputs.x }}` / `{{ stepId.champ }}` des paramètres
@@ -268,7 +301,7 @@ export class RecipeRunner {
       try {
         // Tag les appels d'inférence de ce step avec le mode `recipe` et l'id de
         // recipe pour le journal d'usage IA.
-        const { output, stub } = await runWithJournalContext(
+        const working = runWithJournalContext(
           { mode: 'recipe', recipeId: recipe.name, workspaceRoot: this.workspaceRoot },
           () =>
             handler(resolvedStep, {
@@ -280,6 +313,11 @@ export class RecipeRunner {
               signal,
             })
         );
+        const { output, stub } = await (cancelled ? Promise.race([working, cancelled]) : working);
+        // La course écarte ce qu'une étape rend après l'annulation (la réponse partielle
+        // d'Ollama, par exemple). Reste l'étape réglée juste avant : la course la retient,
+        // puisqu'elle est inscrite avant le rejet, et ce contrôle la jette.
+        if (signal?.aborted) return cancel(step.id);
         priorOutputs[step.id] = output;
         emit({
           kind: 'step_ok',
@@ -290,6 +328,8 @@ export class RecipeRunner {
           stub,
         });
       } catch (e) {
+        // Une étape qui lève parce qu'on l'a interrompue n'a pas échoué.
+        if (signal?.aborted) return cancel(step.id);
         const msg = e instanceof Error ? e.message : String(e);
         emit({
           kind: 'step_failed',

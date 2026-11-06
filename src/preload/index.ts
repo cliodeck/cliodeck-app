@@ -974,11 +974,15 @@ const api = {
         ipcRenderer.invoke('fusion:recipes:read-yaml', scope, fileName),
       save: (fileName: string, yaml: string) =>
         ipcRenderer.invoke('fusion:recipes:save', fileName, yaml),
+      /** `runId` : choisi par le renderer, il sert à annuler cette passe et nulle autre. */
       run: (
         scope: 'builtin' | 'user',
         fileName: string,
-        inputs: Record<string, unknown>
-      ) => ipcRenderer.invoke('fusion:recipes:run', scope, fileName, inputs),
+        inputs: Record<string, unknown>,
+        runId: string
+      ) => ipcRenderer.invoke('fusion:recipes:run', scope, fileName, inputs, runId),
+      /** Fermer la fenêtre d'une recette l'annule (D20). Sans attente : rend la main tout de suite. */
+      cancel: (runId: string) => ipcRenderer.invoke('fusion:recipes:cancel', runId),
       onEvent: (
         callback: (env: { runId: string; event: unknown }) => void
       ) => {

@@ -50,15 +50,18 @@ interface RecipesApi {
   run(
     scope: 'builtin' | 'user',
     fileName: string,
-    inputs: Record<string, unknown>
+    inputs: Record<string, unknown>,
+    runId: string
   ): Promise<{
     success: boolean;
     ok?: boolean;
+    cancelled?: boolean;
     outputs?: Record<string, unknown>;
     logPath?: string;
     failedStep?: { stepId: string; message: string };
     error?: string;
   }>;
+  cancel(runId: string): Promise<unknown>;
   onEvent(
     cb: (env: { runId: string; event: RunEvent }) => void
   ): () => void;
@@ -89,23 +92,34 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
     error?: string;
   } | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  /** La passe lancée par cette fenêtre, tant qu'elle tourne : c'est elle, et elle seule, qu'on annule. */
+  const runIdRef = useRef<string | null>(null);
 
   /** Les valeurs de départ, puis celles de la dernière exécution : ce qui ne se perd pas à fermer. */
   const [lastInputs, setLastInputs] = useState<Record<string, unknown>>({});
 
-  // Pendant l'exécution, le fond ne ferme rien : la recette continue côté main, et la fenêtre
-  // partirait avec son journal. Mais une étape bloquée ne doit pas obliger à quitter l'app, et rien
-  // d'autre ne permet encore d'annuler : Échap et le X ferment, après une question qui dit que la
-  // recette continue. Hors exécution, le fond et Échap sont des gestes involontaires, comme dans
-  // l'assistant : ils ne ferment que si rien de saisi ne s'y perd. Le X reste, lui, un geste franc.
+  // Pendant l'exécution, le fond ne ferme rien : la fenêtre partirait avec la recette. Mais une
+  // étape bloquée ne doit pas obliger à quitter l'app : Échap et le X ferment, après une question
+  // qui dit que fermer arrête la recette (D20). Hors exécution, le fond et Échap sont des gestes
+  // involontaires, comme dans l'assistant : ils ne ferment que si rien de saisi ne s'y perd. Le X
+  // reste, lui, un geste franc.
   const paramsToLose = Object.keys(inputs).some((key) => !Object.is(inputs[key], lastInputs[key]));
   const closeUnlessLosing = running || paramsToLose ? undefined : onClose;
+  /** Sans attendre la réponse : la fenêtre se ferme tout de suite, même sur une étape bloquée. */
+  const cancelRun = useCallback(() => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    runIdRef.current = null;
+    void api()?.cancel(runId);
+  }, []);
   const askToCloseWhileRunning = () => {
     void useDialogStore
       .getState()
       .showConfirm(t('recipeRun.closeWhileRunning'), t('recipeRun.closeWhileRunningTitle'))
       .then((close) => {
-        if (close) onClose();
+        if (!close) return;
+        cancelRun();
+        onClose();
       });
   };
   const trapRef = useFocusTrap({ active: true, onEscape: running ? askToCloseWhileRunning : closeUnlessLosing });
@@ -139,9 +153,14 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
     const r = api();
     if (!r) return;
     return r.onEvent((env) => {
+      // Une passe d'une autre fenêtre, ou une précédente : pas la nôtre.
+      if (env.runId !== runIdRef.current) return;
       setEvents((prev) => [...prev, env.event]);
     });
   }, []);
+
+  // Une fenêtre qui disparaît en pleine exécution, par n'importe quel chemin, arrête sa recette.
+  useEffect(() => cancelRun, [cancelRun]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -175,6 +194,8 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   const run = useCallback(async () => {
     const r = api();
     if (!r || !recipe) return;
+    const runId = crypto.randomUUID();
+    runIdRef.current = runId;
     setRunning(true);
     setLastInputs(inputs);
     setEvents([]);
@@ -184,7 +205,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
       Object.entries(inputs).filter(([key, value]) => !(recipe.inputs[key]?.type === 'number' && value === ''))
     );
     try {
-      const res = await r.run(scope, fileName, sent);
+      const res = await r.run(scope, fileName, sent, runId);
       if (res.success) {
         setResult({
           ok: res.ok ?? false,
@@ -196,6 +217,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
         setResult({ ok: false, error: res.error ?? t('recipeRun.errors.unknownFailure') });
       }
     } finally {
+      if (runIdRef.current === runId) runIdRef.current = null;
       setRunning(false);
     }
   }, [recipe, inputs, scope, fileName, t]);

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -325,5 +325,198 @@ describe('recipeCallsLLM — décide du consentement distant', () => {
       const hasLLMStep = recipe.steps.some((s) => s.kind === 'brainstorm' || s.kind === 'write');
       expect(recipeCallsLLM(recipe), f).toBe(hasLLMStep);
     }
+  });
+});
+
+/**
+ * Fermer la fenêtre d'une recette l'annule (D20). Annuler, c'est : l'étape en cours ne
+ * compte plus, aucune suivante ne démarre, et la passe se dit `cancelled`, jamais
+ * `succeeded` ni `failed`. Une étape qui ignore le signal ne retient pas la passe.
+ */
+describe('annulation d’une passe (D20)', () => {
+  const twoSteps = parseRecipe(`
+name: longue
+version: 1
+steps:
+  - id: lente
+    kind: search
+    with: {}
+  - id: suivante
+    kind: graph
+    with: {}
+`);
+
+  async function runFiles(): Promise<string[]> {
+    return fs.readdir(path.join(tmpRoot, '.cliodeck', 'recipes-runs')).catch(() => []);
+  }
+
+  it('une étape qui pend et ignore le signal : la passe se termine en cancelled, la suivante ne démarre pas', async () => {
+    const next = vi.fn(async () => ({ output: 'ne doit pas tourner' }));
+    let started: () => void = () => undefined;
+    const stepStarted = new Promise<void>((resolve) => (started = resolve));
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: () => {
+          started();
+          return new Promise(() => undefined);
+        },
+        graph: next,
+      },
+    });
+    const controller = new AbortController();
+
+    const running = runner.run(twoSteps, {}, controller.signal);
+    await stepStarted;
+    controller.abort();
+    const res = await running;
+
+    expect(res.ok).toBe(false);
+    expect(res.cancelled).toBe(true);
+    expect(res.failedStep).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
+    const kinds = (await readLog(res.logPath)).map((e) => e.kind);
+    expect(kinds).toEqual(['run_started', 'step_start', 'run_cancelled']);
+  });
+
+  it('un modèle interrompu qui rend une réponse partielle sans lever : la course l’écarte, ni succès, ni étape suivante', async () => {
+    // Le fournisseur Ollama finit sur `finishReason: 'cancelled'` et `complete` rend ce qu'il a.
+    // L'écouteur du runner est inscrit avant celui du fournisseur : son rejet gagne la course.
+    const next = vi.fn(async () => ({ output: 'ne doit pas tourner' }));
+    const controller = new AbortController();
+    const llm: LLMProvider = {
+      ...fakeLLM('x'),
+      complete: (_prompt, opts) =>
+        new Promise((resolve) => {
+          opts?.signal?.addEventListener('abort', () => resolve(''));
+          controller.abort();
+        }),
+    };
+    const recipe = parseRecipe(`
+name: modele
+version: 1
+steps:
+  - id: pense
+    kind: brainstorm
+    with:
+      prompt: "dis"
+  - id: suivante
+    kind: graph
+    with: {}
+`);
+    const runner = new RecipeRunner({
+      registry: { getLLM: () => llm } as unknown as ProviderRegistry,
+      workspaceRoot: tmpRoot,
+      stepHandlers: { graph: next },
+    });
+
+    const res = await runner.run(recipe, {}, controller.signal);
+
+    expect(res.cancelled).toBe(true);
+    expect(res.ok).toBe(false);
+    expect(next).not.toHaveBeenCalled();
+    const kinds = (await readLog(res.logPath)).map((e) => e.kind);
+    expect(kinds).not.toContain('step_ok');
+    expect(kinds).not.toContain('run_failed');
+    expect(kinds.at(-1)).toBe('run_cancelled');
+  });
+
+  it('une étape déjà réglée quand l’annulation arrive : son résultat est jeté', async () => {
+    // L'étape rend son résultat et l'annulation tombe avant que le runner reprenne la main :
+    // la course retient le résultat (inscrit le premier), seul le contrôle d'après la jette.
+    const next = vi.fn(async () => ({ output: 'ne doit pas tourner' }));
+    const controller = new AbortController();
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: async () => {
+          controller.abort();
+          return { output: 'réglé juste avant' };
+        },
+        graph: next,
+      },
+    });
+
+    const res = await runner.run(twoSteps, {}, controller.signal);
+
+    expect(res.cancelled).toBe(true);
+    expect(res.outputs).toEqual({});
+    expect(next).not.toHaveBeenCalled();
+    const kinds = (await readLog(res.logPath)).map((e) => e.kind);
+    expect(kinds).toEqual(['run_started', 'step_start', 'run_cancelled']);
+  });
+
+  it('une étape qui lève parce qu’on l’a interrompue : cancelled, pas failed', async () => {
+    const controller = new AbortController();
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: async (_step, ctx) => {
+          controller.abort();
+          ctx.signal?.throwIfAborted();
+          return { output: 'jamais' };
+        },
+      },
+    });
+
+    const res = await runner.run(twoSteps, {}, controller.signal);
+
+    expect(res.cancelled).toBe(true);
+    expect(res.failedStep).toBeUndefined();
+    const kinds = (await readLog(res.logPath)).map((e) => e.kind);
+    expect(kinds).not.toContain('step_failed');
+    expect(kinds.at(-1)).toBe('run_cancelled');
+  });
+
+  it('une étape qui rend son résultat après l’annulation : rien n’est écrit', async () => {
+    let finish: (value: { output: unknown }) => void = () => undefined;
+    let started: () => void = () => undefined;
+    const stepStarted = new Promise<void>((resolve) => (started = resolve));
+    const controller = new AbortController();
+    const events: RunEvent[] = [];
+    const running = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: {
+        search: () =>
+          new Promise((resolve) => {
+            finish = resolve;
+            started();
+          }),
+      },
+      onEvent: (e) => events.push(e),
+    }).run(twoSteps, {}, controller.signal);
+    await stepStarted;
+    controller.abort();
+    const res = await running;
+    const logBefore = await fs.readFile(res.logPath, 'utf8');
+    const eventsBefore = events.length;
+
+    finish({ output: 'arrivé trop tard' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(res.outputs).toEqual({});
+    expect(events).toHaveLength(eventsBefore);
+    expect(await fs.readFile(res.logPath, 'utf8')).toBe(logBefore);
+    expect(await runFiles()).toEqual([path.basename(res.logPath)]);
+  });
+
+  it('un signal déjà levé : aucune étape ne démarre', async () => {
+    const lente = vi.fn(async () => ({ output: 'x' }));
+    const runner = new RecipeRunner({
+      registry: fakeRegistry('x'),
+      workspaceRoot: tmpRoot,
+      stepHandlers: { search: lente },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    const res = await runner.run(twoSteps, {}, controller.signal);
+
+    expect(res.cancelled).toBe(true);
+    expect(lente).not.toHaveBeenCalled();
   });
 });
