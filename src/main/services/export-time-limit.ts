@@ -34,12 +34,17 @@ const KILL_POLL_MS = 50;
 /** Ce qu'on laisse au service pour nettoyer ; une attente bloquée n'y répondra pas. */
 const CLEANUP_GRACE_MS = 2000;
 
-/** Pour les tests : aucune interface ne la raccourcit. */
 export interface ExportLimits {
+  /** Pour les tests : aucune interface ne la raccourcit. */
   timeLimitMs?: number;
+  /**
+   * L'étape d'export d'une recette qu'on annule en fermant sa fenêtre (D20) : l'arbre
+   * meurt comme à l'échéance, et aucune sortie n'arrive après coup.
+   */
+  signal?: AbortSignal;
 }
 
-export type ExportErrorCode = 'export_timed_out';
+export type ExportErrorCode = 'export_timed_out' | 'export_cancelled';
 
 /** Le résultat des services d'export, tel que le renderer le reçoit. */
 export interface ExportResult {
@@ -59,6 +64,17 @@ export class ExportTimedOutError extends Error {
     this.name = 'ExportTimedOutError';
   }
 }
+
+export class ExportCancelledError extends Error {
+  readonly code: ExportErrorCode = 'export_cancelled';
+
+  constructor() {
+    super('Export annulé.');
+    this.name = 'ExportCancelledError';
+  }
+}
+
+type ExportStopped = ExportTimedOutError | ExportCancelledError;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -165,9 +181,10 @@ export class ExportClock {
   private readonly children = new Set<ChildProcess>();
   private readonly expireHooks: Array<() => void> = [];
   private readonly expiry: Promise<never>;
-  private rejectExpiry: (error: ExportTimedOutError) => void = () => undefined;
+  private rejectExpiry: (error: ExportStopped) => void = () => undefined;
   private timer: NodeJS.Timeout;
   private expired = false;
+  private stoppedBy: ExportStopped | null = null;
 
   constructor(private readonly limitMs: number) {
     this.minutes = Math.round(limitMs / 60_000);
@@ -187,12 +204,22 @@ export class ExportClock {
       this.timer = setTimeout(this.onDeadline, left);
       return;
     }
-    this.expired = true;
-    for (const hook of this.expireHooks) hook();
-    void Promise.all([...this.children].map(killProcessTree)).then(() =>
-      this.rejectExpiry(new ExportTimedOutError(this.minutes))
-    );
+    this.halt(new ExportTimedOutError(this.minutes));
   };
+
+  /** Une annulation fait comme l'échéance : l'arbre meurt, puis l'export échoue. */
+  cancel(): void {
+    clearTimeout(this.timer);
+    this.halt(new ExportCancelledError());
+  }
+
+  private halt(error: ExportStopped): void {
+    if (this.expired) return;
+    this.expired = true;
+    this.stoppedBy = error;
+    for (const hook of this.expireHooks) hook();
+    void Promise.all([...this.children].map(killProcessTree)).then(() => this.rejectExpiry(error));
+  }
 
   /** Lance un outil : à l'échéance, tout son arbre mourra. Échue, elle ne lance plus rien. */
   spawn(
@@ -233,7 +260,7 @@ export class ExportClock {
 
   /** Pour un travail repris après coup : il n'écrit pas par-dessus l'annonce d'un échec. */
   throwIfExpired(): void {
-    if (this.expired) throw new ExportTimedOutError(this.minutes);
+    if (this.expired) throw this.stoppedBy ?? new ExportTimedOutError(this.minutes);
   }
 
   /** Désarme la minuterie : aucun `kill` tardif sur un pid réutilisé. */
@@ -265,12 +292,20 @@ export async function withExportTimeLimit<R>(
   work: (clock: ExportClock) => Promise<R>
 ): Promise<R | ExportResult> {
   const clock = new ExportClock(limits?.timeLimitMs ?? EXPORT_TIME_LIMIT_MS);
+  const signal = limits?.signal;
+  const cancel = () => clock.cancel();
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
   const running = work(clock);
   try {
     return await clock.run(running);
   } catch (error: unknown) {
-    if (!(error instanceof ExportTimedOutError)) throw error;
+    if (!(error instanceof ExportTimedOutError) && !(error instanceof ExportCancelledError)) throw error;
     await settledWithin(running, CLEANUP_GRACE_MS);
+    if (error instanceof ExportCancelledError) {
+      console.warn('⚠️ Export cancelled');
+      return { success: false, error: error.message, errorCode: error.code };
+    }
     console.error('❌ Export stopped by its time limit:', error.message);
     return {
       success: false,
@@ -279,6 +314,7 @@ export async function withExportTimeLimit<R>(
       timeLimitMinutes: error.minutes,
     };
   } finally {
+    signal?.removeEventListener('abort', cancel);
     clock.stop();
   }
 }

@@ -478,6 +478,26 @@ describe.skipIf(process.platform === 'win32')('export PDF : un pandoc qui pend',
   );
 
   it(
+    'une recette annulée en plein export (D20) : pandoc et son enfant meurent, et aucun PDF n’arrive',
+    async () => {
+      // S'il n'était pas tué, ce pandoc écrirait sa sortie une fois son enfant terminé.
+      tool('pandoc', `${hangs('pandoc')}\nprintf "%s" "%PDF-tardif" > "$3"`);
+      const controller = new AbortController();
+
+      const exporting = pdfExportService.exportToPDF(pdfOptions(), undefined, { signal: controller.signal });
+      await waitUntil(pidWritten('pandoc-enfant'), READY_MS);
+      controller.abort();
+
+      expect(await exporting).toMatchObject({ success: false, errorCode: 'export_cancelled' });
+      expect(isAlive(pidOf('pandoc'))).toBe(false);
+      expect(isAlive(pidOf('pandoc-enfant'))).toBe(false);
+      expect(existsSync(pdfOptions().outputPath)).toBe(false);
+      await expectNoTempLeft();
+    },
+    TEST_MS
+  );
+
+  it(
     'sans limite injectée, c’est 15 minutes, et le résultat transporte ce nombre',
     async () => {
       tool('pandoc', hangs('pandoc'));

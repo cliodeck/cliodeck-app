@@ -47,6 +47,21 @@ const runStep = (dir: string, withArgs: Record<string, unknown>) =>
     { workspaceRoot: dir } as never
   );
 
+describe('recette annulée pendant son export (D20)', () => {
+  it('l’export reçoit le signal de la recette : c’est lui qui tue pandoc', async () => {
+    const { pdfExportService } = await import('../pdf-export.js');
+    const dir = await makeProject('article', false);
+    const controller = new AbortController();
+    await recipeStepHandlers.export(
+      { id: 's', kind: 'export', with: { output: join(dir, 'out.pdf') } } as never,
+      { workspaceRoot: dir, signal: controller.signal } as never
+    );
+    const limits = vi.mocked(pdfExportService.exportToPDF).mock.calls.at(-1)?.[2];
+    expect(limits?.signal).toBe(controller.signal);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('recette : step export dans un livre', () => {
   beforeEach(() => {
     exportCalls.length = 0;

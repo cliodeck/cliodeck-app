@@ -259,14 +259,19 @@ async function readProjectManifest(workspaceRoot: string): Promise<{
   }
 
   const bibliographyPath = asString(step.with.bibliography);
-  const result = await pdfExportService.exportToPDF({
-    projectPath: ctx.workspaceRoot,
-    projectType,
-    content,
-    outputPath,
-    bibliographyPath: bibliographyPath || undefined,
-    bookSettings: projectType === 'book' ? bookSettings : undefined,
-  });
+  // Annulée, la recette tue pandoc et xelatex : sinon le PDF arriverait après coup (D20).
+  const result = await pdfExportService.exportToPDF(
+    {
+      projectPath: ctx.workspaceRoot,
+      projectType,
+      content,
+      outputPath,
+      bibliographyPath: bibliographyPath || undefined,
+      bookSettings: projectType === 'book' ? bookSettings : undefined,
+    },
+    undefined,
+    { signal: ctx.signal }
+  );
   if (!result.success) {
     throw new Error(result.error ?? 'export step: Pandoc pipeline failed');
   }
