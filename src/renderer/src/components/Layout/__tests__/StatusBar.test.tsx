@@ -49,7 +49,16 @@ describe('StatusBar : état d’enregistrement', () => {
     await mountWith({ filePath: null, isDirty: false });
 
     expect(screen.queryByText('statusBar.unsaved')).toBeNull();
+    expect(screen.queryByText('statusBar.notModified')).toBeNull();
+  });
+
+  it('document tout juste ouvert : « Non modifié », pas « Non enregistré », puisqu’il n’y a rien à écrire (D6)', async () => {
+    await mountWith({ filePath: '/p/document.md', isDirty: false });
+
+    expect(screen.getByText('statusBar.notModified')).toBeInTheDocument();
+    expect(screen.getByTitle('statusBar.notModifiedTooltip')).toBeInTheDocument();
     expect(screen.queryByText('statusBar.notSavedYet')).toBeNull();
+    expect(screen.queryByText('statusBar.unsaved')).toBeNull();
   });
 
   it('témoin : un fichier ouvert et modifié reste signalé', async () => {

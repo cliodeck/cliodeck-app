@@ -1831,8 +1831,8 @@
     "savedTooltip": "Last saved at {{time}}",
     "unsaved": "Unsaved changes",
     "unsavedTooltip": "The document has changes that are not written to disk.",
-    "notSavedYet": "Not saved",
-    "notSavedYetTooltip": "This document has not been saved since it was opened."
+    "notModified": "Not modified",
+    "notModifiedTooltip": "This document has not been changed since it was opened."
   },
   "security": {
     "revokeTitle": "Key revocation",

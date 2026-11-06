@@ -1831,8 +1831,8 @@
     "savedTooltip": "Zuletzt gespeichert um {{time}}",
     "unsaved": "Nicht gespeicherte Änderungen",
     "unsavedTooltip": "Das Dokument enthält Änderungen, die nicht auf der Festplatte gespeichert sind.",
-    "notSavedYet": "Nicht gespeichert",
-    "notSavedYetTooltip": "Dieses Dokument wurde seit dem Öffnen nicht gespeichert."
+    "notModified": "Nicht geändert",
+    "notModifiedTooltip": "Dieses Dokument wurde seit dem Öffnen nicht geändert."
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",
