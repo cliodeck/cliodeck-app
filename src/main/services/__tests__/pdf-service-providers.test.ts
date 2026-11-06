@@ -160,6 +160,34 @@ describe('changer de modèle d’embeddings, projet ouvert', () => {
     expect(current).not.toBe(state.indexers[0].embeddingProvider);
   });
 
+  it('une indexation lancée pendant l’attente passe par le nouvel indexeur', async () => {
+    // L'attente ne porte que sur les indexations déjà en vol. Une indexation lancée pendant cette
+    // attente prenait l'ancien indexeur, dont le fournisseur est libéré juste après : un embarqué
+    // libéré se recharge alors hors de tout registre, et écrit les vecteurs de l'ancien modèle.
+    let finish = (_value: { id: string }): void => undefined;
+    state.indexers[0].indexPDF.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const first = pdfService.indexPDF('/projet/a.pdf');
+    const download = handlers.get('embedded-embedding:download')?.(event, 'nomic-embed-text-v2');
+    await tick();
+
+    const second = pdfService.indexPDF('/projet/b.pdf');
+    await tick();
+    expect(state.indexers[0].indexPDF).toHaveBeenCalledTimes(1);
+
+    finish({ id: 'a' });
+    await first;
+    await expect(download).resolves.toMatchObject({ success: true });
+    await expect(second).resolves.toEqual({ id: 'doc' });
+
+    expect(state.indexers).toHaveLength(2);
+    expect(state.indexers[1].indexPDF).toHaveBeenCalledWith('/projet/b.pdf', undefined, undefined, undefined, undefined);
+  });
+
   it('supprimer le modèle embarqué : l’indexeur ne garde pas le fournisseur libéré', async () => {
     state.llm = { ...state.llm, embeddedEmbeddingModelId: 'nomic-embed-text-v2' };
     const first = state.indexers[0].embeddingProvider as FakeEmbedding;

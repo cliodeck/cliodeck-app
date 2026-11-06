@@ -99,6 +99,7 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
 
 const { tropyService } = await import('../tropy-service.js');
 const { pdfService } = await import('../pdf-service.js');
+const { retrievalService } = await import('../retrieval-service.js');
 const { setupConfigHandlers } = await import('../../ipc/handlers/config-handlers.js');
 setupConfigHandlers();
 const configSet = (key: string, value: unknown) => handlers.get('config:set')?.({}, key, value);
@@ -148,6 +149,31 @@ describe('retirer le consentement aux embeddings cloud', () => {
     expect(calls.some((u) => u === 'http://127.0.0.1:11434/api/embed')).toBe(true);
     expect(saved.length).toBeGreaterThan(0);
     expect(saved.every((s) => s.dimension === 768)).toBe(true);
+  });
+
+  it('une indexation PDF en vol ne retarde pas Tropy ni la recherche', async () => {
+    // Le service PDF attend ses indexations en vol (jusqu'à 30 s) avant de refaire son indexeur.
+    // Tropy et la recherche n'ont rien à attendre : dès l'enregistrement, plus rien ne doit partir
+    // vers l'ancien hôte, même pendant cette vidange.
+    let releasePdf: () => void = () => undefined;
+    vi.mocked(pdfService.refreshProviders).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (releasePdf = resolve))
+    );
+    vi.mocked(retrievalService.rebuildEmbeddingProvider).mockClear();
+    const tropyRebuilt = vi.spyOn(tropyService, 'rebuildProviders');
+    const saving = configSet('llm', { ...config.llm, useCloudEmbeddings: false });
+    // Attend le résultat, pas un délai : la reconstruction de Tropy doit partir sans le service PDF.
+    await vi.waitFor(() => expect(tropyRebuilt).toHaveBeenCalled());
+    await tropyRebuilt.mock.results[0].value;
+    expect(retrievalService.rebuildEmbeddingProvider).toHaveBeenCalledOnce();
+    calls.length = 0;
+
+    await tropyService.search('grève du port');
+    expect(toOpenAI()).toBe(0);
+    expect(calls).toContain('http://127.0.0.1:11434/api/embed');
+
+    releasePdf();
+    expect(await saving).toEqual({ success: true });
   });
 
   it('configuration invalide : plus rien ne part, surtout pas vers l’ancien hôte', async () => {

@@ -58,6 +58,14 @@ class PDFService {
   private inFlightIndexing = new Set<Promise<unknown>>();
 
   /**
+   * Reconstruction des fournisseurs en cours (`refreshProviders`). L'attente des indexations ne porte
+   * que sur celles déjà en vol : une indexation lancée pendant cette attente prenait l'ancien indexeur,
+   * dont le registre libère le fournisseur juste après. `indexPDF` attend donc la fin de la
+   * reconstruction et prend l'indexeur refait.
+   */
+  private providerRefresh: Promise<void> | null = null;
+
+  /**
    * Typed provider registries (fusion 1.2e). pdf-service owns the
    * `ProviderRegistry` lifecycle for the active project: built from
    * the workspace LLM config in `init()`, rebuilt by `refreshProviders()`,
@@ -283,6 +291,23 @@ class PDFService {
    * Aucun magasin n'est ouvert ici : sans projet, `init` construira tout.
    */
   async refreshProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
+    // Une reconstruction à la fois, et `indexPDF` attend la reconstruction en cours (voir
+    // `providerRefresh`). Le suivi ne rejette jamais : l'erreur revient à l'appelant par `run`.
+    const previous = this.providerRefresh;
+    const run = (async () => {
+      await previous;
+      await this.rebuildProviders({ embeddingChanged });
+    })();
+    const tracked: Promise<void> = run
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.providerRefresh === tracked) this.providerRefresh = null;
+      });
+    this.providerRefresh = tracked;
+    return run;
+  }
+
+  private async rebuildProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
     if (embeddingChanged) await this.drainInFlightIndexing();
     try {
       await this.rebuildLLMRegistry({ embedding: embeddingChanged });
@@ -339,6 +364,7 @@ class PDFService {
     bibliographyMetadata?: { title?: string; author?: string; year?: string },
     collectionKeys?: string[]
   ): Promise<PDFDocument> {
+    while (this.providerRefresh) await this.providerRefresh;
     this.ensureInitialized();
     const job = this.pdfIndexer!.indexPDF(
       filePath,

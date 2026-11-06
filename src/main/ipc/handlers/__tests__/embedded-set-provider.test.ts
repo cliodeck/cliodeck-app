@@ -77,7 +77,8 @@ describe('embedded-embedding:set-provider', () => {
     const res = await handlers.get('embedded-embedding:set-provider')?.({}, 'embedded');
 
     expect(res).toMatchObject({ success: true, provider: 'embedded', reindexRequired: true });
-    expect(order).toEqual(['pdf:embedded', 'tropy:embedded']);
+    // Chacun lit la configuration déjà écrite ; leur ordre entre eux n'est pas un contrat.
+    expect([...order].sort()).toEqual(['pdf:embedded', 'tropy:embedded']);
     expect(services.pdf).toHaveBeenCalledWith({ embeddingChanged: true });
     expect(services.retrieval).toHaveBeenCalledTimes(1);
     expect(services.tropy).toHaveBeenCalledWith({ embeddingChanged: true });

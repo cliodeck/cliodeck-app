@@ -45,6 +45,8 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
   };
 });
 
+import { FallbackEmbeddingProvider } from '../../../../backend/core/llm/providers/fallback.js';
+import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
 import { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 import { configManager } from '../config-manager.js';
 import { retrievalService } from '../retrieval-service.js';
@@ -109,5 +111,36 @@ describe.skipIf(!sqliteAvailable)('cache des embeddings de requête', () => {
 
     expect(askedWith(first, 'zxq-temoin')).toBe(true);
     expect(askedWith(again, 'zxq-temoin')).toBe(false);
+  });
+
+  it('mode « auto » : le vecteur du modèle de repli n’est pas rangé sous la clé du primaire', async () => {
+    // Avant tout sondage, le repli annonce le modèle du primaire ; `embed` sonde ensuite et bascule.
+    // La clé lue avant l'appel rangeait le vecteur du modèle embarqué sous celle d'Ollama, et le
+    // resservait une fois Ollama revenu.
+    let now = 0;
+    let ollamaUp = false;
+    const ollama = { ...fakeEmbedding('nomic-embed-text'), healthCheck: vi.fn(async () => ({ state: ollamaUp ? 'ready' : 'failed' })) };
+    const embedded = { ...fakeEmbedding('nomic-embed-text-v2'), id: 'embedded-embedding', healthCheck: vi.fn(async () => ({ state: 'ready' })) };
+    const question = 'Les grèves de 1936 zxq-repli ?';
+
+    state.current = new FallbackEmbeddingProvider(
+      ollama as unknown as EmbeddingProvider,
+      embedded as unknown as EmbeddingProvider,
+      () => now
+    );
+    retrievalService.configure({ vectorStore: store!, workspaceRoot: project });
+    await retrievalService.search({ query: question, sourceType: 'secondary' });
+    expect(askedWith(embedded, 'zxq-repli')).toBe(true);
+
+    // Ollama revient, après la durée de validité du sondage ; une autre question le fait choisir.
+    ollamaUp = true;
+    now += 60_000;
+    await retrievalService.search({ query: 'Le Front populaire zxq-autre ?', sourceType: 'secondary' });
+    expect(askedWith(ollama, 'zxq-autre')).toBe(true);
+
+    // La même question qu'au début doit partir vers Ollama, pas ressortir le vecteur de l'embarqué.
+    await retrievalService.search({ query: question, sourceType: 'secondary' });
+
+    expect(askedWith(ollama, 'zxq-repli')).toBe(true);
   });
 });

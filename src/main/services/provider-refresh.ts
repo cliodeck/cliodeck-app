@@ -69,8 +69,12 @@ export function providerChanges(
  */
 export async function refreshProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
   const errors: unknown[] = [];
-  await pdfService.refreshProviders({ embeddingChanged }).catch((e: unknown) => errors.push(e));
+  // Seul le service PDF attend quelque chose (ses indexations en vol, jusqu'à 30 s). Tropy et la
+  // recherche partent avant lui : sinon, pendant cette attente, synchro et requêtes continueraient
+  // d'aller vers l'ancien fournisseur — celui dont on vient peut-être de retirer le consentement.
   if (embeddingChanged) retrievalService.rebuildEmbeddingProvider();
-  await tropyService.rebuildProviders({ embeddingChanged }).catch((e: unknown) => errors.push(e));
+  const tropy = tropyService.rebuildProviders({ embeddingChanged }).catch((e: unknown) => errors.push(e));
+  const pdf = pdfService.refreshProviders({ embeddingChanged }).catch((e: unknown) => errors.push(e));
+  await Promise.all([tropy, pdf]);
   if (errors.length > 0) throw errors[0];
 }

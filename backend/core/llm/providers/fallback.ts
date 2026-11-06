@@ -167,6 +167,15 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
     return chosen.healthCheck();
   }
 
+  /**
+   * Le fournisseur qui servira l'appel suivant (sondage compris). Un cache rangé par modèle doit lire
+   * sa clé sur lui : `model` et `dimension` ne disent que le dernier choix, ou le primaire avant tout
+   * sondage, et `embed` peut basculer entre les deux.
+   */
+  resolve(): Promise<EmbeddingProvider> {
+    return this.picker.pick();
+  }
+
   async embed(
     texts: string[],
     opts: { signal?: AbortSignal } = {}
