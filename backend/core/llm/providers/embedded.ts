@@ -125,6 +125,15 @@ abstract class EmbeddedBase {
     return this.loading;
   }
 
+  /**
+   * Oublie le chargement mémorisé. Après `dispose`, le client est vidé : sans cela `ensureLoaded`
+   * répondait encore « chargé », et chaque appel levait « not initialized ». Le prochain appel
+   * recharge le modèle.
+   */
+  protected resetLoading(): void {
+    this.loading = null;
+  }
+
   protected abstract load(): Promise<boolean>;
 }
 
@@ -233,6 +242,7 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
     try {
       await this.client.dispose();
     } finally {
+      this.resetLoading();
       this.status = { state: 'stopped' };
     }
   }
@@ -297,6 +307,7 @@ export class EmbeddedEmbeddingProvider
     try {
       await this.client.dispose();
     } finally {
+      this.resetLoading();
       this.status = { state: 'stopped' };
     }
   }
