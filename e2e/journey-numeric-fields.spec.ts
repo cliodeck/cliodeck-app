@@ -238,6 +238,33 @@ test('la virgule française : 0,5 s’écrit 0.5', async () => {
   }
 });
 
+test('la virgule sur un système anglais : 0,5 s’écrit 0.5, pas 1 (D21)', async () => {
+  const dir = userData(AUTHOR);
+  // Interface en français, Chromium en anglais : la virgule n'y est pas un séparateur décimal.
+  const session = await launch(dir, ['--lang=en-US']);
+  if (!session) return;
+  const { app, window } = session;
+
+  try {
+    await openRag(window);
+    await typeInto(window, threshold(window), '0,5');
+    // À la frappe : la virgule est déjà un point.
+    await expect(threshold(window)).toHaveValue('0.5');
+    await save(window);
+    await expect(saved(window)).toBeVisible();
+
+    expect(readConfig(dir).rag.similarityThreshold).toBe(0.5);
+    await expect(window.locator('.settings-modal').getByText('Valeur actuelle : 0.50')).toBeVisible();
+
+    // Un champ entier n'y gagne rien : la virgule n'y devient pas un point.
+    await typeInto(window, topK(window), '1,2');
+    await window.keyboard.press('Enter');
+    await expect(topK(window)).toHaveValue('12');
+  } finally {
+    await app.close();
+  }
+});
+
 test('hors bornes : l’auteur voit la valeur retenue ; un entier reste entier ; Entrée valide sans rien soumettre', async () => {
   const dir = userData(AUTHOR);
   const session = await launch(dir);

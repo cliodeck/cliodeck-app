@@ -4,7 +4,7 @@
  * dernière valeur, sauf `allowEmpty`, où il veut dire « automatique ». Le vrai enchaînement du
  * navigateur (`blur` avant `click`) est prouvé en plus sur l'app réelle : `journey-numeric-fields`.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import React, { useState } from 'react';
 import { NumberInput } from '../NumberInput';
@@ -318,5 +318,50 @@ describe('allowEmpty', () => {
     fireEvent.blur(input());
     expect(admitted).toHaveBeenCalledExactlyOnceWith(0);
     expect(input().value).toBe('0');
+  });
+});
+
+/**
+ * D21 : une virgule tapée devient un point. Sous un Chromium anglais, la virgule n'entre pas dans un
+ * `type="number"` et `0,5` se lit `05`. jsdom n'a pas `execCommand` : on relève ce qui est demandé au
+ * navigateur. La vraie frappe, sous `--lang=en-US`, est dans `journey-numeric-fields`.
+ */
+describe('la virgule décimale', () => {
+  let execCommand: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    execCommand = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true, writable: true });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'execCommand');
+  });
+
+  const pressComma = (init: KeyboardEventInit = {}) => {
+    const event = createEvent.keyDown(input(), { key: ',', ...init });
+    fireEvent(input(), event);
+    return event;
+  };
+
+  it('champ à décimales : la virgule ne part pas au navigateur, un point est tapé à sa place', () => {
+    render(<Form initial={0.33} min={0} max={1} step={0.05} />);
+    const event = pressComma();
+    expect(event.defaultPrevented).toBe(true);
+    expect(execCommand).toHaveBeenCalledExactlyOnceWith('insertText', false, '.');
+  });
+
+  it('champ entier : rien ne change, la virgule n’a rien à devenir', () => {
+    render(<Form initial={7} min={1} max={20} integer />);
+    const event = pressComma();
+    expect(event.defaultPrevented).toBe(false);
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
+  it('un raccourci avec virgule (Cmd+,) n’est pas une frappe', () => {
+    render(<Form initial={0.33} min={0} max={1} />);
+    expect(pressComma({ metaKey: true }).defaultPrevented).toBe(false);
+    expect(pressComma({ ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(execCommand).not.toHaveBeenCalled();
   });
 });
