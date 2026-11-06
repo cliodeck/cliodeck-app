@@ -1,7 +1,7 @@
 /**
  * Limites de l'IA locale selon la version de macOS.
  *
- * L'enjeu : sous macOS 12 ou 13, Ollama ne s'installe pas, et l'utilisateur
+ * L'enjeu : sous macOS 13, Ollama ne s'installe pas, et l'utilisateur
  * ne l'apprenait qu'en cherchant pourquoi rien ne s'indexait. L'avertissement
  * ne doit pas manquer là, ni apparaître ailleurs.
  */
@@ -9,12 +9,12 @@ import { describe, it, expect } from 'vitest';
 import { localAiSupport } from '../local-ai-support.js';
 
 describe('IA locale selon la version de macOS', () => {
-  it('signale macOS 12 et 13, en rendant la version telle quelle', () => {
-    expect(localAiSupport({ platform: 'darwin', systemVersion: '12.7.6' })).toEqual({
+  it('signale macOS 13, le plus ancien où ClioDeck démarre, en rendant la version telle quelle', () => {
+    expect(localAiSupport({ platform: 'darwin', systemVersion: '13.7.8' })).toEqual({
       limited: true,
-      macosVersion: '12.7.6',
+      macosVersion: '13.7.8',
     });
-    expect(localAiSupport({ platform: 'darwin', systemVersion: '13.6' }).limited).toBe(true);
+    expect(localAiSupport({ platform: 'darwin', systemVersion: '13.0' }).limited).toBe(true);
   });
 
   it('ne dit rien à partir de macOS 14', () => {

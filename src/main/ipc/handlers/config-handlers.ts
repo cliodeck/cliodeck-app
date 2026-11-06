@@ -301,7 +301,7 @@ export function setupConfigHandlers() {
     )
   );
 
-  // macOS 12 ou 13 : Ollama ne s'y installe pas ; restent les modèles embarqués.
+  // macOS 13 : Ollama ne s'y installe pas ; restent les modèles embarqués.
   // Le renderer le dit une fois, puis s'en souvient (`localAiNoticeDismissed`).
   ipcMain.handle('system:get-local-ai-support', () =>
     successResponse({

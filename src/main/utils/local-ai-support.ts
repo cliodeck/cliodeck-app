@@ -1,12 +1,12 @@
 /**
  * Ce macOS limite-t-il l'IA locale ?
  *
- * ClioDeck démarre à partir de macOS 12, mais Ollama exige macOS 14
- * (« macOS Sonoma (v14) or newer ») : en dessous, il ne s'installe pas. Le
- * moteur llama.cpp des modèles embarqués déclare macOS 14 lui aussi, sans
- * que cela l'empêche forcément de tourner — essayé sur un Mac Intel sous
- * macOS 12 (2026-10-05), le modèle de génération embarqué répond. Les
- * embeddings embarqués n'y ont pas été essayés.
+ * ClioDeck démarre à partir de macOS 13 (Electron 45 n'en accepte pas de plus
+ * ancien), mais Ollama exige macOS 14 (« macOS Sonoma (v14) or newer ») : en
+ * dessous, il ne s'installe pas. Le moteur llama.cpp des modèles embarqués
+ * déclare macOS 14 lui aussi, sans que cela l'empêche forcément de tourner —
+ * essayé sur un Mac Intel sous macOS 12 (2026-10-06, Electron 43), le modèle
+ * de génération embarqué répond, et les embeddings embarqués aussi (#128).
  *
  * Rien dans l'app ne le disait : on découvrait la limite en cherchant
  * pourquoi rien ne s'indexait, sans savoir que les modèles embarqués — y
