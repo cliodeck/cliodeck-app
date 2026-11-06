@@ -151,7 +151,8 @@ describe('applyRagConfig', () => {
       throw new Error('pas de clé');
     });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await expect(pdfService.init('/projet')).rejects.toThrow('pas de clé');
+    // Un registre invalide n'empêche plus d'ouvrir le projet (S01-1-10) : magasin ouvert, sans indexeur.
+    await expect(pdfService.init('/projet')).resolves.toBeUndefined();
 
     state.rag = { ...state.rag, chunkingConfig: 'large' };
     expect(() => pdfService.applyRagConfig()).not.toThrow();
