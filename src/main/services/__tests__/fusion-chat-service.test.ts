@@ -9,9 +9,11 @@ import {
   readingNoteHitsToSources,
   resolvePromptLanguage,
   resolveTurnOptions,
+  retrievalStatus,
   shouldIncludeManuscript,
   shouldIncludeReadingNotes,
 } from '../fusion-chat-service.js';
+
 import type {
   ManuscriptMappedSearchResult,
   ReadingNoteMappedSearchResult,
@@ -24,6 +26,20 @@ import type {
   ChatMessage,
   LLMProvider,
 } from '../../../../backend/core/llm/providers/base.js';
+
+describe('retrievalStatus', () => {
+  const success = { source: 'secondary' as const, attempted: true, ok: true, hitCount: 0, selectedCount: 0 };
+  const failed = { source: 'primary' as const, attempted: true, ok: false, hitCount: 0, selectedCount: 0 };
+  const skipped = { ...failed, attempted: false };
+
+  it('distinguishes empty, partial failure, total failure, and recovery', () => {
+    expect(retrievalStatus([skipped], true)).toBeUndefined();
+    expect(retrievalStatus([success, skipped], true)).toBe('empty');
+    expect(retrievalStatus([success, failed], false)).toBe('partial');
+    expect(retrievalStatus([failed, skipped], true)).toBe('failed');
+    expect(retrievalStatus([success, skipped], false)).toBeUndefined();
+  });
+});
 
 function makeFakeProvider(chunks: ChatChunk[]): {
   provider: LLMProvider;

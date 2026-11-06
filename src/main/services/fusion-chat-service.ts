@@ -491,6 +491,16 @@ export interface ChatStreamEnvelope {
   error?: { code: string; message: string };
 }
 
+export function retrievalStatus(
+  corpora: NonNullable<RAGExplanation['search']['corpora']>,
+  noHits: boolean
+): RAGExplanation['search']['retrievalStatus'] {
+  const attempted = corpora.filter((corpus) => corpus.attempted);
+  const failures = attempted.filter((corpus) => !corpus.ok);
+  if (failures.length > 0) return failures.length === attempted.length ? 'failed' : 'partial';
+  return noHits && attempted.length > 0 ? 'empty' : undefined;
+}
+
 class FusionChatService {
   private active = new Map<string, AbortController>();
 
@@ -855,7 +865,11 @@ class FusionChatService {
             });
             const ownHits = manuscriptHits ?? [];
             const noteHits = readingNoteHits ?? [];
-            if (hits.length === 0 && ownHits.length === 0 && noteHits.length === 0) return null;
+            const attempted = stats.search.corpora.filter((corpus) => corpus.attempted);
+            const failures = attempted.filter((corpus) => !corpus.ok);
+            const noHits = hits.length === 0 && ownHits.length === 0 && noteHits.length === 0;
+            if (noHits && attempted.length === 0) return null;
+            const status = retrievalStatus(stats.search.corpora, noHits);
 
             // --- Compression du contexte (#28) --------------------------
             // ContextCompressor existait depuis la fusion sans aucun site
@@ -932,7 +946,7 @@ class FusionChatService {
             // modèle que bibliographie et archives ont été interrogées en vain
             // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
             // porte alors le périmètre.
-            const sourcesBlock = ownOnly
+            const sourcesBlock = ownOnly || (effectiveHits.length === 0 && failures.length > 0)
               ? ''
               : formatContextAsSystemPrompt(effectiveHits, promptLang, {
                   ownBlocksFollow: ownHits.length + noteHits.length > 0,
@@ -974,14 +988,24 @@ class FusionChatService {
             };
 
             return {
-              systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock,
+              systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock +
+                (failures.length > 0
+                  ? (promptLang === 'fr'
+                    ? '\nCertaines recherches ont échoué. Les éléments disponibles peuvent être incomplets ; ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.'
+                    : '\nSome requested source searches failed. The available evidence may be incomplete; do not imply that failed sources were consulted or invent citations.')
+                  : '') +
+                (noHits && (ownOnly || failures.length > 0)
+                  ? (promptLang === 'fr'
+                    ? '\nAucun extrait n’a été fourni. Ne prétends pas disposer de preuves et ne fabrique pas de citations.'
+                    : '\nNo evidence was retrieved. Do not imply that evidence was provided or invent citations.')
+                  : ''),
               sources: [
                 ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
                 ...manuscriptHitsToSources(ownHits),
                 ...readingNoteHitsToSources(noteHits),
               ],
               explanation: {
-                search: { ...stats.search, contextChars },
+                search: { ...stats.search, contextChars, retrievalStatus: status },
                 ...(compressionSlice ? { compression: compressionSlice } : {}),
                 timing: {
                   ...stats.timing,

@@ -280,12 +280,13 @@ export async function runChatTurn<TSource = unknown>(
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser?.content?.trim()) {
       safeStatus({ phase: 'retrieving' });
+      const retrievalStartedAt = Date.now();
       try {
         const result = await args.retriever.search(
           lastUser.content,
           args.retrievalOptions
         );
-        if (result && result.sources.length > 0) {
+        if (result) {
           // After the leading system messages (mode text, hints), before
           // the first conversation turn: the context is read as material
           // governed by the rules above it, not as the persona.
@@ -296,10 +297,12 @@ export async function runChatTurn<TSource = unknown>(
             { role: 'system', content: result.systemPrompt },
             ...messages.slice(at),
           ];
-          try {
-            hooks.onSources?.(result.sources);
-          } catch {
-            // UI hook failure must not abort the stream.
+          if (result.sources.length > 0) {
+            try {
+              hooks.onSources?.(result.sources);
+            } catch {
+              // UI hook failure must not abort the stream.
+            }
           }
           if (result.explanation) {
             retrievalExplanation = result.explanation;
@@ -315,7 +318,23 @@ export async function runChatTurn<TSource = unknown>(
           }
         }
       } catch (e) {
-        // Fail soft — proceed without context.
+        const firstTurn = messages.findIndex((m) => m.role !== 'system');
+        const at = firstTurn === -1 ? messages.length : firstTurn;
+        messages = [...messages.slice(0, at), {
+          role: 'system',
+          content: 'The source search failed. No evidence was retrieved. Do not imply that sources were consulted or invent citations.',
+        }, ...messages.slice(at)];
+        const searchDurationMs = Date.now() - retrievalStartedAt;
+        const sourceType = args.retrievalOptions?.sourceType;
+        retrievalExplanation = {
+          search: {
+            query: lastUser.content, totalResults: 0, searchDurationMs,
+            cacheHit: false,
+            sourceType: sourceType === 'primary' || sourceType === 'secondary' ? sourceType : 'both',
+            documents: [], retrievalStatus: 'failed',
+          },
+          timing: { searchMs: searchDurationMs },
+        };
         console.warn(
           '[chat-engine] retrieval skipped:',
           e instanceof Error ? e.message : e
