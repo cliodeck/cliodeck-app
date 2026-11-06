@@ -76,9 +76,9 @@ const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
  * Module-scope embedding cache. The embedding of a query string is
  * invariant across project changes (same text → same vector for a given
  * provider), so we deliberately keep this cache across `configure()` /
- * `clear()` calls. Provider-scoped invalidation is available via
- * `queryEmbeddingCache.invalidateProvider(providerId)` when a provider's
- * embedding model actually changes.
+ * `clear()` calls. Entries are keyed by provider id, model and dimension
+ * (`getProviderId`): a model change misses the cache instead of serving
+ * the previous model's vectors.
  */
 const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
 
@@ -525,8 +525,11 @@ class RetrievalService {
   }
 
   private getProviderId(): string | undefined {
-    // Stable provider id from the typed embedding (e.g. `ollama-embed:nomic-embed-text`).
-    return this.embedding?.id;
+    // `id` est une constante par famille (`'ollama-embedding'`, quel que soit le modèle) : seul, il
+    // resservait après un changement de modèle les vecteurs de l'ancien. Le modèle et la dimension
+    // complètent la clé.
+    if (!this.embedding) return undefined;
+    return `${this.embedding.id}:${this.embedding.model}:${this.embedding.dimension}`;
   }
 
   /**
