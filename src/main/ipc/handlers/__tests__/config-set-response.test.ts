@@ -19,26 +19,35 @@ vi.mock('electron', () => ({
 const mocks = vi.hoisted(() => ({
   setLLMConfig: vi.fn(),
   set: vi.fn(),
-  init: vi.fn(async (_path: string) => undefined),
+  refresh: vi.fn(async (_opts: { embeddingChanged: boolean }) => undefined),
   applyRagConfig: vi.fn(),
   projectPath: null as string | null,
+  missing: false,
+  llm: { backend: 'ollama' } as Record<string, unknown>,
 }));
 vi.mock('../../../services/config-manager.js', () => ({
   configManager: {
     getAPIKey: () => '',
-    setLLMConfig: mocks.setLLMConfig,
+    setLLMConfig: (partial: Record<string, unknown>) => {
+      mocks.setLLMConfig(partial);
+      mocks.llm = { ...mocks.llm, ...partial };
+    },
     setZoteroConfig: vi.fn(),
     setAPIKey: vi.fn(),
     set: mocks.set,
-    getLLMConfig: () => ({ backend: 'ollama' }),
+    getLLMConfig: () => ({ ...mocks.llm }),
   },
 }));
 vi.mock('../../../services/pdf-service.js', () => ({
   pdfService: {
     getCurrentProjectPath: () => mocks.projectPath,
-    init: mocks.init,
+    providersMissing: () => mocks.missing,
     applyRagConfig: mocks.applyRagConfig,
   },
+}));
+vi.mock('../../../services/provider-refresh.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../services/provider-refresh.js')>()),
+  refreshProviders: mocks.refresh,
 }));
 
 const { setupConfigHandlers } = await import('../config-handlers.js');
@@ -48,7 +57,9 @@ const configSet = (key: string, value: unknown) => handlers.get('config:set')?.(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.projectPath = '/projet';
-  mocks.init.mockImplementation(async () => undefined);
+  mocks.llm = { backend: 'ollama' };
+  mocks.missing = false;
+  mocks.refresh.mockImplementation(async () => undefined);
   mocks.setLLMConfig.mockImplementation(() => undefined);
   mocks.set.mockImplementation(() => undefined);
   mocks.applyRagConfig.mockImplementation(() => undefined);
@@ -58,7 +69,7 @@ beforeEach(() => {
 
 describe('config:set dit ce qui a échoué', () => {
   it('une relance échouée après l’écriture : `written`, et le motif', async () => {
-    mocks.init.mockRejectedValue(new Error('Anthropic backend selected but no claudeAPIKey set in config.'));
+    mocks.refresh.mockRejectedValue(new Error('Anthropic backend selected but no claudeAPIKey set in config.'));
 
     const response = await configSet('llm', { backend: 'claude' });
 
@@ -77,20 +88,35 @@ describe('config:set dit ce qui a échoué', () => {
 
     const response = await configSet('llm', { backend: 'claude' });
 
-    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
     expect(response).toEqual({ success: false, error: 'disque plein' });
   });
 
-  it('écriture et relance réussies : une seule relance', async () => {
-    await expect(configSet('llm', { backend: 'ollama' })).resolves.toEqual({ success: true });
-    expect(mocks.init).toHaveBeenCalledTimes(1);
-    expect(mocks.init).toHaveBeenCalledWith('/projet');
+  it('écriture et relance réussies : une seule relance, sans rouvrir le projet', async () => {
+    await expect(configSet('llm', { backend: 'claude', claudeAPIKey: 'sk-test' })).resolves.toEqual({ success: true });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(mocks.refresh).toHaveBeenCalledWith({ embeddingChanged: true });
+  });
+
+  it('rien qui touche un fournisseur : aucune relance', async () => {
+    await expect(configSet('llm', { backend: 'ollama', ollamaNumCtx: 8192 })).resolves.toEqual({ success: true });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it('rien à écrire, mais les fournisseurs manquent : on retente, embeddings compris', async () => {
+    mocks.missing = true;
+    mocks.refresh.mockRejectedValue(new Error('Anthropic backend selected but no claudeAPIKey set in config.'));
+
+    const response = await configSet('llm', { backend: 'ollama' });
+
+    expect(mocks.refresh).toHaveBeenCalledWith({ embeddingChanged: true });
+    expect(response).toMatchObject({ success: false, written: true });
   });
 
   it('sans projet ouvert : rien à relancer', async () => {
     mocks.projectPath = null;
     await expect(configSet('llm', { backend: 'ollama' })).resolves.toEqual({ success: true });
-    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 });
 
@@ -100,7 +126,7 @@ describe('config:set(`rag`) atteint l’indexeur sans relancer les services', ()
 
     expect(mocks.set).toHaveBeenCalledWith('rag', { chunkingConfig: 'large' });
     expect(mocks.applyRagConfig).toHaveBeenCalledTimes(1);
-    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 
   it('une écriture refusée ne se répercute pas', async () => {
@@ -127,6 +153,6 @@ describe('config:set(`rag`) atteint l’indexeur sans relancer les services', ()
   it('les autres sections n’y touchent pas', async () => {
     await configSet('editor', { fontSize: 18 });
     expect(mocks.applyRagConfig).not.toHaveBeenCalled();
-    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 });

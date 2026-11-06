@@ -678,8 +678,10 @@ function article(): string {
 
 /** `pdfService.init` écrit cette ligne à chaque démarrage : c'est elle qui compte les relances. */
 const SERVICES_STARTED = '[PDF-SERVICE] RAG optimization config';
+/** `config:set('llm')` écrit celle-ci quand il refait les fournisseurs, sans rouvrir le projet. */
+const PROVIDERS_REFRESHED = 'Refreshing providers';
 
-function watchServices(app: ElectronApplication): { started(): Promise<number> } {
+function watchServices(app: ElectronApplication): { started(): Promise<number>; refreshed(): number } {
   let log = '';
   let barriers = 0;
   app.process().stdout?.on('data', (chunk: Buffer) => {
@@ -693,6 +695,10 @@ function watchServices(app: ElectronApplication): { started(): Promise<number> }
       await app.evaluate((_electron, line) => console.log(line), barrier);
       await expect.poll(() => log.includes(barrier)).toBe(true);
       return log.split(SERVICES_STARTED).length - 1;
+    },
+    // À lire après `started()`, qui pose la barrière.
+    refreshed() {
+      return log.split(PROVIDERS_REFRESHED).length - 1;
     },
   };
 }
@@ -749,13 +755,16 @@ test('topK et seuil à null : une vraie recherche rend ses sources, et réparer 
     await expect.poll(() => readConfig(ollama.userDataDir).rag).toEqual({ topK: 10, similarityThreshold: 0.12 });
     expect(readConfig(ollama.userDataDir).llm).toEqual(before.llm);
 
-    // Le témoin : une vraie écriture de `llm` relance, et le compteur le voit. Une relance venue de la
-    // réparation, même encore en cours, s'y ajouterait.
-    const rewritten = await window.evaluate(async () =>
-      window.electron.config.set('llm', await window.electron.config.get('llm'))
-    );
+    // Le témoin : une vraie écriture de `llm` qui touche un fournisseur les refait, et le compteur le
+    // voit — sans rouvrir le projet (A3). Une relance venue de la réparation, même encore en cours,
+    // s'ajouterait au compte des démarrages.
+    const rewritten = await window.evaluate(async () => {
+      const llm = await window.electron.config.get('llm');
+      return window.electron.config.set('llm', { ...llm, ollamaChatModel: 'autre-modele' });
+    });
     expect(rewritten.success).toBe(true);
-    expect(await services.started()).toBe(started + 1);
+    expect(await services.started()).toBe(started);
+    expect(services.refreshed()).toBe(1);
 
     // Écrit tel quel par `config:set` : ni `null` sur le disque, ni zéro source après.
     const answer = await window.evaluate(async () => {

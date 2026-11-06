@@ -58,15 +58,18 @@ class PDFService {
   private inFlightIndexing = new Set<Promise<unknown>>();
 
   /**
-   * Typed provider registry (fusion 1.2e). pdf-service owns the
+   * Typed provider registries (fusion 1.2e). pdf-service owns the
    * `ProviderRegistry` lifecycle for the active project: built from
-   * the workspace LLM config in `init()`, rebuilt by
-   * `updateEmbeddedModel()` / `disableEmbeddedModel()` / etc., disposed
-   * at `init()` re-entry. Replaces the legacy `OllamaClient` +
-   * `LLMProviderManager` pair that this service used to instantiate
-   * twice per project.
+   * the workspace LLM config in `init()`, rebuilt by `refreshProviders()`,
+   * disposed at `init()` re-entry. One per half — `registry` for
+   * embeddings, `llmRegistry` for generation — because a registry only
+   * builds and disposes the half it was asked for: a generation change
+   * leaves the indexer's embedding provider alive. Replaces the legacy
+   * `OllamaClient` + `LLMProviderManager` pair that this service used to
+   * instantiate twice per project.
    */
   private registry: ProviderRegistry | null = null;
+  private llmRegistry: ProviderRegistry | null = null;
   private llm: LLMProvider | null = null;
   private embedding: EmbeddingProvider | null = null;
 
@@ -231,32 +234,74 @@ class PDFService {
   }
 
   /**
-   * Build (or rebuild) the typed provider registry from the active
-   * workspace LLM config. Disposes the previous registry first so the
-   * native handles / HTTP agents it owns are released cleanly. Used by
-   * `init()` and by the embedded-model setters below — the latter are
-   * called after `embedded-llm-handlers` updates `configManager`.
+   * Build (or rebuild) the typed provider registries from the active
+   * workspace LLM config. Disposes the previous ones first so the
+   * native handles / HTTP agents they own are released cleanly. With
+   * `embedding: false`, only the generation half is rebuilt. Used by
+   * `init()` and `refreshProviders()`.
    */
-  private async rebuildLLMRegistry(): Promise<void> {
-    const prev = this.registry;
-    this.registry = null;
+  private async rebuildLLMRegistry({ embedding = true }: { embedding?: boolean } = {}): Promise<void> {
+    const previous = embedding ? [this.llmRegistry, this.registry] : [this.llmRegistry];
+    this.llmRegistry = null;
     this.llm = null;
-    this.embedding = null;
-    if (prev) {
-      await prev.dispose().catch(() => undefined);
+    if (embedding) {
+      this.registry = null;
+      this.embedding = null;
     }
+    await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
 
     try {
-      this.registry = createRegistryFromClioDeckConfig(configManager.getLLMConfig());
-      this.llm = this.registry.getLLM();
-      this.embedding = this.registry.getEmbedding();
+      const llmConfig = configManager.getLLMConfig();
+      this.llmRegistry = createRegistryFromClioDeckConfig(llmConfig);
+      this.llm = this.llmRegistry.getLLM();
+      if (embedding) {
+        this.registry = createRegistryFromClioDeckConfig(llmConfig);
+        this.embedding = this.registry.getEmbedding();
+      }
     } catch (e) {
       console.error('❌ [PDF-SERVICE] Failed to build provider registry:', e);
+      // Tout à null : une configuration qui ne se construit pas ne laisse aucun fournisseur servir.
+      const failed = [this.llmRegistry, this.registry];
       this.registry = null;
+      this.llmRegistry = null;
       this.llm = null;
       this.embedding = null;
+      await Promise.all(failed.map((r) => r?.dispose().catch(() => undefined)));
       throw e;
     }
+  }
+
+  /**
+   * Relit la configuration des fournisseurs après un changement de réglages, sans rouvrir le projet.
+   *
+   * Embeddings changés : l'indexeur capture son fournisseur à la construction, et le `BackendPDFIndexer`
+   * garde un cache d'embeddings indexé par texte. Refaire le registre sans refaire l'indexeur laissait
+   * la réindexation demandée par l'interface écrire avec l'ancien modèle — ou avec un fournisseur
+   * libéré. On attend donc les indexations en vol, puis on refait registre et indexeur.
+   *
+   * Génération seule : le registre de génération est refait, sans attendre ni toucher à l'indexeur.
+   * Aucun magasin n'est ouvert ici : sans projet, `init` construira tout.
+   */
+  async refreshProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
+    if (embeddingChanged) await this.drainInFlightIndexing();
+    try {
+      await this.rebuildLLMRegistry({ embedding: embeddingChanged });
+    } catch (e) {
+      // Un échec libère tout : l'indexeur tiendrait un fournisseur libéré.
+      this.pdfIndexer = null;
+      throw e;
+    }
+    if (embeddingChanged) {
+      this.pdfIndexer = null;
+      if (this.vectorStore && this.embedding) {
+        this.createIndexer(configManager.getRAGConfig());
+      }
+    }
+  }
+
+  /** Vrai quand les fournisseurs manquent : la dernière construction a échoué, tout est à refaire. */
+  providersMissing(): boolean {
+    return !this.llm || !this.embedding;
   }
 
   /**
@@ -466,56 +511,6 @@ class PDFService {
   }
   getEmbeddingProvider(): EmbeddingProvider | null {
     return this.embedding;
-  }
-
-  /**
-   * Embedded-model lifecycle. Each call assumes `embedded-llm-handlers`
-   * has already updated `configManager` with the new (or cleared)
-   * embedded model paths; we just rebuild the registry so the next
-   * chat / embedding call picks up the change.
-   */
-  async updateEmbeddedModel(modelPath: string, _modelId?: string): Promise<boolean> {
-    console.log(`🔄 [PDF-SERVICE] Updating embedded model: ${modelPath}`);
-    try {
-      await this.rebuildLLMRegistry();
-      console.log('✅ [PDF-SERVICE] Embedded model updated successfully');
-      return true;
-    } catch (e) {
-      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-model change:', e);
-      return false;
-    }
-  }
-
-  async disableEmbeddedModel(): Promise<void> {
-    console.log('🔄 [PDF-SERVICE] Disabling embedded model');
-    try {
-      await this.rebuildLLMRegistry();
-      console.log('✅ [PDF-SERVICE] Embedded model disabled');
-    } catch (e) {
-      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded model:', e);
-    }
-  }
-
-  async updateEmbeddedEmbeddingModel(modelPath: string, _modelId?: string): Promise<boolean> {
-    console.log(`🔄 [PDF-SERVICE] Updating embedded embedding model: ${modelPath}`);
-    try {
-      await this.rebuildLLMRegistry();
-      console.log('✅ [PDF-SERVICE] Embedded embedding model updated successfully');
-      return true;
-    } catch (e) {
-      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after embedded-embedding change:', e);
-      return false;
-    }
-  }
-
-  async disableEmbeddedEmbeddingModel(): Promise<void> {
-    console.log('🔄 [PDF-SERVICE] Disabling embedded embedding model');
-    try {
-      await this.rebuildLLMRegistry();
-      console.log('✅ [PDF-SERVICE] Embedded embedding model disabled');
-    } catch (e) {
-      console.error('❌ [PDF-SERVICE] Failed to rebuild registry after disabling embedded embedding:', e);
-    }
   }
 
   getVectorStore() {
@@ -898,13 +893,15 @@ class PDFService {
       this.vectorStore = null;
     }
 
-    // Libérer les ressources du registry typé (HTTP agents, native handles).
-    if (this.registry) {
+    // Libérer les ressources des registres typés (HTTP agents, native handles).
+    if (this.registry || this.llmRegistry) {
       console.log('🔒 Disposing LLM provider registry...');
-      await this.registry.dispose().catch(() => undefined);
+      const previous = [this.registry, this.llmRegistry];
       this.registry = null;
+      this.llmRegistry = null;
       this.llm = null;
       this.embedding = null;
+      await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
     }
 
     this.pdfIndexer = null;

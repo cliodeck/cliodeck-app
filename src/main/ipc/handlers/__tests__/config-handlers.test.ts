@@ -20,25 +20,33 @@ const mocks = vi.hoisted(() => ({
   setZoteroConfig: vi.fn(),
   setAPIKey: vi.fn(),
   set: vi.fn(),
-  init: vi.fn(async (_path: string) => undefined),
+  refresh: vi.fn(async (_opts: { embeddingChanged: boolean }) => undefined),
   applyRagConfig: vi.fn(),
+  llm: { backend: 'ollama' } as Record<string, unknown>,
 }));
 vi.mock('../../../services/config-manager.js', () => ({
   configManager: {
     getAPIKey: () => '',
-    setLLMConfig: mocks.setLLMConfig,
+    setLLMConfig: (partial: Record<string, unknown>) => {
+      mocks.setLLMConfig(partial);
+      mocks.llm = { ...mocks.llm, ...partial };
+    },
     setZoteroConfig: mocks.setZoteroConfig,
     setAPIKey: mocks.setAPIKey,
     set: mocks.set,
-    getLLMConfig: () => ({ backend: 'ollama' }),
+    getLLMConfig: () => ({ ...mocks.llm }),
   },
 }));
 vi.mock('../../../services/pdf-service.js', () => ({
   pdfService: {
     getCurrentProjectPath: () => '/projet',
-    init: mocks.init,
+    providersMissing: () => false,
     applyRagConfig: mocks.applyRagConfig,
   },
+}));
+vi.mock('../../../services/provider-refresh.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../services/provider-refresh.js')>()),
+  refreshProviders: mocks.refresh,
 }));
 
 const { setupConfigHandlers, stripNonFinite } = await import('../config-handlers.js');
@@ -47,7 +55,8 @@ const configSet = (key: string, value: unknown) => handlers.get('config:set')?.(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.init.mockImplementation(async () => undefined);
+  mocks.llm = { backend: 'ollama' };
+  mocks.refresh.mockImplementation(async () => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
 });
@@ -112,7 +121,7 @@ describe('config:set', () => {
   });
 
   it('écrit puis relance en échec : le contrat `written` ne change pas', async () => {
-    mocks.init.mockRejectedValue(new Error('pas de clé'));
+    mocks.refresh.mockRejectedValue(new Error('pas de clé'));
 
     const response = await configSet('llm', { topK: Number.NaN, backend: 'claude' });
 

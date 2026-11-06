@@ -409,7 +409,7 @@ test('un projet ouvert : rien à écrire ne relance rien ; une écriture refusé
   app.process().stdout?.on('data', (chunk: Buffer) => {
     log += chunk.toString();
   });
-  const restarts = () => log.split('Reinitializing services').length - 1;
+  const restarts = () => log.split('Refreshing providers').length - 1;
 
   try {
     await openProject(app, window, article());
@@ -460,7 +460,7 @@ test('écrit mais non appliqué, puis fermer et rouvrir les Paramètres : Sauveg
   app.process().stdout?.on('data', (chunk: Buffer) => {
     log += chunk.toString();
   });
-  const restarts = () => log.split('Reinitializing services').length - 1;
+  const restarts = () => log.split('Refreshing providers').length - 1;
   const reopen = async () => {
     await window.keyboard.press('Escape');
     await expect(window.locator('#settings-modal-title')).toHaveCount(0);
@@ -528,7 +528,7 @@ test('Claude sans clé, puis retour à Ollama : le disque suit, les services rep
     await save(window);
     await expect(saved(window)).toBeVisible();
     expect(readConfig(dir).llm.backend).toBe('ollama');
-    await expect.poll(() => log.split('Services reinitialized successfully').length - 1).toBe(1);
+    await expect.poll(() => log.split('Providers refreshed successfully').length - 1).toBe(1);
 
     await session.app.close();
     const relaunched = await launch(dir);
@@ -554,7 +554,7 @@ test('un changement de découpage seul : le PDF indexé ensuite le suit, sans re
   app.process().stdout?.on('data', (chunk: Buffer) => {
     log += chunk.toString();
   });
-  const restarts = () => log.split('Reinitializing services').length - 1;
+  const restarts = () => log.split('Refreshing providers').length - 1;
   const projectJson = article();
   const pdf = join(dirname(projectJson), 'source.pdf');
   textPdf(pdf, 12);
@@ -589,16 +589,15 @@ test('un changement de découpage seul : le PDF indexé ensuite le suit, sans re
     expect(large.documents).toBe(1);
     expect(large.chunks).toBeLessThan(small.chunks);
 
-    // Les deux sections à la fois : une seule relance, et elle voit le découpage écrit. Le compte
-    // est cumulé : il prouve aussi que le changement de découpage seul n'a rien relancé.
+    // Les deux sections à la fois : le découpage écrit est suivi, et rien n'est relancé — la fenêtre
+    // de contexte se lit à chaque tour, aucun fournisseur n'est à refaire pour elle (A3).
     await preset.selectOption('cpuOptimized');
     await section(window, 'Configuration LLM');
     await window.locator('.settings-modal input[placeholder="défaut du serveur (4096)"]').fill('8192');
     await save(window);
     await expect.poll(() => readConfig(ollama.userDataDir).llm.ollamaNumCtx).toBe(8192);
-    await expect.poll(restarts).toBe(1);
     await expect(saved(window)).toBeVisible();
-    expect(restarts()).toBe(1);
+    expect(restarts()).toBe(0);
 
     expect((await indexedChunks()).chunks).toBe(small.chunks);
   } finally {

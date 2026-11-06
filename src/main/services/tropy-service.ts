@@ -68,12 +68,16 @@ class TropyService {
   private deduplicator: ChunkDeduplicator | null = null;
 
   /**
-   * Typed provider registry (fusion 1.2c). Built from the active workspace
-   * config in `init()`, used for both NER (`registry.getLLM()`) and
-   * chunk/query embeddings (`registry.getEmbedding()`). Disposed in
-   * `close()` to release HTTP agents / native handles.
+   * Typed provider registries (fusion 1.2c), built from the active workspace
+   * config in `init()` and again by `rebuildProviders()` after a settings
+   * change. One per half: `registry` for chunk/query embeddings,
+   * `llmRegistry` for NER. A registry only builds — and disposes — the half
+   * it was asked for, so a generation change leaves the embedding provider of
+   * a running sync alone. Disposed in `close()` to release HTTP agents /
+   * native handles.
    */
   private registry: ProviderRegistry | null = null;
+  private llmRegistry: ProviderRegistry | null = null;
   private llm: LLMProvider | null = null;
   private embedding: EmbeddingProvider | null = null;
 
@@ -103,16 +107,14 @@ class TropyService {
     // registry before re-init.
     await this.disposePreviousRegistry();
     try {
-      this.registry = createRegistryFromClioDeckConfig(
-        configManager.getLLMConfig()
-      );
-      this.llm = this.registry.getLLM();
+      const llmConfig = configManager.getLLMConfig();
+      this.llmRegistry = createRegistryFromClioDeckConfig(llmConfig);
+      this.llm = this.llmRegistry.getLLM();
+      this.registry = createRegistryFromClioDeckConfig(llmConfig);
       this.embedding = this.registry.getEmbedding();
     } catch (e) {
       console.warn('[tropy-service] failed to build provider registry:', e);
-      this.registry = null;
-      this.llm = null;
-      this.embedding = null;
+      await this.disposePreviousRegistry();
     }
 
     // Initialize chunking optimization modules
@@ -157,13 +159,42 @@ class TropyService {
   }
 
   private async disposePreviousRegistry(): Promise<void> {
-    const prev = this.registry;
+    const previous = [this.registry, this.llmRegistry];
     this.registry = null;
+    this.llmRegistry = null;
     this.llm = null;
     this.embedding = null;
-    if (prev) {
-      await prev.dispose().catch(() => undefined);
+    await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
+  }
+
+  /**
+   * Relit la configuration après un changement de réglages. Le registre n'était construit qu'à
+   * l'ouverture du projet : décocher les embeddings cloud laissait partir les transcriptions et les
+   * requêtes vers l'ancien service, avec l'ancienne clé, jusqu'à la réouverture (S08-1-21).
+   *
+   * Le nouveau fournisseur est construit avant que l'ancien ne soit libéré : une synchro en vol passe
+   * au nouveau à l'extrait suivant. Un échec met tout à null, jamais de repli sur l'ancien — il porte
+   * peut-être le consentement qu'on vient de retirer. Service à l'arrêt : `init` lira la configuration.
+   */
+  async rebuildProviders({ embeddingChanged }: { embeddingChanged: boolean }): Promise<void> {
+    if (!this.projectPath) return;
+    const previous = embeddingChanged ? [this.llmRegistry, this.registry] : [this.llmRegistry];
+    try {
+      const llmConfig = configManager.getLLMConfig();
+      const llmRegistry = createRegistryFromClioDeckConfig(llmConfig);
+      const llm = llmRegistry.getLLM();
+      const registry = embeddingChanged ? createRegistryFromClioDeckConfig(llmConfig) : this.registry;
+      const embedding = embeddingChanged ? (registry?.getEmbedding() ?? null) : this.embedding;
+      this.llmRegistry = llmRegistry;
+      this.llm = llm;
+      this.registry = registry;
+      this.embedding = embedding;
+    } catch (e) {
+      console.warn('[tropy-service] failed to rebuild provider registry:', e);
+      await this.disposePreviousRegistry();
+      return;
     }
+    await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
   }
 
   /**

@@ -29,12 +29,9 @@ vi.mock('../../../services/config-manager.js', () => ({
 /** Le chargement échoue, et un Enregistrer a eu le temps de passer. */
 const failAfterASave = vi.hoisted(() => async () => {
   store.llm = { ...store.llm, ollamaChatModel: 'choisi-pendant-le-chargement' };
-  return false;
+  throw new Error('le modèle ne se charge pas');
 });
-vi.mock('../../../services/pdf-service.js', () => ({
-  pdfService: { updateEmbeddedModel: failAfterASave, updateEmbeddedEmbeddingModel: failAfterASave },
-}));
-vi.mock('../../../services/retrieval-service.js', () => ({ retrievalService: {} }));
+vi.mock('../../../services/provider-refresh.js', () => ({ refreshProviders: failAfterASave }));
 vi.mock('../../../../../backend/core/llm/ModelDownloader.js', () => ({
   ModelDownloader: class {
     isDownloadInProgress = () => false;
@@ -55,6 +52,7 @@ const event = { sender: { send: () => undefined } };
 
 beforeEach(() => {
   store.llm = { ollamaChatModel: 'modele-d-avant', embeddingProvider: 'auto' };
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 
 describe('un modèle qui ne se charge pas', () => {
