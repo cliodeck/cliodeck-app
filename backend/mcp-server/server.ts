@@ -16,7 +16,8 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MCPAccessLogger } from './logger.js';
-import { isToolEnabled, type MCPRuntimeConfig } from './config.js';
+import { checkToolCall, isToolEnabled, type MCPRuntimeConfig } from './config.js';
+import { workspaceLinkOutsideSync } from '../core/workspace/link-guard.js';
 import { registerSearchObsidian } from './tools/searchObsidian.js';
 import { registerSearchZotero } from './tools/searchZotero.js';
 import { registerSearchDocuments } from './tools/searchDocuments.js';
@@ -44,6 +45,8 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
 
   const logger = new MCPAccessLogger(cfg.paths.mcpAccessLog);
   logger.open();
+
+  gateToolCalls(server, cfg, logger);
 
   // Opt-in par outil : un outil refusé n'est pas enregistré du tout, donc le
   // client ne le voit pas. Refuser à l'appel aurait laissé le nom, la
@@ -91,4 +94,57 @@ export function createMcpServer(cfg: MCPRuntimeConfig): ClioDeckMcpServer {
   console.error(`[ClioDeck MCP] Tools: ${exposed.join(', ') || '(aucun)'}`);
 
   return { server, logger };
+}
+
+type ToolHandler = (...args: unknown[]) => unknown;
+
+/**
+ * Chaque appel d'outil repasse par l'accord du projet, relu sur disque
+ * (`checkToolCall`) : l'enregistrement, lui, reste figé au démarrage. D'où
+ * l'asymétrie que le panneau dit : un outil ajouté vaut au prochain
+ * démarrage, un accord retiré au prochain appel. La liste annoncée au client
+ * (`tools/list`) garde les outils déjà vus jusqu'à son redémarrage ; seul
+ * l'appel est refusé.
+ *
+ * On enveloppe `server.tool` sur l'instance plutôt que chaque outil : aucun
+ * fichier d'outil n'a à s'en souvenir, et un outil ajouté plus tard est
+ * couvert d'office. Le gestionnaire est toujours le dernier argument.
+ */
+function gateToolCalls(server: McpServer, cfg: MCPRuntimeConfig, logger: MCPAccessLogger): void {
+  const target = server as unknown as { tool: ToolHandler };
+  const register = target.tool.bind(server);
+  target.tool = (...args: unknown[]): unknown => {
+    const name = args[0];
+    const handler = args[args.length - 1];
+    if (typeof name === 'string' && typeof handler === 'function') {
+      const inner = handler as ToolHandler;
+      args[args.length - 1] = (...callArgs: unknown[]): unknown => {
+        const gate = checkToolCall(cfg.workspaceRoot, name);
+        // `in` plutôt que `gate.ok` : sans strictNullChecks (tsconfig.node), un booléen ne discrimine pas.
+        if (!('reason' in gate)) return inner(...callArgs);
+        // Les arguments du client ne sont pas écrits. Et rien ne s'écrit à
+        // travers un lien qui mène hors du projet (D18) : le journal serait
+        // celui d'un autre.
+        if (!workspaceLinkOutsideSync(cfg.workspaceRoot)) {
+          logger.log({
+            kind: 'tool_call',
+            at: new Date().toISOString(),
+            name,
+            input: {},
+            output: { error: `tool_refused: ${gate.reason}` },
+          });
+        }
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ error: 'tool_refused', reason: gate.reason }),
+            },
+          ],
+        };
+      };
+    }
+    return register(...args);
+  };
 }

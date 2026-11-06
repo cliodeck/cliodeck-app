@@ -1668,11 +1668,11 @@
     "serverNameHint": "Nom affiché aux clients connectés. Par défaut, le nom du dossier projet. Seuls les lettres, chiffres, « - » et « _ » sont acceptés par Claude Code : les autres caractères sont adaptés (espaces changées en « - »).",
     "binary": "Binaire wrapper",
     "binaryMissing": "Binaire introuvable — exécutez `npm run build` dans le dépôt cliodeck-app.",
-    "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer.",
+    "disabledNote": "Le serveur refuse de démarrer tant que l'interrupteur est désactivé, même si un client tente de le lancer. Un serveur déjà lancé par un client refuse désormais chaque appel, sans qu'il faille relancer le client.",
     "tools": {
       "title": "Outils exposés aux clients connectés",
       "limits": "Chaque outil accepte topK jusqu'à 200 (défaut 10) et renvoie des chunks tronqués à 4 000 caractères (2 000 pour les snippets Gallica/HAL).",
-      "optIn": "Un outil décoché n'est pas enregistré : le client ne le voit pas du tout. Le changement prend effet au prochain démarrage du serveur, donc après relance du client.",
+      "optIn": "Un outil décoché n'est pas enregistré : le client ne le voit pas du tout. Décocher vaut dès le prochain appel : un serveur déjà lancé refuse l'outil, même si le client l'affiche encore jusqu'à sa relance. Cocher ne prend effet qu'au prochain démarrage du serveur, donc après relance du client.",
       "manuscriptNote": "La lecture du manuscrit fait exception : elle est refusée tant que vous ne l'accordez pas. Les outils de recherche exposent des sources déjà rassemblées ; ceux-là donnent votre texte inédit, mot pour mot, à un logiciel tiers. `context.md` et vos règles de maison (`hints.md`) restent exclus dans tous les cas."
     },
     "snippets": {
