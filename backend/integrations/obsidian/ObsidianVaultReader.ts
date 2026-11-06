@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FSWatcher } from 'chokidar';
 import type { VaultFileEntry, VaultTreeNode } from '../../types/vault.js';
+import { isExcludedFromVault } from './author-text-exclusions.js';
 
 type VaultEvent = 'file-added' | 'file-changed' | 'file-deleted';
 type VaultEventCallback = (entry: VaultFileEntry) => void;
@@ -30,13 +31,20 @@ const DEFAULT_IGNORE_PATTERNS = [
 export class ObsidianVaultReader {
   private vaultPath: string;
   private ignorePatterns: string[];
+  /**
+   * Chemins relatifs au coffre (dossiers ou fichiers) que le scan laisse de côté : le texte de
+   * l'auteur quand le coffre contient le projet (`authorTextInVault`). Il a ses propres corpus,
+   * avec leur consentement et leur politique ; le canal « vault » ne les applique pas.
+   */
+  private excludeRelativePaths: string[];
   private entries: Map<string, VaultFileEntry> = new Map();
   private watcher: FSWatcher | null = null;
   private listeners: Map<VaultEvent, VaultEventCallback[]> = new Map();
 
-  constructor(vaultPath: string, ignorePatterns: string[] = []) {
+  constructor(vaultPath: string, ignorePatterns: string[] = [], excludeRelativePaths: string[] = []) {
     this.vaultPath = path.resolve(vaultPath);
     this.ignorePatterns = ignorePatterns;
+    this.excludeRelativePaths = excludeRelativePaths;
 
     if (!fs.existsSync(this.vaultPath)) {
       throw new Error(`Vault path does not exist: ${this.vaultPath}`);
@@ -91,6 +99,7 @@ export class ObsidianVaultReader {
 
     for (const entry of dirEntries) {
       const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (isExcludedFromVault(relativePath, this.excludeRelativePaths)) continue;
 
       if (entry.isDirectory()) {
         if (this.shouldIgnoreDir(entry.name)) continue;
@@ -208,6 +217,9 @@ export class ObsidianVaultReader {
    * Create a VaultFileEntry from a relative path
    */
   private createEntry(relativePath: string): VaultFileEntry | null {
+    if (isExcludedFromVault(relativePath.split(path.sep).join('/'), this.excludeRelativePaths)) {
+      return null;
+    }
     try {
       const absolutePath = path.join(this.vaultPath, relativePath);
       const stat = fs.statSync(absolutePath);

@@ -43,6 +43,11 @@ import type {
 import { ObsidianVaultStore } from '../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import { obsidianStorePath } from '../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import {
+  authorTextInVault,
+  isExcludedFromVault,
+  makeOrphanAuthorTextTest,
+} from '../../../backend/integrations/obsidian/author-text-exclusions.js';
+import {
   ManuscriptStore,
   manuscriptStorePath,
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
@@ -1081,7 +1086,10 @@ class RetrievalService {
     const store = this.getVaultStore();
     if (!store) return [];
     const embedding = await this.getQueryEmbedding(query);
-    const hits = store.search(embedding, query, options.topK);
+    const hits = this.withoutAuthorText(
+      store.search(embedding, query, options.topK),
+      await this.configuredVaultPath()
+    );
     const mapped = hits.map(
       (h): VaultMappedSearchResult => ({
         chunk: {
@@ -1116,6 +1124,64 @@ class RetrievalService {
     // dans sa langue — une note qui ne franchit pas le seuil n'a rien à dire,
     // et la montrer quand même prendrait la place d'une source pertinente.
     return applyThreshold(mapped, options.threshold, 0);
+  }
+
+  /**
+   * Un coffre qui contient le projet a pu indexer notes de lecture et manuscrit avant que le
+   * lecteur ne les écarte (S09-1-13) : ces extraits ne passent pas par le canal « vault », qui
+   * n'applique ni leur consentement ni leur politique. Une note est écartée si le coffre de la
+   * configuration l'exclut, ou celui qu'elle porte en base. Le premier couvre un coffre renommé ou
+   * déplacé puis relié : son ancien chemin n'existe plus, et la réindexation ne réécrit pas les
+   * extraits que le lecteur écarte. Le second tient quand la configuration ne se lit pas.
+   * Quand aucun des deux n'existe plus (coffre renommé sans être relié, projet copié sur une autre
+   * machine : config.json voyage avec brain.db), le repli `makeOrphanAuthorTextTest` cherche le
+   * chemin de la note sous les ancêtres du projet.
+   */
+  private withoutAuthorText<T extends { note: { relativePath: string; vaultPath?: string } }>(
+    hits: T[],
+    configuredVault: string | null
+  ): T[] {
+    const root = this.workspaceRoot;
+    if (!root) return hits;
+    const byVault = new Map<string, string[]>();
+    const vaultExists = new Map<string, boolean>();
+    const exists = (vaultPath: string): boolean => {
+      let known = vaultExists.get(vaultPath);
+      if (known === undefined) {
+        known = fs.existsSync(vaultPath);
+        vaultExists.set(vaultPath, known);
+      }
+      return known;
+    };
+    let orphanTest: ((relativePath: string) => boolean) | null = null;
+    const exclusionsOf = (vaultPath: string): string[] => {
+      let exclusions = byVault.get(vaultPath);
+      if (!exclusions) {
+        exclusions = authorTextInVault(vaultPath, root);
+        byVault.set(vaultPath, exclusions);
+      }
+      return exclusions;
+    };
+    return hits.filter((h) => {
+      const vaults = [configuredVault, h.note.vaultPath].filter((v): v is string => !!v);
+      if (!vaults.some(exists)) {
+        orphanTest ??= makeOrphanAuthorTextTest(root);
+        return !orphanTest(h.note.relativePath);
+      }
+      return !vaults.some((v) => isExcludedFromVault(h.note.relativePath, exclusionsOf(v)));
+    });
+  }
+
+  /** Le coffre que la configuration du projet relie, ou `null` si elle n'en relie aucun ou ne se lit pas. */
+  private async configuredVaultPath(): Promise<string | null> {
+    if (!this.workspaceRoot) return null;
+    try {
+      const cfg = await readWorkspaceConfig(this.workspaceRoot);
+      const vault = cfg.vault as { path?: unknown } | undefined;
+      return typeof vault?.path === 'string' && vault.path ? vault.path : null;
+    } catch {
+      return null;
+    }
   }
 
   private async searchManuscript(
