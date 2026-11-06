@@ -22,6 +22,7 @@
  */
 export interface RAGExplanation {
   search: {
+    retrievalStatus?: 'empty' | 'partial' | 'failed';
     query: string;
     totalResults: number;
     searchDurationMs: number;

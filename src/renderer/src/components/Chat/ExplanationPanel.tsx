@@ -44,6 +44,15 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
 
   return (
     <div className="message-explanation">
+      {explanation.search.retrievalStatus && (
+        <div role="status" className="retrieval-warning">
+          {explanation.search.retrievalStatus === 'empty'
+            ? t('chat.explanation.retrievalEmpty', 'Aucune source pertinente trouvée.')
+            : explanation.search.retrievalStatus === 'partial'
+              ? t('chat.explanation.retrievalPartial', 'Certaines recherches ont échoué ; les sources peuvent être incomplètes.')
+              : t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')}
+        </div>
+      )}
       <button
         className="explanation-toggle"
         onClick={() => setShowExplanation(!showExplanation)}

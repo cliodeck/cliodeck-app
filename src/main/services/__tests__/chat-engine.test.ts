@@ -23,6 +23,45 @@ function makeFakeProvider(chunks: ChatChunk[]): LLMProvider {
 }
 
 describe('chat-engine onExplanation', () => {
+  it('tells the model and UI when retrieval throws', async () => {
+    const seen: ChatMessage[][] = [];
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* (messages: ChatMessage[]) {
+      seen.push(messages);
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    let explanation: RAGExplanation | undefined;
+    await runChatTurn({
+      provider, messages: [{ role: 'user', content: 'q' }],
+      retriever: { search: async () => { throw new Error('offline'); } },
+      hooks: { onExplanation: (value) => { explanation = value; } },
+    });
+    expect(seen[0][0].content).toContain('source search failed');
+    expect(explanation?.search.retrievalStatus).toBe('failed');
+  });
+
+  it('forwards an empty retrieval result and its explanation to the model and UI', async () => {
+    const seen: ChatMessage[][] = [];
+    const provider = makeFakeProvider([{ delta: '', done: true, finishReason: 'stop' }]);
+    provider.chat = async function* (messages: ChatMessage[]) {
+      seen.push(messages);
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    let explanation: RAGExplanation | undefined;
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'q' }],
+      retriever: { search: async () => ({
+        systemPrompt: 'No evidence found', sources: [],
+        explanation: { search: { query: 'q', totalResults: 0, searchDurationMs: 1,
+          cacheHit: false, sourceType: 'both', documents: [] } },
+      }) },
+      hooks: { onExplanation: (value) => { explanation = value; } },
+    });
+    expect(seen[0].map((message) => message.content)).toContain('No evidence found');
+    expect(explanation?.search.totalResults).toBe(0);
+  });
+
   it('emits a RAGExplanation when the retriever provides stats', async () => {
     const provider = makeFakeProvider([
       { delta: 'hello', done: false },

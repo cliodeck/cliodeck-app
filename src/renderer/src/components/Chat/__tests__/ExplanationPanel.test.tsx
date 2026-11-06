@@ -34,6 +34,12 @@ const fixture: RAGExplanation = {
 describe('ExplanationPanel', () => {
   afterEach(() => cleanup());
 
+  it('shows a retrieval warning while the details are collapsed', () => {
+    render(<ExplanationPanel explanation={{ ...fixture, search: { ...fixture.search, retrievalStatus: 'partial' } }} />);
+    expect(screen.getByRole('status').textContent).toContain('échoué');
+    expect(screen.queryByTestId('explanation-content')).not.toBeInTheDocument();
+  });
+
   it('is collapsed by default and expands on toggle click', () => {
     render(<ExplanationPanel explanation={fixture} />);
     expect(screen.queryByTestId('explanation-content')).not.toBeInTheDocument();
