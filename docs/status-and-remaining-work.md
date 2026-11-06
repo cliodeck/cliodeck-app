@@ -219,6 +219,12 @@ justification du workflow, à relire avant toute modification de celui-ci :
 En local, après avoir recompilé pour Node, **restaurer impérativement l'ABI
 Electron** : `npm run rebuild:native`.
 
+**Depuis better-sqlite3 13 (DEP-1, 2026-11-06)**, les étapes 2 et 4 ne
+décrivent plus le présent : le binaire N-API précompilé se charge sous Node
+comme sous Electron, `npm rebuild better-sqlite3` ne compile plus rien, et
+les suites SQLite tournent aussi par `npx vitest run` en local. Voir
+[`empaquetage.md`](empaquetage.md).
+
 ### L'OCR de masse écrivait dans le vide — 5 défauts, corpus perdu
 
 > **Résolu (2026-08-30).** Section conservée pour la **leçon**, qui dépasse

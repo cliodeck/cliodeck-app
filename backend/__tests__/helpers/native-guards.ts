@@ -18,7 +18,7 @@ import Database from 'better-sqlite3';
 /** Message à coller en commentaire au point d'usage, pour un skip lisible. */
 export const SQLITE_SKIP_REASON =
   'binding better-sqlite3 introuvable (ni binaire précompilé ni compilation) — ' +
-  'lancer `npm rebuild better-sqlite3` ou exécuter en CI';
+  'lancer `npm run rebuild:native` (`npm rebuild better-sqlite3` ne compile plus rien depuis la 13) ou exécuter en CI';
 
 export const sqliteAvailable: boolean = (() => {
   try {

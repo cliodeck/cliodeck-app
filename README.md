@@ -100,7 +100,7 @@ npm run build
 npm start
 ```
 
-Native modules (`better-sqlite3`, `hnswlib-node`) are compiled for Electron's ABI by the postinstall. Running the test suite under Node needs `npm rebuild better-sqlite3` first — that is what `npm run test:integration` does, and what CI does. See the [Build and Deployment Guide](https://github.com/cliodeck/cliodeck-app/wiki/2.1-Build-and-Deployment-Guide).
+Native modules: `better-sqlite3` (13, N-API) ships prebuilt binaries that load under both Node and Electron, and `hnswlib-node` is compiled locally by the postinstall (`electron-rebuild`), also as N-API. So `npx vitest run` runs the SQLite suites directly, with no rebuild. On a platform without a prebuilt `better-sqlite3` binary, `npm run rebuild:native` compiles one (`npm rebuild better-sqlite3` no longer compiles anything: the package declares `gypfile: false`). See the [Build and Deployment Guide](https://github.com/cliodeck/cliodeck-app/wiki/2.1-Build-and-Deployment-Guide).
 
 ### Coming from ClioBrain?
 
