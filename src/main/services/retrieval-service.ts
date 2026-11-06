@@ -45,6 +45,7 @@ import { obsidianStorePath } from '../../../backend/integrations/obsidian/Obsidi
 import {
   authorTextInVault,
   isExcludedFromVault,
+  makeOrphanAuthorTextTest,
 } from '../../../backend/integrations/obsidian/author-text-exclusions.js';
 import {
   ManuscriptStore,
@@ -1132,6 +1133,9 @@ class RetrievalService {
    * configuration l'exclut, ou celui qu'elle porte en base. Le premier couvre un coffre renommé ou
    * déplacé puis relié : son ancien chemin n'existe plus, et la réindexation ne réécrit pas les
    * extraits que le lecteur écarte. Le second tient quand la configuration ne se lit pas.
+   * Quand aucun des deux n'existe plus (coffre renommé sans être relié, projet copié sur une autre
+   * machine : config.json voyage avec brain.db), le repli `makeOrphanAuthorTextTest` cherche le
+   * chemin de la note sous les ancêtres du projet.
    */
   private withoutAuthorText<T extends { note: { relativePath: string; vaultPath?: string } }>(
     hits: T[],
@@ -1140,6 +1144,16 @@ class RetrievalService {
     const root = this.workspaceRoot;
     if (!root) return hits;
     const byVault = new Map<string, string[]>();
+    const vaultExists = new Map<string, boolean>();
+    const exists = (vaultPath: string): boolean => {
+      let known = vaultExists.get(vaultPath);
+      if (known === undefined) {
+        known = fs.existsSync(vaultPath);
+        vaultExists.set(vaultPath, known);
+      }
+      return known;
+    };
+    let orphanTest: ((relativePath: string) => boolean) | null = null;
     const exclusionsOf = (vaultPath: string): string[] => {
       let exclusions = byVault.get(vaultPath);
       if (!exclusions) {
@@ -1150,6 +1164,10 @@ class RetrievalService {
     };
     return hits.filter((h) => {
       const vaults = [configuredVault, h.note.vaultPath].filter((v): v is string => !!v);
+      if (!vaults.some(exists)) {
+        orphanTest ??= makeOrphanAuthorTextTest(root);
+        return !orphanTest(h.note.relativePath);
+      }
       return !vaults.some((v) => isExcludedFromVault(h.note.relativePath, exclusionsOf(v)));
     });
   }

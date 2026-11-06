@@ -47,6 +47,21 @@ function relativeInside(root: string, target: string): string | null {
 }
 
 /**
+ * Les emplacements réels du texte de l'auteur (`realLocation` : un fichier absent garde son chemin),
+ * ou `null` pour une boucle de liens.
+ */
+function authorTextLocations(projectRoot: string): { realRoot: string; reals: string[] } | null {
+  const realRoot = realLocation(projectRoot);
+  if (realRoot === null) return null;
+  const reals: string[] = [];
+  for (const entry of [...AUTHOR_TEXT, ...manifestFiles(projectRoot)]) {
+    const real = realLocation(path.resolve(realRoot, entry));
+    if (real !== null) reals.push(real);
+  }
+  return { realRoot, reals };
+}
+
+/**
  * Les chemins, relatifs au coffre et séparés par `/`, que le coffre doit laisser de côté : notes
  * de lecture, chapitres, `document.md`, `slides.md`, `abstract.md` et les fichiers du manifeste,
  * quand ils sont sous le coffre. Une liste vide si le coffre ne contient rien du projet ; `['']`
@@ -54,13 +69,11 @@ function relativeInside(root: string, target: string): string | null {
  */
 export function authorTextInVault(vaultPath: string, projectRoot: string): string[] {
   const realVault = realLocation(vaultPath);
-  const realRoot = realLocation(projectRoot);
-  if (realVault === null || realRoot === null) return [];
+  const located = authorTextLocations(projectRoot);
+  if (realVault === null || located === null) return [];
 
   const exclusions = new Set<string>();
-  for (const entry of [...AUTHOR_TEXT, ...manifestFiles(projectRoot)]) {
-    const real = realLocation(path.resolve(realRoot, entry));
-    if (real === null) continue;
+  for (const real of located.reals) {
     // Le coffre dans un dossier du texte de l'auteur : tout ce qu'il contient en est.
     if (relativeInside(real, realVault) !== null) return [''];
     const relative = relativeInside(realVault, real);
@@ -75,4 +88,34 @@ export function isExcludedFromVault(relativePath: string, exclusions: readonly s
   return exclusions.some(
     (excluded) => excluded === '' || candidate === excluded || candidate.startsWith(`${excluded}/`)
   );
+}
+
+/**
+ * Le repli quand aucun coffre connu n'existe plus : ni celui de la configuration, ni celui que la
+ * note porte en base. Renommer ou déplacer le coffre, projet compris, sans le relier, ou ouvrir le
+ * projet copié sur une autre machine (config.json voyage avec brain.db) laisse les deux sur un
+ * chemin disparu, et `authorTextInVault` n'a plus de coffre où chercher.
+ *
+ * Le coffre perdu contenait le projet si l'un des ancêtres de la racine réelle du projet, la
+ * racine comprise, joint au chemin de la note, tombe dans le texte de l'auteur. Le chemin joint
+ * se compare par son emplacement réel (`realLocation` garde la partie absente telle quelle) :
+ * l'extrait d'une note de lecture supprimée depuis reste le texte de l'auteur.
+ */
+export function makeOrphanAuthorTextTest(projectRoot: string): (relativePath: string) => boolean {
+  const located = fs.existsSync(projectRoot) ? authorTextLocations(projectRoot) : null;
+  if (located === null) return () => false;
+  const ancestors: string[] = [];
+  for (let dir = located.realRoot; ; dir = path.dirname(dir)) {
+    ancestors.push(dir);
+    if (path.dirname(dir) === dir) break;
+  }
+  return (relativePath) => {
+    if (relativePath === '' || path.isAbsolute(relativePath)) return false;
+    return ancestors.some((ancestor) => {
+      const candidate = realLocation(path.join(ancestor, relativePath));
+      return (
+        candidate !== null && located.reals.some((real) => relativeInside(real, candidate) !== null)
+      );
+    });
+  };
 }

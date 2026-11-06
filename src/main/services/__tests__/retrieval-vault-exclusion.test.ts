@@ -99,6 +99,32 @@ describe('RetrievalService — coffre qui contient le projet', () => {
     expect(paths).toEqual(['Journal/2026-11-06.md']);
   });
 
+  it('un coffre renommé sans être relié : configuration et lignes désignent un chemin disparu', async () => {
+    // config.json voyage dans le même .cliodeck que brain.db : renommer le coffre (projet compris)
+    // ou copier le projet sur une autre machine laisse les deux sur l'ancien chemin.
+    const ancien = `${vault}-ancien-nom`;
+    const project = path.join(vault, 'these');
+    fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
+    fs.writeFileSync(
+      path.join(project, '.cliodeck', 'config.json'),
+      JSON.stringify({ schema_version: 2, vault: { path: ancien } })
+    );
+    vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      search: () => [
+        vaultHit('these/reading-notes/Braudel_1949.md', ancien),
+        vaultHit('these/document.md', ancien),
+        vaultHit('these/reading-notes/Absente_2001.md', ancien),
+        vaultHit('Journal/2026-11-06.md', ancien),
+      ],
+    });
+
+    const { hits } = await retrievalService.search({ query: 'Braudel', sourceType: 'vault' });
+
+    const paths = hits.map((h) => (h.sourceType === 'vault' ? h.source.relativePath : null));
+    // Une note de lecture supprimée depuis reste le texte de l'auteur.
+    expect(paths).toEqual(['Journal/2026-11-06.md']);
+  });
+
   it('un coffre disjoint du projet garde toutes ses notes', async () => {
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-autre-coffre-'));
     try {

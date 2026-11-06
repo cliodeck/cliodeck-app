@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { authorTextInVault, isExcludedFromVault } from '../author-text-exclusions.js';
+import {
+  authorTextInVault,
+  isExcludedFromVault,
+  makeOrphanAuthorTextTest,
+} from '../author-text-exclusions.js';
 
 let tmp = '';
 
@@ -86,5 +90,37 @@ describe('authorTextInVault', () => {
     const excluded = authorTextInVault(link, project);
     expect(isExcludedFromVault('ClioDeck-projet/reading-notes/Braudel_1949.md', excluded)).toBe(true);
     expect(isExcludedFromVault('ClioDeck-projet/document.md', excluded)).toBe(true);
+  });
+});
+
+describe('makeOrphanAuthorTextTest — coffre disparu', () => {
+  it('reconnaît le texte de l’auteur sous un ancêtre du projet, note supprimée comprise', () => {
+    const project = path.join(tmp, 'Coffre', 'these');
+    mkProject(project);
+    const isAuthorText = makeOrphanAuthorTextTest(project);
+    expect(isAuthorText('these/reading-notes/Braudel_1949.md')).toBe(true);
+    expect(isAuthorText('these/reading-notes/Supprimee_2001.md')).toBe(true);
+    expect(isAuthorText('these/document.md')).toBe(true);
+    expect(isAuthorText('reading-notes/Braudel_1949.md')).toBe(true); // coffre = projet
+    expect(isAuthorText('Journal/2026-11-06.md')).toBe(false);
+    expect(isAuthorText('these/notes-diverses.md')).toBe(false);
+  });
+
+  it('livre : les chapitres du manifeste, même hors de chapters/', () => {
+    const project = path.join(tmp, 'Coffre', 'livre');
+    fs.mkdirSync(path.join(project, 'texte'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'texte', 'intro.md'), '# Intro\n');
+    fs.writeFileSync(
+      path.join(project, 'project.json'),
+      JSON.stringify({ type: 'book', chapters: [{ filePath: 'texte/intro.md' }] })
+    );
+    const isAuthorText = makeOrphanAuthorTextTest(project);
+    expect(isAuthorText('livre/texte/intro.md')).toBe(true);
+    expect(isAuthorText('livre/texte/autre.md')).toBe(false);
+  });
+
+  it('projet absent : rien n’est reconnu', () => {
+    const isAuthorText = makeOrphanAuthorTextTest(path.join(tmp, 'nulle-part'));
+    expect(isAuthorText('reading-notes/a.md')).toBe(false);
   });
 });
