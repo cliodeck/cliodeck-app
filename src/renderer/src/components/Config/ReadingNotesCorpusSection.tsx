@@ -52,7 +52,8 @@ interface Props {
   onEnabledChange: (enabled: boolean) => void;
   /** `rag.readingNotesCloudConsent` — envoi autorisé à un fournisseur distant ? */
   cloudConsent: boolean;
-  onCloudConsentChange: (consent: boolean) => void;
+  /** Écrit le consentement sur le disque ; se résout quand c'est fait (ou refusé). */
+  onCloudConsentChange: (consent: boolean) => Promise<void>;
 }
 
 export const ReadingNotesCorpusSection: React.FC<Props> = ({
@@ -67,6 +68,8 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Le main relit le consentement sur le disque : réindexer avant qu'il y soit appliquerait l'ancien.
+  const [consentSaving, setConsentSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     const api = corpusApi();
@@ -117,6 +120,15 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
     }
   };
 
+  const changeConsent = async (consent: boolean) => {
+    setConsentSaving(true);
+    try {
+      await onCloudConsentChange(consent);
+    } finally {
+      setConsentSaving(false);
+    }
+  };
+
   const lastIndexed = stats?.lastIndexedAt
     ? new Date(stats.lastIndexedAt).toLocaleString(i18n.language)
     : null;
@@ -153,8 +165,8 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
               <input
                 type="checkbox"
                 checked={cloudConsent}
-                disabled={!enabled}
-                onChange={(e) => onCloudConsentChange(e.target.checked)}
+                disabled={!enabled || consentSaving}
+                onChange={(e) => void changeConsent(e.target.checked)}
                 className="config-checkbox"
                 data-testid="reading-notes-cloud-consent"
               />
@@ -189,7 +201,7 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
                 type="button"
                 className="config-btn-small"
                 onClick={() => void reindex()}
-                disabled={busy || !enabled}
+                disabled={busy || !enabled || consentSaving}
                 title={t('readingNotesCorpus.reindexTitle')}
                 aria-label={t('readingNotesCorpus.reindexTitle')}
                 style={{ marginTop: 8 }}
