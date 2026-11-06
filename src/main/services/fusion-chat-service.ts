@@ -3,8 +3,9 @@
  *
  * Drives a streamed Brainstorm chat through the typed `ProviderRegistry`
  * (built from the user-level `LLMConfig` via the cliodeck adapter), with
- * automatic `.cliohints` injection. Each session has an `AbortController`
- * the renderer can trigger via `cancel(sessionId)`.
+ * automatic `.cliohints` injection. Each session is a `chat` operation of
+ * the shared registry (`cancellable-operation.ts`), runId = sessionId, that
+ * the renderer can cancel via `cancel(sessionId)`.
  *
  * The LLM turn loop (streaming, tool-use agent, retrieval injection) lives
  * in `chat-engine.ts` so the eventual legacy chat migration can share it.
@@ -265,6 +266,7 @@ import {
 } from '../../../backend/core/hints/loader.js';
 import { guardWorkspaceHints } from './hints-guard.js';
 import { createInactivityWatchdog } from './inactivity-watchdog.js';
+import { operations, type CancellableOperation } from './cancellable-operation.js';
 import {
   applyChatModelOverride,
   createRegistryFromClioDeckConfig,
@@ -503,26 +505,24 @@ export function retrievalStatus(
 }
 
 class FusionChatService {
-  private active = new Map<string, AbortController>();
-
   /**
    * Kick off a streamed chat. Returns synchronously with the sessionId;
    * chunks arrive on `webContents.send('fusion:chat:chunk', envelope)`.
    */
   start(args: ChatStartArgs): string {
     const sessionId = args.sessionId ?? randomUUID();
-    const controller = new AbortController();
-    this.active.set(sessionId, controller);
+    // Gardée en local : le `finally` ne retire que ce tour-ci du registre.
+    const op = operations.begin('chat', { runId: sessionId });
 
     // Fire and forget — the stream pumps chunks via webContents.
-    void this.pump(sessionId, controller, args)
+    void this.pump(sessionId, op, args)
       .catch((e) => {
         // Unhandled errors inside pump() would otherwise be swallowed by
         // the fire-and-forget pattern; surface them so we see the root cause.
         console.error('[fusion-chat] pump crashed', sessionId, e);
       })
       .finally(() => {
-        this.active.delete(sessionId);
+        op.finish();
       });
 
     return sessionId;
@@ -542,15 +542,15 @@ class FusionChatService {
   }
 
   cancel(sessionId: string): boolean {
-    const c = this.active.get(sessionId);
-    if (!c) return false;
-    c.abort();
-    return true;
+    // Seulement un tour de chat : un autre `kind` qui porterait le même
+    // identifiant n'est pas à la portée du bouton « Arrêter ».
+    if (operations.find(sessionId)?.kind !== 'chat') return false;
+    return operations.cancel(sessionId, 'user');
   }
 
   private async pump(
     sessionId: string,
-    controller: AbortController,
+    op: CancellableOperation,
     args: ChatStartArgs
   ): Promise<void> {
     const safeSend = (channel: string, payload: unknown): void => {
@@ -580,7 +580,7 @@ class FusionChatService {
     // utilisateur parti réfléchir devant le dialogue (revue de la PR #84).
     const watchdog = createInactivityWatchdog({
       timeoutMs: args.opts?.timeoutMs,
-      onTimeout: () => controller.abort(),
+      onTimeout: () => op.cancel('timeout'),
     });
     const timeoutError = (): { code: string; message: string } => ({
       code: 'timeout',
@@ -1075,7 +1075,7 @@ class FusionChatService {
       await runChatTurn<BrainstormSource>({
         provider: llm,
         messages,
-        signal: controller.signal,
+        signal: op.signal,
         opts: turnOpts,
         tools,
         toolHandler,
