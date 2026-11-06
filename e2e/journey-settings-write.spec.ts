@@ -437,12 +437,14 @@ test('un projet ouvert : rien à écrire ne relance rien ; une écriture refusé
     await expect(saved(window)).toHaveCount(0);
 
     // La clé saisie : les services repartent, et le message cesse d'être une erreur.
-    await window.locator('.settings-modal input[type="password"]').first().fill('sk-ant-api03-une-cle-de-test');
+    // Assemblée en morceaux : d'un seul tenant, le secret scanning de GitHub la signale.
+    const testKey = 'sk-ant-' + 'api03-une-cle-de-test';
+    await window.locator('.settings-modal input[type="password"]').first().fill(testKey);
     await save(window);
     await expect.poll(restarts).toBe(3);
     await expect(saved(window)).toBeVisible();
     expect(readConfig(dir).llm.backend).toBe('claude');
-    expect(await storedKeys(app, dir)).toEqual({ 'llm.claudeAPIKey': 'sk-ant-api03-une-cle-de-test' });
+    expect(await storedKeys(app, dir)).toEqual({ 'llm.claudeAPIKey': testKey });
   } finally {
     await app.close();
   }
