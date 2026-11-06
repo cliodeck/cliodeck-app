@@ -2,9 +2,10 @@
  * Ce que `project.configUnreadable` dit du chat, mesuré.
  *
  * `config.json` illisible n'éteint pas le coffre : ses notes sont dans `brain.db`, et la recherche
- * ne lit `config.json` que pour le mode de sécurité. Un auteur qui a choisi Bloquer a donc ses
- * notes envoyées au modèle, sous le mode Avertir. Le message le dit. Si ce test tombe parce que ce
- * comportement a changé, c'est aussi ce message qu'il faut changer, dans les trois locales.
+ * ne lit `config.json` que pour le mode de sécurité. Tant que le fichier ne se lit pas, ce mode est
+ * le plus strict, Bloquer, quel que soit le choix qu'il contient (D15) : un auteur qui avait choisi
+ * Bloquer passait à Avertir. Le message le dit. Si ce test tombe parce que ce comportement a changé,
+ * c'est aussi ce message qu'il faut changer, dans les trois locales.
  *
  * Vrai `retrievalService`, vrai fichier ; seul le magasin du coffre est simulé, pour se passer du
  * binding natif.
@@ -74,14 +75,15 @@ afterEach(async () => {
 describe.each<[string, string]>([
   ['virgule en trop', '{"schema_version":2,"security":{"sourceInspectorMode":"block"},}'],
   ['format plus récent', '{"schema_version":3,"security":{"sourceInspectorMode":"block"}}'],
-])('config.json illisible (%s), mode Bloquer choisi', (_label, content) => {
+  ['virgule en trop, Avertir choisi', '{"schema_version":2,"security":{"sourceInspectorMode":"warn"},}'],
+])('config.json illisible (%s)', (_label, content) => {
   beforeEach(async () => {
     writeFileSync(path.join(root, '.cliodeck', 'config.json'), content);
     await internals.refreshInspectorMode();
   });
 
-  it('le mode appliqué est Avertir', () => {
-    expect(retrievalService.getInspectorMode()).toBe('warn');
+  it('le mode appliqué est le plus strict, Bloquer', () => {
+    expect(retrievalService.getInspectorMode()).toBe('block');
   });
 
   it('les notes déjà indexées restent cherchées et rendues', async () => {
@@ -101,4 +103,20 @@ it('témoin : un config.json qui se lit garde le mode choisi', async () => {
   );
   await internals.refreshInspectorMode();
   expect(retrievalService.getInspectorMode()).toBe('block');
+});
+
+it('témoin : sans config.json, rien à lire de travers, le défaut Avertir', async () => {
+  await internals.refreshInspectorMode();
+  expect(retrievalService.getInspectorMode()).toBe('warn');
+});
+
+it('le fichier redevenu lisible rend le choix de l’auteur', async () => {
+  const file = path.join(root, '.cliodeck', 'config.json');
+  writeFileSync(file, '{"schema_version":2,"security":{"sourceInspectorMode":"audit"},}');
+  await internals.refreshInspectorMode();
+  expect(retrievalService.getInspectorMode()).toBe('block');
+
+  writeFileSync(file, '{"schema_version":2,"security":{"sourceInspectorMode":"audit"}}');
+  await internals.refreshInspectorMode();
+  expect(retrievalService.getInspectorMode()).toBe('audit');
 });

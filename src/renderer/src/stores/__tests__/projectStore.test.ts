@@ -871,6 +871,21 @@ describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', 
     }
   });
 
+  it.each([
+    ['en', '“Block”', 'Warn'],
+    ['de', '„Blockieren“', 'Warnen'],
+  ])('en %s : le mode de sécurité dit est le plus strict (D15)', (language, strict, lenient) => {
+    const { message, newerSchema } = (
+      JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', language, 'common.json'), 'utf8')) as {
+        project: { configUnreadable: { message: string; newerSchema: string } };
+      }
+    ).project.configUnreadable;
+    for (const text of [message, newerSchema]) {
+      expect(text).toContain(strict);
+      expect(text).not.toContain(lenient);
+    }
+  });
+
   it('en français : rien n’a été modifié, le mode de sécurité, et quoi faire selon le cas', () => {
     const { message, newerSchema } = (
       JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', 'fr', 'common.json'), 'utf8')) as {
@@ -879,7 +894,9 @@ describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', 
     ).project.configUnreadable;
     for (const text of [message, newerSchema]) {
       expect(text).toContain("n'a pas été modifié");
-      expect(text).toContain('Avertir');
+      // D15 : tant que le fichier ne se lit pas, le plus strict.
+      expect(text).toContain('« Bloquer »');
+      expect(text).not.toContain('Avertir');
     }
     expect(message).toContain('Corrigez');
     expect(newerSchema).toContain('Mettez ClioDeck à jour');

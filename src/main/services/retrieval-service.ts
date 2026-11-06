@@ -60,7 +60,7 @@ import {
 } from '../../../backend/security/source-inspector.js';
 import type { SecurityEvent } from '../../../backend/security/events.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
-import { readWorkspaceConfig } from '../../../backend/core/workspace/config.js';
+import { readWorkspaceConfig, WorkspaceConfigError } from '../../../backend/core/workspace/config.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
@@ -458,7 +458,7 @@ class RetrievalService {
     }
 
     // Refresh the inspector mode for the new workspace. Best-effort —
-    // a missing or unreadable config falls back to `warn`.
+    // a missing config falls back to `warn`, an unreadable one to `block`.
     void this.refreshInspectorMode();
   }
 
@@ -481,10 +481,15 @@ class RetrievalService {
       const m = cfg.security?.sourceInspectorMode;
       this.inspectorMode = m ?? DEFAULT_INSPECTOR_MODE;
     } catch (e) {
-      // Un auteur qui a choisi `block` passe ainsi en `warn` : la notification de `configIssue` le
-      // dit à l'ouverture. Changer ce repli serait un choix de l'auteur, pas un détail de code.
-      console.warn('[retrieval] mode de sécurité par défaut :', e instanceof Error ? e.message : String(e));
-      this.inspectorMode = DEFAULT_INSPECTOR_MODE;
+      // Absent, il n'y a pas de choix à respecter. Illisible, le choix de l'auteur est inconnu : le plus
+      // strict s'applique tant que le fichier ne se lit pas (D15), et la notification de `configIssue`
+      // le dit à l'ouverture. Avertir trahissait un auteur qui avait choisi Bloquer.
+      const absent = e instanceof WorkspaceConfigError && e.kind === 'absent';
+      console.warn(
+        `[retrieval] mode de sécurité ${absent ? 'par défaut' : 'le plus strict'} :`,
+        e instanceof Error ? e.message : String(e)
+      );
+      this.inspectorMode = absent ? DEFAULT_INSPECTOR_MODE : 'block';
     }
   }
 
