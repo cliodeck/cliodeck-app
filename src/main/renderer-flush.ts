@@ -67,9 +67,15 @@ function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promi
     const onDone = (_event: unknown, ack: unknown): void => finish(readRendererReport(ack));
     // Le plafond d'écriture du renderer tombe avant ce délai, mais une page occupée ou une
     // machine chargée peut le retarder. Une page qui a reçu la demande vit : son texte n'est
-    // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée.
+    // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée. Une page vivante qui
+    // se tait encore n'a constaté aucun échec : son écriture traîne, et se dit ainsi (D7).
     const timer = setTimeout(
-      () => finish(received ? { outcome: 'failed', error: 'Réponse du renderer en retard' } : { outcome: 'timeout' }),
+      () =>
+        finish(
+          received
+            ? { outcome: 'failed', error: 'Réponse du renderer en retard', stillWriting: true }
+            : { outcome: 'timeout' }
+        ),
       timeoutMs
     );
 

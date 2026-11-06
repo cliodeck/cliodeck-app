@@ -141,6 +141,8 @@ describe('flushRenderer', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(report).toMatchObject({ outcome: 'failed' });
     expect((report as unknown as FlushReport).error).toBeTruthy();
+    // Une page qui a reçu la demande et se tait encore écrit : c'est une écriture lente (D7).
+    expect((report as unknown as FlushReport).stillWriting).toBe(true);
   });
 
   it('la réponse du renderer vaut toujours mieux que le délai : son rapport est rendu tel quel', async () => {
@@ -265,6 +267,12 @@ describe('mayLeaveRenderer', () => {
 
     await expect(leave).resolves.toBe(false);
     expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
+    // Le rapport `stillWriting` du renderer, parti au plafond de 3,5 s, peut arriver après
+    // les 4 s du main sur une machine chargée : le retard se dit comme une écriture lente.
+    const [, options] = electron.showMessageBox.mock.calls[0];
+    expect(options.message).toBe(
+      "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues"
+    );
   });
 
   it.each<FlushReport>([{ outcome: 'clean' }, { outcome: 'saved' }])(
