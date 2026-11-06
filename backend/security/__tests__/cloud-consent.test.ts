@@ -6,6 +6,7 @@ import {
   cloudConsentRefusalMessage,
   confirmCloudUsage,
   decideCloudConsent,
+  egressGate,
   type ConsentPrompt,
 } from '../cloud-consent.js';
 
@@ -51,6 +52,17 @@ describe('classifyProvider', () => {
     expect(c.providerName).toContain('gpu.lab.uni.lu');
   });
 
+  it('classe distants les modèles Ollama hébergés, même servis en loopback', () => {
+    for (const model of ['gpt-oss:120b-cloud', 'qwen3.5:cloud']) {
+      expect(
+        classifyProvider({ backend: 'ollama', ollamaURL: 'http://127.0.0.1:11434', model })
+      ).toEqual({ isCloud: true, providerName: 'Ollama Cloud (ollama.com)' });
+    }
+    expect(
+      classifyProvider({ backend: 'ollama', ollamaURL: 'http://127.0.0.1:11434', model: 'llama3.2' }).isCloud
+    ).toBe(false);
+  });
+
   it('suppose local sur une URL malformée, comme le renderer', () => {
     expect(classifyProvider({ backend: 'ollama', ollamaURL: 'pas une url' }).isCloud).toBe(false);
   });
@@ -66,6 +78,31 @@ describe('decideCloudConsent', () => {
     );
     expect(d).toEqual({ allowed: true, reason: 'local' });
     expect(prompt.calls).toBe(0);
+  });
+
+  it('classe la génération sur le modèle effectif, pas seulement sur l’hôte', async () => {
+    const local = 'http://127.0.0.1:11434';
+    const ask = (target: Record<string, string>) =>
+      decideCloudConsent(target, null, new CloudConsentRegistry());
+    // Modèle hébergé servi par l'Ollama local : distant.
+    expect((await ask({ backend: 'ollama', ollamaURL: local, ollamaChatModel: 'qwen3.5:cloud' })).allowed).toBe(false);
+    expect((await ask({ backend: 'ollama', ollamaURL: local, ollamaChatModel: 'llama3.2' })).allowed).toBe(true);
+    // Génération embarquée effective : rien ne part, quels que soient l'hôte et le modèle Ollama.
+    expect(
+      await ask({
+        backend: 'ollama',
+        ollamaURL: 'http://gpu.labo.example:11434',
+        ollamaChatModel: 'qwen3.5:cloud',
+        generationProvider: 'embedded',
+        embeddedModelPath: '/modeles/qwen.gguf',
+      })
+    ).toEqual({ allowed: true, reason: 'local' });
+    // Backend absent : l'adaptateur construit un Ollama, la classification aussi.
+    expect(await ask({ ollamaURL: 'http://gpu.labo.example:11434' })).toEqual({
+      allowed: false,
+      reason: 'no-interface',
+      providerName: 'Ollama (gpu.labo.example)',
+    });
   });
 
   it('demande une fois puis mémorise pour la session', async () => {
@@ -149,6 +186,57 @@ describe('decideCloudConsent', () => {
   });
 });
 
+describe('egressGate', () => {
+  const local = { backend: 'ollama', ollamaURL: 'http://127.0.0.1:11434', ollamaChatModel: 'llama3.2' };
+  const hosted = { ...local, ollamaChatModel: 'gpt-oss:120b-cloud' };
+  const notes = (target: Record<string, string>, consent: boolean) =>
+    egressGate({ kind: 'generation', target }, { kind: 'reading-notes', consent });
+
+  it('notes de lecture : jamais vers un distant sans le réglage dédié, toujours vers un local', async () => {
+    expect((await notes(local, false)).allowed).toBe(true);
+    expect(await notes(hosted, false)).toEqual({
+      allowed: false,
+      isCloud: true,
+      providerName: 'Ollama Cloud (ollama.com)',
+      reason: 'corpus-withheld',
+    });
+    expect((await notes(hosted, true)).reason).toBe('corpus-consent');
+    expect((await notes({ backend: 'claude' }, false)).allowed).toBe(false);
+  });
+
+  it('notes de lecture : n’ouvre jamais de dialogue', async () => {
+    const prompt = promptAnswering(1);
+    await egressGate(
+      { kind: 'generation', target: hosted },
+      { kind: 'reading-notes', consent: false },
+      { prompt, registry: new CloudConsentRegistry() }
+    );
+    expect(prompt.calls).toBe(0);
+  });
+
+  it('envoi de session : délègue au dialogue, une fois par fournisseur', async () => {
+    const registry = new CloudConsentRegistry();
+    const prompt = promptAnswering(1);
+    const send = () =>
+      egressGate(
+        { kind: 'generation', target: hosted },
+        { kind: 'session-send', surface: 'chat' },
+        { prompt, registry }
+      );
+    expect((await send()).reason).toBe('granted-now');
+    expect((await send()).reason).toBe('already-granted');
+    expect(prompt.calls).toBe(1);
+  });
+
+  it('classe aussi une destination d’embeddings sur son modèle', async () => {
+    const v = await egressGate(
+      { kind: 'embedding', target: { provider: 'ollama', model: 'embeddinggemma:cloud' } },
+      { kind: 'reading-notes', consent: false }
+    );
+    expect(v.allowed).toBe(false);
+  });
+});
+
 describe('confirmCloudUsage', () => {
   it('refuse par défaut : seul le second bouton vaut acceptation', async () => {
     expect(await confirmCloudUsage('OpenAI', promptAnswering(0))).toBe(false);
@@ -189,6 +277,12 @@ describe('classifyEmbeddingTarget', () => {
     ).toBe(false);
     // Sans URL, le fournisseur Ollama vise la machine locale.
     expect(classifyEmbeddingTarget({ provider: 'ollama' }).isCloud).toBe(false);
+  });
+
+  it('classe distant un modèle d’embeddings Ollama hébergé', () => {
+    expect(
+      classifyEmbeddingTarget({ provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'embeddinggemma:cloud' })
+    ).toEqual({ isCloud: true, providerName: 'Ollama Cloud (ollama.com)' });
   });
 
   it('classe un Ollama distant comme distant, en le nommant', () => {

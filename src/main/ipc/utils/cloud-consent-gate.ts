@@ -14,7 +14,7 @@ import { BrowserWindow, dialog, type WebContents } from 'electron';
 import type { LLMConfig } from '../../../../backend/types/config.js';
 import {
   cloudConsentRefusalMessage,
-  decideCloudConsent,
+  egressGate,
   type CloudSendSurface,
   type ConsentPrompt,
 } from '../../../../backend/security/cloud-consent.js';
@@ -37,19 +37,22 @@ export function consentPromptFor(sender?: WebContents | null): ConsentPrompt | n
 /**
  * `null` si l'envoi peut partir (fournisseur local, ou consentement accordé
  * pour ce fournisseur pendant la session) ; sinon le message de refus à
- * renvoyer au renderer.
+ * renvoyer au renderer. Le modèle compte autant que l'hôte : un modèle
+ * Ollama hébergé (`qwen3.5:cloud`) part chez ollama.com par l'Ollama local.
  */
 export async function cloudConsentRefusal(
   surface: CloudSendSurface,
-  cfg: Pick<LLMConfig, 'backend' | 'ollamaURL'>,
+  cfg: Pick<
+    LLMConfig,
+    'backend' | 'ollamaURL' | 'ollamaChatModel' | 'generationProvider' | 'embeddedModelPath'
+  >,
   sender?: WebContents | null
 ): Promise<string | null> {
-  const decision = await decideCloudConsent(
-    { backend: cfg.backend, ollamaURL: cfg.ollamaURL },
-    consentPromptFor(sender),
-    undefined,
-    surface
+  const verdict = await egressGate(
+    { kind: 'generation', target: cfg },
+    { kind: 'session-send', surface },
+    { prompt: consentPromptFor(sender) }
   );
-  if (decision.allowed === false) return cloudConsentRefusalMessage(decision);
+  if (verdict.allowed === false) return cloudConsentRefusalMessage(verdict);
   return null;
 }

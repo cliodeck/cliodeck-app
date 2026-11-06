@@ -20,9 +20,11 @@ const READY: ProviderStatus = { state: 'ready' };
 class FakeLLM implements LLMProvider {
   readonly id = 'fake';
   readonly name = 'Fake';
-  readonly model = 'fake-model';
   readonly capabilities = { chat: true, streaming: true, tools: false, embeddings: false };
-  constructor(private readonly chunks: ChatChunk[]) {}
+  constructor(
+    private readonly chunks: ChatChunk[],
+    readonly model = 'fake-model'
+  ) {}
   getStatus(): ProviderStatus {
     return READY;
   }
@@ -145,5 +147,17 @@ describe('usage-journal provider instrumentation', () => {
       totalTokens: 3,
       anyError: false,
     });
+  });
+
+  it('journalise distant un modèle Ollama hébergé ou un Ollama sur un autre hôte', async () => {
+    const isLocal = async (model: string, baseUrl: string): Promise<boolean | undefined> => {
+      events.length = 0;
+      await instrumentLLM(new FakeLLM([{ delta: 'x', done: true }], model), 'ollama', baseUrl).complete('q');
+      return events[0].isLocal;
+    };
+    expect(await isLocal('llama3.2', 'http://127.0.0.1:11434')).toBe(true);
+    expect(await isLocal('gpt-oss:120b-cloud', 'http://127.0.0.1:11434')).toBe(false);
+    expect(await isLocal('qwen3.5:cloud', 'http://127.0.0.1:11434')).toBe(false);
+    expect(await isLocal('llama3.2', 'http://gpu.labo.example:11434')).toBe(false);
   });
 });

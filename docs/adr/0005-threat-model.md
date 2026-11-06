@@ -204,3 +204,19 @@ exclut. Le bloquer arrêterait l'indexation de qui utilise un serveur GPU de
 laboratoire ; il faut un consentement au moment du réglage, donc de
 l'interface nouvelle, hors du périmètre de la rc.6. Les Ollama de laboratoire
 seront un sujet à part entière.
+
+## Amendement du 2026-11-06 — les modèles Ollama hébergés (rc.6)
+
+Depuis sa 0.12, Ollama sert par le démon local — même `127.0.0.1:11434`, même
+`/api/tags` — des modèles exécutés chez ollama.com (`gpt-oss:120b-cloud`,
+`qwen3.5:cloud`). La classification ne regardait que l'hôte : un tel modèle
+passait pour local, sans dialogue, notes de lecture comprises, et le journal
+d'usage le déclarait local. **Le modèle effectif entre désormais dans la
+classification** (`classifyGeneration`, `isOllamaCloudModel` : étiquette
+finissant par `-cloud` ou `:cloud`), sur la configuration du tour qui
+construit le registre, modèle du panneau compris ; le tour, ses notes de
+lecture, les recettes, les diapositives et le reclassement passent par une
+seule porte (`egressGate`). Un alias sans le suffixe (`ollama cp`) n'est pas
+reconnu : la règle du nom seule, faute d'avoir pu vérifier sur un vrai
+`/api/tags` les champs qui signalent un modèle hébergé. Les lignes déjà
+écrites dans `journal.db` gardent `is_local = 1`.

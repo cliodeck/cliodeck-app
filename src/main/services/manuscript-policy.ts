@@ -184,7 +184,7 @@ export function resolveManuscriptPolicy(input: ManuscriptPolicyInput): Manuscrip
 export interface ReadingNotesPolicyInput {
   /**
    * `rag.indexReadingNotes`, ET le consentement d'envoi quand le fournisseur
-   * de génération est distant (`shouldIncludeReadingNotes`) : les deux
+   * de génération est distant (`egressGate`, contenu `reading-notes`) : les deux
    * conditions d'existence du corpus pour ce tour, décidées par l'appelant.
    */
   enabled: boolean;

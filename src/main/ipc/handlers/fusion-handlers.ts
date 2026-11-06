@@ -39,7 +39,7 @@ import { fusionChatService } from '../../services/fusion-chat-service.js';
 import { retrievalService } from '../../services/retrieval-service.js';
 import { secureStorage, SENSITIVE_KEYS } from '../../services/secure-storage.js';
 import {
-  classifyProvider,
+  classifyGeneration,
   cloudConsent,
 } from '../../../../backend/security/cloud-consent.js';
 import {
@@ -1156,11 +1156,7 @@ export function setupFusionHandlers(): void {
   // obtenu l'accord de l'utilisateur, le fasse savoir au main — sans quoi
   // celui-ci afficherait son propre dialogue natif de secours.
   ipcMain.handle('fusion:consent:status', async () => {
-    const cfg = configManager.getLLMConfig();
-    const { isCloud, providerName } = classifyProvider({
-      backend: cfg.backend,
-      ollamaURL: cfg.ollamaURL,
-    });
+    const { isCloud, providerName } = classifyGeneration(configManager.getLLMConfig());
     return successResponse({
       isCloud,
       providerName,
@@ -1170,11 +1166,7 @@ export function setupFusionHandlers(): void {
   });
 
   ipcMain.handle('fusion:consent:grant', async (_e, rawProvider: unknown) => {
-    const cfg = configManager.getLLMConfig();
-    const { providerName } = classifyProvider({
-      backend: cfg.backend,
-      ollamaURL: cfg.ollamaURL,
-    });
+    const { providerName } = classifyGeneration(configManager.getLLMConfig());
     // La classification qui fait foi est celle du main. Le renderer dit pour
     // quel fournisseur l'utilisateur a accepté ; s'il ne s'agit pas de celui
     // que le main appellera (réglage changé entre le dialogue et l'accord,

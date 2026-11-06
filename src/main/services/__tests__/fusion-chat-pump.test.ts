@@ -23,9 +23,26 @@ const bench = vi.hoisted(() => ({
   /** Message levé par la construction du registre (configuration invalide). */
   configError: null as string | null,
   seenOpts: [] as ChatOptions[],
+  seenMessages: [] as ChatMessage[][],
+  /** Fenêtre ouverte : sans elle, le main n'a personne à qui demander (refus). */
+  window: null as object | null,
+  /** Réponse au dialogue natif de consentement : 1 accepte, 0 annule. */
+  dialogResponse: 0,
+  dialogCalls: [] as Array<{ message: string; detail: string }>,
 }));
 
-vi.mock('electron', () => ({ BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] }, dialog: {} }));
+vi.mock('electron', () => ({
+  BrowserWindow: {
+    getFocusedWindow: () => bench.window,
+    getAllWindows: () => (bench.window ? [bench.window] : []),
+  },
+  dialog: {
+    showMessageBox: async (_win: unknown, options: { message: string; detail: string }) => {
+      bench.dialogCalls.push({ message: options.message, detail: options.detail });
+      return { response: bench.dialogResponse };
+    },
+  },
+}));
 
 vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../../backend/core/llm/providers/cliodeck-config-adapter.js')>();
@@ -40,6 +57,7 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
           getStatus: () => ({ state: 'ready' }),
           chat: (messages: ChatMessage[], opts: ChatOptions) => {
             bench.seenOpts.push(opts);
+            bench.seenMessages.push(messages);
             if (!bench.provider) throw new Error('bench.provider non défini');
             return bench.provider(messages, opts);
           },
@@ -57,6 +75,11 @@ import { projectManager } from '../project-manager.js';
 import { retrievalService } from '../retrieval-service.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
+import type { ReadingNoteMappedSearchResult } from '../retrieval-service.js';
+import { cloudConsent } from '../../../../backend/security/cloud-consent.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 interface Sent { channel: string; payload: unknown }
 
@@ -118,6 +141,10 @@ afterEach(() => {
   bench.provider = null;
   bench.configError = null;
   bench.seenOpts.length = 0;
+  bench.seenMessages.length = 0;
+  bench.window = null;
+  bench.dialogResponse = 0;
+  bench.dialogCalls.length = 0;
 });
 
 describe('banc du pump de chat', () => {
@@ -200,5 +227,106 @@ describe('banc du pump de chat', () => {
     expect(terminal(sent)?.error).toEqual({ code: 'config_error', message: 'clé API absente' });
     expect(bench.seenOpts).toHaveLength(0);
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+});
+
+describe('consentement distant : modèle Ollama hébergé (L04-1)', () => {
+  const NOTE = 'La longue durée écrase l’événement.';
+  const noteHit: ReadingNoteMappedSearchResult = {
+    chunk: { id: 'n-0', content: NOTE, documentId: 'zotero:ABCD1234', chunkIndex: 0 },
+    document: { id: 'zotero:ABCD1234', title: 'La Méditerranée', author: null, bibtexKey: 'Braudel_1949' },
+    source: {
+      kind: 'reading-note',
+      relativePath: 'reading-notes/Braudel_1949.md',
+      noteId: 'zotero:ABCD1234',
+      citekey: 'Braudel_1949',
+      zoteroKey: 'ABCD1234',
+      tags: [],
+      line: 9,
+    },
+    similarity: 0.7,
+    sourceType: 'readingNotes',
+  };
+  let project = '';
+
+  function setLLM(ollamaURL: string, ollamaChatModel: string): void {
+    vi.mocked(configManager.getLLMConfig).mockReturnValue({ backend: 'ollama', ollamaURL, ollamaChatModel } as ReturnType<typeof configManager.getLLMConfig>);
+  }
+
+  /** Une question de rappel sur les notes, avec le modèle du panneau. */
+  function askNotes(model?: string): { sent: Sent[] } {
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'Que disent mes notes sur Braudel ?' }],
+      systemPrompt: { language: 'fr' },
+      opts: model ? { model } : undefined,
+    });
+    return { sent };
+  }
+
+  const searched = (): { includeReadingNotes?: boolean } =>
+    vi.mocked(retrievalService.searchWithStats).mock.calls[0][0] as { includeReadingNotes?: boolean };
+  const prompted = (): string => bench.seenMessages.flat().map((m) => m.content).join('\n');
+
+  beforeEach(() => {
+    cloudConsent.revoke();
+    bench.window = {};
+    project = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-cloud-model-'));
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(project);
+    vi.mocked(readingNotesIndexService.isEnabled).mockReturnValue(true);
+    vi.mocked(retrievalService.searchWithStats).mockImplementation(async (opts) => ({
+      hits: [], manuscriptHits: [], outcomes: [], securityEvents: [],
+      readingNoteHits: opts.includeReadingNotes ? [noteHit] : [],
+      stats: { search: { query: 'q', totalResults: 0, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [], corpora: [] }, timing: { searchMs: 1 } },
+    }));
+    bench.provider = async function* () {
+      yield { delta: 'ok', done: true, finishReason: 'stop' };
+    };
+  });
+
+  afterEach(() => {
+    cloudConsent.revoke();
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+
+  it('témoin local : llama3.2 en loopback, aucun dialogue, les notes entrent', async () => {
+    setLLM('http://127.0.0.1:11434', 'llama3.2');
+    const { sent } = askNotes();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(bench.dialogCalls).toHaveLength(0);
+    expect(searched().includeReadingNotes).toBe(true);
+    expect(prompted()).toContain(NOTE);
+  });
+
+  it('modèle -cloud du panneau : dialogue une fois, notes retenues faute de consentement', async () => {
+    setLLM('http://127.0.0.1:11434', 'llama3.2');
+    bench.dialogResponse = 1;
+    const { sent } = askNotes('gpt-oss:120b-cloud');
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(bench.dialogCalls).toHaveLength(1);
+    expect(bench.dialogCalls[0].message).toContain('ollama.com');
+    expect(searched().includeReadingNotes).toBe(false);
+    expect(prompted()).not.toContain(NOTE);
+  });
+
+  it('modèle :cloud des réglages, dialogue refusé : le fournisseur n’est jamais appelé', async () => {
+    setLLM('http://127.0.0.1:11434', 'qwen3.5:cloud');
+    const { sent } = askNotes();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(bench.dialogCalls).toHaveLength(1);
+    expect(terminal(sent)?.error?.code).toBe('cloud_consent_required');
+    expect(bench.seenOpts).toHaveLength(0);
+  });
+
+  it('témoin distant : Ollama sur un autre hôte, dialogue et notes retenues', async () => {
+    setLLM('http://gpu.labo.example:11434', 'llama3.2');
+    bench.dialogResponse = 1;
+    const { sent } = askNotes();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(bench.dialogCalls).toHaveLength(1);
+    expect(searched().includeReadingNotes).toBe(false);
+    expect(prompted()).not.toContain(NOTE);
   });
 });
