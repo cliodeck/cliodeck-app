@@ -170,7 +170,7 @@ beforeEach(() => {
       }),
     },
     dialog: { openFile, saveFile: saveDialog },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
 });
 

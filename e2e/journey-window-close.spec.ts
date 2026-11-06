@@ -139,13 +139,15 @@ const retryButton = (window: Page) => window.locator('.error-fallback__retry');
 const blockedMessage = (window: Page) => window.locator('.error-fallback__blocked');
 const reloadAnywayButton = (window: Page) => window.locator('.error-fallback__reload-anyway');
 
-/** Ferme les alertes en file : deux pour un envoi de menu, tant que ses écouteurs sont doublés (S15-1-22). */
-async function dismissAlerts(window: Page): Promise<void> {
+/**
+ * Ferme l'alerte, et exige qu'elle soit seule : une commande, une alerte. Une seconde alerte de la
+ * même commande attendrait déjà dans la file, et prendrait la place de la première.
+ */
+async function dismissAlert(window: Page): Promise<void> {
   const ok = window.locator('.alert-dialog-btn-ok');
-  await expect(async () => {
-    if (await ok.isVisible()) await ok.click();
-    await expect(ok).toHaveCount(0, { timeout: 500 });
-  }).toPass({ timeout: 10_000 });
+  await expect(ok).toHaveCount(1);
+  await ok.click();
+  await expect(ok).toHaveCount(0);
 }
 
 /** Un tampon sans titre, hors du projet, avec du texte qui n'existe nulle part ailleurs. */
@@ -554,7 +556,7 @@ test('plantage de rendu sur un tampon sans titre : le message le dit, un refus s
     await chooseSavePath(article.dir);
     await sendMenu(app, 'menu:save-file');
     await expect(window.locator('.alert-dialog')).toContainText('Erreur lors de la sauvegarde', { timeout: 10_000 });
-    await dismissAlerts(window);
+    await dismissAlert(window);
     await expect(blockedMessage(window)).toContainText('sans titre');
     expect(await pageWasReloaded(window)).toBe(false);
 

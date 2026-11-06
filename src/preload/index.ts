@@ -771,17 +771,19 @@ const api = {
 
   // IPC Renderer for menu shortcuts (filtered by channel whitelist)
   ipcRenderer: {
-    on: (channel: string, listener: (...args: any[]) => void) => {
-      if (ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
-        ipcRenderer.on(channel, listener);
-      } else {
+    // Renvoie le désabonnement, comme les autres API du preload : `contextBridge` livre un nouveau
+    // mandataire de l'écouteur à chaque traversée, et un `removeListener` exposé, qui recevait
+    // l'un pour retirer l'autre, ne retirait jamais rien. Chaque commande de menu s'exécutait
+    // alors deux fois, puis une de plus par changement de langue (S15-1-22). L'événement IPC ne
+    // traverse pas : l'écouteur reçoit les seuls arguments du main.
+    on: (channel: string, listener: (...args: any[]) => void): (() => void) => {
+      if (!ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
         console.warn(`[Preload] Blocked ipcRenderer.on() for unauthorized channel: ${channel}`);
+        return () => undefined;
       }
-    },
-    removeListener: (channel: string, listener: (...args: any[]) => void) => {
-      if (ALLOWED_RECEIVE_CHANNELS.includes(channel)) {
-        ipcRenderer.removeListener(channel, listener);
-      }
+      const wrapped = (_event: unknown, ...args: unknown[]): void => listener(...args);
+      ipcRenderer.on(channel, wrapped);
+      return () => ipcRenderer.removeListener(channel, wrapped);
     },
     send: (channel: string, ...args: any[]) => {
       if (ALLOWED_SEND_CHANNELS.includes(channel)) {

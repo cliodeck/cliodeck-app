@@ -6,6 +6,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
+import { useMenuIntentStore } from '../../stores/menuIntentStore';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { ZoteroImport } from './ZoteroImport';
@@ -110,6 +111,14 @@ export const BibliographyPanel: React.FC = () => {
       console.error('Failed to import BibTeX:', error);
     }
   };
+
+  // Bibliographie › Importer BibTeX : le bouton de ce panneau, même s'il vient d'être monté par
+  // la commande. Une bibliographie déjà là passe par le choix remplacer / fusionner.
+  const menuIntent = useMenuIntentStore((state) => state.intent);
+  useEffect(() => {
+    if (useMenuIntentStore.getState().consume('import-bibtex')) void handleImportBibTeX();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- l'intention seule déclenche, une fois
+  }, [menuIntent]);
 
   const performImport = async (sourcePath: string, mode: 'replace' | 'merge') => {
     try {

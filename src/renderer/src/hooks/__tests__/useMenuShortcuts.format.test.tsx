@@ -46,7 +46,7 @@ const store = () => useEditorStore.getState();
 
 const menu = (channel: string) =>
   act(() => {
-    for (const handler of handlers.get(channel) ?? []) void handler({});
+    for (const handler of handlers.get(channel) ?? []) void handler();
   });
 
 function currentView(): EditorView {
@@ -93,9 +93,7 @@ beforeEach(() => {
     ipcRenderer: {
       on: (channel: string, handler: (...args: unknown[]) => unknown) => {
         handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
-      },
-      removeListener: (channel: string, handler: (...args: unknown[]) => unknown) => {
-        handlers.set(channel, (handlers.get(channel) ?? []).filter((h) => h !== handler));
+        return () => handlers.set(channel, (handlers.get(channel) ?? []).filter((h) => h !== handler));
       },
     },
   };

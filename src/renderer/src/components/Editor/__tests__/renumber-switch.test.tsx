@@ -132,7 +132,7 @@ async function openBook(files: Record<string, string>, open: string = A): Promis
         return { success: true };
       }),
     },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
   useProjectStore.setState({
     currentProject: {
