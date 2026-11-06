@@ -119,6 +119,14 @@ export class OperationRegistry {
   ): CancellableOperation {
     const runId = opts.runId ?? randomUUID();
     const concurrency = opts.concurrency ?? 'parallel';
+    // Un runId déjà pris est refusé avant toute annulation : un refus n'a
+    // aucun effet de bord. Sinon, en `supersede` avec un runId stable (le
+    // chemin du projet…), l'ancienne opération serait coupée et la nouvelle
+    // refusée quand même — les deux perdues. L'ancienne reste dans le
+    // registre jusqu'à son `finish()`, annulée ou non : un appelant qui veut
+    // `supersede` doit donc laisser `runId` au hasard.
+    const existing = this.ops.get(runId);
+    if (existing) throw new OperationBusyError(existing.kind, runId);
     const sameKind = this.active(kind);
     if (concurrency === 'reject' && sameKind.length > 0) {
       throw new OperationBusyError(kind, sameKind[0].runId);
@@ -126,8 +134,6 @@ export class OperationRegistry {
     if (concurrency === 'supersede') {
       for (const op of sameKind) op.cancel('superseded');
     }
-    const existing = this.ops.get(runId);
-    if (existing) throw new OperationBusyError(existing.kind, runId);
     const op = new Operation(runId, kind, opts.scope ?? 'project', (done) => {
       // Règle 2 : ne retirer que soi-même.
       if (this.ops.get(done.runId) === done) this.ops.delete(done.runId);

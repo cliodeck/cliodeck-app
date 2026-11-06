@@ -48,6 +48,25 @@ describe('OperationRegistry', () => {
     expect(second.state).toBe('running');
   });
 
+  it("un runId déjà pris est refusé sans annuler l'opération en cours, même en supersede", () => {
+    // Un runId stable (le chemin du projet, par exemple) : la seconde demande
+    // est refusée ; la première ne doit pas être coupée pour autant, sinon
+    // les deux sont perdues.
+    const registry = new OperationRegistry();
+    const first = registry.begin('similarity', { runId: 'proj', concurrency: 'supersede' });
+    let thrown: unknown;
+    try {
+      registry.begin('similarity', { runId: 'proj', concurrency: 'supersede' });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(OperationBusyError);
+    expect(first.signal.aborted).toBe(false);
+    expect(first.cancelReason).toBeNull();
+    expect(first.state).toBe('running');
+    expect(registry.active('similarity')).toEqual([first]);
+  });
+
   it('reject lève OperationBusyError tant que la précédente tourne', () => {
     const registry = new OperationRegistry();
     const first = registry.begin('tropy-sync', { concurrency: 'reject' });
