@@ -40,6 +40,26 @@ describe('chat-engine onExplanation', () => {
     expect(explanation?.search.retrievalStatus).toBe('failed');
   });
 
+  it('dit l’échec de la recherche dans la langue des consignes (#212)', async () => {
+    const consigne = async (promptLanguage: 'fr' | 'en'): Promise<string> => {
+      const seen: ChatMessage[][] = [];
+      const provider = makeFakeProvider([]);
+      provider.chat = async function* (messages: ChatMessage[]) {
+        seen.push(messages);
+        yield { delta: '', done: true, finishReason: 'stop' };
+      };
+      await runChatTurn({
+        provider, messages: [{ role: 'user', content: 'q' }], promptLanguage,
+        retriever: { search: async () => { throw new Error('offline'); } },
+      });
+      return seen[0][0].content;
+    };
+    const fr = await consigne('fr');
+    expect(fr).toContain('La recherche dans les sources a échoué');
+    expect(fr).not.toContain('source search failed');
+    expect(await consigne('en')).toContain('The source search failed');
+  });
+
   it('forwards an empty retrieval result and its explanation to the model and UI', async () => {
     const seen: ChatMessage[][] = [];
     const provider = makeFakeProvider([{ delta: '', done: true, finishReason: 'stop' }]);

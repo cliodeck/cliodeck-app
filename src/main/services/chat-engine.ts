@@ -230,7 +230,19 @@ export interface RunChatTurnArgs<TSource = unknown> {
    * summarisation never aborts the user's chat turn.
    */
   compactor?: ContextCompactor;
+  /**
+   * Langue des consignes que l'application écrit elle-même, résolue par
+   * l'appelant (`resolvePromptLanguage`) : ici, la consigne d'échec de la
+   * recherche. Absente : l'anglais, comme avant (#212).
+   */
+  promptLanguage?: 'fr' | 'en';
 }
+
+/** Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu. */
+const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
+  fr: 'La recherche dans les sources a échoué. Aucun extrait n’a été récupéré. Ne prétends pas avoir consulté des sources et ne fabrique pas de citations.',
+  en: 'The source search failed. No evidence was retrieved. Do not imply that sources were consulted or invent citations.',
+};
 
 /**
  * Run one logical chat turn, possibly iterating the provider several
@@ -322,7 +334,7 @@ export async function runChatTurn<TSource = unknown>(
         const at = firstTurn === -1 ? messages.length : firstTurn;
         messages = [...messages.slice(0, at), {
           role: 'system',
-          content: 'The source search failed. No evidence was retrieved. Do not imply that sources were consulted or invent citations.',
+          content: RETRIEVAL_FAILED_TEXT[args.promptLanguage ?? 'en'],
         }, ...messages.slice(at)];
         const searchDurationMs = Date.now() - retrievalStartedAt;
         const sourceType = args.retrievalOptions?.sourceType;
