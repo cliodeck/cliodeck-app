@@ -224,3 +224,46 @@ test('Bibliographie › Connecter Zotero : les Réglages', async () => {
     await expect(window.locator('.settings-modal')).toBeVisible({ timeout: 10_000 });
   });
 });
+
+/**
+ * Format › Bloc citation. Sous macOS, Cmd+Maj+Q est « Fermer la session » : le raccourci passe à
+ * Cmd+Option+Q (D3). Aucune touche n'est envoyée au système : l'accélérateur se lit dans le menu
+ * construit, et l'entrée se clique par le menu lui-même.
+ */
+test('Format › Bloc citation : Cmd+Option+Q sous macOS, et l’entrée du menu cite le paragraphe une fois', async () => {
+  await withArticle(async (app, window, article) => {
+    const accelerator = await app.evaluate(({ Menu }) => {
+      const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
+        for (const item of items) {
+          if (item.label === 'Bloc citation') return item;
+          const inner = item.submenu ? find(item.submenu.items) : null;
+          if (inner) return inner;
+        }
+        return null;
+      };
+      const item = find(Menu.getApplicationMenu()?.items ?? []);
+      return { accelerator: item?.accelerator ?? null, platform: process.platform };
+    });
+    expect(accelerator.accelerator).toBe(
+      accelerator.platform === 'darwin' ? 'CmdOrCtrl+Alt+Q' : 'CmdOrCtrl+Shift+Q',
+    );
+
+    await selectLastWord(window);
+    await app.evaluate(({ Menu, BrowserWindow }) => {
+      const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
+        for (const item of items) {
+          if (item.label === 'Bloc citation') return item;
+          const inner = item.submenu ? find(item.submenu.items) : null;
+          if (inner) return inner;
+        }
+        return null;
+      };
+      const win = BrowserWindow.getAllWindows()[0];
+      find(Menu.getApplicationMenu()?.items ?? [])?.click(undefined, win, win.webContents);
+    });
+
+    await expect
+      .poll(onDisk(article), { timeout: 8_000 })
+      .toBe(ARTICLE.replace('Huit mille', '> Huit mille'));
+  });
+});

@@ -6,8 +6,8 @@
  * avec la vraie vue, le vrai autosave, le vrai dialogue et **le fichier** sur le disque.
  *
  * Les accélérateurs natifs ne passent pas par Playwright : le menu est simulé par
- * `webContents.send`, ce que fait le main à la réception du raccourci. Et Cmd+Maj+Q n'est jamais
- * envoyé au système, où il ferme la session : il part de la page, vers la vue.
+ * `webContents.send`, ce que fait le main à la réception du raccourci. Et aucun raccourci n'est
+ * envoyé au système, où Cmd+Maj+Q ferme la session : il part de la page, vers la vue.
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
@@ -119,14 +119,20 @@ async function selectLastWord(window: Page): Promise<void> {
 }
 
 /** Mod-Shift-<touche> tel que la vue le reçoit, sans passer par le système. */
+/**
+ * Le bloc citation est Cmd+Option+Q sous macOS (Cmd+Maj+Q y ferme la session) : la touche Q, sous
+ * Option, y arrive comme `œ`, et seul son `keyCode` dit Q. Ailleurs, Ctrl+Maj+Q.
+ */
 const shortcutToView = (window: Page, key: 'Q' | 'T' | 'F') =>
   editor(window).evaluate((el, pressed) => {
-    const modifier = navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
+    const mac = navigator.platform.includes('Mac');
+    const modifier = mac ? { metaKey: true } : { ctrlKey: true };
+    const optionQ = mac && pressed === 'Q';
     el.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: pressed,
+        key: optionQ ? 'œ' : pressed,
         keyCode: pressed.charCodeAt(0),
-        shiftKey: true,
+        ...(optionQ ? { altKey: true } : { shiftKey: true }),
         ...modifier,
         bubbles: true,
         cancelable: true,
