@@ -87,6 +87,7 @@ describe('flushOpenDocument et les idées', () => {
 
     expect(report.outcome).toBe('failed');
     expect(report.error).toContain('ENOSPC');
+    expect(report.stillWriting).toBeUndefined();
   });
 
   it('un document bien écrit ne fait pas oublier des idées qui échouent : `failed`, sans perdre le document', async () => {
@@ -132,6 +133,8 @@ describe('flushOpenDocument et les idées', () => {
 
     expect(report.outcome).toBe('failed');
     expect(report.error).toContain('pas répondu');
+    // Lente, pas en échec : le main le dit autrement (D7).
+    expect(report.stillWriting).toBe(true);
 
     // L'écriture finit par répondre : elle libère la file, et le texte est sur le disque.
     vi.useRealTimers();

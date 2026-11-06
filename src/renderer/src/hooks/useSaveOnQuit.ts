@@ -61,6 +61,9 @@ function switchLockReleased(): Promise<void> {
   });
 }
 
+/** L'écriture n'a pas répondu avant le plafond : elle n'a pas échoué, elle court encore. */
+class StillWritingError extends Error {}
+
 /**
  * Écrit le document ouvert, sans attendre au-delà de `deadline`. Une écriture sans réponse ne
  * s'annule pas : si l'auteur reste, elle peut encore aboutir, et `saveFile` tient alors l'état
@@ -72,7 +75,7 @@ function writeOpenDocumentBefore(deadline: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       expired = true;
-      reject(new Error("L'écriture n'a pas répondu à temps"));
+      reject(new StillWritingError("L'écriture n'a pas répondu à temps"));
     }, deadline - Date.now());
     writing.then(resolve, reject).finally(() => clearTimeout(timer));
   });
@@ -82,30 +85,44 @@ function writeOpenDocumentBefore(deadline: number): Promise<void> {
  * Écrit les idées sous le même plafond, et rend ce qui les empêche d'être sur le disque. Une
  * idée ne s'écrit qu'au blur d'un champ, et ni `Cmd+Q` ni la croix n'en font un.
  */
-async function flushIdeasBefore(deadline: number): Promise<string | null> {
+async function flushIdeasBefore(deadline: number): Promise<{ error: string; stillWriting: boolean } | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
   await Promise.race([
-    useIdeaStore.getState().flushIdeas(),
+    useIdeaStore
+      .getState()
+      .flushIdeas()
+      .finally(() => {
+        settled = true;
+      }),
     new Promise((resolve) => {
       timer = setTimeout(resolve, deadline - Date.now());
     }),
   ]);
   clearTimeout(timer);
   const { saveError } = useIdeaStore.getState();
-  if (saveError) return saveError;
-  return hasUnwrittenIdeas() ? "L'écriture des idées n'a pas répondu à temps" : null;
+  if (saveError) return { error: saveError, stillWriting: false };
+  return hasUnwrittenIdeas()
+    ? { error: "L'écriture des idées n'a pas répondu à temps", stillWriting: !settled }
+    : null;
 }
 
 /**
  * Écrit le document ouvert et les idées, et dit ce qu'il en est advenu. Ne rejette jamais, et
  * répond avant que le main renonce à attendre. Un document qui part sans mot dire ne fait pas
- * oublier des idées non écrites.
+ * oublier des idées non écrites. Un vrai échec, d'un côté ou de l'autre, l'emporte sur une
+ * écriture seulement lente.
  */
 export async function flushOpenDocument(): Promise<FlushReport> {
   const deadline = Date.now() + FLUSH_CEILING_MS;
-  const [report, ideasError] = await Promise.all([flushDocument(deadline), flushIdeasBefore(deadline)]);
-  if (ideasError && (report.outcome === 'clean' || report.outcome === 'saved')) {
-    return { outcome: 'failed', error: ideasError };
+  const [report, ideas] = await Promise.all([flushDocument(deadline), flushIdeasBefore(deadline)]);
+  if (ideas && (report.outcome === 'clean' || report.outcome === 'saved')) {
+    return ideas.stillWriting
+      ? { outcome: 'failed', error: ideas.error, stillWriting: true }
+      : { outcome: 'failed', error: ideas.error };
+  }
+  if (ideas && !ideas.stillWriting && report.stillWriting) {
+    return { outcome: 'failed', error: ideas.error };
   }
   return report;
 }
@@ -134,7 +151,10 @@ async function flushDocument(deadline: number): Promise<FlushReport> {
   } catch (error) {
     logger.error('SaveOnQuit', error);
     if (overtaken()) return { outcome: 'clean' };
-    return { outcome: 'failed', error: error instanceof Error ? error.message : String(error) };
+    const message = error instanceof Error ? error.message : String(error);
+    return error instanceof StillWritingError
+      ? { outcome: 'failed', error: message, stillWriting: true }
+      : { outcome: 'failed', error: message };
   }
 }
 

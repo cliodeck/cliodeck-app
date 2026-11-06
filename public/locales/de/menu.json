@@ -52,5 +52,6 @@
   "unsavedStay": "Bleiben",
   "unsavedLeave": "Beenden ohne Speichern",
   "unsavedUntitledMessage": "Dieses unbenannte Dokument ist nirgends gespeichert. Wenn Sie jetzt beenden, geht sein Text verloren.",
-  "unsavedSaveFailedMessage": "Ihre letzten Änderungen konnten nicht gespeichert werden. Wenn Sie jetzt beenden, gehen sie verloren."
+  "unsavedSaveFailedMessage": "Ihre letzten Änderungen konnten nicht gespeichert werden. Wenn Sie jetzt beenden, gehen sie verloren.",
+  "unsavedSaveSlowMessage": "Das Speichern dauert länger. Wenn Sie jetzt beenden, gehen Ihre Änderungen verloren."
 }

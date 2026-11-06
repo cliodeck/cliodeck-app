@@ -52,5 +52,6 @@
   "unsavedStay": "Rester",
   "unsavedLeave": "Quitter sans enregistrer",
   "unsavedUntitledMessage": "Ce document sans titre n'est enregistré nulle part. Si vous quittez maintenant, son texte sera perdu.",
-  "unsavedSaveFailedMessage": "Vos dernières modifications n'ont pas pu être enregistrées. Si vous quittez maintenant, elles seront perdues."
+  "unsavedSaveFailedMessage": "Vos dernières modifications n'ont pas pu être enregistrées. Si vous quittez maintenant, elles seront perdues.",
+  "unsavedSaveSlowMessage": "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues"
 }

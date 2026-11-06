@@ -947,7 +947,10 @@ for (const [gestureName, gesture] of [
 
       await expect.poll(() => dialogCount(app), { timeout: 10_000 }).toBe(1);
       const [seen] = await leaveDialogs(app);
-      expect(seen.message).toContain('pas pu être enregistré');
+      // L'écriture court encore : elle n'a pas échoué, et le texte le dit (D7).
+      expect(seen.message).toBe(
+        "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues",
+      );
       expect(seen.buttons).toEqual(['Rester', 'Quitter sans enregistrer']);
       expect(await windowCount(app)).toBe(1);
       await expect(editor(window)).toContainText(PHRASE);
