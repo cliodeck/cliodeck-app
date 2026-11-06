@@ -164,3 +164,22 @@ describe('le nouveau magasin ne s’ouvre pas', () => {
     await expect(pdfService.indexPDF('/projet-b/a.pdf')).rejects.toThrow(/not initialized/);
   });
 });
+
+describe('le nouveau magasin s’ouvre mais son initialisation échoue', () => {
+  it('le magasin ouvert par cet init est fermé, pas abandonné ouvert', async () => {
+    await pdfService.init('/projet-a');
+    state.create.mockImplementation(() => ({
+      store: openStore(),
+      useEnhanced: true,
+      initPromise: Promise.reject(new Error('HNSW illisible')),
+    }));
+
+    await expect(pdfService.init('/projet-b')).rejects.toThrow('HNSW illisible');
+
+    expect(state.stores).toHaveLength(2);
+    expect(state.stores[0].closed).toBe(true);
+    // Plus rien ne le référence : resté ouvert, sa poignée sur brain.db ne serait jamais rendue.
+    expect(state.stores[1].closed).toBe(true);
+    expect(pdfService.getVectorStore()).toBeNull();
+  });
+});

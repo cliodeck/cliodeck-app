@@ -183,8 +183,16 @@ class PDFService {
       });
     } catch (error: unknown) {
       console.error('❌ Failed to initialize PDF Service:', error);
-      // La recherche a pu rester configurée sur le magasin qu'on vient de fermer.
+      // Le magasin ouvert par cet init (initialisation rejetée après l'ouverture) n'est plus
+      // référencé par personne : le fermer, sinon sa connexion sur brain.db reste ouverte à jamais.
+      const opened = this.vectorStore;
       this.vectorStore = null;
+      try {
+        opened?.close();
+      } catch {
+        // déjà fermé
+      }
+      // La recherche a pu rester configurée sur le magasin qu'on vient de fermer.
       this.pdfIndexer = null;
       this.currentProjectPath = null;
       retrievalService.clear();
