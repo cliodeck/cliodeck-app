@@ -7,7 +7,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { workspaceLinkOutside, workspaceLinkOutsideSync } from '../link-guard.js';
+import { workspaceLinkOutside, workspaceLinkOutsideMessage, workspaceLinkOutsideSync } from '../link-guard.js';
 import { symlinkAvailable } from '../../../__tests__/helpers/native-guards.js';
 
 let workDir: string;
@@ -78,5 +78,39 @@ describe('workspaceLinkOutside', () => {
     const journal = path.join(root, '.cliodeck', 'journal.db');
     symlinkSync(path.join(outside, 'absent', 'journal.db'), journal);
     expect(await both()).toEqual([journal, journal]);
+  });
+
+  it.skipIf(!symlinkAvailable)(
+    'le cache de similarité et les métadonnées Zotero liés seuls sont refusés aussi',
+    async () => {
+      mkdirSync(path.join(root, '.cliodeck'));
+      for (const name of ['similarity_cache.json', 'bibliography-metadata.json']) {
+        const link = path.join(root, '.cliodeck', name);
+        writeFileSync(path.join(outside, name), '{}');
+        symlinkSync(path.join(outside, name), link);
+        expect(await both()).toEqual([link, link]);
+        await rm(link);
+      }
+    },
+  );
+});
+
+describe('workspaceLinkOutsideMessage', () => {
+  it('.cliodeck lié : la consigne nomme le dossier', () => {
+    const message = workspaceLinkOutsideMessage('/p', '/p/.cliodeck');
+    expect(message).toMatch(/^\.cliodeck est un lien/);
+    expect(message).toMatch(/Remettez le dossier \.cliodeck dans le projet/);
+  });
+
+  it('un fichier de .cliodeck lié : la consigne dit de remettre ce fichier, pas le dossier', () => {
+    const message = workspaceLinkOutsideMessage('/p', '/p/.cliodeck/brain.db');
+    expect(message).toMatch(/^\.cliodeck\/brain\.db est un lien/);
+    expect(message).toMatch(/Remettez ce fichier dans le dossier \.cliodeck/);
+    expect(message).not.toMatch(/Remettez le dossier \.cliodeck/);
+  });
+
+  it('un dossier de .cliodeck lié (recettes) : ce dossier', () => {
+    const message = workspaceLinkOutsideMessage('/p', '/p/.cliodeck/recipes');
+    expect(message).toMatch(/Remettez ce dossier dans le dossier \.cliodeck/);
   });
 });

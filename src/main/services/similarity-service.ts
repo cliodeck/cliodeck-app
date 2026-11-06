@@ -820,7 +820,7 @@ Your ranking:`;
     return path.join(projectPath, '.cliodeck', 'similarity_cache.json');
   }
 
-  /** `.cliodeck` lié hors du projet (D18) : ce cache serait celui d'un autre projet. */
+  /** `.cliodeck`, ou ce cache lui-même, lié hors du projet (D18) : il serait celui d'un autre projet. */
   private cacheLinkedOutside(projectPath: string): boolean {
     const entry = workspaceLinkOutsideSync(projectPath);
     if (entry) console.warn('⚠️ [SIMILARITY] Cache ignoré, lien hors du projet :', entry);

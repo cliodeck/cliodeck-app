@@ -48,6 +48,7 @@ vi.mock('../../../services/reading-notes-indexing.js', () => ({ indexReadingNote
 vi.mock('../../../services/retrieval-service.js', () => ({ retrievalService: { clear: vi.fn() } }));
 
 import { setupProjectHandlers } from '../project-handlers.js';
+import { modeService } from '../../../services/mode-service.js';
 
 let workDir: string;
 let projectDir: string;
@@ -168,6 +169,8 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     ['security-events.jsonl', 'file'],
     ['recipes', 'dir'],
     ['recipes-runs', 'dir'],
+    ['similarity_cache.json', 'file'],
+    ['bibliography-metadata.json', 'file'],
   ];
 
   it.each(ENTRIES)('%s lié dehors : refusé, la cible intacte', async (name, kind) => {
@@ -208,6 +211,44 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     expect(folderState(outside)).toEqual(before);
     expect(h.pdfInit).not.toHaveBeenCalled();
   });
+
+  it('project:create refusé : les modes du projet, hors de .cliodeck, sont quand même les siens', async () => {
+    const dir = path.join(workDir, 'Neuf');
+    mkdirSync(dir);
+    symlinkSync(outside, path.join(dir, '.cliodeck'));
+    const init = vi.spyOn(modeService, 'init');
+
+    try {
+      const result = await call<LoadResult>('project:create', { name: 'Neuf', type: 'article', path: workDir });
+      expect(result.configIssue?.kind).toBe('linked_outside');
+      expect(init).toHaveBeenCalledWith(dir);
+    } finally {
+      init.mockRestore();
+      await call('project:close');
+    }
+  });
+
+  /** Un ancien fichier que la migration refuse (D17 ne le disait qu'au journal) : le même message. */
+  it.each(['vectors.db', 'history.db', 'primary-sources.db', 'obsidian-vectors.db'])(
+    'ancien %s lié dehors : la migration le refuse et l’ouverture le dit, la cible intacte',
+    async (name) => {
+      const target = path.join(outside, `cible-${name}`);
+      writeFileSync(target, 'base d’un autre projet');
+      mkdirSync(path.join(projectDir, '.cliodeck'));
+      writeFileSync(path.join(projectDir, '.cliodeck', 'config.json'), VALID_CONFIG);
+      const link = path.join(projectDir, '.cliodeck', name);
+      symlinkSync(target, link);
+      const before = folderState(outside);
+
+      const result = await openThenClose();
+
+      expect(result.success).toBe(true);
+      expect(result.configIssue).toEqual({ kind: 'linked_outside', path: link });
+      expect(folderState(outside)).toEqual(before);
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(h.pdfInit).not.toHaveBeenCalled();
+    },
+  );
 
   it('témoin : un vrai dossier .cliodeck, sans lien, s’ouvre comme avant', async () => {
     mkdirSync(path.join(projectDir, '.cliodeck'));

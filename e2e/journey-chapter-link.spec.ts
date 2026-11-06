@@ -359,10 +359,16 @@ test('un .cliodeck/v2 lié hors du projet : le dossier de l’auteur reste intac
     await openProject(app, window, book.projectJson);
     await expect(editor(window)).toContainText('Texte ordinaire du livre reçu', { timeout: 20_000 });
 
+    // Refusé comme un `.cliodeck` lié (D18) : la migration ne passe pas, et l'écran le dit.
+    const toast = window.locator('.status-toast', { hasText: 'Dossier .cliodeck hors du projet' });
+    await expect(toast).toBeVisible({ timeout: 10_000 });
+    await toast.locator('.status-toast__details-btn').click();
+    await expect(toast.locator('.status-toast__details')).toContainText(join('.cliodeck', 'v2'));
+
     expect(readdirSync(book.outside).sort()).toEqual(['config.json', 'hints.md', 'lettres.md']);
     expect(existsSync(join(book.project, '.cliodeck', 'lettres.md'))).toBe(false);
     expect(existsSync(join(book.project, '.cliodeck', 'hints.md'))).toBe(false);
-    expect(readFileSync(join(book.project, '.cliodeck', 'config.json'), 'utf8')).not.toContain(SECRET);
+    expect(existsSync(join(book.project, '.cliodeck', 'config.json'))).toBe(false);
     expect(JSON.stringify(await readHints(window))).not.toContain(SECRET);
   } finally {
     await app.close();

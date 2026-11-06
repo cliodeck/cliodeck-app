@@ -18,7 +18,13 @@ import path from 'path';
 import { isInside, isInsideAsync } from '../vector-store/file-identity.js';
 import { workspaceFiles } from './layout.js';
 
-/** Ce qu'ouvrent les services : bases (avec leurs `-wal` / `-shm`), index, journaux, recettes. */
+/**
+ * Ce qu'ouvrent les services : bases (avec leurs `-wal` / `-shm`), index, journaux, recettes, et
+ * les deux fichiers que la synchronisation Zotero et le cache de similarité lisent et réécrivent.
+ * Puis ce qu'ouvre la migration : les anciennes bases et l'ancien dossier `v2`. Refusés par elle
+ * seule, ils ne se disaient qu'au journal, et l'historien voyait un corpus vide sans savoir
+ * pourquoi (D17) ; ils prennent ici le même état et le même message que le reste.
+ */
 const GUARDED_ENTRIES = [
   'config.json',
   'brain.db',
@@ -33,7 +39,17 @@ const GUARDED_ENTRIES = [
   'security-events.jsonl',
   'recipes',
   'recipes-runs',
+  'similarity_cache.json',
+  'bibliography-metadata.json',
+  'vectors.db',
+  'history.db',
+  'primary-sources.db',
+  'obsidian-vectors.db',
+  'v2',
 ];
+
+/** Les entrées de `.cliodeck` qui sont des dossiers (`v2` : l'ancienne disposition, que la migration refuse). */
+const DIRECTORY_ENTRIES = new Set(['recipes', 'recipes-runs', 'v2']);
 
 /** `.cliodeck` d'abord : lié dehors, tout ce qu'il contient l'est aussi, et c'est lui qu'il faut nommer. */
 function guardedPaths(workspaceRoot: string): string[] {
@@ -72,14 +88,19 @@ export function workspaceLinkOutsideSync(workspaceRoot: string): string | null {
 
 /**
  * Le motif, lisible par un historien : quel fichier, ce qui n'a pas été fait, quoi faire. Le
- * chemin est dit relatif au projet, sauf s'il ne s'y rattache pas.
+ * chemin est dit relatif au projet, sauf s'il ne s'y rattache pas. La consigne suit ce qui est
+ * lié : `.cliodeck` lui-même, ou l'un de ses fichiers ou dossiers, `.cliodeck` restant un vrai dossier.
  */
 export function workspaceLinkOutsideMessage(workspaceRoot: string, entry: string): string {
   const relative = path.relative(workspaceRoot, entry);
   const shown = relative && !relative.startsWith('..') ? relative : entry;
+  const whole = path.resolve(entry) === path.resolve(workspaceFiles(workspaceRoot).root);
+  const what = DIRECTORY_ENTRIES.has(path.basename(entry)) ? 'ce dossier' : 'ce fichier';
+  const instruction = whole
+    ? 'Remettez le dossier .cliodeck dans le projet, à la place du lien'
+    : `Remettez ${what} dans le dossier .cliodeck du projet, à la place du lien`;
   return (
     `${shown} est un lien qui mène hors du projet : ClioDeck ne l'ouvre pas et n'y écrit rien, ` +
-    `il n'a pas été modifié. Remettez le dossier .cliodeck dans le projet, à la place du lien, ` +
-    `puis rouvrez le projet.`
+    `il n'a pas été modifié. ${instruction}, puis rouvrez le projet.`
   );
 }

@@ -67,6 +67,9 @@ export function setupProjectHandlers() {
       // Initialize services if project created successfully
       if (result.success && result.configIssue?.kind === 'linked_outside') {
         console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
+        // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`), comme à l'ouverture.
+        const projectPath = projectManager.getCurrentProjectPath();
+        if (projectPath) modeService.init(projectPath);
         await closeWorkspaceServices();
       } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();

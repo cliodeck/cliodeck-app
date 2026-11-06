@@ -561,7 +561,10 @@ describe.skipIf(!symlinkAvailable)('migrateWorkspaceToFlat — un lien qui sort 
       const flat = workspaceFiles(project);
       await expect(fs.access(flat.hints)).rejects.toThrow();
       await expect(fs.access(path.join(flat.root, 'lettres.md'))).rejects.toThrow();
-      expect((await readWorkspaceConfig(project)).name).toBe('recu');
+      // La configuration générée existe, mais tant que `v2` mène dehors, l'espace de travail est
+      // refusé comme un `.cliodeck` lié (D18) : à l'ouverture, la migration ne passe même pas.
+      expect(JSON.parse(await fs.readFile(flat.config, 'utf8')).name).toBe('recu');
+      await expect(readWorkspaceConfig(project)).rejects.toMatchObject({ kind: 'linked_outside', filePath: v2() });
       expect(JSON.stringify(await loadWorkspaceHints(project))).not.toContain(SECRET);
 
       // Le projet s'ouvre, et la passe suivante ne touche à rien non plus.

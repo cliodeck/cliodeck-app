@@ -61,8 +61,8 @@ export class BibliographyMetadataService {
   }
 
   /**
-   * `.cliodeck` lié hors du projet (D18) : ce fichier serait celui d'un autre projet. Rien ne s'y
-   * lit ni ne s'y écrit ; l'ouverture du projet l'a dit à l'écran.
+   * `.cliodeck`, ou ce fichier lui-même, lié hors du projet (D18) : ce fichier serait celui d'un
+   * autre projet. Rien ne s'y lit ni ne s'y écrit ; l'ouverture du projet l'a dit à l'écran.
    */
   private static linkedOutside(projectPath: string): boolean {
     const entry = workspaceLinkOutsideSync(projectPath);
