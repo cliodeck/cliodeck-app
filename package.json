@@ -75,7 +75,7 @@
     "@lezer/markdown": "^1.7.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/dompurify": "^3.0.5",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "chokidar": "^3.6.0",
     "citeproc": "^2.4.63",
     "docx": "^9.5.1",
