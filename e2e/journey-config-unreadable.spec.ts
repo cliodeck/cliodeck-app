@@ -240,6 +240,24 @@ test.describe('config.json illisible', () => {
     });
   });
 
+  // Un lien cassé qui reste dans le projet : illisible, comme depuis la phase 1.
+  test('config.json lien cassé dans le projet : le projet s’ouvre, l’auteur le sait, et rien n’est écrit', async () => {
+    const project = makeProject('Projet');
+    const target = join(project.dir, 'volume-absent', 'config.json');
+    symlinkSync(target, project.configJson);
+
+    await withApp(async (app, window) => {
+      await openProject(app, window, project);
+      await expect(configToast(window)).toHaveCount(1, { timeout: 10_000 });
+      const status = await window.evaluate(() => window.electron.fusion.vault.status());
+      expect(status).toMatchObject({ success: false });
+    });
+
+    expect(lstatSync(project.configJson).isSymbolicLink()).toBe(true);
+    expect(existsSync(dirname(target))).toBe(false);
+  });
+
+  // Hors du projet, le même lien relève de D18 : le message dit qu'il mène dehors, et quoi faire.
   test('config.json lien cassé : le projet s’ouvre, l’auteur le sait, et rien n’est écrit à l’autre bout', async () => {
     const project = makeProject('Projet');
     const target = join(project.root, 'volume-absent', 'config.json');
@@ -247,7 +265,9 @@ test.describe('config.json illisible', () => {
 
     await withApp(async (app, window) => {
       await openProject(app, window, project);
-      await expect(configToast(window)).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        window.locator('.status-toast', { hasText: 'Dossier .cliodeck hors du projet' }),
+      ).toHaveCount(1, { timeout: 10_000 });
 
       const status = await window.evaluate(() => window.electron.fusion.vault.status());
       expect(status).toMatchObject({ success: false });

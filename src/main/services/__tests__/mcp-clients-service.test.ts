@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { mcpClientsService, toManagerConfig } from '../mcp-clients-service.js';
 import { WorkspaceConfigError } from '../../../../backend/core/workspace/config.js';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 
 describe('toManagerConfig — WorkspaceMCPClient → MCPClientConfig', () => {
   it('maps a stdio client with args + env', () => {
@@ -189,5 +190,38 @@ describe('un config.json illisible n’est pas une configuration vide (S11-1-8)'
     writeFileSync(configFile, VALID);
     await mcpClientsService.loadProject(root);
     expect(readFileSync(configFile, 'utf8')).toBe(VALID);
+  });
+});
+
+/**
+ * D18 : `.cliodeck` lié hors du projet. Charger le projet créait `recipes/`, `recipes-runs/` et le
+ * journal d'accès MCP à l'autre bout du lien, avant même de lire la configuration.
+ */
+describe.skipIf(!symlinkAvailable)('loadProject : .cliodeck lié hors du projet', () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'cliodeck-mcp-'));
+    outside = await mkdtemp(path.join(os.tmpdir(), 'cliodeck-mcp-ailleurs-'));
+  });
+
+  afterEach(async () => {
+    await mcpClientsService.unload();
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it('rien n’est créé à l’autre bout, aucun serveur ne démarre', async () => {
+    writeFileSync(
+      path.join(outside, 'config.json'),
+      JSON.stringify({ schema_version: 2, name: 'Autre', mcpClients: [{ name: 'x', transport: 'sse', url: 'http://127.0.0.1:9/sse' }] })
+    );
+    symlinkSync(outside, path.join(root, '.cliodeck'));
+
+    await expect(mcpClientsService.loadProject(root)).resolves.toBeUndefined();
+
+    expect(readdirSync(outside)).toEqual(['config.json']);
+    expect(mcpClientsService.list()).toEqual([]);
   });
 });

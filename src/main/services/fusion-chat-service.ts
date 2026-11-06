@@ -55,6 +55,7 @@ import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.j
 import { historyService } from './history-service.js';
 import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
+import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import {
   classifyProvider,
   cloudConsentRefusalMessage,
@@ -674,9 +675,11 @@ class FusionChatService {
     //
     // Les serveurs MCP tiers sont « semi-trusted » (ADR 0005) : leurs
     // résultats sont du contenu non fiable, au même titre qu'un chunk RAG.
-    const securityLogPath = projectPath
-      ? workspaceFiles(projectPath).securityEventsLog
-      : null;
+    // `.cliodeck` lié hors du projet (D18) : pas de journal à l'autre bout du lien.
+    const securityLogPath =
+      projectPath && !(await workspaceLinkOutside(projectPath))
+        ? workspaceFiles(projectPath).securityEventsLog
+        : null;
     const emitSecurityEvent = securityLogPath
       ? (e: SecurityEvent) => {
           void appendSecurityEvent(securityLogPath, e).catch((err) => {

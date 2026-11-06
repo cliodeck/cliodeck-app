@@ -762,6 +762,38 @@ describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', 
     expect(toasts()[0].message).toBe(i18n.t('project.configUnreadable.message'));
   });
 
+  it('linked_outside (D18) : son propre message, qui nomme le lien dans les détails', async () => {
+    const link = '/tmp/p1/.cliodeck';
+    loadedWith({ kind: 'linked_outside', path: link });
+
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toMatchObject({
+      level: 'error',
+      duration: 0,
+      title: i18n.t('project.workspaceLinkedOutside.title'),
+      message: i18n.t('project.workspaceLinkedOutside.message'),
+      details: link,
+    });
+    expect(useProjectStore.getState().loadState.kind).toBe('ready');
+  });
+
+  it.each([
+    ['fr', ['hors de ce projet', "n'a pas été modifié", 'reste éditable', 'MCP', "journal d'usage IA", 'rouvrez le projet']],
+    ['en', ['outside this project', 'has not been changed', 'remains editable', 'MCP', 'AI usage journal', 'reopen the project']],
+    ['de', ['außerhalb dieses Projekts', 'nicht verändert', 'bleibt bearbeitbar', 'MCP', 'KI-Nutzungsjournal', 'öffnen Sie das Projekt']],
+  ])('linked_outside en %s : ce qui reste, ce qui manque, quoi faire', (language, expected) => {
+    const { title, message } = (
+      JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'locales', language, 'common.json'), 'utf8')) as {
+        project: { workspaceLinkedOutside: { title: string; message: string } };
+      }
+    ).project.workspaceLinkedOutside;
+    expect(title).toContain('.cliodeck');
+    for (const fragment of expected) expect(message).toContain(fragment);
+    expect(message).not.toMatch(/linked_outside/);
+  });
+
   it('le message vient une fois le projet ouvert, jamais pendant le changement', async () => {
     loadedWith(ISSUE);
     const seenDuring: string[] = [];

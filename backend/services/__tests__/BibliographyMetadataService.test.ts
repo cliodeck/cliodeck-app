@@ -15,6 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { BibliographyMetadataService } from '../BibliographyMetadataService.js';
 import type { Citation } from '../../types/citation.js';
+import { symlinkAvailable } from '../../__tests__/helpers/native-guards.js';
 
 const makeCitation = (overrides: Partial<Citation>): Citation =>
   ({
@@ -173,5 +174,38 @@ describe('BibliographyMetadataService', () => {
       expect(loaded?.version).toBe(2);
       expect(Object.keys(loaded!.citations)).toEqual(['LAST_SURVIVOR']);
     });
+  });
+});
+
+/**
+ * D18 : `.cliodeck` lié hors du projet. Une synchronisation Zotero écrivait les pièces jointes du
+ * projet dans le dossier d'un autre, et les relisait de là.
+ */
+describe.skipIf(!symlinkAvailable)('BibliographyMetadataService — .cliodeck lié hors du projet', () => {
+  let tmpDir: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-meta-'));
+    outside = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-meta-ailleurs-'));
+    fs.symlinkSync(outside, path.join(tmpDir, '.cliodeck'));
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    await fs.promises.rm(outside, { recursive: true, force: true });
+  });
+
+  it('ni écrit ni lu à l’autre bout du lien', async () => {
+    const theirs = path.join(outside, 'bibliography-metadata.json');
+    const content = JSON.stringify({ version: 2, lastUpdated: 'x', citations: { AUTRE: { id: 'autre' } } });
+    fs.writeFileSync(theirs, content);
+
+    await BibliographyMetadataService.saveMetadata(tmpDir, [makeCitation({ zoteroKey: 'ABCD1234' })]);
+    await BibliographyMetadataService.updateCitationMetadata(tmpDir, 'ABCD1234', { zoteroTags: [{ tag: 'x', automatic: false }] });
+
+    expect(await BibliographyMetadataService.loadMetadata(tmpDir)).toBeNull();
+    expect(fs.readFileSync(theirs, 'utf8')).toBe(content);
+    expect(fs.readdirSync(outside)).toEqual(['bibliography-metadata.json']);
   });
 });

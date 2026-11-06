@@ -33,6 +33,7 @@ import {
   ensureWorkspaceDirectories,
   workspaceFiles,
 } from '../../../backend/core/workspace/layout.js';
+import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
@@ -105,6 +106,9 @@ class MCPClientsService {
     try {
       // Disparu (parent renommé, volume débranché) : surtout ne pas recréer un squelette de projet.
       await stat(root);
+      // `.cliodeck` lié hors du projet (D18) : ni dossier ni journal créés à l'autre bout du lien.
+      const linked = await workspaceLinkOutside(root);
+      if (linked) throw new Error(`lien hors du projet : ${linked}`);
       await ensureWorkspaceDirectories(root);
       this.auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
         flags: 'a',

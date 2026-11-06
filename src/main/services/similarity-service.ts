@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pdfService } from './pdf-service.js';
 import { projectManager } from './project-manager.js';
+import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 
 // MARK: - Types
 
@@ -819,7 +820,15 @@ Your ranking:`;
     return path.join(projectPath, '.cliodeck', 'similarity_cache.json');
   }
 
+  /** `.cliodeck`, ou ce cache lui-même, lié hors du projet (D18) : il serait celui d'un autre projet. */
+  private cacheLinkedOutside(projectPath: string): boolean {
+    const entry = workspaceLinkOutsideSync(projectPath);
+    if (entry) console.warn('⚠️ [SIMILARITY] Cache ignoré, lien hors du projet :', entry);
+    return entry !== null;
+  }
+
   async loadCache(projectPath: string): Promise<SimilarityCache | null> {
+    if (this.cacheLinkedOutside(projectPath)) return null;
     try {
       const cachePath = this.getCachePath(projectPath);
       if (!fs.existsSync(cachePath)) {
@@ -842,6 +851,7 @@ Your ranking:`;
   }
 
   async saveCache(projectPath: string, cache: SimilarityCache): Promise<void> {
+    if (this.cacheLinkedOutside(projectPath)) return;
     try {
       const cachePath = this.getCachePath(projectPath);
       const cacheDir = path.dirname(cachePath);
@@ -862,7 +872,7 @@ Your ranking:`;
 
   async clearCache(projectPath?: string): Promise<void> {
     const targetPath = projectPath || projectManager.getCurrentProjectPath();
-    if (!targetPath) {
+    if (!targetPath || this.cacheLinkedOutside(targetPath)) {
       return;
     }
 

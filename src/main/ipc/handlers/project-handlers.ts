@@ -12,6 +12,7 @@ import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { usageJournalService } from '../../services/usage-journal-service.js';
 import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
 import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
+import { retrievalService } from '../../services/retrieval-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -26,6 +27,20 @@ import {
   ProjectReadChaptersSchema,
   ProjectBookSettingsSchema,
 } from '../utils/validation.js';
+
+/**
+ * `.cliodeck` ou l'un de ses fichiers lié hors du projet (D18) : aucun service n'ouvre sa base,
+ * son index ou son journal à travers le lien, et ceux du projet précédent se ferment, sans quoi
+ * la recherche répondrait avec son corpus. Le texte, lui, reste éditable : `configIssue` le dit.
+ */
+async function closeWorkspaceServices(): Promise<void> {
+  historyService.close();
+  usageJournalService.close();
+  await pdfService.close();
+  await tropyService.close();
+  retrievalService.clear();
+  manuscriptIndexService.clear();
+}
 
 export function setupProjectHandlers() {
   ipcMain.handle('project:get-recent', () => {
@@ -50,7 +65,13 @@ export function setupProjectHandlers() {
       const result = await projectManager.createProject(validatedData);
 
       // Initialize services if project created successfully
-      if (result.success) {
+      if (result.success && result.configIssue?.kind === 'linked_outside') {
+        console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
+        // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`), comme à l'ouverture.
+        const projectPath = projectManager.getCurrentProjectPath();
+        if (projectPath) modeService.init(projectPath);
+        await closeWorkspaceServices();
+      } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
           console.log('🔧 Initializing services for new project:', projectPath);
@@ -108,7 +129,13 @@ export function setupProjectHandlers() {
       const result = await projectManager.loadProject(path);
 
       // Initialize services if project loaded successfully
-      if (result.success) {
+      if (result.success && result.configIssue?.kind === 'linked_outside') {
+        console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
+        // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`).
+        const projectPath = projectManager.getCurrentProjectPath();
+        if (projectPath) modeService.init(projectPath);
+        await closeWorkspaceServices();
+      } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
           console.log('🔧 Initializing services for project:', projectPath);

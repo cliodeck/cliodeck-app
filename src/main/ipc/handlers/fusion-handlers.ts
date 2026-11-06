@@ -62,6 +62,10 @@ import {
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { workspaceFiles } from '../../../../backend/core/workspace/layout.js';
+import {
+  workspaceLinkOutside,
+  workspaceLinkOutsideMessage,
+} from '../../../../backend/core/workspace/link-guard.js';
 import { clampNumCtx } from '../../../../backend/core/llm/context-windows.js';
 import {
   readOrInitWorkspaceConfig,
@@ -94,6 +98,15 @@ interface VaultConfigBlock {
 const BUILTIN_RECIPES_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'recipes-builtin')
   : path.join(process.cwd(), 'backend', 'recipes', 'builtin');
+
+/**
+ * `.cliodeck` ou l'un de ses fichiers lié hors du projet (D18) : recettes, journaux de passe et
+ * journal de sécurité ne se lisent ni ne s'écrivent à travers le lien. `null` : rien à refuser.
+ */
+async function linkedOutsideResponse(root: string) {
+  const entry = await workspaceLinkOutside(root);
+  return entry ? errorResponse(workspaceLinkOutsideMessage(root, entry)) : null;
+}
 
 function noProject() {
   return { ...errorResponse('no_project'), error: 'no_project' as const };
@@ -174,7 +187,7 @@ export function setupFusionHandlers(): void {
       const root = projectManager.getCurrentProjectPath();
       const builtin = await listRecipes(BUILTIN_RECIPES_DIR);
       let user: RecipeSummary[] = [];
-      if (root) {
+      if (root && !(await workspaceLinkOutside(root))) {
         const userDir = workspaceFiles(root).recipesDir;
         try {
           await fs.access(userDir);
@@ -206,6 +219,9 @@ export function setupFusionHandlers(): void {
               return root ? workspaceFiles(root).recipesDir : null;
             })();
       if (!baseDir) return noProject();
+      const root = projectManager.getCurrentProjectPath();
+      const linked = rawScope === 'user' && root ? await linkedOutsideResponse(root) : null;
+      if (linked) return linked;
       try {
         const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
         const recipe = parseRecipe(raw);
@@ -234,6 +250,9 @@ export function setupFusionHandlers(): void {
               return root ? workspaceFiles(root).recipesDir : null;
             })();
       if (!baseDir) return noProject();
+      const root = projectManager.getCurrentProjectPath();
+      const linked = rawScope === 'user' && root ? await linkedOutsideResponse(root) : null;
+      if (linked) return linked;
       try {
         const raw = await fs.readFile(path.join(baseDir, rawFileName), 'utf8');
         return successResponse({ yaml: raw });
@@ -261,6 +280,8 @@ export function setupFusionHandlers(): void {
       } catch (e) {
         return errorResponse(e as Error);
       }
+      const linked = await linkedOutsideResponse(root);
+      if (linked) return linked;
       const userDir = workspaceFiles(root).recipesDir;
       try {
         await fs.mkdir(userDir, { recursive: true });
@@ -294,6 +315,9 @@ export function setupFusionHandlers(): void {
       } catch (e) {
         return errorResponse(e as Error);
       }
+      // Même une recette intégrée : son journal de passe s'écrit dans `recipes-runs/`.
+      const linked = await linkedOutsideResponse(root);
+      if (linked) return linked;
       const baseDir =
         rawScope === 'builtin' ? BUILTIN_RECIPES_DIR : workspaceFiles(root).recipesDir;
       let recipe: Recipe;
@@ -1063,6 +1087,8 @@ export function setupFusionHandlers(): void {
     } catch (e) {
       return errorResponse(e as Error);
     }
+    const linked = await linkedOutsideResponse(root);
+    if (linked) return linked;
     try {
       const { readSecurityEventsLog, aggregateSecurityEvents } = await import(
         '../../../../backend/security/events-reader.js'
@@ -1157,7 +1183,7 @@ export function setupFusionHandlers(): void {
       const count = secureStorage.revokeAll();
       // Log revocation event
       const root = projectManager.getCurrentProjectPath();
-      if (root) {
+      if (root && !(await workspaceLinkOutside(root))) {
         const logPath = workspaceFiles(root).securityEventsLog;
         const event = JSON.stringify({
           kind: 'credential_revocation',

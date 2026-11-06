@@ -470,3 +470,75 @@ describe('écriture', () => {
     expect(JSON.parse(readFileSync(target, 'utf8')).vault).toEqual({ path: '/Ailleurs' });
   });
 });
+
+/**
+ * D18 : `.cliodeck`, `config.json` ou un autre fichier de l'espace de travail lié hors du projet.
+ * Lu et réécrit à travers le lien, le fichier d'un autre projet recevait les réglages de celui-ci.
+ */
+describe.skipIf(!symlinkAvailable)('lié hors du projet : refusé, rien de lu ni d’écrit à l’autre bout', () => {
+  let outside: string;
+
+  beforeEach(async () => {
+    outside = await mkdtemp(path.join(os.tmpdir(), 'cliodeck-config-ailleurs-'));
+  });
+
+  afterEach(async () => {
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  const targetText = JSON.stringify({ ...REALISTIC, name: 'Autre projet' });
+
+  it('config.json lié dehors : linked_outside partout, la cible intacte', async () => {
+    const target = path.join(outside, 'config.json');
+    writeFileSync(target, targetText);
+    await symlink(target, configFile);
+    let called = false;
+
+    expect(await kindOf(() => readWorkspaceConfig(root))).toBe('linked_outside');
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('linked_outside');
+    expect(
+      await kindOf(() =>
+        updateWorkspaceConfig(root, () => {
+          called = true;
+        })
+      )
+    ).toBe('linked_outside');
+    expect(await workspaceConfigIssue(root)).toEqual({ kind: 'linked_outside', path: configFile });
+
+    expect(called).toBe(false);
+    expect(readFileSync(target, 'utf8')).toBe(targetText);
+    expect(lstatSync(configFile).isSymbolicLink()).toBe(true);
+  });
+
+  it('.cliodeck lié dehors : refusé, rien de créé à l’autre bout', async () => {
+    await rm(path.join(root, '.cliodeck'), { recursive: true });
+    await symlink(outside, path.join(root, '.cliodeck'));
+
+    expect(await kindOf(() => readOrInitWorkspaceConfig(root))).toBe('linked_outside');
+    expect(await kindOf(() => updateWorkspaceConfig(root, () => undefined))).toBe('linked_outside');
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('brain.db seul lié dehors : la configuration, elle aussi, se refuse et se dit', async () => {
+    writeConfig(JSON.stringify(REALISTIC));
+    const before = bytes();
+    const brainDb = path.join(root, '.cliodeck', 'brain.db');
+    writeFileSync(path.join(outside, 'brain.db'), 'base d’un autre projet');
+    await symlink(path.join(outside, 'brain.db'), brainDb);
+
+    expect(await kindOf(() => updateWorkspaceConfig(root, (cfg) => void (cfg.name = 'X')))).toBe('linked_outside');
+    expect(await workspaceConfigIssue(root)).toEqual({ kind: 'linked_outside', path: brainDb });
+    expect(bytes()).toEqual(before);
+  });
+
+  it('le message nomme le fichier et dit quoi faire', async () => {
+    await symlink(path.join(outside, 'config.json'), configFile);
+    writeFileSync(path.join(outside, 'config.json'), targetText);
+
+    const error = (await readWorkspaceConfig(root).catch((e: unknown) => e)) as WorkspaceConfigError;
+    expect(error.filePath).toBe(configFile);
+    expect(error.message).toContain('.cliodeck/config.json');
+    expect(error.message).toContain('hors du projet');
+    expect(error.message).toContain('rouvrez le projet');
+  });
+});

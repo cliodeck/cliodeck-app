@@ -18,6 +18,7 @@ import {
   withFileLock,
 } from '../fs/user-files.js';
 import { ensureWorkspaceDirectories, workspaceFiles } from './layout.js';
+import { workspaceLinkOutside, workspaceLinkOutsideMessage } from './link-guard.js';
 
 export const WORKSPACE_SCHEMA_VERSION = 2 as const;
 
@@ -85,7 +86,7 @@ const BOM = '\uFEFF';
  */
 export class WorkspaceConfigError extends Error {
   readonly code = 'workspace_config_unreadable';
-  readonly kind: 'absent' | 'invalid_json' | 'newer_schema' | 'unreadable';
+  readonly kind: 'absent' | 'invalid_json' | 'newer_schema' | 'unreadable' | 'linked_outside';
   readonly filePath: string;
 
   constructor(kind: WorkspaceConfigError['kind'], filePath: string, message: string) {
@@ -96,7 +97,10 @@ export class WorkspaceConfigError extends Error {
   }
 }
 
-/** Ce que `project:load` rend à l'interface quand `config.json` est là mais illisible. */
+/**
+ * Ce que `project:load` rend à l'interface quand `config.json` est là mais illisible, ou que
+ * `.cliodeck` mène hors du projet (`linked_outside` : `path` nomme alors le lien).
+ */
 export interface WorkspaceConfigIssue {
   kind: Exclude<WorkspaceConfigError['kind'], 'absent'>;
   path: string;
@@ -108,6 +112,17 @@ function invalidConfig(filePath: string): WorkspaceConfigError {
     filePath,
     `${CONFIG_LABEL} ne se lit pas (une virgule en trop, par exemple) : ce fichier n'a pas été modifié. Corrigez-le, puis rouvrez le projet.`
   );
+}
+
+/**
+ * `.cliodeck` ou l'un de ses fichiers lié hors du projet (D18) : le même état qu'un fichier
+ * illisible, pour tout ce que porte la configuration, et ni lecture ni écriture à travers le lien.
+ */
+async function refuseLinkedOutside(workspaceRoot: string): Promise<void> {
+  const entry = await workspaceLinkOutside(workspaceRoot);
+  if (entry) {
+    throw new WorkspaceConfigError('linked_outside', entry, workspaceLinkOutsideMessage(workspaceRoot, entry));
+  }
 }
 
 function unreadableConfig(filePath: string, detail: string): WorkspaceConfigError {
@@ -192,6 +207,7 @@ async function whyNotAbsent(workspaceRoot: string, file: string): Promise<string
 
 export async function readWorkspaceConfig(workspaceRoot: string): Promise<WorkspaceConfig> {
   const file = workspaceFiles(workspaceRoot).config;
+  await refuseLinkedOutside(workspaceRoot);
   // Le verrou : une lecture demandée après une écriture lit ce que celle-ci a écrit.
   const read = await withFileLock(file, () => readUserFile(file));
   if (read.kind === 'unreadable') throw unreadableConfig(file, read.message);
@@ -254,6 +270,7 @@ export function updateWorkspaceConfig(
 ): Promise<WorkspaceConfig> {
   const file = workspaceFiles(workspaceRoot).config;
   return withFileLock(file, async () => {
+    await refuseLinkedOutside(workspaceRoot);
     const refusal = await whyNotAbsent(workspaceRoot, file);
     if (refusal) throw unreadableConfig(file, refusal);
     await ensureWorkspaceDirectories(workspaceRoot);

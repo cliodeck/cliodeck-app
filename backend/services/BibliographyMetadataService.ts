@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
+import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
 
 /**
  * Metadata stored for each citation (data that can't be stored in BibTeX)
@@ -60,6 +61,16 @@ export class BibliographyMetadataService {
   }
 
   /**
+   * `.cliodeck`, ou ce fichier lui-même, lié hors du projet (D18) : ce fichier serait celui d'un
+   * autre projet. Rien ne s'y lit ni ne s'y écrit ; l'ouverture du projet l'a dit à l'écran.
+   */
+  private static linkedOutside(projectPath: string): boolean {
+    const entry = workspaceLinkOutsideSync(projectPath);
+    if (entry) console.warn('⚠️ Métadonnées bibliographiques ignorées, lien hors du projet :', entry);
+    return entry !== null;
+  }
+
+  /**
    * Get the path to the metadata file for a project
    */
   static getMetadataPath(projectPath: string): string {
@@ -71,6 +82,7 @@ export class BibliographyMetadataService {
    * Only saves metadata that can't be stored in BibTeX (zoteroAttachments, etc.)
    */
   static async saveMetadata(projectPath: string, citations: Citation[]): Promise<void> {
+    if (this.linkedOutside(projectPath)) return;
     const metadataPath = this.getMetadataPath(projectPath);
     const metadataDir = path.dirname(metadataPath);
 
@@ -117,6 +129,7 @@ export class BibliographyMetadataService {
    * Load metadata from file
    */
   static async loadMetadata(projectPath: string): Promise<BibliographyMetadataFile | null> {
+    if (this.linkedOutside(projectPath)) return null;
     const metadataPath = this.getMetadataPath(projectPath);
 
     if (!fs.existsSync(metadataPath)) {
@@ -217,6 +230,7 @@ export class BibliographyMetadataService {
     storageKey: string,
     updates: Partial<CitationMetadata>
   ): Promise<void> {
+    if (this.linkedOutside(projectPath)) return;
     const existingMetadata = await this.loadMetadata(projectPath);
 
     const metadata: BibliographyMetadataFile = existingMetadata || {

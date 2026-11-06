@@ -546,3 +546,56 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
     });
   });
 });
+
+/**
+ * D18 : `.cliodeck` ou `brain.db` lié hors du projet. Une sauvegarde du document relance cette
+ * indexation, et elle ouvrait la base à travers le lien : les extraits du manuscrit partaient
+ * dans la base d'un autre projet. Rien ne s'ouvre, le fournisseur n'est pas appelé.
+ */
+describe.skipIf(!sqliteAvailable || !symlinkAvailable)('manuscriptIndexService — .cliodeck lié hors du projet', () => {
+  let outside = '';
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-'));
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-ailleurs-'));
+    writeProject(tmp, [{ file: '01.md', title: 'Un', body: '# Un\n\nLe port de Danzig.\n' }]);
+  });
+
+  afterEach(() => {
+    manuscriptIndexService.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('.cliodeck lié dehors : ni base ouverte, ni fournisseur appelé, rien à l’autre bout', async () => {
+    fs.symlinkSync(outside, path.join(tmp, '.cliodeck'));
+    manuscriptIndexService.configure(tmp);
+    const embedder = fakeEmbedder();
+
+    await manuscriptIndexService.index(embedder);
+
+    expect(manuscriptIndexService.stats()).toBeNull();
+    expect(manuscriptIndexService.purgeOutside()).toBe(0);
+    expect(embedder.calls).toBe(0);
+    expect(fs.readdirSync(outside)).toEqual([]);
+  });
+
+  it('brain.db lié vers celui d’un autre projet : aucune table manuscript_* n’y arrive', async () => {
+    const otherDb = path.join(outside, 'brain.db');
+    const db = new Database(otherDb);
+    db.exec('CREATE TABLE pdf_documents (id TEXT PRIMARY KEY)');
+    db.close();
+    fs.mkdirSync(path.join(tmp, '.cliodeck'));
+    fs.symlinkSync(otherDb, path.join(tmp, '.cliodeck', 'brain.db'));
+    manuscriptIndexService.configure(tmp);
+
+    await manuscriptIndexService.index(fakeEmbedder());
+
+    const reader = new Database(otherDb, { readonly: true });
+    const names = (reader.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+      name: string;
+    }>).map((row) => row.name);
+    reader.close();
+    expect(names).toEqual(['pdf_documents']);
+  });
+});
