@@ -115,7 +115,7 @@ beforeEach(() => {
       onInsertText: () => () => undefined,
     },
     proposals: { recordAdjudication: () => undefined },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
   useProjectStore.setState({
     currentProject: {

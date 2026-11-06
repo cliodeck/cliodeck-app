@@ -114,6 +114,6 @@ export function installMain(): void {
       onRebuildProgress: () => () => undefined,
     },
     proposals: { recordAdjudication: () => undefined },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
 }

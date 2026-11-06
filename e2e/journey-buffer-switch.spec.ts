@@ -429,14 +429,12 @@ test('article : le menu de mise en forme, le focus dans la saisie du chat, ne to
     expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
     await expect(editor(window).locator('.cm-line')).toHaveCount(4);
 
-    // Témoin : une commande du menu, le curseur dans le texte, écrit bien le fichier. Elle s'exécute
-    // encore deux fois (S15-1-22, écouteurs jamais retirés) : pas le gras, qui se défait, ni un
-    // résultat exact.
+    // Témoin : une commande du menu, le curseur dans le texte, écrit bien le fichier, une fois.
     await selectLastWord(window);
     await sendMenu(app, 'menu:insert-link');
     await expect
       .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
-      .toContain(`[${LAST_WORD}](`);
+      .toBe(ARTICLE.replace(LAST_WORD, `[${LAST_WORD}](url)`));
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
@@ -501,12 +499,11 @@ test('article : le curseur dans le texte, le menu agit encore quand la fenêtre 
     await window.evaluate(() => {
       document.hasFocus = () => false;
     });
-    // Le résultat exact attend la fin de la double exécution du menu (S15-1-22).
     await sendMenu(app, 'menu:insert-link');
 
     await expect
       .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
-      .toContain(`[${LAST_WORD}](`);
+      .toBe(ARTICLE.replace(LAST_WORD, `[${LAST_WORD}](url)`));
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
@@ -623,11 +620,11 @@ test('article : la sélection n’est plus écrasée : lien au clavier, citation
       .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
       .toBe(ARTICLE);
 
-    // Par le menu : le texte reste, préfixé (deux fois tant que dure S15-1-22).
+    // Par le menu : le texte reste, préfixé une fois.
     await sendMenu(app, 'menu:insert-blockquote');
     await expect
       .poll(() => readFileSync(article.document, 'utf8'), { timeout: 8_000 })
-      .toContain('> Huit mille mots déjà enregistrés.');
+      .toBe(ARTICLE.replace('Huit mille', '> Huit mille'));
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

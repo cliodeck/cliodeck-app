@@ -12,5 +12,6 @@
     "strict": false,
     "resolveJsonModule": true
   },
-  "include": ["src/preload/**/*"]
+  "include": ["src/preload/**/*"],
+  "exclude": ["src/preload/**/__tests__/**/*"]
 }

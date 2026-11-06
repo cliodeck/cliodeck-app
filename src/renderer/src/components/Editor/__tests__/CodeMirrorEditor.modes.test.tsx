@@ -189,7 +189,7 @@ beforeEach(() => {
     },
     pdf: { getAllDocuments: vi.fn(async () => ({ success: true, documents: [] })) },
     proposals: { recordAdjudication: () => undefined },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
   setProject(PROJECT);
   openInStore(DOC);

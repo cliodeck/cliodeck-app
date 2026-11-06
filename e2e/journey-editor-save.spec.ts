@@ -660,15 +660,15 @@ async function watchRejections(window: Page): Promise<() => Promise<string[]>> {
 const SAVE_ERROR = 'Erreur lors de la sauvegarde du fichier';
 const alertMessage = (window: Page) => window.locator('.alert-dialog-message');
 
-/** Ferme les alertes à l'écran : les écouteurs de menu n'étant jamais retirés, une commande en ouvre deux. */
-async function closeAlerts(window: Page): Promise<void> {
+/**
+ * Ferme l'alerte, et exige qu'elle soit seule : une commande, une alerte. Une seconde alerte de la
+ * même commande attendrait déjà dans la file, et prendrait la place de la première.
+ */
+async function closeAlert(window: Page): Promise<void> {
   const ok = window.locator('.alert-dialog-btn-ok');
-  await expect
-    .poll(async () => {
-      if (await ok.count()) await ok.click();
-      return ok.count();
-    })
-    .toBe(0);
+  await expect(ok).toHaveCount(1);
+  await ok.click();
+  await expect(ok).toHaveCount(0);
 }
 
 async function stubSaveDialog(app: ElectronApplication, target: string): Promise<void> {
@@ -709,8 +709,8 @@ test('Cmd+S sur un fichier non inscriptible : l’auteur le sait, le texte reste
     await typeAtEnd(window, 'Une phrase.');
     await sendMenu(app, 'menu:save-file');
 
-    await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-    await closeAlerts(window);
+    await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlert(window);
     expect(await rejections()).toEqual([]);
     expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
     await expect(editorOf(window)).toContainText('Une phrase.');
@@ -751,8 +751,8 @@ test('Cmd+O vers un fichier sain, alors que le document ouvert refuse l’écrit
     await typeAtEnd(window, 'Une phrase.');
     await sendMenu(app, 'menu:open-file');
 
-    await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-    await closeAlerts(window);
+    await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+    await closeAlert(window);
     expect(readFileSync(projet.documentMd, 'utf8')).toBe(ORIGINAL);
     await expect(editorOf(window)).toContainText('Une phrase.');
 
@@ -804,7 +804,7 @@ for (const door of ['bouton', 'récents'] as const) {
       await askForProject();
 
       await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-      await closeAlerts(window);
+      await closeAlert(window);
       expect(readFileSync(sortant.documentMd, 'utf8')).toBe(ORIGINAL);
       await expect(editorOf(window)).toContainText('Une phrase.');
 
@@ -850,7 +850,7 @@ test('créer un projet alors que le document ouvert refuse l’écriture : le me
     await createButton.click();
 
     await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-    await closeAlerts(window);
+    await closeAlert(window);
     await expect(nameField).toHaveValue('Neuf');
     expect(existsSync(join(parent, 'Neuf'))).toBe(false);
     expect(readFileSync(sortant.documentMd, 'utf8')).toBe(ORIGINAL);
@@ -909,7 +909,7 @@ test('livre : changer de chapitre alors que le chapitre ouvert refuse l’écrit
     await secondChapter.click();
 
     await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-    await closeAlerts(window);
+    await closeAlert(window);
     expect(readFileSync(first, 'utf8')).toBe(FIRST);
     await expect(editorOf(window)).toContainText('Une phrase.');
 
@@ -952,8 +952,8 @@ for (const door of ['bouton', 'menu'] as const) {
       chmodSync(dehors, 0o555);
       await save();
 
-      await expect(alertMessage(window).first()).toHaveText(SAVE_ERROR, { timeout: 10_000 });
-      await closeAlerts(window);
+      await expect(alertMessage(window)).toHaveText(SAVE_ERROR, { timeout: 10_000 });
+      await closeAlert(window);
       expect(await rejections()).toEqual([]);
       expect(existsSync(note)).toBe(false);
       await expect(editorOf(window)).toContainText('Une idée à part.');
@@ -974,7 +974,6 @@ for (const door of ['bouton', 'menu'] as const) {
   });
 }
 
-// L'écouteur jamais retiré garde le `t` du premier rendu, en français : il répond le premier.
 for (const [language, saveLabel, message, openMessage] of [
   ['en', 'Save', 'Error saving file', 'This file could not be opened. It may be missing or unreadable.'],
   [
@@ -1000,7 +999,8 @@ for (const [language, saveLabel, message, openMessage] of [
 
       await sendMenu(app, 'menu:save-file');
 
-      await expect(alertMessage(window).first()).toHaveText(message, { timeout: 10_000 });
+      await expect(alertMessage(window)).toHaveText(message, { timeout: 10_000 });
+      await closeAlert(window);
     } finally {
       chmodSync(dehors, 0o755);
       await app.close();
@@ -1027,7 +1027,8 @@ for (const [language, saveLabel, message, openMessage] of [
 
       await sendMenu(app, 'menu:open-file');
 
-      await expect(alertMessage(window).first()).toHaveText(openMessage, { timeout: 10_000 });
+      await expect(alertMessage(window)).toHaveText(openMessage, { timeout: 10_000 });
+      await closeAlert(window);
     } finally {
       await app.close();
       rmSync(userDataDir, { recursive: true, force: true });

@@ -1,11 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../stores/dialogStore';
 import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../stores/editorStore';
-import { useProjectStore } from '../stores/projectStore';
+import { useManuscriptStore } from '../stores/manuscriptStore';
+import { useMenuIntentStore, type MenuIntent } from '../stores/menuIntentStore';
 import { runCitationCheck } from '../services/check-citations';
 import { newDocument } from '../services/new-document';
-import i18n from '../i18n';
+import { isModalOpen } from './useFocusTrap';
 
 /**
  * Hook that listens to menu shortcuts and triggers appropriate actions
@@ -14,7 +15,11 @@ import i18n from '../i18n';
 export function useMenuShortcuts() {
   const { t } = useTranslation('common');
   const { saveCurrentFile, loadFile, insertFormatting, togglePreview } = useEditorStore();
-  const { createProject, loadProject } = useProjectStore();
+  // `t` change à chaque `languageChanged`, que i18next émet au lancement même pour la langue en
+  // cours : dans les dépendances de l'effet, il relançait l'abonnement aux commandes. Lu au moment
+  // de la commande, il est celui de la langue affichée.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     // Vérifier que l'API Electron est disponible
@@ -23,14 +28,9 @@ export function useMenuShortcuts() {
       return;
     }
 
-    // Les messages d'Ouvrir et d'Enregistrer passent par `i18n.t`, pas par `t` : un écouteur
-    // de menu qui n'a pas été retiré garde le `t` du premier rendu, en français, et c'est lui
-    // qui répond le premier. Nouveau fichier et Vérifier les citations reçoivent encore ce `t` :
-    // ils attendent la correction des écouteurs, qui rendra `t` à jour partout.
-
     // File operations
     const handleNewFile = () => {
-      void newDocument(t);
+      void newDocument(tRef.current);
     };
 
     const handleOpenFile = async () => {
@@ -42,12 +42,12 @@ export function useMenuShortcuts() {
         if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
           const outcome = await loadFile(result.filePaths[0]);
           if (outcome.status === 'locked') {
-            await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
+            await useDialogStore.getState().showAlert(tRef.current(outcome.lock));
           }
         }
       } catch (error) {
         console.error('Failed to open file:', error);
-        await useDialogStore.getState().showAlert(i18n.t(openErrorKey(error, 'toolbar.openError')));
+        await useDialogStore.getState().showAlert(tRef.current(openErrorKey(error, 'toolbar.openError')));
       }
     };
 
@@ -72,7 +72,7 @@ export function useMenuShortcuts() {
           if (!result.canceled && result.filePath) {
             const outcome = await useEditorStore.getState().saveFileAs(result.filePath);
             if (outcome.status === 'locked') {
-              await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
+              await useDialogStore.getState().showAlert(tRef.current(outcome.lock));
             }
           }
         } else {
@@ -81,19 +81,27 @@ export function useMenuShortcuts() {
         }
       } catch (error) {
         console.error('Failed to save file:', error);
-        if (!overtaken()) await useDialogStore.getState().showAlert(i18n.t('toolbar.saveError'));
+        if (!overtaken()) await useDialogStore.getState().showAlert(tRef.current('toolbar.saveError'));
       }
+    };
+
+    // Nouveau projet, Ouvrir un projet, Importer BibTeX : le panneau de gauche les fait, comme ses
+    // boutons, une fois monté. MainLayout ne change pas de panneau sous une modale ni pendant un
+    // export : l'intention attendrait alors le prochain passage sur ce panneau, et la commande
+    // agirait par surprise, bien plus tard. Rien n'est donc demandé dans ce cas.
+    const openInLeftPanel = (panel: 'projects' | 'bibliography', intent: MenuIntent) => {
+      if (useManuscriptStore.getState().exporting || isModalOpen()) return;
+      useMenuIntentStore.getState().request(intent);
+      window.dispatchEvent(new CustomEvent('switch-panel', { detail: panel }));
     };
 
     // Project operations
     const handleNewProject = () => {
-      // Trigger project creation UI
-      window.dispatchEvent(new CustomEvent('show-create-project-dialog'));
+      openInLeftPanel('projects', 'new-project');
     };
 
     const handleOpenProject = () => {
-      // Trigger project open UI
-      window.dispatchEvent(new CustomEvent('show-open-project-dialog'));
+      openInLeftPanel('projects', 'open-project');
     };
 
     // Export operations
@@ -141,7 +149,7 @@ export function useMenuShortcuts() {
     // d'outils (services/check-citations.ts) : le menu donnait auparavant un
     // résultat différent, calculé en regex sur le seul chapitre ouvert.
     const handleCheckCitations = async () => {
-      await runCitationCheck(t);
+      await runCitationCheck(tRef.current);
     };
 
     // View operations
@@ -149,18 +157,19 @@ export function useMenuShortcuts() {
       togglePreview();
     };
 
-    const handleSwitchPanel = (_event: Electron.IpcRendererEvent, panel: string) => {
+    const handleSwitchPanel = (panel: string) => {
       // Trigger panel switch
       window.dispatchEvent(new CustomEvent('switch-panel', { detail: panel }));
     };
 
     // Bibliography operations
     const handleImportBibTeX = () => {
-      window.dispatchEvent(new CustomEvent('show-bibtex-import-dialog'));
+      openInLeftPanel('bibliography', 'import-bibtex');
     };
 
+    // Les Réglages, où vit la connexion à Zotero : la modale ne sait pas s'ouvrir sur une section.
     const handleConnectZotero = () => {
-      window.dispatchEvent(new CustomEvent('show-zotero-connect-dialog'));
+      window.dispatchEvent(new CustomEvent('show-settings-modal'));
     };
 
     // Settings
@@ -178,60 +187,36 @@ export function useMenuShortcuts() {
       window.dispatchEvent(new CustomEvent('show-about-dialog'));
     };
 
-    // Register all listeners
-    window.electron.ipcRenderer.on('menu:new-file', handleNewFile);
-    window.electron.ipcRenderer.on('menu:open-file', handleOpenFile);
-    window.electron.ipcRenderer.on('menu:save-file', handleSaveFile);
-    window.electron.ipcRenderer.on('menu:new-project', handleNewProject);
-    window.electron.ipcRenderer.on('menu:open-project', handleOpenProject);
-    window.electron.ipcRenderer.on('menu:export-pdf', handleExportPDF);
-    window.electron.ipcRenderer.on('menu:format-bold', handleFormatBold);
-    window.electron.ipcRenderer.on('menu:format-italic', handleFormatItalic);
-    window.electron.ipcRenderer.on('menu:insert-link', handleInsertLink);
-    window.electron.ipcRenderer.on('menu:insert-citation', handleInsertCitation);
-    window.electron.ipcRenderer.on('menu:insert-table', handleInsertTable);
-    window.electron.ipcRenderer.on('menu:insert-footnote', handleInsertFootnote);
-    window.electron.ipcRenderer.on('menu:insert-blockquote', handleInsertBlockQuote);
-    window.electron.ipcRenderer.on('menu:check-citations', handleCheckCitations);
-    window.electron.ipcRenderer.on('menu:toggle-preview', handleTogglePreview);
-    window.electron.ipcRenderer.on('menu:switch-panel', handleSwitchPanel);
-    window.electron.ipcRenderer.on('menu:import-bibtex', handleImportBibTeX);
-    window.electron.ipcRenderer.on('menu:connect-zotero', handleConnectZotero);
-    window.electron.ipcRenderer.on('menu:open-settings', handleOpenSettings);
-    window.electron.ipcRenderer.on('menu:open-usage-journal', handleOpenUsageJournal);
-    window.electron.ipcRenderer.on('menu:about', handleAbout);
+    // Chaque abonnement rend son désabonnement : à travers `contextBridge`, c'est la seule
+    // façon de retirer un écouteur (voir le preload).
+    const { on } = window.electron.ipcRenderer;
+    const unsubscribers = [
+      on('menu:new-file', handleNewFile),
+      on('menu:open-file', handleOpenFile),
+      on('menu:save-file', handleSaveFile),
+      on('menu:new-project', handleNewProject),
+      on('menu:open-project', handleOpenProject),
+      on('menu:export-pdf', handleExportPDF),
+      on('menu:format-bold', handleFormatBold),
+      on('menu:format-italic', handleFormatItalic),
+      on('menu:insert-link', handleInsertLink),
+      on('menu:insert-citation', handleInsertCitation),
+      on('menu:insert-table', handleInsertTable),
+      on('menu:insert-footnote', handleInsertFootnote),
+      on('menu:insert-blockquote', handleInsertBlockQuote),
+      on('menu:check-citations', handleCheckCitations),
+      on('menu:toggle-preview', handleTogglePreview),
+      on('menu:switch-panel', handleSwitchPanel),
+      on('menu:import-bibtex', handleImportBibTeX),
+      on('menu:connect-zotero', handleConnectZotero),
+      on('menu:open-settings', handleOpenSettings),
+      on('menu:open-usage-journal', handleOpenUsageJournal),
+      on('menu:about', handleAbout),
+    ];
 
     // Cleanup listeners on unmount
     return () => {
-      window.electron.ipcRenderer.removeListener('menu:new-file', handleNewFile);
-      window.electron.ipcRenderer.removeListener('menu:open-file', handleOpenFile);
-      window.electron.ipcRenderer.removeListener('menu:save-file', handleSaveFile);
-      window.electron.ipcRenderer.removeListener('menu:new-project', handleNewProject);
-      window.electron.ipcRenderer.removeListener('menu:open-project', handleOpenProject);
-      window.electron.ipcRenderer.removeListener('menu:export-pdf', handleExportPDF);
-      window.electron.ipcRenderer.removeListener('menu:format-bold', handleFormatBold);
-      window.electron.ipcRenderer.removeListener('menu:format-italic', handleFormatItalic);
-      window.electron.ipcRenderer.removeListener('menu:insert-link', handleInsertLink);
-      window.electron.ipcRenderer.removeListener('menu:insert-citation', handleInsertCitation);
-      window.electron.ipcRenderer.removeListener('menu:insert-table', handleInsertTable);
-      window.electron.ipcRenderer.removeListener('menu:insert-footnote', handleInsertFootnote);
-      window.electron.ipcRenderer.removeListener('menu:insert-blockquote', handleInsertBlockQuote);
-      window.electron.ipcRenderer.removeListener('menu:check-citations', handleCheckCitations);
-      window.electron.ipcRenderer.removeListener('menu:toggle-preview', handleTogglePreview);
-      window.electron.ipcRenderer.removeListener('menu:switch-panel', handleSwitchPanel);
-      window.electron.ipcRenderer.removeListener('menu:import-bibtex', handleImportBibTeX);
-      window.electron.ipcRenderer.removeListener('menu:connect-zotero', handleConnectZotero);
-      window.electron.ipcRenderer.removeListener('menu:open-settings', handleOpenSettings);
-      window.electron.ipcRenderer.removeListener('menu:open-usage-journal', handleOpenUsageJournal);
-      window.electron.ipcRenderer.removeListener('menu:about', handleAbout);
+      for (const unsubscribe of unsubscribers) unsubscribe();
     };
-  }, [
-    saveCurrentFile,
-    loadFile,
-    insertFormatting,
-    togglePreview,
-    createProject,
-    loadProject,
-    t,
-  ]);
+  }, [saveCurrentFile, loadFile, insertFormatting, togglePreview]);
 }

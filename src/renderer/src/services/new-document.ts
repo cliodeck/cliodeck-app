@@ -17,7 +17,7 @@ import { logger } from '../utils/logger';
  * d'abord et reste accessible depuis le panneau Projet.
  */
 
-// Un même geste peut arriver deux fois (écouteurs de menu doublés) : une seule
+// Un même geste peut arriver deux fois (double clic, accélérateur répété) : une seule
 // question, un seul chapitre.
 let running: Promise<void> | null = null;
 

@@ -4,6 +4,7 @@ import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, Fi
 import { NotAProjectError, useProjectStore, type Project } from '../../stores/projectStore';
 import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { useMenuIntentStore } from '../../stores/menuIntentStore';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { RevealJsConfig } from './RevealJsConfig';
 import { CSLSettings } from './CSLSettings';
@@ -155,6 +156,16 @@ export const ProjectPanel: React.FC = () => {
       await useDialogStore.getState().showAlert(openFailureMessage(error));
     }
   };
+
+  // Fichier › Nouveau projet et Ouvrir un projet : les boutons de ce panneau, même s'il vient
+  // d'être monté par la commande.
+  const menuIntent = useMenuIntentStore((state) => state.intent);
+  useEffect(() => {
+    const { consume } = useMenuIntentStore.getState();
+    if (consume('new-project')) setShowCreateModal(true);
+    else if (consume('open-project')) void handleOpenProject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- l'intention seule déclenche, une fois
+  }, [menuIntent]);
 
   const handleSelectPath = async () => {
     try {

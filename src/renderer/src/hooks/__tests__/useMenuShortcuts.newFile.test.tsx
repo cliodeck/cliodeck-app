@@ -18,6 +18,9 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import i18n from '../../i18n';
 
+// Le vrai react-i18next : les messages du menu passent par `t`, dans la langue du moment.
+vi.mock('react-i18next', async () => vi.importActual('react-i18next'));
+
 const PROJECT = '/p/projet';
 const DOCUMENT = `${PROJECT}/document.md`;
 
@@ -57,7 +60,7 @@ function mount(type: 'article' | 'book'): void {
 /** Déclenche une entrée de menu telle que le preload la relaie. */
 async function menu(channel: string): Promise<void> {
   await act(async () => {
-    for (const handler of handlers.get(channel) ?? []) void handler({});
+    for (const handler of handlers.get(channel) ?? []) void handler();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
@@ -93,8 +96,8 @@ beforeEach(() => {
     ipcRenderer: {
       on: (channel: string, handler: (...args: unknown[]) => unknown) => {
         handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
+        return () => handlers.set(channel, (handlers.get(channel) ?? []).filter((h) => h !== handler));
       },
-      removeListener: () => undefined,
     },
   };
 });
@@ -123,7 +126,7 @@ describe('menu:new-file', () => {
     live = '# Article\nfrappe\n';
 
     await menu('menu:new-file');
-    expect(dialogs().confirmMessage).toBe('toolbar.newFileConfirm');
+    expect(dialogs().confirmMessage).toBe(i18n.t('toolbar.newFileConfirm'));
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
     await answerConfirm(true);
 
@@ -140,7 +143,7 @@ describe('menu:new-file', () => {
     expect(useEditorStore.getState().filePath).toBe(DOCUMENT);
   });
 
-  // Ce que font aujourd'hui les écouteurs jamais retirés : la commande part deux fois.
+  // La commande qui arrive deux fois de suite (accélérateur répété) : une seule exécution.
   const doubleListener = () => {
     const [handler] = handlers.get('menu:new-file') ?? [];
     handlers.set('menu:new-file', [handler, handler]);

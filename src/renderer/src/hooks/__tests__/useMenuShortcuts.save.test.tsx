@@ -20,6 +20,9 @@ import { useDialogStore } from '../../stores/dialogStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import i18n from '../../i18n';
 
+// Le vrai react-i18next : les messages du menu passent par `t`, dans la langue du moment.
+vi.mock('react-i18next', async () => vi.importActual('react-i18next'));
+
 const DOCUMENT = '/p/projet/document.md';
 const CHAPTER = '/p/projet/chapitre.md';
 const NOTE = '/ailleurs/note.md';
@@ -63,7 +66,7 @@ const wait = (ms: number) =>
 /** Déclenche la commande telle que le preload la relaie, et laisse passer ce qui ne dépend pas du disque. */
 async function menu(channel: string): Promise<void> {
   await act(async () => {
-    for (const handler of handlers.get(channel) ?? []) void handler({});
+    for (const handler of handlers.get(channel) ?? []) void handler();
     await vi.advanceTimersByTimeAsync(0);
   });
 }
@@ -130,11 +133,7 @@ beforeEach(() => {
     ipcRenderer: {
       on: (channel: string, handler: (...args: unknown[]) => unknown) => {
         handlers.set(channel, [...(handlers.get(channel) ?? []), handler]);
-      },
-      // Un retrait qui retire : une commande, un écouteur. Le doublement du vrai pont n'est
-      // pas l'objet de ces tests, et le simulacre de `t` relance l'effet à chaque rendu.
-      removeListener: (channel: string, handler: (...args: unknown[]) => unknown) => {
-        handlers.set(channel, (handlers.get(channel) ?? []).filter((h) => h !== handler));
+        return () => handlers.set(channel, (handlers.get(channel) ?? []).filter((h) => h !== handler));
       },
     },
   };

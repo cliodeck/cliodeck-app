@@ -142,7 +142,7 @@ beforeEach(() => {
         adjudications.push(event);
       },
     },
-    ipcRenderer: { on: () => undefined, removeListener: () => undefined },
+    ipcRenderer: { on: () => () => undefined },
   };
 });
 
