@@ -376,8 +376,12 @@ export const EditorPanel: React.FC = () => {
 
   return (
     <div className="editor-panel">
-      {/* Toolbar - File operations and academic-specific buttons */}
-      <div className="editor-toolbar">
+      {/* Toolbar - File operations and academic-specific buttons.
+          Un clic ne prend pas le focus au texte : après Enregistrer, Cmd+B ne faisait rien
+          avant un clic dans le texte, et une espace relançait l'enregistrement (D5). Le focus
+          reste où il était ; un renommage de chapitre en cours le reste donc aussi. Seule la
+          souris est concernée : Tab et Entrée atteignent toujours les boutons. */}
+      <div className="editor-toolbar" onMouseDown={(e) => e.preventDefault()}>
         {/* File operations */}
         <div className="toolbar-section">
           <button className="toolbar-btn" onClick={handleNewFile} title={t('toolbar.newFile')}>

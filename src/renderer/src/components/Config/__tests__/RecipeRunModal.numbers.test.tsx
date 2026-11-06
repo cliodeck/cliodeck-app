@@ -6,7 +6,7 @@
  * fenêtre croyait avoir des saisies à perdre et ne se fermait plus à Échap.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('react-i18next', () => {
   const t = (key: string) => key;
@@ -176,5 +176,25 @@ describe('Échap', () => {
     await pressEscape();
 
     expect(closeRun).not.toHaveBeenCalled();
+  });
+});
+
+/** D21 : un paramètre numérique peut avoir des décimales, et la virgule y devient un point à la frappe. */
+describe('la virgule décimale', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'execCommand');
+  });
+
+  it('la virgule ne part pas au navigateur : un point est tapé à sa place', async () => {
+    // jsdom n'a pas `execCommand` ; la vraie frappe est dans `journey-numeric-fields`.
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true, writable: true });
+    await open({ default: 0.5 });
+
+    const event = createEvent.keyDown(field(), { key: ',' });
+    fireEvent(field(), event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(execCommand).toHaveBeenCalledExactlyOnceWith('insertText', false, '.');
   });
 });

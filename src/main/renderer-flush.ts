@@ -32,11 +32,19 @@ let decisionInFlight: Promise<boolean> | null = null;
  * illisible n'est pas un texte écrit : il se dit comme une écriture ratée, et l'auteur tranche.
  */
 function readRendererReport(ack: unknown): FlushReport {
-  const { outcome, error } = (ack ?? {}) as Partial<FlushReport>;
+  const { outcome, error, stillWriting } = (ack ?? {}) as Partial<FlushReport>;
   if (!outcome || !RENDERER_OUTCOMES.includes(outcome)) {
     return { outcome: 'failed', error: 'Accusé du renderer illisible' };
   }
-  return typeof error === 'string' ? { outcome, error } : { outcome };
+  const report: FlushReport = typeof error === 'string' ? { outcome, error } : { outcome };
+  if (outcome === 'failed' && stillWriting === true) report.stillWriting = true;
+  return report;
+}
+
+/** Une écriture encore en cours n'est pas un échec : elle peut aboutir si l'auteur reste. */
+function leaveQuestion(report: FlushReport): string {
+  if (report.outcome === 'untitled') return 'unsavedUntitledMessage';
+  return report.stillWriting ? 'unsavedSaveSlowMessage' : 'unsavedSaveFailedMessage';
 }
 
 function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promise<FlushReport> {
@@ -59,9 +67,15 @@ function askRendererToFlush(win: BrowserWindow | null, timeoutMs: number): Promi
     const onDone = (_event: unknown, ack: unknown): void => finish(readRendererReport(ack));
     // Le plafond d'écriture du renderer tombe avant ce délai, mais une page occupée ou une
     // machine chargée peut le retarder. Une page qui a reçu la demande vit : son texte n'est
-    // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée.
+    // pas réputé écrit, et seule une page qui n'a rien reçu est bloquée. Une page vivante qui
+    // se tait encore n'a constaté aucun échec : son écriture traîne, et se dit ainsi (D7).
     const timer = setTimeout(
-      () => finish(received ? { outcome: 'failed', error: 'Réponse du renderer en retard' } : { outcome: 'timeout' }),
+      () =>
+        finish(
+          received
+            ? { outcome: 'failed', error: 'Réponse du renderer en retard', stillWriting: true }
+            : { outcome: 'timeout' }
+        ),
       timeoutMs
     );
 
@@ -101,7 +115,7 @@ async function decideToLeave(win: BrowserWindow | null, timeoutMs: number): Prom
   win.show();
   const { response } = await dialog.showMessageBox(win, {
     type: 'warning',
-    message: t(report.outcome === 'untitled' ? 'unsavedUntitledMessage' : 'unsavedSaveFailedMessage'),
+    message: t(leaveQuestion(report)),
     buttons: [t('unsavedStay'), t('unsavedLeave')],
     defaultId: STAY_BUTTON,
     cancelId: STAY_BUTTON,

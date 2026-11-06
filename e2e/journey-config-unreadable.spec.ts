@@ -162,15 +162,16 @@ test.describe('config.json illisible', () => {
         await expect(toast).toContainText("notes déjà indexées restent consultées par l'assistant");
         await expect(toast).not.toContainText('vault Obsidian et les serveurs MCP');
         await expect(toast).toContainText('MCP');
-        await expect(toast).toContainText('Avertir');
+        await expect(toast).toContainText('« Bloquer »');
+        await expect(toast).not.toContainText('Avertir');
         await expect(toast).toContainText(wording);
         await expect(toast).not.toContainText(avoid);
         await expect(toast).not.toContainText(/invalid_json|newer_schema/);
         expect(readFileSync(project.configJson).equals(before)).toBe(true);
 
-        // Le mode choisi (`block`) n'est plus lu, et `warn` s'applique : c'est ce que dit le message.
+        // Le mode choisi n'est plus lu : le plus strict, `block`, s'applique (D15), et le message le dit.
         const mode = await window.evaluate(() => window.electron.fusion.security.getMode());
-        expect(mode).toMatchObject({ success: false, appliedMode: 'warn' });
+        expect(mode).toMatchObject({ success: false, appliedMode: 'block' });
 
         // Le tiroir du Brainstorm : le motif, pas « vérification… » sans fin.
         await openBrainstormDrawer(window);
@@ -185,10 +186,10 @@ test.describe('config.json illisible', () => {
         // Ce fichier déclare un serveur : « aucun client » serait faux.
         await expect(body.getByText(sectionWording, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
         await expect(body.getByText('Aucun client MCP configuré')).toHaveCount(0);
-        // Il dit aussi `block` : aucun choix affiché pour l'auteur, et ce qui s'applique est écrit.
+        // Aucun choix affiché pour l'auteur, et ce qui s'applique est écrit.
         await expect(body.locator('input[name="inspector-mode"]:checked')).toHaveCount(0);
         await expect(body.locator('input[name="inspector-mode"]:disabled')).toHaveCount(3);
-        await expect(body.getByText("c'est le mode « Avertir » qui s'applique", { exact: false })).toBeVisible();
+        await expect(body.getByText("c'est le mode « Bloquer » qui s'applique", { exact: false })).toBeVisible();
 
         await submitNewMcpServer(window);
         await expect(body.getByText(sectionWording, { exact: false }).first()).toBeVisible();

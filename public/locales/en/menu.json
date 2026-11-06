@@ -52,5 +52,6 @@
   "unsavedStay": "Stay",
   "unsavedLeave": "Quit without saving",
   "unsavedUntitledMessage": "This untitled document is not saved anywhere. If you quit now, its text will be lost.",
-  "unsavedSaveFailedMessage": "Your latest changes could not be saved. If you quit now, they will be lost."
+  "unsavedSaveFailedMessage": "Your latest changes could not be saved. If you quit now, they will be lost.",
+  "unsavedSaveSlowMessage": "Saving is taking a while. If you quit now, your changes will be lost."
 }

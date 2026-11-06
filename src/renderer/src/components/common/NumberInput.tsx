@@ -24,14 +24,28 @@ type NumberInputProps = Omit<
   );
 
 /**
+ * Une virgule tapée devient un point, à la frappe, quelle que soit la langue du système (D21). Le
+ * séparateur d'un `type="number"` est celui de la locale de Chromium : sur un système anglais, la
+ * virgule n'entrait pas, et `0,5` se lisait `05`, borné à 1. Le point se lit dans toutes les locales.
+ * `insertText` passe par le chemin d'une vraie frappe : curseur, sélection, `input` et annulation.
+ * Pour les seuls champs à décimales : dans un champ entier, la virgule n'a rien à devenir.
+ */
+export function typeDecimalPoint(event: React.KeyboardEvent<HTMLInputElement>): void {
+  if (event.key !== ',' || event.ctrlKey || event.metaKey || event.altKey) return;
+  event.preventDefault();
+  document.execCommand('insertText', false, '.');
+}
+
+/**
  * Un champ numérique qui ne vaut qu'une fois validé, au blur ou à Entrée. Pendant la saisie il peut
  * être vide, ou dire `0,` ; le parent n'en sait rien. Un clic ailleurs retire d'abord le focus : un
  * bouton Enregistrer lit donc la valeur à jour. Échap ne valide pas, et ne s'arrête pas ici : la
  * touche va aux modales (`useFocusTrap`).
  *
  * Reste un `type="number"` : le navigateur y lit le séparateur décimal de sa locale, celle du système
- * (ou de `--lang`), pas la langue choisie dans l'app ; et les feuilles de style le visent. Ce qu'il
- * affiche après la saisie est ce qui a été retenu, borné ou non.
+ * (ou de `--lang`), pas la langue choisie dans l'app ; et les feuilles de style le visent. Une virgule
+ * y devient donc un point à la frappe, sauf dans un champ entier. Ce qu'il affiche après la saisie est
+ * ce qui a été retenu, borné ou non.
  */
 export const NumberInput: React.FC<NumberInputProps> = ({
   value,
@@ -81,6 +95,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={(e) => commit(e.currentTarget)}
       onKeyDown={(e) => {
+        if (!integer) typeDecimalPoint(e);
         if (e.key === 'Enter') {
           e.preventDefault();
           commit(e.currentTarget);

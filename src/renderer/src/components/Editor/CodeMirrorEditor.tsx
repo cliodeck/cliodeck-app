@@ -43,6 +43,7 @@ import { editorStateKey, editorStates } from './editor-state-memory';
 import { recordAdjudication } from './proposals-ipc';
 import { normalizeInsertPayload } from './insert-payload';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
+
 import { useProjectStore } from '../../stores/projectStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useTheme } from '../../hooks/useTheme';
@@ -193,7 +194,14 @@ const markdownHighlight = HighlightStyle.define([
 ]);
 
 // Raccourcis de formatage historiques de ClioDeck. Placé avant
-// defaultKeymap pour prendre la priorité.
+// defaultKeymap pour prendre la priorité. Les mêmes que le menu natif
+// (`src/main/menu.ts`) : le bloc citation y est Cmd+Option+Q sous macOS,
+// où Cmd+Maj+Q ferme la session : le troisième élément est la touche macOS.
+type FormattingBinding = readonly [
+  string,
+  Parameters<ReturnType<typeof useEditorStore.getState>['insertFormatting']>[0],
+  string?,
+];
 const formattingKeymap = keymap.of(
   (
     [
@@ -203,10 +211,11 @@ const formattingKeymap = keymap.of(
       ["Mod-'", 'citation'],
       ['Mod-Shift-t', 'table'],
       ['Mod-Shift-f', 'footnote'],
-      ['Mod-Shift-q', 'blockquote'],
-    ] as const
-  ).map(([key, type]) => ({
+      ['Mod-Shift-q', 'blockquote', 'Mod-Alt-q'],
+    ] satisfies ReadonlyArray<FormattingBinding>
+  ).map(([key, type, mac]: FormattingBinding) => ({
     key,
+    mac,
     run: () => {
       useEditorStore.getState().insertFormatting(type);
       return true;

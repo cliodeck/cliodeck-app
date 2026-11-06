@@ -170,7 +170,10 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
         },
         {
           label: t('insertBlockquote'),
-          accelerator: 'CmdOrCtrl+Shift+Q',
+          // Sous macOS, Cmd+Maj+Q est « Fermer la session » : le système le prend avant l'app. Sous
+          // Windows, AltGr arrive comme Ctrl+Alt, et AltGr+Q tape `@` sur un clavier allemand : Ctrl+Alt+Q
+          // prendrait celui des clés de citation. Chaque système garde donc un geste qui n'y fait rien d'autre.
+          accelerator: isMac ? 'CmdOrCtrl+Alt+Q' : 'CmdOrCtrl+Shift+Q',
           click: () => {
             mainWindow.webContents.send('menu:insert-blockquote');
           },

@@ -184,7 +184,13 @@ test('ouvrir puis Sauvegarder, sur une configuration à laquelle il manque des c
 
 test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le modèle d’embeddings n’a pas bougé', async () => {
   test.setTimeout(120_000);
-  const dir = userData(AUTHOR);
+  // Ce que l'auteur a écrit lui-même, sans copie ailleurs : Réinitialiser le garde (D12).
+  const written = {
+    customSystemPrompt: 'Réponds en historien, cite tes sources.',
+    useCustomSystemPrompt: true,
+    queryExpansionDictionary: { lettre: ['letter', 'missive'] },
+  };
+  const dir = userData({ ...AUTHOR, rag: { ...AUTHOR.rag, ...written } });
   const session = await launch(dir);
   if (!session) return;
 
@@ -201,7 +207,8 @@ test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le mod�
     await expect(question(window)).toContainText('Aucune réindexation');
     await expect(question(window)).toContainText('Corpus manuscrit et Corpus notes de lecture');
     await expect(question(window)).toContainText('même si vous les aviez désactivés');
-    await expect(question(window)).toContainText('sont effacés sans copie');
+    await expect(question(window)).toContainText('le prompt système personnalisé et le dictionnaire');
+    await expect(question(window)).not.toContainText('effacé');
     await expect(question(window)).not.toContainText('Configuration Zotero');
     await window.keyboard.press('Escape');
     await expect(question(window)).toHaveCount(0);
@@ -222,6 +229,7 @@ test('Réinitialiser, puis relancer : les valeurs par défaut sont lues, le mod�
     const after = readConfig(dir);
     expect(after.rag).toMatchObject({ topK: 10, similarityThreshold: 0.12, chunkingConfig: 'cpuOptimized', useSemanticChunking: false });
     expect(after.rag.systemPromptLanguage).toBe('en');
+    expect(after.rag).toMatchObject(written);
     expect(after.rag).not.toHaveProperty('readingNotesCloudConsent');
     expect(after.llm).toMatchObject({ backend: 'ollama', ollamaChatModel: 'gemma2:2b', generationProvider: 'auto' });
     expect(after.llm).not.toHaveProperty('ollamaNumCtx');

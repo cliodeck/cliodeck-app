@@ -5,6 +5,7 @@ import { X, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { backdropClose } from '../../utils/backdropClose';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useDialogStore } from '../../stores/dialogStore';
+import { typeDecimalPoint } from '../common/NumberInput';
 
 interface RecipeInputDef {
   type: 'string' | 'number' | 'boolean' | 'path';
@@ -217,6 +218,8 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           type="number"
           value={(value as number | string) ?? ''}
           onChange={(e) => setInputs({ ...inputs, [key]: coerce(key, e.target.value) })}
+          // Rien ne dit qu'il est entier : la virgule y devient un point, comme dans les réglages (D21).
+          onKeyDown={typeDecimalPoint}
           // `1e` ou `-` : le navigateur répond `''` sans effacer ce qu'il montre, et Lancer n'enverrait
           // rien sous un champ qui dit autre chose. La saisie reste immédiate pour `paramsToLose` (#196).
           onBlur={(e) => {

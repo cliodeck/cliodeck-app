@@ -13,7 +13,8 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, act, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
@@ -975,5 +976,68 @@ describe('les boutons de la barre d’outils ne dépendent pas de la garde du me
 
     expect(docText()).toBe('Un mot[^1].\n\n[^1]: ');
     expect(document.activeElement).toBe(currentView().contentDOM);
+  });
+});
+
+/**
+ * D5 : un clic sur un bouton de la barre d'outils ne prend pas le focus au texte. Après un clic sur
+ * Enregistrer, Cmd+B ne faisait rien avant un clic dans le texte, et une espace relançait
+ * l'enregistrement. Vrais gestes (`user-event` : le focus suit `mousedown`, sauf s'il est annulé).
+ */
+describe('la barre d’outils laisse le focus au texte', () => {
+  // `user-event` attend entre ses gestes : sous de faux minuteurs, il ne rendrait jamais la main.
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function mountPanel(text = 'Un mot à mettre en gras.\n'): Promise<ReturnType<typeof userEvent.setup>> {
+    disk[DOC] = text;
+    openInStore(DOC);
+    await act(async () => {
+      render(<EditorPanel />);
+    });
+    act(() => currentView().focus());
+    return userEvent.setup({ delay: null });
+  }
+
+  it.each(['toolbar.save', 'toolbar.checkCitations', 'toolbar.renumberFootnotes', 'similarity.title', 'drafts.title'])(
+    'un clic sur « %s » : le texte garde le focus',
+    async (title) => {
+      const user = await mountPanel();
+      expect(document.activeElement).toBe(currentView().contentDOM);
+
+      await user.click(screen.getByTitle(title));
+
+      expect(document.activeElement).toBe(currentView().contentDOM);
+    }
+  );
+
+  it('après Enregistrer, Cmd+B s’applique à la sélection, et une espace s’écrit dans le texte', async () => {
+    const user = await mountPanel();
+    select('gras');
+    useEditorStore.setState({ isDirty: true });
+    await user.click(screen.getByTitle('toolbar.save'));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    const saves = writes.length;
+
+    await user.keyboard('{Control>}b{/Control}');
+    expect(docText()).toBe('Un mot à mettre en **gras**.\n');
+
+    // L'espace va au texte, à la place de la sélection : rien ne s'enregistre de plus.
+    await user.keyboard(' ');
+    expect(docText()).toBe('Un mot à mettre en ** **.\n');
+    expect(writes.length).toBe(saves);
+  });
+
+  it('le clavier garde l’accès : Tab amène au bouton, Entrée l’active', async () => {
+    const user = await mountPanel();
+    const saveButton = screen.getByTitle('toolbar.save');
+    act(() => saveButton.focus());
+    useEditorStore.setState({ isDirty: true });
+
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(writes.map(([path]) => path)).toEqual([DOC]));
+
+    expect(document.activeElement).toBe(saveButton);
   });
 });

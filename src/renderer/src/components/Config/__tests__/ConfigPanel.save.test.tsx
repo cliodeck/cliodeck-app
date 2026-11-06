@@ -909,7 +909,7 @@ describe('le panneau du chat suit ce qui vient de changer', () => {
     expect(topKNumber().value).toBe('7');
   });
 
-  it('Réinitialiser : le prompt personnalisé effacé du disque cesse aussi de partir', async () => {
+  it('Réinitialiser garde le prompt personnalisé, sur le disque comme dans le chat (D12)', async () => {
     const disk = authorDisk();
     Object.assign(disk.rag as Section, { useCustomSystemPrompt: true, customSystemPrompt: 'Réponds comme un archiviste.' });
     installMain(disk);
@@ -918,9 +918,9 @@ describe('le panneau du chat suit ce qui vient de changer', () => {
 
     await confirmReset();
 
-    expect(disk.rag).not.toHaveProperty('customSystemPrompt');
-    expect(params().useCustomSystemPrompt).toBe(false);
-    expect(params().customSystemPrompt).toBeUndefined();
+    expect(disk.rag).toMatchObject({ useCustomSystemPrompt: true, customSystemPrompt: 'Réponds comme un archiviste.' });
+    expect(params().useCustomSystemPrompt).toBe(true);
+    expect(params().customSystemPrompt).toBe('Réponds comme un archiviste.');
   });
 
   it('le raisonnement suit : Enregistrer transmet `ollamaThink` au chat', async () => {

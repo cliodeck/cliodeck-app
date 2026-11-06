@@ -104,7 +104,7 @@
     "savedNotApplied": "{{sections}}: saved, but this setting could not be applied to the open project ({{reason}}). Search and indexing remain stopped: correct this setting, then save again.",
     "resetFailed": "{{sections}}: reset not applied ({{reason}}). Reset again to retry.",
     "otherSectionsReset": "Other sections have been reset.",
-    "resetConfirm": "Reset configuration to default values?\n\nBack to default values: LLM Configuration, RAG configuration, Editor, Manuscript corpus and Reading notes corpus. The generation backend returns to Ollama, with the chat model {{model}}: if Ollama or this model is missing, the chat will show an error until you choose another one. An embedded model already downloaded takes over if Ollama does not respond.\n\nBoth corpora are turned back on, even if you had turned them off: the next time the document is saved, the manuscript text will go to the embedding provider again, and the assistant will be able to consult it again. Sending reading notes to online models is refused again. A custom system prompt and a query expansion dictionary, if any, are erased, with no copy kept.\n\nKept as they are: the embedding model and provider, along with the Ollama URL and, if it computes them, the online backend; the system prompt language; API keys; Zotero.\n\nNo re-indexing is needed and your indexed documents do not change: chunking settings only apply to PDFs re-indexed afterwards.",
+    "resetConfirm": "Reset configuration to default values?\n\nBack to default values: LLM Configuration, RAG configuration, Editor, Manuscript corpus and Reading notes corpus. The generation backend returns to Ollama, with the chat model {{model}}: if Ollama or this model is missing, the chat will show an error until you choose another one. An embedded model already downloaded takes over if Ollama does not respond.\n\nBoth corpora are turned back on, even if you had turned them off: the next time the document is saved, the manuscript text will go to the embedding provider again, and the assistant will be able to consult it again. Sending reading notes to online models is refused again.\n\nKept as they are: the embedding model and provider, along with the Ollama URL and, if it computes them, the online backend; the system prompt language; the custom system prompt and the query expansion dictionary, if any; API keys; Zotero.\n\nNo re-indexing is needed and your indexed documents do not change: chunking settings only apply to PDFs re-indexed afterwards.",
     "language": "Language",
     "selectLanguage": "Select language",
     "tooltipSave": "Save",
@@ -305,8 +305,8 @@
     "notAProject": "“{{file}}” is not a ClioDeck project file. It has not been changed, and whatever was open stays open. To open a project, choose the project.json file that ClioDeck created in its folder.",
     "configUnreadable": {
       "title": "Project settings unreadable",
-      "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection falls back to “Warn” mode, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
-      "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection falls back to “Warn” mode, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
+      "message": "This project's .cliodeck/config.json file cannot be read, often because of a stray comma. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection switches to the strictest mode, “Block”, whatever you chose. Correct this file or check that it is accessible, then reopen the project.",
+      "newerSchema": "This project's .cliodeck/config.json file comes from a newer version of ClioDeck. It has not been changed, and your text is not affected. Until then, the project's MCP servers are unavailable, and the Obsidian vault cannot be linked, unlinked or reindexed. Its already indexed notes are still consulted by the assistant, and source inspection switches to the strictest mode, “Block”, whatever you chose. Update ClioDeck, then reopen the project. There is no need to edit this file by hand."
     },
     "documentOpenError": "This project's document could not be opened",
     "documentOpenUnchanged": "No file was changed.",
@@ -1834,8 +1834,8 @@
     "savedTooltip": "Last saved at {{time}}",
     "unsaved": "Unsaved changes",
     "unsavedTooltip": "The document has changes that are not written to disk.",
-    "notSavedYet": "Not saved",
-    "notSavedYetTooltip": "This document has not been saved since it was opened."
+    "notModified": "Not modified",
+    "notModifiedTooltip": "This document has not been changed since it was opened."
   },
   "security": {
     "revokeTitle": "Key revocation",

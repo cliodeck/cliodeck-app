@@ -107,6 +107,7 @@ describe('flushRenderer', () => {
     { outcome: 'saved' },
     { outcome: 'untitled' },
     { outcome: 'failed', error: 'EACCES' },
+    { outcome: 'failed', error: 'lent', stillWriting: true },
   ])('rend le rapport du renderer tel quel : $outcome', async (report) => {
     const win = new FakeWindow();
     win.answer = report;
@@ -140,6 +141,8 @@ describe('flushRenderer', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(report).toMatchObject({ outcome: 'failed' });
     expect((report as unknown as FlushReport).error).toBeTruthy();
+    // Une page qui a reçu la demande et se tait encore écrit : c'est une écriture lente (D7).
+    expect((report as unknown as FlushReport).stillWriting).toBe(true);
   });
 
   it('la réponse du renderer vaut toujours mieux que le délai : son rapport est rendu tel quel', async () => {
@@ -264,6 +267,12 @@ describe('mayLeaveRenderer', () => {
 
     await expect(leave).resolves.toBe(false);
     expect(electron.showMessageBox).toHaveBeenCalledTimes(1);
+    // Le rapport `stillWriting` du renderer, parti au plafond de 3,5 s, peut arriver après
+    // les 4 s du main sur une machine chargée : le retard se dit comme une écriture lente.
+    const [, options] = electron.showMessageBox.mock.calls[0];
+    expect(options.message).toBe(
+      "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues"
+    );
   });
 
   it.each<FlushReport>([{ outcome: 'clean' }, { outcome: 'saved' }])(
@@ -309,6 +318,43 @@ describe('mayLeaveRenderer', () => {
     expect(options.defaultId).toBe(0);
     // Le texte du système n'apprend rien à l'historien : il va au journal.
     expect(JSON.stringify(options)).not.toContain('EACCES');
+  });
+
+  it('écriture encore en cours (lente, pas en échec) : un texte à part, mot pour mot, et les mêmes boutons (D7)', async () => {
+    const win = new FakeWindow();
+    win.answer = { outcome: 'failed', error: "L'écriture n'a pas répondu à temps", stillWriting: true };
+    answerDialog(0);
+
+    await expect(mayLeaveRenderer(win.asWindow())).resolves.toBe(false);
+
+    const [, options] = electron.showMessageBox.mock.calls[0];
+    expect(options.message).toBe(
+      "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues"
+    );
+    expect(options.buttons).toEqual(['Rester', 'Quitter sans enregistrer']);
+    expect(options.cancelId).toBe(0);
+    expect(options.defaultId).toBe(0);
+  });
+
+  it('témoin : un vrai échec garde son texte, sans « prend du temps »', async () => {
+    const win = new FakeWindow();
+    win.answer = { outcome: 'failed', error: 'EACCES' };
+    await mayLeaveRenderer(win.asWindow());
+    const [, options] = electron.showMessageBox.mock.calls[0];
+    expect(options.message).toContain('pas pu être enregistré');
+    expect(options.message).not.toContain('prend du temps');
+  });
+
+  it.each([
+    ['en', 'taking a while'],
+    ['de', 'dauert'],
+  ] as const)('écriture encore en cours, %s : le texte est traduit', async (language, phrase) => {
+    setLanguage(language);
+    const win = new FakeWindow();
+    win.answer = { outcome: 'failed', stillWriting: true };
+    await mayLeaveRenderer(win.asWindow());
+    const [, options] = electron.showMessageBox.mock.calls[0];
+    expect(options.message).toContain(phrase);
   });
 
   it('Quitter sans enregistrer laisse partir', async () => {

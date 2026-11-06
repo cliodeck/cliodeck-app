@@ -162,7 +162,7 @@ describe('Réinitialiser et le reste', () => {
     expect(after.embeddedModelPath).toBe(FULL.embeddedModelPath);
   });
 
-  it('rag : tout revient, découpage compris, sauf la langue du prompt', () => {
+  it('rag : tout revient, découpage compris, sauf la langue du prompt, le prompt personnalisé et le dictionnaire', () => {
     const { rag } = resetValues({
       rag: {
         ...DEFAULT_CONFIG.rag,
@@ -174,6 +174,7 @@ describe('Réinitialiser et le reste', () => {
         systemPromptLanguage: 'en',
         customSystemPrompt: 'Réponds en vers.',
         useCustomSystemPrompt: true,
+        queryExpansionDictionary: { lettre: ['letter'] },
         readingNotesCloudConsent: true,
         indexManuscript: false,
         numCtx: 8192,
@@ -182,14 +183,16 @@ describe('Réinitialiser et le reste', () => {
       llm: {},
     });
     const after = { ...rag };
-    expect(after).not.toHaveProperty('systemPromptLanguage');
+    // D12 : l'auteur les a écrits, rien ne les recrée. Ce qui ne s'écrit pas reste sur le disque.
+    for (const field of ['systemPromptLanguage', 'customSystemPrompt', 'useCustomSystemPrompt', 'queryExpansionDictionary']) {
+      expect(after, field).not.toHaveProperty(field);
+    }
     expect(after.topK).toBe(DEFAULT_CONFIG.rag.topK);
     expect(after.chunkingConfig).toBe(DEFAULT_CONFIG.rag.chunkingConfig);
     expect(after.useSemanticChunking).toBe(false);
     expect(after.customChunkingEnabled).toBe(false);
     expect(after.customMaxChunkSize).toBe(DEFAULT_CONFIG.rag.customMaxChunkSize);
-    expect(after.useCustomSystemPrompt).toBe(false);
-    for (const field of ['customSystemPrompt', 'readingNotesCloudConsent', 'indexManuscript', 'numCtx', 'champInconnu']) {
+    for (const field of ['readingNotesCloudConsent', 'indexManuscript', 'numCtx', 'champInconnu']) {
       expect(after, field).toHaveProperty(field, undefined);
     }
   });
@@ -285,14 +288,30 @@ describe('la question de Réinitialiser dit la vérité (fr, en, de)', () => {
 
   // Ce que Réinitialiser annule sans que le mot « défaut » le laisse deviner.
   const MUST_SAY: Record<(typeof LOCALES)[number], RegExp[]> = {
-    fr: [/désactivés/, /texte du manuscrit repartira vers le fournisseur d'embeddings/, /prompt système personnalisé/, /dictionnaire/, /sans copie/],
-    en: [/turned them off/, /manuscript text will go to the embedding provider again/, /custom system prompt/, /dictionary/, /no copy/],
-    de: [/deaktiviert/, /Manuskripttext wieder an den Embedding-Anbieter/, /benutzerdefinierter System-Prompt/, /Wörterbuch/, /ohne Kopie/],
+    fr: [/désactivés/, /texte du manuscrit repartira vers le fournisseur d'embeddings/],
+    en: [/turned them off/, /manuscript text will go to the embedding provider again/],
+    de: [/deaktiviert/, /Manuskripttext wieder an den Embedding-Anbieter/],
   };
 
-  it.each(LOCALES)('%s : les refus annulés et le texte effacé sont dits', (name) => {
+  it.each(LOCALES)('%s : les refus annulés sont dits', (name) => {
     const question = locale(name).settings.resetConfirm;
     for (const phrase of MUST_SAY[name]) expect(question).toMatch(phrase);
+  });
+
+  // D12 : le prompt personnalisé et le dictionnaire restent ; la question ne dit plus qu'ils s'effacent.
+  const KEPT: Record<(typeof LOCALES)[number], { kept: RegExp; prompt: RegExp; dictionary: RegExp; erased: RegExp }> = {
+    fr: { kept: /Restent en place :([^]*)/, prompt: /prompt système personnalisé/, dictionary: /dictionnaire/, erased: /effacé|sans copie/ },
+    en: { kept: /Kept as they are:([^]*)/, prompt: /custom system prompt/, dictionary: /dictionary/, erased: /erased|no copy/ },
+    de: { kept: /Unverändert bleiben:([^]*)/, prompt: /benutzerdefinierte[rn]? System-Prompt/, dictionary: /Wörterbuch/, erased: /gelöscht|ohne Kopie/ },
+  };
+
+  it.each(LOCALES)('%s : le prompt personnalisé et le dictionnaire sont dans ce qui reste, et rien ne se dit effacé', (name) => {
+    const question = locale(name).settings.resetConfirm;
+    const { kept, prompt, dictionary, erased } = KEPT[name];
+    const keptPart = question.match(kept)?.[1] ?? '';
+    expect(keptPart).toMatch(prompt);
+    expect(keptPart).toMatch(dictionary);
+    expect(question).not.toMatch(erased);
   });
 
   it.each(LOCALES)('%s : ce qui est refusé et ce qui passe se disent à part', (name) => {

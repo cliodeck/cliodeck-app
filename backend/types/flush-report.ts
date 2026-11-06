@@ -11,4 +11,9 @@ export type FlushOutcome = 'clean' | 'saved' | 'failed' | 'untitled' | 'timeout'
 export interface FlushReport {
   outcome: FlushOutcome;
   error?: string;
+  /**
+   * Avec `failed` : l'écriture n'a pas échoué, elle n'a pas répondu à temps et court encore. Elle
+   * peut aboutir si l'auteur reste ; la question le dit autrement qu'un échec.
+   */
+  stillWriting?: true;
 }

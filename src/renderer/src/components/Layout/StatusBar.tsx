@@ -123,7 +123,8 @@ export const StatusBar: React.FC = () => {
 
       <div className="status-bar__section status-bar__section--right">
         {/* Save state of the current document. Un tampon sans titre modifié compte
-            aussi : son texte n'est nulle part, et rien d'autre ne le dit. */}
+            aussi : son texte n'est nulle part, et rien d'autre ne le dit. Un document
+            tout juste ouvert n'a rien à écrire : « Non modifié », pas « Non enregistré » (D6). */}
         {(filePath || isDirty) && (
           <span
             className={`status-bar__item ${isDirty ? 'status-bar__item--warning' : ''}`}
@@ -134,7 +135,7 @@ export const StatusBar: React.FC = () => {
                   ? t('statusBar.savedTooltip', {
                       time: new Date(lastSavedAt).toLocaleTimeString(),
                     })
-                  : t('statusBar.notSavedYetTooltip')
+                  : t('statusBar.notModifiedTooltip')
             }
           >
             {isDirty
@@ -146,7 +147,7 @@ export const StatusBar: React.FC = () => {
                       minute: '2-digit',
                     }),
                   })
-                : t('statusBar.notSavedYet')}
+                : t('statusBar.notModified')}
           </span>
         )}
 

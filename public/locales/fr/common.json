@@ -104,7 +104,7 @@
     "savedNotApplied": "{{sections}} : enregistré, mais ce réglage n'a pas pu être appliqué au projet ouvert ({{reason}}). La recherche et l'indexation restent à l'arrêt : corrigez ce réglage, puis sauvegardez de nouveau.",
     "resetFailed": "{{sections}} : réinitialisation non appliquée ({{reason}}). Recommencez pour réessayer.",
     "otherSectionsReset": "Les autres sections sont réinitialisées.",
-    "resetConfirm": "Réinitialiser la configuration aux valeurs par défaut ?\n\nReviennent aux valeurs par défaut : Configuration LLM, Configuration RAG, Éditeur, Corpus manuscrit et Corpus notes de lecture. Le backend de génération repasse à Ollama, avec le modèle de chat {{model}} : si Ollama ou ce modèle manque, le chat affichera une erreur tant que vous n'en aurez pas choisi un autre. Un modèle embarqué déjà téléchargé prend le relais si Ollama ne répond pas.\n\nLes deux corpus sont réactivés, même si vous les aviez désactivés : au prochain enregistrement du document, le texte du manuscrit repartira vers le fournisseur d'embeddings, et l'assistant pourra de nouveau le consulter. L'envoi des notes de lecture aux modèles en ligne est de nouveau refusé. Un prompt système personnalisé et un dictionnaire d'expansion de requêtes, s'il y en a, sont effacés sans copie.\n\nRestent en place : le modèle et le fournisseur d'embeddings, avec l'URL Ollama et, s'il les calcule, le backend en ligne ; la langue du prompt système ; les clés d'API ; Zotero.\n\nAucune réindexation n'est nécessaire et vos documents indexés ne changent pas : les réglages de chunking ne valent que pour les PDF réindexés ensuite.",
+    "resetConfirm": "Réinitialiser la configuration aux valeurs par défaut ?\n\nReviennent aux valeurs par défaut : Configuration LLM, Configuration RAG, Éditeur, Corpus manuscrit et Corpus notes de lecture. Le backend de génération repasse à Ollama, avec le modèle de chat {{model}} : si Ollama ou ce modèle manque, le chat affichera une erreur tant que vous n'en aurez pas choisi un autre. Un modèle embarqué déjà téléchargé prend le relais si Ollama ne répond pas.\n\nLes deux corpus sont réactivés, même si vous les aviez désactivés : au prochain enregistrement du document, le texte du manuscrit repartira vers le fournisseur d'embeddings, et l'assistant pourra de nouveau le consulter. L'envoi des notes de lecture aux modèles en ligne est de nouveau refusé.\n\nRestent en place : le modèle et le fournisseur d'embeddings, avec l'URL Ollama et, s'il les calcule, le backend en ligne ; la langue du prompt système ; le prompt système personnalisé et le dictionnaire d'expansion de requêtes, s'il y en a ; les clés d'API ; Zotero.\n\nAucune réindexation n'est nécessaire et vos documents indexés ne changent pas : les réglages de chunking ne valent que pour les PDF réindexés ensuite.",
     "language": "Langue",
     "selectLanguage": "Sélectionner la langue",
     "tooltipSave": "Sauvegarder",
@@ -305,8 +305,8 @@
     "notAProject": "« {{file}} » n'est pas un fichier de projet ClioDeck. Il n'a pas été modifié, et ce qui était ouvert reste ouvert. Pour ouvrir un projet, choisissez le fichier project.json que ClioDeck a créé dans son dossier.",
     "configUnreadable": {
       "title": "Réglages du projet illisibles",
-      "message": "Le fichier .cliodeck/config.json de ce projet ne se lit pas, souvent à cause d'une virgule en trop. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources revient au mode « Avertir », quel que soit votre choix. Corrigez ce fichier ou vérifiez qu'il est accessible, puis rouvrez le projet.",
-      "newerSchema": "Le fichier .cliodeck/config.json de ce projet vient d'une version plus récente de ClioDeck. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources revient au mode « Avertir », quel que soit votre choix. Mettez ClioDeck à jour, puis rouvrez le projet. Inutile de retoucher ce fichier à la main."
+      "message": "Le fichier .cliodeck/config.json de ce projet ne se lit pas, souvent à cause d'une virgule en trop. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources passe au mode le plus strict, « Bloquer », quel que soit votre choix. Corrigez ce fichier ou vérifiez qu'il est accessible, puis rouvrez le projet.",
+      "newerSchema": "Le fichier .cliodeck/config.json de ce projet vient d'une version plus récente de ClioDeck. Il n'a pas été modifié, et votre texte n'est pas concerné. En attendant, les serveurs MCP du projet restent indisponibles, et le vault Obsidian ne peut être ni lié, ni délié, ni réindexé. Ses notes déjà indexées restent consultées par l'assistant, et l'inspection des sources passe au mode le plus strict, « Bloquer », quel que soit votre choix. Mettez ClioDeck à jour, puis rouvrez le projet. Inutile de retoucher ce fichier à la main."
     },
     "documentOpenError": "Le document de ce projet n'a pas pu être ouvert",
     "documentOpenUnchanged": "Aucun fichier n'a été modifié.",
@@ -1834,8 +1834,8 @@
     "savedTooltip": "Dernière sauvegarde à {{time}}",
     "unsaved": "Modifications non enregistrées",
     "unsavedTooltip": "Le document contient des modifications non écrites sur le disque.",
-    "notSavedYet": "Non enregistré",
-    "notSavedYetTooltip": "Ce document n'a pas encore été enregistré depuis son ouverture."
+    "notModified": "Non modifié",
+    "notModifiedTooltip": "Ce document n'a pas été modifié depuis son ouverture."
   },
   "security": {
     "revokeTitle": "Revocation des cles",

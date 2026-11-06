@@ -246,7 +246,8 @@ describe('flushOpenDocument : une écriture sans réponse', () => {
 
     // Le temps de répondre, à un main qui n'attend pas plus.
     await vi.advanceTimersByTimeAsync(MAIN_GIVES_UP_MS - 2000 - 500);
-    expect(report()).toMatchObject({ outcome: 'failed' });
+    // L'écriture n'est pas en échec : elle court encore, et le main le dira autrement (D7).
+    expect(report()).toMatchObject({ outcome: 'failed', stillWriting: true });
     expect(report()?.error).toBeTruthy();
     expect(writes).toEqual([[FILE, 'Texte. Frappe.']]);
   });
