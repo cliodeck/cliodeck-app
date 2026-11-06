@@ -96,4 +96,62 @@ describe('MessageBubble', () => {
     );
     expect(container.querySelector('script')).toBeNull();
   });
+
+  // S16-1-29 : une réponse faite uniquement de balises interdites sort vide de
+  // DOMPurify ; le repli injectait alors le contenu brut comme HTML. La
+  // réponse doit rester du texte échappé, jamais du balisage actif.
+  describe('réponse entièrement filtrée par l\'assainissement', () => {
+    const STYLE = '<style>body{display:none}</style>';
+
+    const renderAssistant = (
+      content: string,
+      extra: Partial<UnifiedMessage> = {},
+      enableNER = false,
+    ) =>
+      render(
+        <MessageBubble
+          message={baseMsg({ id: 'f', role: 'assistant', content, ...extra })}
+          enableNER={enableNER}
+        />,
+      );
+
+    it.each([STYLE, `${STYLE}\n`])(
+      'n\'injecte aucun <style> et montre le texte échappé (%j)',
+      (content) => {
+        const before = getComputedStyle(document.body).display;
+        const { container } = renderAssistant(content);
+        expect(container.querySelector('style')).toBeNull();
+        expect(document.querySelector('style')).toBeNull();
+        expect(getComputedStyle(document.body).display).toBe(before);
+        const md = container.querySelector('.message-markdown');
+        expect(md?.textContent).toBe(content);
+      },
+    );
+
+    it.each([
+      ['meta', '<meta http-equiv="refresh" content="0;url=https://exemple.invalid/">'],
+      ['img', '<img src=x onerror=alert(1)>'],
+      ['iframe', '<iframe></iframe>'],
+    ])('n\'injecte aucun élément %s', (tag, content) => {
+      const { container } = renderAssistant(content);
+      const md = container.querySelector('.message-markdown');
+      expect(md?.querySelector(tag)).toBeNull();
+      expect(md?.textContent).toBe(content);
+    });
+
+    it('garde ces garanties pendant le flux, balise non fermée, NER actif', () => {
+      const content = '<style>body{display:none}';
+      const before = getComputedStyle(document.body).display;
+      const { container } = renderAssistant(content, { pending: true }, true);
+      expect(document.querySelector('style')).toBeNull();
+      expect(getComputedStyle(document.body).display).toBe(before);
+      expect(container.querySelector('.message-markdown')?.textContent).toBe(content);
+    });
+
+    it('garde ces garanties une fois la réponse finie, NER actif', () => {
+      const { container } = renderAssistant(STYLE, {}, true);
+      expect(document.querySelector('style')).toBeNull();
+      expect(container.querySelector('.message-markdown')?.textContent).toBe(STYLE);
+    });
+  });
 });
