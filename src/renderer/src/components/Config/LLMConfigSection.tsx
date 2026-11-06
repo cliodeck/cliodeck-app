@@ -5,6 +5,8 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDialogStore } from '../../stores/dialogStore';
 import { NUM_CTX_MAX, NUM_CTX_MIN } from '../../../../../backend/core/llm/context-windows';
+import { cloudEmbeddingTarget } from '../../../../../backend/core/llm/providers/cloud-embedding-target';
+import { classifyEmbeddingTarget } from '../../../../../backend/security/cloud-consent';
 import { formatContextSize } from '../../utils/context-size';
 import type { LLMConfig } from './ConfigPanel';
 
@@ -75,6 +77,27 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     if (confirmed) handleFieldChange('useCloudEmbeddings', true);
   };
 
+  /**
+   * `useCloudEmbeddings` est un drapeau global, mais le service qui embarque le corpus dépend du
+   * backend : passer de Mistral à OpenAI changeait de destinataire et de modèle (1024 → 1536 d),
+   * passer à Claude revenait à Ollama, sans une question (S17-1-31). Les mêmes questions qu'ailleurs,
+   * donc : l'invalidation des index si la cible change, le consentement si elle est en ligne. Un
+   * refus laisse le backend tel quel.
+   */
+  const handleBackendChange = async (next: LLMConfig['backend']) => {
+    const changed = { ...config, backend: next };
+    const before = cloudEmbeddingTarget(config);
+    const after = cloudEmbeddingTarget(changed);
+    if (before?.provider !== after?.provider || before?.model !== after?.model) {
+      const dialogs = useDialogStore.getState();
+      if (!(await dialogs.showConfirm(t('embeddedEmbedding.providerChangeConfirm')))) return;
+      if (after && classifyEmbeddingTarget(after).isCloud) {
+        if (!(await dialogs.showConfirm(t('llm.cloudEmbeddings.consent')))) return;
+      }
+    }
+    onChange(changed);
+  };
+
   return (
     <CollapsibleSection title={t('llm.title')} defaultExpanded={false}>
       <div className="config-section">
@@ -89,7 +112,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             </label>
             <select
               value={backend}
-              onChange={(e) => handleFieldChange('backend', e.target.value)}
+              onChange={(e) => void handleBackendChange(e.target.value as LLMConfig['backend'])}
               className="config-input"
             >
               <option value="ollama">{t('llm.backend.ollama')}</option>

@@ -28,6 +28,7 @@
 
 import type { LLMConfig as ClioDeckLLMConfig } from '../../../types/config.js';
 import { ProviderRegistry, type RegistryConfig } from './registry.js';
+import { cloudEmbeddingTarget } from './cloud-embedding-target.js';
 
 const OLLAMA_EMBEDDING_DIMS: Record<string, number> = {
   'nomic-embed-text': 768,
@@ -59,33 +60,13 @@ export function clioDeckConfigToRegistryConfig(
     numCtx: cfg.ollamaEmbeddingNumCtx,
   };
 
-  // Cloud-provider embedding fallbacks — only used when `useCloudEmbeddings`
-  // is set AND the selected backend is a cloud provider that supports
-  // embeddings. Anthropic has no embeddings API and stays on Ollama.
-  const cloudEmbedding: RegistryConfig['embedding'] | null =
-    cfg.useCloudEmbeddings && cfg.backend === 'gemini' && cfg.geminiAPIKey
-      ? {
-          provider: 'gemini',
-          model: 'text-embedding-004',
-          dimension: opts.dimensionOverride ?? 768,
-          apiKey: cfg.geminiAPIKey,
-        }
-      : cfg.useCloudEmbeddings && cfg.backend === 'openai' && cfg.openaiAPIKey
-        ? {
-            provider: 'openai-compatible',
-            model: 'text-embedding-3-small',
-            dimension: opts.dimensionOverride ?? 1536,
-            apiKey: cfg.openaiAPIKey,
-            baseUrl: 'https://api.openai.com/v1',
-          }
-        : cfg.useCloudEmbeddings && cfg.backend === 'mistral' && cfg.mistralAPIKey
-          ? {
-              provider: 'mistral',
-              model: 'mistral-embed',
-              dimension: opts.dimensionOverride ?? 1024,
-              apiKey: cfg.mistralAPIKey,
-            }
-          : null;
+  // Embedding cloud : seulement si `useCloudEmbeddings` est coché ET que le
+  // backend a une API d'embeddings (règle dans `cloud-embedding-target.ts`,
+  // que les Réglages consultent aussi). Anthropic reste sur Ollama.
+  const cloudTarget = cloudEmbeddingTarget(cfg);
+  const cloudEmbedding: RegistryConfig['embedding'] | null = cloudTarget
+    ? { ...cloudTarget, dimension: opts.dimensionOverride ?? cloudTarget.dimension }
+    : null;
 
   // Dimension du modèle d'embedding embarqué (nomic-embed-text-v2 : 768).
   const embeddedEmbedding = cfg.embeddedEmbeddingModelPath

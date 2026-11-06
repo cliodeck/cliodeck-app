@@ -441,6 +441,38 @@ export const ConfigPanel: React.FC = () => {
   };
 
   /**
+   * Le consentement des notes de lecture s'écrit tout de suite, sans « Enregistrer » : le main le
+   * relit sur le disque à chaque indexation, et « Réindexer », à côté, part sans attendre. Décocher
+   * puis réindexer envoyait les notes au fournisseur distant (S17-1-23). Seul ce champ part, posé
+   * sur la section relue ; un refus rétablit la case.
+   */
+  const handleReadingNotesConsentChange = async (readingNotesCloudConsent: boolean) => {
+    setRagConfig((current) => ({ ...current, readingNotesCloudConsent }));
+    try {
+      const rag = await window.electron.config.get('rag');
+      const response = await window.electron.config.set('rag', { ...rag, readingNotesCloudConsent });
+      if (response?.success === false && !response.written) throw new Error(response.error);
+      if (snapshot.current) {
+        snapshot.current = {
+          ...snapshot.current,
+          rag: { ...snapshot.current.rag, readingNotesCloudConsent },
+        };
+      }
+      const query = useRAGQueryStore.getState();
+      query.setReadingNotesFlags({
+        indexEnabled: query.readingNotesIndexEnabled,
+        cloudConsent: readingNotesCloudConsent,
+        generationIsCloud: query.generationIsCloud,
+      });
+    } catch (error) {
+      console.error('Failed to save reading notes cloud consent:', error);
+      setRagConfig((current) => ({ ...current, readingNotesCloudConsent: !readingNotesCloudConsent }));
+      setSaveMessageType('error');
+      setSaveMessage(t('settings.saveError'));
+    }
+  };
+
+  /**
    * Après une révocation, les champs de clés montrent encore le masque chargé à l'ouverture. On
    * relit ces champs seuls : le reste du formulaire garde ses modifications non enregistrées, et
    * l'instantané suit, sans quoi le champ vidé passerait pour un effacement à écrire.
@@ -564,9 +596,7 @@ export const ConfigPanel: React.FC = () => {
                 setRagConfig({ ...ragConfig, indexReadingNotes })
               }
               cloudConsent={ragConfig.readingNotesCloudConsent === true}
-              onCloudConsentChange={(readingNotesCloudConsent) =>
-                setRagConfig({ ...ragConfig, readingNotesCloudConsent })
-              }
+              onCloudConsentChange={handleReadingNotesConsentChange}
             />
 
             <EmbeddedLLMSection />

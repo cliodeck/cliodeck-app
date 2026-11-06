@@ -8,6 +8,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type LLMConfig } from '@backend/types/config';
 import { clioDeckConfigToRegistryConfig } from '@backend/core/llm/providers/cliodeck-config-adapter';
+import { cloudEmbeddingTarget } from '@backend/core/llm/providers/cloud-embedding-target';
 import { apiKeyFields, diffSection, FORM_DEFAULTS, resetValues, withFormDefaults } from '../settings-persist';
 
 /** `Required` : ajouter un champ à `LLMConfig` sans le déclarer ici ne compile plus. */
@@ -128,6 +129,13 @@ describe('Réinitialiser et l’index', () => {
     // Anthropic n'a pas d'embeddings : ils restent sur Ollama, le backend peut revenir au défaut.
     expect(cloud('claude', true)).toBe('ollama');
     expect(cloud('gemini', false)).toBe('ollama');
+  });
+
+  it('sans clé, le backend ne calcule pas les embeddings : même règle que l’adaptateur', () => {
+    // Case cochée mais pas de clé : aucun embedding en ligne, le backend peut revenir au défaut.
+    const noKey: LLMConfig = { ...FULL, backend: 'openai', useCloudEmbeddings: true, openaiAPIKey: undefined };
+    expect(cloudEmbeddingTarget(noKey)).toBeNull();
+    expect(afterReset(noKey).backend).toBe(DEFAULT_CONFIG.llm.backend);
   });
 });
 
