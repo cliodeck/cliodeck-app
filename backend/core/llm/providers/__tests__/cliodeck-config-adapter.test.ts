@@ -6,6 +6,7 @@ import {
   isLocalOllamaGeneration,
   resolveActiveChatModel,
 } from '../cliodeck-config-adapter.js';
+import { cloudEmbeddingTarget } from '../cloud-embedding-target.js';
 import type { LLMConfig } from '../../../../types/config.js';
 
 const base: LLMConfig = {
@@ -139,6 +140,38 @@ describe('ClioDeck LLMConfig → Registry adapter (3.2)', () => {
       useCloudEmbeddings: true,
     });
     expect(r.embedding.provider).toBe('ollama');
+  });
+});
+
+describe('cloudEmbeddingTarget — la cible que les Réglages consultent', () => {
+  const keys = {
+    claudeAPIKey: 'sk-ant-test',
+    openaiAPIKey: 'sk-test',
+    mistralAPIKey: 'mst-test',
+    geminiAPIKey: 'AIza-test',
+  };
+  const backends: LLMConfig['backend'][] = ['ollama', 'claude', 'openai', 'mistral', 'gemini'];
+
+  // Les Réglages décident de leurs questions sur cette cible : si elle
+  // divergeait de ce que l'adaptateur construit, la question porterait sur
+  // un autre service que celui qui reçoit le corpus.
+  for (const backend of backends) {
+    for (const useCloudEmbeddings of [true, false]) {
+      it(`concorde avec l'embedding de l'adaptateur (${backend}, cloud ${useCloudEmbeddings})`, () => {
+        const cfg: LLMConfig = { ...base, ...keys, backend, useCloudEmbeddings };
+        const target = cloudEmbeddingTarget(cfg);
+        const embedding = clioDeckConfigToRegistryConfig(cfg).embedding;
+        if (target) {
+          expect(embedding).toEqual(target);
+        } else {
+          expect(embedding.provider).toBe('ollama');
+        }
+      });
+    }
+  }
+
+  it('sans la clé du backend, pas de cible en ligne', () => {
+    expect(cloudEmbeddingTarget({ ...base, backend: 'openai', useCloudEmbeddings: true })).toBeNull();
   });
 });
 
