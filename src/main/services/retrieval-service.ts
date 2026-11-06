@@ -63,7 +63,7 @@ import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { readWorkspaceConfig, WorkspaceConfigError } from '../../../backend/core/workspace/config.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
-import { FallbackEmbeddingProvider } from '../../../backend/core/llm/providers/fallback.js';
+import { resolveEmbeddingProvider } from '../../../backend/core/llm/providers/fallback.js';
 import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
 
 /**
@@ -535,7 +535,8 @@ class RetrievalService {
         'retrieval-service: embedding provider not configured (call configure() first)'
       );
     }
-    return this.embedding instanceof FallbackEmbeddingProvider ? this.embedding.resolve() : this.embedding;
+    // Le repli arrive enveloppé par le décorateur du journal : `resolveEmbeddingProvider` le traverse.
+    return resolveEmbeddingProvider(this.embedding);
   }
 
   private static providerKey(provider: EmbeddingProvider): string {

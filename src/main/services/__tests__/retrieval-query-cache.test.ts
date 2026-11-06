@@ -46,6 +46,8 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
 });
 
 import { FallbackEmbeddingProvider } from '../../../../backend/core/llm/providers/fallback.js';
+import { instrumentEmbedding } from '../../../../backend/core/llm/providers/instrument.js';
+import { setInferenceSink } from '../../../../backend/core/usage-journal/context.js';
 import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
 import { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 import { configManager } from '../config-manager.js';
@@ -123,11 +125,20 @@ describe.skipIf(!sqliteAvailable)('cache des embeddings de requête', () => {
     const embedded = { ...fakeEmbedding('nomic-embed-text-v2'), id: 'embedded-embedding', healthCheck: vi.fn(async () => ({ state: 'ready' })) };
     const question = 'Les grèves de 1936 zxq-repli ?';
 
-    state.current = new FallbackEmbeddingProvider(
-      ollama as unknown as EmbeddingProvider,
-      embedded as unknown as EmbeddingProvider,
-      () => now
+    // Comme le vrai registre (`ProviderRegistry.getEmbedding`) : le repli est enveloppé par le
+    // décorateur du journal d'usage. Sans l'enveloppe, le test ne voyait pas que le correctif ne
+    // s'exécutait jamais en production.
+    state.current = instrumentEmbedding(
+      new FallbackEmbeddingProvider(
+        ollama as unknown as EmbeddingProvider,
+        embedded as unknown as EmbeddingProvider,
+        () => now
+      ),
+      'ollama',
+      'http://127.0.0.1:11434'
     );
+    const journal: Array<{ kind: string; model?: string }> = [];
+    setInferenceSink((input) => journal.push(input));
     retrievalService.configure({ vectorStore: store!, workspaceRoot: project });
     await retrievalService.search({ query: question, sourceType: 'secondary' });
     expect(askedWith(embedded, 'zxq-repli')).toBe(true);
@@ -142,5 +153,11 @@ describe.skipIf(!sqliteAvailable)('cache des embeddings de requête', () => {
     await retrievalService.search({ query: question, sourceType: 'secondary' });
 
     expect(askedWith(ollama, 'zxq-repli')).toBe(true);
+
+    // Les embeddings de requête restent au journal d'usage, sous le modèle qui les a produits.
+    setInferenceSink(undefined);
+    const models = journal.filter((e) => e.kind === 'embedding').map((e) => e.model);
+    expect(models).toContain('nomic-embed-text-v2');
+    expect(models).toContain('nomic-embed-text');
   });
 });

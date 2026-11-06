@@ -188,3 +188,17 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
     await Promise.allSettled([this.primary.dispose(), this.fallback.dispose()]);
   }
 }
+
+/**
+ * Le fournisseur qui servira le prochain `embed` de `provider`. Un repli (`FallbackEmbeddingProvider`)
+ * sonde et choisit ; tout autre fournisseur se désigne lui-même. Passe aussi à travers le décorateur
+ * du journal d'usage (`instrumentEmbedding`), qui enveloppe toujours le repli dans le vrai registre :
+ * un `instanceof FallbackEmbeddingProvider` ne le voit jamais.
+ */
+export function resolveEmbeddingProvider(provider: EmbeddingProvider): Promise<EmbeddingProvider> {
+  const candidate = provider as EmbeddingProvider & { resolve?: unknown };
+  if (typeof candidate.resolve === 'function') {
+    return (candidate as EmbeddingProvider & { resolve(): Promise<EmbeddingProvider> }).resolve();
+  }
+  return Promise.resolve(provider);
+}
