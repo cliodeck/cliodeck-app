@@ -43,6 +43,10 @@ import type {
 import { ObsidianVaultStore } from '../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import { obsidianStorePath } from '../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import {
+  authorTextInVault,
+  isExcludedFromVault,
+} from '../../../backend/integrations/obsidian/author-text-exclusions.js';
+import {
   ManuscriptStore,
   manuscriptStorePath,
 } from '../../../backend/core/vector-store/ManuscriptStore.js';
@@ -1081,7 +1085,7 @@ class RetrievalService {
     const store = this.getVaultStore();
     if (!store) return [];
     const embedding = await this.getQueryEmbedding(query);
-    const hits = store.search(embedding, query, options.topK);
+    const hits = this.withoutAuthorText(store.search(embedding, query, options.topK));
     const mapped = hits.map(
       (h): VaultMappedSearchResult => ({
         chunk: {
@@ -1116,6 +1120,30 @@ class RetrievalService {
     // dans sa langue — une note qui ne franchit pas le seuil n'a rien à dire,
     // et la montrer quand même prendrait la place d'une source pertinente.
     return applyThreshold(mapped, options.threshold, 0);
+  }
+
+  /**
+   * Un coffre qui contient le projet a pu indexer notes de lecture et manuscrit avant que le
+   * lecteur ne les écarte (S09-1-13) : ces extraits ne passent pas par le canal « vault », qui
+   * n'applique ni leur consentement ni leur politique. Chaque note porte le coffre qui l'a
+   * indexée, d'où les exclusions se recalculent sans relire la configuration ni réindexer.
+   */
+  private withoutAuthorText<T extends { note: { relativePath: string; vaultPath?: string } }>(
+    hits: T[]
+  ): T[] {
+    const root = this.workspaceRoot;
+    if (!root) return hits;
+    const byVault = new Map<string, string[]>();
+    return hits.filter((h) => {
+      const vaultPath = h.note.vaultPath;
+      if (!vaultPath) return true;
+      let exclusions = byVault.get(vaultPath);
+      if (!exclusions) {
+        exclusions = authorTextInVault(vaultPath, root);
+        byVault.set(vaultPath, exclusions);
+      }
+      return !isExcludedFromVault(h.note.relativePath, exclusions);
+    });
   }
 
   private async searchManuscript(

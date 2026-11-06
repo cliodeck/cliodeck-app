@@ -80,6 +80,7 @@ import { recipeStepHandlers } from '../../services/recipe-step-handlers.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { BrowserWindow } from 'electron';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
+import { authorTextInVault } from '../../../../backend/integrations/obsidian/author-text-exclusions.js';
 import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import {
   ObsidianVaultIndexer,
@@ -960,7 +961,9 @@ export function setupFusionHandlers(): void {
       const registry = createRegistryFromClioDeckConfig(llmCfg);
       const embedder = registry.getEmbedding();
 
-      const reader = new ObsidianVaultReader(vaultPath);
+      // Un coffre qui contient le projet n'indexe pas le texte de l'auteur : notes de lecture et
+      // manuscrit ont leurs corpus, leur consentement et leur politique (S09-1-13).
+      const reader = new ObsidianVaultReader(vaultPath, [], authorTextInVault(vaultPath, root));
       const store = new ObsidianVaultStore({
         dbPath: obsidianStorePath(root),
         dimension: embedder.dimension,
