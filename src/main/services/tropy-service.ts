@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { TropyReader, TropyItem, PrimarySourceItem } from '../../../backend/integrations/tropy/TropyReader.js';
@@ -6,6 +6,7 @@ import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress, TropyS
 import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/integrations/tropy/tropy-project-identity.js';
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
+import { PopplerNotFoundError } from '../../../backend/integrations/tropy/PDFConverter.js';
 import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
@@ -69,6 +70,15 @@ type IndexableSource = Pick<
  */
 type IndexOutcome = { status: 'written'; chunks: number } | { status: 'superseded' };
 
+/**
+ * Les modèles de langue de Tesseract, téléchargés une fois par langue. Sous
+ * userData : le dossier courant, où tesseract.js les rangeait sans consigne,
+ * est `/` pour l'app lancée du Finder, non inscriptible (S08-1-29).
+ */
+function ocrOptions(): { cachePath: string } {
+  return { cachePath: path.join(app.getPath('userData'), 'tesseract-cache') };
+}
+
 // MARK: - TropyService
 
 class TropyService {
@@ -111,14 +121,18 @@ class TropyService {
     // aussi ouvert (fuite de handle SQLite).
     this.stopWatching();
     await this.ocrPipeline?.dispose();
+    // Le moteur OCR de la synchro aussi : un thread, le WASM de Tesseract et
+    // son modèle, gardés jusqu'à la fermeture de l'app (S08-1-16). Une passe
+    // du projet quitté s'arrête alors en échec, sans l'attendre.
+    await this.tropySync?.dispose();
     this.vectorStore?.close();
     this.currentTPYPath = null;
 
     this.projectPath = projectPath;
     this.vectorStore = new PrimarySourcesVectorStore(projectPath);
-    this.tropySync = new TropySync();
+    this.tropySync = new TropySync(ocrOptions());
     this.watcher = new TropyWatcher();
-    this.ocrPipeline = new TropyOCRPipeline();
+    this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
 
     // Build the typed provider registry from the active config. Same
     // self-contained lifecycle as retrieval-service: dispose any previous
@@ -172,6 +186,7 @@ class TropyService {
   async close(): Promise<void> {
     this.stopWatching();
     await this.ocrPipeline?.dispose();
+    await this.tropySync?.dispose();
     this.vectorStore?.close();
     await this.disposePreviousRegistry();
 
@@ -659,7 +674,7 @@ class TropyService {
   ): Promise<{ success: boolean; text?: string; confidence?: number; error?: string }> {
     try {
       if (!this.ocrPipeline) {
-        this.ocrPipeline = new TropyOCRPipeline();
+        this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
       }
 
       const result = await this.ocrPipeline.performOCR(imagePath, { language });
@@ -684,10 +699,17 @@ class TropyService {
   ): Promise<{ success: boolean; text?: string; confidence?: number; error?: string }> {
     try {
       if (!this.ocrPipeline) {
-        this.ocrPipeline = new TropyOCRPipeline();
+        this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
       }
 
       const result = await this.ocrPipeline.performBatchOCR(imagePaths, { language });
+
+      // Sans Poppler, le texte ne porte que les images : l'écrire remplacerait,
+      // sans le dire, la transcription complète de la source. L'OCR manuel
+      // échoue alors, comme pour une source qui n'a que des PDF.
+      if (result.missingTool === 'poppler') {
+        throw new PopplerNotFoundError();
+      }
 
       return {
         success: true,
@@ -728,7 +750,7 @@ class TropyService {
   ): Promise<{ success: boolean; text?: string; format?: TranscriptionFormat; error?: string }> {
     try {
       if (!this.ocrPipeline) {
-        this.ocrPipeline = new TropyOCRPipeline();
+        this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
       }
 
       // Détecter le format si non spécifié

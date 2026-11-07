@@ -30,12 +30,33 @@ import {
   type TpySpec,
 } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
-import { TropyOCRPipeline } from '../TropyOCRPipeline';
+import { OcrEngineUnavailableError, TropyOCRPipeline } from '../TropyOCRPipeline';
+import { PopplerNotFoundError } from '../PDFConverter';
 
+// Un userData par test, sous la racine temporaire : le dossier des modèles de
+// Tesseract y est créé quand le vrai pipeline tourne.
+const electronPaths = vi.hoisted(() => ({ userData: '' }));
 vi.mock('electron', () => ({
-  app: { commandLine: { hasSwitch: () => false }, getPath: () => os.tmpdir() },
+  app: { commandLine: { hasSwitch: () => false }, getPath: () => electronPaths.userData },
   ipcMain: { handle: () => undefined },
   BrowserWindow: { getAllWindows: () => [] },
+}));
+
+// Le moteur, pour les rares tests qui laissent tourner le vrai pipeline :
+// aucun modèle téléchargé, aucun réseau. Comme tesseract.js 7, `terminate` ne
+// règle pas une reconnaissance en cours.
+const tess = vi.hoisted(() => ({
+  recognize: (_file: string): Promise<{ data: { text: string; confidence: number } }> => new Promise(() => undefined),
+  terminated: 0,
+}));
+vi.mock('tesseract.js', () => ({
+  createWorker: async () => ({
+    recognize: (file: string) => tess.recognize(file),
+    terminate: async () => {
+      tess.terminated++;
+    },
+    reinitialize: async () => undefined,
+  }),
 }));
 
 vi.mock('../../../../src/main/services/config-manager.js', () => ({
@@ -180,6 +201,8 @@ beforeEach(async () => {
   tropyDir = path.join(root, 'tropy');
   fs.mkdirSync(projectDir, { recursive: true });
   fs.mkdirSync(tropyDir, { recursive: true });
+  electronPaths.userData = path.join(root, 'userData');
+  tess.terminated = 0;
   // `performOCROnItem` écarte les photos absentes du disque : il faut de vrais fichiers.
   photoPath = path.join(tropyDir, 'rapport.jpg');
   fs.writeFileSync(photoPath, 'jpeg factice');
@@ -658,6 +681,321 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(ocrSpy).not.toHaveBeenCalledWith([photoPath], expect.anything());
     expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([20]);
   });
+
+  // L06-10 (S08-1-34) : Poppler absent faisait sauter chaque item à PDF — ni
+  // source créée ni métadonnées écrites — et la marche à suivre restait dans
+  // la console.
+  it('Poppler absent : 40 items PDF enregistrés sans OCR, une seule issue au bilan (L06-10, S08-1-34)', async () => {
+    const items: TpyItemSpec[] = Array.from({ length: 40 }, (_, i) => {
+      const pdf = path.join(tropyDir, `liasse-${i + 1}.pdf`);
+      fs.writeFileSync(pdf, '%PDF factice');
+      return { title: `Liasse ${i + 1}`, photos: [{ path: pdf }] };
+    });
+    ocrSpy.mockRejectedValue(new PopplerNotFoundError());
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.success).toBe(true);
+    expect(result.newItems).toBe(40);
+    expect(result.issues).toEqual([{ code: 'poppler-missing' }]);
+    // L'issue tient lieu de message : pas aussi « 1 erreur — voir la console ».
+    expect(result.errors).toEqual([]);
+    const sources = snapshot().sources;
+    expect(sources).toHaveLength(40);
+    expect(sources.every((s) => s.transcription === null)).toBe(true);
+  });
+
+  it('Poppler absent pour le PDF d’un item mixte : l’OCR de ses images est gardé, et le bilan le dit (L06-10, S08-1-14)', async () => {
+    ocrSpy.mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra', missingTool: 'poppler' });
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.issues).toEqual([{ code: 'poppler-missing' }]);
+    expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription).toBe(OCR_TEXT);
+  });
+
+  // Revue de L06-10. Un item qui mêle images et PDF, reconnu par le vrai
+  // `performBatchOCR` : seul `performOCR`, fichier par fichier, est simulé, le
+  // PDF levant PopplerNotFoundError tant que Poppler manque.
+  describe('item mixte, Poppler installé ou retiré entre deux passes (revue L06-10)', () => {
+    const PDF_TEXT = 'TEXTE DU PDF ' + OCR_TEXT;
+    const IMAGE_TEXT = 'TEXTE DE L IMAGE ' + OCR_TEXT;
+    let poppler: boolean;
+    /** Le PDF échoue pour une raison ordinaire (illisible, chiffré), Poppler présent. */
+    let pdfBroken: boolean;
+    let pdfPath: string;
+    let ocrFiles: string[];
+
+    beforeEach(() => {
+      ocrSpy.mockRestore();
+      pdfPath = path.join(tropyDir, 'annexe.pdf');
+      fs.writeFileSync(pdfPath, '%PDF factice');
+      poppler = true;
+      pdfBroken = false;
+      ocrFiles = [];
+      vi.spyOn(TropyOCRPipeline.prototype, 'performOCR').mockImplementation(async (file: string) => {
+        ocrFiles.push(file);
+        if (file.endsWith('.pdf')) {
+          if (!poppler) throw new PopplerNotFoundError();
+          if (pdfBroken) throw new Error('Failed to convert PDF: Syntax Error');
+          return { text: PDF_TEXT, confidence: 90, language: 'fra' };
+        }
+        return { text: IMAGE_TEXT, confidence: 90, language: 'fra' };
+      });
+    });
+
+    async function openMixedItem(): Promise<void> {
+      const item = { ...baseItems()[0], photos: [{ id: 11, path: photoPath }, { id: 12, path: pdfPath }] };
+      await tropyService.openProject(makeTpy(tropyDir, spec({ items: [item] })));
+    }
+
+    /** La marque « en attente de Poppler » de chaque source, dans l'ordre des items. */
+    function pendingMarks(): Array<string | null> {
+      const db = brainDb();
+      try {
+        const rows = db.prepare('SELECT ocr_pending FROM tropy_sources ORDER BY tropy_id').all() as Array<{
+          ocr_pending: string | null;
+        }>;
+        return rows.map((row) => row.ocr_pending);
+      } finally {
+        db.close();
+      }
+    }
+
+    // Le texte des seules images était tenu pour une transcription acquise :
+    // « Lancer l'OCR », une fois Poppler installé, ne reprenait jamais le PDF.
+    it('Poppler installé après une passe sans lui : « Lancer l’OCR », sans forcer, reprend le PDF', async () => {
+      poppler = false;
+      await openMixedItem();
+      const first = await tropyService.sync(syncOptions);
+      expect(first.issues).toEqual([{ code: 'poppler-missing' }]);
+      // Le travail déjà fait est gardé en attendant (S08-1-14).
+      expect(snapshot().sources[0].transcription).toContain('TEXTE DE L IMAGE');
+
+      poppler = true;
+      const second = await tropyService.sync(syncOptions);
+
+      expect(second.issues).toEqual([]);
+      expect(second.transcriptionsWritten).toBe(1);
+      const after = snapshot();
+      expect(after.sources[0].transcription).toContain('TEXTE DU PDF');
+      expect(after.sources[0].transcription).toContain('TEXTE DE L IMAGE');
+      // Les extraits suivent le texte complet.
+      expect(after.chunks.some((c) => c.content.includes('TEXTE DU PDF'))).toBe(true);
+
+      // Reprise faite une fois : la passe d'après ne refait rien.
+      ocrFiles = [];
+      await tropyService.sync(syncOptions);
+      expect(ocrFiles).toEqual([]);
+    });
+
+    // La reprise, Poppler installé, peut rendre exactement le texte partiel déjà
+    // enregistré : un PDF illisible, que le lot saute, ou retiré du disque. Rien
+    // d'autre ne changeant, la marque n'était jamais levée, et chaque « Lancer
+    // l'OCR » refaisait l'OCR de l'item, sans fin, pour un bilan vide.
+    it.each([
+      ['un PDF illisible', 'illisible'],
+      ['un PDF retiré du disque', 'retiré'],
+    ] as const)('Poppler installé, %s : la source sort de l’attente, et la passe suivante ne refait rien', async (_label, mode) => {
+      poppler = false;
+      await openMixedItem();
+      await tropyService.sync(syncOptions);
+      const partial = snapshot().sources[0].transcription;
+      expect(pendingMarks()).toEqual(['poppler']);
+
+      poppler = true;
+      if (mode === 'illisible') pdfBroken = true;
+      else fs.unlinkSync(pdfPath);
+      ocrFiles = [];
+      const second = await tropyService.sync(syncOptions);
+
+      expect(second.issues).toEqual([]);
+      expect(ocrFiles.some((f) => f.endsWith('.jpg'))).toBe(true);
+      // Le même texte qu'avant : rien de neuf à écrire ni à réembarquer.
+      expect(snapshot().sources[0].transcription).toBe(partial);
+      expect(second.transcriptionsWritten).toBe(0);
+      expect(pendingMarks()).toEqual([null]);
+
+      ocrFiles = [];
+      await tropyService.sync(syncOptions);
+      expect(ocrFiles).toEqual([]);
+    });
+
+    // Des notes Tropy qui font une transcription (Q26) tiennent l'OCR à
+    // l'écart sans forcer. Mais « Relancer l'OCR sur toutes les sources » sans
+    // Poppler y mettait le texte des seules images, en attente : la reprise
+    // que promet l'avis ne venait jamais, la source restait partielle.
+    it('notes valant transcription, passe forcée sans Poppler, puis Poppler installé : « Lancer l’OCR » reprend le PDF', async () => {
+      const item = { ...baseItems()[1], photos: [{ id: 21, path: photoPath }, { id: 22, path: pdfPath }] };
+      await tropyService.openProject(makeTpy(tropyDir, spec({ items: [item] })));
+      await tropyService.sync(syncOptions);
+      expect(snapshot().sources[0].transcription_source).toBe('tropy-notes');
+
+      poppler = false;
+      const forced = await tropyService.sync({ ...syncOptions, forceReindex: true });
+      expect(forced.issues).toEqual([{ code: 'poppler-missing' }]);
+      expect(snapshot().sources[0].transcription).toContain('TEXTE DE L IMAGE');
+
+      poppler = true;
+      ocrFiles = [];
+      const resumed = await tropyService.sync(syncOptions);
+
+      expect(ocrFiles.some((f) => f.endsWith('.pdf'))).toBe(true);
+      expect(resumed.transcriptionsWritten).toBe(1);
+      expect(snapshot().sources[0].transcription).toContain('TEXTE DU PDF');
+      expect(pendingMarks()).toEqual([null]);
+
+      ocrFiles = [];
+      await tropyService.sync(syncOptions);
+      expect(ocrFiles).toEqual([]);
+    });
+
+    // Le bilan comptait le PDF resté faute de Poppler parmi les pages passées
+    // à la reconnaissance, puis encore une fois à sa reprise.
+    it('sans Poppler, le bilan ne compte pas le PDF parmi les pages passées à la reconnaissance', async () => {
+      poppler = false;
+      await openMixedItem();
+      const first = await tropyService.sync(syncOptions);
+      expect(first.ocrPerformed).toBe(1);
+
+      poppler = true;
+      const second = await tropyService.sync(syncOptions);
+      expect(second.ocrPerformed).toBe(2);
+    });
+
+    // Une source à reprendre l'est à chaque passe OCR. Tant que Poppler manque,
+    // chaque reprise referait l'OCR de ses images pour le même texte partiel :
+    // une fois la passe sûre que Poppler manque, elle n'y revient plus.
+    it('Poppler toujours absent : la passe ne refait pas, source après source, l’OCR des images déjà reconnues', async () => {
+      poppler = false;
+      const items = [1, 2, 3].map((n) => {
+        const image = path.join(tropyDir, `dossier-${n}.jpg`);
+        const pdf = path.join(tropyDir, `dossier-${n}.pdf`);
+        fs.writeFileSync(image, 'jpeg factice');
+        fs.writeFileSync(pdf, '%PDF factice');
+        return { id: n * 10, title: `Dossier ${n}`, photos: [{ id: n * 10 + 1, path: image }, { id: n * 10 + 2, path: pdf }] };
+      });
+      await tropyService.openProject(makeTpy(tropyDir, spec({ items })));
+      await tropyService.sync(syncOptions);
+      const firstTexts = snapshot().sources.map((s) => s.transcription);
+      expect(firstTexts.every((t) => t?.includes('TEXTE DE L IMAGE'))).toBe(true);
+
+      ocrFiles = [];
+      const second = await tropyService.sync(syncOptions);
+
+      // La première source reprise apprend à la passe que Poppler manque.
+      expect(ocrFiles.filter((f) => f.endsWith('.jpg'))).toHaveLength(1);
+      expect(second.issues).toEqual([{ code: 'poppler-missing' }]);
+      expect(snapshot().sources.map((s) => s.transcription)).toEqual(firstTexts);
+
+      // Poppler installé : toutes sont reprises.
+      poppler = true;
+      await tropyService.sync(syncOptions);
+      expect(snapshot().sources.every((s) => s.transcription?.includes('TEXTE DU PDF'))).toBe(true);
+    });
+
+    // « Relancer l'OCR sur toutes les sources » sans Poppler remplaçait une
+    // transcription complète par celle des seules images : le texte du PDF,
+    // déjà acquis, était perdu.
+    it('passe forcée sans Poppler : la transcription complète déjà acquise est gardée', async () => {
+      await openMixedItem();
+      await tropyService.sync(syncOptions);
+      const before = snapshot();
+      expect(before.sources[0].transcription).toContain('TEXTE DU PDF');
+
+      poppler = false;
+      const forced = await tropyService.sync({ ...syncOptions, forceReindex: true });
+
+      expect(forced.success).toBe(true);
+      expect(forced.issues).toEqual([{ code: 'poppler-missing' }]);
+      expect(forced.errors).toEqual([]);
+      expect(forced.transcriptionsWritten).toBe(0);
+      const after = snapshot();
+      expect(after.sources[0].transcription).toBe(before.sources[0].transcription);
+      expect(after.chunks.map((c) => c.content)).toEqual(before.chunks.map((c) => c.content));
+    });
+
+    // Une transcription écrite par l'historien sur une source en attente de
+    // Poppler n'est plus « à reprendre » : la passe suivante ne l'écrase pas.
+    it('une transcription saisie entre-temps n’est pas reprise par l’OCR', async () => {
+      poppler = false;
+      await openMixedItem();
+      await tropyService.sync(syncOptions);
+      const id = snapshot().sources[0].id;
+      const manual = 'Transcription revue par l’historienne, images et annexe comprises. ' + OCR_TEXT;
+      expect((await tropyService.updateSourceTranscription(id, manual, 'manual')).success).toBe(true);
+
+      poppler = true;
+      ocrFiles = [];
+      await tropyService.sync(syncOptions);
+
+      expect(ocrFiles).toEqual([]);
+      expect(snapshot().sources[0]).toMatchObject({ transcription: manual, transcription_source: 'manual' });
+    });
+
+    // L'OCR manuel de la carte suit le même chemin : sans Poppler, il rendait
+    // `success: true` avec le texte des seules images, que le store écrivait
+    // à la place de la transcription complète, sans rien en dire.
+    it('OCR manuel sans Poppler sur un item mixte : un échec, pas un texte partiel', async () => {
+      poppler = false;
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await tropyService.performBatchOCR([photoPath, pdfPath], 'fra');
+
+      expect(result.success).toBe(false);
+      expect(result.text).toBeUndefined();
+      expect(result.error).toMatch(/Poppler/);
+    });
+  });
+
+  // L06-10 (S08-1-29) : chaque item retentait un moteur qui ne pouvait pas
+  // démarrer — avec le vrai tesseract.js, la passe restait bloquée au premier.
+  it('modèle de langue introuvable : une tentative pour la passe, items enregistrés, une issue (L06-10, S08-1-29)', async () => {
+    const third = path.join(tropyDir, 'affiche.jpg');
+    fs.writeFileSync(third, 'jpeg factice');
+    const items = [...baseItems(), { id: 30, title: 'Affiche du syndicat', photos: [{ id: 31, path: third }] }];
+    ocrSpy.mockRejectedValue(
+      new OcrEngineUnavailableError('frk', 'Network error while fetching frk.traineddata.gz. Response code: 404')
+    );
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync({ ...syncOptions, ocrLanguage: 'frk' });
+
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    expect(result.newItems).toBe(3);
+    expect(result.issues).toEqual([{ code: 'ocr-language-unavailable', language: 'frk' }]);
+    expect(result.errors).toEqual([]);
+    expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([10, 20, 30]);
+  });
+
+  // L06-10 (S08-1-16) : le moteur de la synchro n'était jamais libéré au
+  // changement de projet. Le libérer ne doit pas laisser la passe du projet
+  // quitté attendre pour toujours une reconnaissance que `terminate` ne règle pas.
+  it('un changement de projet pendant l’OCR : moteur libéré, et la passe quittée échoue franchement (L06-10, S08-1-16)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    ocrSpy.mockRestore();
+    const recognizing = vi.fn((_file: string) => new Promise<never>(() => undefined));
+    tess.recognize = recognizing;
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    const running = tropyService.sync(syncOptions);
+    await vi.waitFor(() => expect(recognizing).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+
+    const otherProject = path.join(root, 'projet-B');
+    fs.mkdirSync(otherProject);
+    await tropyService.init(otherProject);
+
+    const result = await running;
+    expect(tess.terminated).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/OCR engine stopped/);
+  }, 30_000);
 
   it('un paquet .tropy en WAL se synchronise comme un .tpy nu', async () => {
     const pkg = makeTpy(tropyDir, {

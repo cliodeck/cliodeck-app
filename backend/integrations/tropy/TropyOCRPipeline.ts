@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { RecognizeResult, Worker as TesseractWorker } from 'tesseract.js';
 import { PDFConverter, PopplerNotFoundError, createPDFConverter } from './PDFConverter';
 
 // MARK: - Types
@@ -13,7 +14,24 @@ export interface OCRResult {
   text: string;
   confidence: number; // 0-100
   language: string;
+  /** Un outil manquait pour une partie des fichiers (les PDF, sans Poppler) : le texte est partiel. */
+  missingTool?: 'poppler';
 }
+
+export interface TropyOCRPipelineOptions {
+  /**
+   * Dossier des modèles de langue. Sans lui, tesseract.js les range dans le
+   * dossier courant du processus : `/` pour l'app lancée du Finder, non
+   * inscriptible — le modèle se retéléchargeait à chaque session, et une salle
+   * d'archives sans réseau suffisait à bloquer l'OCR (S08-1-29).
+   */
+  cachePath?: string;
+  /** Délai laissé au moteur pour démarrer, téléchargement du modèle compris. */
+  initTimeoutMs?: number;
+}
+
+/** De quoi télécharger un modèle de quelques Mo sur un réseau lent ; hors ligne, l'échec arrive bien avant. */
+const DEFAULT_INIT_TIMEOUT_MS = 120_000;
 
 export type TranscriptionFormat = 'transkribus' | 'alto' | 'page-xml' | 'plain-text';
 
@@ -28,6 +46,38 @@ export interface TranscriptionImportResult {
   pageCount?: number;
 }
 
+/**
+ * Le moteur ne démarre pas dans cette langue : modèle introuvable (hors ligne,
+ * ou langue que le dépôt de tesseract.js ne connaît pas), ou aucune réponse
+ * dans le délai. Vaut pour tous les fichiers de la passe, pas pour un seul.
+ */
+export class OcrEngineUnavailableError extends Error {
+  constructor(
+    readonly language: string,
+    reason: unknown
+  ) {
+    super(`OCR engine unavailable for language "${language}": ${String(reason)}`);
+    this.name = 'OcrEngineUnavailableError';
+  }
+}
+
+/** Le moteur a été arrêté (changement de projet) pendant qu'on l'attendait. */
+export class OcrEngineStoppedError extends Error {
+  constructor() {
+    super('OCR engine stopped while recognition was in progress (project closed)');
+    this.name = 'OcrEngineStoppedError';
+  }
+}
+
+/** Le dossier courant, ou rien s'il a disparu (un terminal dans un dossier supprimé). */
+function currentDirectory(): string | null {
+  try {
+    return process.cwd();
+  } catch {
+    return null;
+  }
+}
+
 // MARK: - TropyOCRPipeline
 
 /**
@@ -37,9 +87,24 @@ export interface TranscriptionImportResult {
  * - Import de transcriptions externes (Transkribus, ALTO, PAGE XML, texte brut)
  */
 export class TropyOCRPipeline {
-  private tesseractWorker: any = null;
+  private tesseractWorker: TesseractWorker | null = null;
   private isInitialized: boolean = false;
   private pdfConverter: PDFConverter | null = null;
+  private readonly cachePath: string | undefined;
+  private readonly initTimeoutMs: number;
+  /** Où tesseract.js rangeait les modèles sans `cachePath` : son `'.'`, le dossier courant. */
+  private readonly legacyCachePath = currentDirectory();
+  /**
+   * Ce qui attend le moteur (démarrage, reconnaissance) : `dispose` le rejette.
+   * `terminate` ne règle pas une reconnaissance en cours, qui attendrait sinon
+   * pour toujours un moteur détruit.
+   */
+  private readonly waiting = new Set<() => void>();
+
+  constructor(options: TropyOCRPipelineOptions = {}) {
+    this.cachePath = options.cachePath;
+    this.initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT_MS;
+  }
 
   /**
    * Initialise le worker Tesseract.js
@@ -48,26 +113,81 @@ export class TropyOCRPipeline {
   async initialize(language: string = 'fra'): Promise<void> {
     if (this.isInitialized) return;
 
-    try {
-      // Import dynamique de tesseract.js pour éviter les erreurs si non installé
-      const Tesseract = await import('tesseract.js');
+    const Tesseract = await import('tesseract.js');
+    this.prepareCache();
 
-      this.tesseractWorker = await Tesseract.createWorker(language, 1, {
-        logger: (m: any) => {
-          if (m.status === 'recognizing text') {
-            // Progress tracking si nécessaire
-          }
+    // Modèle introuvable (hors ligne, langue absente du dépôt) : tesseract.js 7
+    // ne règle jamais la promesse de `createWorker` et ne prévient que
+    // `errorHandler` — sans lui, il lève dans son gestionnaire de messages.
+    // D'où le gestionnaire, et un délai contre le silence.
+    this.tesseractWorker = await new Promise<TesseractWorker>((resolve, reject) => {
+      let settled = false;
+      const settle = (outcome: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.waiting.delete(stop);
+        outcome();
+      };
+      const fail = (reason: unknown): void => settle(() => reject(new OcrEngineUnavailableError(language, reason)));
+      const stop = (): void => settle(() => reject(new OcrEngineStoppedError()));
+      const timer = setTimeout(() => fail(`no answer after ${this.initTimeoutMs} ms`), this.initTimeoutMs);
+      this.waiting.add(stop);
+
+      Tesseract.createWorker(language, 1, {
+        cachePath: this.cachePath,
+        errorHandler: (data: unknown) => {
+          if (settled) console.warn('⚠️ Tesseract:', data);
+          else fail(data);
         },
-      });
-
-      this.isInitialized = true;
-      console.log(`🔤 OCR initialized with language: ${language}`);
-    } catch (error) {
-      console.error('Failed to initialize Tesseract:', error);
-      throw new Error(
-        'Tesseract.js not available. Please install with: npm install tesseract.js'
+      }).then(
+        (worker) => {
+          // Arrivé après le délai ou l'arrêt : personne ne s'en servira.
+          if (settled) void worker.terminate();
+          else settle(() => resolve(worker));
+        },
+        fail
       );
+    });
+
+    this.isInitialized = true;
+    console.log(`🔤 OCR initialized with language: ${language}`);
+  }
+
+  /**
+   * Crée le dossier des modèles. À sa création — une fois, à la première OCR
+   * après la mise à jour —, il reprend les modèles déjà téléchargés dans
+   * l'ancien emplacement, sans les déplacer : un historien qui les avait n'a
+   * pas besoin du réseau pour sa première OCR. Un modèle repris mais illisible
+   * est effacé par tesseract.js, qui le retélécharge ensuite.
+   */
+  private prepareCache(): void {
+    const cachePath = this.cachePath;
+    if (!cachePath || fs.existsSync(cachePath)) return;
+    try {
+      fs.mkdirSync(cachePath, { recursive: true });
+      if (!this.legacyCachePath || path.resolve(this.legacyCachePath) === path.resolve(cachePath)) return;
+      for (const { code } of SUPPORTED_OCR_LANGUAGES) {
+        const legacy = path.join(this.legacyCachePath, `${code}.traineddata`);
+        if (fs.existsSync(legacy) && fs.statSync(legacy).isFile()) {
+          fs.copyFileSync(legacy, path.join(cachePath, `${code}.traineddata`));
+        }
+      }
+    } catch (error) {
+      // Sans dossier, tesseract.js retélécharge le modèle : l'OCR marche en ligne.
+      console.warn(`⚠️ OCR model cache unavailable (${cachePath}):`, error);
     }
+  }
+
+  /** Reconnaissance qui s'arrête avec le moteur au lieu de l'attendre. */
+  private recognize(filePath: string): Promise<RecognizeResult> {
+    const worker = this.tesseractWorker;
+    if (!worker) return Promise.reject(new OcrEngineStoppedError());
+    return new Promise((resolve, reject) => {
+      const stop = (): void => reject(new OcrEngineStoppedError());
+      this.waiting.add(stop);
+      worker.recognize(filePath).then(resolve, reject).finally(() => this.waiting.delete(stop));
+    });
   }
 
   /**
@@ -126,7 +246,7 @@ export class TropyOCRPipeline {
     try {
       console.log(`🔍 Performing OCR on: ${path.basename(filePath)}`);
 
-      const result = await this.tesseractWorker.recognize(filePath);
+      const result = await this.recognize(filePath);
 
       return {
         text: result.data.text.trim(),
@@ -134,6 +254,7 @@ export class TropyOCRPipeline {
         language,
       };
     } catch (error) {
+      if (error instanceof OcrEngineStoppedError) throw error;
       console.error('OCR failed:', error);
       throw new Error(`OCR failed for ${filePath}: ${error}`);
     }
@@ -150,6 +271,12 @@ export class TropyOCRPipeline {
     const language = options?.language || 'fra';
 
     console.log(`📄 Performing OCR on PDF: ${path.basename(pdfPath)}`);
+
+    // Le moteur avant la conversion : un moteur qui ne démarre pas ne coûte
+    // pas une conversion à 300 dpi par PDF (S08-1-13).
+    if (!this.isInitialized) {
+      await this.initialize(language);
+    }
 
     // Initialiser le convertisseur PDF
     const pdfConverter = await this.getPDFConverter();
@@ -168,30 +295,28 @@ export class TropyOCRPipeline {
 
     console.log(`📄 PDF converted: ${tempResult.pageCount} pages`);
 
-    // Initialiser Tesseract si nécessaire
-    if (!this.isInitialized) {
-      await this.initialize(language);
-    }
-
     // Effectuer l'OCR sur chaque page
     const results: OCRResult[] = [];
-    for (let i = 0; i < tempResult.files.length; i++) {
-      const pageFile = tempResult.files[i];
-      try {
-        console.log(`  📃 OCR page ${i + 1}/${tempResult.files.length}`);
-        const result = await this.tesseractWorker.recognize(pageFile);
-        results.push({
-          text: result.data.text.trim(),
-          confidence: result.data.confidence,
-          language,
-        });
-      } catch (error) {
-        console.warn(`⚠️ OCR failed for page ${i + 1}: ${error}`);
+    try {
+      for (let i = 0; i < tempResult.files.length; i++) {
+        const pageFile = tempResult.files[i];
+        try {
+          console.log(`  📃 OCR page ${i + 1}/${tempResult.files.length}`);
+          const result = await this.recognize(pageFile);
+          results.push({
+            text: result.data.text.trim(),
+            confidence: result.data.confidence,
+            language,
+          });
+        } catch (error) {
+          if (error instanceof OcrEngineStoppedError) throw error;
+          console.warn(`⚠️ OCR failed for page ${i + 1}: ${error}`);
+        }
       }
+    } finally {
+      // Nettoyer les fichiers temporaires, même sur un moteur arrêté
+      pdfConverter.cleanupTempFiles(tempResult.tempDir);
     }
-
-    // Nettoyer les fichiers temporaires
-    pdfConverter.cleanupTempFiles(tempResult.tempDir);
 
     if (results.length === 0) {
       return {
@@ -227,6 +352,7 @@ export class TropyOCRPipeline {
     // Deduplicate file paths to avoid processing the same file multiple times
     const uniquePaths = [...new Set(filePaths)];
     const results: OCRResult[] = [];
+    let popplerMissing: PopplerNotFoundError | null = null;
 
     for (const filePath of uniquePaths) {
       try {
@@ -234,15 +360,23 @@ export class TropyOCRPipeline {
         const result = await this.performOCR(filePath, options);
         results.push(result);
       } catch (error) {
+        // Un moteur qui ne démarre pas, ou arrêté, vaut pour tous les fichiers.
+        if (error instanceof OcrEngineUnavailableError || error instanceof OcrEngineStoppedError) throw error;
         // Poppler manquant n'est pas l'échec d'un fichier : c'est un outil
-        // absent pour tout le corpus. On laisse remonter, pour que la
-        // synchronisation le dise au lieu de conclure « pas de texte » (#138).
-        if (error instanceof PopplerNotFoundError) throw error;
+        // absent pour tous les PDF. Les images passent quand même ; l'outil
+        // manquant est rendu avec elles, pour que la synchronisation le dise
+        // au lieu de conclure « pas de texte » (#138).
+        if (error instanceof PopplerNotFoundError) {
+          popplerMissing = error;
+          continue;
+        }
         console.warn(`Skipping ${filePath}: ${error}`);
       }
     }
 
     if (results.length === 0) {
+      // Rien de reconnu : l'outil manquant est tout ce qu'il y a à dire.
+      if (popplerMissing) throw popplerMissing;
       return {
         text: '',
         confidence: 0,
@@ -259,6 +393,7 @@ export class TropyOCRPipeline {
       text: combinedText,
       confidence: avgConfidence,
       language: results[0].language,
+      ...(popplerMissing ? { missingTool: 'poppler' as const } : {}),
     };
   }
 
@@ -318,11 +453,18 @@ export class TropyOCRPipeline {
    * Termine le worker Tesseract
    */
   async dispose(): Promise<void> {
-    if (this.tesseractWorker) {
-      await this.tesseractWorker.terminate();
-      this.tesseractWorker = null;
-      this.isInitialized = false;
-      console.log('🔤 OCR worker terminated');
+    const waiting = [...this.waiting];
+    this.waiting.clear();
+    try {
+      if (this.tesseractWorker) {
+        const worker = this.tesseractWorker;
+        this.tesseractWorker = null;
+        this.isInitialized = false;
+        await worker.terminate();
+        console.log('🔤 OCR worker terminated');
+      }
+    } finally {
+      for (const stop of waiting) stop();
     }
   }
 
@@ -491,7 +633,9 @@ export const SUPPORTED_OCR_LANGUAGES = [
   { code: 'heb', name: 'Hébreu' },
   { code: 'ara', name: 'Arabe' },
   { code: 'frm', name: 'Moyen français' },
-  { code: 'deu_frak', name: 'Allemand Fraktur' },
+  // 'frk' : le modèle LSTM du Fraktur. 'deu_frak' n'existait que dans les
+  // données 3.x de Tesseract, absentes du dépôt de tesseract.js (S08-2-3).
+  { code: 'frk', name: 'Allemand Fraktur' },
 ] as const;
 
 export type SupportedOCRLanguage = (typeof SUPPORTED_OCR_LANGUAGES)[number]['code'];

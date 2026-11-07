@@ -5,7 +5,13 @@ import {
   PrimarySourceItem,
   PrimarySourcePhoto,
 } from './TropyReader';
-import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
+import {
+  TropyOCRPipeline,
+  TranscriptionFormat,
+  OcrEngineStoppedError,
+  OcrEngineUnavailableError,
+  type TropyOCRPipelineOptions,
+} from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
 import { isNoteTranscription } from './note-transcription';
 import { transcriptionSourceOfFormat } from './transcription-provenance';
@@ -63,7 +69,28 @@ export type TropySyncIssue =
       /** Aucun fournisseur d'embeddings : `sources` sources attendent leurs extraits. */
       code: 'no-embedding-provider';
       sources: number;
+    }
+  | {
+      /**
+       * Poppler est absent : les PDF n'ont pas pu passer à l'OCR. Les items
+       * sont enregistrés, et leurs images, s'ils en ont, reconnues (#138) ;
+       * leur transcription reste « à reprendre » (`ocrPending`), et la passe
+       * OCR suivante, sans forcer, reconnaît leurs PDF. Une transcription
+       * complète déjà acquise n'est pas remplacée par ce texte partiel.
+       */
+      code: 'poppler-missing';
+    }
+  | {
+      /**
+       * Le moteur OCR n'a pas démarré dans cette langue (modèle introuvable
+       * hors ligne, ou aucune réponse) : la passe a continué sans OCR.
+       */
+      code: 'ocr-language-unavailable';
+      language: string;
     };
+
+/** Ce qui a empêché l'OCR d'un item, et vaudra pour toute la passe. */
+type OcrBlocked = Extract<TropySyncIssue, { code: 'poppler-missing' | 'ocr-language-unavailable' }>;
 
 export interface TropySyncResult {
   success: boolean;
@@ -121,9 +148,9 @@ export class TropySync {
   private ocrPipeline: TropyOCRPipeline;
   private nerService: NERService | null = null;
 
-  constructor() {
+  constructor(ocrOptions?: TropyOCRPipelineOptions) {
     this.reader = new TropyReader();
-    this.ocrPipeline = new TropyOCRPipeline();
+    this.ocrPipeline = new TropyOCRPipeline(ocrOptions);
   }
 
   /**
@@ -241,8 +268,14 @@ export class TropySync {
         keepId: binding.linkedId,
       });
 
-      // Un outil absent ne se signale qu'une fois (#138).
-      let popplerReported = false;
+      // Un outil ou un modèle de langue absent vaut pour toute la passe : il
+      // se dit une fois au bilan (#138). Un moteur qui ne démarre pas n'est
+      // pas relancé item après item : chaque tentative attendrait son délai et
+      // laisserait un thread derrière elle.
+      let ocrUnavailable = false;
+      // Poppler manque pour cette passe : une source qui l'attend n'en
+      // obtiendrait que le texte de ses images, qu'elle a déjà.
+      let popplerMissing = false;
 
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
@@ -258,7 +291,12 @@ export class TropySync {
         });
 
         try {
-          const processResult = await this.processItem(item, vectorStore, options);
+          const processResult = await this.processItem(
+            item,
+            vectorStore,
+            ocrUnavailable ? { ...options, performOCR: false } : options,
+            { popplerMissing }
+          );
 
           if (processResult.isNew) {
             result.newItems++;
@@ -271,19 +309,17 @@ export class TropySync {
           result.ocrPerformed += processResult.ocrCount;
           result.transcriptionsImported += processResult.transcriptionCount;
           if (processResult.transcriptionWritten) result.transcriptionsWritten++;
-        } catch (error) {
-          if (error instanceof PopplerNotFoundError) {
-            // Dit une fois, pas par item : c'est un outil manquant, pas
-            // l'échec d'une source. La synchronisation continue — les
-            // transcriptions déjà présentes et les images, elles, passent.
-            if (!popplerReported) {
-              result.errors.push(error.message);
-              popplerReported = true;
-              console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
-            }
-            result.skippedItems++;
-            continue;
+
+          const blocked = processResult.ocrBlocked;
+          if (blocked) {
+            if (!result.issues.some((issue) => issue.code === blocked.code)) result.issues.push(blocked);
+            if (blocked.code === 'ocr-language-unavailable') ocrUnavailable = true;
+            if (blocked.code === 'poppler-missing') popplerMissing = true;
           }
+        } catch (error) {
+          // Le moteur arrêté sous la passe (changement de projet) : elle
+          // s'arrête là, en échec, au lieu de traiter le reste sans lui.
+          if (error instanceof OcrEngineStoppedError) throw error;
           result.errors.push(`Item ${item.id} (${item.title}): ${error}`);
         }
       }
@@ -325,7 +361,9 @@ export class TropySync {
   private async processItem(
     item: TropyItem,
     vectorStore: PrimarySourcesVectorStore,
-    options: TropySyncOptions
+    options: TropySyncOptions,
+    /** Ce que la passe sait déjà : Poppler manque. */
+    pass: { popplerMissing: boolean } = { popplerMissing: false }
   ): Promise<{
     isNew: boolean;
     isUpdated: boolean;
@@ -333,6 +371,8 @@ export class TropySync {
     transcriptionCount: number;
     /** Une transcription qui n'existait pas a été écrite pour cette source. */
     transcriptionWritten: boolean;
+    /** L'OCR n'a pas pu se faire, faute d'outil ou de modèle : l'item est enregistré sans. */
+    ocrBlocked?: OcrBlocked;
   }> {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
@@ -340,6 +380,7 @@ export class TropySync {
     let ocrConfidence: number | undefined;
     let ocrCount = 0;
     let transcriptionCount = 0;
+    let ocrBlocked: OcrBlocked | undefined;
 
     // 1. Les notes Tropy (item, photos, sélections), sans les métadonnées.
     //    Une note ne remplace JAMAIS un corps — OCR, transcription de la
@@ -363,12 +404,18 @@ export class TropySync {
     // courte un commentaire, qui ne doit pas empêcher l'OCR.
     const notesAreTranscription = isNoteTranscription(notesText.length);
 
-    // Un corps acquis par une passe précédente. Une source 'tropy-notes'
+    // Un corps obtenu par une passe précédente. Une source 'tropy-notes'
     // n'en a pas : son texte se recalcule à partir des notes de Tropy.
     const existingBody =
       existingSource?.transcriptionSource !== 'tropy-notes'
         ? (existingSource?.transcription ?? '').trim()
         : '';
+    // Un corps partiel — les images d'un item dont les PDF attendaient
+    // Poppler — n'est pas acquis : il se garde, mais l'OCR suivant le reprend.
+    // Tenu pour acquis, il empêchait à jamais de reconnaître le PDF.
+    const existingPending = existingSource?.ocrPending ?? null;
+    const acquiredBody = existingPending ? '' : existingBody;
+    let ocrPending: 'poppler' | null = null;
 
     // 2. Chercher des transcriptions externes (Transkribus, etc.)
     if (options.transcriptionDirectory && (!notesAreTranscription || options.forceReindex)) {
@@ -395,15 +442,29 @@ export class TropySync {
     if (
       !transcription &&
       options.performOCR &&
-      (options.forceReindex || (existingBody.length === 0 && !notesAreTranscription))
+      (options.forceReindex ||
+        // Une source en attente de Poppler se reprend quoi qu'en disent ses
+        // notes : le texte de ses images est déjà là, il manque celui de ses
+        // PDF. Une passe forcée sans Poppler en met une à notes-transcription
+        // en attente, et l'avis promet la reprise sans forcer.
+        existingPending === 'poppler' ||
+        (acquiredBody.length === 0 && !notesAreTranscription)) &&
+      // Poppler toujours absent : la reprendre referait l'OCR de ses images
+      // pour le même texte partiel.
+      !(existingPending === 'poppler' && pass.popplerMissing)
     ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
-      const ocrResult = await this.performOCROnItem(item, options.ocrLanguage);
-      if (ocrResult) {
+      const { result: ocrResult, blocked } = await this.performOCROnItem(item, options.ocrLanguage);
+      ocrBlocked = blocked;
+      // Un texte partiel ne remplace pas une transcription acquise : « Relancer
+      // l'OCR sur toutes les sources » sans Poppler y perdait le texte du PDF.
+      // Le cas est alors celui d'un OCR qui n'a pas pu se faire.
+      if (ocrResult && !(ocrResult.missingTool && acquiredBody)) {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
         ocrConfidence = ocrResult.confidence;
         ocrCount = ocrResult.photoCount;
+        ocrPending = ocrResult.missingTool ?? null;
       }
     }
 
@@ -417,6 +478,8 @@ export class TropySync {
       transcription = existingSource.transcription ?? '';
       transcriptionSource = existingSource.transcriptionSource;
       ocrConfidence = existingSource.ocrConfidence;
+      // Le corps gardé tel quel reste ce qu'il était : partiel ou acquis.
+      ocrPending = existingPending;
     } else if (!transcription && notesText) {
       transcription = this.reader.extractItemText(item);
       transcriptionSource = 'tropy-notes';
@@ -497,9 +560,15 @@ export class TropySync {
     const isUpdated =
       !!existingSource && (options.forceReindex || itemChanged || chunksStale);
 
-    // Initialiser `notes_text` réécrit la ligne sans que rien n'ait changé
-    // pour l'historien : ce n'est pas une mise à jour.
-    let saved = isNew || isUpdated || notesUninitialized;
+    // La marque d'attente peut changer seule : la reprise, Poppler installé,
+    // rend le même texte partiel quand le PDF est illisible ou a quitté le
+    // disque. Ne pas l'écrire faisait refaire l'OCR de l'item à chaque passe.
+    const pendingChanged = !!existingSource && ocrPending !== existingPending;
+
+    // Initialiser `notes_text`, ou lever la seule marque d'attente, réécrit la
+    // ligne sans que rien n'ait changé pour l'historien : ce n'est pas une
+    // mise à jour.
+    let saved = isNew || isUpdated || notesUninitialized || pendingChanged;
     if (saved) {
       // La ligne et l'invalidation de ses extraits dans une même transaction :
       // une ligne nouvelle gardée sans elle passerait pour acquise à la passe
@@ -521,6 +590,10 @@ export class TropySync {
         }
 
         vectorStore.saveSource(sourceItem);
+        // `saveSource` n'y touche pas : la marque change avec le corps, ici.
+        if (ocrPending !== existingPending) {
+          vectorStore.setOcrPending(sourceItem.id, ocrPending);
+        }
 
         // Les chunks appartiennent au texte qu'ils découpent. La phase
         // d'embeddings ne traite que les sources sans chunk : sans cette
@@ -543,6 +616,7 @@ export class TropySync {
       transcriptionCount: saved ? transcriptionCount : 0,
       transcriptionWritten:
         saved && transcription.length > 0 && (isNew || transcriptionChanged),
+      ocrBlocked,
     };
   }
 
@@ -595,37 +669,60 @@ export class TropySync {
   private async performOCROnItem(
     item: TropyItem,
     language: string
-  ): Promise<{ text: string; photoCount: number; confidence: number } | null> {
+  ): Promise<{
+    /** `missingTool` : le texte ne porte que les images, les PDF attendent Poppler. */
+    result: { text: string; photoCount: number; confidence: number; missingTool?: 'poppler' } | null;
+    blocked?: OcrBlocked;
+  }> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
     const uniquePaths = [...new Set(item.photos.map((p) => p.path))];
     const photoPaths = uniquePaths.filter((p) => fs.existsSync(p));
 
     if (photoPaths.length === 0) {
-      return null;
+      return { result: null };
     }
 
     console.log(`📸 [TROPY-SYNC] Item ${item.id}: ${item.photos.length} photo entries -> ${photoPaths.length} unique files`);
 
     try {
       const result = await this.ocrPipeline.performBatchOCR(photoPaths, { language });
+      // Poppler absent pour les PDF de l'item : ses images, elles, sont reconnues.
+      const blocked: OcrBlocked | undefined = result.missingTool ? { code: 'poppler-missing' } : undefined;
 
       // Ne retourner que si on a un texte significatif
       if (result.text.trim().length > 50 && result.confidence > 30) {
         return {
-          text: result.text,
-          photoCount: photoPaths.length,
-          confidence: result.confidence,
+          result: {
+            text: result.text,
+            // Sans Poppler, les PDF n'ont pas été reconnus : ils ne se
+            // comptent pas, et se compteront à leur reprise.
+            photoCount: result.missingTool
+              ? photoPaths.filter((p) => !this.ocrPipeline.isPDF(p)).length
+              : photoPaths.length,
+            confidence: result.confidence,
+            ...(result.missingTool ? { missingTool: result.missingTool } : {}),
+          },
+          blocked,
         };
       }
+      return { result: null, blocked };
     } catch (error) {
-      // Un outil absent concerne tout le corpus : on le remonte à l'appelant,
-      // qui l'inscrit une fois au bilan, plutôt que de conclure « pas de
-      // texte » item après item (#138).
-      if (error instanceof PopplerNotFoundError) throw error;
+      // Un outil ou un modèle absent concerne tout le corpus : l'item est
+      // enregistré sans OCR, et l'appelant l'inscrit une fois au bilan, plutôt
+      // que de conclure « pas de texte » item après item (#138).
+      if (error instanceof PopplerNotFoundError) {
+        console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
+        return { result: null, blocked: { code: 'poppler-missing' } };
+      }
+      if (error instanceof OcrEngineUnavailableError) {
+        console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
+        return { result: null, blocked: { code: 'ocr-language-unavailable', language: error.language } };
+      }
+      if (error instanceof OcrEngineStoppedError) throw error;
       console.warn(`OCR failed for item ${item.id}:`, error);
     }
 
-    return null;
+    return { result: null };
   }
 
   /**

@@ -58,6 +58,30 @@ describe('boucle d’OCR', () => {
     );
   });
 
+  // L06-10 (S08-1-14) : le PDF levait au milieu du lot, et les images déjà
+  // reconnues étaient jetées avec lui.
+  it('12 images et un PDF : le texte des images est rendu, l’outil manquant dit avec lui (L06-10)', async () => {
+    const pipeline = new TropyOCRPipeline();
+    const performOCR = vi
+      .spyOn(pipeline as unknown as { performOCR(p: string): Promise<unknown> }, 'performOCR')
+      .mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('.pdf')) throw new PopplerNotFoundError();
+        return { text: `Texte de ${filePath.split('/').pop()}`, confidence: 80, language: 'fra' };
+      });
+    const images = Array.from({ length: 12 }, (_, i) => `/archives/dossier-x/vue-${i + 1}.jpg`);
+
+    const result = await pipeline.performBatchOCR([
+      ...images.slice(0, 6),
+      '/archives/dossier-x/annexe.pdf',
+      ...images.slice(6),
+    ]);
+
+    expect(performOCR).toHaveBeenCalledTimes(13);
+    expect(result.text).toContain('Texte de vue-1.jpg');
+    expect(result.text).toContain('Texte de vue-12.jpg');
+    expect(result.missingTool).toBe('poppler');
+  });
+
   it('un échec ordinaire sur un fichier reste ignoré, les autres sont traités', async () => {
     const pipeline = new TropyOCRPipeline();
     vi.spyOn(pipeline as unknown as { performOCR(p: string): Promise<unknown> }, 'performOCR').mockImplementation(
