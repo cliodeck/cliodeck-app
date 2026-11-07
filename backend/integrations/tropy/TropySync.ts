@@ -465,15 +465,21 @@ export class TropySync {
     // pour l'historien : ce n'est pas une mise à jour.
     const saved = isNew || isUpdated || notesUninitialized;
     if (saved) {
-      vectorStore.saveSource(sourceItem);
+      // La ligne et l'invalidation de ses extraits dans une même transaction :
+      // une ligne nouvelle gardée sans elle passerait pour acquise à la passe
+      // suivante, qui n'invaliderait plus rien (L06-5). Rien d'asynchrone
+      // dedans : OCR et transcriptions sont déjà obtenus.
+      vectorStore.transaction(() => {
+        vectorStore.saveSource(sourceItem);
 
-      // Les chunks appartiennent au texte qu'ils découpent. La phase
-      // d'embeddings ne traite que les sources sans chunk : sans cette
-      // invalidation, une transcription corrigée resterait invisible au RAG,
-      // qui continuerait de répondre sur l'ancienne.
-      if (chunksStale) {
-        vectorStore.deleteChunks(sourceItem.id);
-      }
+        // Les chunks appartiennent au texte qu'ils découpent. La phase
+        // d'embeddings ne traite que les sources sans chunk : sans cette
+        // invalidation, une transcription corrigée resterait invisible au RAG,
+        // qui continuerait de répondre sur l'ancienne.
+        if (chunksStale) {
+          vectorStore.deleteChunks(sourceItem.id);
+        }
+      });
     }
 
     return {
