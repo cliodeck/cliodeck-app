@@ -199,11 +199,14 @@ export class TropySync {
         }
       }
 
-      // Enregistrer le projet Tropy dans le VectorStore, avec son identité :
-      // un projet déplacé met à jour son chemin. Sans quatrième argument : la
+      // Enregistrer le projet Tropy dans le VectorStore, avec son identité,
+      // sur la ligne que la garde a reconnue : un projet déplacé met à jour
+      // son chemin, même reconnu par la seule empreinte. Sans `autoSync` : la
       // synchro n'a pas à décider de la surveillance automatique, elle la
       // préserve.
-      vectorStore.bindTropyProject(tpyPath, result.projectName, binding.identity.projectId);
+      vectorStore.bindTropyProject(tpyPath, result.projectName, binding.identity.projectId, {
+        keepId: binding.linkedId,
+      });
 
       // Un outil absent ne se signale qu'une fois (#138).
       let popplerReported = false;

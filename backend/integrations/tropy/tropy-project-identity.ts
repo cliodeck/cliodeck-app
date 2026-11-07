@@ -34,6 +34,15 @@ export interface TropyBindingAssessment {
   /** Le projet candidat, tel que lu dans son .tpy. */
   identity: TropyProjectIdentity;
   decision: TropyBindingDecision;
+  /**
+   * La ligne de `tropy_projects` que le candidat met à jour (`keepId` de
+   * `bindTropyProject`) : celle du projet lié quand la décision le reconnaît
+   * (`same`, `adopt-legacy`). Sans elle, un projet reconnu par la seule
+   * empreinte — ligne sans uuid, ancien chemin disparu — recevait une ligne
+   * neuve, et perdait sa surveillance. `null` sinon : une première liaison
+   * ne reprend pas les réglages d'un autre projet.
+   */
+  linkedId: string | null;
 }
 
 /** Couples (id de photo, nom de fichier) comparés pour une ligne d'avant `project_uuid`. */
@@ -205,13 +214,12 @@ export function assessTropyBinding(
     }
   }
 
-  return {
-    identity,
-    decision: decideTropyBinding(linked, sourceCount, {
-      projectId: identity.projectId,
-      pathIsSameFile,
-      linkedPathExists,
-      photoMatchRatio,
-    }),
-  };
+  const decision = decideTropyBinding(linked, sourceCount, {
+    projectId: identity.projectId,
+    pathIsSameFile,
+    linkedPathExists,
+    photoMatchRatio,
+  });
+  const recognised = decision.kind === 'same' || decision.kind === 'adopt-legacy';
+  return { identity, decision, linkedId: recognised ? (linked?.id ?? null) : null };
 }

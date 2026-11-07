@@ -324,8 +324,17 @@ describe.skipIf(!sqliteAvailable)('le projet lié, déplacé ou d’avant la col
     const tpyA = await linkAndSyncA();
     await tropyService.close();
     dropProjectUuidColumn();
+    // La surveillance activée doit survivre au déplacement : c'est la ligne
+    // liée qui est mise à jour, pas une ligne neuve qui la remplace.
+    const db = new Database(brainPath());
+    try {
+      db.prepare('UPDATE tropy_projects SET auto_sync = 1').run();
+    } finally {
+      db.close();
+    }
     const moved = moveProject(tpyA, 'Disque externe');
     const before = snapshot();
+    expect(before.projects).toHaveLength(1);
 
     // L'ancien chemin n'existe plus : init ne peut rien compléter.
     await tropyService.init(projectDir);
@@ -335,7 +344,12 @@ describe.skipIf(!sqliteAvailable)('le projet lié, déplacé ou d’avant la col
 
     const after = snapshot();
     expect(after.projects).toHaveLength(1);
-    expect(after.projects[0]).toMatchObject({ tpy_path: moved, project_uuid: 'projet-tropy-A' });
+    expect(after.projects[0]).toMatchObject({
+      id: before.projects[0].id,
+      tpy_path: moved,
+      project_uuid: 'projet-tropy-A',
+      auto_sync: 1,
+    });
     expect(after.chunks).toEqual(before.chunks);
     expect(ocrSpy).toHaveBeenCalledTimes(1);
   });

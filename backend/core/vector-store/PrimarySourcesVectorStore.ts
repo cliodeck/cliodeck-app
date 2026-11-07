@@ -1442,9 +1442,13 @@ export class PrimarySourcesVectorStore {
    * Enregistre le projet Tropy lié, une fois la garde d'identité passée
    * (`decideTropyBinding`) : il n'en reste qu'une ligne.
    *
-   * La ligne gardée est celle du même projet (`project_uuid`), sinon celle du
-   * même fichier, avec son identifiant et sa surveillance : un projet déplacé
-   * met à jour son chemin au lieu d'ajouter une ligne. Les autres sont
+   * La ligne gardée, avec son identifiant et sa surveillance, est celle que
+   * la garde a reconnue (`keepId`) ; à défaut, celle du même projet
+   * (`project_uuid`), puis celle du même fichier si elle n'appartient pas à
+   * un autre projet connu. Un projet déplacé met ainsi à jour son chemin au
+   * lieu d'ajouter une ligne — y compris quand seule l'empreinte des photos
+   * l'a reconnu, ligne sans uuid et ancien chemin disparu : ni l'uuid ni le
+   * chemin ne la retrouvent alors, d'où `keepId`. Les autres lignes sont
    * retirées — doublons de l'ancien `saveTropyProject`, qui en ajoutait une
    * par synchronisation, ou lien d'un projet sans source qu'on remplace. Le
    * « une seule » est la règle de la v1 (Q25), décidée ici et dans
@@ -1458,13 +1462,17 @@ export class PrimarySourcesVectorStore {
    * `autoSync` omis = « ne touche pas au réglage existant » : la synchro
    * appelle cette méthode à chaque passe et ne doit pas désactiver au
    * passage la surveillance que l'utilisateur a activée.
+   *
+   * `keepId` omis sur une première liaison, exprès : un autre projet ne
+   * reprend pas les réglages de la ligne qu'il remplace.
    */
   bindTropyProject(
     tpyPath: string,
     name: string,
     projectUuid: string | null,
-    autoSync?: boolean
+    options: { autoSync?: boolean; keepId?: string | null } = {}
   ): string {
+    const { autoSync, keepId } = options;
     const now = new Date().toISOString();
 
     const rows = this.db
@@ -1474,8 +1482,13 @@ export class PrimarySourcesVectorStore {
       .all() as Array<{ id: string; tpy_path: string; project_uuid: string | null; auto_sync: number }>;
 
     const kept =
+      (keepId ? rows.find((r) => r.id === keepId) : undefined) ??
       (projectUuid ? rows.find((r) => r.project_uuid === projectUuid) : undefined) ??
-      rows.find((r) => sameFile(r.tpy_path, tpyPath));
+      rows.find(
+        (r) =>
+          (!projectUuid || !r.project_uuid || r.project_uuid === projectUuid) &&
+          sameFile(r.tpy_path, tpyPath)
+      );
     const id = kept?.id ?? randomUUID();
     const effectiveAutoSync = autoSync ?? kept?.auto_sync === 1;
 
