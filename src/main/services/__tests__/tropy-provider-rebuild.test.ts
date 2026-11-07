@@ -57,7 +57,11 @@ vi.mock('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js', ()
     close = () => undefined;
   },
 }));
-vi.mock('../../../../backend/integrations/tropy/TropySync.js', () => ({ TropySync: class {} }));
+vi.mock('../../../../backend/integrations/tropy/TropySync.js', () => ({
+  TropySync: class {
+    dispose = async () => undefined;
+  },
+}));
 vi.mock('../../../../backend/integrations/tropy/TropyWatcher.js', () => ({
   TropyWatcher: class {
     removeAllListeners = () => undefined;

@@ -5,7 +5,13 @@ import {
   PrimarySourceItem,
   PrimarySourcePhoto,
 } from './TropyReader';
-import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
+import {
+  TropyOCRPipeline,
+  TranscriptionFormat,
+  OcrEngineStoppedError,
+  OcrEngineUnavailableError,
+  type TropyOCRPipelineOptions,
+} from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
 import { isNoteTranscription } from './note-transcription';
 import { transcriptionSourceOfFormat } from './transcription-provenance';
@@ -63,7 +69,25 @@ export type TropySyncIssue =
       /** Aucun fournisseur d'embeddings : `sources` sources attendent leurs extraits. */
       code: 'no-embedding-provider';
       sources: number;
+    }
+  | {
+      /**
+       * Poppler est absent : les PDF n'ont pas pu passer à l'OCR. Les items
+       * sont enregistrés, et leurs images, s'ils en ont, reconnues (#138).
+       */
+      code: 'poppler-missing';
+    }
+  | {
+      /**
+       * Le moteur OCR n'a pas démarré dans cette langue (modèle introuvable
+       * hors ligne, ou aucune réponse) : la passe a continué sans OCR.
+       */
+      code: 'ocr-language-unavailable';
+      language: string;
     };
+
+/** Ce qui a empêché l'OCR d'un item, et vaudra pour toute la passe. */
+type OcrBlocked = Extract<TropySyncIssue, { code: 'poppler-missing' | 'ocr-language-unavailable' }>;
 
 export interface TropySyncResult {
   success: boolean;
@@ -121,9 +145,9 @@ export class TropySync {
   private ocrPipeline: TropyOCRPipeline;
   private nerService: NERService | null = null;
 
-  constructor() {
+  constructor(ocrOptions?: TropyOCRPipelineOptions) {
     this.reader = new TropyReader();
-    this.ocrPipeline = new TropyOCRPipeline();
+    this.ocrPipeline = new TropyOCRPipeline(ocrOptions);
   }
 
   /**
@@ -241,8 +265,11 @@ export class TropySync {
         keepId: binding.linkedId,
       });
 
-      // Un outil absent ne se signale qu'une fois (#138).
-      let popplerReported = false;
+      // Un outil ou un modèle de langue absent vaut pour toute la passe : il
+      // se dit une fois au bilan (#138). Un moteur qui ne démarre pas n'est
+      // pas relancé item après item : chaque tentative attendrait son délai et
+      // laisserait un thread derrière elle.
+      let ocrUnavailable = false;
 
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
@@ -258,7 +285,11 @@ export class TropySync {
         });
 
         try {
-          const processResult = await this.processItem(item, vectorStore, options);
+          const processResult = await this.processItem(
+            item,
+            vectorStore,
+            ocrUnavailable ? { ...options, performOCR: false } : options
+          );
 
           if (processResult.isNew) {
             result.newItems++;
@@ -271,19 +302,16 @@ export class TropySync {
           result.ocrPerformed += processResult.ocrCount;
           result.transcriptionsImported += processResult.transcriptionCount;
           if (processResult.transcriptionWritten) result.transcriptionsWritten++;
-        } catch (error) {
-          if (error instanceof PopplerNotFoundError) {
-            // Dit une fois, pas par item : c'est un outil manquant, pas
-            // l'échec d'une source. La synchronisation continue — les
-            // transcriptions déjà présentes et les images, elles, passent.
-            if (!popplerReported) {
-              result.errors.push(error.message);
-              popplerReported = true;
-              console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
-            }
-            result.skippedItems++;
-            continue;
+
+          const blocked = processResult.ocrBlocked;
+          if (blocked) {
+            if (!result.issues.some((issue) => issue.code === blocked.code)) result.issues.push(blocked);
+            if (blocked.code === 'ocr-language-unavailable') ocrUnavailable = true;
           }
+        } catch (error) {
+          // Le moteur arrêté sous la passe (changement de projet) : elle
+          // s'arrête là, en échec, au lieu de traiter le reste sans lui.
+          if (error instanceof OcrEngineStoppedError) throw error;
           result.errors.push(`Item ${item.id} (${item.title}): ${error}`);
         }
       }
@@ -333,6 +361,8 @@ export class TropySync {
     transcriptionCount: number;
     /** Une transcription qui n'existait pas a été écrite pour cette source. */
     transcriptionWritten: boolean;
+    /** L'OCR n'a pas pu se faire, faute d'outil ou de modèle : l'item est enregistré sans. */
+    ocrBlocked?: OcrBlocked;
   }> {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
@@ -340,6 +370,7 @@ export class TropySync {
     let ocrConfidence: number | undefined;
     let ocrCount = 0;
     let transcriptionCount = 0;
+    let ocrBlocked: OcrBlocked | undefined;
 
     // 1. Les notes Tropy (item, photos, sélections), sans les métadonnées.
     //    Une note ne remplace JAMAIS un corps — OCR, transcription de la
@@ -398,7 +429,8 @@ export class TropySync {
       (options.forceReindex || (existingBody.length === 0 && !notesAreTranscription))
     ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
-      const ocrResult = await this.performOCROnItem(item, options.ocrLanguage);
+      const { result: ocrResult, blocked } = await this.performOCROnItem(item, options.ocrLanguage);
+      ocrBlocked = blocked;
       if (ocrResult) {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
@@ -543,6 +575,7 @@ export class TropySync {
       transcriptionCount: saved ? transcriptionCount : 0,
       transcriptionWritten:
         saved && transcription.length > 0 && (isNew || transcriptionChanged),
+      ocrBlocked,
     };
   }
 
@@ -595,37 +628,54 @@ export class TropySync {
   private async performOCROnItem(
     item: TropyItem,
     language: string
-  ): Promise<{ text: string; photoCount: number; confidence: number } | null> {
+  ): Promise<{
+    result: { text: string; photoCount: number; confidence: number } | null;
+    blocked?: OcrBlocked;
+  }> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
     const uniquePaths = [...new Set(item.photos.map((p) => p.path))];
     const photoPaths = uniquePaths.filter((p) => fs.existsSync(p));
 
     if (photoPaths.length === 0) {
-      return null;
+      return { result: null };
     }
 
     console.log(`📸 [TROPY-SYNC] Item ${item.id}: ${item.photos.length} photo entries -> ${photoPaths.length} unique files`);
 
     try {
       const result = await this.ocrPipeline.performBatchOCR(photoPaths, { language });
+      // Poppler absent pour les PDF de l'item : ses images, elles, sont reconnues.
+      const blocked: OcrBlocked | undefined = result.missingTool ? { code: 'poppler-missing' } : undefined;
 
       // Ne retourner que si on a un texte significatif
       if (result.text.trim().length > 50 && result.confidence > 30) {
         return {
-          text: result.text,
-          photoCount: photoPaths.length,
-          confidence: result.confidence,
+          result: {
+            text: result.text,
+            photoCount: photoPaths.length,
+            confidence: result.confidence,
+          },
+          blocked,
         };
       }
+      return { result: null, blocked };
     } catch (error) {
-      // Un outil absent concerne tout le corpus : on le remonte à l'appelant,
-      // qui l'inscrit une fois au bilan, plutôt que de conclure « pas de
-      // texte » item après item (#138).
-      if (error instanceof PopplerNotFoundError) throw error;
+      // Un outil ou un modèle absent concerne tout le corpus : l'item est
+      // enregistré sans OCR, et l'appelant l'inscrit une fois au bilan, plutôt
+      // que de conclure « pas de texte » item après item (#138).
+      if (error instanceof PopplerNotFoundError) {
+        console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
+        return { result: null, blocked: { code: 'poppler-missing' } };
+      }
+      if (error instanceof OcrEngineUnavailableError) {
+        console.warn(`⚠️ [TROPY-SYNC] ${error.message}`);
+        return { result: null, blocked: { code: 'ocr-language-unavailable', language: error.language } };
+      }
+      if (error instanceof OcrEngineStoppedError) throw error;
       console.warn(`OCR failed for item ${item.id}:`, error);
     }
 
-    return null;
+    return { result: null };
   }
 
   /**

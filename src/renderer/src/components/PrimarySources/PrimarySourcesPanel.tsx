@@ -149,8 +149,9 @@ export const PrimarySourcesPanel: React.FC = () => {
     }
   };
 
-  // Ce que la dernière synchro n'a pas pu indexer : un état qui peut durer
-  // (Ollama arrêté), dit ici plutôt qu'en alerte à chaque passe.
+  // Ce que la dernière synchro n'a pas pu faire, indexer ou passer à l'OCR :
+  // un état qui peut durer (Ollama arrêté, Poppler absent, pas de réseau pour
+  // un modèle de langue), dit ici plutôt qu'en alerte à chaque passe.
   const pendingIndexing = syncIssues.filter((issue) => !isSyncRefusal(issue));
 
   const handleToggleWatching = async () => {

@@ -191,8 +191,10 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
                 </p>
               )}
               {/* Ce que la passe n'a pas pu faire : des transcriptions
-                  enregistrées que l'assistant ne cite pas encore, ou le refus
-                  d'un autre projet Tropy. Dit ici, sans alerte. */}
+                  enregistrées que l'assistant ne cite pas encore, Poppler ou un
+                  modèle de langue absent (avec la marche à suivre, à la place
+                  de « voir la console »), ou le refus d'un autre projet Tropy.
+                  Dit ici, sans alerte. */}
               {(outcome.issues ?? []).map((issue) => (
                 <p key={issue.code} className="ocr-summary__warning">
                   <AlertTriangle size={14} strokeWidth={1.5} />

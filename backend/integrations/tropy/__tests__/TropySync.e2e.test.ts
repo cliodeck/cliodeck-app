@@ -30,12 +30,33 @@ import {
   type TpySpec,
 } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
-import { TropyOCRPipeline } from '../TropyOCRPipeline';
+import { OcrEngineUnavailableError, TropyOCRPipeline } from '../TropyOCRPipeline';
+import { PopplerNotFoundError } from '../PDFConverter';
 
+// Un userData par test, sous la racine temporaire : le dossier des modèles de
+// Tesseract y est créé quand le vrai pipeline tourne.
+const electronPaths = vi.hoisted(() => ({ userData: '' }));
 vi.mock('electron', () => ({
-  app: { commandLine: { hasSwitch: () => false }, getPath: () => os.tmpdir() },
+  app: { commandLine: { hasSwitch: () => false }, getPath: () => electronPaths.userData },
   ipcMain: { handle: () => undefined },
   BrowserWindow: { getAllWindows: () => [] },
+}));
+
+// Le moteur, pour les rares tests qui laissent tourner le vrai pipeline :
+// aucun modèle téléchargé, aucun réseau. Comme tesseract.js 7, `terminate` ne
+// règle pas une reconnaissance en cours.
+const tess = vi.hoisted(() => ({
+  recognize: (_file: string): Promise<{ data: { text: string; confidence: number } }> => new Promise(() => undefined),
+  terminated: 0,
+}));
+vi.mock('tesseract.js', () => ({
+  createWorker: async () => ({
+    recognize: (file: string) => tess.recognize(file),
+    terminate: async () => {
+      tess.terminated++;
+    },
+    reinitialize: async () => undefined,
+  }),
 }));
 
 vi.mock('../../../../src/main/services/config-manager.js', () => ({
@@ -180,6 +201,8 @@ beforeEach(async () => {
   tropyDir = path.join(root, 'tropy');
   fs.mkdirSync(projectDir, { recursive: true });
   fs.mkdirSync(tropyDir, { recursive: true });
+  electronPaths.userData = path.join(root, 'userData');
+  tess.terminated = 0;
   // `performOCROnItem` écarte les photos absentes du disque : il faut de vrais fichiers.
   photoPath = path.join(tropyDir, 'rapport.jpg');
   fs.writeFileSync(photoPath, 'jpeg factice');
@@ -658,6 +681,87 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(ocrSpy).not.toHaveBeenCalledWith([photoPath], expect.anything());
     expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([20]);
   });
+
+  // L06-10 (S08-1-34) : Poppler absent faisait sauter chaque item à PDF — ni
+  // source créée ni métadonnées écrites — et la marche à suivre restait dans
+  // la console.
+  it('Poppler absent : 40 items PDF enregistrés sans OCR, une seule issue au bilan (L06-10, S08-1-34)', async () => {
+    const items: TpyItemSpec[] = Array.from({ length: 40 }, (_, i) => {
+      const pdf = path.join(tropyDir, `liasse-${i + 1}.pdf`);
+      fs.writeFileSync(pdf, '%PDF factice');
+      return { title: `Liasse ${i + 1}`, photos: [{ path: pdf }] };
+    });
+    ocrSpy.mockRejectedValue(new PopplerNotFoundError());
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.success).toBe(true);
+    expect(result.newItems).toBe(40);
+    expect(result.issues).toEqual([{ code: 'poppler-missing' }]);
+    // L'issue tient lieu de message : pas aussi « 1 erreur — voir la console ».
+    expect(result.errors).toEqual([]);
+    const sources = snapshot().sources;
+    expect(sources).toHaveLength(40);
+    expect(sources.every((s) => s.transcription === null)).toBe(true);
+  });
+
+  it('Poppler absent pour le PDF d’un item mixte : l’OCR de ses images est gardé, et le bilan le dit (L06-10, S08-1-14)', async () => {
+    ocrSpy.mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra', missingTool: 'poppler' });
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.issues).toEqual([{ code: 'poppler-missing' }]);
+    expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription).toBe(OCR_TEXT);
+  });
+
+  // L06-10 (S08-1-29) : chaque item retentait un moteur qui ne pouvait pas
+  // démarrer — avec le vrai tesseract.js, la passe restait bloquée au premier.
+  it('modèle de langue introuvable : une tentative pour la passe, items enregistrés, une issue (L06-10, S08-1-29)', async () => {
+    const third = path.join(tropyDir, 'affiche.jpg');
+    fs.writeFileSync(third, 'jpeg factice');
+    const items = [...baseItems(), { id: 30, title: 'Affiche du syndicat', photos: [{ id: 31, path: third }] }];
+    ocrSpy.mockRejectedValue(
+      new OcrEngineUnavailableError('frk', 'Network error while fetching frk.traineddata.gz. Response code: 404')
+    );
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+
+    const result = await tropyService.sync({ ...syncOptions, ocrLanguage: 'frk' });
+
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    expect(result.newItems).toBe(3);
+    expect(result.issues).toEqual([{ code: 'ocr-language-unavailable', language: 'frk' }]);
+    expect(result.errors).toEqual([]);
+    expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([10, 20, 30]);
+  });
+
+  // L06-10 (S08-1-16) : le moteur de la synchro n'était jamais libéré au
+  // changement de projet. Le libérer ne doit pas laisser la passe du projet
+  // quitté attendre pour toujours une reconnaissance que `terminate` ne règle pas.
+  it('un changement de projet pendant l’OCR : moteur libéré, et la passe quittée échoue franchement (L06-10, S08-1-16)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    ocrSpy.mockRestore();
+    const recognizing = vi.fn((_file: string) => new Promise<never>(() => undefined));
+    tess.recognize = recognizing;
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    const running = tropyService.sync(syncOptions);
+    await vi.waitFor(() => expect(recognizing).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+
+    const otherProject = path.join(root, 'projet-B');
+    fs.mkdirSync(otherProject);
+    await tropyService.init(otherProject);
+
+    const result = await running;
+    expect(tess.terminated).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toMatch(/OCR engine stopped/);
+  }, 30_000);
 
   it('un paquet .tropy en WAL se synchronise comme un .tpy nu', async () => {
     const pkg = makeTpy(tropyDir, {

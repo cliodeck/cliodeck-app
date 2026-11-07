@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { TropyOCRPipeline } from '../TropyOCRPipeline';
+import { createRequire } from 'module';
+import {
+  OcrEngineStoppedError,
+  OcrEngineUnavailableError,
+  SUPPORTED_OCR_LANGUAGES,
+  TropyOCRPipeline,
+} from '../TropyOCRPipeline';
 import { PDFConverter } from '../PDFConverter';
 import { findExternalTool } from '../../../core/tools/external-tools';
 
@@ -61,6 +67,9 @@ function resetTesseract(): void {
   }));
 }
 
+// Le plafond d'un `vi.waitFor` (une seconde par défaut) : la CI est plus lente que le Mac.
+const UNTIL = { timeout: 4_000 };
+
 // MARK: - Fichiers
 
 let root: string;
@@ -101,6 +110,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
   // Filet si un test échoue avant le nettoyage du pipeline : dossiers nommés, un par un.
@@ -223,17 +233,210 @@ describe('TropyOCRPipeline — PDF', () => {
     expect(result.text).toContain('--- Page 3 ---\n\ntexte de page-3.png');
   });
 
-  // L06-10 (S08-1-13) : la conversion précède l'initialisation du moteur, et le
-  // nettoyage n'est pas dans un `finally` — un moteur qui ne démarre pas laisse
-  // les PNG 300 dpi dans le dossier temporaire.
-  it.fails('un moteur qui ne démarre pas ne laisse pas de pages temporaires (L06-10, S08-1-13)', async () => {
+  // L06-10 (S08-1-13) : la conversion précédait l'initialisation du moteur, et
+  // le nettoyage n'était pas dans un `finally` — un moteur qui ne démarre pas
+  // laissait les PNG 300 dpi dans le dossier temporaire.
+  it('un moteur qui ne démarre pas ne laisse pas de pages temporaires (L06-10, S08-1-13)', async () => {
     const pdf = writeFile('registre.pdf');
-    spyConversion(2);
+    const convert = spyConversion(2);
     tess.createWorker.mockRejectedValue(new Error('langue indisponible'));
 
-    await expect(new TropyOCRPipeline().performOCR(pdf)).rejects.toThrow();
+    await expect(new TropyOCRPipeline().performOCR(pdf)).rejects.toBeInstanceOf(OcrEngineUnavailableError);
 
+    // Le moteur d'abord : aucune page convertie à 300 dpi pour rien.
+    expect(convert).not.toHaveBeenCalled();
+    expect(fs.existsSync(pageDirs[0] ?? path.join(root, 'aucune-page'))).toBe(false);
+  });
+
+  it('le moteur arrêté pendant une page : échec franc, pages temporaires effacées (L06-10)', async () => {
+    const pdf = writeFile('registre.pdf');
+    spyConversion(2);
+    const cleanup = vi.spyOn(PDFConverter.prototype, 'cleanupTempFiles');
+    // Comme tesseract.js 7 : `terminate` ne règle pas une reconnaissance en cours.
+    tess.recognize.mockImplementation(() => new Promise<RecognizeResult>(() => undefined));
+
+    const pipeline = new TropyOCRPipeline();
+    const running = pipeline.performOCR(pdf);
+    await vi.waitFor(() => expect(tess.recognize).toHaveBeenCalledTimes(1), UNTIL);
+    await pipeline.dispose();
+
+    await expect(running).rejects.toBeInstanceOf(OcrEngineStoppedError);
+    expect(cleanup).toHaveBeenCalledWith(pageDirs[0]);
     expect(fs.existsSync(pageDirs[0])).toBe(false);
+    // Ni la page suivante, ni un nouveau moteur pour elle.
+    expect(tess.recognize).toHaveBeenCalledTimes(1);
+    expect(tess.createWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+// MARK: - Moteur qui ne démarre pas
+
+type WorkerOptions = { cachePath?: string; errorHandler?: (data: unknown) => void };
+
+function workerOptions(call = 0): WorkerOptions {
+  return (tess.createWorker.mock.calls[call]?.[2] ?? {}) as WorkerOptions;
+}
+
+function fakeWorker(): FakeWorker {
+  return { recognize: tess.recognize, terminate: tess.terminate, reinitialize: tess.reinitialize };
+}
+
+/**
+ * Comme tesseract.js 7 quand le modèle de langue ne se charge pas (hors ligne,
+ * 404 du dépôt) : la promesse de `createWorker` ne se règle jamais, seul
+ * `errorHandler` est prévenu. Rend de quoi faire arriver le moteur plus tard.
+ */
+function engineThatNeverStarts(): { release: () => void } {
+  let resolve: (worker: FakeWorker) => void = () => undefined;
+  tess.createWorker.mockImplementation(
+    () =>
+      new Promise<FakeWorker>((r) => {
+        resolve = r;
+      })
+  );
+  return { release: () => resolve(fakeWorker()) };
+}
+
+describe('TropyOCRPipeline — moteur qui ne démarre pas (L06-10, S08-1-29)', () => {
+  it('modèle introuvable : `errorHandler` prévenu, rejet typé aussitôt', async () => {
+    engineThatNeverStarts();
+    const started = new TropyOCRPipeline().initialize('frk');
+    await vi.waitFor(() => expect(tess.createWorker).toHaveBeenCalledTimes(1), UNTIL);
+
+    workerOptions().errorHandler?.(
+      'Error: Network error while fetching https://cdn.jsdelivr.net/npm/@tesseract.js-data/frk/4.0.0_best_int/frk.traineddata.gz. Response code: 404'
+    );
+
+    await expect(started).rejects.toBeInstanceOf(OcrEngineUnavailableError);
+    await expect(started).rejects.toMatchObject({ language: 'frk' });
+  });
+
+  it('aucune réponse : rejet typé au délai, pas avant', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    engineThatNeverStarts();
+    let outcome: unknown = 'en attente';
+    const started = new TropyOCRPipeline({ initTimeoutMs: 60_000 }).initialize('fra').then(
+      () => 'démarré',
+      (error: unknown) => error
+    );
+    void started.then((value) => {
+      outcome = value;
+    });
+    await vi.waitFor(() => expect(tess.createWorker).toHaveBeenCalledTimes(1), UNTIL);
+
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(outcome).toBe('en attente');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await started).toBeInstanceOf(OcrEngineUnavailableError);
+  });
+
+  it('un moteur arrivé après le délai est terminé, pas gardé', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const engine = engineThatNeverStarts();
+    const started = new TropyOCRPipeline({ initTimeoutMs: 1_000 }).initialize('fra').catch((error: unknown) => error);
+    await vi.waitFor(() => expect(tess.createWorker).toHaveBeenCalledTimes(1), UNTIL);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await started).toBeInstanceOf(OcrEngineUnavailableError);
+
+    engine.release();
+    await vi.waitFor(() => expect(tess.terminate).toHaveBeenCalledTimes(1), UNTIL);
+  });
+
+  it('lot : le premier fichier suffit, le lot s’arrête sur une seule tentative', async () => {
+    const files = ['a.jpg', 'b.jpg', 'c.jpg'].map((name) => writeFile(name));
+    tess.createWorker.mockRejectedValue(new Error('worker crashed'));
+
+    await expect(new TropyOCRPipeline().performBatchOCR(files, { language: 'frk' })).rejects.toBeInstanceOf(
+      OcrEngineUnavailableError
+    );
+    expect(tess.createWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('arrêté pendant son démarrage : rejet franc, et le moteur arrivé ensuite est terminé', async () => {
+    const engine = engineThatNeverStarts();
+    const pipeline = new TropyOCRPipeline();
+    const running = pipeline.performOCR(writeFile('a.jpg'));
+    await vi.waitFor(() => expect(tess.createWorker).toHaveBeenCalledTimes(1), UNTIL);
+
+    await pipeline.dispose();
+    await expect(running).rejects.toBeInstanceOf(OcrEngineStoppedError);
+
+    engine.release();
+    await vi.waitFor(() => expect(tess.terminate).toHaveBeenCalledTimes(1), UNTIL);
+    expect(tess.recognize).not.toHaveBeenCalled();
+  });
+
+  it('arrêté pendant un lot : le lot s’arrête, aucun moteur n’est recréé pour le fichier suivant', async () => {
+    const files = ['a.jpg', 'b.jpg'].map((name) => writeFile(name));
+    tess.recognize.mockImplementation(() => new Promise<RecognizeResult>(() => undefined));
+    const pipeline = new TropyOCRPipeline();
+    const running = pipeline.performBatchOCR(files);
+    await vi.waitFor(() => expect(tess.recognize).toHaveBeenCalledTimes(1), UNTIL);
+
+    await pipeline.dispose();
+
+    await expect(running).rejects.toBeInstanceOf(OcrEngineStoppedError);
+    expect(tess.createWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+// MARK: - Dossier des modèles de langue
+
+describe('TropyOCRPipeline — dossier des modèles (L06-10, S08-1-29)', () => {
+  it('le moteur range ses modèles dans le dossier donné, créé au besoin', async () => {
+    const cache = path.join(root, 'userData', 'tesseract-cache');
+
+    await new TropyOCRPipeline({ cachePath: cache }).initialize('fra');
+
+    expect(workerOptions().cachePath).toBe(cache);
+    expect(fs.statSync(cache).isDirectory()).toBe(true);
+  });
+
+  it('à sa création, le dossier reprend les modèles laissés dans le dossier courant, sans les déplacer', async () => {
+    // tesseract.js 7, sans `cachePath`, écrivait dans `.` : le dossier courant.
+    const legacy = path.join(root, 'ancien-dossier-courant');
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(path.join(legacy, 'fra.traineddata'), 'modèle français');
+    fs.writeFileSync(path.join(legacy, 'xyz.traineddata'), 'pas une langue proposée');
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(legacy);
+    const cache = path.join(root, 'tesseract-cache');
+    const pipeline = new TropyOCRPipeline({ cachePath: cache });
+    cwd.mockRestore();
+
+    await pipeline.initialize('deu');
+
+    expect(fs.readdirSync(cache)).toEqual(['fra.traineddata']);
+    expect(fs.readFileSync(path.join(cache, 'fra.traineddata'), 'utf-8')).toBe('modèle français');
+    expect(fs.existsSync(path.join(legacy, 'fra.traineddata'))).toBe(true);
+  });
+
+  it('un dossier de modèles qui existe déjà ne reprend rien : une reprise par mise à jour, pas à chaque démarrage', async () => {
+    const legacy = path.join(root, 'ancien-dossier-courant');
+    fs.mkdirSync(legacy);
+    fs.writeFileSync(path.join(legacy, 'fra.traineddata'), 'modèle français');
+    const cache = path.join(root, 'tesseract-cache');
+    fs.mkdirSync(cache);
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(legacy);
+    const pipeline = new TropyOCRPipeline({ cachePath: cache });
+    cwd.mockRestore();
+
+    await pipeline.initialize('fra');
+
+    expect(fs.readdirSync(cache)).toEqual([]);
+  });
+});
+
+// MARK: - Langues proposées
+
+describe('SUPPORTED_OCR_LANGUAGES', () => {
+  it('chaque code proposé existe dans tesseract.js (L06-10, S08-2-3)', () => {
+    // La liste du paquet lui-même, hors de la doublure de `tesseract.js`.
+    const known = new Set(
+      Object.values(createRequire(import.meta.url)('tesseract.js/src/constants/languages') as Record<string, string>)
+    );
+
+    expect(SUPPORTED_OCR_LANGUAGES.map((l) => l.code).filter((code) => !known.has(code))).toEqual([]);
+    expect(SUPPORTED_OCR_LANGUAGES.find((l) => l.name === 'Allemand Fraktur')?.code).toBe('frk');
   });
 });
 
