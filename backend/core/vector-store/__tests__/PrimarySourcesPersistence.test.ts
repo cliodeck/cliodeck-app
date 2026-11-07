@@ -191,6 +191,78 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — sources', () =>
     expect(store.getSourceTags('src-1')).toEqual(['old']);
     expect(store.getChunks('src-1').map((c) => c.id)).toEqual(['chunk-1']);
   });
+
+  // L06-7 (S15-1-8) : `updateSource` ne disait pas s'il avait trouvé la ligne ;
+  // une transcription importée pour une source disparue était annoncée écrite.
+  it('updateSource sur un id inconnu : 0 ligne modifiée', () => {
+    store.saveSource(source());
+    expect(store.updateSource('src-inconnue', { transcription: 'texte importé' })).toBe(0);
+    expect(store.updateSource('src-1', { transcription: 'texte importé' })).toBe(1);
+  });
+
+  // L06-7 (S15-1-36) : la confiance d'un OCR antérieur restait attachée au
+  // texte qui le remplaçait, et classait une saisie humaine parmi les pires OCR.
+  it('écrit la confiance de l’OCR, puis la remet à NULL pour une saisie humaine', () => {
+    store.saveSource(source({ ocrConfidence: 41 }));
+
+    store.updateSource('src-1', { transcription: 'OCR relancé', transcriptionSource: 'tesseract', ocrConfidence: 88 });
+    expect(store.getSource('src-1')).toMatchObject({ transcriptionSource: 'tesseract', ocrConfidence: 88 });
+
+    store.updateSource('src-1', { transcription: 'texte corrigé à la main', transcriptionSource: 'manual' });
+    const saved = store.getSource('src-1');
+    expect(saved?.transcriptionSource).toBe('manual');
+    expect(saved?.ocrConfidence).toBeUndefined();
+    expect(store.getCorpusOCRReport().worstSources).toEqual([]);
+  });
+});
+
+describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — extraits remplacés tout ou rien', () => {
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-primary-chunks-'));
+    store = new PrimarySourcesVectorStore(tmp);
+    store.saveSource(source());
+  });
+
+  afterEach(() => {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const chunk = (id: string, content: string, chunkIndex = 0) => ({
+    chunk: { id, sourceId: 'src-1', content, chunkIndex, startPosition: 0, endPosition: content.length },
+    embedding: Float32Array.from(new Array(768).fill(0.01)),
+  });
+
+  it('remplace l’ancien jeu par le nouveau, et l’ajoute aux index en mémoire', () => {
+    store.replaceSourceChunks('src-1', [chunk('ancien', 'PROCES-VERBAL')]);
+    const before = store.getIndexStats();
+
+    store.replaceSourceChunks('src-1', [chunk('neuf-0', 'texte revu', 0), chunk('neuf-1', 'suite du texte revu', 1)]);
+
+    expect(store.getChunks('src-1').map((c) => c.id)).toEqual(['neuf-0', 'neuf-1']);
+    expect(store.getIndexStats().hnswSize).toBe(before.hnswSize + 2);
+    expect(store.getIndexStats().bm25Size).toBe(before.bm25Size + 2);
+  });
+
+  it('une écriture refusée en chemin laisse l’ancien jeu, en base comme en mémoire', () => {
+    store.replaceSourceChunks('src-1', [chunk('ancien', 'PROCES-VERBAL')]);
+    const before = store.getIndexStats();
+    // Une vraie erreur SQLite au second extrait, après la suppression et le premier.
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    db.exec(`
+      CREATE TRIGGER refuse_chunk BEFORE INSERT ON tropy_chunks
+      WHEN NEW.id = 'neuf-1'
+      BEGIN SELECT RAISE(ABORT, 'écriture de l''extrait refusée'); END;
+    `);
+
+    expect(() =>
+      store.replaceSourceChunks('src-1', [chunk('neuf-0', 'texte revu', 0), chunk('neuf-1', 'suite', 1)])
+    ).toThrow(/extrait refusée/);
+
+    expect(store.getChunks('src-1').map((c) => c.id)).toEqual(['ancien']);
+    // Les index en mémoire ne voient que ce qui a été validé.
+    expect(store.getIndexStats()).toEqual(before);
+  });
 });
 
 describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy lié', () => {

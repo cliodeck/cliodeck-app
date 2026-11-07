@@ -6,7 +6,7 @@ import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress, TropyS
 import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/integrations/tropy/tropy-project-identity.js';
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
-import { PrimarySourcesVectorStore, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
 
@@ -53,6 +53,15 @@ export interface TropySearchResult {
   results?: PrimarySourceSearchResult[];
   error?: string;
 }
+
+/** Pourquoi une source n'a pas été réindexée, à dire par le renderer. */
+export type ReindexFailure = 'source-not-found' | 'no-embedding-provider' | 'embedding-failed';
+
+/** Ce que le découpage d'une source lit : son en-tête, son texte, ses notes. */
+type IndexableSource = Pick<
+  PrimarySourceDocument,
+  'id' | 'title' | 'creator' | 'date' | 'archive' | 'collection' | 'transcription' | 'transcriptionSource' | 'notesText'
+>;
 
 // MARK: - TropyService
 
@@ -360,6 +369,9 @@ class TropyService {
           this.generateEmbeddingsForSources(onProgress)
         );
         console.log(`📐 [TROPY-SERVICE] Embeddings generated: ${embeddingResult.chunksCreated} chunks for ${embeddingResult.sourcesProcessed} sources`);
+        // La synchro a réussi, mais ces sources ne sont pas encore citées par
+        // l'assistant : le dire, au lieu d'un succès sans réserve.
+        if (embeddingResult.issue) result.issues.push(embeddingResult.issue);
 
         // Save HNSW index after embedding generation
         if (embeddingResult.chunksCreated > 0 && this.vectorStore) {
@@ -378,16 +390,17 @@ class TropyService {
   }
 
   /**
-   * Génère les embeddings pour toutes les sources qui n'en ont pas encore
+   * Génère les embeddings pour toutes les sources qui n'en ont pas encore.
+   *
+   * Une source dont l'embarquement échoue reste sans extrait (tout ou rien,
+   * `indexSourceChunks`) : ce filtre la reprend à la synchro suivante. Les
+   * échecs sont comptés et rendus en `issue`, pour que l'historien sache que
+   * l'assistant ne cite pas encore ces sources.
    */
   private async generateEmbeddingsForSources(
     onProgress?: (progress: TropySyncProgress) => void
-  ): Promise<{ sourcesProcessed: number; chunksCreated: number }> {
+  ): Promise<{ sourcesProcessed: number; chunksCreated: number; issue?: TropySyncIssue }> {
     if (!this.vectorStore) {
-      return { sourcesProcessed: 0, chunksCreated: 0 };
-    }
-    if (!this.embedding) {
-      console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, skipping embedding generation');
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
@@ -395,6 +408,7 @@ class TropyService {
     const allSources = this.vectorStore.getAllSources();
     let sourcesProcessed = 0;
     let chunksCreated = 0;
+    let sourcesFailed = 0;
 
     // Filtrer les sources qui ont du texte mais pas encore de chunks
     const sourcesToProcess = allSources.filter(source => {
@@ -423,6 +437,16 @@ class TropyService {
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
+    // Sans fournisseur, rien ne s'indexe — mais seulement s'il y avait de quoi.
+    if (!this.embedding) {
+      console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, skipping embedding generation');
+      return {
+        sourcesProcessed: 0,
+        chunksCreated: 0,
+        issue: { code: 'no-embedding-provider', sources: sourcesToProcess.length },
+      };
+    }
+
     console.log(`📐 [TROPY-SERVICE] Processing ${sourcesToProcess.length} sources for embeddings...`);
 
     for (let i = 0; i < sourcesToProcess.length; i++) {
@@ -439,11 +463,14 @@ class TropyService {
         chunksCreated += await this.indexSourceChunks(source);
         sourcesProcessed++;
       } catch (error) {
+        sourcesFailed++;
         console.error(`❌ [TROPY-SERVICE] Failed to process source ${source.id}:`, error);
       }
     }
 
-    return { sourcesProcessed, chunksCreated };
+    const issue: TropySyncIssue | undefined =
+      sourcesFailed > 0 ? { code: 'embedding-failed', sources: sourcesFailed } : undefined;
+    return { sourcesProcessed, chunksCreated, issue };
   }
 
   /**
@@ -957,23 +984,41 @@ class TropyService {
   // MARK: - Indexing
 
   /**
-   * Met à jour la transcription d'une source
+   * Met à jour la transcription d'une source : OCR manuel d'une carte
+   * ('tesseract', avec sa confiance), import d'un fichier ('transkribus' ou
+   * 'imported'), saisie ('manual', sans confiance).
+   *
+   * Les extraits de l'ancien texte sont supprimés dans la même transaction que
+   * la ligne : ils mentent dès qu'elle change. La réindexation qui suit
+   * (`reindexSource`) en écrit de nouveaux ; si elle échoue, la source reste
+   * sans extrait et la synchro suivante la reprend.
    */
   async updateSourceTranscription(
     sourceId: string,
     transcription: string,
-    source: 'tesseract' | 'transkribus' | 'manual'
-  ): Promise<{ success: boolean; error?: string }> {
+    source: Exclude<NonNullable<PrimarySourceItem['transcriptionSource']>, 'tropy-notes'>,
+    confidence?: number
+  ): Promise<{ success: boolean; error?: string; code?: 'source-not-found' }> {
     try {
-      if (!this.vectorStore) {
+      const store = this.vectorStore;
+      if (!store) {
         return { success: false, error: 'Service not initialized' };
       }
 
-      this.vectorStore.updateSource(sourceId, {
-        transcription,
-        transcriptionSource: source,
-        lastModified: new Date(),
+      const changed = store.transaction(() => {
+        const rows = store.updateSource(sourceId, {
+          transcription,
+          transcriptionSource: source,
+          ocrConfidence: confidence,
+          lastModified: new Date(),
+        });
+        if (rows > 0) store.deleteChunks(sourceId);
+        return rows;
       });
+      // Source absente (purge, autre projet) : rien n'a été écrit.
+      if (changed === 0) {
+        return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
+      }
 
       return { success: true };
     } catch (error: unknown) {
@@ -984,109 +1029,111 @@ class TropyService {
 
 
   /**
-   * Découpe, filtre, déduplique et embarque une source. Renvoie le nombre
-   * de chunks écrits.
-   *
-   * Extrait de la boucle de synchronisation pour que la réindexation d'UNE
-   * source puisse faire exactement le même travail : `reindexSource`
-   * supprimait les chunks sans jamais les regénérer — un `TODO` vieux de
-   * plusieurs mois — si bien que l'appeler aurait retiré la source du RAG.
+   * Découpe, filtre et déduplique le texte d'une source : les extraits à
+   * embarquer, sans rien écrire encore.
    */
-  private async indexSourceChunks(source: {
-    id: string;
-    title?: string;
-    creator?: string;
-    date?: string;
-    archive?: string;
-    collection?: string;
-    transcription?: string;
-    transcriptionSource?: string;
-    notesText?: string;
-  }): Promise<number> {
-    let created = 0;
+  private prepareSourceChunks(source: IndexableSource): PrimarySourceChunk[] {
+    let fullText = '';
+    if (source.title) fullText += `Titre: ${source.title}\n\n`;
+    if (source.creator) fullText += `Auteur: ${source.creator}\n`;
+    if (source.date) fullText += `Date: ${source.date}\n`;
+    if (source.archive) fullText += `Archive: ${source.archive}\n`;
+    if (source.collection) fullText += `Collection: ${source.collection}\n`;
+    fullText += '\n';
+    if (source.transcription) fullText += source.transcription;
+    // Les notes Tropy viennent après le corps, qu'elles ne remplacent plus.
+    // Une source 'tropy-notes' les a déjà pour transcription.
+    if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
+      fullText += `\n\n${source.notesText}`;
+    }
 
-      let fullText = '';
-      if (source.title) fullText += `Titre: ${source.title}\n\n`;
-      if (source.creator) fullText += `Auteur: ${source.creator}\n`;
-      if (source.date) fullText += `Date: ${source.date}\n`;
-      if (source.archive) fullText += `Archive: ${source.archive}\n`;
-      if (source.collection) fullText += `Collection: ${source.collection}\n`;
-      fullText += '\n';
-      if (source.transcription) fullText += source.transcription;
-      // Les notes Tropy viennent après le corps, qu'elles ne remplacent plus.
-      // Une source 'tropy-notes' les a déjà pour transcription.
-      if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
-        fullText += `\n\n${source.notesText}`;
+    // Get raw chunks from DocumentChunker for optimization
+    const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
+    const initialChunkCount = rawChunks.length;
+
+    // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
+    let optimizedChunks = rawChunks;
+    if (this.qualityScorer && optimizedChunks.length > 0) {
+      const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
+        minEntropy: 0.3,
+        minUniqueWordRatio: 0.4,
+      }, false); // Don't log each filtered chunk
+
+      if (qualityResult.stats.filteredChunks > 0) {
+        console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
       }
+      optimizedChunks = qualityResult.passed;
+    }
 
-      // Get raw chunks from DocumentChunker for optimization
-      const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
-      const initialChunkCount = rawChunks.length;
+    // Deduplication - remove duplicate chunks (works on DocumentChunk type)
+    if (this.deduplicator && optimizedChunks.length > 0) {
+      const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
+        useContentHash: true,
+        useSimilarity: false, // Fast mode - hash only
+      });
 
-      // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
-      let optimizedChunks = rawChunks;
-      if (this.qualityScorer && optimizedChunks.length > 0) {
-        const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
-          minEntropy: 0.3,
-          minUniqueWordRatio: 0.4,
-        }, false); // Don't log each filtered chunk
-
-        if (qualityResult.stats.filteredChunks > 0) {
-          console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
-        }
-        optimizedChunks = qualityResult.passed;
+      if (dedupResult.duplicateCount > 0) {
+        console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
       }
+      optimizedChunks = dedupResult.uniqueChunks;
+    }
 
-      // Deduplication - remove duplicate chunks (works on DocumentChunk type)
-      if (this.deduplicator && optimizedChunks.length > 0) {
-        const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
-          useContentHash: true,
-          useSimilarity: false, // Fast mode - hash only
-        });
+    // Log optimization results
+    if (optimizedChunks.length !== initialChunkCount) {
+      console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
+    }
 
-        if (dedupResult.duplicateCount > 0) {
-          console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
-        }
-        optimizedChunks = dedupResult.uniqueChunks;
-      }
-
-      // Log optimization results
-      if (optimizedChunks.length !== initialChunkCount) {
-        console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
-      }
-
-      // Convert to source chunks format and generate embeddings
-      for (const rawChunk of optimizedChunks) {
-        try {
-          // Score chunk quality if scorer is available
-          const qualityScore = this.qualityScorer
-            ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
-            : undefined;
-
-          const sourceChunk = {
-            id: rawChunk.id,
-            sourceId: source.id,
-            content: rawChunk.content,
-            chunkIndex: rawChunk.chunkIndex,
-            startPosition: rawChunk.startPosition,
-            endPosition: rawChunk.endPosition,
-            qualityScore,
-          };
-          const embedding = await this.embedOne(sourceChunk.content);
-          this.vectorStore!.saveChunk(sourceChunk, embedding);
-          created++;
-        } catch (error) {
-          console.warn(`⚠️ [TROPY-SERVICE] Failed to generate embedding for chunk in source ${source.id}:`, error);
-        }
-      }
-
-      return created;
+    // Convert to source chunks format, with their quality score
+    return optimizedChunks.map((rawChunk) => ({
+      id: rawChunk.id,
+      sourceId: source.id,
+      content: rawChunk.content,
+      chunkIndex: rawChunk.chunkIndex,
+      startPosition: rawChunk.startPosition,
+      endPosition: rawChunk.endPosition,
+      qualityScore: this.qualityScorer
+        ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
+        : undefined,
+    }));
   }
 
   /**
-   * Supprime les chunks existants et réindexe une source
+   * Découpe, embarque puis écrit les extraits d'une source, tout ou rien.
+   * Renvoie le nombre d'extraits écrits.
+   *
+   * Tous les extraits sont embarqués en mémoire avant la moindre écriture, puis
+   * remplacent l'ancien jeu dans une transaction (`replaceSourceChunks`). Le
+   * premier échec d'embarquement lève sans rien écrire : un échec avalé
+   * extrait par extrait laissait la source à 9 extraits sur 10, et la synchro,
+   * qui ne reprend que les sources sans extrait, ne complétait jamais le trou
+   * (S08-1-30). Partagé par la synchro et `reindexSource`.
    */
-  async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string }> {
+  private async indexSourceChunks(source: IndexableSource): Promise<number> {
+    // Le magasin du départ : un changement de projet pendant l'embarquement ne
+    // doit pas faire écrire ces extraits dans celui du projet suivant.
+    const store = this.vectorStore;
+    if (!store) {
+      throw new Error('tropy-service: vector store not initialized');
+    }
+
+    const items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> = [];
+    for (const chunk of this.prepareSourceChunks(source)) {
+      items.push({ chunk, embedding: await this.embedOne(chunk.content) });
+    }
+    store.replaceSourceChunks(source.id, items);
+    return items.length;
+  }
+
+  /**
+   * Réembarque une source et remplace ses extraits, tout ou rien.
+   *
+   * Jamais `success: true` quand l'embarquement a échoué : la source sortait du
+   * RAG en silence. Un échec laisse les extraits en place — ceux d'un texte inchangé
+   * restent bons ; après une écriture de transcription il n'y en a plus
+   * (`updateSourceTranscription` les retire), et la synchro suivante reprend
+   * la source.
+   */
+  async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string; code?: ReindexFailure }> {
     try {
       if (!this.vectorStore) {
         return { success: false, error: 'Service not initialized' };
@@ -1094,19 +1141,22 @@ class TropyService {
 
       const source = this.vectorStore.getSource(sourceId);
       if (!source) {
-        return { success: false, error: `Source not found: ${sourceId}` };
+        return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
+      }
+      if (!this.embedding) {
+        return { success: false, error: 'No embedding provider configured', code: 'no-embedding-provider' };
       }
 
-      // Supprimer les chunks existants, puis les REGÉNÉRER. Supprimer sans
-      // regénérer retirait la source du RAG.
-      this.vectorStore.deleteChunks(sourceId);
       const chunks = await this.indexSourceChunks(source);
       console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${chunks} chunk(s)`);
-
       return { success: true };
     } catch (error: unknown) {
       console.error('Failed to reindex source:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        code: 'embedding-failed',
+      };
     }
   }
 

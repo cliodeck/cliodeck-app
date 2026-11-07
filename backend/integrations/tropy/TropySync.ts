@@ -40,14 +40,29 @@ export interface TropySyncOptions {
  * (`describeSyncIssue`, `sync-issues.ts`). `errors` garde le texte technique,
  * pour la console.
  */
-export type TropySyncIssue = {
-  /** Le projet ouvert n'est pas le projet Tropy lié, qui a déjà des sources (Q25). */
-  code: 'different-project';
-  /** Nom du projet lié ; '' si des sources existent sans projet enregistré. */
-  linkedName: string;
-  candidateName: string;
-  sourceCount: number;
-};
+export type TropySyncIssue =
+  | {
+      /** Le projet ouvert n'est pas le projet Tropy lié, qui a déjà des sources (Q25). */
+      code: 'different-project';
+      /** Nom du projet lié ; '' si des sources existent sans projet enregistré. */
+      linkedName: string;
+      candidateName: string;
+      sourceCount: number;
+    }
+  | {
+      /**
+       * Des sources enregistrées n'ont pas pu être embarquées (fournisseur en
+       * panne, Ollama arrêté) : elles restent sans extrait, et la synchro
+       * suivante les reprend. Un état qui peut durer, pas un refus.
+       */
+      code: 'embedding-failed';
+      sources: number;
+    }
+  | {
+      /** Aucun fournisseur d'embeddings : `sources` sources attendent leurs extraits. */
+      code: 'no-embedding-provider';
+      sources: number;
+    };
 
 export interface TropySyncResult {
   success: boolean;

@@ -255,22 +255,29 @@ export function setupTropyHandlers() {
       _event,
       rawSourceId: unknown,
       rawTranscription: unknown,
-      rawSource: unknown
+      rawSource: unknown,
+      rawConfidence?: unknown
     ) => {
-      const { sourceId, transcription, source } = validate(TropyUpdateTranscriptionSchema, { sourceId: rawSourceId, transcription: rawTranscription, source: rawSource });
-      console.log('📞 IPC Call: tropy:update-transcription', { sourceId, source });
+      const { sourceId, transcription, source, confidence } = validate(TropyUpdateTranscriptionSchema, {
+        sourceId: rawSourceId,
+        transcription: rawTranscription,
+        source: rawSource,
+        confidence: rawConfidence,
+      });
+      console.log('📞 IPC Call: tropy:update-transcription', { sourceId, source, confidence });
       try {
-        const result = await tropyService.updateSourceTranscription(sourceId, transcription, source);
+        const result = await tropyService.updateSourceTranscription(sourceId, transcription, source, confidence);
         if (!result.success) return result;
 
         // Réindexer : sans cela, la transcription est visible dans la fiche
         // mais INVISIBLE au RAG — l'assistant continue de répondre sur
         // l'ancien texte, ou sur rien. L'échec de réindexation ne fait pas
-        // échouer l'écriture, qui a bien eu lieu ; il est signalé à part.
+        // échouer l'écriture, qui a bien eu lieu ; il est signalé à part, avec
+        // son code, pour que le renderer dise « enregistrée, pas encore indexée ».
         const reindexed = await tropyService.reindexSource(sourceId);
         return reindexed.success
           ? result
-          : { ...result, reindexError: reindexed.error };
+          : { ...result, reindexError: reindexed.error, reindexCode: reindexed.code };
       } catch (error: unknown) {
         console.error('❌ tropy:update-transcription error:', error);
         return errorResponse(error);

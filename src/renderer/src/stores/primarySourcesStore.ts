@@ -24,7 +24,7 @@ export interface PrimarySource {
   type?: string;
   tags: string[];
   transcription?: string;
-  transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
+  transcriptionSource?: TranscriptionWriteSource | 'tropy-notes';
   photoCount: number;
   lastModified: string;
   indexedAt: string;
@@ -59,6 +59,29 @@ export interface SyncOutcome {
   errors?: string[];
   /** Ce qui a empêché la passe, à dire à l'utilisateur (`describeSyncIssue`). */
   issues?: TropySyncIssue[];
+}
+
+/**
+ * La provenance d'une transcription écrite depuis l'interface : OCR manuel
+ * d'une carte ('tesseract'), import d'un fichier ('transkribus' ou
+ * 'imported'), saisie ('manual').
+ */
+export type TranscriptionWriteSource = 'tesseract' | 'transkribus' | 'manual' | 'imported';
+
+/** Pourquoi une transcription écrite n'est pas encore citée par l'assistant. */
+export type NotIndexedReason = 'embedding-failed' | 'no-embedding-provider';
+
+/**
+ * Ce qu'est devenue une transcription envoyée au main. `success` : elle est
+ * écrite. `notIndexed` : écrite mais pas indexée, l'assistant ne la cite pas
+ * avant la prochaine synchronisation — jamais un succès sans réserve.
+ * `code` : pourquoi rien n'a été écrit.
+ */
+export interface TranscriptionWriteResult {
+  success: boolean;
+  notIndexed?: NotIndexedReason;
+  code?: 'source-not-found';
+  error?: string;
 }
 
 export interface PrimarySourcesStatistics {
@@ -102,6 +125,20 @@ interface PrimarySourcesState {
   // Statistics
   statistics: PrimarySourcesStatistics | null;
 
+  /**
+   * Ce que la dernière synchro n'a pas pu faire sans être refusée — des
+   * sources enregistrées mais pas encore indexées. Le panneau l'affiche
+   * jusqu'à la synchro suivante, sans alerte : c'est un état qui peut durer.
+   */
+  syncIssues: TropySyncIssue[];
+
+  /**
+   * Avance à chaque écriture de transcription (OCR manuel, import, synchro) :
+   * le rapport OCR de la source sélectionnée se relit dessus, il ne se
+   * relisait qu'au changement de source (S18-2-6).
+   */
+  transcriptionRevision: number;
+
   // OCR Languages
   availableOCRLanguages: Array<{ code: string; name: string }>;
 
@@ -142,20 +179,40 @@ interface PrimarySourcesState {
   stopWatching: () => Promise<void>;
 
   // Actions - OCR
-  performOCR: (sourceId: string, imagePaths: string[], language: string) => Promise<{ success: boolean; text?: string }>;
+  /** `write` : ce qu'est devenue la transcription reconnue, si l'OCR a abouti. */
+  performOCR: (
+    sourceId: string,
+    imagePaths: string[],
+    language: string
+  ) => Promise<{ success: boolean; text?: string; write?: TranscriptionWriteResult }>;
   /** OCR manuel d'une source (#23) : résout les photos côté main puis
    *  délègue à performOCR avec la langue courante. */
-  performManualOCR: (sourceId: string) => Promise<{ success: boolean; error?: 'no-photos' | 'failed' }>;
+  performManualOCR: (sourceId: string) => Promise<{
+    success: boolean;
+    error?: 'no-photos' | 'failed' | 'not-saved' | 'source-not-found';
+    notIndexed?: NotIndexedReason;
+  }>;
   setOCRLanguage: (language: string) => void;
-  importTranscription: (sourceId: string, filePath: string) => Promise<{ success: boolean; error?: string }>;
+  /** `code` : l'écriture a échoué ('not-saved'), ou la source n'est plus en base. */
+  importTranscription: (sourceId: string, filePath: string) => Promise<{
+    success: boolean;
+    error?: string;
+    code?: 'source-not-found' | 'not-saved';
+    notIndexed?: NotIndexedReason;
+  }>;
   loadOCRLanguages: () => Promise<void>;
 
   // Actions - Sources
   refreshSources: () => Promise<void>;
   selectSource: (sourceId: string | null) => void;
   getSource: (sourceId: string) => Promise<PrimarySource | null>;
-  /** `false` si l'écriture a échoué — la carte ne doit pas annoncer un succès. */
-  updateTranscription: (sourceId: string, transcription: string, source: 'manual') => Promise<boolean>;
+  /** La carte ne doit pas annoncer un succès quand l'écriture a échoué, ni sans réserve quand l'indexation manque. */
+  updateTranscription: (
+    sourceId: string,
+    transcription: string,
+    source: TranscriptionWriteSource,
+    confidence?: number
+  ) => Promise<TranscriptionWriteResult>;
 
   // Actions - Search & Filters
   searchSources: (query: string) => void;
@@ -185,6 +242,7 @@ const EMPTY_PROJECT_STATE = {
   selectedArchive: null,
   selectedCollection: null,
   statistics: null,
+  syncIssues: [],
 } satisfies Partial<PrimarySourcesState>;
 
 /**
@@ -194,10 +252,20 @@ const EMPTY_PROJECT_STATE = {
  */
 let generation = 0;
 
+/**
+ * La provenance d'un fichier importé, d'après son format : PAGE XML est le
+ * format d'export de Transkribus ; ALTO et le texte brut viennent d'ailleurs.
+ * Tout import était étiqueté 'transkribus' (S15-1-36).
+ */
+function importedSource(format: string | undefined): TranscriptionWriteSource {
+  return format === 'transkribus' || format === 'page-xml' ? 'transkribus' : 'imported';
+}
+
 export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
   // Initial state
   ...EMPTY_PROJECT_STATE,
   loadedFor: null,
+  transcriptionRevision: 0,
   isSyncing: false,
   syncProgress: null,
   isPerformingOCR: false,
@@ -275,6 +343,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     }
 
     set({ isSyncing: true, syncProgress: null });
+    const startedAt = generation;
 
     // Setup progress listener
     const unsubscribe = window.electron.tropy.onSyncProgress((progress) => {
@@ -283,13 +352,18 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
 
     try {
       const result = await window.electron.tropy.sync(options);
+      // Le bilan d'une passe lancée pour un autre projet ne s'affiche pas ici.
+      if (startedAt === generation) set({ syncIssues: result.issues ?? [] });
 
       if (result.success) {
+        set((state) => ({ transcriptionRevision: state.transcriptionRevision + 1 }));
         // Refresh sources after sync
         await get().refreshSources();
         await get().refreshStatistics();
         await get().getProjectInfo();
 
+        // Une passe réussie a aussi ses problèmes : des sources enregistrées
+        // mais pas encore indexées. Ils étaient jetés ici.
         return {
           success: true,
           newItems: result.newItems,
@@ -297,6 +371,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
           ocrPerformed: result.ocrPerformed,
           transcriptionsWritten: result.transcriptionsWritten,
           errors: result.errors,
+          issues: result.issues,
         };
       }
 
@@ -375,11 +450,12 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       if (result.success && result.text) {
         // L'OCR a réussi, mais l'ÉCRITURE peut échouer : annoncer un succès
         // sans le vérifier laissait croire que la transcription était
-        // enregistrée alors que rien ne l'avait été.
-        const written = await get().updateTranscription(sourceId, result.text, 'manual');
-        if (!written) return { success: false };
+        // enregistrée alors que rien ne l'avait été. Un texte de Tesseract,
+        // avec sa confiance : il était enregistré comme saisie manuelle.
+        const write = await get().updateTranscription(sourceId, result.text, 'tesseract', result.confidence);
+        if (!write.success) return { success: false, write };
 
-        return { success: true, text: result.text };
+        return { success: true, text: result.text, write };
       }
 
       return { success: false };
@@ -398,7 +474,17 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
         return { success: false, error: 'no-photos' as const };
       }
       const result = await get().performOCR(sourceId, photosRes.paths, get().ocrLanguage);
-      return result.success ? { success: true } : { success: false, error: 'failed' as const };
+      if (result.success) {
+        return result.write?.notIndexed ? { success: true, notIndexed: result.write.notIndexed } : { success: true };
+      }
+      // Reconnu mais pas enregistré : ce n'est pas « l'OCR a échoué ».
+      if (result.write) {
+        return {
+          success: false,
+          error: result.write.code === 'source-not-found' ? ('source-not-found' as const) : ('not-saved' as const),
+        };
+      }
+      return { success: false, error: 'failed' as const };
     } catch (error) {
       console.error('Manual OCR failed:', error);
       return { success: false, error: 'failed' as const };
@@ -414,10 +500,13 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       const result = await window.electron.tropy.importTranscription(filePath);
 
       if (result.success && result.text) {
-        await window.electron.tropy.updateTranscription(sourceId, result.text, 'transkribus');
-        await get().refreshSources();
-
-        return { success: true };
+        // Le résultat de l'écriture était ignoré : « importée » s'affichait
+        // même quand rien n'avait été écrit (S15-1-8).
+        const write = await get().updateTranscription(sourceId, result.text, importedSource(result.format));
+        if (!write.success) {
+          return { success: false, error: write.error, code: write.code ?? ('not-saved' as const) };
+        }
+        return write.notIndexed ? { success: true, notIndexed: write.notIndexed } : { success: true };
       }
 
       return { success: false, error: result.error };
@@ -485,7 +574,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     }
   },
 
-  updateTranscription: async (sourceId: string, transcription: string, source: 'manual') => {
+  updateTranscription: async (sourceId, transcription, source, confidence) => {
     // Le résultat était AWAITÉ sans être lu : `updateSourceTranscription`
     // rend `{success:false}` sans lever, si bien que la carte affichait une
     // réussite alors que rien n'avait été écrit.
@@ -493,17 +582,33 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       const result = await window.electron.tropy.updateTranscription(
         sourceId,
         transcription,
-        source
+        source,
+        confidence
       );
       if (!result?.success) {
         console.error('Transcription non écrite:', result?.error);
-        return false;
+        return {
+          success: false,
+          error: result?.error,
+          ...(result?.code === 'source-not-found' && { code: 'source-not-found' as const }),
+        };
       }
+      // Écrite : le rapport OCR et les compteurs « avec / sans transcription »
+      // ne se relisaient pas (S18-2-6).
+      set((state) => ({ transcriptionRevision: state.transcriptionRevision + 1 }));
       await get().refreshSources();
-      return true;
+      await get().refreshStatistics();
+      // Écrite mais pas réindexée : à dire, pas à taire (S08-1-30).
+      if (result.reindexError || result.reindexCode) {
+        console.warn('Transcription écrite, pas encore indexée:', result.reindexError);
+        const notIndexed: NotIndexedReason =
+          result.reindexCode === 'no-embedding-provider' ? 'no-embedding-provider' : 'embedding-failed';
+        return { success: true, notIndexed };
+      }
+      return { success: true };
     } catch (error) {
       console.error('Failed to update transcription:', error);
-      return false;
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   },
 

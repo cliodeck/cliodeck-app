@@ -11,6 +11,7 @@ import {
   BarChart3,
   ScanSearch,
   Archive,
+  AlertTriangle,
 } from 'lucide-react';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -21,7 +22,7 @@ import { PrimarySourceStats } from './PrimarySourceStats';
 import { OCRCorpusReport } from './OCRCorpusReport';
 import { OCRSettingsModal } from './OCRSettingsModal';
 import { TranscriptionImportModal } from './TranscriptionImportModal';
-import { describeSyncIssue } from './sync-issues';
+import { describeSyncIssue, isSyncRefusal } from './sync-issues';
 import './PrimarySourcesPanel.css';
 
 export const PrimarySourcesPanel: React.FC = () => {
@@ -36,6 +37,7 @@ export const PrimarySourcesPanel: React.FC = () => {
     searchQuery,
     selectedCollection,
     statistics,
+    syncIssues,
     searchSources,
     setCollectionFilter,
     openTPYProject,
@@ -140,10 +142,16 @@ export const PrimarySourcesPanel: React.FC = () => {
     if (!result.success && result.errors && result.errors.length > 0) {
       console.error('Sync errors:', result.errors);
     }
-    for (const issue of result.issues ?? []) {
+    // Seuls les refus s'annoncent par une alerte ; des sources pas encore
+    // indexées restent dites dans le panneau (`syncIssues`).
+    for (const issue of (result.issues ?? []).filter(isSyncRefusal)) {
       await useDialogStore.getState().showAlert(describeSyncIssue(t, issue));
     }
   };
+
+  // Ce que la dernière synchro n'a pas pu indexer : un état qui peut durer
+  // (Ollama arrêté), dit ici plutôt qu'en alerte à chaque passe.
+  const pendingIndexing = syncIssues.filter((issue) => !isSyncRefusal(issue));
 
   const handleToggleWatching = async () => {
     if (projectInfo?.isWatching) {
@@ -279,6 +287,14 @@ export const PrimarySourcesPanel: React.FC = () => {
             )}
           </div>
         )}
+
+        {projectInfo &&
+          pendingIndexing.map((issue) => (
+            <div key={issue.code} className="sync-notice" role="status">
+              <AlertTriangle size={14} strokeWidth={1.5} />
+              <span>{describeSyncIssue(t, issue)}</span>
+            </div>
+          ))}
 
         {/* Statistics Panel */}
         {showStats && statistics && <PrimarySourceStats statistics={statistics} />}

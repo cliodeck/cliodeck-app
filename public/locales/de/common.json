@@ -1374,6 +1374,7 @@
     "tropy-notes": "Tropy-Notizen",
     "transkribus": "Transkribus",
     "manual": "Manuell",
+    "imported": "Importierte Datei",
     "noCorpusData": "Keine OCR-Daten. Führen Sie bei der Synchronisierung eine OCR durch.",
     "closeReport": "Schließen",
     "collectionFilter": "Nach Liste filtern",
@@ -1406,6 +1407,10 @@
     "import": "Importieren",
     "importSuccess": "Transkription importiert.",
     "importFailed": "Der Import ist fehlgeschlagen.",
+    "transcriptionNotIndexed": "Transkription gespeichert, noch nicht indexiert: Das Modell der semantischen Suche hat nicht geantwortet (prüfen Sie, ob Ollama läuft). Der Assistent zitiert sie vorerst nicht; sie wird bei der nächsten Synchronisierung nachgeholt.",
+    "transcriptionNotIndexedNoProvider": "Transkription gespeichert, noch nicht indexiert: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Modelleinstellungen). Der Assistent zitiert sie vorerst nicht; sie wird bei der nächsten Synchronisierung nachgeholt.",
+    "transcriptionNotSaved": "Die Transkription wurde nicht gespeichert.",
+    "transcriptionSourceGone": "Die Transkription wurde nicht gespeichert: Diese Quelle ist nicht mehr in der Projektdatenbank. Synchronisieren Sie das Tropy-Projekt und versuchen Sie es erneut.",
     "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription — bereits vorhandene Transkriptionen bleiben erhalten.",
     "ocrSummaryTitle": "Bilanz des Durchlaufs",
     "ocrSummaryWritten": "{{count}} Transkription(en) gespeichert",
@@ -1416,7 +1421,9 @@
     "close": "Schließen",
     "issues": {
       "differentProject": "„{{candidateName}}“ ist ein anderes Tropy-Projekt: Dieses ClioDeck-Projekt ist bereits mit „{{linkedName}}“ verknüpft ({{sourceCount}} Quelle(n)). Es wurde nichts geändert. Um mit „{{candidateName}}“ zu arbeiten, öffnen Sie es in einem anderen ClioDeck-Projekt. Um „{{linkedName}}“ zu ersetzen, bereinigen Sie zuerst dessen Quellen: Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Primärquellen bereinigen“.",
-      "differentProjectUnnamed": "„{{candidateName}}“ ist nicht das Tropy-Projekt, aus dem die {{sourceCount}} Quelle(n) dieses ClioDeck-Projekts stammen. Es wurde nichts geändert. Um mit „{{candidateName}}“ zu arbeiten, öffnen Sie es in einem anderen ClioDeck-Projekt. Um es hier zu verknüpfen, bereinigen Sie zuerst diese Quellen: Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Primärquellen bereinigen“."
+      "differentProjectUnnamed": "„{{candidateName}}“ ist nicht das Tropy-Projekt, aus dem die {{sourceCount}} Quelle(n) dieses ClioDeck-Projekts stammen. Es wurde nichts geändert. Um mit „{{candidateName}}“ zu arbeiten, öffnen Sie es in einem anderen ClioDeck-Projekt. Um es hier zu verknüpfen, bereinigen Sie zuerst diese Quellen: Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Primärquellen bereinigen“.",
+      "embeddingFailed": "Letzte Synchronisierung: {{sources}} Quelle(n) gespeichert, noch nicht indexiert. Das Modell der semantischen Suche hat nicht geantwortet (prüfen Sie, ob Ollama läuft): Der Assistent zitiert sie vorerst nicht. Sie werden bei der nächsten Synchronisierung nachgeholt.",
+      "noEmbeddingProvider": "Letzte Synchronisierung: {{sources}} Quelle(n) gespeichert, noch nicht indexiert. Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Modelleinstellungen): Der Assistent zitiert sie vorerst nicht. Sie werden bei der nächsten Synchronisierung nachgeholt."
     }
   },
   "modes": {

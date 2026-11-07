@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Languages, Play, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Languages, Play, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { usePrimarySourcesStore, type SyncOutcome } from '../../stores/primarySourcesStore';
+import { describeSyncIssue } from './sync-issues';
 import './OCRSettingsModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -189,6 +190,15 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
                   )}
                 </p>
               )}
+              {/* Ce que la passe n'a pas pu faire : des transcriptions
+                  enregistrées que l'assistant ne cite pas encore, ou le refus
+                  d'un autre projet Tropy. Dit ici, sans alerte. */}
+              {(outcome.issues ?? []).map((issue) => (
+                <p key={issue.code} className="ocr-summary__warning">
+                  <AlertTriangle size={14} strokeWidth={1.5} />
+                  <span>{describeSyncIssue(t, issue)}</span>
+                </p>
+              ))}
               {(outcome.errors?.length ?? 0) > 0 && (
                 <p className="ocr-summary__errors">
                   {t('primarySources.ocrSummaryErrors', {

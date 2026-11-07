@@ -34,7 +34,7 @@ export interface PrimarySourceDocument {
   collection?: string;
   type?: string;
   transcription?: string;
-  transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
+  transcriptionSource?: PrimarySourceItem['transcriptionSource'];
   /** Tesseract OCR confidence 0-100, if OCR was performed. */
   ocrConfidence?: number;
   /**
@@ -684,9 +684,14 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Met à jour une source existante
+   * Met à jour une source existante. Renvoie le nombre de lignes modifiées :
+   * 0 pour une source absente, que l'appelant ne doit pas annoncer écrite.
+   *
+   * Une transcription qui n'est pas un OCR Tesseract n'a pas de confiance OCR :
+   * celle de l'OCR qu'elle remplace restait sinon attachée à une saisie humaine
+   * ou à un import, et le rapport du corpus la classait parmi les pires OCR.
    */
-  updateSource(id: string, updates: Partial<PrimarySourceItem>): void {
+  updateSource(id: string, updates: Partial<PrimarySourceItem>): number {
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -717,22 +722,28 @@ export class PrimarySourcesVectorStore {
     if (updates.transcriptionSource !== undefined) {
       fields.push('transcription_source = ?');
       values.push(updates.transcriptionSource);
+      fields.push('ocr_confidence = ?');
+      values.push(updates.transcriptionSource === 'tesseract' ? (updates.ocrConfidence ?? null) : null);
+    } else if (updates.ocrConfidence !== undefined) {
+      fields.push('ocr_confidence = ?');
+      values.push(updates.ocrConfidence);
     }
     if (updates.lastModified !== undefined) {
       fields.push('last_modified = ?');
       values.push(updates.lastModified.toISOString());
     }
 
-    if (fields.length === 0) return;
+    if (fields.length === 0) return 0;
 
     values.push(id);
     const stmt = this.db.prepare(`UPDATE tropy_sources SET ${fields.join(', ')} WHERE id = ?`);
-    stmt.run(...values);
+    const { changes } = stmt.run(...values);
 
     // Mettre à jour les tags si fournis
     if (updates.tags) {
       this.saveSourceTags(id, updates.tags);
     }
+    return changes;
   }
 
   /**
@@ -978,6 +989,52 @@ export class PrimarySourcesVectorStore {
     });
 
     transaction();
+  }
+
+  /**
+   * Remplace tous les extraits d'une source par `items`, embarqués d'avance :
+   * la suppression de l'ancien jeu et l'écriture du nouveau dans une seule
+   * transaction. Une source a ainsi tous ses extraits ou aucun — un échec
+   * d'embarquement au milieu laissait 9 extraits sur 10, et la synchro, qui ne
+   * reprend que les sources sans extrait, ne complétait jamais le trou
+   * (S08-1-30). `items` vide retire les extraits.
+   *
+   * INSERT simple, jamais `INSERT OR REPLACE` : les ids sont neufs, et un
+   * conflit avec l'extrait d'une autre source doit échouer, pas le lui voler.
+   * HNSW et BM25 ne sont alimentés qu'après la validation : une annulation ne
+   * laisse rien en mémoire qui ne soit en base. À appeler hors d'une
+   * transaction du magasin, sinon la validation n'est qu'un point de sauvegarde.
+   */
+  replaceSourceChunks(
+    sourceId: string,
+    items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }>
+  ): void {
+    const insert = this.db.prepare(`
+      INSERT INTO tropy_chunks
+      (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
+      for (const { chunk, embedding } of items) {
+        insert.run(
+          chunk.id,
+          sourceId,
+          chunk.content,
+          chunk.chunkIndex,
+          chunk.startPosition,
+          chunk.endPosition,
+          Buffer.from(embedding.buffer),
+          chunk.qualityScore ?? null
+        );
+      }
+    })();
+
+    for (const { chunk, embedding } of items) {
+      this.addToHNSWIndex(chunk.id, embedding);
+      this.addToBM25Index(chunk);
+    }
   }
 
   /**

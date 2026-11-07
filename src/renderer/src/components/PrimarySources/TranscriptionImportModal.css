@@ -155,6 +155,24 @@
   color: var(--color-error);
 }
 
+/* Un message long ne doit pas écraser l'icône. */
+.import-result svg {
+  flex-shrink: 0;
+}
+
+/* Écrite mais pas encore indexée (L06-7) : ni un succès, ni un échec. */
+.import-result.warning {
+  background: var(--color-warning-bg);
+}
+
+.import-result.warning svg {
+  color: var(--color-warning);
+}
+
+.import-result.warning span {
+  color: var(--text-primary);
+}
+
 .import-result span {
   font-size: 12px;
   line-height: 1.4;

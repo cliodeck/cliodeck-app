@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Archive, FileText, Calendar, User, Building, ScanText, Loader2 } from 'lucide-react';
 import { PrimarySource, usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { describeNotIndexed, describeNotSaved } from './sync-issues';
 import './PrimarySourceCard.css';
 
 interface PrimarySourceCardProps {
@@ -22,8 +23,8 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({
   };
 
   // OCR manuel par source (#23) : re-lance la reconnaissance sur les images
-  // de cette source, remplace la transcription (statut 'manual'). Une
-  // transcription existante est écrasée — confirmation d'abord.
+  // de cette source, remplace la transcription (statut 'tesseract', avec sa
+  // confiance). Une transcription existante est écrasée — confirmation d'abord.
   const handleManualOCR = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isPerformingOCR) return;
@@ -53,8 +54,13 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({
                   'primarySources.ocrNoPhotos',
                   'No image found for this source (files moved or missing).'
                 )
-              : t('primarySources.ocrFailed', 'OCR failed for this source.')
+              : result.error === 'not-saved' || result.error === 'source-not-found'
+                ? describeNotSaved(t, result.error)
+                : t('primarySources.ocrFailed', 'OCR failed for this source.')
           );
+      } else if (result.notIndexed) {
+        // Enregistrée, mais l'assistant ne la cite pas encore (Ollama arrêté…).
+        await useDialogStore.getState().showAlert(describeNotIndexed(t, result.notIndexed));
       }
     } finally {
       setIsOcrHere(false);

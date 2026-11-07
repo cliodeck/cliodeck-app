@@ -74,7 +74,8 @@ export interface PrimarySourceItem {
   tags: string[];
   photos: PrimarySourcePhoto[];
   transcription?: string;
-  transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
+  /** 'imported' : fichier importé à la main, ALTO ou texte brut (L06-7). */
+  transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes' | 'imported';
   /** Tesseract OCR confidence 0-100, if OCR was performed. */
   ocrConfidence?: number;
   /**
