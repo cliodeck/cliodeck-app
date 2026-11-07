@@ -44,6 +44,24 @@ function rememberDialogDirectory(chosenPath: string): void {
   }
 }
 
+/**
+ * Sous Windows et Linux, un dialogue ne choisit pas à la fois des fichiers et
+ * des dossiers : avec `openFile` et `openDirectory`, il ne laisse choisir que
+ * des dossiers (documentation d'Electron), et un projet Tropy `.tpy` devenait
+ * impossible à ouvrir (S18-2-8). On y garde donc `openFile` : un paquet
+ * `.tropy`, simple dossier sur ces systèmes, s'ouvre par son `project.tpy`, que
+ * le lecteur accepte. Sous macOS, où un paquet se choisit comme un dossier,
+ * rien ne change ; un appel `openDirectory` seul non plus.
+ */
+export function normalizeDialogProperties(
+  properties: string[] | undefined,
+  platform: NodeJS.Platform
+): string[] | undefined {
+  if (!properties || platform === 'darwin') return properties;
+  if (!properties.includes('openFile') || !properties.includes('openDirectory')) return properties;
+  return properties.filter((property) => property !== 'openDirectory');
+}
+
 export function setupFilesystemHandlers() {
   // Filesystem handlers
   ipcMain.handle('fs:read-directory', async (_event, rawDirPath: unknown) => {
@@ -222,7 +240,8 @@ export function setupFilesystemHandlers() {
       options.defaultPath,
       configManager.get('lastDialogDirectory')
     );
-    const result = await dialog.showOpenDialog({ ...options, defaultPath } as OpenDialogOptions);
+    const properties = normalizeDialogProperties(options.properties, process.platform);
+    const result = await dialog.showOpenDialog({ ...options, properties, defaultPath } as OpenDialogOptions);
     // Le choix vient de l'utilisateur, pas du renderer : c'est le
     // consentement explicite que `path-validator` exige pour autoriser un
     // accès hors projet (ouvrir un document rangé ailleurs).

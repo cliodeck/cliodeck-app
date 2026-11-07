@@ -105,6 +105,23 @@ interface PrimarySourcesState {
   // OCR Languages
   availableOCRLanguages: Array<{ code: string; name: string }>;
 
+  /**
+   * Le projet ClioDeck dont le store tient l'état. Seul le panneau, qui sait
+   * quel projet est ouvert, l'écrit ; `reset` n'y touche pas.
+   */
+  loadedFor: string | null;
+
+  /**
+   * Rend l'état initial : rien du projet ClioDeck précédent ne reste (S18-1-30),
+   * et une lecture lancée avant ne réécrit plus rien. Ne touche ni aux opérations
+   * en vol (`isSyncing`, OCR), que leur propre fin referme, ni aux réglages de
+   * l'application (langue OCR, langues disponibles), ni à `loadedFor` : vidé
+   * pour un projet sans Tropy ou après une purge, l'état reste celui du projet
+   * ouvert, et le panneau ne doit pas, à son retour, y voir un autre projet et
+   * vider la recherche et le filtre choisis depuis.
+   */
+  reset: () => void;
+
   // Actions - Project
   openTPYProject: (
     tpyPath: string
@@ -156,24 +173,42 @@ interface PrimarySourcesState {
 
 // MARK: - Store
 
-export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
-  // Initial state
+/** Ce qui appartient au projet ClioDeck ouvert, et que `reset` vide. */
+const EMPTY_PROJECT_STATE = {
   sources: [],
   filteredSources: [],
   selectedSourceId: null,
   tpyPath: null,
   projectInfo: null,
-  isSyncing: false,
-  syncProgress: null,
-  isPerformingOCR: false,
-  ocrProgress: null,
-  ocrLanguage: 'fra',
   searchQuery: '',
   selectedTags: [],
   selectedArchive: null,
   selectedCollection: null,
   statistics: null,
+} satisfies Partial<PrimarySourcesState>;
+
+/**
+ * Change à chaque `reset` : une lecture n'écrit sa réponse que si aucun reset
+ * n'a eu lieu depuis son départ. Sans cela, la réponse d'une lecture lancée
+ * pour le projet A, arrivée après le passage à B, y réécrivait l'état de A.
+ */
+let generation = 0;
+
+export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
+  // Initial state
+  ...EMPTY_PROJECT_STATE,
+  loadedFor: null,
+  isSyncing: false,
+  syncProgress: null,
+  isPerformingOCR: false,
+  ocrProgress: null,
+  ocrLanguage: 'fra',
   availableOCRLanguages: [],
+
+  reset: () => {
+    generation += 1;
+    set({ ...EMPTY_PROJECT_STATE });
+  },
 
   // MARK: - Project Actions
 
@@ -210,14 +245,20 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   },
 
   getProjectInfo: async () => {
+    const startedAt = generation;
     try {
       const result = await window.electron.tropy.getProjectInfo();
+      if (startedAt !== generation) return;
       if (result.success && result.info) {
         // Restaurer aussi le tpyPath depuis les infos du projet
         set({
           projectInfo: result.info,
           tpyPath: result.info.tpyPath || null,
         });
+      } else if (result.success) {
+        // Pas de projet Tropy : celui du projet précédent ne reste pas affiché,
+        // et son chemin ne repart pas vers le main (S18-1-30).
+        get().reset();
       }
     } catch (error) {
       console.error('Failed to get project info:', error);
@@ -281,11 +322,15 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   // MARK: - Watching Actions
 
   startWatching: async () => {
-    const { tpyPath } = get();
-    if (!tpyPath) return;
-
     try {
-      await window.electron.tropy.startWatching(tpyPath);
+      // Aucun chemin envoyé : le main surveille le projet Tropy lié au projet
+      // courant. Il adoptait celui qu'on lui passait, et un `tpyPath` resté du
+      // projet précédent devenait le projet Tropy de celui-ci (S18-1-30).
+      const result = await window.electron.tropy.startWatching();
+      if (!result?.success) {
+        console.error('Failed to start watching:', result?.error);
+        return;
+      }
       set((state) => ({
         projectInfo: state.projectInfo
           ? { ...state.projectInfo, isWatching: true }
@@ -396,8 +441,10 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   // MARK: - Sources Actions
 
   refreshSources: async () => {
+    const startedAt = generation;
     try {
       const result = await window.electron.tropy.getAllSources();
+      if (startedAt !== generation) return;
 
       if (result.success && result.sources) {
         const sources: PrimarySource[] = result.sources.map((s: Partial<PrimarySource>) => ({
@@ -532,8 +579,10 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   // MARK: - Statistics Actions
 
   refreshStatistics: async () => {
+    const startedAt = generation;
     try {
       const result = await window.electron.tropy.getStatistics();
+      if (startedAt !== generation) return;
       if (result.success && result.statistics) {
         set({ statistics: result.statistics });
       }

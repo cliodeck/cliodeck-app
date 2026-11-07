@@ -8,7 +8,6 @@ import {
   validate,
   StringPathSchema,
   StringIdSchema,
-  OptionalStringSchema,
   TropySyncSchema,
   TropyPerformOcrSchema,
   TropyPerformBatchOcrSchema,
@@ -95,13 +94,14 @@ export function setupTropyHandlers() {
   // MARK: - File Watching
 
   /**
-   * Démarre la surveillance du fichier .tpy
+   * Démarre la surveillance du projet Tropy lié au projet courant. Un chemin
+   * envoyé par le renderer est ignoré : il n'a pas à choisir quel .tpy suivre
+   * (S18-1-30).
    */
-  ipcMain.handle('tropy:start-watching', async (_event, rawTpyPath?: unknown) => {
-    const tpyPath = validate(OptionalStringSchema, rawTpyPath);
-    console.log('📞 IPC Call: tropy:start-watching', { tpyPath });
+  ipcMain.handle('tropy:start-watching', async () => {
+    console.log('📞 IPC Call: tropy:start-watching');
     try {
-      const result = tropyService.startWatching(tpyPath);
+      const result = tropyService.startWatching();
       console.log('📤 IPC Response: tropy:start-watching', result);
       return result;
     } catch (error: unknown) {

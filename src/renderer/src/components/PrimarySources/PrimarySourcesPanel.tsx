@@ -68,6 +68,18 @@ export const PrimarySourcesPanel: React.FC = () => {
 
   // Load project info and sources when project changes
   useEffect(() => {
+    // Un autre projet que celui dont le store tient l'état : rien de l'ancien
+    // ne doit s'afficher pendant la lecture, ni être réécrit par une lecture
+    // lancée pour lui (S18-1-30). La remise à zéro précède donc la lecture.
+    // Le panneau est démonté pendant un changement de projet fait depuis
+    // l'onglet Projets : c'est à son montage qu'il le découvre.
+    const projectPath = currentProject?.path ?? null;
+    const store = usePrimarySourcesStore.getState();
+    if (store.loadedFor !== projectPath) {
+      store.reset();
+      usePrimarySourcesStore.setState({ loadedFor: projectPath });
+    }
+
     const loadData = async () => {
       if (currentProject) {
         // D'abord récupérer les infos du projet Tropy (restaure tpyPath et projectInfo)
@@ -85,6 +97,8 @@ export const PrimarySourcesPanel: React.FC = () => {
       // On macOS, .tropy files are actually packages (folders with .tropy extension)
       // containing project.tpy and an assets folder.
       // We use openDirectory to allow selecting .tropy packages directly.
+      // Sous Windows et Linux, le main retire openDirectory
+      // (`normalizeDialogProperties`) : un paquet s'y ouvre par son project.tpy.
       const result = await window.electron.dialog.openFile({
         title: t('primarySources.selectTropyProject', 'Select Tropy Project'),
         message: t('primarySources.selectTropyMessage', 'Choose a .tropy package or .tpy file'),
