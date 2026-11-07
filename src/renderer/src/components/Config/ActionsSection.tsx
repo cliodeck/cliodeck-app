@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useDialogStore } from '../../stores/dialogStore';
+import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './ConfigPanel.css';
 
 export const ActionsSection: React.FC = () => {
@@ -106,6 +107,9 @@ export const ActionsSection: React.FC = () => {
 
       if (result.success) {
         console.log('✅ Primary sources database purged successfully');
+        // Le panneau Sources primaires ne garde ni le projet Tropy ni ses
+        // sources, qui n'existent plus en base (S08-2-9).
+        usePrimarySourcesStore.getState().reset();
         await useDialogStore.getState().showAlert(t('actions.purgePrimaryDatabase.success'));
       } else {
         console.error('❌ Failed to purge primary sources database:', result.error);

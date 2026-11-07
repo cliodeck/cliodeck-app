@@ -146,7 +146,7 @@ class TropyService {
 
       // Démarrer le watcher si auto-sync était activé
       if (existingProject.autoSync && fs.existsSync(existingProject.tpyPath)) {
-        this.startWatching(existingProject.tpyPath);
+        this.startWatching();
       }
     }
   }
@@ -532,13 +532,17 @@ class TropyService {
   // MARK: - File Watching
 
   /**
-   * Démarre la surveillance du fichier .tpy
+   * Démarre la surveillance du projet Tropy lié au projet courant
+   * (`currentTPYPath`, posé par `init` ou `openProject`). Aucun chemin n'est
+   * reçu : celui que passait le renderer était adopté comme `currentTPYPath`,
+   * et un chemin resté du projet ClioDeck précédent faisait importer son
+   * archive dans celui-ci à la synchro suivante (S18-1-30).
    */
-  startWatching(tpyPath?: string): { success: boolean; error?: string } {
-    const pathToWatch = tpyPath || this.currentTPYPath;
+  startWatching(): { success: boolean; error?: string } {
+    const pathToWatch = this.currentTPYPath;
 
     if (!pathToWatch) {
-      return { success: false, error: 'No project path specified' };
+      return { success: false, error: 'No Tropy project linked to the current project' };
     }
 
     if (!this.watcher) {
@@ -579,7 +583,6 @@ class TropyService {
     });
 
     this.watcher.watch(pathToWatch);
-    this.currentTPYPath = pathToWatch;
 
     return { success: true };
   }
@@ -1120,6 +1123,8 @@ class TropyService {
       // Drop and recreate every `tropy_*` table (post db-fusion brain.db
       // hosts other domains, so we can't just unlink the file).
       this.vectorStore.purgeAll();
+      // Plus de projet lié : sa surveillance s'arrête aussi (S08-2-9).
+      this.stopWatching();
       this.currentTPYPath = null;
       console.log('🗑️ Purged tropy_* tables in brain.db');
 

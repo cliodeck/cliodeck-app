@@ -837,7 +837,8 @@ const api = {
     checkSyncNeeded: () => ipcRenderer.invoke('tropy:check-sync-needed'),
 
     // File Watching
-    startWatching: (tpyPath?: string) => ipcRenderer.invoke('tropy:start-watching', tpyPath),
+    // Sans chemin : le main surveille le projet Tropy lié au projet courant (S18-1-30).
+    startWatching: () => ipcRenderer.invoke('tropy:start-watching'),
     stopWatching: () => ipcRenderer.invoke('tropy:stop-watching'),
     isWatching: () => ipcRenderer.invoke('tropy:is-watching'),
 
