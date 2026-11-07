@@ -1413,7 +1413,11 @@
     "ocrSummaryNothing": "Aucune transcription nouvelle. Les sources concernées en avaient déjà une, ou la reconnaissance n'a rien produit d'exploitable.",
     "ocrSummaryErrors": "{{count}} erreur(s) — voir la console",
     "ocrSummaryFailed": "La synchronisation a échoué.",
-    "close": "Fermer"
+    "close": "Fermer",
+    "issues": {
+      "differentProject": "« {{candidateName}} » est un autre projet Tropy : ce projet ClioDeck est déjà lié à « {{linkedName}} » ({{sourceCount}} source(s)). Rien n'a été modifié. Pour travailler sur « {{candidateName}} », ouvrez-le dans un autre projet ClioDeck. Pour remplacer « {{linkedName}} », purgez d'abord ses sources : panneau Projet, section « Actions », bouton « Purger Sources Primaires ».",
+      "differentProjectUnnamed": "« {{candidateName}} » n'est pas le projet Tropy d'où viennent les {{sourceCount}} source(s) de ce projet ClioDeck. Rien n'a été modifié. Pour travailler sur « {{candidateName}} », ouvrez-le dans un autre projet ClioDeck. Pour le lier ici, purgez d'abord ces sources : panneau Projet, section « Actions », bouton « Purger Sources Primaires »."
+    }
   },
   "modes": {
     "selector": {

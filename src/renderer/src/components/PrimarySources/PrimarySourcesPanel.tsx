@@ -21,6 +21,7 @@ import { PrimarySourceStats } from './PrimarySourceStats';
 import { OCRCorpusReport } from './OCRCorpusReport';
 import { OCRSettingsModal } from './OCRSettingsModal';
 import { TranscriptionImportModal } from './TranscriptionImportModal';
+import { describeSyncIssue } from './sync-issues';
 import './PrimarySourcesPanel.css';
 
 export const PrimarySourcesPanel: React.FC = () => {
@@ -104,7 +105,10 @@ export const PrimarySourcesPanel: React.FC = () => {
 
         const openResult = await openTPYProject(projectPath);
 
-        if (!openResult.success) {
+        if (openResult.issue) {
+          // Un autre projet Tropy (Q25) : dire lequel est lié, et comment en changer.
+          await useDialogStore.getState().showAlert(describeSyncIssue(t, openResult.issue));
+        } else if (!openResult.success) {
           await useDialogStore.getState().showAlert(`Failed to open Tropy project: ${openResult.error}`);
         }
       }
@@ -121,6 +125,9 @@ export const PrimarySourcesPanel: React.FC = () => {
 
     if (!result.success && result.errors && result.errors.length > 0) {
       console.error('Sync errors:', result.errors);
+    }
+    for (const issue of result.issues ?? []) {
+      await useDialogStore.getState().showAlert(describeSyncIssue(t, issue));
     }
   };
 

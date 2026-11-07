@@ -7,6 +7,7 @@
  *    CASCADE`, réenregistrer une source emportait ses chunks (46 → 0) ;
  *  — `saveTropyProject` résolvait son conflit sur un `randomUUID()` neuf à
  *    chaque appel, donc jamais : une ligne de plus par synchronisation.
+ *    Devenu `bindTropyProject` (L06-3), qui porte aussi l'identité du projet.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
@@ -109,9 +110,9 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy li
   });
 
   it('garde une seule ligne quel que soit le nombre de synchronisations', () => {
-    const first = store.saveTropyProject(TPY, 'comité');
-    store.saveTropyProject(TPY, 'comité');
-    store.saveTropyProject(TPY, 'comité');
+    const first = store.bindTropyProject(TPY, 'comité', 'uuid-comite');
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite');
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite');
 
     const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
     const count = db.prepare('SELECT COUNT(*) as c FROM tropy_projects').get() as { c: number };
@@ -123,11 +124,11 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy li
   });
 
   it('préserve la surveillance automatique quand la synchro ne la mentionne pas', () => {
-    store.saveTropyProject(TPY, 'comité', true);
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite', { autoSync: true });
 
-    // La synchro appelle sans troisième argument à chaque passe : elle ne
-    // doit pas désactiver au passage un réglage de l'utilisateur.
-    store.saveTropyProject(TPY, 'comité');
+    // La synchro appelle sans `autoSync` à chaque passe : elle ne doit pas
+    // désactiver au passage un réglage de l'utilisateur.
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite');
 
     const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
     const rows = db.prepare('SELECT auto_sync FROM tropy_projects').all() as Array<{
@@ -139,8 +140,8 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy li
   });
 
   it('laisse la synchro modifier explicitement la surveillance', () => {
-    store.saveTropyProject(TPY, 'comité', true);
-    store.saveTropyProject(TPY, 'comité', false);
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite', { autoSync: true });
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite', { autoSync: false });
 
     expect(store.getTropyProject()?.autoSync).toBe(false);
   });
@@ -155,7 +156,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy li
     insert.run('b', TPY, 'comité', '2026-08-02T00:00:00.000Z', 0);
     insert.run('c', TPY, 'comité', '2026-08-03T00:00:00.000Z', 0);
 
-    store.saveTropyProject(TPY, 'comité');
+    store.bindTropyProject(TPY, 'comité', null);
 
     const count = db
       .prepare('SELECT COUNT(*) as c FROM tropy_projects WHERE tpy_path = ?')
@@ -163,5 +164,76 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy li
     expect(count.c).toBe(1);
     // La plus récente est celle qui survit.
     expect(store.getTropyProject()?.id).toBe('c');
+  });
+
+  it('un appel qui ne connaît pas l’uuid ne l’efface pas (A5)', () => {
+    // REPLACE réécrivait la ligne avec les seules colonnes nommées.
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite');
+    store.bindTropyProject(TPY, 'comité', null);
+
+    expect(store.getTropyProject()?.projectUuid).toBe('uuid-comite');
+  });
+
+  it('retrouve le projet par son uuid avant son chemin : déplacé, il garde sa ligne et sa surveillance', () => {
+    const MOVED = '/Volumes/Archives/comité.tropy';
+    const id = store.bindTropyProject(TPY, 'comité', 'uuid-comite', { autoSync: true });
+    expect(store.bindTropyProject(MOVED, 'comité', 'uuid-comite')).toBe(id);
+
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    const rows = db.prepare('SELECT id, tpy_path, auto_sync FROM tropy_projects').all();
+    expect(rows).toEqual([{ id, tpy_path: MOVED, auto_sync: 1 }]);
+  });
+
+  it('met à jour la ligne que la garde a reconnue, même sans uuid ni chemin pour la retrouver', () => {
+    // Ligne d'avant project_uuid, projet déplacé depuis : seule l'empreinte
+    // des photos l'a reconnu. Une ligne neuve à sa place perdait la
+    // surveillance, et perdrait tout ce que la ligne portera plus tard.
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    db.prepare(
+      'INSERT INTO tropy_projects (id, tpy_path, name, last_sync, auto_sync) VALUES (?, ?, ?, ?, ?)'
+    ).run('a', TPY, 'comité', '2026-08-01T00:00:00.000Z', 1);
+    const MOVED = '/Volumes/Archives/comité.tropy';
+
+    expect(store.bindTropyProject(MOVED, 'comité', 'uuid-comite', { keepId: 'a' })).toBe('a');
+
+    const rows = db.prepare('SELECT id, tpy_path, auto_sync, project_uuid FROM tropy_projects').all();
+    expect(rows).toEqual([{ id: 'a', tpy_path: MOVED, auto_sync: 1, project_uuid: 'uuid-comite' }]);
+  });
+
+  it('un autre projet au même chemin ne reprend pas la ligne de l’ancien', () => {
+    // Le fichier a été remplacé par un autre projet Tropy, sans source liée
+    // encore : la surveillance réglée pour l'ancien ne passe pas au nouveau.
+    const first = store.bindTropyProject(TPY, 'comité', 'uuid-comite', { autoSync: true });
+    const second = store.bindTropyProject(TPY, 'ddf_archives', 'uuid-ddf');
+
+    expect(second).not.toBe(first);
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    const rows = db.prepare('SELECT id, name, auto_sync, project_uuid FROM tropy_projects').all();
+    expect(rows).toEqual([{ id: second, name: 'ddf_archives', auto_sync: 0, project_uuid: 'uuid-ddf' }]);
+  });
+
+  it('un projet sans source remplacé par un autre : une seule ligne, celle du nouveau', () => {
+    store.bindTropyProject(TPY, 'comité', 'uuid-comite');
+    store.bindTropyProject('/Users/historienne/Documents/ddf.tropy', 'ddf_archives', 'uuid-ddf');
+
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    const rows = db.prepare('SELECT name, project_uuid FROM tropy_projects').all();
+    expect(rows).toEqual([{ name: 'ddf_archives', project_uuid: 'uuid-ddf' }]);
+  });
+
+  it('complète l’uuid d’une ligne ancienne sans toucher à sa date de synchro', () => {
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    db.prepare(
+      'INSERT INTO tropy_projects (id, tpy_path, name, last_sync, auto_sync) VALUES (?, ?, ?, ?, ?)'
+    ).run('a', TPY, 'comité', '2026-08-01T00:00:00.000Z', 0);
+
+    store.recordTropyProjectUuid('a', 'uuid-comite');
+    // Une identité déjà connue ne se réécrit pas.
+    store.recordTropyProjectUuid('a', 'uuid-autre');
+
+    expect(store.getTropyProject()).toMatchObject({
+      projectUuid: 'uuid-comite',
+      lastSync: '2026-08-01T00:00:00.000Z',
+    });
   });
 });

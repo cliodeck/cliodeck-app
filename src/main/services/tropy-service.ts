@@ -2,7 +2,8 @@ import { BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { TropyReader, TropyItem, PrimarySourceItem } from '../../../backend/integrations/tropy/TropyReader.js';
-import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress } from '../../../backend/integrations/tropy/TropySync.js';
+import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress, TropySyncIssue } from '../../../backend/integrations/tropy/TropySync.js';
+import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/integrations/tropy/tropy-project-identity.js';
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
 import { PrimarySourcesVectorStore, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
@@ -43,6 +44,8 @@ export interface TropyOpenResult {
   itemCount?: number;
   lastModified?: string;
   error?: string;
+  /** Pourquoi l'ouverture est refusée, à traduire côté renderer (`describeSyncIssue`). */
+  issue?: TropySyncIssue;
 }
 
 export interface TropySearchResult {
@@ -128,6 +131,18 @@ class TropyService {
     if (existingProject) {
       this.currentTPYPath = existingProject.tpyPath;
       console.log(`📚 Tropy project loaded: ${existingProject.name}`);
+
+      // Lien d'avant project_uuid : son identité se lit dans le .tpy
+      // enregistré, s'il est toujours là. Sinon la garde s'en remettra à
+      // l'empreinte des photos. Jamais une raison de faire échouer l'ouverture.
+      if (existingProject.projectUuid === null && fs.existsSync(existingProject.tpyPath)) {
+        try {
+          const { projectId } = readTropyProjectIdentity(existingProject.tpyPath);
+          if (projectId) this.vectorStore.recordTropyProjectUuid(existingProject.id, projectId);
+        } catch (error) {
+          console.warn('⚠️ [TROPY-SERVICE] Could not read the linked Tropy project identity:', error);
+        }
+      }
 
       // Démarrer le watcher si auto-sync était activé
       if (existingProject.autoSync && fs.existsSync(existingProject.tpyPath)) {
@@ -229,6 +244,25 @@ class TropyService {
         return { success: false, error: `File not found: ${tpyPath}` };
       }
 
+      // Un projet ClioDeck, un projet Tropy (Q25) : un autre projet n'est
+      // pas suivi, et la synchro automatique qui suit l'ouverture n'a pas
+      // lieu. currentTPYPath reste celui du projet lié.
+      if (this.vectorStore) {
+        const { decision, identity } = assessTropyBinding(tpyPath, this.vectorStore);
+        if (decision.kind === 'different') {
+          return {
+            success: false,
+            error: `Different Tropy project: "${identity.name}" is not the linked project "${decision.linkedName}"`,
+            issue: {
+              code: 'different-project',
+              linkedName: decision.linkedName,
+              candidateName: identity.name,
+              sourceCount: decision.sourceCount,
+            },
+          };
+        }
+      }
+
       const reader = new TropyReader();
       reader.openProject(tpyPath);
 
@@ -288,6 +322,7 @@ class TropyService {
         transcriptionsImported: 0,
         transcriptionsWritten: 0,
         errors: ['Service not initialized or no project opened'],
+        issues: [],
       };
     }
 

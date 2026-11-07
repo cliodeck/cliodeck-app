@@ -16,6 +16,7 @@ import type {
 } from '../../types/entity';
 import { entityNormalizer } from '../ner/EntityNormalizer';
 import { relevanceScore } from '../rag/relevance';
+import { sameFile } from './file-identity';
 
 const { HierarchicalNSW } = hnswlib;
 type HierarchicalNSW = InstanceType<typeof HierarchicalNSW>;
@@ -506,6 +507,22 @@ export class PrimarySourcesVectorStore {
         auto_sync INTEGER DEFAULT 0
       );
     `);
+
+    // Soft migration: add project_uuid column (`project.project_id` du .tpy,
+    // l'identité du projet lié : les ids d'items et de photos sont locaux à
+    // chaque .tpy). NULL sur les lignes existantes : tropyService.init le lit
+    // dans le .tpy enregistré, sans réembarquer.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_projects')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'project_uuid')) {
+        this.db.exec('ALTER TABLE tropy_projects ADD COLUMN project_uuid TEXT');
+        console.log('🗄️ Migrated tropy_projects: added project_uuid column');
+      }
+    } catch (err) {
+      console.warn('⚠️ project_uuid migration check failed:', err);
+    }
 
     // Indexes pour performance
     this.db.exec(`
@@ -1422,49 +1439,103 @@ export class PrimarySourcesVectorStore {
   // MARK: - Tropy Project Management
 
   /**
-   * Enregistre un projet Tropy lié
-   */
-  /**
-   * `INSERT OR REPLACE` résout le conflit sur la clé primaire — ici un
-   * `randomUUID()` neuf à chaque appel, donc jamais en conflit : chaque
-   * synchronisation ajoutait une ligne de plus pour le MÊME projet. On
-   * réutilise l'identifiant déjà enregistré pour ce chemin, et on absorbe
-   * les doublons hérités des versions précédentes.
+   * Enregistre le projet Tropy lié, une fois la garde d'identité passée
+   * (`decideTropyBinding`) : il n'en reste qu'une ligne.
+   *
+   * La ligne gardée, avec son identifiant et sa surveillance, est celle que
+   * la garde a reconnue (`keepId`) ; à défaut, celle du même projet
+   * (`project_uuid`), puis celle du même fichier si elle n'appartient pas à
+   * un autre projet connu. Un projet déplacé met ainsi à jour son chemin au
+   * lieu d'ajouter une ligne — y compris quand seule l'empreinte des photos
+   * l'a reconnu, ligne sans uuid et ancien chemin disparu : ni l'uuid ni le
+   * chemin ne la retrouvent alors, d'où `keepId`. Les autres lignes sont
+   * retirées — doublons de l'ancien `saveTropyProject`, qui en ajoutait une
+   * par synchronisation, ou lien d'un projet sans source qu'on remplace. Le
+   * « une seule » est la règle de la v1 (Q25), décidée ici et dans
+   * `decideTropyBinding` ; le schéma n'interdit pas plusieurs lignes.
+   *
+   * UPSERT, jamais `INSERT OR REPLACE` (A5) : REPLACE supprime la ligne en
+   * conflit et la réécrit avec les seules colonnes nommées. Un appel qui ne
+   * connaît pas l'uuid (identité illisible) n'efface pas celui qui est
+   * enregistré.
    *
    * `autoSync` omis = « ne touche pas au réglage existant » : la synchro
    * appelle cette méthode à chaque passe et ne doit pas désactiver au
    * passage la surveillance que l'utilisateur a activée.
+   *
+   * `keepId` omis sur une première liaison, exprès : un autre projet ne
+   * reprend pas les réglages de la ligne qu'il remplace.
    */
-  saveTropyProject(tpyPath: string, name: string, autoSync?: boolean): string {
+  bindTropyProject(
+    tpyPath: string,
+    name: string,
+    projectUuid: string | null,
+    options: { autoSync?: boolean; keepId?: string | null } = {}
+  ): string {
+    const { autoSync, keepId } = options;
     const now = new Date().toISOString();
 
-    const existing = this.db
-      .prepare('SELECT id, auto_sync FROM tropy_projects WHERE tpy_path = ? ORDER BY last_sync DESC')
-      .all(tpyPath) as Array<{ id: string; auto_sync: number }>;
+    const rows = this.db
+      .prepare(
+        'SELECT id, tpy_path, project_uuid, auto_sync FROM tropy_projects ORDER BY last_sync DESC'
+      )
+      .all() as Array<{ id: string; tpy_path: string; project_uuid: string | null; auto_sync: number }>;
 
-    const id = existing[0]?.id ?? randomUUID();
-    const effectiveAutoSync = autoSync ?? existing[0]?.auto_sync === 1;
+    const kept =
+      (keepId ? rows.find((r) => r.id === keepId) : undefined) ??
+      (projectUuid ? rows.find((r) => r.project_uuid === projectUuid) : undefined) ??
+      rows.find(
+        (r) =>
+          (!projectUuid || !r.project_uuid || r.project_uuid === projectUuid) &&
+          sameFile(r.tpy_path, tpyPath)
+      );
+    const id = kept?.id ?? randomUUID();
+    const effectiveAutoSync = autoSync ?? kept?.auto_sync === 1;
 
-    if (existing.length > 1) {
-      const stale = existing.slice(1).map((r) => r.id);
+    this.db.transaction(() => {
+      const removed = this.db.prepare('DELETE FROM tropy_projects WHERE id != ?').run(id).changes;
+      if (removed > 0) {
+        console.log(`🧹 [PRIMARY-STORE] Removed ${removed} other Tropy project row(s)`);
+      }
       this.db
         .prepare(
-          `DELETE FROM tropy_projects WHERE id IN (${stale.map(() => '?').join(', ')})`
-        )
-        .run(...stale);
-      console.log(`🧹 [PRIMARY-STORE] Removed ${stale.length} duplicate Tropy project row(s)`);
-    }
-
-    this.db
-      .prepare(
-        `
-      INSERT OR REPLACE INTO tropy_projects (id, tpy_path, name, last_sync, auto_sync)
-      VALUES (?, ?, ?, ?, ?)
+          `
+      INSERT INTO tropy_projects (id, tpy_path, name, last_sync, auto_sync, project_uuid)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tpy_path = excluded.tpy_path,
+        name = excluded.name,
+        last_sync = excluded.last_sync,
+        auto_sync = excluded.auto_sync,
+        project_uuid = COALESCE(excluded.project_uuid, tropy_projects.project_uuid)
     `
-      )
-      .run(id, tpyPath, name, now, effectiveAutoSync ? 1 : 0);
+        )
+        .run(id, tpyPath, name, now, effectiveAutoSync ? 1 : 0, projectUuid);
+    })();
 
     return id;
+  }
+
+  /**
+   * Complète l'identité d'une ligne d'avant `project_uuid`, lue dans le .tpy
+   * enregistré, sans rien toucher d'autre : `last_sync` décide encore si une
+   * synchronisation est à refaire (`checkSyncNeeded`).
+   */
+  recordTropyProjectUuid(id: string, projectUuid: string): void {
+    this.db
+      .prepare('UPDATE tropy_projects SET project_uuid = ? WHERE id = ? AND project_uuid IS NULL')
+      .run(projectUuid, id);
+  }
+
+  /**
+   * Couples (id de photo, nom de fichier) des sources enregistrées : de quoi
+   * reconnaître le projet lié quand ni son identité ni son chemin ne le
+   * peuvent plus (ligne d'avant `project_uuid`, projet déplacé depuis).
+   */
+  getPhotoFingerprint(limit: number): Array<{ id: number; filename: string }> {
+    return this.db
+      .prepare('SELECT id, filename FROM tropy_photos ORDER BY id LIMIT ?')
+      .all(limit) as Array<{ id: number; filename: string }>;
   }
 
   /**
@@ -1478,7 +1549,15 @@ export class PrimarySourcesVectorStore {
   /**
    * Récupère le projet Tropy enregistré
    */
-  getTropyProject(): { id: string; tpyPath: string; name: string; lastSync: string; autoSync: boolean } | null {
+  getTropyProject(): {
+    id: string;
+    tpyPath: string;
+    name: string;
+    lastSync: string;
+    autoSync: boolean;
+    /** `project.project_id` du .tpy lié ; `null` sur une ligne d'avant la colonne. */
+    projectUuid: string | null;
+  } | null {
     // `LIMIT 1` sans `ORDER BY` rendait une ligne arbitraire — sans
     // conséquence tant qu'il n'y en a qu'une, mais c'est précisément ce
     // qu'on ne peut pas garantir sur les bases déjà polluées de doublons.
@@ -1493,6 +1572,7 @@ export class PrimarySourcesVectorStore {
       name: row.name,
       lastSync: row.last_sync,
       autoSync: row.auto_sync === 1,
+      projectUuid: row.project_uuid ?? null,
     };
   }
 

@@ -1413,7 +1413,11 @@
     "ocrSummaryNothing": "Keine neue Transkription. Die Quellen hatten bereits eine, oder die Erkennung lieferte nichts Verwertbares.",
     "ocrSummaryErrors": "{{count}} Fehler — siehe Konsole",
     "ocrSummaryFailed": "Synchronisierung fehlgeschlagen.",
-    "close": "Schließen"
+    "close": "Schließen",
+    "issues": {
+      "differentProject": "„{{candidateName}}“ ist ein anderes Tropy-Projekt: Dieses ClioDeck-Projekt ist bereits mit „{{linkedName}}“ verknüpft ({{sourceCount}} Quelle(n)). Es wurde nichts geändert. Um mit „{{candidateName}}“ zu arbeiten, öffnen Sie es in einem anderen ClioDeck-Projekt. Um „{{linkedName}}“ zu ersetzen, bereinigen Sie zuerst dessen Quellen: Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Primärquellen bereinigen“.",
+      "differentProjectUnnamed": "„{{candidateName}}“ ist nicht das Tropy-Projekt, aus dem die {{sourceCount}} Quelle(n) dieses ClioDeck-Projekts stammen. Es wurde nichts geändert. Um mit „{{candidateName}}“ zu arbeiten, öffnen Sie es in einem anderen ClioDeck-Projekt. Um es hier zu verknüpfen, bereinigen Sie zuerst diese Quellen: Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Primärquellen bereinigen“."
+    }
   },
   "modes": {
     "selector": {
