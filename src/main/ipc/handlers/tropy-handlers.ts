@@ -266,8 +266,16 @@ export function setupTropyHandlers() {
       });
       console.log('📞 IPC Call: tropy:update-transcription', { sourceId, source, confidence });
       try {
-        const result = await tropyService.updateSourceTranscription(sourceId, transcription, source, confidence);
+        const { indexUpToDate, ...result } = await tropyService.updateSourceTranscription(
+          sourceId,
+          transcription,
+          source,
+          confidence
+        );
         if (!result.success) return result;
+        // Même texte, extraits en place : rien à réembarquer, donc rien qu'une
+        // panne du fournisseur puisse faire annoncer « pas encore indexée ».
+        if (indexUpToDate) return result;
 
         // Réindexer : sans cela, la transcription est visible dans la fiche
         // mais INVISIBLE au RAG — l'assistant continue de répondre sur

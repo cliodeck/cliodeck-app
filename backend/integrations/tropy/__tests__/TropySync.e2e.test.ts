@@ -682,4 +682,70 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(after.sources[0].transcription).toBe(OCR_TEXT);
     expect(after.chunks.length).toBeGreaterThan(0);
   });
+
+  // L06-7 (S15-1-36) : l'import d'un dossier de transcriptions (modale
+  // d'import, mode « dossier ») étiquetait 'transkribus' tout fichier trouvé,
+  // ALTO et texte brut compris ; le rapport OCR et les statistiques par
+  // provenance les comptaient comme des exports Transkribus.
+  it('un dossier de transcriptions importé : la provenance suit le format de chaque fichier (L06-7)', async () => {
+    const transcriptionDir = path.join(root, 'transcriptions');
+    fs.mkdirSync(transcriptionDir);
+    fs.writeFileSync(
+      path.join(transcriptionDir, '10.xml'),
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<alto xmlns="http://www.loc.gov/standards/alto/ns-v4#"><Layout><Page ID="p1"><PrintSpace><TextBlock>' +
+        '<TextLine><String CONTENT="Rapport"/><String CONTENT="du"/><String CONTENT="préfet"/></TextLine>' +
+        '<TextLine><String CONTENT="sur"/><String CONTENT="la"/><String CONTENT="grève"/></TextLine>' +
+        '</TextBlock></PrintSpace></Page></Layout></alto>\n'
+    );
+    fs.writeFileSync(
+      path.join(transcriptionDir, '20.txt'),
+      'Lettre du commissaire central, transcrite à la main hors de ClioDeck.\n'
+    );
+    fs.writeFileSync(
+      path.join(transcriptionDir, '30.xml'),
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"><Page imageFilename="affiche.jpg">' +
+        '<TextRegion><TextLine><TextEquiv><Unicode>Affiche du syndicat des dockers</Unicode></TextEquiv></TextLine></TextRegion>' +
+        '</Page></PcGts>\n'
+    );
+    const tpy = makeTpy(
+      tropyDir,
+      spec({
+        items: [
+          { id: 10, title: 'Rapport du préfet', photos: [{ id: 11, path: photoPath }] },
+          { id: 20, title: 'Lettre du commissaire', photos: [{ id: 21, path: photoPath.replace('rapport', 'lettre') }] },
+          { id: 30, title: 'Affiche du syndicat', photos: [{ id: 31, path: photoPath }] },
+        ],
+      })
+    );
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    // Ce que fait la modale en mode « dossier ».
+    const result = await tropyService.sync({
+      performOCR: false,
+      ocrLanguage: 'fra',
+      transcriptionDirectory: transcriptionDir,
+      forceReindex: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.transcriptionsImported).toBe(3);
+
+    const bySource = new Map(snapshot().sources.map((s) => [s.tropy_id, s]));
+    expect(bySource.get(10)).toMatchObject({
+      transcription: 'Rapport du préfet\nsur la grève',
+      transcription_source: 'imported',
+      ocr_confidence: null,
+    });
+    expect(bySource.get(20)).toMatchObject({
+      transcription: 'Lettre du commissaire central, transcrite à la main hors de ClioDeck.',
+      transcription_source: 'imported',
+      ocr_confidence: null,
+    });
+    expect(bySource.get(30)).toMatchObject({
+      transcription: 'Affiche du syndicat des dockers',
+      transcription_source: 'transkribus',
+      ocr_confidence: null,
+    });
+  });
 });

@@ -1007,35 +1007,51 @@ class TropyService {
    * la ligne : ils mentent dès qu'elle change. La réindexation qui suit
    * (`reindexSource`) en écrit de nouveaux ; si elle échoue, la source reste
    * sans extrait et la synchro suivante la reprend.
+   *
+   * Un texte indexé inchangé (même fichier réimporté, OCR relancé qui rend le
+   * même texte, seule la provenance change) garde ses extraits : ils découpent
+   * toujours ce texte. Les retirer faisait sortir la source du RAG dès que le
+   * fournisseur était en panne. `indexUpToDate` : ces extraits existent, il
+   * n'y a rien à réembarquer.
    */
   async updateSourceTranscription(
     sourceId: string,
     transcription: string,
     source: Exclude<NonNullable<PrimarySourceItem['transcriptionSource']>, 'tropy-notes'>,
     confidence?: number
-  ): Promise<{ success: boolean; error?: string; code?: 'source-not-found' }> {
+  ): Promise<{ success: boolean; error?: string; code?: 'source-not-found'; indexUpToDate?: boolean }> {
     try {
       const store = this.vectorStore;
       if (!store) {
         return { success: false, error: 'Service not initialized' };
       }
 
-      const changed = store.transaction(() => {
+      const written = store.transaction(() => {
+        const before = store.getSource(sourceId);
         const rows = store.updateSource(sourceId, {
           transcription,
           transcriptionSource: source,
           ocrConfidence: confidence,
           lastModified: new Date(),
         });
-        if (rows > 0) store.deleteChunks(sourceId);
-        return rows;
+        if (rows === 0) return null;
+        const after = store.getSource(sourceId);
+        // En-tête, corps et notes : ce que découpent les extraits. Une source
+        // 'tropy-notes' qui devient un corps change de texte (ses notes
+        // passent après lui).
+        const textChanged = !before || !after || this.indexableText(before) !== this.indexableText(after);
+        if (textChanged) {
+          store.deleteChunks(sourceId);
+          return { indexUpToDate: false };
+        }
+        return { indexUpToDate: store.getChunks(sourceId).length > 0 };
       });
       // Source absente (purge, autre projet) : rien n'a été écrit.
-      if (changed === 0) {
+      if (!written) {
         return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
       }
 
-      return { success: true };
+      return { success: true, indexUpToDate: written.indexUpToDate };
     } catch (error: unknown) {
       console.error('Failed to update transcription:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -1168,7 +1184,7 @@ class TropyService {
    *
    * Jamais `success: true` quand l'embarquement a échoué : la source sortait du
    * RAG en silence. Un échec laisse les extraits en place — ceux d'un texte inchangé
-   * restent bons ; après une écriture de transcription il n'y en a plus
+   * restent bons ; après une écriture qui change le texte il n'y en a plus
    * (`updateSourceTranscription` les retire), et la synchro suivante reprend
    * la source. Une source réécrite pendant la réindexation n'est pas un échec :
    * rien n'est écrit, et le texte plus récent a sa propre indexation.

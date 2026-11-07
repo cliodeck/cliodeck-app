@@ -184,6 +184,23 @@ test.describe('Sources primaires : une transcription écrite Ollama arrêté', (
       await expect.poll(() => sourceRow(layout.project).chunks, { timeout: 30_000 }).toBeGreaterThan(0);
       // Indexée, la source garde sa provenance, nommée dans le rapport.
       await expect(report).toContainText('Fichier importé');
+
+      // Ollama de nouveau arrêté, le même fichier réimporté : le texte n'a pas changé, ses
+      // extraits restent, et rien n'annonce une source « pas encore indexée ».
+      const indexed = sourceRow(layout.project).chunks;
+      await ollama.close();
+      ollama = null;
+      await panel(window).locator('button[title="Importer une transcription"]').click();
+      await answerOpenDialog(app, layout.transcription);
+      await modal.locator('.btn-primary').click();
+      await expect(modal.locator('.import-result')).toContainText('Transcription importée.', { timeout: 20_000 });
+      await expect(modal.locator('.import-result')).not.toHaveClass(/warning/);
+      expect(sourceRow(layout.project)).toMatchObject({
+        transcription: IMPORTED_TEXT,
+        transcription_source: 'imported',
+        chunks: indexed,
+      });
+      await modal.locator('.close-button').click();
     } finally {
       await app.close().catch(() => undefined);
       await ollama?.close();

@@ -22,6 +22,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
+import { TropyOCRPipeline } from '../../../../backend/integrations/tropy/TropyOCRPipeline';
 
 const handlers = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>());
 vi.mock('electron', () => ({
@@ -334,6 +335,52 @@ describe.skipIf(!sqliteAvailable)('réindexation : jamais annoncée réussie san
     expect(chunksOf(source.id).join(' ')).toContain('la grève du port est terminée');
   });
 
+  // Le même fichier réimporté, un OCR relancé qui rend le même texte : les
+  // extraits découpent toujours ce texte. Les retirer à chaque écriture faisait
+  // sortir la source du RAG dès que le fournisseur était en panne, jusqu'à la
+  // synchro suivante, pour un texte qui n'avait pas changé.
+  it('la même transcription réécrite, fournisseur en panne : les extraits restent, et la source reste indexée', async () => {
+    await linkAndSync();
+    await tropyService.sync(syncOptions);
+    const update = handlers.get('tropy:update-transcription');
+    const [source] = tropyService.getAllSources();
+    expect(await update?.({}, source.id, NEW_TEXT, 'imported')).toEqual({ success: true });
+    const before = chunksOf(source.id);
+    expect(before.length).toBeGreaterThan(0);
+
+    await setProvider('down');
+    // Réimport du même fichier : la provenance peut changer, pas le texte.
+    const response = await update?.({}, source.id, NEW_TEXT, 'transkribus');
+
+    expect(response).toEqual({ success: true });
+    expect(sourceRow(source.id)).toEqual({
+      transcription: NEW_TEXT,
+      transcription_source: 'transkribus',
+      ocr_confidence: null,
+    });
+    expect(chunksOf(source.id)).toEqual(before);
+  });
+
+  it('la même transcription réécrite sur une source restée sans extrait : elle est réindexée', async () => {
+    await linkAndSync();
+    await tropyService.sync(syncOptions);
+    const [source] = tropyService.getAllSources();
+    const update = handlers.get('tropy:update-transcription');
+    // Écrite Ollama arrêté : la source reste à 0 extrait.
+    await setProvider('down');
+    expect(await update?.({}, source.id, NEW_TEXT, 'imported')).toMatchObject({
+      success: true,
+      reindexCode: 'embedding-failed',
+    });
+    expect(chunksOf(source.id)).toEqual([]);
+
+    // Le même texte, réécrit une fois le fournisseur revenu : il n'a pas
+    // changé, mais la source n'a rien d'indexé, elle est donc réembarquée.
+    await setProvider('ok');
+    expect(await update?.({}, source.id, NEW_TEXT, 'imported')).toEqual({ success: true });
+    expect(chunksOf(source.id).join(' ')).toContain('la grève du port est terminée');
+  });
+
   it('une source inconnue : rien d’écrit, échec avec le code source-not-found', async () => {
     await linkAndSync();
     await tropyService.sync(syncOptions);
@@ -413,5 +460,105 @@ describe.skipIf(!sqliteAvailable)('écriture pendant un embarquement : les extra
     const chunks = chunksOf(source.id);
     expect(chunks[0]).toContain('les dockers réunis à la Bourse');
     expect(chunks.join(' ')).not.toContain('la grève du port est terminée');
+  });
+});
+
+// MARK: - Écriture pendant la reconnaissance d'un item
+
+/**
+ * Même course, une phase plus tôt. `processItem` lit la source, attend l'OCR
+ * de l'item (des secondes réelles), puis réécrit la ligne d'après sa lecture.
+ * Un import ou un OCR manuel qui tombe pendant cette attente était écrasé : la
+ * transcription importée disparaissait sans rien dire. Sous « Relancer l'OCR »,
+ * l'OCR rendait le même texte qu'avant, si bien que la ligne revenait à
+ * l'ancien texte en gardant les extraits de l'import, et le filtre « sans
+ * extrait » ne la reprenait jamais.
+ */
+describe.skipIf(!sqliteAvailable)('écriture pendant la reconnaissance : l’OCR ne réécrit pas une source récrite entre-temps', () => {
+  const OCR_TEXT =
+    'Rapport du commissaire central au préfet sur la réunion tenue salle Colbert le 18 mars 1907, ' +
+    'où près de huit cents dockers et charretiers ont voté la grève générale du port de Nantes.';
+
+  async function linkWithPhoto(): Promise<void> {
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    // `performOCROnItem` écarte les photos absentes du disque.
+    const photo = path.join(tropyDir, 'rapport.jpg');
+    fs.writeFileSync(photo, 'jpeg factice');
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Grèves nantaises',
+      items: [{ id: 10, title: 'Rapport du commissaire', photos: [{ id: 11, path: photo }] }],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+  }
+
+  /** La reconnaissance n° `held` attend `open()` ; `reached` se résout quand elle y est. */
+  function holdOCR(held: number): { reached: Promise<void>; open: () => void } {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      reach = resolve;
+    });
+    let calls = 0;
+    vi.spyOn(TropyOCRPipeline.prototype, 'performBatchOCR').mockImplementation(async () => {
+      calls += 1;
+      if (calls === held) {
+        reach();
+        await gate;
+      }
+      // Tesseract, mêmes images, même langue : le même texte à chaque passe.
+      return { text: OCR_TEXT, confidence: 82, language: 'fra' };
+    });
+    return { reached, open };
+  }
+
+  it.each([
+    {
+      cas: '« Relancer l’OCR » sur une source déjà reconnue',
+      held: 2,
+      before: { performOCR: true, ocrLanguage: 'fra' },
+      during: { performOCR: true, forceReindex: true, ocrLanguage: 'fra' },
+    },
+    {
+      cas: 'premier OCR d’une source sans transcription',
+      held: 1,
+      before: { performOCR: false, ocrLanguage: 'fra' },
+      during: { performOCR: true, ocrLanguage: 'fra' },
+    },
+  ])('$cas : l’import fait pendant la reconnaissance reste, avec ses extraits', async ({ held, before, during }) => {
+    await linkWithPhoto();
+    const ocr = holdOCR(held);
+    await tropyService.sync(before);
+    const [source] = tropyService.getAllSources();
+
+    const pending = tropyService.sync(during);
+    try {
+      await ocr.reached;
+      // Pendant la reconnaissance de l'item, l'historien importe un fichier
+      // Transkribus pour cette source.
+      const update = handlers.get('tropy:update-transcription');
+      expect(await update?.({}, source.id, IMPORTED_TEXT, 'transkribus')).toEqual({ success: true });
+    } finally {
+      ocr.open();
+    }
+    const result = await pending;
+
+    // L'écriture la plus récente l'emporte : la passe n'a rien réécrit.
+    expect(sourceRow(source.id)).toEqual({
+      transcription: IMPORTED_TEXT,
+      transcription_source: 'transkribus',
+      ocr_confidence: null,
+    });
+    // Et les extraits découpent ce texte, pas celui de l'OCR.
+    const chunks = chunksOf(source.id).join(' ');
+    expect(chunks).toContain('les dockers réunis à la Bourse');
+    expect(chunks).not.toContain('salle Colbert');
+    // Une reconnaissance jetée n'est ni une panne, ni un OCR « effectué ».
+    expect(result.issues).toEqual([]);
+    expect(result.ocrPerformed).toBe(0);
   });
 });

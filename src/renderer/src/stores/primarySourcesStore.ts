@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TropySyncIssue } from '@backend/integrations/tropy/TropySync';
+import { transcriptionSourceOfFormat } from '@backend/integrations/tropy/transcription-provenance';
 
 // MARK: - Types
 
@@ -252,15 +253,6 @@ const EMPTY_PROJECT_STATE = {
  */
 let generation = 0;
 
-/**
- * La provenance d'un fichier importé, d'après son format : PAGE XML est le
- * format d'export de Transkribus ; ALTO et le texte brut viennent d'ailleurs.
- * Tout import était étiqueté 'transkribus' (S15-1-36).
- */
-function importedSource(format: string | undefined): TranscriptionWriteSource {
-  return format === 'transkribus' || format === 'page-xml' ? 'transkribus' : 'imported';
-}
-
 export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
   // Initial state
   ...EMPTY_PROJECT_STATE,
@@ -502,7 +494,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       if (result.success && result.text) {
         // Le résultat de l'écriture était ignoré : « importée » s'affichait
         // même quand rien n'avait été écrit (S15-1-8).
-        const write = await get().updateTranscription(sourceId, result.text, importedSource(result.format));
+        const write = await get().updateTranscription(sourceId, result.text, transcriptionSourceOfFormat(result.format));
         if (!write.success) {
           return { success: false, error: write.error, code: write.code ?? ('not-saved' as const) };
         }
