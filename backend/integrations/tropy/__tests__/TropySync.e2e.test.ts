@@ -381,7 +381,10 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     ocrSpy.mockResolvedValue({ text: '', confidence: 0, language: 'fra' });
     const result = await tropyService.sync({ ...syncOptions, forceReindex: true });
     expect(result.success).toBe(true);
-    expect(ocrSpy).toHaveBeenCalledTimes(2);
+    // Ciblé sur la photo de l'item 10 : sous forceReindex, Q26 (L06-2) fera
+    // repasser l'item 20 à l'OCR (sa note n'est pas un corps), et ce test ne
+    // doit pas en dépendre.
+    expect(ocrSpy.mock.calls.filter((c: unknown[]) => (c[0] as string[])[0] === photoPath)).toHaveLength(2);
 
     const after = snapshot();
     expect(after.sources.find((s) => s.tropy_id === 10)?.transcription).toBe(OCR_TEXT);
