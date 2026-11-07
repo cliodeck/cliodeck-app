@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { TropySyncIssue } from '@backend/integrations/tropy/TropySync';
 
 // MARK: - Types
 
@@ -56,6 +57,8 @@ export interface SyncOutcome {
   ocrPerformed?: number;
   transcriptionsWritten?: number;
   errors?: string[];
+  /** Ce qui a empêché la passe, à dire à l'utilisateur (`describeSyncIssue`). */
+  issues?: TropySyncIssue[];
 }
 
 export interface PrimarySourcesStatistics {
@@ -103,7 +106,9 @@ interface PrimarySourcesState {
   availableOCRLanguages: Array<{ code: string; name: string }>;
 
   // Actions - Project
-  openTPYProject: (tpyPath: string) => Promise<{ success: boolean; error?: string }>;
+  openTPYProject: (
+    tpyPath: string
+  ) => Promise<{ success: boolean; error?: string; issue?: TropySyncIssue }>;
   getProjectInfo: () => Promise<void>;
 
   // Actions - Sync
@@ -196,7 +201,8 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
         return { success: true };
       }
 
-      return { success: false, error: result.error };
+      // Refus (autre projet Tropy, Q25) : rien n'est suivi ni synchronisé.
+      return { success: false, error: result.error, issue: result.issue };
     } catch (error: unknown) {
       console.error('Failed to open TPY project:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -253,7 +259,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
         };
       }
 
-      return { success: false, errors: result.errors };
+      return { success: false, errors: result.errors, issues: result.issues };
     } catch (error: unknown) {
       console.error('Sync failed:', error);
       return { success: false, errors: [error instanceof Error ? error.message : String(error)] };

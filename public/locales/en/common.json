@@ -1413,7 +1413,11 @@
     "ocrSummaryNothing": "No new transcription. The sources already had one, or recognition produced nothing usable.",
     "ocrSummaryErrors": "{{count}} error(s) — see console",
     "ocrSummaryFailed": "Synchronisation failed.",
-    "close": "Close"
+    "close": "Close",
+    "issues": {
+      "differentProject": "“{{candidateName}}” is a different Tropy project: this ClioDeck project is already linked to “{{linkedName}}” ({{sourceCount}} source(s)). Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To replace “{{linkedName}}”, first purge its sources: Project panel, “Actions” section, “Purge Primary Sources” button.",
+      "differentProjectUnnamed": "“{{candidateName}}” is not the Tropy project the {{sourceCount}} source(s) of this ClioDeck project come from. Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To link it here, first purge these sources: Project panel, “Actions” section, “Purge Primary Sources” button."
+    }
   },
   "modes": {
     "selector": {
