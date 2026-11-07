@@ -97,6 +97,8 @@ export const PrimarySourcesPanel: React.FC = () => {
       // On macOS, .tropy files are actually packages (folders with .tropy extension)
       // containing project.tpy and an assets folder.
       // We use openDirectory to allow selecting .tropy packages directly.
+      // Sous Windows et Linux, le main retire openDirectory
+      // (`normalizeDialogProperties`) : un paquet s'y ouvre par son project.tpy.
       const result = await window.electron.dialog.openFile({
         title: t('primarySources.selectTropyProject', 'Select Tropy Project'),
         message: t('primarySources.selectTropyMessage', 'Choose a .tropy package or .tpy file'),
