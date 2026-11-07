@@ -63,6 +63,12 @@ type IndexableSource = Pick<
   'id' | 'title' | 'creator' | 'date' | 'archive' | 'collection' | 'transcription' | 'transcriptionSource' | 'notesText'
 >;
 
+/**
+ * Ce qu'a fait `indexSourceChunks` : écrit `chunks` extraits, ou rien parce que
+ * la source a changé pendant son embarquement.
+ */
+type IndexOutcome = { status: 'written'; chunks: number } | { status: 'superseded' };
+
 // MARK: - TropyService
 
 class TropyService {
@@ -395,7 +401,9 @@ class TropyService {
    * Une source dont l'embarquement échoue reste sans extrait (tout ou rien,
    * `indexSourceChunks`) : ce filtre la reprend à la synchro suivante. Les
    * échecs sont comptés et rendus en `issue`, pour que l'historien sache que
-   * l'assistant ne cite pas encore ces sources.
+   * l'assistant ne cite pas encore ces sources. Le filtre lit les sources au
+   * départ de la passe ; une source réécrite depuis n'est pas indexée avec son
+   * ancien texte (`superseded`).
    */
   private async generateEmbeddingsForSources(
     onProgress?: (progress: TropySyncProgress) => void
@@ -460,7 +468,14 @@ class TropyService {
       });
 
       try {
-        chunksCreated += await this.indexSourceChunks(source);
+        const outcome = await this.indexSourceChunks(source);
+        // Réécrite pendant la passe (OCR manuel, import) : son écrivain la
+        // réindexe, ou la passe suivante la reprend. Ni traitée, ni en échec.
+        if (outcome.status === 'superseded') {
+          console.log(`📐 [TROPY-SERVICE] Source ${source.id} modifiée pendant son embarquement : extraits non écrits`);
+          continue;
+        }
+        chunksCreated += outcome.chunks;
         sourcesProcessed++;
       } catch (error) {
         sourcesFailed++;
@@ -1029,10 +1044,12 @@ class TropyService {
 
 
   /**
-   * Découpe, filtre et déduplique le texte d'une source : les extraits à
-   * embarquer, sans rien écrire encore.
+   * Le texte que découpent les extraits d'une source : son en-tête, son corps,
+   * puis ses notes. Deux sources qui donnent le même texte ont les mêmes
+   * extraits (`indexSourceChunks` s'en sert pour voir qu'une source a changé
+   * pendant son embarquement).
    */
-  private prepareSourceChunks(source: IndexableSource): PrimarySourceChunk[] {
+  private indexableText(source: IndexableSource): string {
     let fullText = '';
     if (source.title) fullText += `Titre: ${source.title}\n\n`;
     if (source.creator) fullText += `Auteur: ${source.creator}\n`;
@@ -1046,7 +1063,14 @@ class TropyService {
     if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
       fullText += `\n\n${source.notesText}`;
     }
+    return fullText;
+  }
 
+  /**
+   * Découpe, filtre et déduplique le texte d'une source (`indexableText`) : les
+   * extraits à embarquer, sans rien écrire encore.
+   */
+  private prepareSourceChunks(source: IndexableSource, fullText: string): PrimarySourceChunk[] {
     // Get raw chunks from DocumentChunker for optimization
     const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
     const initialChunkCount = rawChunks.length;
@@ -1099,7 +1123,6 @@ class TropyService {
 
   /**
    * Découpe, embarque puis écrit les extraits d'une source, tout ou rien.
-   * Renvoie le nombre d'extraits écrits.
    *
    * Tous les extraits sont embarqués en mémoire avant la moindre écriture, puis
    * remplacent l'ancien jeu dans une transaction (`replaceSourceChunks`). Le
@@ -1107,8 +1130,16 @@ class TropyService {
    * extrait par extrait laissait la source à 9 extraits sur 10, et la synchro,
    * qui ne reprend que les sources sans extrait, ne complétait jamais le trou
    * (S08-1-30). Partagé par la synchro et `reindexSource`.
+   *
+   * `superseded` : la source a changé (ou disparu) pendant l'embarquement, et
+   * rien n'est écrit. Une passe partie avec l'ancien texte écrasait sinon les
+   * extraits que l'écriture de transcription venait de produire : la source
+   * gardait des extraits d'un texte qui n'existait plus, et le filtre « sans
+   * extrait » de la synchro ne la reprenait jamais. L'écrivain plus récent a
+   * sa propre réindexation, ou bien la source reste sans extrait (il les a
+   * retirés) et la synchro suivante la reprend. Ce n'est pas une panne.
    */
-  private async indexSourceChunks(source: IndexableSource): Promise<number> {
+  private async indexSourceChunks(source: IndexableSource): Promise<IndexOutcome> {
     // Le magasin du départ : un changement de projet pendant l'embarquement ne
     // doit pas faire écrire ces extraits dans celui du projet suivant.
     const store = this.vectorStore;
@@ -1116,12 +1147,20 @@ class TropyService {
       throw new Error('tropy-service: vector store not initialized');
     }
 
+    const text = this.indexableText(source);
     const items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> = [];
-    for (const chunk of this.prepareSourceChunks(source)) {
+    for (const chunk of this.prepareSourceChunks(source, text)) {
       items.push({ chunk, embedding: await this.embedOne(chunk.content) });
     }
+
+    // Relire la source puis écrire, sans `await` entre les deux : better-sqlite3
+    // est synchrone, aucun autre écrivain du main ne peut s'intercaler.
+    const current = store.getSource(source.id);
+    if (!current || this.indexableText(current) !== text) {
+      return { status: 'superseded' };
+    }
     store.replaceSourceChunks(source.id, items);
-    return items.length;
+    return { status: 'written', chunks: items.length };
   }
 
   /**
@@ -1131,7 +1170,8 @@ class TropyService {
    * RAG en silence. Un échec laisse les extraits en place — ceux d'un texte inchangé
    * restent bons ; après une écriture de transcription il n'y en a plus
    * (`updateSourceTranscription` les retire), et la synchro suivante reprend
-   * la source.
+   * la source. Une source réécrite pendant la réindexation n'est pas un échec :
+   * rien n'est écrit, et le texte plus récent a sa propre indexation.
    */
   async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string; code?: ReindexFailure }> {
     try {
@@ -1147,8 +1187,14 @@ class TropyService {
         return { success: false, error: 'No embedding provider configured', code: 'no-embedding-provider' };
       }
 
-      const chunks = await this.indexSourceChunks(source);
-      console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${chunks} chunk(s)`);
+      const outcome = await this.indexSourceChunks(source);
+      if (outcome.status === 'superseded') {
+        // Réécrite entre-temps : son écrivain suivant la réindexe, ou la
+        // synchro la reprend. L'écriture de cet appel a bien eu lieu.
+        console.log(`🔁 [TROPY] Source ${sourceId} modifiée pendant sa réindexation : rien d'écrit, le texte plus récent l'emporte`);
+        return { success: true };
+      }
+      console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${outcome.chunks} chunk(s)`);
       return { success: true };
     } catch (error: unknown) {
       console.error('Failed to reindex source:', error);

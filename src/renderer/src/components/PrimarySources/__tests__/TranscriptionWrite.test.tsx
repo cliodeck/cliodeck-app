@@ -87,7 +87,10 @@ describe('carte : OCR manuel', () => {
 
     await waitFor(() => expect(showAlert).toHaveBeenCalledTimes(1));
     expect(showAlert.mock.calls[0][0]).toMatch(NOT_INDEXED);
-    expect(showAlert.mock.calls[0][0]).toMatch(/Ollama/);
+    // La piste vaut pour tout fournisseur : modèle embarqué (le seul sous
+    // macOS 13, sans Ollama), cloud ou Ollama.
+    expect(showAlert.mock.calls[0][0]).toMatch(/vérifiez dans les Paramètres qu'il est disponible/);
+    expect(showAlert.mock.calls[0][0]).not.toMatch(/Ollama/);
   });
 
   it('écriture refusée : « n’a pas été enregistrée », pas « l’OCR a échoué »', async () => {

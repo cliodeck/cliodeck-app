@@ -47,10 +47,17 @@ vi.mock('../config-manager.js', () => ({
 /**
  * `ok` : répond ; `fail-at-3` : seul le 3e texte demandé échoue, comme un délai
  * passager ; `down` : tout échoue, comme Ollama arrêté ; `absent` : le registre
- * ne se construit pas, aucun fournisseur.
+ * ne se construit pas, aucun fournisseur ; `gate` : le 1er texte attend qu'on
+ * ouvre `gate`, comme un Ollama lent, le temps d'écrire la source pendant
+ * l'embarquement (`gateFirstEmbed`).
  */
-type ProviderMode = 'ok' | 'fail-at-3' | 'down' | 'absent';
-const provider = vi.hoisted(() => ({ mode: 'ok' as ProviderMode, texts: 0 }));
+type ProviderMode = 'ok' | 'fail-at-3' | 'down' | 'absent' | 'gate';
+const provider = vi.hoisted(() => ({
+  mode: 'ok' as ProviderMode,
+  texts: 0,
+  gate: null as Promise<void> | null,
+  reached: null as (() => void) | null,
+}));
 
 const DIMENSION = 768;
 function hashedVector(text: string): number[] {
@@ -79,6 +86,10 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', () 
         embed: async (texts: string[]) => {
           for (let i = 0; i < texts.length; i++) {
             provider.texts += 1;
+            if (provider.mode === 'gate' && provider.texts === 1 && provider.gate) {
+              provider.reached?.();
+              await provider.gate;
+            }
             if (provider.mode === 'down') throw new Error('connect ECONNREFUSED 127.0.0.1:11434');
             if (provider.mode === 'fail-at-3' && provider.texts === 3) {
               throw new Error('The operation was aborted due to timeout');
@@ -121,6 +132,10 @@ const LONG_NOTE = [
 const NEW_TEXT =
   'Transcription revue : le préfet signale au ministre que la grève du port est terminée ' +
   'et que les ouvriers ont repris le travail le lundi 25 mars au matin.';
+
+const IMPORTED_TEXT =
+  'Transcription importée : le commissaire central rapporte que les dockers réunis à la Bourse ' +
+  'du travail ont voté la reprise pour le mardi 26 mars, malgré l’opposition du syndicat.';
 
 let root: string;
 let projectDir: string;
@@ -169,6 +184,22 @@ async function setProvider(mode: ProviderMode): Promise<void> {
   await tropyService.rebuildProviders({ embeddingChanged: true });
 }
 
+/**
+ * Arrête le 1er texte embarqué jusqu'à `open()` ; `reached` se résout quand
+ * l'embarquement y est : la source peut alors être réécrite en plein milieu.
+ */
+async function gateFirstEmbed(): Promise<{ reached: Promise<void>; open: () => void }> {
+  let open!: () => void;
+  provider.gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const reached = new Promise<void>((resolve) => {
+    provider.reached = resolve;
+  });
+  await setProvider('gate');
+  return { reached, open };
+}
+
 beforeEach(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-tropy-reindex-'));
   projectDir = path.join(root, 'projet-cliodeck');
@@ -178,6 +209,8 @@ beforeEach(async () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   provider.mode = 'ok';
   provider.texts = 0;
+  provider.gate = null;
+  provider.reached = null;
   await tropyService.init(projectDir);
 });
 
@@ -313,5 +346,72 @@ describe.skipIf(!sqliteAvailable)('réindexation : jamais annoncée réussie san
       success: false,
       code: 'source-not-found',
     });
+  });
+});
+
+// MARK: - Écriture pendant un embarquement
+
+/**
+ * Une passe embarque le texte d'une source tel qu'il était à son départ, à
+ * travers des dizaines d'`await`. Une écriture de transcription (OCR manuel,
+ * import) qui tombe pendant ce temps réindexe la source avec le nouveau texte ;
+ * la passe, en finissant, écrasait ces extraits avec ceux de l'ancien. La
+ * source gardait des extraits, donc le filtre « sans extrait » ne la reprenait
+ * jamais : l'assistant citait pour toujours un texte qui n'existait plus.
+ */
+describe.skipIf(!sqliteAvailable)('écriture pendant un embarquement : les extraits suivent le dernier texte', () => {
+  it('OCR manuel pendant la synchro : la synchro ne remet pas les extraits de l’ancien texte', async () => {
+    await linkAndSync();
+    // Ollama arrêté à la première passe : la source reste à 0 extrait.
+    await setProvider('down');
+    await tropyService.sync(syncOptions);
+    const [source] = tropyService.getAllSources();
+    expect(chunksOf(source.id)).toEqual([]);
+
+    // Ollama relancé, lent : la synchro s'arrête sur le 1er extrait de la source.
+    const gate = await gateFirstEmbed();
+    const pending = tropyService.sync(syncOptions);
+    let afterWrite: string[] = [];
+    try {
+      await gate.reached;
+      // Pendant ce temps, l'historien lance l'OCR manuel sur la carte.
+      const update = handlers.get('tropy:update-transcription');
+      expect(await update?.({}, source.id, NEW_TEXT, 'tesseract', 80)).toEqual({ success: true });
+      afterWrite = chunksOf(source.id);
+      expect(afterWrite[0]).toContain('la grève du port est terminée');
+    } finally {
+      gate.open();
+    }
+    const result = await pending;
+
+    // Les extraits restent ceux du nouveau texte, et la passe abandonnée
+    // n'est pas une panne du modèle.
+    expect(chunksOf(source.id)).toEqual(afterWrite);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('deux écritures de suite : la réindexation de la première n’écrit pas son texte par-dessus la seconde', async () => {
+    await linkAndSync();
+    await tropyService.sync(syncOptions);
+    const [source] = tropyService.getAllSources();
+
+    const gate = await gateFirstEmbed();
+    const update = handlers.get('tropy:update-transcription');
+    // OCR manuel : la ligne est écrite, sa réindexation s'arrête au 1er extrait.
+    const first = update?.({}, source.id, NEW_TEXT, 'tesseract', 80);
+    try {
+      await gate.reached;
+      // Pendant ce temps, un import réécrit la même source et la réindexe.
+      expect(await update?.({}, source.id, IMPORTED_TEXT, 'imported')).toEqual({ success: true });
+    } finally {
+      gate.open();
+    }
+    // L'écriture a bien eu lieu ; son indexation revient à l'écrivain suivant.
+    expect(await first).toEqual({ success: true });
+
+    expect(sourceRow(source.id)).toMatchObject({ transcription: IMPORTED_TEXT, transcription_source: 'imported' });
+    const chunks = chunksOf(source.id);
+    expect(chunks[0]).toContain('les dockers réunis à la Bourse');
+    expect(chunks.join(' ')).not.toContain('la grève du port est terminée');
   });
 });
