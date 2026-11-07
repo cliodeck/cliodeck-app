@@ -13,7 +13,7 @@
  * ce que le main servait au moment où il l'a reçu.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PrimarySourcesPanel } from '../PrimarySourcesPanel';
 import { usePrimarySourcesStore } from '../../../stores/primarySourcesStore';
 import { useProjectStore } from '../../../stores/projectStore';
@@ -57,6 +57,9 @@ const MAIN: Record<MainProject, { info: unknown; sources: unknown[]; statistics:
   B: { info: null, sources: [], statistics: STATS_EMPTY },
 };
 
+/** Ce que sert le main pour chaque projet ; un test peut lier B à Tropy en cours de route. */
+let main: typeof MAIN;
+
 const project = (id: MainProject) => ({
   id,
   name: `Projet ${id}`,
@@ -97,14 +100,15 @@ async function switchTo(p: MainProject): Promise<void> {
 
 beforeEach(() => {
   served = 'A';
+  main = { ...MAIN };
   hold = null;
   held.clear();
   calls.length = 0;
   const electron = (window as unknown as { electron: Record<string, unknown> }).electron;
   electron.tropy = {
-    getProjectInfo: vi.fn(() => answer('getProjectInfo', () => ({ success: true, info: MAIN[served].info }))),
-    getAllSources: vi.fn(() => answer('getAllSources', () => ({ success: true, sources: MAIN[served].sources }))),
-    getStatistics: vi.fn(() => answer('getStatistics', () => ({ success: true, statistics: MAIN[served].statistics }))),
+    getProjectInfo: vi.fn(() => answer('getProjectInfo', () => ({ success: true, info: main[served].info }))),
+    getAllSources: vi.fn(() => answer('getAllSources', () => ({ success: true, sources: main[served].sources }))),
+    getStatistics: vi.fn(() => answer('getStatistics', () => ({ success: true, statistics: main[served].statistics }))),
     getOCRLanguages: vi.fn(async () => ({ success: true, languages: [] })),
     onSyncProgress: vi.fn(() => () => undefined),
   };
@@ -188,6 +192,42 @@ describe('PrimarySourcesPanel — changement de projet ClioDeck', () => {
     render(<PrimarySourcesPanel />);
     await waitFor(() => expect(answered('getStatistics', 'A', since)).toBe(true));
     expect(await screen.findByText('Archives Danzig')).toBeInTheDocument();
+    expect(usePrimarySourcesStore.getState().searchQuery).toBe('préfet');
+    expect(usePrimarySourcesStore.getState().selectedCollection).toBe('Carton 12');
+  });
+
+  it('un projet lié à Tropy en cours de session : quitter l’onglet et y revenir garde aussi la recherche et le filtre', async () => {
+    // B s'ouvre sans Tropy : la lecture de son projet Tropy répond info:null.
+    served = 'B';
+    useProjectStore.setState({ currentProject: project('B') });
+    const first = render(<PrimarySourcesPanel />);
+    expect(await screen.findByText('No Tropy Project')).toBeInTheDocument();
+
+    // L'historien y ouvre un projet Tropy, par le bouton du panneau.
+    const electron = (window as unknown as { electron: Record<string, Record<string, unknown>> }).electron;
+    electron.dialog = { openFile: vi.fn(async () => ({ canceled: false, filePaths: ['/archives/Greve.tpy'] })) };
+    electron.tropy.openProject = vi.fn(async () => {
+      main.B = {
+        ...MAIN.A,
+        info: { ...(MAIN.A.info as object), name: 'Comité de grève', tpyPath: '/archives/Greve.tpy' },
+      };
+      return { success: true, projectName: 'Comité de grève', itemCount: 1 };
+    });
+    electron.tropy.sync = vi.fn(async () => ({ success: true, newItems: 1, errors: [] }));
+    fireEvent.click(screen.getByTitle('Open Tropy Project'));
+    expect(await screen.findByRole('option', { name: 'Carton 12' })).toBeInTheDocument();
+    await waitFor(() => expect(usePrimarySourcesStore.getState().isSyncing).toBe(false));
+
+    fireEvent.change(screen.getByPlaceholderText('Search sources...'), { target: { value: 'préfet' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by collection' }), {
+      target: { value: 'Carton 12' },
+    });
+    first.unmount();
+
+    const since = calls.length;
+    render(<PrimarySourcesPanel />);
+    await waitFor(() => expect(answered('getStatistics', 'B', since)).toBe(true));
+    expect(await screen.findByText('Comité de grève')).toBeInTheDocument();
     expect(usePrimarySourcesStore.getState().searchQuery).toBe('préfet');
     expect(usePrimarySourcesStore.getState().selectedCollection).toBe('Carton 12');
   });

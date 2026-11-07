@@ -105,14 +105,20 @@ interface PrimarySourcesState {
   // OCR Languages
   availableOCRLanguages: Array<{ code: string; name: string }>;
 
-  /** Le projet ClioDeck dont le store tient l'état ; `null` après `reset`. */
+  /**
+   * Le projet ClioDeck dont le store tient l'état. Seul le panneau, qui sait
+   * quel projet est ouvert, l'écrit ; `reset` n'y touche pas.
+   */
   loadedFor: string | null;
 
   /**
    * Rend l'état initial : rien du projet ClioDeck précédent ne reste (S18-1-30),
    * et une lecture lancée avant ne réécrit plus rien. Ne touche ni aux opérations
    * en vol (`isSyncing`, OCR), que leur propre fin referme, ni aux réglages de
-   * l'application (langue OCR, langues disponibles).
+   * l'application (langue OCR, langues disponibles), ni à `loadedFor` : vidé
+   * pour un projet sans Tropy ou après une purge, l'état reste celui du projet
+   * ouvert, et le panneau ne doit pas, à son retour, y voir un autre projet et
+   * vider la recherche et le filtre choisis depuis.
    */
   reset: () => void;
 
@@ -179,7 +185,6 @@ const EMPTY_PROJECT_STATE = {
   selectedArchive: null,
   selectedCollection: null,
   statistics: null,
-  loadedFor: null,
 } satisfies Partial<PrimarySourcesState>;
 
 /**
@@ -192,6 +197,7 @@ let generation = 0;
 export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
   // Initial state
   ...EMPTY_PROJECT_STATE,
+  loadedFor: null,
   isSyncing: false,
   syncProgress: null,
   isPerformingOCR: false,

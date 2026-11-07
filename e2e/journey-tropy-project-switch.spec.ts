@@ -178,6 +178,33 @@ test.describe('Sources primaires : un projet ClioDeck, son projet Tropy', () => 
     });
   });
 
+  test('B lié à Tropy en cours de session : la recherche survit à un changement d’onglet', async () => {
+    test.setTimeout(150_000);
+    const layout = makeLayout();
+
+    await withApp(async (app, window) => {
+      // B s'ouvre sans Tropy : son panneau est vide.
+      await openProject(app, window, layout.projectB, 'Article');
+      await window.locator('#left-tab-primary-sources').click();
+      await expect(panel(window)).toContainText('Aucun projet Tropy');
+
+      // L'historien y lie un projet Tropy, puis cherche dans ses sources.
+      await linkTropy(app, window, layout.comite, 'Comité de grève', 'Procès-verbal de séance');
+      const search = () => panel(window).getByPlaceholder('Rechercher dans les sources...');
+      await search().fill('Procès');
+
+      // Un autre onglet, puis retour : même projet, la recherche est toujours là. Avant, la
+      // remise à zéro faite pour « pas de projet Tropy » effaçait aussi le projet auquel l'état
+      // appartient, et le panneau, à son retour, croyait changer de projet.
+      await window.locator('#left-tab-bibliography').click();
+      await expect(panel(window)).toHaveCount(0);
+      await window.locator('#left-tab-primary-sources').click();
+      await expect(panel(window).locator('.project-name')).toHaveText('Comité de grève', { timeout: 20_000 });
+      await expect(search()).toHaveValue('Procès');
+      expect(tropyRows(layout.projectB)).toEqual({ sources: 1, projects: 1 });
+    });
+  });
+
   test('purge : panneau vide, sans « Synchroniser », puis un autre projet Tropy s’ouvre', async () => {
     test.setTimeout(150_000);
     const layout = makeLayout();

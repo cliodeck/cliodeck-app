@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../../../backend/__tests__/helpers/native-guards';
 import { makeTpy } from '../../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
+import { TropyWatcher } from '../../../../../backend/integrations/tropy/TropyWatcher';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const handlers = vi.hoisted(() => new Map<string, Handler>());
@@ -144,8 +145,17 @@ describe.skipIf(!sqliteAvailable)('tropy:start-watching', () => {
     await tropyService.init(projectB);
     await invoke('tropy:open-project', tpyC);
     await invoke('tropy:sync', { performOCR: false, ocrLanguage: 'fra' });
+    // Le fichier réellement suivi : la base et la garde de L06-3 ne le disent
+    // pas, elles gardent le lien à C même quand c'est A qu'on surveille.
+    const watch = vi.spyOn(TropyWatcher.prototype, 'watch');
 
     await invoke('tropy:start-watching', tpyA);
+
+    expect(watch).toHaveBeenCalledTimes(1);
+    expect(watch).toHaveBeenLastCalledWith(tpyC);
+    expect((watch.mock.contexts[0] as InstanceType<typeof TropyWatcher>).getWatchedPath()).toBe(tpyC);
+
+    // Et la synchro qui suit lit toujours C : rien de A n'entre dans B.
     await invoke('tropy:sync', { performOCR: false, ocrLanguage: 'fra' });
 
     const info = await invoke<{ info: { tpyPath: string; name: string } }>('tropy:get-project-info');
