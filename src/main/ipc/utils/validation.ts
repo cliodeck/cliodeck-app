@@ -539,6 +539,9 @@ export const PDFIndexFullSchema = z.object({
     author: z.string().optional(),
     year: z.string().optional(),
   }).optional(),
+  // Le projet du lot qui demande l'indexation : refusée s'il n'est plus l'ouvert. Absent pour
+  // un geste immédiat (panneau d'indexation), qui garde son comportement.
+  expectedProjectPath: z.string().min(1).optional(),
 });
 
 export const PDFCheckModifiedSchema = z.object({

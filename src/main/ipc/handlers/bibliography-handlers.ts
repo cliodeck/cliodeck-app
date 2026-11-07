@@ -30,6 +30,7 @@ import {
   setProjectTags,
 } from '../../../../backend/core/bibliography/readingNotes.js';
 import { UnreadableFileError } from '../../../../backend/core/fs/user-files.js';
+import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -209,6 +210,16 @@ export function setupBibliographyHandlers() {
       projectPath: options.projectPath,
       citationCount: options.citations.length
     });
+    // Le fichier est réécrit en entier : les références d'un autre projet, enregistrées sous
+    // celui-ci par un lot qui a survécu à la bascule, effaçaient tous ses rattachements (S18-2-0).
+    const currentProject = projectManager.getCurrentProjectPath();
+    if (!currentProject) {
+      return errorResponse(new Error('Aucun projet ouvert.'));
+    }
+    if (!sameFile(currentProject, options.projectPath)) {
+      console.warn('⚠️ bibliography:save-metadata refusé : ce n\'est pas le projet ouvert');
+      return errorResponse('project-changed');
+    }
     try {
       await BibliographyMetadataService.saveMetadata(options.projectPath, options.citations as any[]);
       console.log('📤 IPC Response: bibliography:save-metadata - Success');
