@@ -283,6 +283,10 @@ export function setupBibliographyHandlers() {
       return successResponse({ citations: mergedCitations, unreadKeys, metadataUnreadable });
     } catch (error: unknown) {
       console.error('❌ bibliography:load-with-metadata error:', error);
+      // C'est le chargement de la bibliographie du projet ouvert (à l'ouverture, après une
+      // synchronisation) : le panneau se vide, le main aussi. `bibliography:load`, qui sert à
+      // l'import, garde la sienne quand le fichier importé ne se lit pas.
+      bibliographyService.forget();
       return bibliographyLoadFailure(error);
     }
   });

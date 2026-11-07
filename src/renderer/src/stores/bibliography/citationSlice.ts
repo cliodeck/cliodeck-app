@@ -1,6 +1,9 @@
 import type { BibliographyProblem, Citation, CitationSliceState, BibliographySliceCreator } from './types';
 import { referenceTags } from './referenceTags';
 
+/** Un fichier qui ne s'est pas lu du tout. */
+type UnreadFileProblem = Extract<BibliographyProblem, { kind: 'missing' | 'unreadable' }>;
+
 /** Ce que rend le main pour un `.bib` : les citations, et ce qui ne s'est pas lu. */
 interface BibliographyLoadResponse {
   success?: boolean;
@@ -23,9 +26,30 @@ function partialProblem(filePath: string, result: BibliographyLoadResponse): Bib
 }
 
 /** Le fichier ne s'est pas lu du tout. */
-function failureProblem(filePath: string, result: BibliographyLoadResponse | undefined): BibliographyProblem {
+function failureProblem(filePath: string, result: BibliographyLoadResponse | undefined): UnreadFileProblem {
   if (result?.problem === 'missing') return { kind: 'missing', file: fileName(filePath) };
   return { kind: 'unreadable', file: fileName(filePath), reason: result?.reason ?? 'io', detail: result?.error ?? '' };
+}
+
+/**
+ * Un `.bib` demandé (à l'import) qui ne s'est pas lu : absent ou illisible, avec sa raison, pour
+ * que le message dise quoi faire dans la langue de l'interface (« enregistrez-le en UTF-8 »),
+ * au lieu du texte brut du main.
+ */
+export class BibliographyFileError extends Error {
+  readonly problem: UnreadFileProblem;
+
+  constructor(problem: UnreadFileProblem, message: string) {
+    super(message);
+    this.name = 'BibliographyFileError';
+    this.problem = problem;
+  }
+}
+
+/** L'échec de `bibliography.load` : celui d'un fichier qui ne se lit pas, ou un autre. */
+function loadFailure(filePath: string, result: BibliographyLoadResponse | undefined): Error {
+  const message = result?.error || 'Failed to load bibliography';
+  return result?.problem ? new BibliographyFileError(failureProblem(filePath, result), message) : new Error(message);
 }
 
 export const createCitationSlice: BibliographySliceCreator<CitationSliceState> = (set, get) => ({
@@ -55,7 +79,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
         await get().refreshIndexedPDFs();
       } else {
         console.error('Invalid response from bibliography.load:', result);
-        throw new Error(result.error || 'Failed to load bibliography');
+        throw loadFailure(filePath, result);
       }
     } catch (error) {
       console.error('Failed to load bibliography:', error);
@@ -113,11 +137,11 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
 
   mergeBibliography: async (filePath: string) => {
     try {
-      const result = await window.electron.bibliography.load(filePath);
+      const result: BibliographyLoadResponse = await window.electron.bibliography.load(filePath);
 
       if (!result.success || !Array.isArray(result.citations)) {
         console.error('Invalid response from bibliography.load:', result);
-        throw new Error(result.error || 'Failed to load bibliography');
+        throw loadFailure(filePath, result);
       }
 
       const { citations: currentCitations } = get();

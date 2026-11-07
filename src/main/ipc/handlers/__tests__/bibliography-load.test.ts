@@ -26,6 +26,7 @@ vi.mock('../../../services/project-manager.js', () => ({
 vi.mock('../../../services/reading-notes-indexing.js', () => ({ indexReadingNotesInBackground: () => undefined }));
 
 import { setupBibliographyHandlers } from '../bibliography-handlers.js';
+import { bibliographyService } from '../../../services/bibliography-service.js';
 
 type LoadResponse = {
   success: boolean;
@@ -88,6 +89,49 @@ describe('bibliography:load-with-metadata', () => {
 
     expect(result).toMatchObject({ success: true, unreadKeys: [], metadataUnreadable: false });
     expect(result.citations[0]?.zoteroAttachments).toHaveLength(1);
+  });
+});
+
+describe('bibliography:load-with-metadata — le main ne garde pas la bibliographie du projet d’avant', () => {
+  // Le singleton du main résout les citations des exports PDF et Word et de l'aperçu : après un
+  // échec à l'ouverture de B, il gardait les références de A, et l'export de B les imprimait.
+  let other = '';
+  beforeEach(() => {
+    other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-bib-load-b-'));
+  });
+  afterEach(() => {
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+  const openB = (file: string) =>
+    h.handlers.get('bibliography:load-with-metadata')!({}, { filePath: path.join(other, file), projectPath: other }) as Promise<LoadResponse>;
+
+  it('B dont le .bib est introuvable : plus aucune référence de A', async () => {
+    fs.writeFileSync(path.join(h.projectPath, 'refs.bib'), GARDE);
+    expect(await loadWithMetadata('refs.bib')).toMatchObject({ success: true });
+
+    expect(await openB('refs.bib')).toMatchObject({ success: false, problem: 'missing' });
+    expect(bibliographyService.getByCitationKey('Garde_2000')).toBeUndefined();
+    expect(bibliographyService.getCitations()).toEqual([]);
+  });
+
+  it('B dont le .bib n’est pas en UTF-8 : plus aucune référence de A', async () => {
+    fs.writeFileSync(path.join(h.projectPath, 'refs.bib'), GARDE);
+    await loadWithMetadata('refs.bib');
+    fs.writeFileSync(path.join(other, 'refs.bib'), Buffer.from('@book{Etat,\n  title = {L’État},\n}\n', 'latin1'));
+
+    expect(await openB('refs.bib')).toMatchObject({ success: false, problem: 'unreadable' });
+    expect(bibliographyService.getByCitationKey('Garde_2000')).toBeUndefined();
+  });
+
+  it('témoin : un import qui échoue (bibliography:load) laisse la bibliographie du projet ouvert', async () => {
+    fs.writeFileSync(path.join(h.projectPath, 'refs.bib'), GARDE);
+    await loadWithMetadata('refs.bib');
+    fs.writeFileSync(path.join(other, 'importe.bib'), Buffer.from('@book{Etat,\n  title = {L’État},\n}\n', 'latin1'));
+
+    const failed = (await h.handlers.get('bibliography:load')!({}, path.join(other, 'importe.bib'))) as LoadResponse;
+
+    expect(failed).toMatchObject({ success: false, problem: 'unreadable' });
+    expect(bibliographyService.getByCitationKey('Garde_2000')?.title).toBe('Le temps des archives');
   });
 });
 

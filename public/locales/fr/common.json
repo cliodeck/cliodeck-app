@@ -675,6 +675,7 @@
       "projectChanged": "Un autre projet a été ouvert pendant la synchronisation : rien n'a été écrit. Relancez « Synchroniser avec Zotero » dans le projet voulu.",
       "refused": "Synchronisation interrompue : rien n'a été écrit.",
       "unreadEntries": "{{count}} entrée(s) de {{file}} n'ont pas pu être lues, et réécrire le fichier les aurait effacées. Corrigez-les dans {{file}}, avec un éditeur de texte : ajoutez un titre (title = {…}) à celle qui n'en a pas, et dans Zotero aussi si la notice en vient ; refermez une accolade restée ouverte ; supprimez un champ dont le nom contient un tiret (mendeley-groups, date-added…), que Mendeley et BibDesk placent avant le titre. Entrées en cause :",
+      "unreadFromZotero": "Venue(s) de Zotero (champ zoterokey) : {{keys}}. La synchronisation réécrit ces entrées depuis leur notice : corrigez d'abord la notice dans Zotero (un titre manquant, une accolade seule dans un titre, une revue ou un éditeur), puis supprimez l'entrée de {{file}} ; la synchronisation suivante la réécrira, corrigée.",
       "stringMacros": "{{file}} définit des abréviations (@string), que la réécriture du fichier aurait perdues. Remplacez chaque abréviation par sa valeur dans les entrées, puis supprimez les lignes @string.",
       "metadataUnreadable": "{{file}}, qui retient les PDF Zotero rattachés aux références, est illisible : la synchronisation l'aurait remplacé, et ces rattachements auraient été perdus. Réparez-le, ou remettez-en une copie. Le supprimer fait repartir de zéro : les PDF déjà téléchargés restent sur le disque, mais il faudra les télécharger de nouveau pour qu'ils soient rattachés.",
       "fixThenRetry": "Relancez ensuite « Synchroniser avec Zotero »."
@@ -2349,7 +2350,9 @@
     "merge": "Fusionner",
     "empty": "Votre bibliographie est vide : le fichier y sera simplement chargé.",
     "cancel": "Annuler",
-    "import": "Importer"
+    "import": "Importer",
+    "projectFileMissing": "La bibliographie du projet, {{file}}, est introuvable : le fichier importé la remplacera.",
+    "projectFileUnread": "La bibliographie du projet, {{file}}, ne s'est pas lue, ou pas en entier (voir le bandeau). Le fichier importé la remplacera ; s'il porte le même nom, il l'écrasera sur le disque, et ce que ClioDeck n'a pas pu lire sera perdu. Pour le garder, annulez et corrigez d'abord {{file}}."
   },
   "bibImportSummary": {
     "title": "Import terminé",

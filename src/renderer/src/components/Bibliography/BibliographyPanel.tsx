@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward, AlertTriangle } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import type { BibliographyProblem } from '../../stores/bibliography/types';
+import { BibliographyFileError } from '../../stores/bibliography/citationSlice';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
@@ -91,9 +92,9 @@ export const BibliographyPanel: React.FC = () => {
     clearTagsFilter,
   } = useBibliographyStore();
 
+  // Absent, illisible ou lu en partie : une liste vide n'est pas une bibliographie vide, et le
+  // bandeau dit ce qui manque, à la place de « Aucune citation disponible ».
   const bibliographyProblem = useBibliographyStore((state) => state.bibliographyProblem);
-  // Absent ou illisible : la liste vide n'est pas une bibliographie vide, et le bandeau le dit.
-  const bibliographyUnread = bibliographyProblem !== null && bibliographyProblem.kind !== 'partial';
 
   // PDF Modification Detection
   const { modifiedPDFs, dismissNotification } = usePDFModificationDetection(
@@ -176,6 +177,24 @@ export const BibliographyPanel: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- l'intention seule déclenche, une fois
   }, [menuIntent]);
 
+  /**
+   * Le fichier importé ne se lit pas : dire pourquoi et quoi faire, dans la langue de l'interface.
+   * Rien n'a été copié dans le projet, et le bandeau, qui parle du `.bib` du projet, ne change pas.
+   */
+  const importFailureMessage = (error: unknown): string => {
+    if (error instanceof BibliographyFileError) {
+      const { problem } = error;
+      if (problem.kind === 'unreadable' && problem.reason === 'encoding') {
+        return t('bibliography.bibNotUtf8', { file: problem.file });
+      }
+      return t('bibliography.bibUnreadable', {
+        file: problem.file,
+        error: problem.kind === 'unreadable' ? problem.detail : error.message,
+      });
+    }
+    return `Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`;
+  };
+
   const performImport = async (sourcePath: string, mode: 'replace' | 'merge') => {
     try {
       let newCitations = 0;
@@ -231,7 +250,7 @@ export const BibliographyPanel: React.FC = () => {
       setShowSummaryModal(true);
     } catch (error) {
       console.error('Failed to import BibTeX:', error);
-      await useDialogStore.getState().showAlert(`Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`);
+      await useDialogStore.getState().showAlert(importFailureMessage(error));
     }
   };
 
@@ -632,7 +651,7 @@ export const BibliographyPanel: React.FC = () => {
         <div className="bibliography-content">
           {filteredCitations.length > 0 ? (
             <CitationList citations={filteredCitations} />
-          ) : bibliographyUnread ? null : (
+          ) : bibliographyProblem ? null : (
             <div className="bibliography-empty">
               <h4>{t('bibliography.noCitations')}</h4>
               <p>{t('bibliography.importPrompt')}</p>
@@ -651,6 +670,7 @@ export const BibliographyPanel: React.FC = () => {
         onReplace={handleReplaceMode}
         onMerge={handleMergeMode}
         currentCitationCount={citations.length}
+        projectFileProblem={bibliographyProblem}
       />
 
       {/* Import Summary Modal */}

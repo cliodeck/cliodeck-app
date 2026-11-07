@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Plus, RefreshCw, X } from 'lucide-react';
+import type { BibliographyProblem } from '../../stores/bibliography/types';
 import './BibImportModeModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -11,6 +12,20 @@ interface BibImportModeModalProps {
   onReplace: () => void;
   onMerge: () => void;
   currentCitationCount: number;
+  /** Le `.bib` du projet ne s'est pas lu, ou pas en entier : l'import le remplacerait. */
+  projectFileProblem?: BibliographyProblem | null;
+}
+
+/**
+ * Ce que l'import ferait au `.bib` du projet qui ne se lit pas. Le fichier importé est copié dans
+ * le projet sous son nom : de même nom, il écrase ce que ClioDeck n'a pas pu lire. Des métadonnées
+ * seules illisibles ne changent rien : le `.bib` s'est lu en entier.
+ */
+function importWarningKey(problem: BibliographyProblem | null | undefined): string | null {
+  if (!problem) return null;
+  if (problem.kind === 'missing') return 'bibImport.projectFileMissing';
+  if (problem.kind === 'unreadable' || problem.unreadKeys.length > 0) return 'bibImport.projectFileUnread';
+  return null;
 }
 
 export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
@@ -19,6 +34,7 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   onReplace,
   onMerge,
   currentCitationCount,
+  projectFileProblem,
 }) => {
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
@@ -27,6 +43,7 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
   if (!isOpen) return null;
 
   const hasCitations = currentCitationCount > 0;
+  const warningKey = importWarningKey(projectFileProblem);
 
   return (
     <div ref={trapRef} className="modal-overlay" {...backdropClose(onClose)}>
@@ -39,6 +56,12 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
         </div>
 
         <div className="modal-body">
+          {warningKey && projectFileProblem && (
+            <p className="bib-import-warning">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span>{t(warningKey, { file: projectFileProblem.file })}</span>
+            </p>
+          )}
           {hasCitations ? (
             <>
               <p className="modal-info">
@@ -68,13 +91,14 @@ export const BibImportModeModal: React.FC<BibImportModeModalProps> = ({
             </>
           ) : (
             <div className="first-import">
-              <p>{t('bibImport.empty')}</p>
+              {/* Une bibliographie qui ne se lit pas n'est pas vide : remplacer se demande. */}
+              {!warningKey && <p>{t('bibImport.empty')}</p>}
               <div className="modal-actions">
                 <button className="btn-cancel" onClick={onClose}>
                   {t('bibImport.cancel')}
                 </button>
                 <button className="btn-primary" onClick={onReplace}>
-                  {t('bibImport.import')}
+                  {warningKey ? t('bibImport.replace') : t('bibImport.import')}
                 </button>
               </div>
             </div>

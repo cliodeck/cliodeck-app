@@ -675,6 +675,7 @@
       "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut.",
       "refused": "Synchronisierung abgebrochen: Es wurde nichts geschrieben.",
       "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden, und ein erneutes Schreiben der Datei hätte sie gelöscht. Korrigieren Sie sie in {{file}} mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel, auch in Zotero, wenn der Eintrag von dort stammt; schließen Sie offen gebliebene geschweifte Klammern; entfernen Sie Felder, deren Name einen Bindestrich enthält (mendeley-groups, date-added…), die Mendeley und BibDesk vor den Titel setzen. Betroffene Einträge:",
+      "unreadFromZotero": "Aus Zotero stammend (Feld zoterokey): {{keys}}. Die Synchronisierung schreibt diese Einträge aus ihrem Zotero-Eintrag neu: Korrigieren Sie zuerst den Eintrag in Zotero (ein fehlender Titel, eine einzelne geschweifte Klammer in Titel, Zeitschrift oder Verlag), und löschen Sie dann den Eintrag aus {{file}}; die nächste Synchronisierung schreibt ihn korrigiert neu.",
       "stringMacros": "{{file}} definiert Abkürzungen (@string), die beim erneuten Schreiben der Datei verloren gegangen wären. Ersetzen Sie jede Abkürzung in den Einträgen durch ihren Wert und löschen Sie dann die @string-Zeilen.",
       "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Die Synchronisierung hätte sie ersetzt, und diese Verknüpfungen wären verloren gegangen. Reparieren Sie sie oder stellen Sie eine Kopie wieder her. Wenn Sie sie löschen, beginnen Sie von vorn: Bereits heruntergeladene PDFs bleiben auf der Festplatte, müssen aber erneut heruntergeladen werden, um verknüpft zu werden.",
       "fixThenRetry": "Starten Sie danach „Mit Zotero synchronisieren“ erneut."
@@ -2349,7 +2350,9 @@
     "merge": "Zusammenführen",
     "empty": "Ihre Bibliographie ist leer: die Datei wird einfach eingelesen.",
     "cancel": "Abbrechen",
-    "import": "Importieren"
+    "import": "Importieren",
+    "projectFileMissing": "Die Bibliographie des Projekts, {{file}}, ist nicht auffindbar: Die importierte Datei wird sie ersetzen.",
+    "projectFileUnread": "Die Bibliographie des Projekts, {{file}}, konnte nicht oder nicht vollständig gelesen werden (siehe Hinweis). Die importierte Datei wird sie ersetzen; trägt sie denselben Namen, überschreibt sie sie auf dem Datenträger, und was ClioDeck nicht lesen konnte, geht verloren. Um es zu behalten, brechen Sie ab und korrigieren Sie zuerst {{file}}."
   },
   "bibImportSummary": {
     "title": "Import abgeschlossen",

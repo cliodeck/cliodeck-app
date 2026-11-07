@@ -78,6 +78,34 @@ describe('synchronisation refusée : le message, pas le code', () => {
     expect(loadWithMetadata).not.toHaveBeenCalled();
   });
 
+  it('entrées venues de Zotero : le message dit de corriger la notice dans Zotero, puis de supprimer l’entrée', async () => {
+    const message = await synchronizeWith({
+      success: false,
+      error: 'bib-unread',
+      file: 'ma-biblio.bib',
+      unreadKeys: ['entretien_dupont', 'Odd_2021'],
+      unreadFromZotero: ['Odd_2021'],
+      hasStringMacros: false,
+    });
+
+    expect(message).toContain('zotero.sync.unreadEntries');
+    expect(message).toContain('zotero.sync.unreadFromZotero');
+    expect(message.indexOf('zotero.sync.unreadFromZotero')).toBeLessThan(message.indexOf('zotero.sync.fixThenRetry'));
+  });
+
+  it('témoin : aucune entrée venue de Zotero, pas de conseil Zotero', async () => {
+    const message = await synchronizeWith({
+      success: false,
+      error: 'bib-unread',
+      file: 'b.bib',
+      unreadKeys: ['entretien_dupont'],
+      unreadFromZotero: [],
+      hasStringMacros: false,
+    });
+
+    expect(message).not.toContain('zotero.sync.unreadFromZotero');
+  });
+
   it('beaucoup d’entrées : les premières, puis « et N autres »', async () => {
     const unreadKeys = Array.from({ length: 30 }, (_, i) => `e${i + 1}`);
     const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys, hasStringMacros: false });

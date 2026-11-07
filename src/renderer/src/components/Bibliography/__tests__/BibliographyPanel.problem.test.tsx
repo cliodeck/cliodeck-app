@@ -24,10 +24,16 @@ vi.mock('../BibImportSummaryModal', () => ({ BibImportSummaryModal: () => null }
 
 import { BibliographyPanel } from '../BibliographyPanel';
 import { useBibliographyStore } from '../../../stores/bibliographyStore';
+import { useDialogStore } from '../../../stores/dialogStore';
 import { useProjectStore } from '../../../stores/projectStore';
 
 const citation = (id: string) => ({ id, type: 'book', author: 'Garde', year: '2000', title: id });
 let loadBibliography: ReturnType<typeof vi.fn>;
+/** Le vrai `loadBibliography` du store, avant qu'un test ne le remplace. */
+const realLoadBibliography = useBibliographyStore.getState().loadBibliography;
+const dialogs = () => useDialogStore.getState();
+const electron = () =>
+  (window as unknown as { electron: { fs: { copyFile: ReturnType<typeof vi.fn> }; bibliography?: unknown } }).electron;
 
 function show(state: Record<string, unknown>): void {
   useBibliographyStore.setState({ citations: [], filteredCitations: [], ...state } as never);
@@ -54,6 +60,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useBibliographyStore.setState({ bibliographyProblem: null } as never);
+  while (dialogs().queue.length > 0) {
+    if (dialogs().confirmOpen) dialogs().resolveConfirm(false);
+    else dialogs().closeAlert();
+  }
 });
 
 describe('le bandeau du panneau Bibliographie', () => {
@@ -101,6 +111,14 @@ describe('le bandeau du panneau Bibliographie', () => {
     expect(banner()).not.toHaveTextContent('bibliography.unreadEntries');
   });
 
+  it('entrées non lues sans aucune entrée lue : le bandeau, pas « Aucune citation disponible »', () => {
+    show({ bibliographyProblem: { kind: 'partial', file: 'bibdesk.bib', unreadKeys: ['a', 'b'], metadataUnreadable: false } });
+
+    expect(banner()).toHaveTextContent('bibliography.unreadEntries');
+    expect(screen.queryByText('bibliography.noCitations')).toBeNull();
+    expect(screen.queryByText('bibliography.importPrompt')).toBeNull();
+  });
+
   it('témoin : sans problème, pas de bandeau', () => {
     show({ bibliographyProblem: null });
 
@@ -129,5 +147,122 @@ describe('importer un .bib pendant que le bandeau est là', () => {
     });
 
     expect(loadBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib');
+  });
+
+  const openImport = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('bibliography.import'));
+    });
+  };
+
+  // Le fichier importé est copié dans le projet sous son nom : un `refs.bib` importé écrase le
+  // `refs.bib` du projet. La fenêtre disait « Votre bibliographie est vide » (S07-1-11).
+  it('.bib du projet illisible, aucune référence : la fenêtre ne dit pas « vide », et Annuler ne copie rien', async () => {
+    show({ bibliographyProblem: { kind: 'unreadable', file: 'refs.bib', reason: 'encoding', detail: 'x' } });
+    await openImport();
+
+    expect(screen.queryByText('bibImport.empty')).toBeNull();
+    expect(screen.getByText('bibImport.projectFileUnread')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'bibImport.import' })).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'bibImport.cancel' }));
+    });
+
+    expect(loadBibliography).not.toHaveBeenCalled();
+    expect(electron().fs.copyFile).not.toHaveBeenCalled();
+  });
+
+  it('entrées non lues sans aucune entrée lue (BibDesk) : même avertissement', async () => {
+    show({ bibliographyProblem: { kind: 'partial', file: 'refs.bib', unreadKeys: ['a'], metadataUnreadable: false } });
+    await openImport();
+
+    expect(screen.queryByText('bibImport.empty')).toBeNull();
+    expect(screen.getByText('bibImport.projectFileUnread')).toBeInTheDocument();
+  });
+
+  it('l’accord explicite, « Remplacer », importe le fichier', async () => {
+    show({ bibliographyProblem: { kind: 'unreadable', file: 'refs.bib', reason: 'encoding', detail: 'x' } });
+    await openImport();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'bibImport.replace' }));
+    });
+
+    expect(loadBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib');
+    expect(electron().fs.copyFile).toHaveBeenCalledWith('/ailleurs/refs.bib', '/p/these/refs.bib');
+  });
+
+  it('.bib du projet introuvable : la fenêtre le dit', async () => {
+    show({ bibliographyProblem: { kind: 'missing', file: 'refs.bib' } });
+    await openImport();
+
+    expect(screen.queryByText('bibImport.empty')).toBeNull();
+    expect(screen.getByText('bibImport.projectFileMissing')).toBeInTheDocument();
+  });
+
+  it('des références lues et des entrées perdues : l’avertissement s’ajoute au choix remplacer / fusionner', async () => {
+    show({
+      citations: [citation('Garde_2000')],
+      filteredCitations: [citation('Garde_2000')],
+      bibliographyProblem: { kind: 'partial', file: 'refs.bib', unreadKeys: ['a'], metadataUnreadable: false },
+    });
+    await openImport();
+
+    expect(screen.getByText('bibImport.projectFileUnread')).toBeInTheDocument();
+    expect(screen.getByText('bibImport.merge')).toBeInTheDocument();
+  });
+
+  it('témoin : seules les métadonnées sont illisibles, le .bib s’est lu en entier : pas d’avertissement', async () => {
+    show({
+      citations: [citation('Garde_2000')],
+      filteredCitations: [citation('Garde_2000')],
+      bibliographyProblem: { kind: 'partial', file: 'refs.bib', unreadKeys: [], metadataUnreadable: true },
+    });
+    await openImport();
+
+    expect(screen.getByText('bibImport.merge')).toBeInTheDocument();
+    expect(screen.queryByText('bibImport.projectFileUnread')).toBeNull();
+  });
+});
+
+describe('importer un .bib qui ne se lit pas', () => {
+  // `bibliography:load` lit en UTF-8 strict : un vieux `.bib` en windows-1252 est refusé. Le
+  // message brut du main s'affichait derrière « Failed to import bibliography: », en français
+  // quelle que soit la langue, sans dire quoi faire.
+  async function importRefused(response: Record<string, unknown>): Promise<string> {
+    electron().bibliography = { load: vi.fn(async () => ({ success: false, citations: [], ...response })) };
+    useBibliographyStore.setState({ loadBibliography: realLoadBibliography } as never);
+    show({ bibliographyProblem: null });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('bibliography.import'));
+    });
+    expect(dialogs().alertOpen).toBe(true);
+    return dialogs().alertMessage;
+  }
+
+  it('pas en UTF-8 : le message traduit dit d’enregistrer en UTF-8, rien n’est copié', async () => {
+    const message = await importRefused({
+      problem: 'unreadable',
+      reason: 'encoding',
+      error: "/ailleurs/refs.bib n'est pas encodé en UTF-8",
+    });
+
+    expect(message).toBe('bibliography.bibNotUtf8');
+    expect(electron().fs.copyFile).not.toHaveBeenCalled();
+    // Le bandeau parle du `.bib` du projet, que l'import n'a pas touché.
+    expect(banner()).toBeNull();
+  });
+
+  it('droits refusés : le message traduit générique', async () => {
+    const message = await importRefused({ problem: 'unreadable', reason: 'permission', error: 'EACCES' });
+
+    expect(message).toBe('bibliography.bibUnreadable');
+  });
+
+  it('témoin : un autre échec garde son message', async () => {
+    const message = await importRefused({ error: 'autre panne' });
+
+    expect(message).toContain('autre panne');
   });
 });

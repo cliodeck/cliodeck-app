@@ -24,6 +24,7 @@ import {
   type BibliographyMetadataFile,
 } from '../../../backend/services/BibliographyMetadataService.js';
 import { readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
+import type { BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
 import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import type { Citation } from '../../../backend/types/citation.js';
@@ -365,14 +366,16 @@ class BibUnreadError extends Error {
   readonly code = 'bib-unread';
   readonly filePath: string;
   readonly unreadKeys: string[];
+  readonly unreadFromZotero: string[];
   readonly hasStringMacros: boolean;
 
-  constructor(filePath: string, unreadKeys: string[], hasStringMacros: boolean) {
+  constructor(filePath: string, audit: BibAudit) {
     super(`${path.basename(filePath)} n'a pas été lu en entier ; synchronisation interrompue pour ne rien effacer.`);
     this.name = 'BibUnreadError';
     this.filePath = filePath;
-    this.unreadKeys = unreadKeys;
-    this.hasStringMacros = hasStringMacros;
+    this.unreadKeys = audit.unreadKeys;
+    this.unreadFromZotero = audit.unreadFromZotero;
+    this.hasStringMacros = audit.hasStringMacros;
   }
 }
 
@@ -386,6 +389,8 @@ interface SyncRefusalDetails {
   /** Le fichier en cause, relatif au projet. */
   file?: string;
   unreadKeys?: string[];
+  /** Parmi `unreadKeys`, les entrées venues de Zotero : à corriger dans la notice. */
+  unreadFromZotero?: string[];
   hasStringMacros?: boolean;
   /** Raison de `readUserFile` (`encoding`, `permission`…), et message du système. */
   reason?: string;
@@ -399,6 +404,7 @@ function syncRefusal(error: unknown): ({ success: false; error: string } & SyncR
       error: 'bib-unread',
       file: path.basename(error.filePath),
       unreadKeys: error.unreadKeys,
+      unreadFromZotero: error.unreadFromZotero,
       hasStringMacros: error.hasStringMacros,
     };
   }
@@ -441,7 +447,7 @@ async function readLocalBibliography(bibtexPath: string, projectPath: string): P
   const read = await readBibFile(bibtexPath);
   if (read.kind === 'unreadable') throw new BibFileUnreadableError(bibtexPath, read.reason, read.message);
   if (read.kind === 'ok' && (read.unreadKeys.length > 0 || read.hasStringMacros)) {
-    throw new BibUnreadError(bibtexPath, read.unreadKeys, read.hasStringMacros);
+    throw new BibUnreadError(bibtexPath, read);
   }
   const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
   return BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], metadata);

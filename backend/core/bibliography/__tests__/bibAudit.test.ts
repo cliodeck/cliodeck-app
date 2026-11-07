@@ -101,6 +101,16 @@ describe('auditParsedBib — les entrées que le parseur a laissées', () => {
     expect(result.unreadKeys).toEqual(['Garde_2000']);
   });
 
+  it('une entrée non lue qui porte zoterokey vient de Zotero : elle est désignée comme telle', () => {
+    const bib = new BibTeXExporter().exportToString([
+      createCitation({ id: 'Odd_2021', type: 'article', author: 'Odd, A.', year: '2021', title: 'Ensemble } fermé', zoteroKey: 'ODD2021' }),
+    ]);
+    const result = audit(`${bib}\n@misc{entretien_dupont,\n  note = {Entretien},\n}\n`);
+
+    expect(result.unreadKeys).toEqual(['Odd_2021', 'entretien_dupont']);
+    expect(result.unreadFromZotero).toEqual(['Odd_2021']);
+  });
+
   it('une entrée entre parenthèses, que le parseur ne sait pas lire', () => {
     expect(audit('@book(Garde_2000,\n  title = {Le temps},\n)\n').unreadKeys).toEqual(['Garde_2000']);
   });
@@ -136,6 +146,32 @@ describe('auditParsedBib — pas de refus à tort', () => {
 
     expect(result.parsed.map((c) => c.id)).toEqual(['a', 'b', 'c']);
     expect(result.unreadKeys).toEqual([]);
+  });
+
+  it('témoin : une ligne de commentaire % qui contient une accolade, entre deux entrées', () => {
+    const result = audit(
+      [
+        '@book{Garde_2000,',
+        '  title = {Le temps des archives},',
+        '}',
+        '% à revoir {voir carton}',
+        '  %% fermer } plus tard',
+        '@misc{carton,',
+        '  title = {Carton F7},',
+        '}',
+      ].join('\n')
+    );
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Garde_2000', 'carton']);
+    expect(result.unreadKeys).toEqual([]);
+  });
+
+  it('une accolade de trop reste signalée quand un commentaire % la suit', () => {
+    const result = audit(
+      ['@book{Garde_2000,', '  title = {Le temps}},', '  year = {2000},', '}', '% fin {', '@misc{carton,', '  title = {Carton},', '}'].join('\n')
+    );
+
+    expect(result.unreadKeys).toEqual(['Garde_2000']);
   });
 
   it('témoin : ce que ClioDeck écrit se relit sans rien signaler', () => {

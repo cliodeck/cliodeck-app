@@ -675,6 +675,7 @@
       "projectChanged": "Another project was opened during the synchronization: nothing was written. Run “Sync with Zotero” again in the project you want.",
       "refused": "Synchronization stopped: nothing was written.",
       "unreadEntries": "{{count}} entry(ies) in {{file}} could not be read, and rewriting the file would have erased them. Fix them in {{file}} with a text editor: add a title (title = {…}) to any entry that has none, in Zotero too if the record comes from there; close any brace left open; remove any field whose name contains a hyphen (mendeley-groups, date-added…), which Mendeley and BibDesk place before the title. Entries concerned:",
+      "unreadFromZotero": "From Zotero (zoterokey field): {{keys}}. The synchronization rewrites these entries from their record: first fix the record in Zotero (a missing title, a lone brace in a title, journal or publisher), then delete the entry from {{file}}; the next synchronization will write it again, fixed.",
       "stringMacros": "{{file}} defines abbreviations (@string) that rewriting the file would have lost. Replace each abbreviation with its value in the entries, then delete the @string lines.",
       "metadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read: the synchronization would have replaced it, and those attachments would have been lost. Repair it, or restore a copy of it. Deleting it starts from scratch: PDFs already downloaded stay on disk, but they will have to be downloaded again to be attached.",
       "fixThenRetry": "Then run “Sync with Zotero” again."
@@ -2349,7 +2350,9 @@
     "merge": "Merge",
     "empty": "Your bibliography is empty: the file will simply be loaded into it.",
     "cancel": "Cancel",
-    "import": "Import"
+    "import": "Import",
+    "projectFileMissing": "The project's bibliography, {{file}}, cannot be found: the imported file will replace it.",
+    "projectFileUnread": "The project's bibliography, {{file}}, could not be read, or not in full (see the banner). The imported file will replace it; if it has the same name, it will overwrite it on disk, and whatever ClioDeck could not read will be lost. To keep it, cancel and fix {{file}} first."
   },
   "bibImportSummary": {
     "title": "Import complete",

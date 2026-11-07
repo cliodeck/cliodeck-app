@@ -98,6 +98,15 @@ class BibliographyService {
     return { citations: this.citations, unreadKeys: read.unreadKeys };
   }
 
+  /**
+   * La bibliographie du projet ouvert ne s'est pas chargée : plus aucune référence, comme le
+   * panneau. Ces citations résolvent les exports PDF et Word et l'aperçu ; garder celles du
+   * projet d'avant les imprimerait dans celui-ci, sans un mot.
+   */
+  forget(): void {
+    this.citations = [];
+  }
+
   async parseContent(content: string): Promise<Citation[]> {
     try {
       this.citations = this.parser.parse(content);

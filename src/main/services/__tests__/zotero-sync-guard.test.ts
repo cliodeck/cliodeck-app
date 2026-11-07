@@ -49,8 +49,10 @@ type Response = {
   report?: SyncReport;
   file?: string;
   unreadKeys?: string[];
+  unreadFromZotero?: string[];
   hasStringMacros?: boolean;
   reason?: string;
+  written?: boolean;
 };
 const synchronize = (request: Record<string, unknown>) =>
   handlers.get('zotero:synchronize')?.({}, request) as Promise<Response>;
@@ -218,6 +220,62 @@ describe('zotero:synchronize — une entrée que le parseur n’a pas lue arrêt
     expect(confirmed).toMatchObject({ success: false, error: 'bib-unread', unreadKeys: ['entretien_dupont'] });
     expect(snapshot()).toEqual(before);
     expect(openSource).not.toHaveBeenCalled();
+  });
+});
+
+describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zotero', () => {
+  it('une entrée non lue qui porte zoterokey est désignée comme venue de Zotero', async () => {
+    makeProject(
+      [
+        '@misc{entretien_dupont,',
+        '  note = {Entretien},',
+        '}',
+        '@article{Odd_2021,',
+        '  author = {Odd, A.},',
+        '  year = {2021},',
+        '  zoterokey = {ODD2021},',
+        '}',
+        GARDE,
+        '',
+      ].join('\n')
+    );
+
+    await expectRefused({ error: 'bib-unread', unreadKeys: ['entretien_dupont', 'Odd_2021'], unreadFromZotero: ['Odd_2021'] });
+  });
+
+  // L'exporteur écrit une accolade isolée `\}`, que le parseur compte (S07-1-32, L05-7) : ce que la
+  // synchronisation écrit, la suivante le refuse. Corriger le .bib seul ne suffit pas : la
+  // synchronisation réécrit l'entrée depuis la notice. Le message dit donc de corriger la notice
+  // dans Zotero, puis de supprimer l'entrée du .bib.
+  const entryOf = (key: string) => new RegExp(`@\\w+\\{${key},[\\s\\S]*?\\n\\}\\n?`);
+
+  it('accolade isolée dans un titre Zotero : le conseil du message débloque la synchronisation', async () => {
+    makeProject(GARDE + '\n');
+    contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble \\} fermé');
+
+    const refused = await synchronize(request());
+    expect(refused).toMatchObject({ success: false, error: 'bib-unread' });
+    expect(refused.unreadKeys).toHaveLength(1);
+    expect(refused.unreadFromZotero).toEqual(refused.unreadKeys);
+
+    // La notice corrigée dans Zotero, l'entrée supprimée du .bib.
+    contents = { COLL: [notice('ODD2021', 'Ensemble fermé', 'Odd')] };
+    const key = refused.unreadKeys?.[0] ?? '';
+    fs.writeFileSync(bibPath(), fs.readFileSync(bibPath(), 'utf-8').replace(entryOf(key), ''));
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble fermé');
+    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Garde_2000');
+  });
+
+  it.fails('accolade isolée dans un titre Zotero : la synchronisation suivante passe (L05-7, S07-1-32)', async () => {
+    makeProject(GARDE + '\n');
+    contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
+    await synchronize(request());
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied' });
   });
 });
 
