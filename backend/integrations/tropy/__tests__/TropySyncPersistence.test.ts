@@ -65,6 +65,8 @@ function harness(options: {
   existing?: Record<string, unknown> | null;
   ocrText?: string;
   ocrConfidence?: number;
+  /** Pages que le pipeline dit avoir passées à la reconnaissance. */
+  ocrPages?: number;
   /** Texte des notes Tropy de l'item (item, photos et sélections confondues). */
   notes?: string;
   /** Un vrai magasin à la place de la doublure : ce qu'il a écrit, la passe suivante le relit. */
@@ -89,6 +91,7 @@ function harness(options: {
       text: options.ocrText ?? OCR_TEXT,
       confidence: options.ocrConfidence ?? 89.9,
       language: 'fra',
+      pageCount: options.ocrPages ?? 1,
     })),
   };
   Object.assign(sync as unknown as Record<string, unknown>, { reader, ocrPipeline });
@@ -202,6 +205,20 @@ describe('TropySync — persistance des transcriptions', () => {
       new Date(ITEM_MODIFIED).toISOString()
     );
     expect(h.saved()?.lastModified.toISOString()).not.toBe(TPY_MTIME.toISOString());
+  });
+
+  // L06-11 (S08-2-8) : Tropy crée une photo par page de PDF, toutes sur le
+  // même fichier. Le bilan comptait les fichiers dédoublonnés : 1 pour 120
+  // pages reconnues.
+  it('un PDF de 120 pages compte 120 pages passées à la reconnaissance', async () => {
+    const pages = Array.from({ length: 120 }, (_, i) => ({ id: i + 1, path: PHOTO, filename: 'x.pdf', notes: [], selections: [] }));
+    const h = harness({ existing: null, ocrPages: 120, item: { photos: pages } });
+
+    const result = await h.run();
+
+    // Le fichier passe une fois à l'OCR ; ses pages comptent chacune.
+    expect(h.ocrPipeline.performBatchOCR).toHaveBeenCalledWith([PHOTO], { language: 'fra' });
+    expect(result.ocrCount).toBe(120);
   });
 
   it('ne compte comme « OCR effectué » que ce qui a été écrit', async () => {

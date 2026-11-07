@@ -66,9 +66,13 @@ afterEach(() => {
   usePrimarySourcesStore.setState({ syncIssues: [], availableOCRLanguages: [] });
 });
 
-async function runWith(issues: unknown[], userAgent = USER_AGENTS.mac): Promise<void> {
+async function runWith(
+  issues: unknown[],
+  userAgent = USER_AGENTS.mac,
+  counts = { transcriptionsWritten: 0, ocrPerformed: 0 }
+): Promise<void> {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
-  tropy.sync.mockResolvedValue({ success: true, transcriptionsWritten: 0, ocrPerformed: 0, errors: [], issues });
+  tropy.sync.mockResolvedValue({ success: true, ...counts, errors: [], issues });
   render(<OCRSettingsModal isOpen onClose={() => undefined} />);
   await screen.findByRole('option', { name: 'Allemand Fraktur' });
   fireEvent.click(screen.getByRole('button', { name: /Lancer l'OCR/ }));
@@ -136,5 +140,18 @@ describe('modale OCR : la reconnaissance n’a pas pu se faire', () => {
     await runWith([]);
 
     expect(screen.getByText(/Aucune transcription nouvelle/)).toBeInTheDocument();
+  });
+});
+
+// L06-11 (S08-2-8) : le compte est devenu celui des pages (images et pages de
+// PDF reconnues). Le libellé dit « pages », et il ne se répète pas à côté des
+// avis de la passe.
+describe('modale OCR : pages passées à la reconnaissance', () => {
+  it('le compte des pages, une seule fois, à côté de l’avis Poppler', async () => {
+    await runWith([{ code: 'poppler-missing' }], USER_AGENTS.mac, { transcriptionsWritten: 3, ocrPerformed: 120 });
+
+    expect(screen.getAllByText(/page\(s\) passée\(s\) à la reconnaissance/)).toHaveLength(1);
+    expect(screen.getByText('120 page(s) passée(s) à la reconnaissance')).toBeInTheDocument();
+    expect(screen.getByText(/Poppler est introuvable/)).toBeInTheDocument();
   });
 });
