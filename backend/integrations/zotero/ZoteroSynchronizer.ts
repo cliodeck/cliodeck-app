@@ -28,7 +28,8 @@ import { ZoteroSyncResolver } from './ZoteroSyncResolver';
  *   entrées sans lien Zotero) est conservé.
  * - **Rien de destructeur sans accord** : ajouts et compléments s'appliquent
  *   directement ; retirer une référence ou changer de collection demande
- *   confirmation.
+ *   confirmation. L'accord vaut pour le rapport lu, pas pour ce que Zotero
+ *   contient au moment de l'appliquer.
  * - **Nos clés, jamais celles de Better BibTeX** : une clé déjà écrite est
  *   reconduite si elle reste valide ; une clé invalide ou portée par deux
  *   entrées est refaite, et signalée.
@@ -48,6 +49,18 @@ export interface SyncEntry {
   title: string;
 }
 
+/**
+ * Ce que l'auteur a lu dans la boîte et accepté. Un booléen valait pour tout ce que le second
+ * appel trouverait : une notice retirée de Zotero pendant la lecture, ou les entrées d'un autre
+ * projet ouvert entre-temps, partaient sans avoir été montrées (S07-1-0).
+ */
+export interface SyncConfirmation {
+  collectionKey: string;
+  collectionChange: { from: string; to: string } | null;
+  /** Clés Zotero des références retirées. */
+  deletedKeys: string[];
+}
+
 export interface SyncReport {
   collectionKey: string;
   /** Changement de collection : la bibliographie en suivait une autre. */
@@ -55,7 +68,7 @@ export interface SyncReport {
   added: SyncEntry[];
   modified: Array<SyncEntry & { fields: string[] }>;
   /** Références dont la notice n'est plus dans la collection. */
-  deleted: SyncEntry[];
+  deleted: Array<SyncEntry & { zoteroKey: string }>;
   unchangedCount: number;
   /** Entrées sans lien Zotero, laissées telles quelles. */
   localOnlyCount: number;
@@ -63,6 +76,8 @@ export interface SyncReport {
   renamedKeys: Array<{ from: string; to: string; title: string; zoteroKey: string }>;
   duplicates: DuplicateWork[];
   warnings: SyncWarning[];
+  /** L'accord à renvoyer pour appliquer exactement ce rapport. */
+  confirmation: SyncConfirmation;
 }
 
 export type SynchronizeResult =
@@ -84,11 +99,26 @@ export interface SynchronizeInput {
   collectionKey: string;
   /** Collection que le projet suivait jusqu'ici, s'il y en avait une. */
   savedCollectionKey?: string;
-  /** Accord donné pour les suppressions et le changement de collection. */
-  confirmed?: boolean;
+  /** Accord donné sur un rapport : il ne couvre que ce que ce rapport montrait. */
+  confirmation?: SyncConfirmation;
 }
 
 const entry = (c: Citation): SyncEntry => ({ id: c.id, title: c.title });
+
+/**
+ * L'accord couvre-t-il ce qui va être détruit ? Même collection, même changement de collection,
+ * et aucune suppression qu'il n'ait vue. Une suppression vue qui n'a plus lieu (la notice est
+ * revenue) ne le rend pas caduc.
+ */
+function covers(given: SyncConfirmation | undefined, needed: SyncConfirmation): boolean {
+  if (!given || given.collectionKey !== needed.collectionKey) return false;
+  const a = given.collectionChange;
+  const b = needed.collectionChange;
+  const sameChange = a === null || b === null ? a === b : a.from === b.from && a.to === b.to;
+  if (!sameChange) return false;
+  const seen = new Set(given.deletedKeys);
+  return needed.deletedKeys.every((key) => seen.has(key));
+}
 
 export class ZoteroSynchronizer {
   constructor(private readonly source: IZoteroDataSource) {}
@@ -107,20 +137,27 @@ export class ZoteroSynchronizer {
         ? { from: input.savedCollectionKey, to: input.collectionKey }
         : null;
 
+    // Le diff ne retire que des entrées liées à Zotero (`ZoteroDiffEngine`) : la clé est là.
+    const deleted = diff.deleted.map((c) => ({ ...entry(c), zoteroKey: c.zoteroKey! }));
     const report: SyncReport = {
       collectionKey: input.collectionKey,
       collectionChange,
       added: diff.added.map(entry),
       modified: diff.modified.map((m) => ({ ...entry(m.local), fields: m.modifiedFields })),
-      deleted: diff.deleted.map(entry),
+      deleted,
       unchangedCount: diff.unchanged.length,
       localOnlyCount: input.local.filter((c) => !c.zoteroKey).length,
       renamedKeys: [],
       duplicates: findDuplicateWorks(items),
       warnings: [],
+      confirmation: {
+        collectionKey: input.collectionKey,
+        collectionChange,
+        deletedKeys: deleted.map((d) => d.zoteroKey),
+      },
     };
 
-    if ((diff.deleted.length > 0 || collectionChange) && !input.confirmed) {
+    if ((deleted.length > 0 || collectionChange) && !covers(input.confirmation, report.confirmation)) {
       return { status: 'needs-confirmation', report };
     }
 

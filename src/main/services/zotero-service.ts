@@ -14,6 +14,7 @@ import {
 import { IZoteroDataSource, ZoteroLibraryInfo } from '../../../backend/integrations/zotero/IZoteroDataSource.js';
 import {
   ZoteroSynchronizer,
+  type SyncConfirmation,
   type SyncReport,
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
 import { parseUserJson, UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
@@ -251,14 +252,15 @@ class ZoteroService {
    * Le fichier `.bib` est la source de vérité : c'est lui qu'on lit, pas
    * l'état du panneau, et c'est lui qu'on écrit.
    *
-   * Premier appel sans `confirmed` : si la synchronisation retirerait des
+   * Premier appel sans `confirmation` : si la synchronisation retirerait des
    * références ou changerait de collection, rien n'est écrit et le rapport
-   * revient pour confirmation.
+   * revient pour confirmation. L'accord renvoyé ne couvre que ce rapport :
+   * une suppression qu'il ne montrait pas en redemande un.
    */
   async synchronizeProject(options: ZoteroSourceOptions & {
     projectPath: string;
     collectionKey: string;
-    confirmed?: boolean;
+    confirmation?: SyncConfirmation;
   }): Promise<{
     success: boolean;
     status?: 'needs-confirmation' | 'applied';
@@ -289,7 +291,7 @@ class ZoteroService {
           local,
           collectionKey: options.collectionKey,
           savedCollectionKey,
-          confirmed: options.confirmed,
+          confirmation: options.confirmation,
         });
 
         if (result.status === 'needs-confirmation') {

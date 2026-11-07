@@ -235,9 +235,33 @@ describe('ZoteroSynchronizeSchema', () => {
       mode: 'local',
       dataDirectory: '/zotero',
       collectionKey: 'COL123',
+      expectedProjectPath: '/projets/these',
     });
     expect(result.collectionKey).toBe('COL123');
-    expect(result.confirmed).toBeUndefined();
+    expect(result.expectedProjectPath).toBe('/projets/these');
+    expect(result.confirmation).toBeUndefined();
+  });
+
+  it('refuses a synchronization that does not say which project asked for it', () => {
+    // Le main relisait son projet courant : un accord donné dans A s'appliquait à B (S07-1-0).
+    expect(() =>
+      ZoteroSynchronizeSchema.parse({ mode: 'local', dataDirectory: '/zotero', collectionKey: 'COL123' })
+    ).toThrow();
+  });
+
+  it('carries the confirmed report, and drops the old global « confirmed » flag', () => {
+    const confirmation = { collectionKey: 'COL123', collectionChange: null, deletedKeys: ['ABCD1234'] };
+    const result = ZoteroSynchronizeSchema.parse({
+      mode: 'api',
+      userId: '123',
+      apiKey: 'key',
+      collectionKey: 'COL123',
+      expectedProjectPath: '/projets/these',
+      confirmation,
+      confirmed: true,
+    });
+    expect(result.confirmation).toEqual(confirmation);
+    expect(result).not.toHaveProperty('confirmed');
   });
 
   it('refuses a synchronization without collection', () => {

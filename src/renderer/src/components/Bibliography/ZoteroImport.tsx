@@ -21,12 +21,18 @@ interface SyncReport {
   collectionChange: { from: string; to: string } | null;
   added: SyncEntry[];
   modified: Array<SyncEntry & { fields: string[] }>;
-  deleted: SyncEntry[];
+  deleted: Array<SyncEntry & { zoteroKey: string }>;
   unchangedCount: number;
   localOnlyCount: number;
   renamedKeys: Array<{ from: string; to: string; title: string }>;
   duplicates: Array<{ title: string; keys: string[] }>;
   warnings: Array<{ kind: string; expected: number; written: number }>;
+  /** L'accord à renvoyer : il ne vaut que pour ce rapport. */
+  confirmation: {
+    collectionKey: string;
+    collectionChange: { from: string; to: string } | null;
+    deletedKeys: string[];
+  };
 }
 
 interface ZoteroLibraryInfo {
@@ -273,7 +279,12 @@ export const ZoteroImport: React.FC = () => {
    * collection, selon l'état du projet — c'est le processus principal qui
    * en décide, en lisant le fichier du projet. Rien de destructeur sans
    * accord : s'il faut retirer des références ou changer de collection, on
-   * demande d'abord.
+   * demande d'abord, et l'accord renvoyé est celui du rapport lu.
+   *
+   * La synchronisation appartient au projet où l'on a cliqué. Ouvrir un autre
+   * projet démonte ce panneau sans arrêter cette fonction : après chaque
+   * attente, si le projet a changé, elle s'arrête sans rien montrer ni
+   * recharger dans le nouveau (S07-1-7).
    */
   const handleSynchronize = async () => {
     if (!isConfigured) {
@@ -289,22 +300,29 @@ export const ZoteroImport: React.FC = () => {
       return;
     }
 
+    const projectPath = currentProject.path;
+    const stillInProject = () => useProjectStore.getState().currentProject?.path === projectPath;
+    const request = buildOptions({ collectionKey: selectedCollection, expectedProjectPath: projectPath });
+
     setIsSyncing(true);
     try {
-      let result = await window.electron.zotero.synchronize(
-        buildOptions({ collectionKey: selectedCollection })
-      );
+      let result = await window.electron.zotero.synchronize(request);
 
-      if (result.success && result.status === 'needs-confirmation' && result.report) {
+      // Un nouveau rapport après l'accord (Zotero a changé pendant la lecture) se relit.
+      while (stillInProject() && result.success && result.status === 'needs-confirmation' && result.report) {
+        const report = result.report as SyncReport;
         const confirmed = await useDialogStore
           .getState()
-          .showConfirm(describeConfirmation(result.report as SyncReport), t('zotero.sync.confirmTitle'));
-        if (!confirmed) return;
-        result = await window.electron.zotero.synchronize(
-          buildOptions({ collectionKey: selectedCollection, confirmed: true })
-        );
+          .showConfirm(describeConfirmation(report), t('zotero.sync.confirmTitle'));
+        if (!confirmed || !stillInProject()) return;
+        result = await window.electron.zotero.synchronize({ ...request, confirmation: report.confirmation });
       }
+      if (!stillInProject()) return;
 
+      if (!result.success && result.error === 'project-changed') {
+        await useDialogStore.getState().showAlert(t('zotero.sync.projectChanged'));
+        return;
+      }
       if (!result.success || result.status !== 'applied' || !result.report) {
         await useDialogStore
           .getState()
@@ -316,12 +334,14 @@ export const ZoteroImport: React.FC = () => {
       if (result.bibtexPath) {
         await useBibliographyStore
           .getState()
-          .loadBibliographyWithMetadata(result.bibtexPath, currentProject.path);
+          .loadBibliographyWithMetadata(result.bibtexPath, projectPath);
+        if (!stillInProject()) return;
       }
 
       await useDialogStore.getState().showAlert(describeOutcome(result.report as SyncReport));
     } catch (error) {
       console.error('Zotero synchronization failed:', error);
+      if (!stillInProject()) return;
       await useDialogStore.getState().showAlert(t('zotero.import.genericError'));
     } finally {
       setIsSyncing(false);

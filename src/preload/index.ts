@@ -385,7 +385,9 @@ const api = {
     /**
      * Synchronise la bibliographie du projet ouvert avec sa collection :
      * premier import, mise à jour ou changement de collection. Sans
-     * `confirmed`, s'arrête avant toute suppression pour demander accord.
+     * `confirmation`, s'arrête avant toute suppression pour demander accord ;
+     * avec, n'applique que le rapport confirmé. Refusé (`project-changed`) si
+     * le projet ouvert n'est plus `expectedProjectPath`.
      */
     synchronize: (options: {
       mode: 'api' | 'local';
@@ -395,7 +397,12 @@ const api = {
       dataDirectory?: string;
       libraryID?: number;
       collectionKey: string;
-      confirmed?: boolean;
+      expectedProjectPath: string;
+      confirmation?: {
+        collectionKey: string;
+        collectionChange: { from: string; to: string } | null;
+        deletedKeys: string[];
+      };
     }) => ipcRenderer.invoke('zotero:synchronize', options),
     downloadPDF: (options: {
       mode: 'api' | 'local';
