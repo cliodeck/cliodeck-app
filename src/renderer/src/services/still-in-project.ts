@@ -28,6 +28,17 @@ export async function stillIn(path: string): Promise<boolean> {
   return useProjectStore.getState().currentProject?.path === path;
 }
 
+/**
+ * L'écran montre-t-il encore `path`, sans attendre l'issue d'une ouverture en cours ? Pour la seule
+ * demande qui suit une étape que le main a acceptée et qui a déjà changé `path` (un rattachement
+ * écrit, un document supprimé) : attendre la fin de l'ouverture la ferait refuser à coup sûr, et
+ * laisserait l'étape à moitié faite. Elle part donc aussitôt, avec le projet attendu, et c'est le
+ * main qui refuse s'il a déjà basculé : pendant une ouverture, lui seul le sait.
+ */
+export function stillShown(path: string): boolean {
+  return useProjectStore.getState().currentProject?.path === path;
+}
+
 /** Le main a refusé la demande : le projet ouvert n'est plus celui pour lequel elle partait. */
 export function refusedAsProjectChanged(response: { success?: boolean; error?: string } | null | undefined): boolean {
   return response?.success === false && response.error === 'project-changed';

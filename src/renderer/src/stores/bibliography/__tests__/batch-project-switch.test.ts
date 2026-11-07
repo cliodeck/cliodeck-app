@@ -13,6 +13,11 @@
  * sur deux projets temporaires. Le main est simulé, sans ses propres gardes : un projet courant
  * que `project:load` change avant de répondre, et un corpus par projet. Zotero aussi : aucun appel
  * à l'API ni à une base Zotero, le téléchargement écrit un faux PDF.
+ *
+ * Seule exception, `mainGuardsIndex` : après une étape que le main a acceptée et qui a changé A
+ * (un rattachement écrit, un document supprimé), l'indexation part sans attendre l'issue d'une
+ * ouverture, et c'est le main qui refuse s'il a déjà basculé. Les tests de ce cas lui rendent sa
+ * garde de `pdf:index` (`project-changed`).
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
@@ -57,8 +62,15 @@ function deferred() {
 let downloadGates: Array<Promise<void>> = [];
 let indexGates: Array<Promise<void>> = [];
 let getAllGates: Array<Promise<void>> = [];
+let saveGates: Array<Promise<void>> = [];
+let deleteGates: Array<Promise<void>> = [];
 /** Retient `project:load` après la bascule du main : l'écran montre encore A. */
 let loadGate: Promise<void> | null = null;
+/** Retient `project:load` avant la bascule du main : l'ouverture a commencé, le main est encore sur A. */
+let switchGate: Promise<void> | null = null;
+let loadCalls = 0;
+/** La garde du vrai `pdf:index` : un projet attendu qui n'est plus le courant est refusé. */
+let mainGuardsIndex = false;
 
 const docsOf = (project: string | null): IndexedDocument[] => (project ? (corpus.get(project) ?? []) : []);
 
@@ -134,6 +146,8 @@ function installMain(): void {
     project: {
       getMetadata: vi.fn(async (p: string) => ({ success: true, project: projectData(p) })),
       load: vi.fn(async (p: string) => {
+        loadCalls++;
+        if (switchGate) await switchGate;
         mainCurrent = p;
         if (loadGate) await loadGate;
         return { success: true, project: projectData(p) };
@@ -153,6 +167,9 @@ function installMain(): void {
       saveMetadata: vi.fn(async ({ projectPath, citations }: { projectPath: string; citations: Citation[] }) => {
         saveCalls.push({ projectPath, ids: citations.map((c) => c.id) });
         await BibliographyMetadataService.saveMetadata(projectPath, citations as never);
+        // Écrit, accepté : seule la réponse tarde.
+        const gate = saveGates.shift();
+        if (gate) await gate;
         return { success: true };
       }),
       readingNotes: { list: vi.fn(async () => ({ success: true, notes: [] })) },
@@ -171,6 +188,9 @@ function installMain(): void {
       index: vi.fn(async (file: string, bibtexKey?: string, _meta?: unknown, expected?: string) => {
         const at = mainCurrent;
         indexCalls.push({ file, at, expected });
+        if (mainGuardsIndex && expected !== undefined && expected !== at) {
+          return { success: false, error: 'project-changed' };
+        }
         const gate = indexGates.shift();
         if (gate) await gate;
         if (at) corpus.set(at, [...docsOf(at), { id: `doc-${path.basename(file)}`, fileURL: file, bibtexKey }]);
@@ -184,6 +204,9 @@ function installMain(): void {
       }),
       delete: vi.fn(async (id: string) => {
         if (mainCurrent) corpus.set(mainCurrent, docsOf(mainCurrent).filter((d) => d.id !== id));
+        // Supprimé : seule la réponse tarde.
+        const gate = deleteGates.shift();
+        if (gate) await gate;
         return { success: true };
       }),
     },
@@ -195,9 +218,14 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-async function until(condition: () => boolean): Promise<void> {
+/** Attend la condition, sans échouer : l'appelant relâche ses attentes avant de conclure. */
+async function reached(condition: () => boolean): Promise<boolean> {
   for (let i = 0; i < 500 && !condition(); i++) await new Promise((r) => setTimeout(r, 0));
-  expect(condition()).toBe(true);
+  return condition();
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  expect(await reached(condition)).toBe(true);
 }
 
 const open = (p: string) => useProjectStore.getState().loadProject(p);
@@ -214,7 +242,12 @@ beforeEach(async () => {
   downloadGates = [];
   indexGates = [];
   getAllGates = [];
+  saveGates = [];
+  deleteGates = [];
   loadGate = null;
+  switchGate = null;
+  loadCalls = 0;
+  mainGuardsIndex = false;
   bHasBibliography = true;
   await makeProjects();
   installMain();
@@ -342,6 +375,81 @@ describe('« Télécharger tous les PDFs manquants » : B ouvert pendant le prem
   });
 });
 
+describe('« Télécharger tous les PDFs manquants » : B ouvert pendant l’écriture des métadonnées du dernier PDF', () => {
+  /** a3 est téléchargé et son rattachement écrit dans A ; la réponse du main tarde. */
+  function holdLastSave() {
+    const save = deferred();
+    saveGates = [Promise.resolve(), Promise.resolve(), save.promise];
+    const batch = bib().downloadAllMissingPDFs(A);
+    return { save, batch };
+  }
+  const corpusOfA = () => docsOf(A).map((d) => path.basename(d.fileURL));
+
+  it('B déjà ouvert : le PDF rattaché compte « à indexer », et « Indexer tous les PDFs » termine le travail', async () => {
+    const { save, batch } = holdLastSave();
+    await until(() => saveGates.length === 0);
+
+    await open(B);
+    save.resolve();
+    const result = await batch;
+
+    // a3 a son fichier dans A : une relance du téléchargement l'écarterait. Il n'est pas « non traité ».
+    expect(result).toMatchObject({ downloaded: 2, errors: [], interrupted: true, remaining: 0, toIndex: 1 });
+    expect(indexedIn(B)).toEqual([]);
+    expect(filesOf(B).filter((f) => f.startsWith(A))).toEqual([]);
+
+    await open(A);
+    expect(citation('a3')?.file).toBe(path.join(A, 'PDFs', 'ATTA3.pdf'));
+    expect(await bib().downloadAllMissingPDFs(A)).toMatchObject({ downloaded: 0, errors: [] });
+    expect(corpusOfA()).not.toContain('ATTA3.pdf');
+    // Ce que l'alerte indique pour ce PDF.
+    expect(await bib().indexAllPDFs(A)).toMatchObject({ indexed: 1, errors: [] });
+    expect(corpusOfA()).toContain('ATTA3.pdf');
+  });
+
+  it('l’ouverture n’a pas encore atteint le main : le PDF rattaché est indexé dans A sans attendre', async () => {
+    const { save, batch } = holdLastSave();
+    await until(() => saveGates.length === 0);
+    const opening = deferred();
+    switchGate = opening.promise;
+    const loadsBefore = loadCalls;
+    const switching = open(B);
+    await until(() => loadCalls === loadsBefore + 1);
+
+    save.resolve();
+    const sent = await reached(() => indexCalls.length === 3);
+    opening.resolve();
+    await switching;
+    const result = await batch;
+
+    expect(sent).toBe(true);
+    expect(indexCalls[2]).toMatchObject({ file: path.join(A, 'PDFs', 'ATTA3.pdf'), at: A, expected: A });
+    expect(corpusOfA()).toContain('ATTA3.pdf');
+    expect(result).toMatchObject({ downloaded: 3, interrupted: true, remaining: 0, toIndex: 0 });
+    expect(filesOf(B).filter((f) => f.startsWith(A))).toEqual([]);
+  });
+
+  it('le main a déjà pris B, l’écran montre encore A : le main refuse l’indexation, le PDF compte « à indexer »', async () => {
+    mainGuardsIndex = true;
+    const { save, batch } = holdLastSave();
+    await until(() => saveGates.length === 0);
+    const opening = deferred();
+    loadGate = opening.promise;
+    const switching = open(B);
+    await until(() => mainCurrent === B);
+
+    save.resolve();
+    await reached(() => indexCalls.length === 3);
+    opening.resolve();
+    await switching;
+    const result = await batch;
+
+    expect(result).toMatchObject({ downloaded: 2, interrupted: true, remaining: 0, toIndex: 1 });
+    expect(filesOf(B).filter((f) => f.startsWith(A))).toEqual([]);
+    expect(corpusOfA()).not.toContain('ATTA3.pdf');
+  });
+});
+
 describe('« Indexer tous les PDFs » : B ouvert pendant la première indexation', () => {
   beforeEach(async () => {
     // Trois notices dont le .bib porte le PDF.
@@ -415,6 +523,56 @@ describe('les gestes unitaires de la fiche ne finissent pas dans B', () => {
     expect(bib().indexedFilePaths.has(path.join(A, 'PDFs', 'ATTA0.pdf'))).toBe(false);
     expect(indexCalls[0]).toMatchObject({ at: A, expected: A });
     expect(result.interrupted).toBe(true);
+  });
+
+  it('« Télécharger et indexer » : l’ouverture de B n’a pas encore atteint le main pendant l’écriture, le PDF est indexé dans A', async () => {
+    const save = deferred();
+    saveGates = [save.promise];
+    const pending = bib().downloadAndIndexZoteroPDF('a1', 'ATTA1', A);
+    await until(() => saveGates.length === 0);
+    const opening = deferred();
+    switchGate = opening.promise;
+    const loadsBefore = loadCalls;
+    const switching = open(B);
+    await until(() => loadCalls === loadsBefore + 1);
+
+    save.resolve();
+    const sent = await reached(() => indexCalls.length === 1);
+    opening.resolve();
+    await switching;
+    const result = await pending;
+
+    expect(sent).toBe(true);
+    expect(indexCalls[0]).toMatchObject({ file: path.join(A, 'PDFs', 'ATTA1.pdf'), at: A, expected: A });
+    expect(docsOf(A).map((d) => d.bibtexKey)).toContain('a1');
+    expect(bib().citations.map((c) => c.id)).toEqual(['b1']);
+    expect(result).toEqual({ interrupted: true });
+  });
+
+  it('« Ré-indexer » : B ouvert pendant la suppression, avant que le main bascule : le document de A est réindexé dans A', async () => {
+    const removal = deferred();
+    deleteGates = [removal.promise];
+    const pending = bib().reindexPDFFromCitation('a0');
+    // La suppression a eu lieu dans A ; sa réponse tarde.
+    await until(() => !docsOf(A).some((d) => d.id === 'docA0'));
+    const opening = deferred();
+    switchGate = opening.promise;
+    const loadsBefore = loadCalls;
+    const switching = open(B);
+    await until(() => loadCalls === loadsBefore + 1);
+
+    removal.resolve();
+    const sent = await reached(() => indexCalls.length === 1);
+    opening.resolve();
+    await switching;
+    const result = await pending;
+
+    expect(sent).toBe(true);
+    expect(indexCalls[0]).toMatchObject({ file: path.join(A, 'PDFs', 'ATTA0.pdf'), at: A, expected: A });
+    // Le document de A n'est pas perdu : il est revenu dans son corpus.
+    expect(docsOf(A).map((d) => d.bibtexKey)).toContain('a0');
+    expect(docsOf(B).map((d) => d.id)).toEqual(['docB1']);
+    expect(result).toEqual({ interrupted: true });
   });
 
   it('« Ré-indexer » : le document de B de même clé n’est pas supprimé, et le PDF de A n’entre pas dans B', async () => {

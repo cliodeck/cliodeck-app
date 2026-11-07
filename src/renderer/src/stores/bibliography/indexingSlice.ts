@@ -1,7 +1,7 @@
 import type { BatchIndexingState, IndexingSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useProjectStore } from '../projectStore';
-import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
+import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
 
 /** Aucun lot en cours : ni barre de progression dans le panneau, ni indicateur dans la barre d'état. */
 export function idleBatchIndexing(): BatchIndexingState {
@@ -11,11 +11,20 @@ export function idleBatchIndexing(): BatchIndexingState {
 /**
  * Le projet où l'on a cliqué : le main refuse d'indexer ailleurs, et ce qu'il répond après la
  * bascule ne s'inscrit pas dans le store du suivant (S18-2-0). Sans projet, rien n'est gardé :
- * le main refuse de toute façon d'indexer.
+ * le main refuse de toute façon d'indexer. `leftNow` n'attend pas l'issue d'une ouverture
+ * (`stillShown`).
  */
-function leavingCheck(): { projectPath: string | undefined; left: () => Promise<boolean> } {
+function leavingCheck(): {
+  projectPath: string | undefined;
+  left: () => Promise<boolean>;
+  leftNow: () => boolean;
+} {
   const projectPath = useProjectStore.getState().currentProject?.path;
-  return { projectPath, left: async () => !!projectPath && !(await stillIn(projectPath)) };
+  return {
+    projectPath,
+    left: async () => !!projectPath && !(await stillIn(projectPath)),
+    leftNow: () => !!projectPath && !stillShown(projectPath),
+  };
 }
 
 export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> = (set, get) => ({
@@ -113,7 +122,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
       // Après chaque attente : un autre projet ouvert entre-temps aurait son document de même clé
       // supprimé, et le PDF de celui-ci dans son corpus.
-      const { projectPath, left } = leavingCheck();
+      const { projectPath, left, leftNow } = leavingCheck();
 
       // Resolution order for the PDF path on disk:
       //   1. `citation.file` — what BibTeX or the in-memory Zotero download
@@ -159,7 +168,10 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       if (documentId) {
         console.log(`🗑️ Deleting existing indexed PDF for: ${citation.title}`);
         await window.electron.pdf.delete(documentId);
-        if (await left()) return { interrupted: true };
+        // Le document est retiré de ce projet : sa réindexation part aussitôt, le main refuse s'il a
+        // déjà basculé. Attendre l'issue d'une ouverture la ferait refuser à coup sûr, et le
+        // document manquerait au corpus sans que rien ne le dise.
+        if (leftNow()) return { interrupted: true };
 
         // Remove from indexed set
         set((state) => {

@@ -1,7 +1,7 @@
 import type { Citation, ZoteroSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { idleBatchIndexing } from './indexingSlice';
-import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
+import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
 
 /**
  * Rattache un PDF téléchargé à son entrée : `file` pour la session, et la
@@ -131,7 +131,9 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       } catch (metaError) {
         console.error('⚠️ Failed to save metadata after PDF download:', metaError);
       }
-      if (await left()) return { interrupted: true };
+      // Le PDF est rattaché dans ce projet : son indexation part aussitôt, le main refuse s'il a
+      // déjà basculé. Attendre l'issue d'une ouverture la ferait refuser à coup sûr.
+      if (!stillShown(projectPath)) return { interrupted: true };
 
       // Index the downloaded PDF
       console.log(`🔍 Indexing downloaded PDF for citation: ${citation.title}`);
@@ -223,6 +225,8 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       const errors: string[] = [];
       let downloaded = 0;
       const skipped = 0;
+      /** Rattachés dans ce projet mais pas indexés : la relance du téléchargement les écarterait. */
+      let toIndex = 0;
       /**
        * Le projet du lot n'est plus l'ouvert (S18-2-0). Les références du store sont alors celles
        * de l'autre : enregistrées sous ce projet, elles effaçaient tous ses rattachements, et ses
@@ -231,8 +235,8 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
        */
       const interrupt = () => {
         set({ batchIndexing: idleBatchIndexing() });
-        const remaining = citationsNeedingPDFs.length - downloaded - skipped - errors.length;
-        return { downloaded, skipped, errors, interrupted: true as const, remaining };
+        const remaining = citationsNeedingPDFs.length - downloaded - skipped - errors.length - toIndex;
+        return { downloaded, skipped, errors, interrupted: true as const, remaining, toIndex };
       };
       if (!(await stillIn(projectPath))) return interrupt();
 
@@ -320,16 +324,24 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           set({ citations: updatedCitations });
           get().applyFilters();
 
+          let attached = false;
           try {
             const saved = await window.electron.bibliography.saveMetadata({
               projectPath,
               citations: updatedCitations,
             });
             if (refusedAsProjectChanged(saved)) return interrupt();
+            attached = saved?.success === true;
           } catch (metaError) {
             console.warn('⚠️ Métadonnées non sauvegardées après téléchargement :', metaError);
           }
-          if (!(await stillIn(projectPath))) return interrupt();
+          // Le PDF est rattaché dans ce projet : une relance du téléchargement l'écarterait. Son
+          // indexation part donc aussitôt, le main refuse s'il a déjà basculé ; attendre l'issue
+          // d'une ouverture la ferait refuser à coup sûr.
+          if (!stillShown(projectPath)) {
+            if (attached) toIndex++;
+            return interrupt();
+          }
 
           // Index the downloaded PDF
           set((state) => ({
@@ -357,8 +369,10 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
             projectPath
           );
           // Le PDF en vol a été indexé dans le projet du lot : il compte, mais l'ouvert n'en sait rien.
+          // Refusé ou en échec, il reste rattaché sans être indexé.
           if (refusedAsProjectChanged(indexResult) || !(await stillIn(projectPath))) {
             if (indexResult.success) downloaded++;
+            else if (attached) toIndex++;
             return interrupt();
           }
 

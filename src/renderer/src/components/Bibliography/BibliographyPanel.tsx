@@ -199,25 +199,38 @@ export const BibliographyPanel: React.FC = () => {
   /**
    * Un lot arrêté parce que son projet n'est plus l'ouvert (S18-2-0). L'onglet Projets démonte ce
    * panneau sans arrêter le geste : l'alerte s'affiche donc souvent par-dessus l'autre projet. Elle
-   * nomme le projet d'origine, dit ce qui a été fait et ce qui reste, et comment le terminer.
+   * nomme le projet d'origine, dit ce qui a été fait et ce qui reste, et comment le terminer : la
+   * relance du lot pour ce qui n'a pas été traité, « Indexer tous les PDFs » pour un PDF rattaché
+   * mais pas indexé, que la relance du téléchargement écarterait.
    */
   const alertBatchInterrupted = (
     batchKey: string,
     projectName: string,
-    progress: { done: number; remaining: number; errors: string[] }
-  ) =>
-    useDialogStore.getState().showAlert(
-      withErrorDetails(
-        t('bibliography.batchInterrupted', {
-          batch: t(batchKey),
-          project: projectName,
-          done: progress.done,
-          errors: progress.errors.length,
-          remaining: progress.remaining,
-        }),
-        progress.errors
-      )
-    );
+    progress: { done: number; remaining: number; errors: string[]; toIndex?: number }
+  ) => {
+    const batch = t(batchKey);
+    const toIndex = progress.toIndex ?? 0;
+    const message = [
+      t('bibliography.batchInterrupted', {
+        batch,
+        project: projectName,
+        done: progress.done,
+        errors: progress.errors.length,
+        remaining: progress.remaining,
+      }),
+      progress.remaining > 0 ? t('bibliography.batchInterruptedResume', { batch, project: projectName }) : '',
+      toIndex > 0
+        ? t('bibliography.batchInterruptedToIndex', {
+            pending: toIndex,
+            project: projectName,
+            indexAll: t('bibliography.indexAllPDFs'),
+          })
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return useDialogStore.getState().showAlert(withErrorDetails(message, progress.errors));
+  };
 
   const handleIndexAllPDFs = async () => {
     if (batchIndexing.isIndexing) return;
@@ -288,6 +301,7 @@ export const BibliographyPanel: React.FC = () => {
           done: result.downloaded,
           remaining: result.remaining ?? 0,
           errors: result.errors,
+          toIndex: result.toIndex,
         });
         return;
       }

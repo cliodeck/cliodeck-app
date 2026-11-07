@@ -91,6 +91,11 @@ export interface BatchIndexingState {
 export interface ProjectChangedOutcome {
   interrupted?: true;
   remaining?: number;
+  /**
+   * PDF téléchargés et rattachés dans le projet, mais pas indexés : une relance du téléchargement
+   * les écarterait (leur notice a son fichier), « Indexer tous les PDFs » les reprend.
+   */
+  toIndex?: number;
 }
 
 // MARK: - Slice State Interfaces

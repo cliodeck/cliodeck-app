@@ -74,6 +74,7 @@ function deferred<T>() {
 }
 
 let downloadPDF: ReturnType<typeof vi.fn>;
+let saveMetadata: ReturnType<typeof vi.fn>;
 let pdfIndex: ReturnType<typeof vi.fn>;
 let getAll: ReturnType<typeof vi.fn>;
 const dialogs = () => useDialogStore.getState();
@@ -111,13 +112,14 @@ beforeEach(() => {
     success: true,
     filePath: `${options.targetDirectory}/PDFs/${options.attachmentKey}.pdf`,
   }));
+  saveMetadata = vi.fn(async () => ({ success: true }));
   pdfIndex = vi.fn(async () => ({ success: true }));
   getAll = vi.fn(async () => ({ success: true, documents: [] }));
   (window as unknown as { electron: unknown }).electron = {
     config: { get: vi.fn(async () => ({ mode: 'local', dataDirectory: '/zotero-simule' })) },
     project: { getConfig: vi.fn(async () => ({})) },
     zotero: { downloadPDF },
-    bibliography: { saveMetadata: vi.fn(async () => ({ success: true })) },
+    bibliography: { saveMetadata },
     pdf: { index: pdfIndex, getAll },
   };
 });
@@ -148,6 +150,27 @@ describe('« Télécharger tous les PDFs manquants depuis Zotero » interrompu p
     expect(dialogs().alertMessage).not.toContain('Thèse B');
     expect(dialogs().alertMessage).toContain('3 non traité(s)');
     expect(dialogs().alertMessage).toContain('relancez « Télécharger tous les PDFs manquants depuis Zotero »');
+    expect(pdfIndex).not.toHaveBeenCalled();
+  });
+
+  it('le dernier PDF, téléchargé et rattaché mais pas indexé : l’alerte renvoie à « Indexer tous les PDFs », pas à une relance du téléchargement', async () => {
+    // La relance l'écarterait : sa notice a désormais son fichier.
+    const written = deferred<unknown>();
+    saveMetadata.mockReturnValueOnce(written.promise);
+    await mountIn([fromZotero('a1')]);
+    await launch('Télécharger tous les PDFs manquants depuis Zotero');
+    expect(saveMetadata).toHaveBeenCalledTimes(1);
+
+    await switchToB();
+    await act(async () => {
+      written.resolve({ success: true });
+    });
+
+    expect(dialogs().queue).toHaveLength(1);
+    expect(dialogs().alertMessage).toContain('0 PDF(s) traité(s), 0 erreur(s), 0 non traité(s)');
+    expect(dialogs().alertMessage).toContain('1 PDF(s) téléchargé(s) mais non indexé(s)');
+    expect(dialogs().alertMessage).toContain('lancez « Indexer tous les PDFs »');
+    expect(dialogs().alertMessage).not.toContain('relancez « Télécharger tous les PDFs manquants depuis Zotero »');
     expect(pdfIndex).not.toHaveBeenCalled();
   });
 
