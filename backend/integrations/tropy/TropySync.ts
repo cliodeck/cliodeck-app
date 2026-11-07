@@ -7,6 +7,7 @@ import {
 } from './TropyReader';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
+import { isNoteTranscription } from './note-transcription';
 import {
   PrimarySourcesVectorStore,
   PrimarySourceDocument,
@@ -263,8 +264,11 @@ export class TropySync {
     let ocrCount = 0;
     let transcriptionCount = 0;
 
-    // 1. D'abord, extraire le texte des notes Tropy (transcriptions manuelles dans Tropy)
-    // Use extractItemNotesOnly to get ONLY the actual transcription content, not metadata
+    // 1. Les notes Tropy (item, photos, sélections), sans les métadonnées.
+    //    Une note ne remplace JAMAIS un corps — OCR, transcription de la
+    //    fiche, Transkribus : elle est gardée à côté (`notesText`). Elle
+    //    remplaçait tout, même « voir aussi carton 12 » sur 50 pages d'OCR,
+    //    qui sortaient du RAG ; et elle empêchait de relancer l'OCR.
     const notesOnlyText = this.reader.extractItemNotesOnly(item);
     const notesCounts = this.reader.countItemNotes(item);
 
@@ -277,15 +281,20 @@ export class TropySync {
       }
     }
 
-    // Only use notes text if there are actual notes (not just metadata)
-    if (notesOnlyText.trim().length > 0) {
-      // Include metadata header + notes for the full transcription
-      transcription = this.reader.extractItemText(item);
-      transcriptionSource = 'tropy-notes';
-    }
+    const notesText = notesOnlyText.trim();
+    // Q26 : une note longue est une transcription faite à la main, une
+    // courte un commentaire, qui ne doit pas empêcher l'OCR.
+    const notesAreTranscription = isNoteTranscription(notesText.length);
+
+    // Un corps acquis par une passe précédente. Une source 'tropy-notes'
+    // n'en a pas : son texte se recalcule à partir des notes de Tropy.
+    const existingBody =
+      existingSource?.transcriptionSource !== 'tropy-notes'
+        ? (existingSource?.transcription ?? '').trim()
+        : '';
 
     // 2. Chercher des transcriptions externes (Transkribus, etc.)
-    if (options.transcriptionDirectory && (!transcription || options.forceReindex)) {
+    if (options.transcriptionDirectory && (!notesAreTranscription || options.forceReindex)) {
       const externalTranscription = await this.findExternalTranscription(
         item,
         options.transcriptionDirectory
@@ -297,17 +306,16 @@ export class TropySync {
       }
     }
 
-    // 3. Si pas de transcription et OCR activé, faire l'OCR.
-    //    Une source déjà transcrite n'est PAS repassée à la reconnaissance
-    //    sans demande explicite : c'est ce que la case « relancer l'OCR sur
-    //    toutes les sources » promettait sans le faire. L'OCR repartait de
-    //    zéro à chaque passe — des heures de calcul sur un corpus d'archives —
-    //    pour un résultat que la décision d'écriture jetait ensuite.
-    const existingTranscription = (existingSource?.transcription ?? '').trim();
+    // 3. OCR. Une source déjà transcrite n'est PAS repassée à la
+    //    reconnaissance sans demande explicite : c'est ce que la case
+    //    « relancer l'OCR sur toutes les sources » promettait sans le faire.
+    //    L'OCR repartait de zéro à chaque passe — des heures de calcul sur un
+    //    corpus d'archives — pour un résultat que la décision d'écriture
+    //    jetait ensuite. Une note-transcription (Q26) vaut transcription ici.
     if (
       !transcription &&
       options.performOCR &&
-      (existingTranscription.length === 0 || options.forceReindex)
+      (options.forceReindex || (existingBody.length === 0 && !notesAreTranscription))
     ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
       const ocrResult = await this.performOCROnItem(item, options.ocrLanguage);
@@ -322,10 +330,16 @@ export class TropySync {
     // 4. Rien de neuf ne doit effacer l'ancien. `saveSource` réécrit la ligne
     //    entière : sans ce report, un OCR infructueux (page illisible,
     //    confiance sous le seuil) faisait perdre une transcription acquise.
-    if (!transcription && existingSource?.transcription) {
-      transcription = existingSource.transcription;
+    //    Sans corps, les notes tiennent lieu de texte (titre et métadonnées
+    //    en tête) ; sans notes non plus, une source 'tropy-notes' n'a plus
+    //    rien à dire et perd sa transcription.
+    if (!transcription && existingBody && existingSource) {
+      transcription = existingSource.transcription ?? '';
       transcriptionSource = existingSource.transcriptionSource;
       ocrConfidence = existingSource.ocrConfidence;
+    } else if (!transcription && notesText) {
+      transcription = this.reader.extractItemText(item);
+      transcriptionSource = 'tropy-notes';
     }
 
     // Date de fraîcheur : celle de CET item quand Tropy la fournit
@@ -351,6 +365,7 @@ export class TropySync {
       transcription: transcription || undefined,
       transcriptionSource,
       ocrConfidence,
+      notesText,
       lastModified: itemModified,
       metadata: this.extractMetadata(item),
       archival: archivalFromTropyMetadata(this.extractMetadata(item), {
@@ -370,6 +385,29 @@ export class TropySync {
     const transcriptionChanged =
       !!existingSource && transcription !== (existingSource.transcription ?? '');
 
+    // Les extraits portent aussi les notes (hors 'tropy-notes', où elles sont
+    // déjà la transcription) et un en-tête — titre, auteur, date, archive,
+    // collection. Si l'un change, les extraits d'avant mentent.
+    // `notesText` absent : ligne écrite avant la colonne. On l'initialise sans
+    // réembarquer, en supposant les extraits à jour : ceux d'un corps n'ont
+    // jamais contenu de note, ceux d'une source 'tropy-notes' les contiennent
+    // par la transcription. Sans cela, le premier lancement après la mise à
+    // jour réembarquerait tout le corpus.
+    const notesUninitialized = !!existingSource && existingSource.notesText === undefined;
+    const previousNotes =
+      notesUninitialized && existingSource?.transcriptionSource === 'tropy-notes'
+        ? notesText
+        : (existingSource?.notesText ?? '');
+    const notesChanged = !!existingSource && notesText !== previousNotes;
+    const headerChanged =
+      !!existingSource &&
+      (sourceItem.title !== existingSource.title ||
+        (sourceItem.creator ?? '') !== (existingSource.creator ?? '') ||
+        (sourceItem.date ?? '') !== (existingSource.date ?? '') ||
+        (sourceItem.archive ?? '') !== (existingSource.archive ?? '') ||
+        (sourceItem.collection ?? '') !== (existingSource.collection ?? ''));
+    const chunksStale = transcriptionChanged || notesChanged || headerChanged;
+
     // Fraîcheur inconnue (Tropy trop ancien pour exposer `modified`) =
     // « a pu changer » : on réécrit, c'est bon marché.
     const itemChanged =
@@ -377,9 +415,11 @@ export class TropySync {
       (!item.modified || existingSource.lastModified !== sourceItem.lastModified.toISOString());
 
     const isUpdated =
-      !!existingSource && (options.forceReindex || itemChanged || transcriptionChanged);
+      !!existingSource && (options.forceReindex || itemChanged || chunksStale);
 
-    const saved = isNew || isUpdated;
+    // Initialiser `notes_text` réécrit la ligne sans que rien n'ait changé
+    // pour l'historien : ce n'est pas une mise à jour.
+    const saved = isNew || isUpdated || notesUninitialized;
     if (saved) {
       vectorStore.saveSource(sourceItem);
 
@@ -387,7 +427,7 @@ export class TropySync {
       // d'embeddings ne traite que les sources sans chunk : sans cette
       // invalidation, une transcription corrigée resterait invisible au RAG,
       // qui continuerait de répondre sur l'ancienne.
-      if (transcriptionChanged) {
+      if (chunksStale) {
         vectorStore.deleteChunks(sourceItem.id);
       }
     }

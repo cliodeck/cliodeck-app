@@ -347,9 +347,10 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     await tropyService.sync(syncOptions);
     const before = snapshot();
 
-    // L'historien corrige le titre dans Tropy : `subjects.modified` avance pour CET item.
+    // L'historien ajoute un tag dans Tropy : `subjects.modified` avance pour CET item.
+    // Un tag n'entre pas dans le texte des extraits (le titre, si : voir plus bas).
     const items = baseItems();
-    items[0] = { ...items[0], title: 'Rapport du préfet (corrigé)', modified: '2026-06-01T08:00:00.000Z' };
+    items[0] = { ...items[0], tags: ['grève', 'port', 'préfecture'], modified: '2026-06-01T08:00:00.000Z' };
     makeTpy(tropyDir, spec({ items }));
 
     const result = await tropyService.sync(syncOptions);
@@ -391,9 +392,9 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(after.chunks.length).toBe(before.chunks.length);
   });
 
-  // L06-2 (S08-1-1) : une note ajoutée dans Tropy devient la transcription
-  // ('tropy-notes') et ses extraits remplacent ceux de l'OCR.
-  it.fails('une note ajoutée après l’OCR ne remplace pas la transcription (L06-2, S08-1-1)', async () => {
+  // L06-2 (S08-1-1) : une note ajoutée dans Tropy devenait la transcription
+  // ('tropy-notes') et ses extraits remplaçaient ceux de l'OCR.
+  it('une note ajoutée après l’OCR ne remplace pas la transcription (L06-2, S08-1-1)', async () => {
     const tpy = makeTpy(tropyDir, spec());
     await tropyService.openProject(tpy);
     await tropyService.sync(syncOptions);
@@ -413,9 +414,9 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
   });
 
   // L06-2 (décision Q26) : toute note, même un commentaire de quelques mots,
-  // tient lieu de transcription et empêche l'OCR. Sous 500 caractères, une note
-  // est un commentaire : l'OCR doit passer.
-  it.fails('une note de moins de 500 caractères n’empêche pas l’OCR (L06-2, Q26)', async () => {
+  // tenait lieu de transcription et empêchait l'OCR. Sous 500 caractères, une
+  // note est un commentaire : l'OCR doit passer.
+  it('une note de moins de 500 caractères n’empêche pas l’OCR (L06-2, Q26)', async () => {
     const items = baseItems();
     items[0] = { ...items[0], notes: [{ text: 'Voir aussi carton 12' }] };
     const tpy = makeTpy(tropyDir, spec({ items }));
@@ -426,6 +427,67 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
     expect(s10?.transcription_source).toBe('tesseract');
     expect(s10?.transcription).toBe(OCR_TEXT);
+  });
+
+  it('un titre corrigé dans Tropy passe dans l’en-tête des extraits (L06-2)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    const items = baseItems();
+    items[0] = { ...items[0], title: 'Rapport du préfet (corrigé)', modified: '2026-06-01T08:00:00.000Z' };
+    makeTpy(tropyDir, spec({ items }));
+    const result = await tropyService.sync(syncOptions);
+    expect(result.updatedItems).toBe(1);
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+
+    const after = snapshot();
+    const s10 = after.sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription).toBe(OCR_TEXT);
+    const chunks = after.chunks.filter((c) => c.source_id === s10?.id).map((c) => c.content).join(' ');
+    expect(chunks).toContain('Titre: Rapport du préfet (corrigé)');
+    expect(chunks).toContain('Monsieur Durand');
+  });
+
+  it('une base d’avant la colonne notes_text s’initialise sans réembarquer (L06-2, A20)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+    await tropyService.close();
+
+    // Ramener brain.db au schéma d'avant L06-2 : sans la colonne, comme sur
+    // les postes des historiens avant la mise à jour.
+    const db = new Database(path.join(projectDir, '.cliodeck', 'brain.db'));
+    db.exec('ALTER TABLE tropy_sources DROP COLUMN notes_text');
+    db.close();
+    const before = snapshot();
+    const embeddedBefore = embedCalls.texts;
+
+    await tropyService.init(projectDir);
+    await tropyService.openProject(tpy);
+    const result = await tropyService.sync(syncOptions);
+    expect(result.success).toBe(true);
+    expect(result.updatedItems).toBe(0);
+
+    const after = snapshot();
+    expect(embedCalls.texts).toBe(embeddedBefore);
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    expect(after.chunks).toEqual(before.chunks);
+    expect(after.sources.map((s) => [s.id, s.transcription, s.transcription_source])).toEqual(
+      before.sources.map((s) => [s.id, s.transcription, s.transcription_source])
+    );
+    const probe = brainDb();
+    try {
+      const notes = probe
+        .prepare('SELECT tropy_id, notes_text FROM tropy_sources ORDER BY tropy_id')
+        .all() as Array<{ tropy_id: number; notes_text: string | null }>;
+      expect(notes).toEqual([
+        { tropy_id: 10, notes_text: '' },
+        { tropy_id: 20, notes_text: NOTE_TEXT },
+      ]);
+    } finally {
+      probe.close();
+    }
   });
 
   // L06-12 (S08-1-10) : la table `transcriptions` de Tropy n'est pas lue, la
