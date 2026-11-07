@@ -8,12 +8,15 @@
  * « modifiée », donc jamais sauvegardée : l'OCR tournait des heures et son
  * résultat était jeté, sans le moindre message.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import type Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TropySync } from '../TropySync';
 import type { PrimarySourceItem } from '../TropyReader';
+import { PrimarySourcesVectorStore } from '../../../core/vector-store/PrimarySourcesVectorStore';
+import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
 
 // mtime du .tpy : une seule valeur pour TOUT le projet
 const TPY_MTIME = new Date('2026-05-06T13:13:33.499Z');
@@ -64,6 +67,9 @@ function harness(options: {
   ocrConfidence?: number;
   /** Texte des notes Tropy de l'item (item, photos et sélections confondues). */
   notes?: string;
+  /** Un vrai magasin à la place de la doublure : ce qu'il a écrit, la passe suivante le relit. */
+  store?: PrimarySourcesVectorStore;
+  item?: Record<string, unknown>;
 }) {
   const sync = new TropySync();
 
@@ -89,10 +95,11 @@ function harness(options: {
 
   const saveSource = vi.fn();
   const deleteChunks = vi.fn();
-  const vectorStore = {
+  const vectorStore = options.store ?? {
     getSourceByTropyId: () => options.existing ?? null,
     saveSource,
     deleteChunks,
+    transaction: <T>(fn: () => T): T => fn(),
   };
 
   const run = (opts: Record<string, unknown> = {}) =>
@@ -109,7 +116,7 @@ function harness(options: {
           transcriptionWritten: boolean;
         }>;
       }
-    ).processItem(makeItem(), vectorStore, {
+    ).processItem(makeItem(options.item), vectorStore, {
       performOCR: true,
       ocrLanguage: 'fra',
       forceReindex: false,
@@ -379,5 +386,110 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
     expect(h.saved()?.title).toBe('1980_01_08_141st_CoG_meeting_Minutes_FR');
     expect(h.deleteChunks).toHaveBeenCalledWith('existing-uuid');
     expect(result.isUpdated).toBe(true);
+  });
+});
+
+// MARK: - Tout ou rien (L06-5, S02-1-10)
+
+// Ici, un vrai magasin : la question est ce que la passe suivante relit après
+// un échec, et une doublure ne garde rien. Lecteur et OCR restent simulés.
+describe.skipIf(!sqliteAvailable)('TropySync — une source s’écrit tout ou rien (L06-5)', () => {
+  const NEW_NOTE = `${LONG_NOTE} Pièces jointes par la fusion des deux items.`;
+  const TITLE = '1980_01_08_141st_CoG_meeting_Minutes_FR';
+  // L'item tel que Tropy le rend après la fusion : notes nouvelles, tag
+  // nouveau, date `modified` avancée.
+  const MERGED = { modified: '2026-06-01T08:00:00.000Z', tags: ['fusion'] };
+  let tmp = '';
+  let store: PrimarySourcesVectorStore | null = null;
+
+  afterEach(() => {
+    store?.close();
+    store = null;
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = '';
+  });
+
+  /** Source 'tropy-notes' déjà synchronisée, avec un extrait de son texte. */
+  function openStore(): { store: PrimarySourcesVectorStore; db: Database.Database } {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-tropy-tout-ou-rien-'));
+    store = new PrimarySourcesVectorStore(tmp);
+    store.saveSource({
+      id: 'existing-uuid',
+      tropyId: 305,
+      title: TITLE,
+      tags: ['ancien'],
+      photos: [{ id: 1, path: PHOTO, filename: 'x.pdf', hasTranscription: false, notes: [] }],
+      transcription: `${TITLE}\n\n${LONG_NOTE}`,
+      transcriptionSource: 'tropy-notes',
+      notesText: LONG_NOTE,
+      lastModified: new Date(ITEM_MODIFIED),
+      metadata: {},
+    });
+    store.saveChunk(
+      {
+        id: 'chunk-ancien',
+        sourceId: 'existing-uuid',
+        content: LONG_NOTE,
+        chunkIndex: 0,
+        startPosition: 0,
+        endPosition: LONG_NOTE.length,
+      },
+      Float32Array.from(new Array(768).fill(0.01))
+    );
+    const db = (store as unknown as { db: Database.Database }).db;
+    return { store, db };
+  }
+
+  function expectUntouched(s: PrimarySourcesVectorStore): void {
+    const source = s.getSource('existing-uuid');
+    expect(source?.transcription).toBe(`${TITLE}\n\n${LONG_NOTE}`);
+    expect(source?.notesText).toBe(LONG_NOTE);
+    expect(source?.lastModified).toBe(ITEM_MODIFIED);
+    expect(s.getSourceTags('existing-uuid')).toEqual(['ancien']);
+    expect(s.getChunks('existing-uuid').map((c) => c.id)).toEqual(['chunk-ancien']);
+  }
+
+  it('saveSource lève alors que la transcription a changé : rien d’écrit, la passe suivante voit encore le changement', async () => {
+    const { store: s, db } = openStore();
+    const deleteChunks = vi.spyOn(s, 'deleteChunks');
+    db.exec(`
+      CREATE TRIGGER refuse_tags BEFORE INSERT ON tropy_tags
+      BEGIN SELECT RAISE(ABORT, 'écriture des tags refusée'); END;
+    `);
+    const h = harness({ store: s, item: MERGED, notes: NEW_NOTE });
+
+    await expect(h.run({ performOCR: false })).rejects.toThrow(/tags refusée/);
+    expect(deleteChunks).not.toHaveBeenCalled();
+    expectUntouched(s);
+
+    // L'erreur passée, la même synchro doit retrouver le travail à faire. La
+    // ligne à moitié écrite le cachait : même texte, même date, rien à faire,
+    // et le RAG répondait pour de bon sur les extraits d'avant.
+    db.exec('DROP TRIGGER refuse_tags');
+    const result = await h.run({ performOCR: false });
+
+    expect(result.isUpdated).toBe(true);
+    expect(deleteChunks).toHaveBeenCalledWith('existing-uuid');
+    expect(s.getChunks('existing-uuid')).toEqual([]);
+    expect(s.getSource('existing-uuid')?.transcription).toBe(`${TITLE}\n\n${NEW_NOTE}`);
+    expect(s.getSourceTags('existing-uuid')).toEqual(['fusion']);
+  });
+
+  it('l’invalidation des extraits échoue : la nouvelle ligne n’est pas gardée sans elle', async () => {
+    const { store: s, db } = openStore();
+    db.exec(`
+      CREATE TRIGGER refuse_suppression BEFORE DELETE ON tropy_chunks
+      BEGIN SELECT RAISE(ABORT, 'suppression des extraits refusée'); END;
+    `);
+    const h = harness({ store: s, item: MERGED, notes: NEW_NOTE });
+
+    await expect(h.run({ performOCR: false })).rejects.toThrow(/extraits refusée/);
+    expectUntouched(s);
+
+    db.exec('DROP TRIGGER refuse_suppression');
+    await h.run({ performOCR: false });
+
+    expect(s.getChunks('existing-uuid')).toEqual([]);
+    expect(s.getSource('existing-uuid')?.transcription).toBe(`${TITLE}\n\n${NEW_NOTE}`);
   });
 });
