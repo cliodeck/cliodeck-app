@@ -199,7 +199,7 @@ beforeEach(async () => {
   embedCalls.texts = 0;
   ocrSpy = vi
     .spyOn(TropyOCRPipeline.prototype, 'performBatchOCR')
-    .mockResolvedValue({ text: OCR_TEXT, confidence: 91, language: 'fra' });
+    .mockResolvedValue({ text: OCR_TEXT, confidence: 91, language: 'fra', pageCount: 1 });
 
   await tropyService.init(projectDir);
 });

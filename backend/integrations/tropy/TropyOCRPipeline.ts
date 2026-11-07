@@ -12,8 +12,14 @@ export interface OCROptions {
 
 export interface OCRResult {
   text: string;
-  confidence: number; // 0-100
+  confidence: number; // 0-100, pondérée par la longueur du texte de chaque page
   language: string;
+  /**
+   * Pages passées à la reconnaissance : une par image, une par page de PDF
+   * reconnue. Tropy crée une photo par page d'un PDF, toutes sur le même
+   * fichier : compter les fichiers annonçait 1 page pour un registre de 120.
+   */
+  pageCount: number;
   /** Un outil manquait pour une partie des fichiers (les PDF, sans Poppler) : le texte est partiel. */
   missingTool?: 'poppler';
 }
@@ -69,6 +75,23 @@ export class OcrEngineStoppedError extends Error {
   }
 }
 
+/**
+ * Confiance d'un ensemble de pages, pondérée par la longueur de leur texte.
+ * Tesseract rend 0 pour une page blanche : comptée comme une autre, elle
+ * tirait la moyenne vers le bas, et trois versos blancs faisaient jeter, sous
+ * le seuil de la synchronisation, l'OCR d'un recto bien lu (S08-2-1). Sans
+ * aucun texte, 0 : rien n'a été lu.
+ */
+function weightedConfidence(results: ReadonlyArray<{ text: string; confidence: number }>): number {
+  let weight = 0;
+  let sum = 0;
+  for (const { text, confidence } of results) {
+    weight += text.length;
+    sum += confidence * text.length;
+  }
+  return weight > 0 ? sum / weight : 0;
+}
+
 /** Le dossier courant, ou rien s'il a disparu (un terminal dans un dossier supprimé). */
 function currentDirectory(): string | null {
   try {
@@ -89,6 +112,8 @@ function currentDirectory(): string | null {
 export class TropyOCRPipeline {
   private tesseractWorker: TesseractWorker | null = null;
   private isInitialized: boolean = false;
+  /** La langue du moteur en marche : `recognize` n'en prend pas, elle se fixe au démarrage. */
+  private engineLanguage: string | null = null;
   private pdfConverter: PDFConverter | null = null;
   private readonly cachePath: string | undefined;
   private readonly initTimeoutMs: number;
@@ -107,11 +132,24 @@ export class TropyOCRPipeline {
   }
 
   /**
-   * Initialise le worker Tesseract.js
+   * Initialise le worker Tesseract.js dans cette langue. Un moteur qui tourne
+   * dans une autre est arrêté, et un neuf démarre.
    * @param language Langue pour l'OCR (default: 'fra')
    */
   async initialize(language: string = 'fra'): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+      if (this.engineLanguage === language) return;
+      // Le moteur gardait la langue du premier appel : un fonds allemand
+      // relancé en « Allemand » repassait au modèle français (S08-1-5).
+      // Un moteur neuf plutôt que `reinitialize` : tesseract.js 7 y tient la
+      // langue pour chargée avant de l'avoir chargée, et son second essai d'un
+      // modèle introuvable arrête le moteur en marche puis lève dans son
+      // gestionnaire de messages, hors de toute promesse — mesuré, de quoi
+      // faire tomber le processus. Il n'a, de plus, ni délai ni erreur typée.
+      // Un démarrage coûte quelques dizaines de millisecondes, modèle en
+      // cache, une fois par changement de langue.
+      await this.dispose();
+    }
 
     const Tesseract = await import('tesseract.js');
     this.prepareCache();
@@ -151,6 +189,7 @@ export class TropyOCRPipeline {
     });
 
     this.isInitialized = true;
+    this.engineLanguage = language;
     console.log(`🔤 OCR initialized with language: ${language}`);
   }
 
@@ -191,15 +230,10 @@ export class TropyOCRPipeline {
   }
 
   /**
-   * Change la langue du worker Tesseract
+   * Change la langue du worker Tesseract : un moteur neuf (voir `initialize`).
    */
   async setLanguage(language: string): Promise<void> {
-    if (!this.tesseractWorker) {
-      await this.initialize(language);
-      return;
-    }
-
-    await this.tesseractWorker.reinitialize(language);
+    await this.initialize(language);
   }
 
   /**
@@ -238,10 +272,8 @@ export class TropyOCRPipeline {
       return this.performPDFOCR(filePath, options);
     }
 
-    // Initialiser Tesseract si nécessaire
-    if (!this.isInitialized) {
-      await this.initialize(language);
-    }
+    // Le moteur, dans la langue demandée
+    await this.initialize(language);
 
     try {
       console.log(`🔍 Performing OCR on: ${path.basename(filePath)}`);
@@ -252,6 +284,7 @@ export class TropyOCRPipeline {
         text: result.data.text.trim(),
         confidence: result.data.confidence,
         language,
+        pageCount: 1,
       };
     } catch (error) {
       if (error instanceof OcrEngineStoppedError) throw error;
@@ -265,18 +298,16 @@ export class TropyOCRPipeline {
    * Convertit chaque page en image puis applique l'OCR
    * @param pdfPath Chemin vers le PDF
    * @param options Options OCR
-   * @returns Texte combiné de toutes les pages avec confiance moyenne
+   * @returns Texte combiné des pages, confiance pondérée et pages reconnues
    */
   async performPDFOCR(pdfPath: string, options?: OCROptions): Promise<OCRResult> {
     const language = options?.language || 'fra';
 
     console.log(`📄 Performing OCR on PDF: ${path.basename(pdfPath)}`);
 
-    // Le moteur avant la conversion : un moteur qui ne démarre pas ne coûte
-    // pas une conversion à 300 dpi par PDF (S08-1-13).
-    if (!this.isInitialized) {
-      await this.initialize(language);
-    }
+    // Le moteur avant la conversion, dans la langue demandée : un moteur qui
+    // ne démarre pas ne coûte pas une conversion à 300 dpi par PDF (S08-1-13).
+    await this.initialize(language);
 
     // Initialiser le convertisseur PDF
     const pdfConverter = await this.getPDFConverter();
@@ -295,18 +326,19 @@ export class TropyOCRPipeline {
 
     console.log(`📄 PDF converted: ${tempResult.pageCount} pages`);
 
-    // Effectuer l'OCR sur chaque page
-    const results: OCRResult[] = [];
+    // Effectuer l'OCR sur chaque page. Le numéro voyage avec le texte : une
+    // page en échec, sautée, décalait d'un cran toutes les suivantes (S08-1-12).
+    const pages: Array<{ page: number; text: string; confidence: number }> = [];
     try {
       for (let i = 0; i < tempResult.files.length; i++) {
         const pageFile = tempResult.files[i];
         try {
           console.log(`  📃 OCR page ${i + 1}/${tempResult.files.length}`);
           const result = await this.recognize(pageFile);
-          results.push({
+          pages.push({
+            page: i + 1,
             text: result.data.text.trim(),
             confidence: result.data.confidence,
-            language,
           });
         } catch (error) {
           if (error instanceof OcrEngineStoppedError) throw error;
@@ -318,24 +350,22 @@ export class TropyOCRPipeline {
       pdfConverter.cleanupTempFiles(tempResult.tempDir);
     }
 
-    if (results.length === 0) {
-      return {
-        text: '',
-        confidence: 0,
-        language,
-      };
-    }
+    // Combiner les textes des pages. Une page blanche n'a rien à citer : sans
+    // en-tête, elle ne laisse pas un « --- Page 1 --- » seul passer pour une
+    // transcription.
+    const combinedText = pages
+      .filter((p) => p.text)
+      .map((p) => `--- Page ${p.page} ---\n\n${p.text}`)
+      .join('\n\n');
+    const confidence = weightedConfidence(pages);
 
-    // Combiner les textes des pages
-    const combinedText = results.map((r, i) => `--- Page ${i + 1} ---\n\n${r.text}`).join('\n\n');
-    const avgConfidence = results.reduce((sum, r) => sum + r.confidence, 0) / results.length;
-
-    console.log(`📄 PDF OCR completed: ${results.length} pages, avg confidence: ${avgConfidence.toFixed(1)}%`);
+    console.log(`📄 PDF OCR completed: ${pages.length} pages, confidence: ${confidence.toFixed(1)}%`);
 
     return {
       text: combinedText,
-      confidence: avgConfidence,
+      confidence,
       language,
+      pageCount: pages.length,
     };
   }
 
@@ -343,7 +373,7 @@ export class TropyOCRPipeline {
    * Effectue l'OCR sur plusieurs fichiers (images ou PDF) et concatène les résultats
    * @param filePaths Liste des chemins de fichiers (images ou PDF)
    * @param options Options OCR
-   * @returns Texte combiné avec confiance moyenne
+   * @returns Texte combiné, confiance pondérée et pages reconnues
    */
   async performBatchOCR(
     filePaths: string[],
@@ -381,18 +411,22 @@ export class TropyOCRPipeline {
         text: '',
         confidence: 0,
         language: options?.language || 'fra',
+        pageCount: 0,
       };
     }
 
-    // Combiner les textes
-    const combinedText = results.map((r) => r.text).join('\n\n---\n\n');
-    const avgConfidence =
-      results.reduce((sum, r) => sum + r.confidence, 0) / results.length;
+    // Combiner les textes ; un fichier blanc n'ajouterait qu'un séparateur.
+    const combinedText = results
+      .filter((r) => r.text)
+      .map((r) => r.text)
+      .join('\n\n---\n\n');
 
     return {
       text: combinedText,
-      confidence: avgConfidence,
+      confidence: weightedConfidence(results),
       language: results[0].language,
+      // Un PDF illisible, sauté, ou sans Poppler ne compte pas : il n'a pas été reconnu.
+      pageCount: results.reduce((sum, r) => sum + r.pageCount, 0),
       ...(popplerMissing ? { missingTool: 'poppler' as const } : {}),
     };
   }
@@ -460,6 +494,7 @@ export class TropyOCRPipeline {
         const worker = this.tesseractWorker;
         this.tesseractWorker = null;
         this.isInitialized = false;
+        this.engineLanguage = null;
         await worker.terminate();
         console.log('🔤 OCR worker terminated');
       }

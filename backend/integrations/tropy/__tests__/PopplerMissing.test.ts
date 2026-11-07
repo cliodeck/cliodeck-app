@@ -66,7 +66,7 @@ describe('boucle d’OCR', () => {
       .spyOn(pipeline as unknown as { performOCR(p: string): Promise<unknown> }, 'performOCR')
       .mockImplementation(async (filePath: string) => {
         if (filePath.endsWith('.pdf')) throw new PopplerNotFoundError();
-        return { text: `Texte de ${filePath.split('/').pop()}`, confidence: 80, language: 'fra' };
+        return { text: `Texte de ${filePath.split('/').pop()}`, confidence: 80, language: 'fra', pageCount: 1 };
       });
     const images = Array.from({ length: 12 }, (_, i) => `/archives/dossier-x/vue-${i + 1}.jpg`);
 
@@ -87,7 +87,7 @@ describe('boucle d’OCR', () => {
     vi.spyOn(pipeline as unknown as { performOCR(p: string): Promise<unknown> }, 'performOCR').mockImplementation(
       async (filePath: string) => {
         if (filePath.endsWith('cassé.pdf')) throw new Error('page illisible');
-        return { text: 'Texte de la source', confidence: 80, language: 'fra' };
+        return { text: 'Texte de la source', confidence: 80, language: 'fra', pageCount: 1 };
       },
     );
 

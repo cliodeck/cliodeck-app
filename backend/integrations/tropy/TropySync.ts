@@ -463,7 +463,7 @@ export class TropySync {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
         ocrConfidence = ocrResult.confidence;
-        ocrCount = ocrResult.photoCount;
+        ocrCount = ocrResult.pageCount;
         ocrPending = ocrResult.missingTool ?? null;
       }
     }
@@ -671,7 +671,7 @@ export class TropySync {
     language: string
   ): Promise<{
     /** `missingTool` : le texte ne porte que les images, les PDF attendent Poppler. */
-    result: { text: string; photoCount: number; confidence: number; missingTool?: 'poppler' } | null;
+    result: { text: string; pageCount: number; confidence: number; missingTool?: 'poppler' } | null;
     blocked?: OcrBlocked;
   }> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
@@ -694,11 +694,10 @@ export class TropySync {
         return {
           result: {
             text: result.text,
-            // Sans Poppler, les PDF n'ont pas été reconnus : ils ne se
-            // comptent pas, et se compteront à leur reprise.
-            photoCount: result.missingTool
-              ? photoPaths.filter((p) => !this.ocrPipeline.isPDF(p)).length
-              : photoPaths.length,
+            // Les pages reconnues, pas les fichiers : un PDF en compte autant
+            // que de pages lues. Sans Poppler, ou illisible, il ne compte pas
+            // (il se comptera à sa reprise).
+            pageCount: result.pageCount,
             confidence: result.confidence,
             ...(result.missingTool ? { missingTool: result.missingTool } : {}),
           },

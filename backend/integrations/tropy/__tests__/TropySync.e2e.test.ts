@@ -31,7 +31,7 @@ import {
 } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
 import { OcrEngineUnavailableError, TropyOCRPipeline } from '../TropyOCRPipeline';
-import { PopplerNotFoundError } from '../PDFConverter';
+import { PDFConverter, PopplerNotFoundError } from '../PDFConverter';
 
 // Un userData par test, sous la racine temporaire : le dossier des modèles de
 // Tesseract y est créé quand le vrai pipeline tourne.
@@ -44,14 +44,16 @@ vi.mock('electron', () => ({
 
 // Le moteur, pour les rares tests qui laissent tourner le vrai pipeline :
 // aucun modèle téléchargé, aucun réseau. Comme tesseract.js 7, `terminate` ne
-// règle pas une reconnaissance en cours.
+// règle pas une reconnaissance en cours. `recognize` reçoit la langue du
+// moteur qui reconnaît, celle de sa création.
 const tess = vi.hoisted(() => ({
-  recognize: (_file: string): Promise<{ data: { text: string; confidence: number } }> => new Promise(() => undefined),
+  recognize: (_file: string, _language: string): Promise<{ data: { text: string; confidence: number } }> =>
+    new Promise(() => undefined),
   terminated: 0,
 }));
 vi.mock('tesseract.js', () => ({
-  createWorker: async () => ({
-    recognize: (file: string) => tess.recognize(file),
+  createWorker: async (language: string) => ({
+    recognize: (file: string) => tess.recognize(file, language),
     terminate: async () => {
       tess.terminated++;
     },
@@ -160,6 +162,22 @@ function spec(overrides: Partial<TpySpec> = {}): TpySpec {
 
 const syncOptions = { performOCR: true, ocrLanguage: 'fra', forceReindex: false };
 
+/**
+ * La conversion par Poppler remplacée : `count` pages PNG factices, dans un
+ * dossier sous la racine du test. Le nettoyage du pipeline reste le vrai.
+ */
+function convertPdfTo(count: number) {
+  return vi.spyOn(PDFConverter.prototype, 'convertToTempFiles').mockImplementation(async () => {
+    const tempDir = fs.mkdtempSync(path.join(root, 'pages-'));
+    const files = Array.from({ length: count }, (_, i) => {
+      const file = path.join(tempDir, `page-${i + 1}.png`);
+      fs.writeFileSync(file, 'png factice');
+      return file;
+    });
+    return { tempDir, files, pageCount: count };
+  });
+}
+
 /** La reconnaissance a-t-elle reçu cette photo, seule ou avec d'autres ? */
 function ocrReached(photo: string): boolean {
   return ocrSpy.mock.calls.some((call: unknown[]) => (call[0] as string[]).includes(photo));
@@ -203,6 +221,9 @@ beforeEach(async () => {
   fs.mkdirSync(tropyDir, { recursive: true });
   electronPaths.userData = path.join(root, 'userData');
   tess.terminated = 0;
+  // Le moteur qui ne répond pas, sauf pour le test qui le dit : un test ne
+  // reconnaît pas avec la doublure du précédent.
+  tess.recognize = () => new Promise(() => undefined);
   // `performOCROnItem` écarte les photos absentes du disque : il faut de vrais fichiers.
   photoPath = path.join(tropyDir, 'rapport.jpg');
   fs.writeFileSync(photoPath, 'jpeg factice');
@@ -213,7 +234,7 @@ beforeEach(async () => {
   embedCalls.texts = 0;
   ocrSpy = vi
     .spyOn(TropyOCRPipeline.prototype, 'performBatchOCR')
-    .mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra' });
+    .mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra', pageCount: 1 });
 
   await tropyService.init(projectDir);
 });
@@ -413,7 +434,7 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     await tropyService.sync(syncOptions);
     const before = snapshot();
 
-    ocrSpy.mockResolvedValue({ text: '', confidence: 0, language: 'fra' });
+    ocrSpy.mockResolvedValue({ text: '', confidence: 0, language: 'fra', pageCount: 1 });
     const result = await tropyService.sync({ ...syncOptions, forceReindex: true });
     expect(result.success).toBe(true);
     // Ciblé sur la photo de l'item 10 : sous forceReindex, Q26 (L06-2) fera
@@ -708,7 +729,7 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
   });
 
   it('Poppler absent pour le PDF d’un item mixte : l’OCR de ses images est gardé, et le bilan le dit (L06-10, S08-1-14)', async () => {
-    ocrSpy.mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra', missingTool: 'poppler' });
+    ocrSpy.mockResolvedValue({ text: OCR_TEXT, confidence: 88.5, language: 'fra', pageCount: 1, missingTool: 'poppler' });
     const tpy = makeTpy(tropyDir, spec());
     await tropyService.openProject(tpy);
 
@@ -742,9 +763,9 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
         if (file.endsWith('.pdf')) {
           if (!poppler) throw new PopplerNotFoundError();
           if (pdfBroken) throw new Error('Failed to convert PDF: Syntax Error');
-          return { text: PDF_TEXT, confidence: 90, language: 'fra' };
+          return { text: PDF_TEXT, confidence: 90, language: 'fra', pageCount: 1 };
         }
-        return { text: IMAGE_TEXT, confidence: 90, language: 'fra' };
+        return { text: IMAGE_TEXT, confidence: 90, language: 'fra', pageCount: 1 };
       });
     });
 
@@ -867,6 +888,18 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
       expect(second.ocrPerformed).toBe(2);
     });
 
+    // L06-11 (S08-2-8) : le bilan comptait les fichiers de l'item, PDF sauté
+    // compris (« 4 page(s) » pour 3, mesuré par L06-10).
+    it('Poppler présent, PDF illisible : il ne compte pas parmi les pages passées à la reconnaissance (L06-11)', async () => {
+      pdfBroken = true;
+      await openMixedItem();
+
+      const result = await tropyService.sync(syncOptions);
+
+      expect(result.transcriptionsWritten).toBe(1);
+      expect(result.ocrPerformed).toBe(1);
+    });
+
     // Une source à reprendre l'est à chaque passe OCR. Tant que Poppler manque,
     // chaque reprise referait l'OCR de ses images pour le même texte partiel :
     // une fois la passe sûre que Poppler manque, elle n'y revient plus.
@@ -972,6 +1005,84 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(result.issues).toEqual([{ code: 'ocr-language-unavailable', language: 'frk' }]);
     expect(result.errors).toEqual([]);
     expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([10, 20, 30]);
+  });
+
+  // L06-11 (S08-1-5) : le moteur de la synchro gardait la langue de la
+  // première passe. Relancer en « Allemand » un fonds pris pour français
+  // refaisait des heures d'OCR avec le modèle français, étiqueté 'deu'.
+  it('relancer l’OCR en allemand après une passe en français : reconnu par le modèle allemand (L06-11, S08-1-5)', async () => {
+    ocrSpy.mockRestore();
+    tess.recognize = async (_file, language) => ({ data: { text: `[${language}] ${OCR_TEXT}`, confidence: 88 } });
+    await tropyService.openProject(makeTpy(tropyDir, spec()));
+
+    await tropyService.sync(syncOptions);
+    expect(snapshot().sources[0].transcription).toBe(`[fra] ${OCR_TEXT}`);
+
+    await tropyService.sync({ ...syncOptions, ocrLanguage: 'deu', forceReindex: true });
+
+    const after = snapshot();
+    expect(after.sources[0].transcription).toBe(`[deu] ${OCR_TEXT}`);
+    expect(after.chunks.some((c) => c.content.includes('[fra]'))).toBe(false);
+  });
+
+  // L06-11 (S08-2-1) : une lettre photographiée en quatre vues, recto écrit,
+  // verso et enveloppe blancs. La moyenne simple des confiances (75/4) tombait
+  // sous le seuil de la synchro : l'OCR du recto était jeté, à chaque passe.
+  it('une lettre et trois vues blanches : le texte du recto est gardé, avec sa confiance (L06-11, S08-2-1)', async () => {
+    ocrSpy.mockRestore();
+    const views = ['recto', 'verso', 'enveloppe-recto', 'enveloppe-verso'].map((name) => {
+      const file = path.join(tropyDir, `${name}.jpg`);
+      fs.writeFileSync(file, 'jpeg factice');
+      return file;
+    });
+    tess.recognize = async (file) =>
+      file === views[0] ? { data: { text: OCR_TEXT, confidence: 75 } } : { data: { text: '', confidence: 0 } };
+    const item = { id: 40, title: 'Lettre du maire', photos: views.map((p) => ({ path: p })) };
+    await tropyService.openProject(makeTpy(tropyDir, spec({ items: [item] })));
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(snapshot().sources[0]).toMatchObject({ transcription: OCR_TEXT, ocr_confidence: 75 });
+    expect(result.transcriptionsWritten).toBe(1);
+    expect(result.ocrPerformed).toBe(4);
+  });
+
+  // Rien à moyenner : ni NaN en base, ni en-tête « --- Page 1 --- » seul, que
+  // l'OCR manuel de la carte écrivait comme une transcription.
+  it('un PDF d’une seule page blanche : ni transcription ni confiance, par la synchro comme par l’OCR manuel (L06-11, S08-2-1)', async () => {
+    ocrSpy.mockRestore();
+    const pdf = path.join(tropyDir, 'feuillet.pdf');
+    fs.writeFileSync(pdf, '%PDF factice');
+    convertPdfTo(1);
+    tess.recognize = async () => ({ data: { text: '', confidence: 0 } });
+    const item = { id: 50, title: 'Feuillet blanc', photos: [{ path: pdf }] };
+    await tropyService.openProject(makeTpy(tropyDir, spec({ items: [item] })));
+
+    const result = await tropyService.sync(syncOptions);
+    const manual = await tropyService.performBatchOCR([pdf], 'fra');
+
+    expect(snapshot().sources[0]).toMatchObject({ transcription: null, ocr_confidence: null });
+    expect(result.transcriptionsWritten).toBe(0);
+    // Le store n'écrit qu'un texte non vide.
+    expect(manual).toEqual({ success: true, text: '', confidence: 0 });
+  });
+
+  // L06-11 (S08-2-8) : Tropy crée une photo par page de PDF, toutes sur le
+  // même fichier. « N page(s) passée(s) à la reconnaissance » comptait les
+  // fichiers : 1 pour un registre de 120 pages.
+  it('un registre PDF de 120 pages : 120 pages au bilan (L06-11, S08-2-8)', async () => {
+    ocrSpy.mockRestore();
+    const pdf = path.join(tropyDir, 'registre.pdf');
+    fs.writeFileSync(pdf, '%PDF factice');
+    convertPdfTo(120);
+    tess.recognize = async (file) => ({ data: { text: `${path.basename(file)} : ${OCR_TEXT}`, confidence: 88 } });
+    const photos = Array.from({ length: 120 }, (_, page) => ({ path: pdf, page }));
+    await tropyService.openProject(makeTpy(tropyDir, spec({ items: [{ id: 60, title: 'Registre des délibérations', photos }] })));
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.transcriptionsWritten).toBe(1);
+    expect(result.ocrPerformed).toBe(120);
   });
 
   // L06-10 (S08-1-16) : le moteur de la synchro n'était jamais libéré au

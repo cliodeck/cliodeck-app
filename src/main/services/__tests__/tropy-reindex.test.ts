@@ -511,7 +511,7 @@ describe.skipIf(!sqliteAvailable)('écriture pendant la reconnaissance : l’OCR
         await gate;
       }
       // Tesseract, mêmes images, même langue : le même texte à chaque passe.
-      return { text: OCR_TEXT, confidence: 82, language: 'fra' };
+      return { text: OCR_TEXT, confidence: 82, language: 'fra', pageCount: 1 };
     });
     return { reached, open };
   }
