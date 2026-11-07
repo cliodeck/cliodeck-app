@@ -89,3 +89,19 @@
   font-size: 0.78rem;
   font-weight: 500;
 }
+
+.ocr-report-notice {
+  margin-top: 0.4rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  color: var(--text-secondary);
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.ocr-report-notice svg {
+  flex-shrink: 0;
+}
