@@ -962,6 +962,8 @@ class TropyService {
     archive?: string;
     collection?: string;
     transcription?: string;
+    transcriptionSource?: string;
+    notesText?: string;
   }): Promise<number> {
     let created = 0;
 
@@ -973,6 +975,11 @@ class TropyService {
       if (source.collection) fullText += `Collection: ${source.collection}\n`;
       fullText += '\n';
       if (source.transcription) fullText += source.transcription;
+      // Les notes Tropy viennent après le corps, qu'elles ne remplacent plus.
+      // Une source 'tropy-notes' les a déjà pour transcription.
+      if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
+        fullText += `\n\n${source.notesText}`;
+      }
 
       // Get raw chunks from DocumentChunker for optimization
       const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });

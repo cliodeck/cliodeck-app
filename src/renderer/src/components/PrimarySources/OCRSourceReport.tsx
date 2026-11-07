@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScanSearch, FileText, BarChart3 } from 'lucide-react';
+import { ScanSearch, FileText, BarChart3, Info } from 'lucide-react';
+import {
+  NOTE_TRANSCRIPTION_MIN_CHARS,
+  isNoteTranscription,
+} from '../../../../../backend/integrations/tropy/note-transcription';
 import './OCRSourceReport.css';
 
 interface SourceOCRReport {
@@ -13,6 +17,7 @@ interface SourceOCRReport {
   minQualityScore: number | null;
   maxQualityScore: number | null;
   transcriptionLength: number;
+  notesLength: number;
 }
 
 interface OCRSourceReportProps {
@@ -61,12 +66,24 @@ export const OCRSourceReport: React.FC<OCRSourceReportProps> = ({ sourceId }) =>
   const hasOCR = report.ocrConfidence !== null;
   const hasQuality = report.avgQualityScore !== null;
 
+  // Décision Q26 : des notes longues tiennent lieu de transcription et
+  // l'OCR ne passe pas sans demande. L'historien doit savoir pourquoi.
+  const notesHoldOCR =
+    report.transcriptionSource === 'tropy-notes' && isNoteTranscription(report.notesLength);
+  const notesNotice = notesHoldOCR && (
+    <div className="ocr-report-notice">
+      <Info size={12} strokeWidth={1.5} />
+      <span>{t('primarySources.notesHoldOCR', { min: NOTE_TRANSCRIPTION_MIN_CHARS })}</span>
+    </div>
+  );
+
   if (!hasOCR && !hasQuality && report.chunkCount === 0) {
     return (
       <div className="ocr-source-report empty">
         <span className="ocr-report-empty-text">
           {t('primarySources.noOCRData')}
         </span>
+        {notesNotice}
       </div>
     );
   }
@@ -132,6 +149,7 @@ export const OCRSourceReport: React.FC<OCRSourceReportProps> = ({ sourceId }) =>
           </span>
         </div>
       )}
+      {notesNotice}
     </div>
   );
 };

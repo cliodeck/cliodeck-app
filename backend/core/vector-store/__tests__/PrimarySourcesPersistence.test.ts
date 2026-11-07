@@ -80,6 +80,21 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — sources', () =>
     // Une seule ligne, pas deux.
     expect(store.getAllSources()).toHaveLength(1);
   });
+
+  it('distingue « pas de note » de « notes pas encore lues » (notes_text, L06-2)', () => {
+    // '' : la synchro a lu l'item, il n'a pas de note. NULL : ligne d'avant la
+    // colonne, que la synchro initialise sans réembarquer. Les confondre
+    // ferait soit tout réembarquer, soit ne jamais embarquer une note ajoutée.
+    store.saveSource(source({ notesText: '' }));
+    expect(store.getSource('src-1')?.notesText).toBe('');
+
+    store.saveSource(source({ notesText: 'Voir aussi carton 12' }));
+    expect(store.getSource('src-1')?.notesText).toBe('Voir aussi carton 12');
+    expect(store.getSource('src-1')?.transcription).toBe('PROCES-VERBAL');
+
+    store.saveSource(source({ id: 'src-2', tropyId: 306 }));
+    expect(store.getSource('src-2')?.notesText).toBeUndefined();
+  });
 });
 
 describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — projet Tropy lié', () => {

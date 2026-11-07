@@ -77,6 +77,11 @@ export interface PrimarySourceItem {
   transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
   /** Tesseract OCR confidence 0-100, if OCR was performed. */
   ocrConfidence?: number;
+  /**
+   * Texte des notes Tropy de l'item (item, photos, sélections), gardé à côté
+   * de la transcription : une note ne la remplace jamais. '' = pas de note.
+   */
+  notesText?: string;
   lastModified: Date;
   metadata: Record<string, string>;
   /** Structured archival metadata (cote, fonds, repository, producer, …). */

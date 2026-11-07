@@ -36,6 +36,12 @@ export interface PrimarySourceDocument {
   transcriptionSource?: 'tesseract' | 'transkribus' | 'manual' | 'tropy-notes';
   /** Tesseract OCR confidence 0-100, if OCR was performed. */
   ocrConfidence?: number;
+  /**
+   * Notes Tropy de l'item, à côté de la transcription. `undefined` : ligne
+   * écrite avant la colonne `notes_text` (la synchro l'initialise sans
+   * réembarquer) ; '' : pas de note.
+   */
+  notesText?: string;
   language?: string;
   lastModified: string;
   indexedAt: string;
@@ -422,6 +428,21 @@ export class PrimarySourcesVectorStore {
       console.warn('⚠️ ocr_confidence migration check failed:', err);
     }
 
+    // Soft migration: add notes_text column (une note Tropy ne remplace plus
+    // la transcription, elle est gardée à côté). NULL sur les lignes
+    // existantes : la synchro suivante l'initialise sans réembarquer.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'notes_text')) {
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN notes_text TEXT');
+        console.log('🗄️ Migrated tropy_sources: added notes_text column');
+      }
+    } catch (err) {
+      console.warn('⚠️ notes_text migration check failed:', err);
+    }
+
     // Table des photos associées aux sources
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tropy_photos (
@@ -584,8 +605,9 @@ export class PrimarySourcesVectorStore {
     const stmt = this.db.prepare(`
       INSERT INTO tropy_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
-       transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence,
+       notes_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         tropy_id = excluded.tropy_id,
         title = excluded.title,
@@ -601,7 +623,8 @@ export class PrimarySourcesVectorStore {
         indexed_at = excluded.indexed_at,
         metadata = excluded.metadata,
         archival_metadata = excluded.archival_metadata,
-        ocr_confidence = excluded.ocr_confidence
+        ocr_confidence = excluded.ocr_confidence,
+        notes_text = excluded.notes_text
     `);
 
     stmt.run(
@@ -620,7 +643,9 @@ export class PrimarySourcesVectorStore {
       now,
       source.metadata ? JSON.stringify(source.metadata) : null,
       source.archival ? JSON.stringify(source.archival) : null,
-      source.ocrConfidence ?? null
+      source.ocrConfidence ?? null,
+      // '' se garde tel quel : il dit « pas de note », NULL « pas encore lu ».
+      source.notesText ?? null
     );
 
     // Sauvegarder les photos
@@ -1859,6 +1884,7 @@ export class PrimarySourcesVectorStore {
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       archival: row.archival_metadata ? JSON.parse(row.archival_metadata) : undefined,
       ocrConfidence: row.ocr_confidence ?? undefined,
+      notesText: row.notes_text ?? undefined,
     };
   }
 
@@ -1884,6 +1910,7 @@ export class PrimarySourcesVectorStore {
     minQualityScore: number | null;
     maxQualityScore: number | null;
     transcriptionLength: number;
+    notesLength: number;
   } | null {
     const source = this.getSource(sourceId);
     if (!source) return null;
@@ -1907,6 +1934,7 @@ export class PrimarySourcesVectorStore {
       minQualityScore: row.min_quality,
       maxQualityScore: row.max_quality,
       transcriptionLength: source.transcription?.length ?? 0,
+      notesLength: source.notesText?.length ?? 0,
     };
   }
 
