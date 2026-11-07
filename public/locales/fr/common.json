@@ -1360,7 +1360,7 @@
     "transcriptionLength": "Longueur",
     "characters": "caractères",
     "noOCRData": "Aucune donnée OCR disponible pour ce document.",
-    "notesHoldOCR": "Les notes Tropy de cette source (au moins {{min}} caractères) sont traitées comme une transcription : l'OCR n'est donc pas lancé. Pour le lancer quand même, cochez « Relancer l'OCR sur toutes les sources » dans les réglages de l'OCR.",
+    "notesHoldOCR": "Les notes Tropy de cette source (au moins {{min}} caractères en tout) sont traitées comme une transcription : l'OCR n'est lancé que si « Relancer l'OCR sur toutes les sources » est coché dans les réglages de l'OCR. S'il n'en tire aucun texte lisible, les notes restent le texte de la source.",
     "corpusReport": "Rapport corpus",
     "corpusOCRTitle": "Qualité OCR du corpus",
     "sourcesWithOCR": "Sources avec OCR",

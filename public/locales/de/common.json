@@ -1360,7 +1360,7 @@
     "transcriptionLength": "Länge",
     "characters": "Zeichen",
     "noOCRData": "Keine OCR-Daten für dieses Dokument verfügbar.",
-    "notesHoldOCR": "Die Tropy-Notizen dieser Quelle (mindestens {{min}} Zeichen) gelten als Transkription, daher wird keine OCR ausgeführt. Um sie trotzdem auszuführen, aktivieren Sie „OCR für alle Quellen erneut ausführen“ in den OCR-Einstellungen.",
+    "notesHoldOCR": "Die Tropy-Notizen dieser Quelle (insgesamt mindestens {{min}} Zeichen) gelten als Transkription: Die OCR läuft nur, wenn „OCR für alle Quellen erneut ausführen“ in den OCR-Einstellungen aktiviert ist. Liefert sie keinen lesbaren Text, bleiben die Notizen der Text der Quelle.",
     "corpusReport": "Korpus-Bericht",
     "corpusOCRTitle": "OCR-Qualität des Korpus",
     "sourcesWithOCR": "Quellen mit OCR",

@@ -1360,7 +1360,7 @@
     "transcriptionLength": "Length",
     "characters": "characters",
     "noOCRData": "No OCR data available for this document.",
-    "notesHoldOCR": "This source's Tropy notes (at least {{min}} characters) are treated as a transcription, so OCR is not run. To run it anyway, tick “Re-run OCR on every source” in the OCR settings.",
+    "notesHoldOCR": "This source's Tropy notes (at least {{min}} characters in all) are treated as a transcription: OCR only runs when “Re-run OCR on every source” is ticked in the OCR settings. If it yields no readable text, the notes remain the source's text.",
     "corpusReport": "Corpus Report",
     "corpusOCRTitle": "Corpus OCR Quality",
     "sourcesWithOCR": "Sources with OCR",

@@ -133,6 +133,11 @@ function spec(overrides: Partial<TpySpec> = {}): TpySpec {
 
 const syncOptions = { performOCR: true, ocrLanguage: 'fra', forceReindex: false };
 
+/** La reconnaissance a-t-elle reçu cette photo, seule ou avec d'autres ? */
+function ocrReached(photo: string): boolean {
+  return ocrSpy.mock.calls.some((call: unknown[]) => (call[0] as string[]).includes(photo));
+}
+
 function brainDb(): Database.Database {
   return new Database(path.join(projectDir, '.cliodeck', 'brain.db'), { readonly: true });
 }
@@ -488,6 +493,62 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     } finally {
       probe.close();
     }
+  });
+
+  // Q26 : le seuil porte sur l'ensemble des notes de l'item (item, photos,
+  // sélections), pas sur chacune. Une transcription faite à la main dans
+  // Tropy se découpe d'ordinaire en une note par page : prise note à note,
+  // aucune page n'atteindrait le seuil et l'OCR repasserait sur un document
+  // déjà transcrit.
+  it('des notes de page, chacune sous 500 caractères, font ensemble une transcription (L06-2, Q26)', async () => {
+    const half = Math.ceil(NOTE_TEXT.length / 2);
+    const pages = [NOTE_TEXT.slice(0, half), NOTE_TEXT.slice(half)];
+    expect(Math.max(...pages.map((p) => p.trim().length))).toBeLessThan(500);
+    const page2 = path.join(tropyDir, 'rapport-p2.jpg');
+    fs.writeFileSync(page2, 'jpeg factice');
+    const items = baseItems();
+    items[0] = {
+      ...items[0],
+      photos: [
+        { id: 11, path: photoPath, notes: [{ text: pages[0] }] },
+        { id: 12, path: page2, notes: [{ text: pages[1] }] },
+      ],
+    };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    expect(ocrReached(photoPath)).toBe(false);
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tropy-notes');
+    expect(s10?.transcription).toContain('salle Colbert');
+  });
+
+  // Revers assumé de la règle précédente : des annotations courtes de
+  // sélections, chacune un commentaire, comptent aussi ensemble. L'OCR ne
+  // passe alors que sous « Relancer l'OCR » — et la source le dit.
+  it('des annotations courtes qui dépassent ensemble 500 caractères attendent « Relancer l’OCR » (L06-2, Q26)', async () => {
+    const annotations = Array.from({ length: 24 }, (_, i) => ({
+      id: 100 + i,
+      notes: [{ text: `Tampon de la préfecture, pièce ${i + 1}` }],
+    }));
+    const items = baseItems();
+    items[0] = { ...items[0], photos: [{ id: 11, path: photoPath, selections: annotations }] };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    expect(ocrReached(photoPath)).toBe(false);
+    const first = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(first?.transcription_source).toBe('tropy-notes');
+    const report = tropyService.getSourceOCRReport(first!.id);
+    expect(report?.notesLength).toBeGreaterThanOrEqual(500);
+
+    await tropyService.sync({ ...syncOptions, forceReindex: true });
+    expect(ocrSpy).toHaveBeenCalledWith([photoPath], expect.anything());
+    const forced = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(forced?.transcription_source).toBe('tesseract');
+    expect(forced?.transcription).toBe(OCR_TEXT);
   });
 
   // L06-12 (S08-1-10) : la table `transcriptions` de Tropy n'est pas lue, la
