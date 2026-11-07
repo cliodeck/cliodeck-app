@@ -1,7 +1,77 @@
+import path from 'path';
+import { mkdir, readFile } from 'fs/promises';
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibTeXExporter } from '../../../backend/core/bibliography/BibTeXExporter.js';
+import { auditParsedBib, type BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
+import {
+  atomicWriteFile,
+  readUserFile,
+  UnreadableFileError,
+  type UserFileRead,
+} from '../../../backend/core/fs/user-files.js';
+import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import type { Citation } from '../../../backend/types/citation.js';
 import { BibliographyStatsEngine, type BibliographyStatistics } from '../../../backend/services/BibliographyStats.js';
+
+/** Le `.bib` attendu n'est pas là : ce n'est pas une bibliographie vide. */
+export class BibliographyMissingError extends Error {
+  readonly code = 'bib-missing';
+  readonly filePath: string;
+
+  constructor(filePath: string) {
+    super(`${path.basename(filePath)} est introuvable`);
+    this.name = 'BibliographyMissingError';
+    this.filePath = filePath;
+  }
+}
+
+export type BibFileRead =
+  | { kind: 'absent' }
+  | Extract<UserFileRead, { kind: 'unreadable' }>
+  | ({ kind: 'ok'; citations: Citation[] } & BibAudit);
+
+/**
+ * Lit un `.bib` sans confondre absent, illisible et vide, puis contrôle le parse : les entrées du
+ * texte que le parseur n'a pas rendues, et les `@string`. UTF-8 strict : un `.bib` Latin-1 est
+ * illisible, plutôt que relu avec des caractères de remplacement qu'une réécriture rendrait
+ * définitifs.
+ */
+export async function readBibFile(filePath: string): Promise<BibFileRead> {
+  const read = await readUserFile(filePath);
+  if (read.kind !== 'ok') return read;
+  const citations = new BibTeXParser().parse(read.content, path.dirname(path.resolve(filePath)));
+  return { kind: 'ok', citations, ...auditParsedBib(read.content, citations) };
+}
+
+/**
+ * La copie de sécurité du `.bib`, unique : l'état d'avant la dernière réécriture, et pas plus
+ * loin. Hors de `workspaceFiles`, comme `bibliography-metadata.json`.
+ */
+export function bibBackupPath(projectPath: string): string {
+  return path.join(projectPath, '.cliodeck', 'bibliography.bib.bak');
+}
+
+/**
+ * Remplace le `.bib` du projet, tout entier ou pas du tout, après avoir copié la version en place
+ * dans `.cliodeck/bibliography.bib.bak`, à l'octet. Une copie qui échoue arrête tout : le `.bib`
+ * n'est pas touché. Un `.bib` encore absent n'a rien à copier.
+ */
+export async function rewriteProjectBibliography(projectPath: string, bibtexPath: string, content: string): Promise<void> {
+  const previous = await readFile(bibtexPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (previous) {
+    const backup = bibBackupPath(projectPath);
+    // `.cliodeck` lié hors du projet (D18) : la copie partirait dans le dossier d'un autre.
+    if (!(await isInsideAsync(projectPath, backup))) {
+      throw new Error(`Copie de sécurité refusée : ${backup} mène hors du projet`);
+    }
+    await mkdir(path.dirname(backup), { recursive: true });
+    await atomicWriteFile(backup, previous);
+  }
+  await atomicWriteFile(bibtexPath, content);
+}
 
 class BibliographyService {
   private parser: BibTeXParser;
@@ -15,15 +85,17 @@ class BibliographyService {
     this.statsEngine = new BibliographyStatsEngine();
   }
 
-  async loadFromFile(filePath: string): Promise<Citation[]> {
-    try {
-      this.citations = this.parser.parseFile(filePath);
-      console.log(`✅ Bibliography loaded: ${this.citations.length} citations`);
-      return this.citations;
-    } catch (error) {
-      console.error('❌ Failed to load bibliography:', error);
-      throw error;
-    }
+  /**
+   * Absent ou illisible lève, et les citations déjà chargées restent : un fichier manquant n'est
+   * pas une bibliographie vide (S07-1-11). Les entrées que le parseur a laissées sont rendues.
+   */
+  async loadFromFile(filePath: string): Promise<{ citations: Citation[]; unreadKeys: string[] }> {
+    const read = await readBibFile(filePath);
+    if (read.kind === 'absent') throw new BibliographyMissingError(filePath);
+    if (read.kind === 'unreadable') throw new UnreadableFileError(filePath, read.reason, read.message);
+    this.citations = read.citations;
+    console.log(`✅ Bibliography loaded: ${this.citations.length} citations, ${read.unreadKeys.length} non lue(s)`);
+    return { citations: this.citations, unreadKeys: read.unreadKeys };
   }
 
   async parseContent(content: string): Promise<Citation[]> {

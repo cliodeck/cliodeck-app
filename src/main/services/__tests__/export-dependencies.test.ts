@@ -20,7 +20,10 @@ const calls: SpawnCall[] = [];
 /** Ce que fait le processus simulé : trouvé, absent, ou introuvable au lancement. */
 let outcome: 'found' | 'not-found' | 'spawn-error' = 'found';
 
-vi.mock('child_process', () => ({
+// Le reste du module reste réel : `user-files`, que charge le service bibliographique des exports,
+// a besoin d'`execFile` dès son chargement.
+vi.mock('child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('child_process')>()),
   spawn: (command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
     calls.push({ command, args, options });
     const child = new EventEmitter();

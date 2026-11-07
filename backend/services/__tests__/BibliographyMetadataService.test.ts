@@ -178,6 +178,67 @@ describe('BibliographyMetadataService', () => {
 });
 
 /**
+ * Illisible n'est pas absent (S07-1-10). `loadMetadata` rendait `null` sur toute erreur de lecture
+ * ou de JSON : la synchronisation repartait alors sans les rattachements de PDF et réécrivait le
+ * fichier, que l'historien aurait pu réparer.
+ */
+describe('BibliographyMetadataService — métadonnées illisibles', () => {
+  let tmpDir: string;
+  const metadataPath = () => BibliographyMetadataService.getMetadataPath(tmpDir);
+  const RATTACHEMENTS = JSON.stringify({
+    version: 2,
+    lastUpdated: '2026-04-01T00:00:00.000Z',
+    citations: { ABCD1234: { id: 'Lester_1935', zoteroKey: 'ABCD1234', zoteroAttachments: [{ key: 'att', filename: 'a.pdf' }] } },
+  });
+
+  beforeEach(async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-meta-'));
+    await fs.promises.mkdir(path.dirname(metadataPath()), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('témoin : absent, c’est null', async () => {
+    expect(await BibliographyMetadataService.loadMetadata(tmpDir)).toBeNull();
+  });
+
+  it('JSON tronqué : lève, au lieu de passer pour absent', async () => {
+    fs.writeFileSync(metadataPath(), RATTACHEMENTS.slice(0, 60));
+
+    await expect(BibliographyMetadataService.loadMetadata(tmpDir)).rejects.toMatchObject({
+      code: 'metadata-unreadable',
+      filePath: metadataPath(),
+    });
+  });
+
+  it('un JSON qui n’est pas un fichier de métadonnées lève aussi', async () => {
+    fs.writeFileSync(metadataPath(), '[]');
+
+    await expect(BibliographyMetadataService.loadMetadata(tmpDir)).rejects.toMatchObject({ code: 'metadata-unreadable' });
+  });
+
+  it('BOM en tête : lu, pas pris pour un fichier abîmé', async () => {
+    fs.writeFileSync(metadataPath(), `\uFEFF${RATTACHEMENTS}`);
+
+    const loaded = await BibliographyMetadataService.loadMetadata(tmpDir);
+
+    expect(Object.keys(loaded?.citations ?? {})).toEqual(['ABCD1234']);
+  });
+
+  it('une mise à jour partielle ne remplace pas un fichier illisible', async () => {
+    const damaged = RATTACHEMENTS.slice(0, 60);
+    fs.writeFileSync(metadataPath(), damaged);
+
+    await expect(
+      BibliographyMetadataService.updateCitationMetadata(tmpDir, 'ABCD1234', { zoteroTags: [{ tag: 'x', automatic: false }] })
+    ).rejects.toMatchObject({ code: 'metadata-unreadable' });
+    expect(fs.readFileSync(metadataPath(), 'utf8')).toBe(damaged);
+  });
+});
+
+/**
  * D18 : `.cliodeck` lié hors du projet. Une synchronisation Zotero écrivait les pièces jointes du
  * projet dans le dossier d'un autre, et les relisait de là.
  */

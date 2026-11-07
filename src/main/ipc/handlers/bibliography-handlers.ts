@@ -2,10 +2,14 @@
  * Bibliography IPC handlers
  */
 import { ipcMain } from 'electron';
-import { bibliographyService } from '../../services/bibliography-service.js';
+import { BibliographyMissingError, bibliographyService } from '../../services/bibliography-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { OrphanPDFDetector } from '../../../../backend/services/OrphanPDFDetector.js';
-import { BibliographyMetadataService } from '../../../../backend/services/BibliographyMetadataService.js';
+import {
+  BibliographyMetadataService,
+  MetadataUnreadableError,
+  type BibliographyMetadataFile,
+} from '../../../../backend/services/BibliographyMetadataService.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
 import {
   validate,
@@ -56,15 +60,29 @@ async function partitionWritablePaths(filePaths: string[]): Promise<{
   return { allowed, rejected };
 }
 
+/**
+ * Un `.bib` absent ou illisible n'est pas une bibliographie vide : le panneau le dit en bandeau,
+ * au lieu de se montrer vide (S07-1-11).
+ */
+function bibliographyLoadFailure(error: unknown) {
+  if (error instanceof BibliographyMissingError) {
+    return { ...errorResponse(error), citations: [], problem: 'missing' as const };
+  }
+  if (error instanceof UnreadableFileError) {
+    return { ...errorResponse(error), citations: [], problem: 'unreadable' as const, reason: error.reason };
+  }
+  return { ...errorResponse(error), citations: [] };
+}
+
 export function setupBibliographyHandlers() {
   ipcMain.handle('bibliography:load', async (_event, rawFilePath: unknown) => {
     try {
       const filePath = validate(StringPathSchema, rawFilePath);
-      const citations = await bibliographyService.loadFromFile(filePath);
-      return successResponse({ citations });
+      const { citations, unreadKeys } = await bibliographyService.loadFromFile(filePath);
+      return successResponse({ citations, unreadKeys });
     } catch (error: unknown) {
       console.error('❌ bibliography:load error:', error);
-      return { ...errorResponse(error), citations: [] };
+      return bibliographyLoadFailure(error);
     }
   });
 
@@ -240,21 +258,32 @@ export function setupBibliographyHandlers() {
     });
     try {
       // Load citations from BibTeX
-      const citations = await bibliographyService.loadFromFile(options.filePath);
+      const { citations, unreadKeys } = await bibliographyService.loadFromFile(options.filePath);
 
-      // Load and merge metadata
-      const metadata = await BibliographyMetadataService.loadMetadata(options.projectPath);
+      // Des métadonnées illisibles ne cachent pas les références : elles s'affichent sans leurs
+      // PDF Zotero, et le bandeau dit pourquoi. La synchronisation, elle, refuse de les réécrire.
+      let metadata: BibliographyMetadataFile | null = null;
+      let metadataUnreadable = false;
+      try {
+        metadata = await BibliographyMetadataService.loadMetadata(options.projectPath);
+      } catch (error: unknown) {
+        if (!(error instanceof MetadataUnreadableError)) throw error;
+        console.warn('⚠️ Métadonnées bibliographiques illisibles :', error.message);
+        metadataUnreadable = true;
+      }
       const mergedCitations = BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata);
 
       console.log('📤 IPC Response: bibliography:load-with-metadata', {
         totalCitations: mergedCitations.length,
-        withMetadata: metadata ? Object.keys(metadata.citations).length : 0
+        withMetadata: metadata ? Object.keys(metadata.citations).length : 0,
+        unread: unreadKeys.length,
+        metadataUnreadable,
       });
 
-      return successResponse({ citations: mergedCitations });
+      return successResponse({ citations: mergedCitations, unreadKeys, metadataUnreadable });
     } catch (error: unknown) {
       console.error('❌ bibliography:load-with-metadata error:', error);
-      return { ...errorResponse(error), citations: [] };
+      return bibliographyLoadFailure(error);
     }
   });
 

@@ -1,6 +1,6 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, rm } from 'fs/promises';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import type { ZoteroItem } from '../../../backend/integrations/zotero/ZoteroAPI.js';
 import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalDB.js';
@@ -18,8 +18,12 @@ import {
   type SyncReport,
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
 import { parseUserJson, UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
-import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
-import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
+import {
+  BibliographyMetadataService,
+  MetadataUnreadableError,
+  type BibliographyMetadataFile,
+} from '../../../backend/services/BibliographyMetadataService.js';
+import { readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
 import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import type { Citation } from '../../../backend/types/citation.js';
@@ -272,7 +276,7 @@ class ZoteroService {
     /** Clé BibTeX → collections Zotero, pour relier les documents indexés. */
     bibtexKeyToCollections?: Record<string, string[]>;
     error?: string;
-  }> {
+  } & SyncRefusalDetails> {
     try {
       const projectJsonPath = path.join(options.projectPath, 'project.json');
       const project = await readProjectJson(projectJsonPath);
@@ -300,11 +304,10 @@ class ZoteroService {
 
         const mustWrite = result.changed || !existsSync(bibtexPath);
         if (mustWrite) {
-          // Écriture atomique : un fichier à moitié écrit (coupure, OneDrive
-          // qui synchronise au mauvais moment) perdrait la bibliographie.
-          const temporary = `${bibtexPath}.tmp`;
-          await writeFile(temporary, result.bibtex, 'utf-8');
-          await rename(temporary, bibtexPath);
+          // Écriture atomique, après une copie de l'état d'avant : un fichier à moitié écrit
+          // (coupure, OneDrive au mauvais moment) perdrait la bibliographie, et la réécriture
+          // perd ce que le parseur ignore (@comment, @preamble).
+          await rewriteProjectBibliography(options.projectPath, bibtexPath, result.bibtex);
           await BibliographyMetadataService.saveMetadata(options.projectPath, result.citations);
           // Une clé refaite ne doit pas couper une note de lecture de sa
           // référence : la note suit (front matter et nom de fichier).
@@ -345,9 +348,73 @@ class ZoteroService {
       }
     } catch (error: unknown) {
       console.error('Zotero synchronization failed:', error);
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return syncRefusal(error) ?? { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
+}
+
+/**
+ * Le `.bib` du projet ne se lit pas, avant toute lecture de Zotero. Distinct des autres
+ * `UnreadableFileError` : un `project.json` illisible à la fin de la synchronisation arrive après
+ * l'écriture, et ne doit pas se dire « rien n'a été écrit ».
+ */
+class BibFileUnreadableError extends UnreadableFileError {}
+
+/** Le `.bib` lu, mais pas en entier : le réécrire effacerait ce que le parseur a laissé. */
+class BibUnreadError extends Error {
+  readonly code = 'bib-unread';
+  readonly filePath: string;
+  readonly unreadKeys: string[];
+  readonly hasStringMacros: boolean;
+
+  constructor(filePath: string, unreadKeys: string[], hasStringMacros: boolean) {
+    super(`${path.basename(filePath)} n'a pas été lu en entier ; synchronisation interrompue pour ne rien effacer.`);
+    this.name = 'BibUnreadError';
+    this.filePath = filePath;
+    this.unreadKeys = unreadKeys;
+    this.hasStringMacros = hasStringMacros;
+  }
+}
+
+/**
+ * Une synchronisation refusée avant toute lecture de Zotero, parce que le `.bib` ou les
+ * métadonnées sont mal lus : `error` vaut `bib-unread`, `bib-unreadable` ou `metadata-unreadable`,
+ * et ces champs disent ce qui est en cause. Le renderer en fait un message : le code ne s'affiche
+ * jamais tel quel.
+ */
+interface SyncRefusalDetails {
+  /** Le fichier en cause, relatif au projet. */
+  file?: string;
+  unreadKeys?: string[];
+  hasStringMacros?: boolean;
+  /** Raison de `readUserFile` (`encoding`, `permission`…), et message du système. */
+  reason?: string;
+  detail?: string;
+}
+
+function syncRefusal(error: unknown): ({ success: false; error: string } & SyncRefusalDetails) | null {
+  if (error instanceof BibUnreadError) {
+    return {
+      success: false,
+      error: 'bib-unread',
+      file: path.basename(error.filePath),
+      unreadKeys: error.unreadKeys,
+      hasStringMacros: error.hasStringMacros,
+    };
+  }
+  if (error instanceof BibFileUnreadableError) {
+    return {
+      success: false,
+      error: 'bib-unreadable',
+      file: path.basename(error.filePath),
+      reason: error.reason,
+      detail: error.message,
+    };
+  }
+  if (error instanceof MetadataUnreadableError) {
+    return { success: false, error: 'metadata-unreadable', file: path.join('.cliodeck', path.basename(error.filePath)) };
+  }
+  return null;
 }
 
 interface ProjectJson {
@@ -365,17 +432,19 @@ async function readProjectJson(projectJsonPath: string): Promise<ProjectJson> {
  * Bibliographie actuelle du projet : le fichier, enrichi des métadonnées
  * (PDF Zotero, téléchargements). Un fichier présent mais illisible arrête
  * tout : le traiter comme vide ferait tout « ajouter » depuis Zotero et
- * effacerait à l'écriture les entrées qu'il contenait.
+ * effacerait à l'écriture les entrées qu'il contenait. Une seule entrée que
+ * le parseur n'a pas rendue, ou une définition `@string`, arrête tout aussi :
+ * la réécriture partirait des seules entrées lues (S07-1-2). Des métadonnées
+ * illisibles, même sans `.bib` encore écrit, de même (S07-1-10).
  */
 async function readLocalBibliography(bibtexPath: string, projectPath: string): Promise<Citation[]> {
-  if (!existsSync(bibtexPath)) return [];
-  const content = await readFile(bibtexPath, 'utf-8');
-  const citations = new BibTeXParser().parse(content, path.dirname(bibtexPath));
-  if (citations.length === 0 && content.includes('@')) {
-    throw new Error(`${path.basename(bibtexPath)} n'a pas pu être lu ; synchronisation interrompue pour ne rien effacer.`);
+  const read = await readBibFile(bibtexPath);
+  if (read.kind === 'unreadable') throw new BibFileUnreadableError(bibtexPath, read.reason, read.message);
+  if (read.kind === 'ok' && (read.unreadKeys.length > 0 || read.hasStringMacros)) {
+    throw new BibUnreadError(bibtexPath, read.unreadKeys, read.hasStringMacros);
   }
   const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
-  return BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata);
+  return BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], metadata);
 }
 
 /**
@@ -411,9 +480,19 @@ export async function recordProjectCollection(
 }
 
 /** Clé BibTeX → collections Zotero de la notice correspondante. */
-/** Pièces jointes déjà téléchargées du projet, et le fichier de chacune. */
+/**
+ * Pièces jointes déjà téléchargées du projet, et le fichier de chacune. Des métadonnées
+ * illisibles n'en disent rien : aucun propriétaire connu, et la comparaison de contenu protège
+ * alors les fichiers en place.
+ */
 async function downloadedAttachmentOwners(projectPath: string): Promise<AttachmentOwner[]> {
-  const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
+  let metadata: BibliographyMetadataFile | null = null;
+  try {
+    metadata = await BibliographyMetadataService.loadMetadata(projectPath);
+  } catch (error: unknown) {
+    if (!(error instanceof MetadataUnreadableError)) throw error;
+    console.warn('⚠️ Métadonnées bibliographiques illisibles : propriétaires des PDF inconnus', error.message);
+  }
   const owners: AttachmentOwner[] = [];
   for (const entry of Object.values(metadata?.citations ?? {})) {
     for (const attachment of entry.zoteroAttachments ?? []) {
