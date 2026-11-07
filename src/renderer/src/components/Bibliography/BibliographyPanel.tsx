@@ -7,6 +7,7 @@ import { withErrorDetails } from './errorDetails';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
+import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { ZoteroImport } from './ZoteroImport';
@@ -195,8 +196,36 @@ export const BibliographyPanel: React.FC = () => {
     }
   };
 
+  /**
+   * Un lot arrêté parce que son projet n'est plus l'ouvert (S18-2-0). L'onglet Projets démonte ce
+   * panneau sans arrêter le geste : l'alerte s'affiche donc souvent par-dessus l'autre projet. Elle
+   * nomme le projet d'origine, dit ce qui a été fait et ce qui reste, et comment le terminer.
+   */
+  const alertBatchInterrupted = (
+    batchKey: string,
+    projectName: string,
+    progress: { done: number; remaining: number; errors: string[] }
+  ) =>
+    useDialogStore.getState().showAlert(
+      withErrorDetails(
+        t('bibliography.batchInterrupted', {
+          batch: t(batchKey),
+          project: projectName,
+          done: progress.done,
+          errors: progress.errors.length,
+          remaining: progress.remaining,
+        }),
+        progress.errors
+      )
+    );
+
   const handleIndexAllPDFs = async () => {
     if (batchIndexing.isIndexing) return;
+
+    if (!currentProject) {
+      await useDialogStore.getState().showAlert(t('bibliography.noProjectOpen'));
+      return;
+    }
 
     if (citationsWithPDFs === 0) {
       await useDialogStore.getState().showAlert(t('bibliography.noPDFsToIndex'));
@@ -209,7 +238,15 @@ export const BibliographyPanel: React.FC = () => {
     if (!confirmed) return;
 
     try {
-      const result = await indexAllPDFs();
+      const result = await indexAllPDFs(currentProject.path);
+      if (result.interrupted) {
+        await alertBatchInterrupted('bibliography.indexAllPDFs', currentProject.name, {
+          done: result.indexed,
+          remaining: result.remaining ?? 0,
+          errors: result.errors,
+        });
+        return;
+      }
       await useDialogStore.getState().showAlert(
         withErrorDetails(
           t('bibliography.indexAllComplete', {
@@ -246,6 +283,14 @@ export const BibliographyPanel: React.FC = () => {
 
     try {
       const result = await downloadAllMissingPDFs(currentProject.path);
+      if (result.interrupted) {
+        await alertBatchInterrupted('bibliography.downloadAllMissing', currentProject.name, {
+          done: result.downloaded,
+          remaining: result.remaining ?? 0,
+          errors: result.errors,
+        });
+        return;
+      }
       await useDialogStore.getState().showAlert(
         withErrorDetails(
           t('bibliography.downloadAllComplete', {
@@ -313,19 +358,35 @@ export const BibliographyPanel: React.FC = () => {
     );
     if (!confirmed) return;
 
+    // Le projet du geste : un autre ouvert entre-temps ne reçoit ni les PDF de celui-ci, ni sa relecture.
+    const { path: projectPath, name: projectName } = currentProject;
+    let done = 0;
+    const errors: string[] = [];
+    const interrupted = () =>
+      alertBatchInterrupted('bibliography.reindexAll', projectName, {
+        done,
+        remaining: toReindex.length - done - errors.length,
+        errors,
+      });
+
     try {
       // Re-index each PDF
       for (const citation of toReindex) {
         if (!citation || !citation.file) continue;
-        await window.electron.pdf.index(
+        if (!(await stillIn(projectPath))) return await interrupted();
+        const result = await window.electron.pdf.index(
           citation.file,
           citation.key,
           {
             title: citation.title,
             author: citation.author,
             year: citation.year,
-          }
+          },
+          projectPath
         );
+        if (result?.success) done++;
+        else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${result?.error}`);
+        if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return await interrupted();
       }
 
       // Refresh indexed PDFs

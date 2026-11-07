@@ -126,7 +126,8 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
 
       setIsIndexing(true);
       try {
-        await reindexPDFFromCitation(citation.id);
+        // Le projet a changé pendant le geste : rien à annoncer dans le suivant (S18-2-0).
+        if ((await reindexPDFFromCitation(citation.id)).interrupted) return;
         await useDialogStore.getState().showAlert(t('bibliography.pdfReindexed', { title: citation.title }));
       } catch (error) {
         await useDialogStore.getState().showAlert(`${t('bibliography.indexError')} ${error}`);
@@ -141,10 +142,11 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
       setIsIndexing(true);
       try {
         const result = await indexPDFFromCitation(citation.id);
+        if (result.interrupted) return;
         if (result.alreadyIndexed) {
           const shouldReindex = await useDialogStore.getState().showConfirm(t('bibliography.reindexConfirm', { title: citation.title }));
           if (shouldReindex) {
-            await reindexPDFFromCitation(citation.id);
+            if ((await reindexPDFFromCitation(citation.id)).interrupted) return;
             await useDialogStore.getState().showAlert(t('bibliography.pdfReindexed', { title: citation.title }));
           }
         } else {
@@ -179,7 +181,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
 
     setIsIndexing(true);
     try {
-      await downloadAndIndexZoteroPDF(citation.id, attachmentKey, currentProject.path);
+      if ((await downloadAndIndexZoteroPDF(citation.id, attachmentKey, currentProject.path)).interrupted) return;
       await useDialogStore.getState().showAlert(t('bibliography.pdfDownloadedAndIndexed', { title: citation.title }));
     } catch (error) {
       await useDialogStore.getState().showAlert(`${t('bibliography.downloadError')} ${error}`);

@@ -240,6 +240,7 @@
     "noMissingPDFs": "No missing PDFs to download. All citations with Zotero PDFs already have local copies.",
     "confirmDownloadAll": "Download and index {{count}} PDFs from Zotero?",
     "downloadAllComplete": "Download complete: {{downloaded}} downloaded and indexed, {{skipped}} skipped, {{errors}} errors",
+    "batchInterrupted": "“{{batch}}” interrupted: “{{project}}”, the project it was started in, is no longer open. In “{{project}}”: {{done}} PDF(s) processed, {{errors}} error(s), {{remaining}} not processed. Reopen “{{project}}” and run “{{batch}}” again to finish the job.",
     "viewStatistics": "View bibliography statistics",
     "statistics": "Statistics",
     "exportBibTeX": "Export bibliography to BibTeX",

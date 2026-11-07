@@ -1,5 +1,7 @@
 import type { Citation, ZoteroSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
+import { idleBatchIndexing } from './indexingSlice';
+import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
 
 /**
  * Rattache un PDF téléchargé à son entrée : `file` pour la session, et la
@@ -29,6 +31,9 @@ export function withDownloadedAttachment(
 
 export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (set, get) => ({
   downloadAndIndexZoteroPDF: async (citationId: string, attachmentKey: string, projectPath: string) => {
+    // Après chaque attente : un autre projet ouvert entre-temps recevrait les références de
+    // celui-ci dans son store, et son PDF dans son corpus (S18-2-0).
+    const left = async () => !(await stillIn(projectPath));
     try {
       const { citations } = get();
       const citation = citations.find((c) => c.id === citationId);
@@ -92,9 +97,11 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }
 
       console.log(`Downloading PDF from Zotero (${mode}): ${attachment.filename}`);
+      if (await left()) return { interrupted: true };
 
       // Download PDF from Zotero
       const downloadResult = await window.electron.zotero.downloadPDF(downloadOptions);
+      if (refusedAsProjectChanged(downloadResult) || (await left())) return { interrupted: true };
 
       if (!downloadResult.success || !downloadResult.filePath) {
         throw new Error(downloadResult.error || 'Failed to download PDF');
@@ -115,14 +122,16 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
 
       // Save updated metadata to persist the local file path
       try {
-        await window.electron.bibliography.saveMetadata({
+        const saved = await window.electron.bibliography.saveMetadata({
           projectPath,
           citations: updatedCitations,
         });
+        if (refusedAsProjectChanged(saved)) return { interrupted: true };
         console.log('💾 Metadata saved after PDF download');
       } catch (metaError) {
         console.error('⚠️ Failed to save metadata after PDF download:', metaError);
       }
+      if (await left()) return { interrupted: true };
 
       // Index the downloaded PDF
       console.log(`🔍 Indexing downloaded PDF for citation: ${citation.title}`);
@@ -140,8 +149,16 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       const indexResult = await window.electron.pdf.index(
         downloadResult.filePath!,
         citationId,
-        bibliographyMetadata
+        bibliographyMetadata,
+        projectPath
       );
+
+      if (refusedAsProjectChanged(indexResult) || (await left())) {
+        window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
+          detail: { citationId, success: false }
+        }));
+        return { interrupted: true };
+      }
 
       if (!indexResult.success) {
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -160,6 +177,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }));
 
       console.log(`✅ PDF downloaded and indexed from Zotero: ${citation.title}`);
+      return {};
     } catch (error) {
       console.error('❌ Failed to download and index PDF from Zotero:', error);
       throw error;
@@ -202,13 +220,25 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
         (c) => !isPdfPath(c.file) && c.zoteroAttachments && c.zoteroAttachments.length > 0
       );
 
-      if (citationsNeedingPDFs.length === 0) {
-        return { downloaded: 0, skipped: 0, errors: [] };
-      }
-
       const errors: string[] = [];
       let downloaded = 0;
       const skipped = 0;
+      /**
+       * Le projet du lot n'est plus l'ouvert (S18-2-0). Les références du store sont alors celles
+       * de l'autre : enregistrées sous ce projet, elles effaçaient tous ses rattachements, et ses
+       * PDF partaient dans le corpus de l'autre. Le lot s'arrête là, sans rien écrire ni relire,
+       * la progression disparaît, et ce qui reste se dit.
+       */
+      const interrupt = () => {
+        set({ batchIndexing: idleBatchIndexing() });
+        const remaining = citationsNeedingPDFs.length - downloaded - skipped - errors.length;
+        return { downloaded, skipped, errors, interrupted: true as const, remaining };
+      };
+      if (!(await stillIn(projectPath))) return interrupt();
+
+      if (citationsNeedingPDFs.length === 0) {
+        return { downloaded: 0, skipped: 0, errors: [] };
+      }
 
       // Update batch indexing state
       set({
@@ -224,6 +254,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
 
       for (let i = 0; i < citationsNeedingPDFs.length; i++) {
         const citation = citationsNeedingPDFs[i];
+        if (!(await stillIn(projectPath))) return interrupt();
 
         set((state) => ({
           batchIndexing: {
@@ -266,6 +297,8 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
               };
 
           const downloadResult = await window.electron.zotero.downloadPDF(downloadOptions);
+          // Le PDF en vol reste dans le dossier du projet, sans rattachement : la relance le reprend.
+          if (refusedAsProjectChanged(downloadResult) || !(await stillIn(projectPath))) return interrupt();
 
           if (!downloadResult.success || !downloadResult.filePath) {
             errors.push(`${citation.title}: ${downloadResult.error || 'Failed to download'}`);
@@ -288,13 +321,15 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           get().applyFilters();
 
           try {
-            await window.electron.bibliography.saveMetadata({
+            const saved = await window.electron.bibliography.saveMetadata({
               projectPath,
               citations: updatedCitations,
             });
+            if (refusedAsProjectChanged(saved)) return interrupt();
           } catch (metaError) {
             console.warn('⚠️ Métadonnées non sauvegardées après téléchargement :', metaError);
           }
+          if (!(await stillIn(projectPath))) return interrupt();
 
           // Index the downloaded PDF
           set((state) => ({
@@ -318,8 +353,14 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           const indexResult = await window.electron.pdf.index(
             downloadResult.filePath,
             citation.id,
-            bibliographyMetadata
+            bibliographyMetadata,
+            projectPath
           );
+          // Le PDF en vol a été indexé dans le projet du lot : il compte, mais l'ouvert n'en sait rien.
+          if (refusedAsProjectChanged(indexResult) || !(await stillIn(projectPath))) {
+            if (indexResult.success) downloaded++;
+            return interrupt();
+          }
 
           if (indexResult.success) {
             downloaded++;

@@ -240,6 +240,7 @@
     "noMissingPDFs": "Keine fehlenden PDFs zum Herunterladen. Alle Zitate mit Zotero-PDFs haben bereits lokale Kopien.",
     "confirmDownloadAll": "{{count}} PDFs aus Zotero herunterladen und indexieren?",
     "downloadAllComplete": "Download abgeschlossen: {{downloaded}} heruntergeladen und indexiert, {{skipped}} übersprungen, {{errors}} Fehler",
+    "batchInterrupted": "„{{batch}}“ unterbrochen: „{{project}}“, das Projekt, in dem der Vorgang gestartet wurde, ist nicht mehr geöffnet. In „{{project}}“: {{done}} PDF(s) verarbeitet, {{errors}} Fehler, {{remaining}} nicht verarbeitet. Öffnen Sie „{{project}}“ erneut und starten Sie „{{batch}}“ noch einmal, um die Arbeit abzuschließen.",
     "viewStatistics": "Statistiken der Bibliographie anzeigen",
     "statistics": "Statistiken",
     "exportBibTeX": "Bibliographie als BibTeX exportieren",
