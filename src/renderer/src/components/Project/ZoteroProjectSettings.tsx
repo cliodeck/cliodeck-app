@@ -64,18 +64,26 @@ export const ZoteroProjectSettings: React.FC<ZoteroProjectSettingsProps> = ({
     : `${projectPath}/project.json`;
 
   useEffect(() => {
-    loadConfig();
+    // Une lecture du projet précédent qui répond après l'ouverture de celui-ci ne s'affiche pas :
+    // l'auteur la prendrait pour celle de ce projet (S17-1-7).
+    let current = true;
+    loadConfig(() => current);
+    return () => {
+      current = false;
+    };
   }, [projectPath]);
 
-  const loadConfig = async () => {
+  const loadConfig = async (isCurrent: () => boolean) => {
     try {
       // Load global Zotero config to get mode and dataDirectory
       const globalConfig = await window.electron.config.get('zotero');
+      if (!isCurrent()) return;
       const mode = globalConfig?.mode || 'api';
       setZoteroMode(mode);
 
       // Load project-specific Zotero config from project.json
       const projectConfig = await window.electron.project.getConfig(projectFilePath);
+      if (!isCurrent()) return;
       const stored: ProjectZoteroConfig = {
         groupId: projectConfig?.zotero?.groupId || '',
         collectionKey: projectConfig?.zotero?.collectionKey || '',
