@@ -320,6 +320,52 @@ describe('un accord ne couvre que le rapport lu', () => {
     expect(inB.report.deleted.map((d) => d.zoteroKey)).toEqual(['DDD']);
   });
 
+  it('une autre collection enregistrée pendant la lecture, mêmes suppressions : nouvel accord', async () => {
+    // L'historien enregistre une autre collection dans les Paramètres Zotero du projet pendant
+    // que la boîte est ouverte. Même collection visée, mêmes suppressions, mais la boîte ne
+    // montrait aucun changement de collection : l'appliquer écraserait ce qu'il vient d'enregistrer.
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    library.contents.ARTICLE.pop();
+    const asked = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' });
+    expect(asked.report.confirmation).toEqual({ collectionKey: 'ARTICLE', collectionChange: null, deletedKeys: ['CCC'] });
+
+    const again = await sync.synchronize({
+      local,
+      collectionKey: 'ARTICLE',
+      savedCollectionKey: 'AUTRE',
+      ...approve(asked.report),
+    });
+
+    expect(again.status).toBe('needs-confirmation');
+    expect(again.report.confirmation).toEqual({
+      collectionKey: 'ARTICLE',
+      collectionChange: { from: 'AUTRE', to: 'ARTICLE' },
+      deletedKeys: ['CCC'],
+    });
+  });
+
+  it('le changement de collection lu ne partait pas de la même collection : nouvel accord', async () => {
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    const asked = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'AUTRE' });
+    expect(asked.report.confirmation).toEqual({
+      collectionKey: 'ARTICLE',
+      collectionChange: { from: 'AUTRE', to: 'ARTICLE' },
+      deletedKeys: [],
+    });
+
+    const again = await sync.synchronize({
+      local,
+      collectionKey: 'ARTICLE',
+      savedCollectionKey: 'TROISIEME',
+      ...approve(asked.report),
+    });
+
+    expect(again.status).toBe('needs-confirmation');
+    expect(again.report.collectionChange).toEqual({ from: 'TROISIEME', to: 'ARTICLE' });
+  });
+
   it('témoin : une notice du rapport revenue dans la collection, l’accord vaut encore', async () => {
     const library = threeItems();
     const { sync, local } = await firstImport(library);

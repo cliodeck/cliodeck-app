@@ -84,6 +84,7 @@ const switchToB = () =>
 const dialogs = () => useDialogStore.getState();
 
 beforeEach(() => {
+  useProjectStore.setState({ loadState: { kind: 'idle' } } as never);
   synchronize = vi.fn();
   getConfig = vi.fn(async () => ({ zotero: { collectionKey: 'CA' } }));
   loadWithMetadata = vi.fn(async () => undefined);
@@ -205,7 +206,7 @@ describe('la synchronisation de A ne finit pas dans B', () => {
     expect(dialogs().alertOpen).toBe(true);
   });
 
-  it('remonté dans B : la liste des collections chargée pour A n’est pas proposée', async () => {
+  it('témoin : remonté dans B, la liste des collections chargée pour A n’est pas proposée', async () => {
     await mountIn(A);
     await act(async () => {
       fireEvent.click(screen.getByTitle('zotero.import.loadCollectionsButton'));
@@ -217,5 +218,122 @@ describe('la synchronisation de A ne finit pas dans B', () => {
     await mountIn(B);
 
     expect(screen.queryByRole('option', { name: 'Collection de A' })).toBeNull();
+  });
+});
+
+/**
+ * Pendant l'ouverture de B, le main prend B avant que l'écran ne la montre : il initialise
+ * encore ses services alors que `currentProject` est toujours A. Une lecture de A qui finit dans
+ * cette fenêtre ouvrait sa boîte, qui restait ensuite par-dessus B.
+ */
+describe('B en cours d’ouverture quand la lecture de A finit', () => {
+  /** L'onglet Projets démonte le panneau, puis l'ouverture de B commence. */
+  const startOpeningB = () =>
+    act(async () => {
+      cleanup();
+      useProjectStore.setState({ loadState: { kind: 'loading', path: B } } as never);
+    });
+
+  it('l’ouverture aboutit : aucune boîte, ni avant ni après, et aucun second appel', async () => {
+    const first = deferred<unknown>();
+    synchronize.mockReturnValueOnce(first.promise);
+    await mountIn(A);
+    await clickSynchronize();
+
+    await startOpeningB();
+    await act(async () => {
+      first.resolve(needsConfirmation());
+    });
+    expect(dialogs().queue).toEqual([]);
+
+    await act(async () => {
+      useProjectStore.setState({
+        currentProject: project(B),
+        loadState: { kind: 'ready', path: B, loadedAt: '' },
+      } as never);
+    });
+
+    expect(dialogs().queue).toEqual([]);
+    expect(synchronize).toHaveBeenCalledTimes(1);
+    expect(loadWithMetadata).not.toHaveBeenCalled();
+  });
+
+  it('l’ouverture est refusée : la boîte de A s’ouvre alors dans A, et la synchronisation va au bout', async () => {
+    const first = deferred<unknown>();
+    synchronize.mockReturnValueOnce(first.promise).mockResolvedValueOnce(appliedResult());
+    await mountIn(A);
+    await clickSynchronize();
+
+    await startOpeningB();
+    await act(async () => {
+      first.resolve(needsConfirmation());
+    });
+    expect(dialogs().queue).toEqual([]);
+
+    // Un refus (document à garder, B illisible) rend l'état d'avant : A reste ouvert.
+    await act(async () => {
+      useProjectStore.setState({ loadState: { kind: 'ready', path: A, loadedAt: '' } } as never);
+    });
+    expect(dialogs().confirmOpen).toBe(true);
+
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+    expect(synchronize).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedProjectPath: A, confirmation: confirmation(['A2']) })
+    );
+    expect(loadWithMetadata).toHaveBeenCalledWith(`${A}/bibliography.bib`, A);
+  });
+});
+
+/**
+ * Le panneau n'est pas toujours remonté à chaque projet : ce qu'il a chargé pour A ne doit pas
+ * servir à B (S18-2-9). Une clé de collection de A, choisie ou relue en retard, partirait avec
+ * la bibliothèque de B.
+ */
+describe('B sans remontage du panneau', () => {
+  const openBInPlace = () =>
+    act(async () => {
+      useProjectStore.setState({ currentProject: project(B) } as never);
+    });
+
+  it('la liste des collections chargée pour A est vidée', async () => {
+    await mountIn(A);
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('zotero.import.loadCollectionsButton'));
+    });
+    expect(screen.getByRole('option', { name: 'Collection de A' })).toBeInTheDocument();
+
+    getConfig.mockResolvedValue({ name: 'B' });
+    await openBInPlace();
+
+    expect(screen.queryByRole('option', { name: 'Collection de A' })).toBeNull();
+  });
+
+  it('la configuration de A répond après le passage à B : B ne reçoit pas la collection de A', async () => {
+    const configA = deferred<unknown>();
+    getConfig.mockReturnValueOnce(configA.promise).mockResolvedValue({ name: 'B' });
+    await mountIn(A);
+
+    await openBInPlace();
+    await act(async () => {
+      configA.resolve({ zotero: { collectionKey: 'CA' } });
+    });
+
+    expect(screen.getByRole('combobox')).toHaveValue('');
+    expect(screen.getByRole('button', { name: /zotero\.sync\.button/ })).toBeDisabled();
+  });
+
+  it('témoin : un nouvel objet pour le même projet ne vide pas la liste', async () => {
+    await mountIn(A);
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('zotero.import.loadCollectionsButton'));
+    });
+
+    await act(async () => {
+      useProjectStore.setState({ currentProject: project(A) } as never);
+    });
+
+    expect(screen.getByRole('option', { name: 'Collection de A' })).toBeInTheDocument();
   });
 });
