@@ -196,6 +196,12 @@ export const BibliographyPanel: React.FC = () => {
   };
 
   const performImport = async (sourcePath: string, mode: 'replace' | 'merge') => {
+    // Ce que montrait le panneau avant l'import : tant que le fichier n'est pas copié dans le
+    // projet, le `.bib` du projet n'a pas changé, ni donc sa liste ou son bandeau.
+    const { citations: citationsBefore, bibliographyProblem: problemBefore } = useBibliographyStore.getState();
+    const projectPath = currentProject?.path;
+    let loaded = false;
+    let copied = false;
     try {
       let newCitations = 0;
       let duplicates = 0;
@@ -212,6 +218,7 @@ export const BibliographyPanel: React.FC = () => {
         duplicates = result.duplicates;
         total = result.total;
       }
+      loaded = true;
 
       // If we have a project, save the bibliography source configuration
       if (currentProject) {
@@ -221,6 +228,7 @@ export const BibliographyPanel: React.FC = () => {
 
         // Copy file to project directory
         await window.electron.fs.copyFile(sourcePath, targetPath);
+        copied = true;
 
         // Save the bibliography source to project.json
         const projectJsonPath = `${currentProject.path}/project.json`;
@@ -250,6 +258,13 @@ export const BibliographyPanel: React.FC = () => {
       setShowSummaryModal(true);
     } catch (error) {
       console.error('Failed to import BibTeX:', error);
+      // Le fichier importé s'est lu, mais n'est pas entré dans le projet (copie refusée) : le
+      // panneau revient à ce qu'il montrait, bandeau compris, s'il montre encore ce projet.
+      if (loaded && !copied && projectPath && (await stillIn(projectPath))) {
+        useBibliographyStore.setState({ citations: citationsBefore, bibliographyProblem: problemBefore });
+        useBibliographyStore.getState().applyFilters();
+        await useBibliographyStore.getState().refreshIndexedPDFs();
+      }
       await useDialogStore.getState().showAlert(importFailureMessage(error));
     }
   };

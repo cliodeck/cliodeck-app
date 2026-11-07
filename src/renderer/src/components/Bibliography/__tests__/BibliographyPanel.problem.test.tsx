@@ -226,6 +226,49 @@ describe('importer un .bib pendant que le bandeau est là', () => {
   });
 });
 
+describe('un import qui ne va pas jusqu’au projet', () => {
+  // Le fichier importé se lit, mais la copie dans le projet est refusée (fichier rangé hors du
+  // projet, S11-1-9) : le `.bib` du projet n'a pas bougé. Le panneau montrait les références du
+  // fichier importé, sans le bandeau, alors que le fichier du projet ne se lisait toujours pas.
+  const PROBLEM = { kind: 'unreadable', file: 'refs.bib', reason: 'encoding', detail: 'x' } as const;
+
+  async function replaceWith(copy: () => Promise<unknown>): Promise<void> {
+    electron().bibliography = {
+      load: vi.fn(async () => ({ success: true, citations: [citation('Import_2020')], unreadKeys: [], metadataUnreadable: false })),
+    };
+    electron().fs.copyFile.mockImplementation(copy);
+    useBibliographyStore.setState({ loadBibliography: realLoadBibliography } as never);
+    show({ bibliographyProblem: PROBLEM });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('bibliography.import'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'bibImport.replace' }));
+    });
+  }
+
+  it('copie refusée : le bandeau du projet reste, pas la liste du fichier importé', async () => {
+    await replaceWith(async () => {
+      throw new Error('Read access denied: /ailleurs/refs.bib is outside allowed directories');
+    });
+
+    expect(dialogs().alertOpen).toBe(true);
+    expect(dialogs().alertMessage).toContain('Read access denied');
+    expect(useBibliographyStore.getState().bibliographyProblem).toEqual(PROBLEM);
+    expect(useBibliographyStore.getState().citations).toEqual([]);
+    expect(banner()).toHaveTextContent('bibliography.bibNotUtf8');
+    expect(screen.queryByText('liste : Import_2020')).toBeNull();
+  });
+
+  it('témoin : la copie réussit, le bandeau part et la liste importée s’affiche', async () => {
+    await replaceWith(async () => ({ success: true }));
+
+    expect(useBibliographyStore.getState().bibliographyProblem).toBeNull();
+    expect(useBibliographyStore.getState().citations.map((c) => c.id)).toEqual(['Import_2020']);
+    expect(banner()).toBeNull();
+  });
+});
+
 describe('importer un .bib qui ne se lit pas', () => {
   // `bibliography:load` lit en UTF-8 strict : un vieux `.bib` en windows-1252 est refusé. Le
   // message brut du main s'affichait derrière « Failed to import bibliography: », en français

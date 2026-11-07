@@ -16,7 +16,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { IZoteroDataSource } from '../../../../backend/integrations/zotero/IZoteroDataSource.js';
-import type { ZoteroCollection, ZoteroItem } from '../../../../backend/integrations/zotero/ZoteroAPI.js';
+import type { ZoteroAttachment, ZoteroCollection, ZoteroItem } from '../../../../backend/integrations/zotero/ZoteroAPI.js';
 import type { SyncReport } from '../../../../backend/integrations/zotero/ZoteroSynchronizer.js';
 
 const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -78,7 +78,15 @@ const notice = (key: string, title: string, lastName: string): ZoteroItem =>
 const collection = (key: string): ZoteroCollection => ({ key, version: 0, data: { key, version: 0, name: key } });
 
 let contents: Record<string, ZoteroItem[]> = {};
+/** Pièces jointes de chaque notice, par clé Zotero. */
+let attachments: Record<string, ZoteroAttachment[]> = {};
 let openSource: ReturnType<typeof vi.fn>;
+
+const pdfAttachment = (key: string, filename: string): ZoteroAttachment => ({
+  key,
+  version: 0,
+  data: { key, version: 0, itemType: 'attachment', linkMode: 'imported_file', contentType: 'application/pdf', filename },
+});
 
 function fakeSource(): IZoteroDataSource {
   return {
@@ -90,7 +98,7 @@ function fakeSource(): IZoteroDataSource {
       throw new Error('inutile ici');
     },
     getItemChildren: async () => [],
-    getItemAttachments: async () => [],
+    getItemAttachments: async (key: string) => [...(attachments[key] ?? [])],
     getItemNotes: async () => [],
     hasAttachments: async () => false,
     downloadFile: async () => ({ filename: '', size: 0 }),
@@ -146,6 +154,7 @@ const GARDE = ['@book{Garde_2000,', '  author = {Garde, Paul},', '  title = {Le 
 
 beforeEach(() => {
   contents = { COLL: [notice('MART2021', 'Les archives orales', 'Martin')] };
+  attachments = {};
   openSource = vi.fn(fakeSource);
   // @ts-expect-error méthode privée remplacée par la source simulée
   vi.spyOn(zoteroService, 'createDataSource').mockImplementation(openSource);
@@ -246,28 +255,78 @@ describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zot
   // L'exporteur écrit une accolade isolée `\}`, que le parseur compte (S07-1-32, L05-7) : ce que la
   // synchronisation écrit, la suivante le refuse. Corriger le .bib seul ne suffit pas : la
   // synchronisation réécrit l'entrée depuis la notice. Le message dit donc de corriger la notice
-  // dans Zotero, puis de supprimer l'entrée du .bib.
-  const entryOf = (key: string) => new RegExp(`@\\w+\\{${key},[\\s\\S]*?\\n\\}\\n?`);
+  // dans Zotero, puis de faire la même correction dans l'entrée du .bib. Pas de la supprimer : elle
+  // reviendrait de Zotero comme une référence nouvelle, et le PDF déjà téléchargé ne lui serait plus
+  // rattaché.
+
+  /** Les pièces jointes que les métadonnées rattachent à une notice. */
+  const attachmentsOf = (zoteroKey: string) => {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath(), 'utf-8')) as {
+      citations: Record<string, { zoteroAttachments?: Array<{ key: string; downloaded?: boolean; localPath?: string }> }>;
+    };
+    return metadata.citations[zoteroKey]?.zoteroAttachments ?? [];
+  };
+
+  /** Le PDF de la notice est téléchargé : ce que l'app inscrit après « Télécharger le PDF ». */
+  const markDownloaded = (zoteroKey: string, localPath: string) => {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath(), 'utf-8')) as {
+      citations: Record<string, { zoteroAttachments?: Array<Record<string, unknown>> }>;
+    };
+    metadata.citations[zoteroKey].zoteroAttachments = (metadata.citations[zoteroKey].zoteroAttachments ?? []).map((a) => ({
+      ...a,
+      downloaded: true,
+      localPath,
+    }));
+    fs.writeFileSync(metadataPath(), JSON.stringify(metadata, null, 2));
+  };
 
   it('accolade isolée dans un titre Zotero : le conseil du message débloque la synchronisation', async () => {
     makeProject(GARDE + '\n');
     contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
+    attachments = { ODD2021: [pdfAttachment('ATT1', 'odd.pdf')] };
     expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
     expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble \\} fermé');
+    const pdf = path.join(project, 'PDFs', 'odd.pdf');
+    markDownloaded('ODD2021', pdf);
 
     const refused = await synchronize(request());
     expect(refused).toMatchObject({ success: false, error: 'bib-unread' });
     expect(refused.unreadKeys).toHaveLength(1);
     expect(refused.unreadFromZotero).toEqual(refused.unreadKeys);
 
-    // La notice corrigée dans Zotero, l'entrée supprimée du .bib.
+    // La notice corrigée dans Zotero, et la même correction dans l'entrée du .bib.
     contents = { COLL: [notice('ODD2021', 'Ensemble fermé', 'Odd')] };
-    const key = refused.unreadKeys?.[0] ?? '';
-    fs.writeFileSync(bibPath(), fs.readFileSync(bibPath(), 'utf-8').replace(entryOf(key), ''));
+    fs.writeFileSync(bibPath(), fs.readFileSync(bibPath(), 'utf-8').replace('Ensemble \\} fermé', 'Ensemble fermé'));
 
-    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied' });
     expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble fermé');
     expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Garde_2000');
+    // Le PDF déjà téléchargé reste rattaché à sa référence.
+    expect(attachmentsOf('ODD2021')).toEqual([expect.objectContaining({ key: 'ATT1', downloaded: true, localPath: pdf })]);
+  });
+
+  // Une notice Zotero sans titre s'exporte « Untitled » (`toCitation`) : une entrée venue de Zotero
+  // n'en manque que si on a retouché le .bib. Le conseil vaut aussi : le titre remis en place.
+  it('entrée venue de Zotero dont le titre a été retiré du .bib : le remettre débloque, PDF rattaché', async () => {
+    makeProject(GARDE + '\n');
+    contents = { COLL: [notice('NOTI2021', 'Le titre retrouvé', 'Sanstitre')] };
+    attachments = { NOTI2021: [pdfAttachment('ATT2', 'sans-titre.pdf')] };
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    const pdf = path.join(project, 'PDFs', 'sans-titre.pdf');
+    markDownloaded('NOTI2021', pdf);
+    const written = fs.readFileSync(bibPath(), 'utf-8');
+    const titleLine = /^\s*title = \{Le titre retrouvé\},\n/m;
+    expect(written).toMatch(titleLine);
+    fs.writeFileSync(bibPath(), written.replace(titleLine, ''));
+
+    const refused = await synchronize(request());
+    expect(refused).toMatchObject({ success: false, error: 'bib-unread' });
+    expect(refused.unreadKeys).toHaveLength(1);
+    expect(refused.unreadFromZotero).toEqual(refused.unreadKeys);
+
+    fs.writeFileSync(bibPath(), written);
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: false });
+    expect(attachmentsOf('NOTI2021')).toEqual([expect.objectContaining({ key: 'ATT2', downloaded: true, localPath: pdf })]);
   });
 
   it.fails('accolade isolée dans un titre Zotero : la synchronisation suivante passe (L05-7, S07-1-32)', async () => {

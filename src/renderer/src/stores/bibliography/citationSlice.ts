@@ -127,6 +127,15 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
         // Le fichier attendu ne se lit pas : ni la liste du projet d'avant, ni un panneau vide
         // sans explication (S07-1-11).
         set({ citations: [], filteredCitations: [], bibliographyProblem: failureProblem(filePath, result) });
+        // Les notes de lecture et les PDF indexés appartiennent au projet, pas au `.bib` : sans
+        // cette relecture, ceux du projet d'avant restaient affichés, et une étiquette ajoutée
+        // ici recopiait sur le disque celles de l'autre projet.
+        void get().loadReadingNotes();
+        try {
+          await get().refreshIndexedPDFs();
+        } catch (refreshError) {
+          console.error('⚠️ refreshIndexedPDFs failed (non-blocking):', refreshError);
+        }
         throw new Error(result.error || 'Failed to load bibliography with metadata');
       }
     } catch (error) {

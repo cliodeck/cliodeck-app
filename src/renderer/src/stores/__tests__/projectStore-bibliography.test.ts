@@ -56,7 +56,14 @@ beforeEach(() => {
   };
   useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null, bufferDetached: false });
   useProjectStore.setState({ currentProject: null, chapters: [], currentChapterId: null, loadState: { kind: 'idle' }, recentProjects: [] });
-  useBibliographyStore.setState({ citations: [], filteredCitations: [], bibliographyProblem: null } as never);
+  useBibliographyStore.setState({
+    citations: [],
+    filteredCitations: [],
+    bibliographyProblem: null,
+    readingNotes: [],
+    indexedFilePaths: new Set<string>(),
+    indexedBibtexKeys: new Set<string>(),
+  } as never);
 });
 
 afterEach(() => {
@@ -130,6 +137,53 @@ describe('ouvrir B après A', () => {
       unreadKeys: ['entretien_dupont'],
       metadataUnreadable: true,
     });
+  });
+
+  it('le .bib de B ne se lit pas : les notes de lecture et les PDF indexés de B sont relus quand même', async () => {
+    // Sur `main`, ce fichier rendait une liste vide « réussie », et la suite de l'ouverture relisait
+    // les notes et les PDF du nouveau projet. La branche d'échec les sautait : les étiquettes de A
+    // restaient affichées dans B, et une étiquette ajoutée dans B y recopiait celles de A.
+    projects = { A: project('A', 'a.bib'), B: project('B', 'renomme.bib') };
+    const electron = (window as unknown as {
+      electron: {
+        bibliography: { readingNotes: { list: ReturnType<typeof vi.fn> } };
+        pdf: { getAll: ReturnType<typeof vi.fn> };
+      };
+    }).electron;
+    const listNotes = electron.bibliography.readingNotes.list;
+    const getAll = electron.pdf.getAll;
+    listNotes
+      .mockResolvedValueOnce({
+        success: true,
+        notes: [{ file: 'reading-notes/Alpha_2022.md', citekey: 'Alpha_2022', tags: ['etiquette-de-A'] }],
+      })
+      .mockResolvedValueOnce({ success: true, notes: [] });
+    getAll
+      .mockResolvedValueOnce({ success: true, documents: [{ fileURL: '/tmp/A/PDFs/a.pdf', bibtexKey: 'Alpha_2022' }] })
+      .mockResolvedValueOnce({ success: true, documents: [{ fileURL: '/tmp/A/PDFs/a.pdf', bibtexKey: 'Alpha_2022' }] })
+      .mockResolvedValue({ success: true, documents: [] });
+    loadWithMetadata
+      .mockResolvedValueOnce({ success: true, citations: [A1], unreadKeys: [], metadataUnreadable: false })
+      .mockResolvedValueOnce({ success: false, error: 'introuvable', citations: [], problem: 'missing' });
+
+    await open('A');
+    await vi.waitFor(() => {
+      expect(useBibliographyStore.getState().readingNotes.map((n) => n.citekey)).toEqual(['Alpha_2022']);
+    });
+    expect([...useBibliographyStore.getState().indexedFilePaths]).toEqual(['/tmp/A/PDFs/a.pdf']);
+    const notesCallsAfterA = listNotes.mock.calls.length;
+    const pdfCallsAfterA = getAll.mock.calls.length;
+
+    await open('B');
+
+    expect(useBibliographyStore.getState().bibliographyProblem).toEqual({ kind: 'missing', file: 'renomme.bib' });
+    expect(listNotes.mock.calls.length).toBeGreaterThan(notesCallsAfterA);
+    expect(getAll.mock.calls.length).toBeGreaterThan(pdfCallsAfterA);
+    await vi.waitFor(() => {
+      expect(useBibliographyStore.getState().readingNotes).toEqual([]);
+    });
+    expect([...useBibliographyStore.getState().indexedFilePaths]).toEqual([]);
+    expect(useBibliographyStore.getState().getAllTags()).toEqual([]);
   });
 
   it('témoin : le fichier redevient lisible, le bandeau disparaît', async () => {
