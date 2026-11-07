@@ -6,6 +6,7 @@ import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress, TropyS
 import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/integrations/tropy/tropy-project-identity.js';
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
+import { PopplerNotFoundError } from '../../../backend/integrations/tropy/PDFConverter.js';
 import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
@@ -702,6 +703,13 @@ class TropyService {
       }
 
       const result = await this.ocrPipeline.performBatchOCR(imagePaths, { language });
+
+      // Sans Poppler, le texte ne porte que les images : l'écrire remplacerait,
+      // sans le dire, la transcription complète de la source. L'OCR manuel
+      // échoue alors, comme pour une source qui n'a que des PDF.
+      if (result.missingTool === 'poppler') {
+        throw new PopplerNotFoundError();
+      }
 
       return {
         success: true,

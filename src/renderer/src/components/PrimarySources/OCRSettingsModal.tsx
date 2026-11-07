@@ -48,6 +48,14 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
+  // La reconnaissance n'a pas pu se faire (Poppler, modèle de langue) : son
+  // avis le dit. « Aucune transcription nouvelle… » y ajoutait deux
+  // explications fausses — rien n'a été reconnu, et les sources n'avaient pas
+  // forcément de transcription.
+  const ocrBlocked = (outcome?.issues ?? []).some(
+    (issue) => issue.code === 'poppler-missing' || issue.code === 'ocr-language-unavailable'
+  );
+
   // La modale se refermait ici même : après des heures d'OCR, l'utilisateur
   // n'apprenait ni combien de transcriptions avaient été écrites, ni qu'il
   // n'y en avait aucune. On garde la fenêtre ouverte sur le bilan.
@@ -182,7 +190,7 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
                     })}
                   </li>
                 </ul>
-              ) : (
+              ) : ocrBlocked ? null : (
                 <p>
                   {t(
                     'primarySources.ocrSummaryNothing',

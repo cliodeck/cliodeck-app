@@ -43,6 +43,12 @@ export interface PrimarySourceDocument {
    * réembarquer) ; '' : pas de note.
    */
   notesText?: string;
+  /**
+   * L'OCR de la source attend un outil : 'poppler', sa transcription ne porte
+   * que les images de l'item, sans ses PDF. Elle n'est pas acquise : la passe
+   * OCR suivante la reprend. Absent : rien en attente.
+   */
+  ocrPending?: 'poppler';
   language?: string;
   lastModified: string;
   indexedAt: string;
@@ -444,6 +450,21 @@ export class PrimarySourcesVectorStore {
       console.warn('⚠️ notes_text migration check failed:', err);
     }
 
+    // Soft migration: add ocr_pending column. 'poppler' : la transcription
+    // (OCR) ne porte que les images de l'item, ses PDF attendent Poppler ; la
+    // passe OCR suivante la reprend (revue de L06-10). NULL : rien en attente.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'ocr_pending')) {
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN ocr_pending TEXT');
+        console.log('🗄️ Migrated tropy_sources: added ocr_pending column');
+      }
+    } catch (err) {
+      console.warn('⚠️ ocr_pending migration check failed:', err);
+    }
+
     // Table des photos associées aux sources
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tropy_photos (
@@ -718,6 +739,9 @@ export class PrimarySourcesVectorStore {
     if (updates.transcription !== undefined) {
       fields.push('transcription = ?');
       values.push(updates.transcription);
+      // Un texte écrit à la main, importé ou reconnu en entier remplace la
+      // transcription partielle : plus rien n'est à reprendre.
+      fields.push('ocr_pending = NULL');
     }
     if (updates.transcriptionSource !== undefined) {
       fields.push('transcription_source = ?');
@@ -744,6 +768,15 @@ export class PrimarySourcesVectorStore {
       this.saveSourceTags(id, updates.tags);
     }
     return changes;
+  }
+
+  /**
+   * Note qu'une transcription d'OCR est partielle, faute d'un outil, ou
+   * qu'elle ne l'est plus. `saveSource` n'y touche pas : la synchro, seule à
+   * réécrire la ligne entière, l'appelle dans la même transaction.
+   */
+  setOcrPending(id: string, pending: 'poppler' | null): void {
+    this.db.prepare('UPDATE tropy_sources SET ocr_pending = ? WHERE id = ?').run(pending, id);
   }
 
   /**
@@ -2054,6 +2087,7 @@ export class PrimarySourcesVectorStore {
       archival: row.archival_metadata ? JSON.parse(row.archival_metadata) : undefined,
       ocrConfidence: row.ocr_confidence ?? undefined,
       notesText: row.notes_text ?? undefined,
+      ocrPending: row.ocr_pending === 'poppler' ? 'poppler' : undefined,
     };
   }
 

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards.js';
 import { PrimarySourcesVectorStore } from '../PrimarySourcesVectorStore.js';
 import type {
@@ -213,6 +214,42 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — sources', () =>
     expect(saved?.transcriptionSource).toBe('manual');
     expect(saved?.ocrConfidence).toBeUndefined();
     expect(store.getCorpusOCRReport().worstSources).toEqual([]);
+  });
+
+  // Revue de L06-10 : sans Poppler, la transcription d'un item mixte ne porte
+  // que ses images. Rien ne le disait en base : elle passait pour acquise, et
+  // l'OCR suivant ne reprenait jamais le PDF.
+  it('une source dont l’OCR attend Poppler le reste à la synchro suivante, plus après une transcription récrite', () => {
+    store.saveSource(source());
+    expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
+
+    store.setOcrPending('src-1', 'poppler');
+    expect(store.getSource('src-1')?.ocrPending).toBe('poppler');
+    // La synchro réécrit la ligne sans y toucher.
+    store.saveSource(source({ title: 'Titre corrigé' }));
+    expect(store.getSourceByTropyId(305)?.ocrPending).toBe('poppler');
+
+    // Une transcription écrite à la main, importée ou reconnue en entier.
+    store.updateSource('src-1', { transcription: 'texte revu', transcriptionSource: 'manual' });
+    expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
+
+    store.setOcrPending('src-1', 'poppler');
+    store.setOcrPending('src-1', null);
+    expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
+  });
+
+  it('une base d’avant la colonne ocr_pending la reçoit, sans source à reprendre', () => {
+    store.saveSource(source());
+    store.close();
+    const db = new Database(path.join(tmp, '.cliodeck', 'brain.db'));
+    db.exec('ALTER TABLE tropy_sources DROP COLUMN ocr_pending');
+    db.close();
+
+    store = new PrimarySourcesVectorStore(tmp);
+    expect(store.getSource('src-1')).toMatchObject({ transcription: 'PROCES-VERBAL' });
+    expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
+    store.setOcrPending('src-1', 'poppler');
+    expect(store.getSource('src-1')?.ocrPending).toBe('poppler');
   });
 });
 

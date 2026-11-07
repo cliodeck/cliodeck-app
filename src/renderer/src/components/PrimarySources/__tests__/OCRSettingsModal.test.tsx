@@ -81,6 +81,11 @@ describe('modale OCR : Poppler absent (L06-10, S08-1-34)', () => {
     await runWith([{ code: 'poppler-missing' }]);
 
     expect(screen.getByText(/Poppler est introuvable/)).toHaveTextContent('brew install poppler');
+    // Le bouton à reprendre, nommé comme dans la modale : « relancez l'OCR »
+    // se confondait avec la case qui refait tout le corpus (revue de L06-10).
+    expect(screen.getByText(/Poppler est introuvable/)).toHaveTextContent(
+      "cliquez de nouveau sur « Lancer l'OCR » : les PDF en attente seront reconnus, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources »"
+    );
     expect(screen.queryByText(/voir la console/)).toBeNull();
     expect(showAlert).not.toHaveBeenCalled();
   });
@@ -109,5 +114,27 @@ describe('modale OCR : modèle de langue introuvable (L06-10, S08-1-29)', () => 
     expect(screen.queryByText(/voir la console/)).toBeNull();
     // La passe a rendu la main : le bouton est de nouveau libre.
     expect(screen.getByRole('button', { name: /Lancer l'OCR/ })).not.toBeDisabled();
+  });
+});
+
+// Revue de L06-10 : « Aucune transcription nouvelle. Les sources concernées en
+// avaient déjà une, ou la reconnaissance n'a rien produit d'exploitable. »
+// s'affichait au-dessus de l'avis, alors que la reconnaissance n'avait pas
+// tourné : deux explications fausses.
+describe('modale OCR : la reconnaissance n’a pas pu se faire', () => {
+  it.each([
+    ['modèle de langue introuvable', { code: 'ocr-language-unavailable', language: 'frk' }],
+    ['Poppler absent', { code: 'poppler-missing' }],
+  ])('%s : l’avis seul, sans « Aucune transcription nouvelle »', async (_label, issue) => {
+    await runWith([issue]);
+
+    expect(screen.queryByText(/Aucune transcription nouvelle/)).toBeNull();
+    expect(screen.getByText(/n'a pas pu démarrer|Poppler est introuvable/)).toBeInTheDocument();
+  });
+
+  it('une passe sans rien de neuf ni d’empêchement garde son explication', async () => {
+    await runWith([]);
+
+    expect(screen.getByText(/Aucune transcription nouvelle/)).toBeInTheDocument();
   });
 });

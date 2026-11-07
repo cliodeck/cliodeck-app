@@ -73,7 +73,10 @@ export type TropySyncIssue =
   | {
       /**
        * Poppler est absent : les PDF n'ont pas pu passer à l'OCR. Les items
-       * sont enregistrés, et leurs images, s'ils en ont, reconnues (#138).
+       * sont enregistrés, et leurs images, s'ils en ont, reconnues (#138) ;
+       * leur transcription reste « à reprendre » (`ocrPending`), et la passe
+       * OCR suivante, sans forcer, reconnaît leurs PDF. Une transcription
+       * complète déjà acquise n'est pas remplacée par ce texte partiel.
        */
       code: 'poppler-missing';
     }
@@ -270,6 +273,9 @@ export class TropySync {
       // pas relancé item après item : chaque tentative attendrait son délai et
       // laisserait un thread derrière elle.
       let ocrUnavailable = false;
+      // Poppler manque pour cette passe : une source qui l'attend n'en
+      // obtiendrait que le texte de ses images, qu'elle a déjà.
+      let popplerMissing = false;
 
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
@@ -288,7 +294,8 @@ export class TropySync {
           const processResult = await this.processItem(
             item,
             vectorStore,
-            ocrUnavailable ? { ...options, performOCR: false } : options
+            ocrUnavailable ? { ...options, performOCR: false } : options,
+            { popplerMissing }
           );
 
           if (processResult.isNew) {
@@ -307,6 +314,7 @@ export class TropySync {
           if (blocked) {
             if (!result.issues.some((issue) => issue.code === blocked.code)) result.issues.push(blocked);
             if (blocked.code === 'ocr-language-unavailable') ocrUnavailable = true;
+            if (blocked.code === 'poppler-missing') popplerMissing = true;
           }
         } catch (error) {
           // Le moteur arrêté sous la passe (changement de projet) : elle
@@ -353,7 +361,9 @@ export class TropySync {
   private async processItem(
     item: TropyItem,
     vectorStore: PrimarySourcesVectorStore,
-    options: TropySyncOptions
+    options: TropySyncOptions,
+    /** Ce que la passe sait déjà : Poppler manque. */
+    pass: { popplerMissing: boolean } = { popplerMissing: false }
   ): Promise<{
     isNew: boolean;
     isUpdated: boolean;
@@ -394,12 +404,18 @@ export class TropySync {
     // courte un commentaire, qui ne doit pas empêcher l'OCR.
     const notesAreTranscription = isNoteTranscription(notesText.length);
 
-    // Un corps acquis par une passe précédente. Une source 'tropy-notes'
+    // Un corps obtenu par une passe précédente. Une source 'tropy-notes'
     // n'en a pas : son texte se recalcule à partir des notes de Tropy.
     const existingBody =
       existingSource?.transcriptionSource !== 'tropy-notes'
         ? (existingSource?.transcription ?? '').trim()
         : '';
+    // Un corps partiel — les images d'un item dont les PDF attendaient
+    // Poppler — n'est pas acquis : il se garde, mais l'OCR suivant le reprend.
+    // Tenu pour acquis, il empêchait à jamais de reconnaître le PDF.
+    const existingPending = existingSource?.ocrPending ?? null;
+    const acquiredBody = existingPending ? '' : existingBody;
+    let ocrPending: 'poppler' | null = null;
 
     // 2. Chercher des transcriptions externes (Transkribus, etc.)
     if (options.transcriptionDirectory && (!notesAreTranscription || options.forceReindex)) {
@@ -426,16 +442,23 @@ export class TropySync {
     if (
       !transcription &&
       options.performOCR &&
-      (options.forceReindex || (existingBody.length === 0 && !notesAreTranscription))
+      (options.forceReindex || (acquiredBody.length === 0 && !notesAreTranscription)) &&
+      // Poppler toujours absent : la reprendre referait l'OCR de ses images
+      // pour le même texte partiel.
+      !(existingPending === 'poppler' && pass.popplerMissing)
     ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
       const { result: ocrResult, blocked } = await this.performOCROnItem(item, options.ocrLanguage);
       ocrBlocked = blocked;
-      if (ocrResult) {
+      // Un texte partiel ne remplace pas une transcription acquise : « Relancer
+      // l'OCR sur toutes les sources » sans Poppler y perdait le texte du PDF.
+      // Le cas est alors celui d'un OCR qui n'a pas pu se faire.
+      if (ocrResult && !(ocrResult.missingTool && acquiredBody)) {
         transcription = ocrResult.text;
         transcriptionSource = 'tesseract';
         ocrConfidence = ocrResult.confidence;
         ocrCount = ocrResult.photoCount;
+        ocrPending = ocrResult.missingTool ?? null;
       }
     }
 
@@ -449,6 +472,8 @@ export class TropySync {
       transcription = existingSource.transcription ?? '';
       transcriptionSource = existingSource.transcriptionSource;
       ocrConfidence = existingSource.ocrConfidence;
+      // Le corps gardé tel quel reste ce qu'il était : partiel ou acquis.
+      ocrPending = existingPending;
     } else if (!transcription && notesText) {
       transcription = this.reader.extractItemText(item);
       transcriptionSource = 'tropy-notes';
@@ -553,6 +578,10 @@ export class TropySync {
         }
 
         vectorStore.saveSource(sourceItem);
+        // `saveSource` n'y touche pas : la marque change avec le corps, ici.
+        if (ocrPending !== existingPending) {
+          vectorStore.setOcrPending(sourceItem.id, ocrPending);
+        }
 
         // Les chunks appartiennent au texte qu'ils découpent. La phase
         // d'embeddings ne traite que les sources sans chunk : sans cette
@@ -629,7 +658,8 @@ export class TropySync {
     item: TropyItem,
     language: string
   ): Promise<{
-    result: { text: string; photoCount: number; confidence: number } | null;
+    /** `missingTool` : le texte ne porte que les images, les PDF attendent Poppler. */
+    result: { text: string; photoCount: number; confidence: number; missingTool?: 'poppler' } | null;
     blocked?: OcrBlocked;
   }> {
     // Deduplicate paths - Tropy creates multiple photo entries for multi-page PDFs
@@ -654,6 +684,7 @@ export class TropySync {
             text: result.text,
             photoCount: photoPaths.length,
             confidence: result.confidence,
+            ...(result.missingTool ? { missingTool: result.missingTool } : {}),
           },
           blocked,
         };
