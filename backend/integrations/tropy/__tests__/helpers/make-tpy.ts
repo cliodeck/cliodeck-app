@@ -14,7 +14,8 @@
  *     `taggings.(tag_id, id)` : celles-là doivent exister telles quelles ;
  *  2. le schéma de projet de Tropy 1.17 tel qu'il est publié dans son dépôt
  *     (`db/schema/project.sql`) pour le reste : `project.(project_id, base)`,
- *     la table `trash` et ses raisons, la table `transcriptions` (Tropy ≥ 1.15),
+ *     la table `trash` et ses raisons, la table `transcriptions` (Tropy ≥ 1.15 ;
+ *     `text` et `status` sans NOT NULL, comme dans l'`app.asar` de la 1.17.3),
  *     les contraintes NOT NULL et les clés étrangères qui imposent un
  *     identifiant partagé par `subjects` (un item, une photo, une sélection
  *     sont tous des sujets ; une photo et une sélection sont aussi des images).
@@ -44,7 +45,8 @@ export interface TpyNoteSpec {
 }
 
 export interface TpyTranscriptionSpec {
-  text: string;
+  /** `null` : transcription sans texte (le schéma de Tropy 1.17.3 permet NULL). */
+  text: string | null;
   /** Statut Tropy : > 0 terminé, 0 en cours, < 0 en erreur. Défaut : 1. */
   status?: number;
   deleted?: boolean;
@@ -232,10 +234,10 @@ CREATE TABLE trash (
 CREATE TABLE transcriptions (
   transcription_id INTEGER PRIMARY KEY,
   id INTEGER NOT NULL REFERENCES images (id) ON DELETE CASCADE,
-  text TEXT NOT NULL DEFAULT '',
-  data TEXT,
+  text TEXT,
   config TEXT,
-  status INTEGER NOT NULL DEFAULT 0,
+  data TEXT,
+  status NUMERIC,
   created NUMERIC NOT NULL DEFAULT CURRENT_TIMESTAMP,
   modified NUMERIC NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted NUMERIC

@@ -22,7 +22,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
-import { makeTpy, type TpyItemSpec, type TpySpec } from './helpers/make-tpy';
+import { makeTpy, tpyDatabasePath, type TpyItemSpec, type TpySpec } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
 import { TropyOCRPipeline } from '../TropyOCRPipeline';
 
@@ -90,10 +90,17 @@ const OCR_TEXT = [
   'Je vous prie de bien vouloir me faire connaître les instructions du gouvernement à ce sujet.',
 ].join(' ');
 
+// Au moins 500 caractères : une vraie transcription au sens de la décision Q26
+// (en dessous, une note est un commentaire et l'OCR passe). Le jeu de base ne
+// doit pas dépendre de ce seuil, que L06-2 introduit.
 const NOTE_TEXT =
   'Transcription faite à la main dans Tropy : lettre du commissaire central au maire de Nantes, ' +
   'relative aux réunions publiques tenues salle Colbert pendant la semaine du 18 mars, ' +
-  'avec la liste des orateurs inscrits et le nombre approximatif des auditeurs présents.';
+  'avec la liste des orateurs inscrits et le nombre approximatif des auditeurs présents. ' +
+  'Le commissaire signale que la réunion du mardi a rassemblé près de huit cents personnes, ' +
+  'dont une majorité de dockers et de charretiers, et que les orateurs ont appelé à la grève générale ' +
+  'du port si la compagnie refusait la hausse demandée. Il ajoute que deux agents en civil ont pris ' +
+  'des notes pendant toute la séance et que leur rapport sera transmis au préfet dès le lendemain matin.';
 
 let root: string;
 let projectDir: string;
@@ -255,6 +262,33 @@ describe.skipIf(!sqliteAvailable)('makeTpy : un .tpy que TropyReader lit comme u
       reader.closeProject();
     }
   });
+
+  it('écrit une transcription native sans texte, comme le permet Tropy 1.17.3', () => {
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'p',
+      name: 'Transcriptions',
+      items: [
+        {
+          id: 1,
+          title: 'Pièce',
+          photos: [{ id: 2, path: photoPath, transcriptions: [{ text: null, status: 0 }, { text: 'lu', status: 1 }] }],
+        },
+      ],
+    });
+
+    const probe = new Database(tpyDatabasePath(tpy), { readonly: true });
+    try {
+      const rows = probe
+        .prepare('SELECT id, text, status FROM transcriptions ORDER BY transcription_id')
+        .all() as Array<{ id: number; text: string | null; status: number }>;
+      expect(rows).toEqual([
+        { id: 2, text: null, status: 0 },
+        { id: 2, text: 'lu', status: 1 },
+      ]);
+    } finally {
+      probe.close();
+    }
+  });
 });
 
 // MARK: - sync() de bout en bout
@@ -269,7 +303,8 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(first.errors).toEqual([]);
     expect(first.newItems).toBe(2);
     expect(first.transcriptionsWritten).toBe(2);
-    // L'item 20 a une note : pas d'OCR pour lui. Seul l'item 10 passe à la reconnaissance.
+    // L'item 20 a une transcription (note de 500 caractères ou plus) : pas d'OCR pour lui.
+    // Seul l'item 10 passe à la reconnaissance.
     expect(ocrSpy).toHaveBeenCalledTimes(1);
     expect(ocrSpy.mock.calls[0][0]).toEqual([photoPath]);
 
@@ -374,6 +409,22 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(chunks).toContain('carton 12');
   });
 
+  // L06-2 (décision Q26) : toute note, même un commentaire de quelques mots,
+  // tient lieu de transcription et empêche l'OCR. Sous 500 caractères, une note
+  // est un commentaire : l'OCR doit passer.
+  it.fails('une note de moins de 500 caractères n’empêche pas l’OCR (L06-2, Q26)', async () => {
+    const items = baseItems();
+    items[0] = { ...items[0], notes: [{ text: 'Voir aussi carton 12' }] };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    expect(ocrSpy).toHaveBeenCalledWith([photoPath], expect.anything());
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tesseract');
+    expect(s10?.transcription).toBe(OCR_TEXT);
+  });
+
   // L06-12 (S08-1-10) : la table `transcriptions` de Tropy n'est pas lue, la
   // photo repart à l'OCR.
   it.fails('une photo transcrite dans Tropy ne repart pas à l’OCR (L06-12, S08-1-10)', async () => {
@@ -386,7 +437,8 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     await tropyService.openProject(tpy);
     await tropyService.sync(syncOptions);
 
-    expect(ocrSpy).not.toHaveBeenCalled();
+    // Ciblé sur la photo de l'item 10 : l'item 20 ne doit pas peser sur ce rouge.
+    expect(ocrSpy).not.toHaveBeenCalledWith([photoPath], expect.anything());
     expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription).toContain('Monsieur Durand');
   });
 
@@ -398,7 +450,8 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     await tropyService.openProject(tpy);
     await tropyService.sync(syncOptions);
 
-    expect(ocrSpy).not.toHaveBeenCalled();
+    // Ciblé sur la photo de l'item 10 : l'item 20 ne doit pas peser sur ce rouge.
+    expect(ocrSpy).not.toHaveBeenCalledWith([photoPath], expect.anything());
     expect(snapshot().sources.map((s) => s.tropy_id)).toEqual([20]);
   });
 
