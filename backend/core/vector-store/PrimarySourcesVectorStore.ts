@@ -614,8 +614,17 @@ export class PrimarySourcesVectorStore {
    * ce qui masquait le problème. Une source réindexée sortait donc du RAG
    * en silence. Mesuré sur un projet réel : 46 chunks → 0 après une
    * simple resynchronisation.
+   *
+   * Tout ou rien : la ligne, ses photos et ses tags, dans une transaction.
+   * Une écriture interrompue après la ligne gardait la nouvelle
+   * transcription et sa date ; la passe suivante ne voyait plus rien à
+   * changer et les extraits de l'ancien texte restaient pour de bon (L06-5).
    */
   saveSource(source: PrimarySourceItem): string {
+    return this.db.transaction(() => this.writeSource(source))();
+  }
+
+  private writeSource(source: PrimarySourceItem): string {
     const id = source.id || randomUUID();
     const now = new Date().toISOString();
 
@@ -777,10 +786,23 @@ export class PrimarySourcesVectorStore {
     // Supprimer les photos existantes
     this.db.prepare('DELETE FROM tropy_photos WHERE source_id = ?').run(sourceId);
 
+    // L'id est celui de la photo dans Tropy, qui le garde quand il la déplace
+    // d'un item à l'autre (déplacement, fusion, scission) : encore rattachée
+    // en base à l'item qui l'a perdue, la photo change de source au lieu de
+    // lever UNIQUE. ON CONFLICT et non REPLACE, comme pour `tropy_sources`.
     const stmt = this.db.prepare(`
       INSERT INTO tropy_photos
       (id, source_id, path, filename, width, height, mimetype, has_transcription, transcription)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        source_id = excluded.source_id,
+        path = excluded.path,
+        filename = excluded.filename,
+        width = excluded.width,
+        height = excluded.height,
+        mimetype = excluded.mimetype,
+        has_transcription = excluded.has_transcription,
+        transcription = excluded.transcription
     `);
 
     for (const photo of photos) {
@@ -1020,6 +1042,16 @@ export class PrimarySourcesVectorStore {
    */
   deleteChunks(sourceId: string): void {
     this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
+  }
+
+  /**
+   * Exécute `fn` dans une transaction : tout ou rien. Synchrone, comme les
+   * transactions de better-sqlite3 (qui refusent une fonction rendant une
+   * promesse) : ni OCR, ni embeddings, ni lecture du .tpy à l'intérieur. Une
+   * transaction du magasin appelée dedans devient un point de sauvegarde.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   // MARK: - Hybrid Search (HNSW + BM25)

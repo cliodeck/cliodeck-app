@@ -22,7 +22,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
-import { makeTpy, tpyDatabasePath, type TpyItemSpec, type TpySpec } from './helpers/make-tpy';
+import {
+  makeTpy,
+  openTpyForWrite,
+  tpyDatabasePath,
+  type TpyItemSpec,
+  type TpySpec,
+} from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
 import { TropyOCRPipeline } from '../TropyOCRPipeline';
 
@@ -549,6 +555,78 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     const forced = snapshot().sources.find((s) => s.tropy_id === 10);
     expect(forced?.transcription_source).toBe('tesseract');
     expect(forced?.transcription).toBe(OCR_TEXT);
+  });
+
+  // L06-5 (S02-1-10) : Tropy garde l'id d'une photo qu'il déplace d'un item à
+  // l'autre (`UPDATE photos SET item_id`, pour un déplacement comme pour une
+  // fusion) et avance la date `modified` de l'item qui la reçoit. Réécrire
+  // celui-ci levait UNIQUE sur `tropy_photos.id` tant que la photo restait,
+  // en base, à la source qui l'a perdue.
+  function movePhoto(tpy: string, photoId: number, toItem: number, modified: number[]): void {
+    const db = openTpyForWrite(tpy);
+    try {
+      db.prepare('UPDATE photos SET item_id = ?, position = 99 WHERE id = ?').run(toItem, photoId);
+      const touch = db.prepare("UPDATE subjects SET modified = '2026-06-01T08:00:00.000Z' WHERE id = ?");
+      for (const id of modified) touch.run(id);
+    } finally {
+      db.close();
+    }
+  }
+
+  function photoOwners(): Array<{ photo: number; tropy_id: number }> {
+    const db = brainDb();
+    try {
+      return db
+        .prepare(
+          `SELECT p.id AS photo, s.tropy_id FROM tropy_photos p
+           JOIN tropy_sources s ON s.id = p.source_id ORDER BY p.id`
+        )
+        .all() as Array<{ photo: number; tropy_id: number }>;
+    } finally {
+      db.close();
+    }
+  }
+
+  it('une photo déplacée vers un item traité avant celui qui la perd change de source, sans erreur (L06-5)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    expect((await tropyService.sync(syncOptions)).errors).toEqual([]);
+    expect(photoOwners()).toEqual([
+      { photo: 11, tropy_id: 10 },
+      { photo: 21, tropy_id: 20 },
+    ]);
+
+    // La photo 21 passe de l'item 20 à l'item 10, lu le premier ; les deux
+    // items sont datés de la modification.
+    movePhoto(tpy, 21, 10, [10, 20]);
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.errors).toEqual([]);
+    expect(result.updatedItems).toBe(2);
+    expect(photoOwners()).toEqual([
+      { photo: 11, tropy_id: 10 },
+      { photo: 21, tropy_id: 10 },
+    ]);
+  });
+
+  it('une photo déplacée depuis un item que la passe ne réécrit pas change de source, sans erreur (L06-5)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    // Comme une fusion de l'item 10 dans l'item 20 : seul l'item qui reçoit
+    // la photo est daté de la modification ; l'item 10, inchangé pour la
+    // synchro, n'est pas réécrit et garde la photo en base.
+    movePhoto(tpy, 11, 20, [20]);
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.errors).toEqual([]);
+    expect(result.updatedItems).toBe(1);
+    expect(result.skippedItems).toBe(1);
+    expect(photoOwners()).toEqual([
+      { photo: 11, tropy_id: 20 },
+      { photo: 21, tropy_id: 20 },
+    ]);
   });
 
   // L06-12 (S08-1-10) : la table `transcriptions` de Tropy n'est pas lue, la

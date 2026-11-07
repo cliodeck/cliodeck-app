@@ -15,7 +15,10 @@ import os from 'os';
 import path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards.js';
 import { PrimarySourcesVectorStore } from '../PrimarySourcesVectorStore.js';
-import type { PrimarySourceItem } from '../../../integrations/tropy/TropyReader.js';
+import type {
+  PrimarySourceItem,
+  PrimarySourcePhoto,
+} from '../../../integrations/tropy/TropyReader.js';
 
 let tmp = '';
 let store: PrimarySourcesVectorStore;
@@ -33,6 +36,17 @@ function source(over: Partial<PrimarySourceItem> = {}): PrimarySourceItem {
     transcriptionSource: 'tesseract',
     lastModified: new Date('2026-05-06T13:13:22.394Z'),
     metadata: {},
+    ...over,
+  };
+}
+
+function photo(id: number, over: Partial<PrimarySourcePhoto> = {}): PrimarySourcePhoto {
+  return {
+    id,
+    path: `/archives/scan-${id}.jpg`,
+    filename: `scan-${id}.jpg`,
+    hasTranscription: false,
+    notes: [],
     ...over,
   };
 }
@@ -95,6 +109,87 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — sources', () =>
 
     store.saveSource(source({ id: 'src-2', tropyId: 306 }));
     expect(store.getSource('src-2')?.notesText).toBeUndefined();
+  });
+
+  // L06-5 (S02-1-10) : Tropy garde l'id d'une photo qu'il déplace d'un item à
+  // l'autre (déplacement, fusion, scission). L'INSERT simple levait UNIQUE sur
+  // `tropy_photos.id` tant que l'ancienne source n'avait pas été réécrite.
+  it('une photo qui change d’item change de source, sans erreur UNIQUE (L06-5)', () => {
+    store.saveSource(source({ id: 'src-B', tropyId: 8, photos: [photo(42)], tags: ['b'] }));
+    store.saveSource(source({ id: 'src-A', tropyId: 5, photos: [photo(7)], tags: ['old'] }));
+
+    // Fusion de B dans A : la photo 42 arrive avec sa note.
+    expect(() =>
+      store.saveSource(
+        source({
+          id: 'src-A',
+          tropyId: 5,
+          photos: [photo(7), photo(42, { hasTranscription: true, transcription: 'note de la page' })],
+          tags: ['new'],
+          transcription: 'texte A + B',
+        })
+      )
+    ).not.toThrow();
+
+    expect(store.getSourcePhotos('src-A').map((p) => p.id).sort((a, b) => a - b)).toEqual([7, 42]);
+    expect(store.getSourcePhotos('src-A').find((p) => p.id === 42)).toMatchObject({
+      hasTranscription: true,
+      transcription: 'note de la page',
+    });
+    expect(store.getSourcePhotos('src-B')).toEqual([]);
+    expect(store.getSourceTags('src-A')).toEqual(['new']);
+    expect(store.getSource('src-A')?.transcription).toBe('texte A + B');
+    // B garde sa ligne et ses tags : seule la photo a changé de main.
+    expect(store.getSourceTags('src-B')).toEqual(['b']);
+  });
+
+  it('une écriture qui échoue en chemin ne laisse rien de la nouvelle version (L06-5)', () => {
+    store.saveSource(
+      source({
+        photos: [photo(7)],
+        tags: ['old'],
+        transcription: 'ancien texte',
+      })
+    );
+    store.saveChunk(
+      {
+        id: 'chunk-1',
+        sourceId: 'src-1',
+        content: 'ancien texte',
+        chunkIndex: 0,
+        startPosition: 0,
+        endPosition: 12,
+      },
+      Float32Array.from(new Array(768).fill(0.01))
+    );
+
+    // Une vraie erreur SQLite au milieu de l'écriture : après la ligne et les
+    // photos, pendant les tags.
+    const db = (store as unknown as { db: import('better-sqlite3').Database }).db;
+    db.exec(`
+      CREATE TRIGGER refuse_tags BEFORE INSERT ON tropy_tags
+      BEGIN SELECT RAISE(ABORT, 'écriture des tags refusée'); END;
+    `);
+
+    expect(() =>
+      store.saveSource(
+        source({
+          photos: [photo(7), photo(8)],
+          tags: ['new'],
+          transcription: 'nouveau texte',
+          lastModified: new Date('2026-06-01T08:00:00.000Z'),
+        })
+      )
+    ).toThrow(/tags refusée/);
+
+    // Tout tel qu'avant : sinon la passe suivante prend la nouvelle
+    // transcription pour acquise et n'invalide jamais les extraits.
+    const saved = store.getSource('src-1');
+    expect(saved?.transcription).toBe('ancien texte');
+    expect(saved?.lastModified).toBe('2026-05-06T13:13:22.394Z');
+    expect(store.getSourcePhotos('src-1').map((p) => p.id)).toEqual([7]);
+    expect(store.getSourceTags('src-1')).toEqual(['old']);
+    expect(store.getChunks('src-1').map((c) => c.id)).toEqual(['chunk-1']);
   });
 });
 
