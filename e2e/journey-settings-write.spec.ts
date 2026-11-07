@@ -352,7 +352,7 @@ test('révoquer puis Sauvegarder : aucun masque dans le trousseau ni dans le fic
     await window.locator('.settings-modal').getByRole('button', { name: 'Expert', exact: true }).click();
     await window.locator('.security-revoke-btn').last().click();
     await window.locator('.confirm-dialog-btn-confirm').click();
-    await expect(window.locator('.settings-modal').getByText(/revoquee/)).toBeVisible();
+    await expect(window.locator('.settings-modal').getByText(/révoquée/)).toBeVisible();
     expect(await storedKeys(app, dir)).toEqual({});
     await expect(keyField).toHaveValue('');
 

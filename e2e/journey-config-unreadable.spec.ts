@@ -534,9 +534,9 @@ test.describe('project.json refuse une écriture demandée depuis un panneau', (
 
     await withApp(async (app, window) => {
       await openProject(app, window, project);
-      await window.getByText('Parametres Zotero').click();
+      await window.getByText('Paramètres Zotero').click();
       const group = window.getByPlaceholder("Entrez l'ID du groupe Zotero");
-      const collection = window.getByPlaceholder('Entrez la cle de collection (optionnel)');
+      const collection = window.getByPlaceholder('Entrez la clé de collection (optionnel)');
       await expect(collection).toHaveValue('AVANT');
       const save = window.locator('.config-section', { has: collection }).getByRole('button', { name: 'Enregistrer' });
 
