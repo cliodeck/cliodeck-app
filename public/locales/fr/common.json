@@ -662,7 +662,8 @@
       "renamedKeys": "{{count}} clé(s) de citation invalide(s) ou en double ont été refaites — vérifiez-les dans votre texte :",
       "localKept": "{{count}} référence(s) sans lien avec Zotero ont été conservées telles quelles.",
       "more": "… et {{count}} autre(s)",
-      "error": "La synchronisation a échoué : {{error}}"
+      "error": "La synchronisation a échoué : {{error}}",
+      "projectChanged": "Un autre projet a été ouvert pendant la synchronisation : rien n'a été écrit. Relancez « Synchroniser avec Zotero » dans le projet voulu."
     }
   },
   "suggestions": {

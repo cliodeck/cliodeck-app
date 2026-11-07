@@ -388,8 +388,9 @@ export const ProjectPanel: React.FC = () => {
               </CollapsibleSection>
             )}
 
-            {/* Zotero Project Settings */}
-            <ZoteroProjectSettings projectPath={currentProject.path} />
+            {/* Zotero Project Settings — remontés à chaque projet : rien du précédent (champs,
+                message « Enregistré » ou refus) ne s'affiche dans le suivant. */}
+            <ZoteroProjectSettings key={currentProject.path} projectPath={currentProject.path} />
 
             {/* Database Actions - project-specific */}
             <ActionsSection />

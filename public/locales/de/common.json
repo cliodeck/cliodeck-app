@@ -662,7 +662,8 @@
       "renamedKeys": "{{count}} ungültige oder doppelte Zitierschlüssel wurden neu erzeugt – prüfen Sie sie in Ihrem Text:",
       "localKept": "{{count}} Referenz(en) ohne Zotero-Verknüpfung wurden unverändert beibehalten.",
       "more": "… und {{count}} weitere",
-      "error": "Synchronisierung fehlgeschlagen: {{error}}"
+      "error": "Synchronisierung fehlgeschlagen: {{error}}",
+      "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut."
     }
   },
   "suggestions": {

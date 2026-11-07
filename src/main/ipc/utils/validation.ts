@@ -124,7 +124,17 @@ export const ZoteroListCollectionsSchema = z.discriminatedUnion('mode', [
   }),
 ]);
 
-/** Synchronisation de la bibliographie du projet avec sa collection Zotero. */
+/** L'accord donné sur un rapport de synchronisation : ce que l'auteur a lu, rien de plus. */
+const ZoteroSyncConfirmationSchema = z.object({
+  collectionKey: z.string().min(1),
+  collectionChange: z.object({ from: z.string(), to: z.string() }).nullable(),
+  deletedKeys: z.array(z.string().min(1)),
+});
+
+/**
+ * Synchronisation de la bibliographie du projet avec sa collection Zotero. Le projet attendu est
+ * celui où l'on a cliqué : le main refuse s'il en a ouvert un autre depuis.
+ */
 export const ZoteroSynchronizeSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('api'),
@@ -132,14 +142,16 @@ export const ZoteroSynchronizeSchema = z.discriminatedUnion('mode', [
     apiKey: z.string().min(1),
     groupId: z.string().optional(),
     collectionKey: z.string().min(1),
-    confirmed: z.boolean().optional(),
+    expectedProjectPath: z.string().min(1),
+    confirmation: ZoteroSyncConfirmationSchema.optional(),
   }),
   z.object({
     mode: z.literal('local'),
     dataDirectory: z.string().min(1),
     libraryID: z.number().optional(),
     collectionKey: z.string().min(1),
-    confirmed: z.boolean().optional(),
+    expectedProjectPath: z.string().min(1),
+    confirmation: ZoteroSyncConfirmationSchema.optional(),
   }),
 ]);
 

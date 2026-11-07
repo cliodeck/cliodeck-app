@@ -198,4 +198,25 @@ describe('seul ce que l’auteur a changé part', () => {
 
     expect(screen.getByPlaceholderText('project.zoteroCollectionKeyPlaceholder')).toHaveValue('');
   });
+
+  it('la lecture de A répond après l’ouverture de B : B garde ses champs vides, et Enregistrer n’y écrit rien de A', async () => {
+    // S17-1-7 : une réponse arrivée en retard s'affichait dans B, qui pouvait la croire sienne.
+    let answerA: (value: unknown) => void = () => undefined;
+    getConfig.mockReturnValueOnce(new Promise((resolve) => (answerA = resolve)));
+    const { rerender } = await mount('api', null);
+    getConfig.mockResolvedValue({ name: 'Sans Zotero' });
+
+    await act(async () => {
+      rerender(<ZoteroProjectSettings projectPath="/p/autre" />);
+    });
+    await act(async () => {
+      answerA({ zotero: { groupId: '1', collectionKey: 'X' } });
+    });
+
+    expect(screen.getByPlaceholderText('project.zoteroCollectionKeyPlaceholder')).toHaveValue('');
+    expect(screen.getByPlaceholderText('project.zoteroGroupIdPlaceholder')).toHaveValue('');
+    await type('project.zoteroGroupIdPlaceholder', '7');
+    await save();
+    expect(updateConfig).toHaveBeenLastCalledWith('/p/autre/project.json', { zotero: { groupId: '7' } });
+  });
 });

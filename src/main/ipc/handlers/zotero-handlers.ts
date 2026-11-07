@@ -17,6 +17,8 @@ import {
   ZoteroSynchronizeSchema,
 } from '../utils/validation.js';
 import { projectManager } from '../../services/project-manager.js';
+import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
+import type { SyncConfirmation } from '../../../../backend/integrations/zotero/ZoteroSynchronizer.js';
 
 /**
  * The renderer only ever receives masked API keys (config:get redaction), so
@@ -102,21 +104,36 @@ export function setupZoteroHandlers() {
   });
 
   ipcMain.handle('zotero:synchronize', async (_event, rawOptions: unknown) => {
-    const options = withResolvedZoteroApiKey(validate(ZoteroSynchronizeSchema, rawOptions));
+    const { expectedProjectPath, ...options } = withResolvedZoteroApiKey(
+      validate(ZoteroSynchronizeSchema, rawOptions)
+    );
     // Le projet vient du processus principal, jamais du renderer : c'est
-    // lui qu'on va réécrire.
+    // lui qu'on va réécrire. Lu une fois, avant tout `await`.
     const projectPath = projectManager.getCurrentProjectPath();
     if (!projectPath) {
       return errorResponse(new Error('Aucun projet ouvert.'));
     }
+    // Le renderer dit où l'on a cliqué : un accord donné dans A ne vaut pas pour B, ouvert
+    // pendant la lecture de la collection (S07-1-0). Même fichier, pas même chaîne : un lien ou
+    // `/private/var` ne doivent pas faire abandonner une synchronisation légitime.
+    if (!sameFile(projectPath, expectedProjectPath)) {
+      console.warn('⚠️ zotero:synchronize refusé : le projet a changé depuis la demande');
+      return errorResponse('project-changed');
+    }
     console.log('📞 IPC Call: zotero:synchronize', {
       mode: options.mode,
       collectionKey: options.collectionKey,
-      confirmed: options.confirmed === true,
+      confirmedDeletions: options.confirmation ? options.confirmation.deletedKeys.length : null,
     });
     try {
       const vectorStoreBefore = pdfService.getVectorStore();
-      const result = await zoteroService.synchronizeProject({ ...options, projectPath } as any);
+      const result = await zoteroService.synchronizeProject({
+        ...options,
+        projectPath,
+        // Le schéma exige `collectionChange` (nullable, pas optionnel) ; sans `strictNullChecks`,
+        // le type que zod en déduit la dit optionnelle.
+        confirmation: options.confirmation as SyncConfirmation | undefined,
+      });
 
       // Relier les documents indexés à leurs collections Zotero.
       if (result.success && result.status === 'applied') {

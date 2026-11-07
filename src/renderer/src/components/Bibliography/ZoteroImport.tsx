@@ -21,12 +21,18 @@ interface SyncReport {
   collectionChange: { from: string; to: string } | null;
   added: SyncEntry[];
   modified: Array<SyncEntry & { fields: string[] }>;
-  deleted: SyncEntry[];
+  deleted: Array<SyncEntry & { zoteroKey: string }>;
   unchangedCount: number;
   localOnlyCount: number;
   renamedKeys: Array<{ from: string; to: string; title: string }>;
   duplicates: Array<{ title: string; keys: string[] }>;
   warnings: Array<{ kind: string; expected: number; written: number }>;
+  /** L'accord à renvoyer : il ne vaut que pour ce rapport. */
+  confirmation: {
+    collectionKey: string;
+    collectionChange: { from: string; to: string } | null;
+    deletedKeys: string[];
+  };
 }
 
 interface ZoteroLibraryInfo {
@@ -34,6 +40,27 @@ interface ZoteroLibraryInfo {
   type: 'user' | 'group';
   name: string;
   groupID?: number;
+}
+
+type ProjectStoreState = ReturnType<typeof useProjectStore.getState>;
+
+/**
+ * Encore dans le projet `path` ? Pendant l'ouverture d'un autre projet, le main l'a parfois déjà
+ * pris (il initialise ses services) alors que l'écran montre encore `path` : on attend l'issue.
+ * Une ouverture refusée laisse `path` ouvert, et la réponse est oui.
+ */
+async function stillIn(path: string): Promise<boolean> {
+  const leaving = (state: ProjectStoreState) => state.loadState.kind === 'loading' && state.loadState.path !== path;
+  if (leaving(useProjectStore.getState())) {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = useProjectStore.subscribe((state) => {
+        if (leaving(state)) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+  }
+  return useProjectStore.getState().currentProject?.path === path;
 }
 
 export const ZoteroImport: React.FC = () => {
@@ -72,22 +99,34 @@ export const ZoteroImport: React.FC = () => {
     return { ...base, ...extra };
   };
 
-  // Load config on mount and when project changes
+  const currentPath = currentProject?.path;
+
+  // À chaque projet, pas à chaque nouvel objet du même projet : ce qui a été chargé pour le
+  // précédent (listes, réglages relus en retard) ne sert pas au suivant (S18-2-9).
   useEffect(() => {
-    loadZoteroConfig();
-  }, [currentProject]);
+    setCollections([]);
+    setLibraries([]);
+    let current = true;
+    loadZoteroConfig(currentPath, () => current);
+    return () => {
+      current = false;
+    };
+  }, [currentPath]);
 
   // Load libraries when in local mode and configured
   useEffect(() => {
-    if (zoteroMode === 'local' && dataDirectory) {
-      loadLibraries(dataDirectory);
-    }
-  }, [zoteroMode, dataDirectory]);
+    if (zoteroMode !== 'local' || !dataDirectory) return undefined;
+    let current = true;
+    loadLibraries(dataDirectory, () => current);
+    return () => {
+      current = false;
+    };
+  }, [zoteroMode, dataDirectory, currentPath]);
 
-  const loadLibraries = async (dir: string) => {
+  const loadLibraries = async (dir: string, isCurrent: () => boolean) => {
     try {
       const result = await window.electron.zotero.listLibraries(dir);
-      if (result.success && result.libraries) {
+      if (isCurrent() && result.success && result.libraries) {
         setLibraries(result.libraries);
       }
     } catch (error) {
@@ -95,10 +134,11 @@ export const ZoteroImport: React.FC = () => {
     }
   };
 
-  const loadZoteroConfig = async () => {
+  const loadZoteroConfig = async (path: string | undefined, isCurrent: () => boolean) => {
     try {
       // Load global Zotero config
       const globalConfig = await window.electron.config.get('zotero');
+      if (!isCurrent()) return;
       if (globalConfig) {
         const mode = globalConfig.mode || 'api';
         setZoteroMode(mode);
@@ -108,9 +148,10 @@ export const ZoteroImport: React.FC = () => {
       }
 
       // Load project-specific Zotero config
-      if (currentProject?.path) {
-        const projectFilePath = `${currentProject.path}/project.json`;
+      if (path) {
+        const projectFilePath = `${path}/project.json`;
         const projectConfig = await window.electron.project.getConfig(projectFilePath);
+        if (!isCurrent()) return;
 
         if (projectConfig?.zotero?.groupId) {
           setGroupId(projectConfig.zotero.groupId);
@@ -273,7 +314,14 @@ export const ZoteroImport: React.FC = () => {
    * collection, selon l'état du projet — c'est le processus principal qui
    * en décide, en lisant le fichier du projet. Rien de destructeur sans
    * accord : s'il faut retirer des références ou changer de collection, on
-   * demande d'abord.
+   * demande d'abord, et l'accord renvoyé est celui du rapport lu.
+   *
+   * La synchronisation appartient au projet où l'on a cliqué. Ouvrir un autre
+   * projet démonte ce panneau sans arrêter cette fonction : après chaque
+   * attente, si le projet a changé, elle s'arrête sans rien montrer ni
+   * recharger dans le nouveau (S07-1-7). Une ouverture encore en cours se
+   * laisse finir d'abord : le main a pu prendre le nouveau projet avant
+   * l'écran, et une boîte ouverte dans cette fenêtre resterait sur lui.
    */
   const handleSynchronize = async () => {
     if (!isConfigured) {
@@ -289,22 +337,30 @@ export const ZoteroImport: React.FC = () => {
       return;
     }
 
+    const projectPath = currentProject.path;
+    const stillInProject = () => stillIn(projectPath);
+    const request = buildOptions({ collectionKey: selectedCollection, expectedProjectPath: projectPath });
+
     setIsSyncing(true);
     try {
-      let result = await window.electron.zotero.synchronize(
-        buildOptions({ collectionKey: selectedCollection })
-      );
+      let result = await window.electron.zotero.synchronize(request);
+      if (!(await stillInProject())) return;
 
-      if (result.success && result.status === 'needs-confirmation' && result.report) {
+      // Un nouveau rapport après l'accord (Zotero a changé pendant la lecture) se relit.
+      while (result.success && result.status === 'needs-confirmation' && result.report) {
+        const report = result.report as SyncReport;
         const confirmed = await useDialogStore
           .getState()
-          .showConfirm(describeConfirmation(result.report as SyncReport), t('zotero.sync.confirmTitle'));
-        if (!confirmed) return;
-        result = await window.electron.zotero.synchronize(
-          buildOptions({ collectionKey: selectedCollection, confirmed: true })
-        );
+          .showConfirm(describeConfirmation(report), t('zotero.sync.confirmTitle'));
+        if (!confirmed || !(await stillInProject())) return;
+        result = await window.electron.zotero.synchronize({ ...request, confirmation: report.confirmation });
+        if (!(await stillInProject())) return;
       }
 
+      if (!result.success && result.error === 'project-changed') {
+        await useDialogStore.getState().showAlert(t('zotero.sync.projectChanged'));
+        return;
+      }
       if (!result.success || result.status !== 'applied' || !result.report) {
         await useDialogStore
           .getState()
@@ -316,12 +372,14 @@ export const ZoteroImport: React.FC = () => {
       if (result.bibtexPath) {
         await useBibliographyStore
           .getState()
-          .loadBibliographyWithMetadata(result.bibtexPath, currentProject.path);
+          .loadBibliographyWithMetadata(result.bibtexPath, projectPath);
+        if (!(await stillInProject())) return;
       }
 
       await useDialogStore.getState().showAlert(describeOutcome(result.report as SyncReport));
     } catch (error) {
       console.error('Zotero synchronization failed:', error);
+      if (!(await stillInProject())) return;
       await useDialogStore.getState().showAlert(t('zotero.import.genericError'));
     } finally {
       setIsSyncing(false);

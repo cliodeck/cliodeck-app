@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { IZoteroDataSource } from '../IZoteroDataSource';
 import type { ZoteroAttachment, ZoteroCollection, ZoteroItem } from '../ZoteroAPI';
-import { ZoteroSynchronizer, type SynchronizeResult } from '../ZoteroSynchronizer';
+import { ZoteroSynchronizer, type SyncReport, type SynchronizeResult } from '../ZoteroSynchronizer';
 import { BibTeXParser } from '../../../core/bibliography/BibTeXParser';
 import { createCitation, type Citation } from '../../../types/citation';
 
@@ -89,6 +89,9 @@ const applied = (result: SynchronizeResult) => {
   if (result.status !== 'applied') throw new Error(`attendu « applied », reçu « ${result.status} »`);
   return result;
 };
+
+/** L'accord de l'auteur, donné sur le rapport qu'il a lu. */
+const approve = (report: SyncReport) => ({ confirmation: report.confirmation });
 
 describe('premier import', () => {
   it('ajoute toute la collection sans rien demander', async () => {
@@ -204,10 +207,11 @@ describe('ce qui demande confirmation', () => {
     library.contents.ARTICLE.pop();
     const asked = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' });
     expect(asked.status).toBe('needs-confirmation');
-    expect(asked.report.deleted).toEqual([{ id: 'Martin_2022', title: 'Retirée' }]);
+    expect(asked.report.deleted).toEqual([{ id: 'Martin_2022', title: 'Retirée', zoteroKey: 'BBB' }]);
+    expect(asked.report.confirmation).toEqual({ collectionKey: 'ARTICLE', collectionChange: null, deletedKeys: ['BBB'] });
 
     const confirmed = applied(
-      await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE', confirmed: true })
+      await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE', ...approve(asked.report) })
     );
     expect(reread(confirmed).map((c) => c.zoteroKey)).toEqual(['AAA']);
   });
@@ -217,15 +221,163 @@ describe('ce qui demande confirmation', () => {
       collections: [collection('ANCIENNE'), collection('NOUVELLE')],
       contents: { ANCIENNE: [], NOUVELLE: [item('AAA', { title: 'T' })] },
     };
+    const sync = new ZoteroSynchronizer(source(library));
+    const input = { local: [], collectionKey: 'NOUVELLE', savedCollectionKey: 'ANCIENNE' };
 
-    const result = await new ZoteroSynchronizer(source(library)).synchronize({
-      local: [],
-      collectionKey: 'NOUVELLE',
-      savedCollectionKey: 'ANCIENNE',
-    });
+    const result = await sync.synchronize(input);
 
     expect(result.status).toBe('needs-confirmation');
     expect(result.report.collectionChange).toEqual({ from: 'ANCIENNE', to: 'NOUVELLE' });
+    expect(applied(await sync.synchronize({ ...input, ...approve(result.report) })).report.added).toHaveLength(1);
+  });
+});
+
+/**
+ * L'accord vaut pour le rapport que l'auteur a lu, pas pour ce que Zotero contient au
+ * moment du second appel : un booléen global laissait passer une suppression que la boîte
+ * n'avait jamais montrée (S07-1-0).
+ */
+describe('un accord ne couvre que le rapport lu', () => {
+  const threeItems = (): Library => ({
+    collections: [collection('ARTICLE'), collection('AUTRE')],
+    contents: {
+      ARTICLE: [
+        item('AAA', { title: 'Garde', lastName: 'Dupont' }),
+        item('BBB', { title: 'Retirée', lastName: 'Martin' }),
+        item('CCC', { title: 'Retirée pendant la lecture', lastName: 'Durand' }),
+      ],
+      AUTRE: [item('DDD', { title: 'Autre', lastName: 'Petit' })],
+    },
+  });
+
+  async function firstImport(library: Library) {
+    const sync = new ZoteroSynchronizer(source(library));
+    const local = reread(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    return { sync, local };
+  }
+
+  it('Zotero retire une autre notice pendant la lecture : la suppression nouvelle redemande l’accord', async () => {
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    const input = { local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' };
+
+    library.contents.ARTICLE = library.contents.ARTICLE.filter((i) => i.key !== 'BBB');
+    const asked = await sync.synchronize(input);
+    expect(asked.report.deleted.map((d) => d.zoteroKey)).toEqual(['BBB']);
+
+    library.contents.ARTICLE = library.contents.ARTICLE.filter((i) => i.key !== 'CCC');
+    const again = await sync.synchronize({ ...input, ...approve(asked.report) });
+
+    expect(again.status).toBe('needs-confirmation');
+    expect(again.report.deleted).toEqual(
+      expect.arrayContaining([expect.objectContaining({ zoteroKey: 'CCC', title: 'Retirée pendant la lecture' })])
+    );
+    expect(again.report.confirmation.deletedKeys).toEqual(expect.arrayContaining(['BBB', 'CCC']));
+
+    // Le nouveau rapport, lu et accepté à son tour, s'applique.
+    const done = applied(await sync.synchronize({ ...input, ...approve(again.report) }));
+    expect(reread(done).map((c) => c.zoteroKey)).toEqual(['AAA']);
+  });
+
+  it('une autre collection que celle du rapport : nouvel accord', async () => {
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    const asked = await sync.synchronize({ local, collectionKey: 'AUTRE', savedCollectionKey: 'ARTICLE' });
+    expect(asked.report.confirmation.collectionChange).toEqual({ from: 'ARTICLE', to: 'AUTRE' });
+
+    // L'accord porte sur AUTRE ; la demande, sur une troisième collection.
+    library.collections.push(collection('TROISIEME'));
+    library.contents.TROISIEME = [item('EEE', { title: 'Troisième', lastName: 'Leroy' })];
+    const elsewhere = await sync.synchronize({
+      local,
+      collectionKey: 'TROISIEME',
+      savedCollectionKey: 'ARTICLE',
+      ...approve(asked.report),
+    });
+
+    expect(elsewhere.status).toBe('needs-confirmation');
+    expect(elsewhere.report.collectionChange).toEqual({ from: 'ARTICLE', to: 'TROISIEME' });
+  });
+
+  it('un projet qui suivait une autre collection que celle du rapport : nouvel accord', async () => {
+    // Le cas du projet B confirmé avec le rapport de A : même collection visée, mais B en
+    // suivait une autre, et ses entrées liées à Zotero partiraient toutes.
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    library.contents.ARTICLE.pop();
+    const askedInA = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' });
+    expect(askedInA.report.confirmation.collectionChange).toBeNull();
+
+    const projectB = reread(await sync.synchronize({ local: [], collectionKey: 'AUTRE' }));
+    const inB = await sync.synchronize({
+      local: projectB,
+      collectionKey: 'ARTICLE',
+      savedCollectionKey: 'AUTRE',
+      ...approve(askedInA.report),
+    });
+
+    expect(inB.status).toBe('needs-confirmation');
+    expect(inB.report.deleted.map((d) => d.zoteroKey)).toEqual(['DDD']);
+  });
+
+  it('une autre collection enregistrée pendant la lecture, mêmes suppressions : nouvel accord', async () => {
+    // L'historien enregistre une autre collection dans les Paramètres Zotero du projet pendant
+    // que la boîte est ouverte. Même collection visée, mêmes suppressions, mais la boîte ne
+    // montrait aucun changement de collection : l'appliquer écraserait ce qu'il vient d'enregistrer.
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    library.contents.ARTICLE.pop();
+    const asked = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' });
+    expect(asked.report.confirmation).toEqual({ collectionKey: 'ARTICLE', collectionChange: null, deletedKeys: ['CCC'] });
+
+    const again = await sync.synchronize({
+      local,
+      collectionKey: 'ARTICLE',
+      savedCollectionKey: 'AUTRE',
+      ...approve(asked.report),
+    });
+
+    expect(again.status).toBe('needs-confirmation');
+    expect(again.report.confirmation).toEqual({
+      collectionKey: 'ARTICLE',
+      collectionChange: { from: 'AUTRE', to: 'ARTICLE' },
+      deletedKeys: ['CCC'],
+    });
+  });
+
+  it('le changement de collection lu ne partait pas de la même collection : nouvel accord', async () => {
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    const asked = await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'AUTRE' });
+    expect(asked.report.confirmation).toEqual({
+      collectionKey: 'ARTICLE',
+      collectionChange: { from: 'AUTRE', to: 'ARTICLE' },
+      deletedKeys: [],
+    });
+
+    const again = await sync.synchronize({
+      local,
+      collectionKey: 'ARTICLE',
+      savedCollectionKey: 'TROISIEME',
+      ...approve(asked.report),
+    });
+
+    expect(again.status).toBe('needs-confirmation');
+    expect(again.report.collectionChange).toEqual({ from: 'TROISIEME', to: 'ARTICLE' });
+  });
+
+  it('témoin : une notice du rapport revenue dans la collection, l’accord vaut encore', async () => {
+    const library = threeItems();
+    const { sync, local } = await firstImport(library);
+    const input = { local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' };
+    const removed = library.contents.ARTICLE.pop()!;
+    const asked = await sync.synchronize(input);
+
+    library.contents.ARTICLE.push(removed);
+    const done = applied(await sync.synchronize({ ...input, ...approve(asked.report) }));
+
+    expect(done.report.deleted).toEqual([]);
+    expect(reread(done)).toHaveLength(3);
   });
 });
 

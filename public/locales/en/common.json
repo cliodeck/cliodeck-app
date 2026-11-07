@@ -662,7 +662,8 @@
       "renamedKeys": "{{count}} invalid or duplicate citation key(s) were regenerated — check them in your text:",
       "localKept": "{{count}} reference(s) not linked to Zotero were kept as they are.",
       "more": "… and {{count}} more",
-      "error": "Synchronization failed: {{error}}"
+      "error": "Synchronization failed: {{error}}",
+      "projectChanged": "Another project was opened during the synchronization: nothing was written. Run “Sync with Zotero” again in the project you want."
     }
   },
   "suggestions": {
