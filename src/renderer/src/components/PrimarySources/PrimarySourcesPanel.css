@@ -119,6 +119,25 @@
   font-size: 12px;
 }
 
+/* Sources enregistrées mais pas encore indexées (L06-7) : un avis qui reste
+   jusqu'à la synchro suivante, pas une alerte. */
+.sync-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sync-notice svg {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
 .tropy-project-info .project-name {
   font-weight: 500;
   color: var(--text-primary);

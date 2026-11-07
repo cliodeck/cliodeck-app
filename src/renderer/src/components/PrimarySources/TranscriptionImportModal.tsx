@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, FileText, Upload, FolderOpen, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, FileText, Upload, FolderOpen, CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
+import { describeNotIndexed, describeNotSaved, describeSyncIssue, isSyncRefusal } from './sync-issues';
 import './TranscriptionImportModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -12,6 +13,8 @@ interface TranscriptionImportModalProps {
 }
 
 type ImportMode = 'single' | 'directory';
+/** 'warning' : écrite mais pas encore indexée — ni un succès, ni un échec. */
+type ResultTone = 'success' | 'warning' | 'error';
 type TranscriptionFormat = 'transkribus' | 'alto' | 'page-xml' | 'plain-text' | 'auto';
 
 export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> = ({
@@ -27,7 +30,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
   const [importMode, setImportMode] = useState<ImportMode>('single');
   const [selectedFormat, setSelectedFormat] = useState<TranscriptionFormat>('auto');
   const [isImporting, setIsImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(
+  const [importResult, setImportResult] = useState<{ tone: ResultTone; message: string } | null>(
     null
   );
 
@@ -36,7 +39,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
   const handleSingleFileImport = async () => {
     if (!selectedSourceId) {
       setImportResult({
-        success: false,
+        tone: 'error',
         message: t('primarySources.selectSourceFirst', 'Please select a source first'),
       });
       return;
@@ -55,14 +58,20 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
         setIsImporting(true);
         const importResult = await importTranscription(selectedSourceId, result.filePaths[0]);
 
-        if (importResult.success) {
+        if (importResult.success && importResult.notIndexed) {
+          // Enregistrée, mais l'assistant ne la cite pas encore : pas « importée ».
+          setImportResult({ tone: 'warning', message: describeNotIndexed(t, importResult.notIndexed) });
+        } else if (importResult.success) {
           setImportResult({
-            success: true,
+            tone: 'success',
             message: t('primarySources.importSuccess', 'Transcription imported successfully'),
           });
+        } else if (importResult.code) {
+          // Fichier lu, transcription non écrite.
+          setImportResult({ tone: 'error', message: describeNotSaved(t, importResult.code) });
         } else {
           setImportResult({
-            success: false,
+            tone: 'error',
             message: importResult.error || t('primarySources.importFailed', 'Import failed'),
           });
         }
@@ -70,7 +79,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
       }
     } catch (error: unknown) {
       setImportResult({
-        success: false,
+        tone: 'error',
         message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
@@ -95,17 +104,22 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
           forceReindex: true,
         });
 
+        // Des sources importées mais pas encore indexées : le bilan le dit.
+        const pendingIndexing = (syncResult.issues ?? []).filter((issue) => !isSyncRefusal(issue));
         if (syncResult.success) {
           setImportResult({
-            success: true,
-            message: t(
-              'primarySources.batchImportSuccess',
-              `Imported transcriptions for ${syncResult.newItems || 0} sources`
-            ),
+            tone: pendingIndexing.length > 0 ? 'warning' : 'success',
+            message: [
+              t(
+                'primarySources.batchImportSuccess',
+                `Imported transcriptions for ${syncResult.newItems || 0} sources`
+              ),
+              ...pendingIndexing.map((issue) => describeSyncIssue(t, issue)),
+            ].join(' '),
           });
         } else {
           setImportResult({
-            success: false,
+            tone: 'error',
             message: syncResult.errors?.join(', ') || t('primarySources.importFailed', 'Import failed'),
           });
         }
@@ -113,7 +127,7 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
       }
     } catch (error: unknown) {
       setImportResult({
-        success: false,
+        tone: 'error',
         message: error instanceof Error ? error.message : t('primarySources.importFailed', 'Import failed'),
       });
       setIsImporting(false);
@@ -213,9 +227,11 @@ export const TranscriptionImportModal: React.FC<TranscriptionImportModalProps> =
 
           {/* Result Message */}
           {importResult && (
-            <div className={`import-result ${importResult.success ? 'success' : 'error'}`}>
-              {importResult.success ? (
+            <div className={`import-result ${importResult.tone}`}>
+              {importResult.tone === 'success' ? (
                 <CheckCircle size={16} strokeWidth={1} />
+              ) : importResult.tone === 'warning' ? (
+                <AlertTriangle size={16} strokeWidth={1} />
               ) : (
                 <AlertCircle size={16} strokeWidth={1} />
               )}

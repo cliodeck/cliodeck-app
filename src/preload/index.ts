@@ -856,11 +856,13 @@ const api = {
     getSource: (sourceId: string) => ipcRenderer.invoke('tropy:get-source', sourceId),
     getSourcePhotos: (sourceId: string) =>
       ipcRenderer.invoke('tropy:get-source-photos', sourceId),
+    // `confidence` : celle de Tesseract, pour un OCR manuel ; sans objet sinon.
     updateTranscription: (
       sourceId: string,
       transcription: string,
-      source: 'tesseract' | 'transkribus' | 'manual'
-    ) => ipcRenderer.invoke('tropy:update-transcription', sourceId, transcription, source),
+      source: 'tesseract' | 'transkribus' | 'manual' | 'imported',
+      confidence?: number
+    ) => ipcRenderer.invoke('tropy:update-transcription', sourceId, transcription, source, confidence),
 
     // Statistics
     getStatistics: () => ipcRenderer.invoke('tropy:get-statistics'),

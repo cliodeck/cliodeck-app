@@ -8,6 +8,7 @@ import {
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
 import { isNoteTranscription } from './note-transcription';
+import { transcriptionSourceOfFormat } from './transcription-provenance';
 import { assessTropyBinding } from './tropy-project-identity';
 import {
   PrimarySourcesVectorStore,
@@ -40,14 +41,29 @@ export interface TropySyncOptions {
  * (`describeSyncIssue`, `sync-issues.ts`). `errors` garde le texte technique,
  * pour la console.
  */
-export type TropySyncIssue = {
-  /** Le projet ouvert n'est pas le projet Tropy lié, qui a déjà des sources (Q25). */
-  code: 'different-project';
-  /** Nom du projet lié ; '' si des sources existent sans projet enregistré. */
-  linkedName: string;
-  candidateName: string;
-  sourceCount: number;
-};
+export type TropySyncIssue =
+  | {
+      /** Le projet ouvert n'est pas le projet Tropy lié, qui a déjà des sources (Q25). */
+      code: 'different-project';
+      /** Nom du projet lié ; '' si des sources existent sans projet enregistré. */
+      linkedName: string;
+      candidateName: string;
+      sourceCount: number;
+    }
+  | {
+      /**
+       * Des sources enregistrées n'ont pas pu être embarquées (fournisseur en
+       * panne, Ollama arrêté) : elles restent sans extrait, et la synchro
+       * suivante les reprend. Un état qui peut durer, pas un refus.
+       */
+      code: 'embedding-failed';
+      sources: number;
+    }
+  | {
+      /** Aucun fournisseur d'embeddings : `sources` sources attendent leurs extraits. */
+      code: 'no-embedding-provider';
+      sources: number;
+    };
 
 export interface TropySyncResult {
   success: boolean;
@@ -76,6 +92,23 @@ export interface TropySyncProgress {
 }
 
 export type TropySyncProgressCallback = (progress: TropySyncProgress) => void;
+
+/**
+ * La ligne d'une source a-t-elle été écrite par un autre que cette passe depuis
+ * sa lecture ? Hors synchro, seule l'écriture d'une transcription (OCR manuel,
+ * import, saisie) touche une ligne existante, et elle date toujours
+ * `last_modified` ; une source apparue ou disparue entre-temps compte aussi.
+ */
+function rewrittenSince(read: PrimarySourceDocument | null, now: PrimarySourceDocument | null): boolean {
+  if (!read || !now) return read !== now;
+  return (
+    read.id !== now.id ||
+    (read.transcription ?? '') !== (now.transcription ?? '') ||
+    read.transcriptionSource !== now.transcriptionSource ||
+    read.ocrConfidence !== now.ocrConfidence ||
+    read.lastModified !== now.lastModified
+  );
+}
 
 // MARK: - TropySync
 
@@ -345,7 +378,10 @@ export class TropySync {
       );
       if (externalTranscription) {
         transcription = externalTranscription.text;
-        transcriptionSource = 'transkribus';
+        // La provenance suit le format, comme pour l'import d'un seul
+        // fichier : un dossier d'ALTO ou de .txt n'est pas un export
+        // Transkribus (S15-1-36).
+        transcriptionSource = transcriptionSourceOfFormat(externalTranscription.format);
         transcriptionCount++;
       }
     }
@@ -463,13 +499,27 @@ export class TropySync {
 
     // Initialiser `notes_text` réécrit la ligne sans que rien n'ait changé
     // pour l'historien : ce n'est pas une mise à jour.
-    const saved = isNew || isUpdated || notesUninitialized;
+    let saved = isNew || isUpdated || notesUninitialized;
     if (saved) {
       // La ligne et l'invalidation de ses extraits dans une même transaction :
       // une ligne nouvelle gardée sans elle passerait pour acquise à la passe
       // suivante, qui n'invaliderait plus rien (L06-5). Rien d'asynchrone
       // dedans : OCR et transcriptions sont déjà obtenus.
-      vectorStore.transaction(() => {
+      saved = vectorStore.transaction(() => {
+        // Tout ce qui précède a été décidé d'après `existingSource`, lu avant
+        // l'OCR de l'item : des secondes pendant lesquelles un import ou un
+        // OCR manuel a pu écrire la source (et la réindexer). Réécrire la
+        // ligne d'après cette lecture effaçait leur texte, en gardant parfois
+        // leurs extraits (même texte d'OCR qu'avant : rien de « changé »).
+        // L'écriture la plus récente l'emporte ; la passe suivante reprendra
+        // l'item d'après la ligne à jour.
+        if (rewrittenSince(existingSource, vectorStore.getSourceByTropyId(item.id))) {
+          console.log(
+            `🔁 [TROPY-SYNC] Item ${item.id} "${item.title}" réécrit pendant son traitement : la passe le laisse`
+          );
+          return false;
+        }
+
         vectorStore.saveSource(sourceItem);
 
         // Les chunks appartiennent au texte qu'ils découpent. La phase
@@ -479,12 +529,13 @@ export class TropySync {
         if (chunksStale) {
           vectorStore.deleteChunks(sourceItem.id);
         }
+        return true;
       });
     }
 
     return {
-      isNew,
-      isUpdated: !isNew && isUpdated,
+      isNew: saved && isNew,
+      isUpdated: saved && !isNew && isUpdated,
       // Ne compter que ce qui a atteint le disque : un compteur qui recense
       // l'effort plutôt que le résultat annonçait « OCR effectué » sur des
       // transcriptions perdues.

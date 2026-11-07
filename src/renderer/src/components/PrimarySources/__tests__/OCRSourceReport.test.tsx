@@ -6,11 +6,12 @@
  * l'OCR ne passe pas sans « Relancer l'OCR sur toutes les sources ». L'auteur
  * a posé une condition : que l'historien le voie sur la source concernée.
  */
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import * as fs from 'fs';
 import * as path from 'path';
 import { OCRSourceReport } from '../OCRSourceReport';
+import { usePrimarySourcesStore } from '../../../stores/primarySourcesStore';
 import { NOTE_TRANSCRIPTION_MIN_CHARS } from '../../../../../../backend/integrations/tropy/note-transcription';
 
 function stubReport(report: Record<string, unknown>): void {
@@ -84,5 +85,57 @@ describe('OCRSourceReport — notes Tropy tenant lieu de transcription', () => {
       // la phrase en cite la partie avant la parenthèse.
       expect(strings.notesHoldOCR).toContain(strings.forceOCR.split(' (')[0]);
     }
+  });
+});
+
+describe('OCRSourceReport — provenance de la transcription', () => {
+  // Le libellé se lit par une clé calculée (`primarySources.<provenance>`) :
+  // le test des clés ne la voit pas. 'imported' est la provenance d'un fichier
+  // ALTO ou texte brut importé (L06-7).
+  it('chaque provenance a son libellé dans les trois langues', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const file = path.join(__dirname, '../../../../../../public/locales', lng, 'common.json');
+      const strings = JSON.parse(fs.readFileSync(file, 'utf-8')).primarySources as Record<string, unknown>;
+      for (const source of ['tesseract', 'transkribus', 'manual', 'tropy-notes', 'imported']) {
+        expect(typeof strings[source], `${lng} ${source}`).toBe('string');
+      }
+    }
+  });
+});
+
+// S18-2-6 : le rapport ne se relisait qu'au changement de source. Un OCR manuel
+// sur la source sélectionnée laissait « aucune donnée OCR » affiché.
+describe('OCRSourceReport — relu après une écriture sur la source sélectionnée', () => {
+  it('après un OCR manuel, le rapport montre la nouvelle transcription', async () => {
+    let report: Record<string, unknown> = {
+      sourceId: 's',
+      title: 'Lettre du commissaire',
+      ocrConfidence: null,
+      transcriptionSource: null,
+      chunkCount: 0,
+      avgQualityScore: null,
+      minQualityScore: null,
+      maxQualityScore: null,
+      transcriptionLength: 0,
+      notesLength: 0,
+    };
+    const electron = (window as unknown as { electron: Record<string, unknown> }).electron;
+    electron.tropy = {
+      getSourceOCRReport: vi.fn(async () => ({ success: true, report })),
+      updateTranscription: vi.fn(async () => ({ success: true })),
+      getAllSources: vi.fn(async () => ({ success: true, sources: [] })),
+      getStatistics: vi.fn(async () => ({ success: true, statistics: null })),
+    };
+
+    render(<OCRSourceReport sourceId="s" />);
+    expect(await screen.findByText('primarySources.noOCRData')).toBeInTheDocument();
+
+    report = { ...report, ocrConfidence: 88, transcriptionSource: 'tesseract', chunkCount: 4, transcriptionLength: 1200 };
+    await act(async () => {
+      await usePrimarySourcesStore.getState().updateTranscription('s', 'Texte reconnu', 'tesseract', 88);
+    });
+
+    expect(await screen.findByText('88%')).toBeInTheDocument();
+    expect(screen.queryByText('primarySources.noOCRData')).toBeNull();
   });
 });

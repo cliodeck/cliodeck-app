@@ -276,6 +276,19 @@
   color: var(--text-secondary);
 }
 
+.ocr-summary .ocr-summary__warning {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-primary);
+}
+
+.ocr-summary__warning svg {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
 .ocr-summary__errors {
   margin-top: 8px;
   color: var(--color-danger);

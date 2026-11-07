@@ -1374,6 +1374,7 @@
     "tropy-notes": "Tropy Notes",
     "transkribus": "Transkribus",
     "manual": "Manual",
+    "imported": "Imported file",
     "noCorpusData": "No OCR data. Run OCR during synchronization.",
     "closeReport": "Close",
     "collectionFilter": "Filter by list",
@@ -1406,6 +1407,10 @@
     "import": "Import",
     "importSuccess": "Transcription imported.",
     "importFailed": "The import failed.",
+    "transcriptionNotIndexed": "Transcription saved, not indexed yet: the semantic search model did not respond (check in Settings that it is available). The assistant does not cite it for now; it will be picked up at the next synchronization.",
+    "transcriptionNotIndexedNoProvider": "Transcription saved, not indexed yet: no semantic search model is available (check Settings). The assistant does not cite it for now; it will be picked up at the next synchronization.",
+    "transcriptionNotSaved": "The transcription was not saved.",
+    "transcriptionSourceGone": "The transcription was not saved: this source is no longer in the project database. Synchronize the Tropy project, then try again.",
     "forceOCRHint": "When unchecked, recognition only processes sources that have no transcription yet — transcriptions already obtained are kept.",
     "ocrSummaryTitle": "Run summary",
     "ocrSummaryWritten": "{{count}} transcription(s) saved",
@@ -1416,7 +1421,9 @@
     "close": "Close",
     "issues": {
       "differentProject": "“{{candidateName}}” is a different Tropy project: this ClioDeck project is already linked to “{{linkedName}}” ({{sourceCount}} source(s)). Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To replace “{{linkedName}}”, first purge its sources: Project panel, “Actions” section, “Purge Primary Sources” button.",
-      "differentProjectUnnamed": "“{{candidateName}}” is not the Tropy project the {{sourceCount}} source(s) of this ClioDeck project come from. Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To link it here, first purge these sources: Project panel, “Actions” section, “Purge Primary Sources” button."
+      "differentProjectUnnamed": "“{{candidateName}}” is not the Tropy project the {{sourceCount}} source(s) of this ClioDeck project come from. Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To link it here, first purge these sources: Project panel, “Actions” section, “Purge Primary Sources” button.",
+      "embeddingFailed": "Last synchronization: {{sources}} source(s) saved, not indexed yet. The semantic search model did not respond (check in Settings that it is available): the assistant does not cite them for now. They will be picked up at the next synchronization.",
+      "noEmbeddingProvider": "Last synchronization: {{sources}} source(s) saved, not indexed yet. No semantic search model is available (check Settings): the assistant does not cite them for now. They will be picked up at the next synchronization."
     }
   },
   "modes": {

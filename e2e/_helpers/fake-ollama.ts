@@ -13,6 +13,7 @@ import { join } from 'node:path';
 export interface FakeOllama {
   /** `cliodeck-config.json` d'un userData temporaire réglé sur ce faux serveur, à donner à `launchApp`. */
   userDataDir: string;
+  port: number;
   /** Avec `hangChat` : les demandes de chat reçues, et celles que l'app a coupées sans attendre la réponse. */
   chatRequests(): number;
   chatAborted(): number;
@@ -27,10 +28,12 @@ const EMBEDDING_DIMENSION = 768;
  * modèle absent. Le chat doit le dire, et non rester muet.
  *
  * `hangChat` : le chat ne répond jamais, comme un modèle bloqué ; seule l'app peut couper la demande.
+ *
+ * `port` : écouter sur ce port, celui d'un faux Ollama fermé plus tôt — un Ollama arrêté puis relancé.
  */
 export async function startFakeOllama(
   answer: string,
-  options: { onlyItsModel?: boolean; hangChat?: boolean } = {},
+  options: { onlyItsModel?: boolean; hangChat?: boolean; port?: number } = {},
 ): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
   let chatRequests = 0;
@@ -82,7 +85,7 @@ export async function startFakeOllama(
       }
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
 
   const userDataDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-ollama-'));
@@ -103,6 +106,7 @@ export async function startFakeOllama(
 
   return {
     userDataDir,
+    port,
     chatRequests: () => chatRequests,
     chatAborted: () => chatAborted,
     close: () =>

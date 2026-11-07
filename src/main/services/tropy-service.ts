@@ -6,7 +6,7 @@ import { TropySync, TropySyncOptions, TropySyncResult, TropySyncProgress, TropyS
 import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/integrations/tropy/tropy-project-identity.js';
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
-import { PrimarySourcesVectorStore, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
 
@@ -53,6 +53,21 @@ export interface TropySearchResult {
   results?: PrimarySourceSearchResult[];
   error?: string;
 }
+
+/** Pourquoi une source n'a pas été réindexée, à dire par le renderer. */
+export type ReindexFailure = 'source-not-found' | 'no-embedding-provider' | 'embedding-failed';
+
+/** Ce que le découpage d'une source lit : son en-tête, son texte, ses notes. */
+type IndexableSource = Pick<
+  PrimarySourceDocument,
+  'id' | 'title' | 'creator' | 'date' | 'archive' | 'collection' | 'transcription' | 'transcriptionSource' | 'notesText'
+>;
+
+/**
+ * Ce qu'a fait `indexSourceChunks` : écrit `chunks` extraits, ou rien parce que
+ * la source a changé pendant son embarquement.
+ */
+type IndexOutcome = { status: 'written'; chunks: number } | { status: 'superseded' };
 
 // MARK: - TropyService
 
@@ -360,6 +375,9 @@ class TropyService {
           this.generateEmbeddingsForSources(onProgress)
         );
         console.log(`📐 [TROPY-SERVICE] Embeddings generated: ${embeddingResult.chunksCreated} chunks for ${embeddingResult.sourcesProcessed} sources`);
+        // La synchro a réussi, mais ces sources ne sont pas encore citées par
+        // l'assistant : le dire, au lieu d'un succès sans réserve.
+        if (embeddingResult.issue) result.issues.push(embeddingResult.issue);
 
         // Save HNSW index after embedding generation
         if (embeddingResult.chunksCreated > 0 && this.vectorStore) {
@@ -378,16 +396,19 @@ class TropyService {
   }
 
   /**
-   * Génère les embeddings pour toutes les sources qui n'en ont pas encore
+   * Génère les embeddings pour toutes les sources qui n'en ont pas encore.
+   *
+   * Une source dont l'embarquement échoue reste sans extrait (tout ou rien,
+   * `indexSourceChunks`) : ce filtre la reprend à la synchro suivante. Les
+   * échecs sont comptés et rendus en `issue`, pour que l'historien sache que
+   * l'assistant ne cite pas encore ces sources. Le filtre lit les sources au
+   * départ de la passe ; une source réécrite depuis n'est pas indexée avec son
+   * ancien texte (`superseded`).
    */
   private async generateEmbeddingsForSources(
     onProgress?: (progress: TropySyncProgress) => void
-  ): Promise<{ sourcesProcessed: number; chunksCreated: number }> {
+  ): Promise<{ sourcesProcessed: number; chunksCreated: number; issue?: TropySyncIssue }> {
     if (!this.vectorStore) {
-      return { sourcesProcessed: 0, chunksCreated: 0 };
-    }
-    if (!this.embedding) {
-      console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, skipping embedding generation');
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
@@ -395,6 +416,7 @@ class TropyService {
     const allSources = this.vectorStore.getAllSources();
     let sourcesProcessed = 0;
     let chunksCreated = 0;
+    let sourcesFailed = 0;
 
     // Filtrer les sources qui ont du texte mais pas encore de chunks
     const sourcesToProcess = allSources.filter(source => {
@@ -423,6 +445,16 @@ class TropyService {
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
 
+    // Sans fournisseur, rien ne s'indexe — mais seulement s'il y avait de quoi.
+    if (!this.embedding) {
+      console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, skipping embedding generation');
+      return {
+        sourcesProcessed: 0,
+        chunksCreated: 0,
+        issue: { code: 'no-embedding-provider', sources: sourcesToProcess.length },
+      };
+    }
+
     console.log(`📐 [TROPY-SERVICE] Processing ${sourcesToProcess.length} sources for embeddings...`);
 
     for (let i = 0; i < sourcesToProcess.length; i++) {
@@ -436,14 +468,24 @@ class TropyService {
       });
 
       try {
-        chunksCreated += await this.indexSourceChunks(source);
+        const outcome = await this.indexSourceChunks(source);
+        // Réécrite pendant la passe (OCR manuel, import) : son écrivain la
+        // réindexe, ou la passe suivante la reprend. Ni traitée, ni en échec.
+        if (outcome.status === 'superseded') {
+          console.log(`📐 [TROPY-SERVICE] Source ${source.id} modifiée pendant son embarquement : extraits non écrits`);
+          continue;
+        }
+        chunksCreated += outcome.chunks;
         sourcesProcessed++;
       } catch (error) {
+        sourcesFailed++;
         console.error(`❌ [TROPY-SERVICE] Failed to process source ${source.id}:`, error);
       }
     }
 
-    return { sourcesProcessed, chunksCreated };
+    const issue: TropySyncIssue | undefined =
+      sourcesFailed > 0 ? { code: 'embedding-failed', sources: sourcesFailed } : undefined;
+    return { sourcesProcessed, chunksCreated, issue };
   }
 
   /**
@@ -957,25 +999,59 @@ class TropyService {
   // MARK: - Indexing
 
   /**
-   * Met à jour la transcription d'une source
+   * Met à jour la transcription d'une source : OCR manuel d'une carte
+   * ('tesseract', avec sa confiance), import d'un fichier ('transkribus' ou
+   * 'imported'), saisie ('manual', sans confiance).
+   *
+   * Les extraits de l'ancien texte sont supprimés dans la même transaction que
+   * la ligne : ils mentent dès qu'elle change. La réindexation qui suit
+   * (`reindexSource`) en écrit de nouveaux ; si elle échoue, la source reste
+   * sans extrait et la synchro suivante la reprend.
+   *
+   * Un texte indexé inchangé (même fichier réimporté, OCR relancé qui rend le
+   * même texte, seule la provenance change) garde ses extraits : ils découpent
+   * toujours ce texte. Les retirer faisait sortir la source du RAG dès que le
+   * fournisseur était en panne. `indexUpToDate` : ces extraits existent, il
+   * n'y a rien à réembarquer.
    */
   async updateSourceTranscription(
     sourceId: string,
     transcription: string,
-    source: 'tesseract' | 'transkribus' | 'manual'
-  ): Promise<{ success: boolean; error?: string }> {
+    source: Exclude<NonNullable<PrimarySourceItem['transcriptionSource']>, 'tropy-notes'>,
+    confidence?: number
+  ): Promise<{ success: boolean; error?: string; code?: 'source-not-found'; indexUpToDate?: boolean }> {
     try {
-      if (!this.vectorStore) {
+      const store = this.vectorStore;
+      if (!store) {
         return { success: false, error: 'Service not initialized' };
       }
 
-      this.vectorStore.updateSource(sourceId, {
-        transcription,
-        transcriptionSource: source,
-        lastModified: new Date(),
+      const written = store.transaction(() => {
+        const before = store.getSource(sourceId);
+        const rows = store.updateSource(sourceId, {
+          transcription,
+          transcriptionSource: source,
+          ocrConfidence: confidence,
+          lastModified: new Date(),
+        });
+        if (rows === 0) return null;
+        const after = store.getSource(sourceId);
+        // En-tête, corps et notes : ce que découpent les extraits. Une source
+        // 'tropy-notes' qui devient un corps change de texte (ses notes
+        // passent après lui).
+        const textChanged = !before || !after || this.indexableText(before) !== this.indexableText(after);
+        if (textChanged) {
+          store.deleteChunks(sourceId);
+          return { indexUpToDate: false };
+        }
+        return { indexUpToDate: store.getChunks(sourceId).length > 0 };
       });
+      // Source absente (purge, autre projet) : rien n'a été écrit.
+      if (!written) {
+        return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
+      }
 
-      return { success: true };
+      return { success: true, indexUpToDate: written.indexUpToDate };
     } catch (error: unknown) {
       console.error('Failed to update transcription:', error);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -984,109 +1060,136 @@ class TropyService {
 
 
   /**
-   * Découpe, filtre, déduplique et embarque une source. Renvoie le nombre
-   * de chunks écrits.
-   *
-   * Extrait de la boucle de synchronisation pour que la réindexation d'UNE
-   * source puisse faire exactement le même travail : `reindexSource`
-   * supprimait les chunks sans jamais les regénérer — un `TODO` vieux de
-   * plusieurs mois — si bien que l'appeler aurait retiré la source du RAG.
+   * Le texte que découpent les extraits d'une source : son en-tête, son corps,
+   * puis ses notes. Deux sources qui donnent le même texte ont les mêmes
+   * extraits (`indexSourceChunks` s'en sert pour voir qu'une source a changé
+   * pendant son embarquement).
    */
-  private async indexSourceChunks(source: {
-    id: string;
-    title?: string;
-    creator?: string;
-    date?: string;
-    archive?: string;
-    collection?: string;
-    transcription?: string;
-    transcriptionSource?: string;
-    notesText?: string;
-  }): Promise<number> {
-    let created = 0;
-
-      let fullText = '';
-      if (source.title) fullText += `Titre: ${source.title}\n\n`;
-      if (source.creator) fullText += `Auteur: ${source.creator}\n`;
-      if (source.date) fullText += `Date: ${source.date}\n`;
-      if (source.archive) fullText += `Archive: ${source.archive}\n`;
-      if (source.collection) fullText += `Collection: ${source.collection}\n`;
-      fullText += '\n';
-      if (source.transcription) fullText += source.transcription;
-      // Les notes Tropy viennent après le corps, qu'elles ne remplacent plus.
-      // Une source 'tropy-notes' les a déjà pour transcription.
-      if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
-        fullText += `\n\n${source.notesText}`;
-      }
-
-      // Get raw chunks from DocumentChunker for optimization
-      const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
-      const initialChunkCount = rawChunks.length;
-
-      // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
-      let optimizedChunks = rawChunks;
-      if (this.qualityScorer && optimizedChunks.length > 0) {
-        const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
-          minEntropy: 0.3,
-          minUniqueWordRatio: 0.4,
-        }, false); // Don't log each filtered chunk
-
-        if (qualityResult.stats.filteredChunks > 0) {
-          console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
-        }
-        optimizedChunks = qualityResult.passed;
-      }
-
-      // Deduplication - remove duplicate chunks (works on DocumentChunk type)
-      if (this.deduplicator && optimizedChunks.length > 0) {
-        const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
-          useContentHash: true,
-          useSimilarity: false, // Fast mode - hash only
-        });
-
-        if (dedupResult.duplicateCount > 0) {
-          console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
-        }
-        optimizedChunks = dedupResult.uniqueChunks;
-      }
-
-      // Log optimization results
-      if (optimizedChunks.length !== initialChunkCount) {
-        console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
-      }
-
-      // Convert to source chunks format and generate embeddings
-      for (const rawChunk of optimizedChunks) {
-        try {
-          // Score chunk quality if scorer is available
-          const qualityScore = this.qualityScorer
-            ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
-            : undefined;
-
-          const sourceChunk = {
-            id: rawChunk.id,
-            sourceId: source.id,
-            content: rawChunk.content,
-            chunkIndex: rawChunk.chunkIndex,
-            startPosition: rawChunk.startPosition,
-            endPosition: rawChunk.endPosition,
-            qualityScore,
-          };
-          const embedding = await this.embedOne(sourceChunk.content);
-          this.vectorStore!.saveChunk(sourceChunk, embedding);
-          created++;
-        } catch (error) {
-          console.warn(`⚠️ [TROPY-SERVICE] Failed to generate embedding for chunk in source ${source.id}:`, error);
-        }
-      }
-
-      return created;
+  private indexableText(source: IndexableSource): string {
+    let fullText = '';
+    if (source.title) fullText += `Titre: ${source.title}\n\n`;
+    if (source.creator) fullText += `Auteur: ${source.creator}\n`;
+    if (source.date) fullText += `Date: ${source.date}\n`;
+    if (source.archive) fullText += `Archive: ${source.archive}\n`;
+    if (source.collection) fullText += `Collection: ${source.collection}\n`;
+    fullText += '\n';
+    if (source.transcription) fullText += source.transcription;
+    // Les notes Tropy viennent après le corps, qu'elles ne remplacent plus.
+    // Une source 'tropy-notes' les a déjà pour transcription.
+    if (source.notesText && source.transcriptionSource !== 'tropy-notes') {
+      fullText += `\n\n${source.notesText}`;
+    }
+    return fullText;
   }
 
   /**
-   * Supprime les chunks existants et réindexe une source
+   * Découpe, filtre et déduplique le texte d'une source (`indexableText`) : les
+   * extraits à embarquer, sans rien écrire encore.
    */
-  async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string }> {
+  private prepareSourceChunks(source: IndexableSource, fullText: string): PrimarySourceChunk[] {
+    // Get raw chunks from DocumentChunker for optimization
+    const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
+    const initialChunkCount = rawChunks.length;
+
+    // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
+    let optimizedChunks = rawChunks;
+    if (this.qualityScorer && optimizedChunks.length > 0) {
+      const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
+        minEntropy: 0.3,
+        minUniqueWordRatio: 0.4,
+      }, false); // Don't log each filtered chunk
+
+      if (qualityResult.stats.filteredChunks > 0) {
+        console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
+      }
+      optimizedChunks = qualityResult.passed;
+    }
+
+    // Deduplication - remove duplicate chunks (works on DocumentChunk type)
+    if (this.deduplicator && optimizedChunks.length > 0) {
+      const dedupResult = this.deduplicator.deduplicate(optimizedChunks, {
+        useContentHash: true,
+        useSimilarity: false, // Fast mode - hash only
+      });
+
+      if (dedupResult.duplicateCount > 0) {
+        console.log(`🔄 [TROPY] Deduplication for "${source.title}": removed ${dedupResult.duplicateCount} duplicates`);
+      }
+      optimizedChunks = dedupResult.uniqueChunks;
+    }
+
+    // Log optimization results
+    if (optimizedChunks.length !== initialChunkCount) {
+      console.log(`📊 [TROPY] Chunks for "${source.title}": ${initialChunkCount} → ${optimizedChunks.length} after optimization`);
+    }
+
+    // Convert to source chunks format, with their quality score
+    return optimizedChunks.map((rawChunk) => ({
+      id: rawChunk.id,
+      sourceId: source.id,
+      content: rawChunk.content,
+      chunkIndex: rawChunk.chunkIndex,
+      startPosition: rawChunk.startPosition,
+      endPosition: rawChunk.endPosition,
+      qualityScore: this.qualityScorer
+        ? this.qualityScorer.scoreChunk(rawChunk.content).overallScore
+        : undefined,
+    }));
+  }
+
+  /**
+   * Découpe, embarque puis écrit les extraits d'une source, tout ou rien.
+   *
+   * Tous les extraits sont embarqués en mémoire avant la moindre écriture, puis
+   * remplacent l'ancien jeu dans une transaction (`replaceSourceChunks`). Le
+   * premier échec d'embarquement lève sans rien écrire : un échec avalé
+   * extrait par extrait laissait la source à 9 extraits sur 10, et la synchro,
+   * qui ne reprend que les sources sans extrait, ne complétait jamais le trou
+   * (S08-1-30). Partagé par la synchro et `reindexSource`.
+   *
+   * `superseded` : la source a changé (ou disparu) pendant l'embarquement, et
+   * rien n'est écrit. Une passe partie avec l'ancien texte écrasait sinon les
+   * extraits que l'écriture de transcription venait de produire : la source
+   * gardait des extraits d'un texte qui n'existait plus, et le filtre « sans
+   * extrait » de la synchro ne la reprenait jamais. L'écrivain plus récent a
+   * sa propre réindexation, ou bien la source reste sans extrait (il les a
+   * retirés) et la synchro suivante la reprend. Ce n'est pas une panne.
+   */
+  private async indexSourceChunks(source: IndexableSource): Promise<IndexOutcome> {
+    // Le magasin du départ : un changement de projet pendant l'embarquement ne
+    // doit pas faire écrire ces extraits dans celui du projet suivant.
+    const store = this.vectorStore;
+    if (!store) {
+      throw new Error('tropy-service: vector store not initialized');
+    }
+
+    const text = this.indexableText(source);
+    const items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> = [];
+    for (const chunk of this.prepareSourceChunks(source, text)) {
+      items.push({ chunk, embedding: await this.embedOne(chunk.content) });
+    }
+
+    // Relire la source puis écrire, sans `await` entre les deux : better-sqlite3
+    // est synchrone, aucun autre écrivain du main ne peut s'intercaler.
+    const current = store.getSource(source.id);
+    if (!current || this.indexableText(current) !== text) {
+      return { status: 'superseded' };
+    }
+    store.replaceSourceChunks(source.id, items);
+    return { status: 'written', chunks: items.length };
+  }
+
+  /**
+   * Réembarque une source et remplace ses extraits, tout ou rien.
+   *
+   * Jamais `success: true` quand l'embarquement a échoué : la source sortait du
+   * RAG en silence. Un échec laisse les extraits en place — ceux d'un texte inchangé
+   * restent bons ; après une écriture qui change le texte il n'y en a plus
+   * (`updateSourceTranscription` les retire), et la synchro suivante reprend
+   * la source. Une source réécrite pendant la réindexation n'est pas un échec :
+   * rien n'est écrit, et le texte plus récent a sa propre indexation.
+   */
+  async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string; code?: ReindexFailure }> {
     try {
       if (!this.vectorStore) {
         return { success: false, error: 'Service not initialized' };
@@ -1094,19 +1197,28 @@ class TropyService {
 
       const source = this.vectorStore.getSource(sourceId);
       if (!source) {
-        return { success: false, error: `Source not found: ${sourceId}` };
+        return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
+      }
+      if (!this.embedding) {
+        return { success: false, error: 'No embedding provider configured', code: 'no-embedding-provider' };
       }
 
-      // Supprimer les chunks existants, puis les REGÉNÉRER. Supprimer sans
-      // regénérer retirait la source du RAG.
-      this.vectorStore.deleteChunks(sourceId);
-      const chunks = await this.indexSourceChunks(source);
-      console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${chunks} chunk(s)`);
-
+      const outcome = await this.indexSourceChunks(source);
+      if (outcome.status === 'superseded') {
+        // Réécrite entre-temps : son écrivain suivant la réindexe, ou la
+        // synchro la reprend. L'écriture de cet appel a bien eu lieu.
+        console.log(`🔁 [TROPY] Source ${sourceId} modifiée pendant sa réindexation : rien d'écrit, le texte plus récent l'emporte`);
+        return { success: true };
+      }
+      console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${outcome.chunks} chunk(s)`);
       return { success: true };
     } catch (error: unknown) {
       console.error('Failed to reindex source:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        code: 'embedding-failed',
+      };
     }
   }
 

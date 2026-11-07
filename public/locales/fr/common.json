@@ -1374,6 +1374,7 @@
     "tropy-notes": "Notes Tropy",
     "transkribus": "Transkribus",
     "manual": "Manuel",
+    "imported": "Fichier importé",
     "noCorpusData": "Aucune donnée OCR. Lancez un OCR lors de la synchronisation.",
     "closeReport": "Fermer",
     "collectionFilter": "Filtrer par liste",
@@ -1406,6 +1407,10 @@
     "import": "Importer",
     "importSuccess": "Transcription importée.",
     "importFailed": "L'import a échoué.",
+    "transcriptionNotIndexed": "Transcription enregistrée, pas encore indexée : le modèle de recherche sémantique n'a pas répondu (vérifiez dans les Paramètres qu'il est disponible). L'assistant ne la cite pas pour l'instant ; elle sera reprise à la prochaine synchronisation.",
+    "transcriptionNotIndexedNoProvider": "Transcription enregistrée, pas encore indexée : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres). L'assistant ne la cite pas pour l'instant ; elle sera reprise à la prochaine synchronisation.",
+    "transcriptionNotSaved": "La transcription n'a pas été enregistrée.",
+    "transcriptionSourceGone": "La transcription n'a pas été enregistrée : cette source n'est plus dans la base du projet. Synchronisez le projet Tropy, puis réessayez.",
     "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources qui n'ont pas encore de transcription — les transcriptions déjà acquises sont conservées.",
     "ocrSummaryTitle": "Bilan de la passe",
     "ocrSummaryWritten": "{{count}} transcription(s) enregistrée(s)",
@@ -1416,7 +1421,9 @@
     "close": "Fermer",
     "issues": {
       "differentProject": "« {{candidateName}} » est un autre projet Tropy : ce projet ClioDeck est déjà lié à « {{linkedName}} » ({{sourceCount}} source(s)). Rien n'a été modifié. Pour travailler sur « {{candidateName}} », ouvrez-le dans un autre projet ClioDeck. Pour remplacer « {{linkedName}} », purgez d'abord ses sources : panneau Projet, section « Actions », bouton « Purger Sources Primaires ».",
-      "differentProjectUnnamed": "« {{candidateName}} » n'est pas le projet Tropy d'où viennent les {{sourceCount}} source(s) de ce projet ClioDeck. Rien n'a été modifié. Pour travailler sur « {{candidateName}} », ouvrez-le dans un autre projet ClioDeck. Pour le lier ici, purgez d'abord ces sources : panneau Projet, section « Actions », bouton « Purger Sources Primaires »."
+      "differentProjectUnnamed": "« {{candidateName}} » n'est pas le projet Tropy d'où viennent les {{sourceCount}} source(s) de ce projet ClioDeck. Rien n'a été modifié. Pour travailler sur « {{candidateName}} », ouvrez-le dans un autre projet ClioDeck. Pour le lier ici, purgez d'abord ces sources : panneau Projet, section « Actions », bouton « Purger Sources Primaires ».",
+      "embeddingFailed": "Dernière synchronisation : {{sources}} source(s) enregistrée(s), pas encore indexée(s). Le modèle de recherche sémantique n'a pas répondu (vérifiez dans les Paramètres qu'il est disponible) : l'assistant ne les cite pas pour l'instant. Elles seront reprises à la prochaine synchronisation.",
+      "noEmbeddingProvider": "Dernière synchronisation : {{sources}} source(s) enregistrée(s), pas encore indexée(s). Aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres) : l'assistant ne les cite pas pour l'instant. Elles seront reprises à la prochaine synchronisation."
     }
   },
   "modes": {

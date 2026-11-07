@@ -335,7 +335,9 @@ export const TropyImportTranscriptionSchema = z.object({
 export const TropyUpdateTranscriptionSchema = z.object({
   sourceId: z.string().min(1, 'Source ID is required'),
   transcription: z.string(),
-  source: z.enum(['tesseract', 'transkribus', 'manual']),
+  source: z.enum(['tesseract', 'transkribus', 'manual', 'imported']),
+  /** Confiance Tesseract 0-100 ; ignorée pour une autre provenance (L06-7). */
+  confidence: z.number().min(0).max(100).optional(),
 });
 
 // Editor schemas

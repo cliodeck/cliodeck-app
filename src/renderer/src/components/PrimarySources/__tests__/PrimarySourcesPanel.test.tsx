@@ -82,7 +82,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useProjectStore.setState({ currentProject: null });
-  usePrimarySourcesStore.setState({ projectInfo: null, tpyPath: null, isSyncing: false });
+  usePrimarySourcesStore.setState({ projectInfo: null, tpyPath: null, isSyncing: false, syncIssues: [] });
 });
 
 describe('PrimarySourcesPanel — un autre projet Tropy', () => {
@@ -129,5 +129,32 @@ describe('PrimarySourcesPanel — un autre projet Tropy', () => {
       }
       expect(strings.primarySources.issues.differentProject).toContain('{{linkedName}}');
     }
+  });
+});
+
+// L06-7 : une source enregistrée mais pas indexée décrit un état qui peut durer
+// (Ollama arrêté) : pas d'alerte à chaque synchro, un avis dans le panneau.
+describe('PrimarySourcesPanel — ce que la synchro n’a pas pu indexer', () => {
+  it('« Synchroniser » : aucune alerte, le panneau dit combien de sources attendent leur indexation', async () => {
+    tropy.sync.mockResolvedValue({ success: true, errors: [], issues: [{ code: 'embedding-failed', sources: 3 }] });
+    const showAlert = vi.spyOn(useDialogStore.getState(), 'showAlert').mockResolvedValue(undefined);
+    render(<PrimarySourcesPanel />);
+
+    fireEvent.click(await screen.findByTitle('Synchroniser'));
+
+    expect(
+      await screen.findByText(/3 source\(s\) enregistrée\(s\), pas encore indexée\(s\)/)
+    ).toBeInTheDocument();
+    expect(showAlert).not.toHaveBeenCalled();
+  });
+
+  it('la synchro suivante, sans problème, retire l’avis', async () => {
+    tropy.sync.mockResolvedValueOnce({ success: true, errors: [], issues: [{ code: 'no-embedding-provider', sources: 2 }] });
+    render(<PrimarySourcesPanel />);
+    fireEvent.click(await screen.findByTitle('Synchroniser'));
+    expect(await screen.findByText(/2 source\(s\) enregistrée\(s\), pas encore indexée\(s\)/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('Synchroniser'));
+    await waitFor(() => expect(screen.queryByText(/pas encore indexée/)).toBeNull());
   });
 });

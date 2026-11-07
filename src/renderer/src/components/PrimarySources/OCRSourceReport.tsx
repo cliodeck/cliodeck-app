@@ -5,6 +5,7 @@ import {
   NOTE_TRANSCRIPTION_MIN_CHARS,
   isNoteTranscription,
 } from '../../../../../backend/integrations/tropy/note-transcription';
+import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './OCRSourceReport.css';
 
 interface SourceOCRReport {
@@ -40,6 +41,10 @@ export const OCRSourceReport: React.FC<OCRSourceReportProps> = ({ sourceId }) =>
   const { t } = useTranslation('common');
   const [report, setReport] = useState<SourceOCRReport | null>(null);
   const [loading, setLoading] = useState(true);
+  // Relu après chaque écriture de transcription, pas seulement au changement
+  // de source : un OCR manuel sur la source sélectionnée laissait l'ancien
+  // rapport affiché (S18-2-6).
+  const revision = usePrimarySourcesStore((state) => state.transcriptionRevision);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +58,7 @@ export const OCRSourceReport: React.FC<OCRSourceReportProps> = ({ sourceId }) =>
     });
 
     return () => { cancelled = true; };
-  }, [sourceId]);
+  }, [sourceId, revision]);
 
   if (loading) {
     return <div className="ocr-source-report loading">...</div>;
