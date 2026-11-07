@@ -120,6 +120,22 @@ describe('téléchargement Zotero : pièces jointes de même nom', () => {
     expect(fs.readFileSync(existing, 'utf8')).toContain('déposé à la main');
   });
 
+  it('métadonnées illisibles : le téléchargement passe, et la comparaison de contenu protège le fichier en place', async () => {
+    // Illisibles, elles ne disent plus à qui est chaque fichier (S07-1-10) : ce n'est pas une
+    // raison d'arrêter le téléchargement, ni d'écraser un fichier de même nom.
+    fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.cliodeck', 'bibliography-metadata.json'), '{"version": 2, "citat');
+    fs.mkdirSync(path.join(project, 'PDFs'), { recursive: true });
+    const existing = path.join(project, 'PDFs', SAFE);
+    fs.writeFileSync(existing, library.QQBJJVQY);
+
+    const other = await download('GC9BPFL6');
+
+    expect(other.success).toBe(true);
+    expect(other.filePath).not.toBe(existing);
+    expect(fs.readFileSync(existing, 'utf8')).toBe(library.QQBJJVQY);
+  });
+
   it('un échec de téléchargement ne laisse aucun fichier partiel', async () => {
     const failed = await download('INCONNUE');
     expect(failed.success).toBe(false);

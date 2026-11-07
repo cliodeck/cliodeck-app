@@ -98,11 +98,23 @@ export interface ProjectChangedOutcome {
   toIndex?: number;
 }
 
+/**
+ * Le `.bib` attendu du projet ne s'est pas lu, ou pas en entier : le panneau le dit en bandeau,
+ * au lieu de se montrer vide ou de taire ce qui manque (S07-1-11, S07-1-2). `partial` : le fichier
+ * s'est lu, mais des entrées ou les métadonnées des PDF Zotero ne l'ont pas été.
+ */
+export type BibliographyProblem =
+  | { kind: 'missing'; file: string }
+  | { kind: 'unreadable'; file: string; reason: string; detail: string }
+  | { kind: 'partial'; file: string; unreadKeys: string[]; metadataUnreadable: boolean };
+
 // MARK: - Slice State Interfaces
 
 export interface CitationSliceState {
   // State
   citations: Citation[];
+  /** Remis à zéro à chaque ouverture de projet : le bandeau d'un projet ne passe jamais dans un autre. */
+  bibliographyProblem: BibliographyProblem | null;
   filteredCitations: Citation[];
   selectedCitationId: string | null;
   searchQuery: string;

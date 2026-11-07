@@ -295,7 +295,13 @@
     "createReadingNote": "Neue Notiz",
     "openReadingNote": "Lesenotiz",
     "readingNoteError": "Lesenotiz: {{error}}",
-    "readingNoteNotUtf8": "Die Lesenotiz dieser Referenz ist nicht in UTF-8 kodiert. Ihre Schlagwörter wurden nicht geändert, weil ein erneutes Schreiben ihre Sonderzeichen beschädigen würde: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut."
+    "readingNoteNotUtf8": "Die Lesenotiz dieser Referenz ist nicht in UTF-8 kodiert. Ihre Schlagwörter wurden nicht geändert, weil ein erneutes Schreiben ihre Sonderzeichen beschädigen würde: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut.",
+    "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie werden nicht angezeigt, und die Synchronisierung mit Zotero bricht ab, ohne etwas zu schreiben, bis sie korrigiert sind. Korrigieren Sie sie in der Datei mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel, auch in Zotero, wenn der Eintrag von dort stammt; schließen Sie offen gebliebene geschweifte Klammern; entfernen Sie Felder, deren Name einen Bindestrich enthält (mendeley-groups, date-added…), die Mendeley und BibDesk vor den Titel setzen. Betroffene Einträge:",
+    "bibMissing": "Die Bibliografiedatei des Projekts, {{file}}, ist nicht auffindbar: Sie wurde außerhalb von ClioDeck verschoben, umbenannt oder gelöscht, und ihre Referenzen werden nicht angezeigt. Legen Sie sie wieder an ihren Platz.",
+    "bibNotUtf8": "{{file}} ist nicht in UTF-8 kodiert: ClioDeck liest die Datei nicht, um ihre Sonderzeichen nicht zu beschädigen. Speichern Sie sie in Ihrem Texteditor oder Literaturverwaltungsprogramm als UTF-8.",
+    "bibUnreadable": "{{file}} konnte nicht gelesen werden ({{error}}). Prüfen Sie, ob die Datei auf diesem Datenträger liegt, heruntergeladen ist, falls sie sich in einem synchronisierten Ordner befindet, und ob Sie sie lesen dürfen.",
+    "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Diese PDFs werden nicht angezeigt, und die Synchronisierung mit Zotero bricht ab, ohne etwas zu schreiben, bis die Datei repariert ist. Reparieren Sie sie oder stellen Sie eine Kopie wieder her.",
+    "reopenAfterFix": "Öffnen Sie das Projekt danach erneut: Dieser Hinweis verschwindet dann."
   },
   "project": {
     "title": "Projekt",
@@ -666,7 +672,13 @@
       "localKept": "{{count}} Referenz(en) ohne Zotero-Verknüpfung wurden unverändert beibehalten.",
       "more": "… und {{count}} weitere",
       "error": "Synchronisierung fehlgeschlagen: {{error}}",
-      "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut."
+      "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut.",
+      "refused": "Synchronisierung abgebrochen: Es wurde nichts geschrieben.",
+      "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden, und ein erneutes Schreiben der Datei hätte sie gelöscht. Korrigieren Sie sie in {{file}} mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel, auch in Zotero, wenn der Eintrag von dort stammt; schließen Sie offen gebliebene geschweifte Klammern; entfernen Sie Felder, deren Name einen Bindestrich enthält (mendeley-groups, date-added…), die Mendeley und BibDesk vor den Titel setzen. Betroffene Einträge:",
+      "unreadFromZotero": "Aus Zotero stammend (Feld zoterokey): {{keys}}. Die Synchronisierung schreibt diese Einträge aus ihrem Zotero-Eintrag neu: Korrigieren Sie zuerst den Eintrag in Zotero (ein fehlender Titel, eine einzelne geschweifte Klammer in Titel, Zeitschrift oder Verlag), und nehmen Sie dann dieselbe Korrektur am Eintrag in {{file}} vor, wo eine einzelne geschweifte Klammer als \\} geschrieben ist. Löschen Sie den Eintrag nicht: Er käme aus Zotero als neue Referenz zurück, und das bereits heruntergeladene PDF wäre nicht mehr mit ihm verknüpft.",
+      "stringMacros": "{{file}} definiert Abkürzungen (@string), die beim erneuten Schreiben der Datei verloren gegangen wären. Ersetzen Sie jede Abkürzung in den Einträgen durch ihren Wert und löschen Sie dann die @string-Zeilen.",
+      "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Die Synchronisierung hätte sie ersetzt, und diese Verknüpfungen wären verloren gegangen. Reparieren Sie sie oder stellen Sie eine Kopie wieder her. Wenn Sie sie löschen, beginnen Sie von vorn: Bereits heruntergeladene PDFs bleiben auf der Festplatte, müssen aber erneut heruntergeladen werden, um verknüpft zu werden.",
+      "fixThenRetry": "Starten Sie danach „Mit Zotero synchronisieren“ erneut."
     }
   },
   "suggestions": {
@@ -2338,7 +2350,9 @@
     "merge": "Zusammenführen",
     "empty": "Ihre Bibliographie ist leer: die Datei wird einfach eingelesen.",
     "cancel": "Abbrechen",
-    "import": "Importieren"
+    "import": "Importieren",
+    "projectFileMissing": "Die Bibliographie des Projekts, {{file}}, ist nicht auffindbar: Die importierte Datei wird sie ersetzen.",
+    "projectFileUnread": "Die Bibliographie des Projekts, {{file}}, konnte nicht oder nicht vollständig gelesen werden (siehe Hinweis). Die importierte Datei wird sie ersetzen; trägt sie denselben Namen, überschreibt sie sie auf dem Datenträger, und was ClioDeck nicht lesen konnte, geht verloren. Um es zu behalten, brechen Sie ab und korrigieren Sie zuerst {{file}}."
   },
   "bibImportSummary": {
     "title": "Import abgeschlossen",

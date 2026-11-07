@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward } from 'lucide-react';
+import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward, AlertTriangle } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
+import type { BibliographyProblem } from '../../stores/bibliography/types';
+import { BibliographyFileError } from '../../stores/bibliography/citationSlice';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
@@ -18,6 +20,55 @@ import { TagFilter } from './TagManager';
 import { OrphanPDFModal } from './OrphanPDFModal';
 import { PDFModificationNotification, usePDFModificationDetection } from './PDFModificationNotification';
 import './BibliographyPanel.css';
+
+/** Clés montrées dans le bandeau avant « … et N autre(s) ». */
+const SHOWN_KEYS = 8;
+
+/**
+ * Le `.bib` attendu du projet ne s'est pas lu, ou pas en entier : ce qui manque, les clés en
+ * cause, et quoi faire. Il disparaît à la lecture suivante d'un fichier redevenu lisible.
+ */
+const BibliographyProblemBanner: React.FC<{ problem: BibliographyProblem }> = ({ problem }) => {
+  const { t } = useTranslation('common');
+  const { file } = problem;
+  const parts: React.ReactNode[] = [];
+  if (problem.kind === 'missing') {
+    parts.push(t('bibliography.bibMissing', { file }));
+  } else if (problem.kind === 'unreadable') {
+    parts.push(
+      problem.reason === 'encoding'
+        ? t('bibliography.bibNotUtf8', { file })
+        : t('bibliography.bibUnreadable', { file, error: problem.detail })
+    );
+  } else {
+    if (problem.unreadKeys.length > 0) {
+      const keys = problem.unreadKeys.slice(0, SHOWN_KEYS).map((key) => `@${key}`).join(', ');
+      const more = problem.unreadKeys.length - SHOWN_KEYS;
+      parts.push(t('bibliography.unreadEntries', { count: problem.unreadKeys.length, file }));
+      parts.push(
+        <span className="bibliography-problem-keys">
+          {keys}
+          {more > 0 && ` ${t('zotero.sync.more', { count: more })}`}
+        </span>
+      );
+    }
+    if (problem.metadataUnreadable) {
+      parts.push(t('bibliography.metadataUnreadable', { file: '.cliodeck/bibliography-metadata.json' }));
+    }
+  }
+  parts.push(t('bibliography.reopenAfterFix'));
+
+  return (
+    <div className="bibliography-problem" role="alert">
+      <AlertTriangle size={16} aria-hidden="true" />
+      <div className="bibliography-problem-text">
+        {parts.map((part, i) => (
+          <p key={i}>{part}</p>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const BibliographyPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -40,6 +91,10 @@ export const BibliographyPanel: React.FC = () => {
     setTagsFilter,
     clearTagsFilter,
   } = useBibliographyStore();
+
+  // Absent, illisible ou lu en partie : une liste vide n'est pas une bibliographie vide, et le
+  // bandeau dit ce qui manque, à la place de « Aucune citation disponible ».
+  const bibliographyProblem = useBibliographyStore((state) => state.bibliographyProblem);
 
   // PDF Modification Detection
   const { modifiedPDFs, dismissNotification } = usePDFModificationDetection(
@@ -100,8 +155,9 @@ export const BibliographyPanel: React.FC = () => {
         const sourcePath = result.filePaths[0];
         setPendingFilePath(sourcePath);
 
-        // If we already have citations, show the mode selection modal
-        if (citations.length > 0) {
+        // If we already have citations, show the mode selection modal. Un `.bib` du projet qui
+        // ne se lit pas n'est pas une bibliographie vide : pas de remplacement sans le demander.
+        if (citations.length > 0 || bibliographyProblem) {
           setShowModeModal(true);
         } else {
           // No citations yet, directly replace (= load)
@@ -121,7 +177,31 @@ export const BibliographyPanel: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- l'intention seule déclenche, une fois
   }, [menuIntent]);
 
+  /**
+   * Le fichier importé ne se lit pas : dire pourquoi et quoi faire, dans la langue de l'interface.
+   * Rien n'a été copié dans le projet, et le bandeau, qui parle du `.bib` du projet, ne change pas.
+   */
+  const importFailureMessage = (error: unknown): string => {
+    if (error instanceof BibliographyFileError) {
+      const { problem } = error;
+      if (problem.kind === 'unreadable' && problem.reason === 'encoding') {
+        return t('bibliography.bibNotUtf8', { file: problem.file });
+      }
+      return t('bibliography.bibUnreadable', {
+        file: problem.file,
+        error: problem.kind === 'unreadable' ? problem.detail : error.message,
+      });
+    }
+    return `Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`;
+  };
+
   const performImport = async (sourcePath: string, mode: 'replace' | 'merge') => {
+    // Ce que montrait le panneau avant l'import : tant que le fichier n'est pas copié dans le
+    // projet, le `.bib` du projet n'a pas changé, ni donc sa liste ou son bandeau.
+    const { citations: citationsBefore, bibliographyProblem: problemBefore } = useBibliographyStore.getState();
+    const projectPath = currentProject?.path;
+    let loaded = false;
+    let copied = false;
     try {
       let newCitations = 0;
       let duplicates = 0;
@@ -138,6 +218,7 @@ export const BibliographyPanel: React.FC = () => {
         duplicates = result.duplicates;
         total = result.total;
       }
+      loaded = true;
 
       // If we have a project, save the bibliography source configuration
       if (currentProject) {
@@ -147,6 +228,7 @@ export const BibliographyPanel: React.FC = () => {
 
         // Copy file to project directory
         await window.electron.fs.copyFile(sourcePath, targetPath);
+        copied = true;
 
         // Save the bibliography source to project.json
         const projectJsonPath = `${currentProject.path}/project.json`;
@@ -176,7 +258,14 @@ export const BibliographyPanel: React.FC = () => {
       setShowSummaryModal(true);
     } catch (error) {
       console.error('Failed to import BibTeX:', error);
-      await useDialogStore.getState().showAlert(`Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`);
+      // Le fichier importé s'est lu, mais n'est pas entré dans le projet (copie refusée) : le
+      // panneau revient à ce qu'il montrait, bandeau compris, s'il montre encore ce projet.
+      if (loaded && !copied && projectPath && (await stillIn(projectPath))) {
+        useBibliographyStore.setState({ citations: citationsBefore, bibliographyProblem: problemBefore });
+        useBibliographyStore.getState().applyFilters();
+        await useBibliographyStore.getState().refreshIndexedPDFs();
+      }
+      await useDialogStore.getState().showAlert(importFailureMessage(error));
     }
   };
 
@@ -501,6 +590,8 @@ export const BibliographyPanel: React.FC = () => {
         </div>
       )}
 
+      {bibliographyProblem && <BibliographyProblemBanner problem={bibliographyProblem} />}
+
       {/* Zotero Import */}
       <ZoteroImport />
 
@@ -573,13 +664,13 @@ export const BibliographyPanel: React.FC = () => {
       {/* Citation List */}
       <CollapsibleSection title={t('bibliography.title')} defaultExpanded={true}>
         <div className="bibliography-content">
-          {filteredCitations.length === 0 ? (
+          {filteredCitations.length > 0 ? (
+            <CitationList citations={filteredCitations} />
+          ) : bibliographyProblem ? null : (
             <div className="bibliography-empty">
               <h4>{t('bibliography.noCitations')}</h4>
               <p>{t('bibliography.importPrompt')}</p>
             </div>
-          ) : (
-            <CitationList citations={filteredCitations} />
           )}
         </div>
       </CollapsibleSection>
@@ -594,6 +685,7 @@ export const BibliographyPanel: React.FC = () => {
         onReplace={handleReplaceMode}
         onMerge={handleMergeMode}
         currentCitationCount={citations.length}
+        projectFileProblem={bibliographyProblem}
       />
 
       {/* Import Summary Modal */}

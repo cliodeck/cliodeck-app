@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
 import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
+import { parseUserJson, readUserFile } from '../core/fs/user-files';
 
 /**
  * Metadata stored for each citation (data that can't be stored in BibTeX)
@@ -26,6 +27,23 @@ export interface BibliographyMetadataFile {
   version: number;
   lastUpdated: string;
   citations: Record<string, CitationMetadata>;
+}
+
+/**
+ * Le fichier de métadonnées est là, mais ne se lit pas (JSON tronqué par un conflit de
+ * synchronisation, édition à la main) : ce n'est pas un fichier absent. Le prendre pour tel ferait
+ * repartir la synchronisation Zotero sans les rattachements de PDF, puis réécrire le fichier, que
+ * l'historien aurait pu réparer (S07-1-10).
+ */
+export class MetadataUnreadableError extends Error {
+  readonly code = 'metadata-unreadable';
+  readonly filePath: string;
+
+  constructor(filePath: string, message: string) {
+    super(message);
+    this.name = 'MetadataUnreadableError';
+    this.filePath = filePath;
+  }
 }
 
 /**
@@ -126,44 +144,50 @@ export class BibliographyMetadataService {
   }
 
   /**
-   * Load metadata from file
+   * Load metadata from file. Absent : `null`. Illisible, JSON invalide ou qui n'est pas un fichier
+   * de métadonnées : `MetadataUnreadableError`, jamais `null`.
    */
   static async loadMetadata(projectPath: string): Promise<BibliographyMetadataFile | null> {
     if (this.linkedOutside(projectPath)) return null;
     const metadataPath = this.getMetadataPath(projectPath);
 
-    if (!fs.existsSync(metadataPath)) {
+    const read = await readUserFile(metadataPath);
+    if (read.kind === 'absent') {
       console.log('📂 No bibliography metadata file found');
       return null;
     }
+    if (read.kind === 'unreadable') throw new MetadataUnreadableError(metadataPath, read.message);
 
+    let metadata: BibliographyMetadataFile;
     try {
-      const content = fs.readFileSync(metadataPath, 'utf-8');
-      const metadata = JSON.parse(content) as BibliographyMetadataFile;
-
-      // v1 → v2 migration: re-index entries by zoteroKey when present so
-      // bibtexKey collisions stop dropping attachments at the first match.
-      if (metadata.version === 1) {
-        const reIndexed: Record<string, CitationMetadata> = {};
-        for (const entry of Object.values(metadata.citations)) {
-          reIndexed[this.storageKeyFromMeta(entry)] = entry;
-        }
-        metadata.version = this.CURRENT_VERSION;
-        metadata.citations = reIndexed;
-        console.log(
-          `🔄 Migrated bibliography metadata v1 → v${this.CURRENT_VERSION}: ${Object.keys(reIndexed).length} entries re-indexed by zoteroKey. ` +
-            `Any attachments lost to bibtexKey collisions in v1 need a fresh Zotero sync to recover.`
-        );
-      } else if (metadata.version !== this.CURRENT_VERSION) {
-        console.log(`⚠️ Metadata version mismatch: ${metadata.version} vs ${this.CURRENT_VERSION}`);
-      }
-
-      console.log(`✅ Bibliography metadata loaded: ${Object.keys(metadata.citations).length} entries`);
-      return metadata;
+      metadata = parseUserJson<BibliographyMetadataFile>(read.content);
     } catch (error) {
-      console.error('❌ Failed to load bibliography metadata:', error);
-      return null;
+      throw new MetadataUnreadableError(metadataPath, error instanceof Error ? error.message : String(error));
     }
+    const citations: unknown = (metadata as { citations?: unknown } | null)?.citations;
+    if (typeof citations !== 'object' || citations === null || Array.isArray(citations)) {
+      throw new MetadataUnreadableError(metadataPath, `${metadataPath} n'est pas un fichier de métadonnées bibliographiques`);
+    }
+
+    // v1 → v2 migration: re-index entries by zoteroKey when present so
+    // bibtexKey collisions stop dropping attachments at the first match.
+    if (metadata.version === 1) {
+      const reIndexed: Record<string, CitationMetadata> = {};
+      for (const entry of Object.values(metadata.citations)) {
+        reIndexed[this.storageKeyFromMeta(entry)] = entry;
+      }
+      metadata.version = this.CURRENT_VERSION;
+      metadata.citations = reIndexed;
+      console.log(
+        `🔄 Migrated bibliography metadata v1 → v${this.CURRENT_VERSION}: ${Object.keys(reIndexed).length} entries re-indexed by zoteroKey. ` +
+          `Any attachments lost to bibtexKey collisions in v1 need a fresh Zotero sync to recover.`
+      );
+    } else if (metadata.version !== this.CURRENT_VERSION) {
+      console.log(`⚠️ Metadata version mismatch: ${metadata.version} vs ${this.CURRENT_VERSION}`);
+    }
+
+    console.log(`✅ Bibliography metadata loaded: ${Object.keys(metadata.citations).length} entries`);
+    return metadata;
   }
 
   /**
