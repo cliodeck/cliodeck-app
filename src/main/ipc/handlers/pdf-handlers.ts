@@ -16,6 +16,7 @@ import {
   StringIdSchema,
 } from '../utils/validation.js';
 import { PDFModificationDetector } from '../../../../backend/services/PDFModificationDetector.js';
+import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { logger } from '../../utils/logger.js';
 
 export function setupPDFHandlers() {
@@ -32,8 +33,13 @@ export function setupPDFHandlers() {
     }
   });
 
-  ipcMain.handle('pdf:index', async (event, rawFilePath: unknown, rawBibtexKey?: unknown, rawBibliographyMetadata?: unknown) => {
-    const { filePath, bibtexKey, bibliographyMetadata } = validate(PDFIndexFullSchema, { filePath: rawFilePath, bibtexKey: rawBibtexKey, bibliographyMetadata: rawBibliographyMetadata });
+  ipcMain.handle('pdf:index', async (event, rawFilePath: unknown, rawBibtexKey?: unknown, rawBibliographyMetadata?: unknown, rawExpectedProjectPath?: unknown) => {
+    const { filePath, bibtexKey, bibliographyMetadata, expectedProjectPath } = validate(PDFIndexFullSchema, {
+      filePath: rawFilePath,
+      bibtexKey: rawBibtexKey,
+      bibliographyMetadata: rawBibliographyMetadata,
+      expectedProjectPath: rawExpectedProjectPath,
+    });
     logger.info('ipc', 'pdf:index', { filePath, bibtexKey, bibliographyMetadata });
     const elapsed = logger.startTimer();
 
@@ -41,6 +47,12 @@ export function setupPDFHandlers() {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
       logger.debug('ipc', 'pdf:index:project', { projectPath });
+      // Un lot lancé dans A, B ouvert entre-temps : le PDF de A n'entre pas dans le corpus de B
+      // (S18-2-0). Même fichier, pas même chaîne : un lien ne fait pas refuser à tort.
+      if (expectedProjectPath !== undefined && !sameFile(projectPath, expectedProjectPath)) {
+        logger.warn('ipc', 'pdf:index:project-changed', { expectedProjectPath, projectPath });
+        return errorResponse('project-changed');
+      }
 
       // Initialize PDF service for this project
 

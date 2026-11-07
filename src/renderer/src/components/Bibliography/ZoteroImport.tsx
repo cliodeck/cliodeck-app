@@ -4,6 +4,7 @@ import { Download, RefreshCw } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { stillIn } from '../../services/still-in-project';
 
 interface ZoteroCollection {
   key: string;
@@ -40,27 +41,6 @@ interface ZoteroLibraryInfo {
   type: 'user' | 'group';
   name: string;
   groupID?: number;
-}
-
-type ProjectStoreState = ReturnType<typeof useProjectStore.getState>;
-
-/**
- * Encore dans le projet `path` ? Pendant l'ouverture d'un autre projet, le main l'a parfois déjà
- * pris (il initialise ses services) alors que l'écran montre encore `path` : on attend l'issue.
- * Une ouverture refusée laisse `path` ouvert, et la réponse est oui.
- */
-async function stillIn(path: string): Promise<boolean> {
-  const leaving = (state: ProjectStoreState) => state.loadState.kind === 'loading' && state.loadState.path !== path;
-  if (leaving(useProjectStore.getState())) {
-    await new Promise<void>((resolve) => {
-      const unsubscribe = useProjectStore.subscribe((state) => {
-        if (leaving(state)) return;
-        unsubscribe();
-        resolve();
-      });
-    });
-  }
-  return useProjectStore.getState().currentProject?.path === path;
 }
 
 export const ZoteroImport: React.FC = () => {

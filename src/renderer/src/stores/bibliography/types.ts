@@ -84,6 +84,20 @@ export interface BatchIndexingState {
   errors: string[];
 }
 
+/**
+ * Le projet a changé en cours de route (S18-2-0) : l'action s'est arrêtée sans rien écrire ni
+ * relire dans le nouveau projet. Un lot dit en plus combien d'éléments il n'a pas traités.
+ */
+export interface ProjectChangedOutcome {
+  interrupted?: true;
+  remaining?: number;
+  /**
+   * PDF téléchargés et rattachés dans le projet, mais pas indexés : une relance du téléchargement
+   * les écarterait (leur notice a son fichier), « Indexer tous les PDFs » les reprend.
+   */
+  toIndex?: number;
+}
+
 // MARK: - Slice State Interfaces
 
 export interface CitationSliceState {
@@ -118,10 +132,11 @@ export interface IndexingSliceState {
   batchIndexing: BatchIndexingState;
 
   // Actions
-  indexPDFFromCitation: (citationId: string) => Promise<{ alreadyIndexed: boolean }>;
-  reindexPDFFromCitation: (citationId: string) => Promise<void>;
+  indexPDFFromCitation: (citationId: string) => Promise<{ alreadyIndexed: boolean } & ProjectChangedOutcome>;
+  reindexPDFFromCitation: (citationId: string) => Promise<ProjectChangedOutcome>;
   getDocumentIdForCitation: (citationId: string) => Promise<string | null>;
-  indexAllPDFs: () => Promise<{ indexed: number; skipped: number; errors: string[] }>;
+  /** Indexe les PDF des références du projet `projectPath`, tant qu'il reste le projet ouvert. */
+  indexAllPDFs: (projectPath: string) => Promise<{ indexed: number; skipped: number; errors: string[] } & ProjectChangedOutcome>;
   refreshIndexedPDFs: () => Promise<void>;
   isFileIndexed: (filePath: string) => boolean;
   isBibtexKeyIndexed: (bibtexKey: string) => boolean;
@@ -129,8 +144,8 @@ export interface IndexingSliceState {
 
 export interface ZoteroSliceState {
   // Actions only (state is shared via other slices)
-  downloadAndIndexZoteroPDF: (citationId: string, attachmentKey: string, projectPath: string) => Promise<void>;
-  downloadAllMissingPDFs: (projectPath: string) => Promise<{ downloaded: number; skipped: number; errors: string[] }>;
+  downloadAndIndexZoteroPDF: (citationId: string, attachmentKey: string, projectPath: string) => Promise<ProjectChangedOutcome>;
+  downloadAllMissingPDFs: (projectPath: string) => Promise<{ downloaded: number; skipped: number; errors: string[] } & ProjectChangedOutcome>;
 }
 
 export interface ReadingNotesSliceState {

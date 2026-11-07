@@ -1,17 +1,36 @@
-import type { IndexingSliceState, BibliographySliceCreator } from './types';
+import type { BatchIndexingState, IndexingSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
+import { useProjectStore } from '../projectStore';
+import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
+
+/** Aucun lot en cours : ni barre de progression dans le panneau, ni indicateur dans la barre d'état. */
+export function idleBatchIndexing(): BatchIndexingState {
+  return { isIndexing: false, current: 0, total: 0, skipped: 0, indexed: 0, errors: [] };
+}
+
+/**
+ * Le projet où l'on a cliqué : le main refuse d'indexer ailleurs, et ce qu'il répond après la
+ * bascule ne s'inscrit pas dans le store du suivant (S18-2-0). Sans projet, rien n'est gardé :
+ * le main refuse de toute façon d'indexer. `leftNow` n'attend pas l'issue d'une ouverture
+ * (`stillShown`).
+ */
+function leavingCheck(): {
+  projectPath: string | undefined;
+  left: () => Promise<boolean>;
+  leftNow: () => boolean;
+} {
+  const projectPath = useProjectStore.getState().currentProject?.path;
+  return {
+    projectPath,
+    left: async () => !!projectPath && !(await stillIn(projectPath)),
+    leftNow: () => !!projectPath && !stillShown(projectPath),
+  };
+}
 
 export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> = (set, get) => ({
   indexedFilePaths: new Set<string>(),
   indexedBibtexKeys: new Set<string>(),
-  batchIndexing: {
-    isIndexing: false,
-    current: 0,
-    total: 0,
-    skipped: 0,
-    indexed: 0,
-    errors: [],
-  },
+  batchIndexing: idleBatchIndexing(),
 
   indexPDFFromCitation: async (citationId: string) => {
     try {
@@ -30,6 +49,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
       console.log(`🔍 Indexing PDF for citation: ${citation.title}`);
       console.log(`📁 PDF file path: ${citation.file}`);
+      const { projectPath, left } = leavingCheck();
 
       // Emit event to show progress in PDF panel
       window.dispatchEvent(new CustomEvent('bibliography:indexing-start', {
@@ -43,7 +63,14 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         year: citation.year,
       };
 
-      const result = await window.electron.pdf.index(citation.file, citationId, bibliographyMetadata);
+      const result = await window.electron.pdf.index(citation.file, citationId, bibliographyMetadata, projectPath);
+
+      if (refusedAsProjectChanged(result) || (await left())) {
+        window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
+          detail: { citationId, success: false }
+        }));
+        return { alreadyIndexed: false, interrupted: true };
+      }
 
       if (!result.success) {
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -93,6 +120,10 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         throw new Error('Citation not found');
       }
 
+      // Après chaque attente : un autre projet ouvert entre-temps aurait son document de même clé
+      // supprimé, et le PDF de celui-ci dans son corpus.
+      const { projectPath, left, leftNow } = leavingCheck();
+
       // Resolution order for the PDF path on disk:
       //   1. `citation.file` — what BibTeX or the in-memory Zotero download
       //      flow gave us. Cheapest and most accurate when available.
@@ -107,6 +138,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       if (!filePath) {
         try {
           const allDocs = await window.electron.pdf.getAll();
+          if (await left()) return { interrupted: true };
           if (allDocs.success && Array.isArray(allDocs.documents)) {
             const existing = allDocs.documents.find(
               (d: { bibtexKey?: string; fileURL?: string }) =>
@@ -132,9 +164,14 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
       // Find and delete existing indexed document
       const documentId = await get().getDocumentIdForCitation(citationId);
+      if (await left()) return { interrupted: true };
       if (documentId) {
         console.log(`🗑️ Deleting existing indexed PDF for: ${citation.title}`);
         await window.electron.pdf.delete(documentId);
+        // Le document est retiré de ce projet : sa réindexation part aussitôt, le main refuse s'il a
+        // déjà basculé. Attendre l'issue d'une ouverture la ferait refuser à coup sûr, et le
+        // document manquerait au corpus sans que rien ne le dise.
+        if (leftNow()) return { interrupted: true };
 
         // Remove from indexed set
         set((state) => {
@@ -157,7 +194,14 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         year: citation.year,
       };
 
-      const result = await window.electron.pdf.index(filePath, citationId, bibliographyMetadata);
+      const result = await window.electron.pdf.index(filePath, citationId, bibliographyMetadata, projectPath);
+
+      if (refusedAsProjectChanged(result) || (await left())) {
+        window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
+          detail: { citationId, success: false }
+        }));
+        return { interrupted: true };
+      }
 
       if (!result.success) {
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
@@ -176,17 +220,23 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       }));
 
       console.log(`✅ PDF re-indexed from citation: ${citation.title}`);
+      return {};
     } catch (error) {
       console.error('❌ Failed to re-index PDF from citation:', error);
       throw error;
     }
   },
 
-  indexAllPDFs: async () => {
+  indexAllPDFs: async (projectPath: string) => {
     const { citations } = get();
+    const itemsWithFile = citations.filter((c) => isPdfPath(c.file)).length;
 
     // Refresh indexed PDFs list first
     await get().refreshIndexedPDFs();
+    // Un autre projet ouvert pendant la relecture : le lot ne démarre pas.
+    if (!(await stillIn(projectPath))) {
+      return { indexed: 0, skipped: 0, errors: [], interrupted: true, remaining: itemsWithFile };
+    }
 
     // Get citations with PDFs that are not yet indexed, deduplicated by
     // filePath. A Zotero library can have many bibliography items pointing
@@ -212,7 +262,6 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       return { indexed: 0, skipped: 0, errors: [] };
     }
 
-    const itemsWithFile = citations.filter((c) => isPdfPath(c.file)).length;
     if (itemsWithFile > citationsWithPDFs.length) {
       const duplicates = itemsWithFile - citationsWithPDFs.length;
       console.log(
@@ -225,6 +274,15 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     const errors: string[] = [];
     let indexed = 0;
     let skipped = 0;
+    /**
+     * Le projet du lot n'est plus l'ouvert (S18-2-0) : ses PDF suivants iraient dans le corpus de
+     * l'autre. Le lot s'arrête, la progression disparaît, et ce qui reste se dit.
+     */
+    const interrupt = () => {
+      set({ batchIndexing: idleBatchIndexing() });
+      const remaining = citationsWithPDFs.length - indexed - skipped - errors.length;
+      return { indexed, skipped, errors, interrupted: true as const, remaining };
+    };
 
     set({
       batchIndexing: {
@@ -239,6 +297,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
 
     for (let i = 0; i < citationsWithPDFs.length; i++) {
       const citation = citationsWithPDFs[i];
+      if (!(await stillIn(projectPath))) return interrupt();
 
       set((state) => ({
         batchIndexing: {
@@ -274,7 +333,16 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           year: citation.year,
         };
 
-        const result = await window.electron.pdf.index(citation.file!, citation.id, bibliographyMetadata);
+        const result = await window.electron.pdf.index(citation.file!, citation.id, bibliographyMetadata, projectPath);
+
+        // Le PDF en vol a été indexé dans le projet du lot : il compte, mais l'ouvert n'en sait rien.
+        if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) {
+          if (result.success) indexed++;
+          window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
+            detail: { citationId: citation.id, success: result.success }
+          }));
+          return interrupt();
+        }
 
         if (result.success) {
           indexed++;

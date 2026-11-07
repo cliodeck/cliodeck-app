@@ -174,6 +174,16 @@ export function setupZoteroHandlers() {
       mode: options.mode,
       attachmentKey: options.attachmentKey,
     });
+    // Le PDF arrive dans `<targetDirectory>/PDFs` : seulement celui du projet ouvert, pas celui
+    // d'un lot qui a survécu à l'ouverture d'un autre (S18-2-0).
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) {
+      return errorResponse(new Error('Aucun projet ouvert.'));
+    }
+    if (!sameFile(projectPath, options.targetDirectory)) {
+      console.warn('⚠️ zotero:download-pdf refusé : ce n\'est pas le projet ouvert');
+      return errorResponse('project-changed');
+    }
     try {
       const result = await zoteroService.downloadPDF(options as any);
       console.log('📤 IPC Response: zotero:download-pdf', {

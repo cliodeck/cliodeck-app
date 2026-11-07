@@ -106,8 +106,16 @@ const api = {
   pdf: {
     extractMetadata: (filePath: string) =>
       ipcRenderer.invoke('pdf:extractMetadata', filePath),
-    index: (filePath: string, bibtexKey?: string, bibliographyMetadata?: { title?: string; author?: string; year?: string }) =>
-      ipcRenderer.invoke('pdf:index', filePath, bibtexKey, bibliographyMetadata),
+    /**
+     * Refusé (`project-changed`) si le projet ouvert n'est plus `expectedProjectPath` : un lot de
+     * la bibliographie le donne, pour que les PDF d'un projet n'entrent pas dans le corpus d'un autre.
+     */
+    index: (
+      filePath: string,
+      bibtexKey?: string,
+      bibliographyMetadata?: { title?: string; author?: string; year?: string },
+      expectedProjectPath?: string
+    ) => ipcRenderer.invoke('pdf:index', filePath, bibtexKey, bibliographyMetadata, expectedProjectPath),
     search: (query: string, options?: any) =>
       ipcRenderer.invoke('pdf:search', query, options),
     delete: (documentId: string) =>
@@ -166,6 +174,7 @@ const api = {
       projectPath: string;
       archiveSubdir?: string;
     }) => ipcRenderer.invoke('bibliography:archive-orphan-pdfs', options),
+    /** Refusé (`project-changed`) si `projectPath` n'est pas le projet ouvert. */
     saveMetadata: (options: {
       projectPath: string;
       citations: any[];
@@ -413,6 +422,7 @@ const api = {
       libraryID?: number;
       attachmentKey: string;
       filename: string;
+      /** Le projet ouvert : refusé (`project-changed`) sinon. Le PDF arrive dans son `PDFs/`. */
       targetDirectory: string;
     }) => ipcRenderer.invoke('zotero:download-pdf', options),
   },

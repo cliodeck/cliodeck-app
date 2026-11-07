@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useBibliographyStore } from '../../bibliographyStore';
+import { useProjectStore } from '../../projectStore';
 import { withDownloadedAttachment } from '../zoteroSlice';
 import type { Citation } from '../types';
 import { BibliographyMetadataService } from '../../../../../../backend/services/BibliographyMetadataService';
@@ -39,6 +40,11 @@ beforeEach(() => {
     bibliography: { saveMetadata },
   };
   useBibliographyStore.setState({ citations: [fromBib()] });
+  // Le lot s'arrête si son projet n'est plus l'ouvert (S18-2-0) : il est ouvert ici.
+  useProjectStore.setState({
+    currentProject: { id: 'projet', name: 'Projet', path: '/projet', type: 'article', createdAt: new Date(), lastOpenedAt: new Date() },
+    loadState: { kind: 'idle' },
+  });
 });
 
 afterEach(() => {

@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useBibliographyStore } from '../../bibliographyStore';
+import { useProjectStore } from '../../projectStore';
 import type { Citation } from '../types';
 
 const PDF = '/projet/PDFs/Fickers_-_2020_-_Update_für_die_Hermeneutik.pdf';
@@ -53,6 +54,11 @@ beforeEach(() => {
     indexedFilePaths: new Set<string>(),
     indexedBibtexKeys: new Set<string>(),
   });
+  // Les lots s'arrêtent si leur projet n'est plus l'ouvert (S18-2-0) : il est ouvert ici.
+  useProjectStore.setState({
+    currentProject: { id: 'projet', name: 'Projet', path: '/projet', type: 'article', createdAt: new Date(), lastOpenedAt: new Date() },
+    loadState: { kind: 'idle' },
+  });
 });
 
 afterEach(() => {
@@ -61,7 +67,7 @@ afterEach(() => {
 
 describe('pièce jointe qui n’est pas un PDF', () => {
   it('« Indexer tous les PDF » n’envoie que les PDF, sans compter d’erreur', async () => {
-    const result = await useBibliographyStore.getState().indexAllPDFs();
+    const result = await useBibliographyStore.getState().indexAllPDFs('/projet');
 
     expect(indexPdf.mock.calls.map((call) => call[0])).toEqual([PDF]);
     expect(result).toEqual({ indexed: 1, skipped: 0, errors: [] });
