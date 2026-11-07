@@ -442,7 +442,13 @@ export class TropySync {
     if (
       !transcription &&
       options.performOCR &&
-      (options.forceReindex || (acquiredBody.length === 0 && !notesAreTranscription)) &&
+      (options.forceReindex ||
+        // Une source en attente de Poppler se reprend quoi qu'en disent ses
+        // notes : le texte de ses images est déjà là, il manque celui de ses
+        // PDF. Une passe forcée sans Poppler en met une à notes-transcription
+        // en attente, et l'avis promet la reprise sans forcer.
+        existingPending === 'poppler' ||
+        (acquiredBody.length === 0 && !notesAreTranscription)) &&
       // Poppler toujours absent : la reprendre referait l'OCR de ses images
       // pour le même texte partiel.
       !(existingPending === 'poppler' && pass.popplerMissing)
@@ -554,9 +560,15 @@ export class TropySync {
     const isUpdated =
       !!existingSource && (options.forceReindex || itemChanged || chunksStale);
 
-    // Initialiser `notes_text` réécrit la ligne sans que rien n'ait changé
-    // pour l'historien : ce n'est pas une mise à jour.
-    let saved = isNew || isUpdated || notesUninitialized;
+    // La marque d'attente peut changer seule : la reprise, Poppler installé,
+    // rend le même texte partiel quand le PDF est illisible ou a quitté le
+    // disque. Ne pas l'écrire faisait refaire l'OCR de l'item à chaque passe.
+    const pendingChanged = !!existingSource && ocrPending !== existingPending;
+
+    // Initialiser `notes_text`, ou lever la seule marque d'attente, réécrit la
+    // ligne sans que rien n'ait changé pour l'historien : ce n'est pas une
+    // mise à jour.
+    let saved = isNew || isUpdated || notesUninitialized || pendingChanged;
     if (saved) {
       // La ligne et l'invalidation de ses extraits dans une même transaction :
       // une ligne nouvelle gardée sans elle passerait pour acquise à la passe
@@ -682,7 +694,11 @@ export class TropySync {
         return {
           result: {
             text: result.text,
-            photoCount: photoPaths.length,
+            // Sans Poppler, les PDF n'ont pas été reconnus : ils ne se
+            // comptent pas, et se compteront à leur reprise.
+            photoCount: result.missingTool
+              ? photoPaths.filter((p) => !this.ocrPipeline.isPDF(p)).length
+              : photoPaths.length,
             confidence: result.confidence,
             ...(result.missingTool ? { missingTool: result.missingTool } : {}),
           },
