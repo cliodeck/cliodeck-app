@@ -295,7 +295,13 @@
     "createReadingNote": "New note",
     "openReadingNote": "Reading note",
     "readingNoteError": "Reading note: {{error}}",
-    "readingNoteNotUtf8": "This reference's reading note is not encoded in UTF-8. Its tags were not changed, because rewriting it would damage its accented characters: it remains untouched on disk. Convert it to UTF-8, then try again."
+    "readingNoteNotUtf8": "This reference's reading note is not encoded in UTF-8. Its tags were not changed, because rewriting it would damage its accented characters: it remains untouched on disk. Convert it to UTF-8, then try again.",
+    "unreadEntries": "{{count}} entry(ies) in {{file}} could not be read: they are not shown, and the synchronization with Zotero stops without writing anything until they are fixed. Fix them in the file with a text editor: add a title (title = {…}) to any entry that has none, in Zotero too if the record comes from there; close any brace left open; remove any field whose name contains a hyphen (mendeley-groups, date-added…), which Mendeley and BibDesk place before the title. Entries concerned:",
+    "bibMissing": "The project's bibliography file, {{file}}, cannot be found: it was moved, renamed or deleted outside ClioDeck, and its references are not shown. Put it back in its place.",
+    "bibNotUtf8": "{{file}} is not encoded in UTF-8: ClioDeck does not read it, so as not to damage its accented characters. Save it as UTF-8 in your text editor or reference manager.",
+    "bibUnreadable": "{{file}} could not be read ({{error}}). Check that it is on this disk, downloaded if it is in a synced folder, and that you are allowed to read it.",
+    "metadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read: those PDFs are not shown, and the synchronization with Zotero stops without writing anything until it is repaired. Repair it, or restore a copy of it.",
+    "reopenAfterFix": "Then reopen the project: this banner will disappear."
   },
   "project": {
     "title": "Project",
@@ -666,7 +672,12 @@
       "localKept": "{{count}} reference(s) not linked to Zotero were kept as they are.",
       "more": "… and {{count}} more",
       "error": "Synchronization failed: {{error}}",
-      "projectChanged": "Another project was opened during the synchronization: nothing was written. Run “Sync with Zotero” again in the project you want."
+      "projectChanged": "Another project was opened during the synchronization: nothing was written. Run “Sync with Zotero” again in the project you want.",
+      "refused": "Synchronization stopped: nothing was written.",
+      "unreadEntries": "{{count}} entry(ies) in {{file}} could not be read, and rewriting the file would have erased them. Fix them in {{file}} with a text editor: add a title (title = {…}) to any entry that has none, in Zotero too if the record comes from there; close any brace left open; remove any field whose name contains a hyphen (mendeley-groups, date-added…), which Mendeley and BibDesk place before the title. Entries concerned:",
+      "stringMacros": "{{file}} defines abbreviations (@string) that rewriting the file would have lost. Replace each abbreviation with its value in the entries, then delete the @string lines.",
+      "metadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read: the synchronization would have replaced it, and those attachments would have been lost. Repair it, or restore a copy of it. Deleting it starts from scratch: PDFs already downloaded stay on disk, but they will have to be downloaded again to be attached.",
+      "fixThenRetry": "Then run “Sync with Zotero” again."
     }
   },
   "suggestions": {

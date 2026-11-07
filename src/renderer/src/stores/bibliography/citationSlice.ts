@@ -1,8 +1,36 @@
-import type { Citation, CitationSliceState, BibliographySliceCreator } from './types';
+import type { BibliographyProblem, Citation, CitationSliceState, BibliographySliceCreator } from './types';
 import { referenceTags } from './referenceTags';
+
+/** Ce que rend le main pour un `.bib` : les citations, et ce qui ne s'est pas lu. */
+interface BibliographyLoadResponse {
+  success?: boolean;
+  error?: string;
+  citations?: Citation[];
+  unreadKeys?: string[];
+  metadataUnreadable?: boolean;
+  problem?: 'missing' | 'unreadable';
+  reason?: string;
+}
+
+const fileName = (filePath: string): string => filePath.split(/[\\/]/).pop() || filePath;
+
+/** Le fichier s'est lu : des entrées ou des métadonnées ont pu manquer. */
+function partialProblem(filePath: string, result: BibliographyLoadResponse): BibliographyProblem | null {
+  const unreadKeys = result.unreadKeys ?? [];
+  const metadataUnreadable = result.metadataUnreadable === true;
+  if (unreadKeys.length === 0 && !metadataUnreadable) return null;
+  return { kind: 'partial', file: fileName(filePath), unreadKeys, metadataUnreadable };
+}
+
+/** Le fichier ne s'est pas lu du tout. */
+function failureProblem(filePath: string, result: BibliographyLoadResponse | undefined): BibliographyProblem {
+  if (result?.problem === 'missing') return { kind: 'missing', file: fileName(filePath) };
+  return { kind: 'unreadable', file: fileName(filePath), reason: result?.reason ?? 'io', detail: result?.error ?? '' };
+}
 
 export const createCitationSlice: BibliographySliceCreator<CitationSliceState> = (set, get) => ({
   citations: [],
+  bibliographyProblem: null,
   filteredCitations: [],
   selectedCitationId: null,
   searchQuery: '',
@@ -12,12 +40,13 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
 
   loadBibliography: async (filePath: string) => {
     try {
-      const result = await window.electron.bibliography.load(filePath);
+      const result: BibliographyLoadResponse = await window.electron.bibliography.load(filePath);
 
       if (result.success && Array.isArray(result.citations)) {
         set({
           citations: result.citations,
           filteredCitations: result.citations,
+          bibliographyProblem: partialProblem(filePath, result),
         });
 
         get().applyFilters();
@@ -36,7 +65,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
 
   loadBibliographyWithMetadata: async (filePath: string, projectPath: string) => {
     try {
-      const result = await window.electron.bibliography.loadWithMetadata({
+      const result: BibliographyLoadResponse = await window.electron.bibliography.loadWithMetadata({
         filePath,
         projectPath,
       });
@@ -51,6 +80,7 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
         set({
           citations: result.citations,
           filteredCitations: result.citations,
+          bibliographyProblem: partialProblem(filePath, result),
         });
 
         get().applyFilters();
@@ -70,6 +100,9 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
         }
       } else {
         console.error('Invalid response from bibliography.loadWithMetadata:', result);
+        // Le fichier attendu ne se lit pas : ni la liste du projet d'avant, ni un panneau vide
+        // sans explication (S07-1-11).
+        set({ citations: [], filteredCitations: [], bibliographyProblem: failureProblem(filePath, result) });
         throw new Error(result.error || 'Failed to load bibliography with metadata');
       }
     } catch (error) {

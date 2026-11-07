@@ -295,7 +295,13 @@
     "createReadingNote": "Neue Notiz",
     "openReadingNote": "Lesenotiz",
     "readingNoteError": "Lesenotiz: {{error}}",
-    "readingNoteNotUtf8": "Die Lesenotiz dieser Referenz ist nicht in UTF-8 kodiert. Ihre Schlagwörter wurden nicht geändert, weil ein erneutes Schreiben ihre Sonderzeichen beschädigen würde: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut."
+    "readingNoteNotUtf8": "Die Lesenotiz dieser Referenz ist nicht in UTF-8 kodiert. Ihre Schlagwörter wurden nicht geändert, weil ein erneutes Schreiben ihre Sonderzeichen beschädigen würde: Sie bleibt auf der Festplatte unverändert. Konvertieren Sie sie nach UTF-8 und versuchen Sie es erneut.",
+    "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie werden nicht angezeigt, und die Synchronisierung mit Zotero bricht ab, ohne etwas zu schreiben, bis sie korrigiert sind. Korrigieren Sie sie in der Datei mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel, auch in Zotero, wenn der Eintrag von dort stammt; schließen Sie offen gebliebene geschweifte Klammern; entfernen Sie Felder, deren Name einen Bindestrich enthält (mendeley-groups, date-added…), die Mendeley und BibDesk vor den Titel setzen. Betroffene Einträge:",
+    "bibMissing": "Die Bibliografiedatei des Projekts, {{file}}, ist nicht auffindbar: Sie wurde außerhalb von ClioDeck verschoben, umbenannt oder gelöscht, und ihre Referenzen werden nicht angezeigt. Legen Sie sie wieder an ihren Platz.",
+    "bibNotUtf8": "{{file}} ist nicht in UTF-8 kodiert: ClioDeck liest die Datei nicht, um ihre Sonderzeichen nicht zu beschädigen. Speichern Sie sie in Ihrem Texteditor oder Literaturverwaltungsprogramm als UTF-8.",
+    "bibUnreadable": "{{file}} konnte nicht gelesen werden ({{error}}). Prüfen Sie, ob die Datei auf diesem Datenträger liegt, heruntergeladen ist, falls sie sich in einem synchronisierten Ordner befindet, und ob Sie sie lesen dürfen.",
+    "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Diese PDFs werden nicht angezeigt, und die Synchronisierung mit Zotero bricht ab, ohne etwas zu schreiben, bis die Datei repariert ist. Reparieren Sie sie oder stellen Sie eine Kopie wieder her.",
+    "reopenAfterFix": "Öffnen Sie das Projekt danach erneut: Dieser Hinweis verschwindet dann."
   },
   "project": {
     "title": "Projekt",
@@ -666,7 +672,12 @@
       "localKept": "{{count}} Referenz(en) ohne Zotero-Verknüpfung wurden unverändert beibehalten.",
       "more": "… und {{count}} weitere",
       "error": "Synchronisierung fehlgeschlagen: {{error}}",
-      "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut."
+      "projectChanged": "Während der Synchronisierung wurde ein anderes Projekt geöffnet: Es wurde nichts geschrieben. Starten Sie „Mit Zotero synchronisieren“ im gewünschten Projekt erneut.",
+      "refused": "Synchronisierung abgebrochen: Es wurde nichts geschrieben.",
+      "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden, und ein erneutes Schreiben der Datei hätte sie gelöscht. Korrigieren Sie sie in {{file}} mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel, auch in Zotero, wenn der Eintrag von dort stammt; schließen Sie offen gebliebene geschweifte Klammern; entfernen Sie Felder, deren Name einen Bindestrich enthält (mendeley-groups, date-added…), die Mendeley und BibDesk vor den Titel setzen. Betroffene Einträge:",
+      "stringMacros": "{{file}} definiert Abkürzungen (@string), die beim erneuten Schreiben der Datei verloren gegangen wären. Ersetzen Sie jede Abkürzung in den Einträgen durch ihren Wert und löschen Sie dann die @string-Zeilen.",
+      "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Die Synchronisierung hätte sie ersetzt, und diese Verknüpfungen wären verloren gegangen. Reparieren Sie sie oder stellen Sie eine Kopie wieder her. Wenn Sie sie löschen, beginnen Sie von vorn: Bereits heruntergeladene PDFs bleiben auf der Festplatte, müssen aber erneut heruntergeladen werden, um verknüpft zu werden.",
+      "fixThenRetry": "Starten Sie danach „Mit Zotero synchronisieren“ erneut."
     }
   },
   "suggestions": {

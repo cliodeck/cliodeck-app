@@ -36,6 +36,21 @@ interface SyncReport {
   };
 }
 
+/**
+ * Refus du main avant toute lecture de Zotero : le `.bib` ou les métadonnées sont mal lus, et les
+ * réécrire perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10).
+ */
+type SyncRefusal = { success: false; file: string } & (
+  | { error: 'bib-unread'; unreadKeys: string[]; hasStringMacros: boolean }
+  | { error: 'bib-unreadable'; reason: string; detail: string }
+  | { error: 'metadata-unreadable' }
+);
+
+const REFUSALS = new Set(['bib-unread', 'bib-unreadable', 'metadata-unreadable']);
+
+const isRefusal = (result: { success?: boolean; error?: string }): result is SyncRefusal =>
+  result.success === false && REFUSALS.has(result.error ?? '');
+
 interface ZoteroLibraryInfo {
   libraryID: number;
   type: 'user' | 'group';
@@ -262,6 +277,32 @@ export const ZoteroImport: React.FC = () => {
     return parts.join('\n\n');
   };
 
+  /**
+   * Ce qui est en cause et comment le corriger, jamais le code du refus : les entrées que le
+   * parseur n'a pas lues, nommées, ou le fichier illisible.
+   */
+  const describeRefusal = (refusal: SyncRefusal): string => {
+    const parts: string[] = [];
+    if (refusal.error === 'bib-unread') {
+      if (refusal.unreadKeys.length > 0) {
+        parts.push(
+          `${t('zotero.sync.unreadEntries', { count: refusal.unreadKeys.length, file: refusal.file })}\n` +
+            listSome(refusal.unreadKeys.map((key) => `• @${key}`))
+        );
+      }
+      if (refusal.hasStringMacros) parts.push(t('zotero.sync.stringMacros', { file: refusal.file }));
+    } else if (refusal.error === 'bib-unreadable') {
+      parts.push(
+        refusal.reason === 'encoding'
+          ? t('bibliography.bibNotUtf8', { file: refusal.file })
+          : t('bibliography.bibUnreadable', { file: refusal.file, error: refusal.detail })
+      );
+    } else {
+      parts.push(t('zotero.sync.metadataUnreadable', { file: refusal.file }));
+    }
+    return [t('zotero.sync.refused'), ...parts, t('zotero.sync.fixThenRetry')].join('\n\n');
+  };
+
   /** Compte rendu après écriture. */
   const describeOutcome = (report: SyncReport): string => {
     const changed =
@@ -339,6 +380,10 @@ export const ZoteroImport: React.FC = () => {
 
       if (!result.success && result.error === 'project-changed') {
         await useDialogStore.getState().showAlert(t('zotero.sync.projectChanged'));
+        return;
+      }
+      if (isRefusal(result)) {
+        await useDialogStore.getState().showAlert(describeRefusal(result));
         return;
       }
       if (!result.success || result.status !== 'applied' || !result.report) {

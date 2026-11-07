@@ -356,9 +356,11 @@ async function openProjectContents(
     console.log('📚 Using legacy bibliography path');
   }
 
+  // Le bandeau d'un `.bib` illisible vaut pour son projet : chaque ouverture repart sans lui.
   if (bibliographyPath) {
     try {
       const { useBibliographyStore } = await import('./bibliographyStore');
+      useBibliographyStore.setState({ bibliographyProblem: null });
       console.log('📚 Loading bibliography from:', bibliographyPath);
       // Use loadBibliographyWithMetadata to restore zoteroAttachments from metadata file
       await useBibliographyStore.getState().loadBibliographyWithMetadata(bibliographyPath, project.path);
@@ -374,6 +376,7 @@ async function openProjectContents(
     // Still refresh indexed PDFs in case there are documents indexed without bibliography
     try {
       const { useBibliographyStore } = await import('./bibliographyStore');
+      useBibliographyStore.setState({ bibliographyProblem: null });
       await useBibliographyStore.getState().refreshIndexedPDFs();
     } catch (error) {
       console.error('❌ Failed to refresh indexed PDFs:', error);

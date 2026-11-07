@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward } from 'lucide-react';
+import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward, AlertTriangle } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
+import type { BibliographyProblem } from '../../stores/bibliography/types';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
@@ -18,6 +19,55 @@ import { TagFilter } from './TagManager';
 import { OrphanPDFModal } from './OrphanPDFModal';
 import { PDFModificationNotification, usePDFModificationDetection } from './PDFModificationNotification';
 import './BibliographyPanel.css';
+
+/** Clés montrées dans le bandeau avant « … et N autre(s) ». */
+const SHOWN_KEYS = 8;
+
+/**
+ * Le `.bib` attendu du projet ne s'est pas lu, ou pas en entier : ce qui manque, les clés en
+ * cause, et quoi faire. Il disparaît à la lecture suivante d'un fichier redevenu lisible.
+ */
+const BibliographyProblemBanner: React.FC<{ problem: BibliographyProblem }> = ({ problem }) => {
+  const { t } = useTranslation('common');
+  const { file } = problem;
+  const parts: React.ReactNode[] = [];
+  if (problem.kind === 'missing') {
+    parts.push(t('bibliography.bibMissing', { file }));
+  } else if (problem.kind === 'unreadable') {
+    parts.push(
+      problem.reason === 'encoding'
+        ? t('bibliography.bibNotUtf8', { file })
+        : t('bibliography.bibUnreadable', { file, error: problem.detail })
+    );
+  } else {
+    if (problem.unreadKeys.length > 0) {
+      const keys = problem.unreadKeys.slice(0, SHOWN_KEYS).map((key) => `@${key}`).join(', ');
+      const more = problem.unreadKeys.length - SHOWN_KEYS;
+      parts.push(t('bibliography.unreadEntries', { count: problem.unreadKeys.length, file }));
+      parts.push(
+        <span className="bibliography-problem-keys">
+          {keys}
+          {more > 0 && ` ${t('zotero.sync.more', { count: more })}`}
+        </span>
+      );
+    }
+    if (problem.metadataUnreadable) {
+      parts.push(t('bibliography.metadataUnreadable', { file: '.cliodeck/bibliography-metadata.json' }));
+    }
+  }
+  parts.push(t('bibliography.reopenAfterFix'));
+
+  return (
+    <div className="bibliography-problem" role="alert">
+      <AlertTriangle size={16} aria-hidden="true" />
+      <div className="bibliography-problem-text">
+        {parts.map((part, i) => (
+          <p key={i}>{part}</p>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const BibliographyPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -40,6 +90,10 @@ export const BibliographyPanel: React.FC = () => {
     setTagsFilter,
     clearTagsFilter,
   } = useBibliographyStore();
+
+  const bibliographyProblem = useBibliographyStore((state) => state.bibliographyProblem);
+  // Absent ou illisible : la liste vide n'est pas une bibliographie vide, et le bandeau le dit.
+  const bibliographyUnread = bibliographyProblem !== null && bibliographyProblem.kind !== 'partial';
 
   // PDF Modification Detection
   const { modifiedPDFs, dismissNotification } = usePDFModificationDetection(
@@ -100,8 +154,9 @@ export const BibliographyPanel: React.FC = () => {
         const sourcePath = result.filePaths[0];
         setPendingFilePath(sourcePath);
 
-        // If we already have citations, show the mode selection modal
-        if (citations.length > 0) {
+        // If we already have citations, show the mode selection modal. Un `.bib` du projet qui
+        // ne se lit pas n'est pas une bibliographie vide : pas de remplacement sans le demander.
+        if (citations.length > 0 || bibliographyProblem) {
           setShowModeModal(true);
         } else {
           // No citations yet, directly replace (= load)
@@ -501,6 +556,8 @@ export const BibliographyPanel: React.FC = () => {
         </div>
       )}
 
+      {bibliographyProblem && <BibliographyProblemBanner problem={bibliographyProblem} />}
+
       {/* Zotero Import */}
       <ZoteroImport />
 
@@ -573,13 +630,13 @@ export const BibliographyPanel: React.FC = () => {
       {/* Citation List */}
       <CollapsibleSection title={t('bibliography.title')} defaultExpanded={true}>
         <div className="bibliography-content">
-          {filteredCitations.length === 0 ? (
+          {filteredCitations.length > 0 ? (
+            <CitationList citations={filteredCitations} />
+          ) : bibliographyUnread ? null : (
             <div className="bibliography-empty">
               <h4>{t('bibliography.noCitations')}</h4>
               <p>{t('bibliography.importPrompt')}</p>
             </div>
-          ) : (
-            <CitationList citations={filteredCitations} />
           )}
         </div>
       </CollapsibleSection>
