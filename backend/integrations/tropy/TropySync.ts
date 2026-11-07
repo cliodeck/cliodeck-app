@@ -8,6 +8,7 @@ import {
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat } from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
 import { isNoteTranscription } from './note-transcription';
+import { assessTropyBinding } from './tropy-project-identity';
 import {
   PrimarySourcesVectorStore,
   PrimarySourceDocument,
@@ -15,6 +16,7 @@ import {
 import { NERService } from '../../core/ner/NERService';
 import type { LLMProvider } from '../../core/llm/providers/base';
 import { archivalFromTropyMetadata } from '../../types/archival-metadata';
+import { sameFile } from '../../core/vector-store/file-identity';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +35,20 @@ export interface TropySyncOptions {
   llm?: LLMProvider;
 }
 
+/**
+ * Ce qui a empêché ou gêné une passe, sous une forme que le renderer traduit
+ * (`describeSyncIssue`, `sync-issues.ts`). `errors` garde le texte technique,
+ * pour la console.
+ */
+export type TropySyncIssue = {
+  /** Le projet ouvert n'est pas le projet Tropy lié, qui a déjà des sources (Q25). */
+  code: 'different-project';
+  /** Nom du projet lié ; '' si des sources existent sans projet enregistré. */
+  linkedName: string;
+  candidateName: string;
+  sourceCount: number;
+};
+
 export interface TropySyncResult {
   success: boolean;
   projectName: string;
@@ -49,6 +65,7 @@ export interface TropySyncResult {
    */
   transcriptionsWritten: number;
   errors: string[];
+  issues: TropySyncIssue[];
 }
 
 export interface TropySyncProgress {
@@ -107,11 +124,34 @@ export class TropySync {
       transcriptionsImported: 0,
       transcriptionsWritten: 0,
       errors: [],
+      issues: [],
     };
 
     try {
       // Phase 1: Lecture du projet Tropy
       onProgress?.({ phase: 'reading', current: 0, total: 1 });
+
+      // Garde d'identité, avant toute écriture : les ids d'items et de photos
+      // sont locaux à chaque .tpy, un autre projet Tropy verrait ses items
+      // rattachés aux sources de même numéro (S02-1-18). Bouton, ouverture et
+      // surveillance passent tous par ici.
+      const binding = assessTropyBinding(tpyPath, vectorStore);
+      if (binding.decision.kind === 'different') {
+        const { linkedName, sourceCount } = binding.decision;
+        result.projectName = binding.identity.name;
+        result.issues.push({
+          code: 'different-project',
+          linkedName,
+          candidateName: binding.identity.name,
+          sourceCount,
+        });
+        result.errors.push(
+          `Different Tropy project: "${binding.identity.name}" is not the linked project ` +
+            `"${linkedName}" (${sourceCount} sources); nothing was synchronised.`
+        );
+        console.warn(`⚠️ [TROPY-SYNC] ${result.errors[0]}`);
+        return result;
+      }
 
       this.reader.openProject(tpyPath);
       result.projectName = this.reader.getProjectName();
@@ -159,10 +199,11 @@ export class TropySync {
         }
       }
 
-      // Enregistrer le projet Tropy dans le VectorStore
-      // Sans troisième argument : la synchro n'a pas à décider de la
-      // surveillance automatique, elle la préserve.
-      vectorStore.saveTropyProject(tpyPath, result.projectName);
+      // Enregistrer le projet Tropy dans le VectorStore, avec son identité :
+      // un projet déplacé met à jour son chemin. Sans quatrième argument : la
+      // synchro n'a pas à décider de la surveillance automatique, elle la
+      // préserve.
+      vectorStore.bindTropyProject(tpyPath, result.projectName, binding.identity.projectId);
 
       // Un outil absent ne se signale qu'une fois (#138).
       let popplerReported = false;
@@ -630,7 +671,9 @@ export class TropySync {
     const project = vectorStore.getTropyProject();
     if (!project) return true;
 
-    if (project.tpyPath !== projectPath) return true;
+    // Le même fichier, pas la même chaîne : par un lien ou une casse
+    // différente (macOS), un projet frais semblait toujours à resynchroniser.
+    if (!sameFile(project.tpyPath, projectPath)) return true;
 
     try {
       // Resolve actual .tpy path if it's a .tropy package
