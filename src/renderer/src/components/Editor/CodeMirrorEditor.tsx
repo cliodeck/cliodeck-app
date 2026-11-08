@@ -396,9 +396,13 @@ export const CodeMirrorEditor: React.FC = () => {
           projectPath: ownProjectPath,
         }),
       labels: {
+        heading: t('editor.proposalHeading'),
         accept: t('editor.proposalAccept'),
         reject: t('editor.proposalReject'),
         modify: t('editor.proposalModify'),
+        acceptShort: t('editor.proposalAcceptShort'),
+        rejectShort: t('editor.proposalRejectShort'),
+        modifyShort: t('editor.proposalModifyShort'),
         rejectionPrompt: t('editor.proposalWhy'),
         apply: t('editor.proposalApply'),
         cancel: t('common.cancel'),

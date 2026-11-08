@@ -21,9 +21,13 @@ import {
  */
 
 const LABELS = {
+  heading: 'proposition IA',
   accept: 'accepter',
   reject: 'rejeter',
   modify: 'modifier',
+  acceptShort: 'accepter',
+  rejectShort: 'rejeter',
+  modifyShort: 'modifier',
   rejectionPrompt: 'pourquoi ?',
   apply: 'appliquer',
   cancel: 'annuler',

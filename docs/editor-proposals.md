@@ -51,12 +51,15 @@ interface Proposal {
 Cycle de vie :
 
 - **Affichage** : original barré (teinte danger) + proposé en encart (teinte
-  accent) avec ✓ / ✗ / ✎. Insertion pure : pas de barré.
-- **Accepter** (✓ ou Tab au curseur) : le range est remplacé par `proposed`,
+  accent, bordure gauche accent). L'encart s'ouvre sur sa barre : « Proposition
+  IA », puis Accepter, Rejeter et Modifier, chacun avec son icône et son
+  libellé ; le libellé long, raccourci compris, est leur `title` et leur
+  `aria-label`. Le texte proposé vient dessous. Insertion pure : pas de barré.
+- **Accepter** (bouton ou Tab au curseur) : le range est remplacé par `proposed`,
   transaction annotée `ai-proposal-accepted`.
-- **Modifier** (✎) : édition du texte proposé en place, application annotée
+- **Modifier** (bouton) : édition du texte proposé en place, application annotée
   `ai-proposal-modified`, l'événement porte `final`.
-- **Rejeter** (✗ ou Échap au curseur) : retrait sans édition. **Annotation de
+- **Rejeter** (bouton ou Échap au curseur) : retrait sans édition. **Annotation de
   rejet échantillonnée** (arbitrage 1) : 1 rejet sur 5 — jamais deux de
   suite — ouvre un champ « pourquoi ? » optionnel et non bloquant (Entrée
   envoie, Échap/clic ailleurs passe).
@@ -77,6 +80,10 @@ Cycle de vie :
   curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit. Au
   retour d'un mode, le défilement restauré n'arrive qu'à l'image suivante :
   `propose` et `revealLine` l'annulent, sinon il repasserait sur eux.
+  L'encart se situe à sa barre (`coordsAt` du widget) : c'est elle que
+  `scrollIntoView` amène à l'écran, y compris sans retour à la ligne. Situé
+  par sa boîte entière, un encart plus haut que l'écran s'y montrait par le
+  bas, et ses actions, placées après le texte, restaient hors de vue (BT1-1).
 - **Fins de ligne** : le texte accepté ou modifié entre avec le séparateur du
   document. CM6 ne découpe une chaîne que sur le séparateur déclaré : un `\n`
   resterait à l'intérieur d'une ligne d'un fichier CRLF, qui deviendrait mixte.

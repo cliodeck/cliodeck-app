@@ -49,9 +49,16 @@ export interface ProposalAdjudicationEvent {
 }
 
 export interface ProposalLabels {
+  /** Nom de l'encart, en tête de sa barre : le texte proposé n'est pas encore celui de l'auteur. */
+  heading: string;
+  /** Libellés longs, raccourci compris : `title` et `aria-label` des boutons. */
   accept: string;
   reject: string;
   modify: string;
+  /** Libellés visibles des boutons, courts. */
+  acceptShort: string;
+  rejectShort: string;
+  modifyShort: string;
   /** Placeholder du champ « pourquoi ? » (annotation de rejet échantillonnée). */
   rejectionPrompt: string;
   apply: string;

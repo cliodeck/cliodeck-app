@@ -6,17 +6,18 @@ import {
   WidgetType,
   keymap,
   type DecorationSet,
+  type Rect,
 } from '@codemirror/view';
-import { Check, Pencil, X, createElement as createIcon, type IconNode } from 'lucide';
+import { Check, Pencil, Sparkles, X, createElement as createIcon, type IconNode } from 'lucide';
 import type { PendingProposal, ProposalsField } from './state';
 import type { ProposalLabels } from './types';
 
 /**
  * Affichage des propositions : l'original marqué (barré, teinte danger),
- * le texte proposé en regard dans un encart (teinte accent) avec les
- * actions accepter / rejeter / modifier (icônes lucide, les mêmes que le
- * reste de l'interface). DOM construit à la main — jamais d'innerHTML avec
- * du contenu du document.
+ * le texte proposé en regard dans un encart (teinte accent, bordure gauche)
+ * qui s'ouvre sur une barre : son nom, puis les actions accepter / rejeter /
+ * modifier, chacune avec son icône lucide et son libellé. DOM construit à la
+ * main — jamais d'innerHTML avec du contenu du document.
  */
 
 export interface ProposalUiHandlers {
@@ -54,49 +55,72 @@ class ProposalWidget extends WidgetType {
     box.className = 'cm-proposal-box';
     box.dataset.proposalId = this.proposal.id;
 
-    if (this.proposal.ui === 'note') this.renderNote(box, view);
-    else if (this.proposal.ui === 'modify') this.renderModify(box, view);
-    else this.renderButtons(box, view);
+    // La barre d'abord : après une réponse de trente paragraphes, les actions tombaient sous le bas
+    // de l'écran, et rien ne disait que ce texte n'était pas encore celui de l'auteur (BT1-1).
+    const bar = document.createElement('span');
+    bar.className = 'cm-proposal-bar';
+    const heading = document.createElement('span');
+    heading.className = 'cm-proposal-heading';
+    heading.appendChild(createIcon(Sparkles, { width: 14, height: 14 }));
+    heading.appendChild(document.createTextNode(this.labels.heading));
+    bar.appendChild(heading);
+    box.appendChild(bar);
+
+    if (this.proposal.ui === 'note') this.renderNote(bar, view);
+    else if (this.proposal.ui === 'modify') this.renderModify(box, bar, view);
+    else this.renderButtons(box, bar, view);
 
     return box;
   }
 
-  private renderButtons(box: HTMLElement, view: EditorView): void {
-    if (this.proposal.proposed !== '') {
-      const text = document.createElement('span');
-      text.className = 'cm-proposal-text';
-      text.textContent = this.proposal.proposed;
-      box.appendChild(text);
-    }
+  /**
+   * L'encart se situe à sa barre : c'est elle que `scrollIntoView` amène à l'écran. Sinon, la
+   * position est l'encart entier, et un encart plus haut que l'écran s'y montre par le bas.
+   */
+  override coordsAt(dom: HTMLElement): Rect | null {
+    return dom.querySelector('.cm-proposal-bar')?.getBoundingClientRect() ?? null;
+  }
+
+  private renderButtons(box: HTMLElement, bar: HTMLElement, view: EditorView): void {
     const btn = (
       icon: IconNode,
+      label: string,
       title: string,
       onClick: () => void
-    ): void => {
+    ): HTMLButtonElement => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'cm-proposal-btn';
       b.appendChild(createIcon(icon, { width: 14, height: 14 }));
+      b.appendChild(document.createTextNode(label));
+      // Le libellé long garde le raccourci (Tab, Échap) : au survol, et aux lecteurs d'écran.
       b.title = title;
       b.setAttribute('aria-label', title);
       b.addEventListener('mousedown', (e) => {
         e.preventDefault();
         onClick();
       });
-      box.appendChild(b);
+      bar.appendChild(b);
+      return b;
     };
-    btn(Check, this.labels.accept, () =>
+    btn(Check, this.labels.acceptShort, this.labels.accept, () =>
       this.handlers.accept(view, this.proposal.id)
-    );
-    btn(X, this.labels.reject, () =>
+    ).classList.add('cm-proposal-btn-accept');
+    btn(X, this.labels.rejectShort, this.labels.reject, () =>
       this.handlers.reject(view, this.proposal.id)
     );
-    btn(Pencil, this.labels.modify, () =>
+    btn(Pencil, this.labels.modifyShort, this.labels.modify, () =>
       this.handlers.startModify(view, this.proposal.id)
     );
+    if (this.proposal.proposed !== '') {
+      const text = document.createElement('span');
+      text.className = 'cm-proposal-text';
+      text.textContent = this.proposal.proposed;
+      box.appendChild(text);
+    }
   }
 
-  private renderNote(box: HTMLElement, view: EditorView): void {
+  private renderNote(bar: HTMLElement, view: EditorView): void {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'cm-proposal-note';
@@ -119,11 +143,11 @@ class ProposalWidget extends WidgetType {
     });
     // Non bloquant : cliquer ailleurs vaut « passer ».
     input.addEventListener('blur', () => submit(null));
-    box.appendChild(input);
+    bar.appendChild(input);
     requestAnimationFrame(() => input.focus());
   }
 
-  private renderModify(box: HTMLElement, view: EditorView): void {
+  private renderModify(box: HTMLElement, bar: HTMLElement, view: EditorView): void {
     const area = document.createElement('textarea');
     area.className = 'cm-proposal-edit';
     area.value = this.proposal.proposed;
@@ -138,7 +162,6 @@ class ProposalWidget extends WidgetType {
       }
       e.stopPropagation();
     });
-    box.appendChild(area);
 
     const apply = document.createElement('button');
     apply.type = 'button';
@@ -156,8 +179,9 @@ class ProposalWidget extends WidgetType {
       e.preventDefault();
       this.handlers.cancelUi(view, this.proposal.id);
     });
-    box.appendChild(apply);
-    box.appendChild(cancel);
+    bar.appendChild(apply);
+    bar.appendChild(cancel);
+    box.appendChild(area);
     requestAnimationFrame(() => area.focus());
   }
 }
@@ -245,30 +269,60 @@ export const proposalTheme = EditorView.baseTheme({
     textDecorationColor:
       'color-mix(in srgb, var(--color-danger) 60%, transparent)',
   },
+  // En colonne, la barre en tête : sa ligne de base est celle de l'encart, qui se range donc sur la
+  // ligne de l'auteur, et le texte proposé descend dessous. La bordure gauche et la teinte le
+  // distinguent du texte de l'auteur.
   '.cm-proposal-box': {
+    display: 'inline-flex',
+    flexDirection: 'column',
+    gap: '4px',
+    margin: '0 2px',
+    padding: '2px 8px 4px',
+    borderRadius: '4px',
+    backgroundColor: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--color-accent) 45%, transparent)',
+    borderLeft: '3px solid var(--color-accent)',
+    fontSize: '92%',
+  },
+  // Large de son seul contenu : c'est sa boîte que le défilement montre. Étirée à la largeur du
+  // texte, sans retour à la ligne, elle se montrait par son bord droit, boutons hors de l'écran.
+  '.cm-proposal-bar': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: '6px',
+  },
+  '.cm-proposal-heading': {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
-    margin: '0 2px',
-    padding: '0 6px',
-    borderRadius: '4px',
-    backgroundColor: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
-    border: '1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)',
-    fontSize: '92%',
+    marginRight: '4px',
+    // Éclairci en sombre, assombri en clair : lisible sur la teinte de l'encart dans les deux thèmes.
+    color: 'color-mix(in srgb, var(--color-accent) 70%, var(--text-primary))',
+    fontWeight: '600',
   },
   '.cm-proposal-text': { color: 'var(--text-primary)' },
   '.cm-proposal-btn': {
     display: 'inline-flex',
     alignItems: 'center',
-    verticalAlign: 'middle',
-    background: 'none',
-    border: 'none',
+    gap: '4px',
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '4px',
     cursor: 'pointer',
-    padding: '0 2px',
-    color: 'var(--text-secondary)',
-    fontSize: 'inherit',
+    padding: '0 6px',
+    color: 'var(--text-primary)',
+    font: 'inherit',
   },
-  '.cm-proposal-btn:hover': { color: 'var(--color-accent)' },
+  '.cm-proposal-btn:hover': {
+    borderColor: 'var(--color-accent)',
+    color: 'var(--color-accent)',
+  },
+  '.cm-proposal-btn-accept': {
+    borderColor: 'var(--color-accent)',
+    backgroundColor: 'color-mix(in srgb, var(--color-accent) 22%, var(--bg-panel))',
+  },
   '.cm-proposal-note, .cm-proposal-edit': {
     background: 'var(--bg-app)',
     color: 'var(--text-primary)',
