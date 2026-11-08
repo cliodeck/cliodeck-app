@@ -584,10 +584,12 @@ describe('getProjectMetadata : absent n’est pas indisponible', () => {
     ['0 octet', ''],
     ['des blancs', '  \n'],
     ['Latin-1', Buffer.from([0x7b, 0x22, 0x6e, 0x22, 0x3a, 0x22, 0xc9, 0x22, 0x7d])],
-  ])('%s : project_unavailable, jamais retiré, jamais réécrit', async (_label, content) => {
+  ])('%s : manifest_unreadable, jamais retiré, jamais réécrit', async (_label, content) => {
+    // Le fichier se lit, son contenu non : c'est lui qu'il faut réparer, pas le disque qu'il faut
+    // rebrancher. `project_unavailable` réunissait les deux, et l'auteur ne savait pas lequel.
     writeFileSync(projectFile, content);
     const before = readFileSync(projectFile);
-    expect(await metadataOf(projectFile)).toMatchObject({ success: false, code: 'project_unavailable' });
+    expect(await metadataOf(projectFile)).toMatchObject({ success: false, code: 'manifest_unreadable' });
     expect(readFileSync(projectFile).equals(before)).toBe(true);
   });
 
@@ -672,5 +674,63 @@ describe('getProjectMetadata : absent n’est pas indisponible', () => {
     const result = await metadataOf(projectFile);
     expect(result.error).toBeTruthy();
     expect(result.error).not.toBe('project_unavailable');
+  });
+});
+
+/**
+ * `project:load` rendait un code pour « ce n'est pas un projet », et une erreur nue pour tout le
+ * reste : l'interface n'avait plus qu'un message, « project.json peut-être illisible ou endommagé »,
+ * faux pour un disque débranché comme pour un dossier en lecture seule (BT1-5).
+ */
+describe('loadProject : chaque refus dit sa cause, avec les codes de getProjectMetadata', () => {
+  const loadOf = (file: string) => manager.loadProject(file) as Promise<{
+    success: boolean;
+    code?: string;
+    error?: string;
+  }>;
+
+  it.each<[string, string | Buffer]>([
+    ['JSON invalide', '{ "name": "Thèse", '],
+    ['0 octet', ''],
+    ['Latin-1', Buffer.from([0x7b, 0x22, 0x6e, 0x22, 0x3a, 0x22, 0xc9, 0x22, 0x7d])],
+  ])('%s : manifest_unreadable, le texte de l’erreur gardé pour le journal', async (_label, content) => {
+    writeFileSync(projectFile, content);
+
+    const result = await loadOf(projectFile);
+
+    expect(result).toMatchObject({ success: false, code: 'manifest_unreadable' });
+    expect(result.error).toBeTruthy();
+    expect(manager.getCurrentProjectPath()).toBeNull();
+  });
+
+  it('dossier absent (disque débranché, parent renommé) : project_unavailable', async () => {
+    const result = await loadOf(path.join(workDir, 'NulPart', 'Thèse', 'project.json'));
+    expect(result).toMatchObject({ success: false, code: 'project_unavailable' });
+  });
+
+  it('dossier présent, project.json vraiment absent : project_file_missing', async () => {
+    expect(await loadOf(projectFile)).toMatchObject({ success: false, code: 'project_file_missing' });
+  });
+
+  it.skipIf(IS_ROOT)('project.json en lecture seule : lastOpenedAt ne s’écrit pas, manifest_unwritable, fichier intact', async () => {
+    writeProject(realisticProject());
+    const before = readFileSync(projectFile);
+    chmodSync(projectFile, 0o444);
+    try {
+      const result = await loadOf(projectFile);
+
+      expect(result).toMatchObject({ success: false, code: 'manifest_unwritable' });
+      expect(readFileSync(projectFile).equals(before)).toBe(true);
+      expect(manager.getCurrentProjectPath()).toBeNull();
+    } finally {
+      chmodSync(projectFile, 0o644);
+    }
+  });
+
+  it('témoin : un projet lisible s’ouvre, sans code', async () => {
+    writeProject(realisticProject());
+    const result = await loadOf(projectFile);
+    expect(result.success).toBe(true);
+    expect(result.code).toBeUndefined();
   });
 });

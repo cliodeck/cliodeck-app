@@ -330,6 +330,10 @@
     "createErrorFilesExist": "Der Ordner „{{name}}“ in {{folder}} enthält bereits Dateien, die beim Erstellen ersetzt würden. Es wurde nichts geändert. Wählen Sie einen anderen Namen oder Speicherort.",
     "createErrorNameInvalid": "Ein Projektname darf weder / noch \\ enthalten und nicht „.“ oder „..“ lauten.",
     "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
+    "openUnavailable": "Dieses Projekt konnte nicht geöffnet werden: Sein Ordner oder seine Datei project.json ist nicht auffindbar oder nicht erreichbar (Laufwerk getrennt, Ordner verschoben oder umbenannt, Leserechte entzogen). Es wurde nichts geändert.",
+    "openNotWritable": "Dieses Projekt konnte nicht geöffnet werden: Seine Datei project.json konnte nicht geschrieben werden. Sie wurde nicht verändert. Prüfen Sie, ob diese Datei und der Projektordner beschreibbar sind.",
+    "servicesFailed": "Dieses Projekt konnte nicht vorbereitet werden: Einer der Dienste von ClioDeck (Forschungstagebuch, Primärquellen, PDF-Index) ist nicht gestartet. Die Datei project.json ist nicht die Ursache. Falls das erneut passiert, kann ein Neustart von ClioDeck genügen.",
+    "openFailed": "Dieses Projekt konnte nicht geöffnet werden.",
     "notAProject": "„{{file}}“ ist keine ClioDeck-Projektdatei. Sie wurde nicht verändert, und was geöffnet war, bleibt geöffnet. Um ein Projekt zu öffnen, wählen Sie die Datei project.json, die ClioDeck in seinem Ordner angelegt hat.",
     "configUnreadable": {
       "title": "Projekteinstellungen nicht lesbar",

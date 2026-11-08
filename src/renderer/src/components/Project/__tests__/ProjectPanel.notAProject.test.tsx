@@ -152,12 +152,73 @@ describe('ProjectPanel : ce fichier n’est pas un projet', () => {
 
   it.each(OPEN_DOORS)('témoin, par %s : un project.json abîmé garde son message', async (_door, open) => {
     await renderPanel();
-    getMetadata.mockResolvedValue({ success: false, code: 'project_unavailable', error: 'invalid_json' });
+    getMetadata.mockResolvedValue({ success: false, code: 'manifest_unreadable', error: 'Unexpected end of JSON input' });
 
     await open();
     await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
 
     expect(dialogs().alertMessage).toBe('project.openError');
+  });
+});
+
+/**
+ * BT1-5 : tout refus autre que « ce n'est pas un projet » affichait « project.json est peut-être
+ * illisible ou endommagé ». Un service qui ne démarre pas, un disque débranché, un dossier en
+ * lecture seule : l'auteur cherchait à réparer un fichier intact. Chaque code a son message.
+ */
+describe('ProjectPanel : les autres refus disent leur cause, jamais « project.json endommagé » à tort', () => {
+  it.each(OPEN_DOORS)('un service du projet ne démarre pas, par %s : son message, sans la cause technique', async (_door, open) => {
+    await renderPanel();
+    load.mockResolvedValue({ success: false, code: 'services_failed', error: 'registre de fournisseurs invalide' });
+
+    await open();
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    expect(dialogs().alertMessage).not.toBe('project.openError');
+    expect(dialogs().alertMessage).toBe('project.servicesFailed');
+    expect(dialogs().alertMessage).not.toContain('registre');
+  });
+
+  it.each<[string, 'getMetadata' | 'load', Record<string, unknown>, string]>([
+    ['dossier introuvable ou inaccessible', 'getMetadata', { code: 'project_unavailable', error: 'ENOENT' }, 'project.openUnavailable'],
+    ['project.json absent', 'getMetadata', { code: 'project_file_missing', error: 'ENOENT' }, 'project.openUnavailable'],
+    ['project.json qui ne s’écrit pas', 'load', { code: 'manifest_unwritable', error: 'EACCES' }, 'project.openNotWritable'],
+    ['project.json abîmé, vu par project:load', 'load', { code: 'manifest_unreadable', error: 'Unexpected token' }, 'project.openError'],
+    ['un refus sans code', 'load', { error: 'canal coupé' }, 'project.openFailed'],
+  ])('%s : son propre message', async (_label, door, refusal, key) => {
+    await renderPanel();
+    (door === 'getMetadata' ? getMetadata : load).mockResolvedValue({ success: false, ...refusal });
+
+    await OPEN_DOORS[0][1]();
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    expect(dialogs().alertMessage).toBe(key);
+  });
+});
+
+describe('les messages d’échec d’ouverture, dans les trois langues', () => {
+  const OTHER_CAUSES = ['servicesFailed', 'openUnavailable', 'openNotWritable', 'openFailed'];
+  const projectTexts = (language: string): Record<string, string> => {
+    const file = path.join(process.cwd(), 'public', 'locales', language, 'common.json');
+    return (JSON.parse(readFileSync(file, 'utf8')) as { project: Record<string, string> }).project;
+  };
+
+  it.each<[string, RegExp]>([
+    ['fr', /endommag/],
+    ['en', /damaged/],
+    ['de', /beschädigt/],
+  ])('%s : seul openError parle d’un fichier endommagé, et aucun ne montre un code', (language, damaged) => {
+    const texts = projectTexts(language);
+    expect(texts.openError).toMatch(damaged);
+    for (const key of OTHER_CAUSES) {
+      expect(texts[key], key).toBeTruthy();
+      expect(texts[key], key).not.toMatch(damaged);
+      expect(texts[key], key).not.toMatch(/services_failed|project_unavailable|project_file_missing|manifest_/);
+    }
+  });
+
+  it.each(['fr', 'en', 'de'])('%s : un service en panne dit que project.json n’y est pour rien', (language) => {
+    expect(projectTexts(language).servicesFailed).toContain('project.json');
   });
 });
 

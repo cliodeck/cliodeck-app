@@ -419,6 +419,39 @@ describe('createProject ouvre le document du projet créé', () => {
     expect(read(documentA)).toBe(`${A_TEXT}Dernière phrase.`);
   });
 
+  // Témoin de BT1-5 (C22) : après ce refus, l'auteur a vu « project.json endommagé » pour tout
+  // projet, jusqu'au redémarrage. Le refus ne laisse rien derrière lui côté renderer : les
+  // ouvertures suivantes aboutissent, et le retour sur A aussi.
+  it('création refusée, puis B s’ouvre, puis A de nouveau : rien n’est resté du refus', async () => {
+    await openProjectA();
+    await typeAtEnd('Dernière phrase.');
+    await writeProject(path.join(root, 'Pris'), { id: 'pris', name: 'Pris', type: 'article' });
+
+    await act(async () => {
+      await expect(project().createProject('Pris', 'article', root)).rejects.toThrow('project_exists');
+    });
+    expect(project().loadState.kind).toBe('failed');
+
+    await act(async () => {
+      await project().loadProject(path.join(dirB, 'project.json'));
+    });
+    expect(project().loadState.kind).toBe('ready');
+    expect(project().currentProject?.path).toBe(dirB);
+    expect(store().filePath).toBe(documentB);
+    expect(currentView().state.doc.toString()).toBe(B_TEXT);
+
+    await act(async () => {
+      await project().loadProject(path.join(dirA, 'project.json'));
+    });
+    expect(project().loadState.kind).toBe('ready');
+    expect(project().currentProject?.path).toBe(dirA);
+    expect(store().filePath).toBe(documentA);
+    expect(currentView().state.doc.toString()).toBe(`${A_TEXT}Dernière phrase.`);
+    expect(dialogs().alertOpen).toBe(false);
+    expect(refused).toEqual([]);
+    expect(read(documentB)).toBe(B_TEXT);
+  });
+
   it('création refusée, une écriture d’autosave encore en vol à la relecture : le texte revient entier', async () => {
     await openProjectA();
     // Le minuteur n'y est pour rien : l'écriture en vol part ici, à l'instant voulu.

@@ -266,6 +266,40 @@ async function projectFileIsMissing(projectFile: string): Promise<boolean> {
   }
 }
 
+/**
+ * Pourquoi `project.json` ne s'ouvre pas, aux deux portes, et chaque cause a son message. Lu mais
+ * pas compris (JSON invalide, octets qui ne sont pas de l'UTF-8) : c'est lui qu'il faut réparer.
+ * Pas atteint : le disque, le dossier ou ses droits, et il n'y a rien à réparer dedans.
+ */
+type ManifestFailureCode =
+  | NotAProjectError['code']
+  | 'manifest_unreadable'
+  | 'project_file_missing'
+  | 'project_unavailable';
+
+/** Le manifeste a été lu, son contenu non. */
+function manifestContentUnreadable(error: unknown): boolean {
+  return (
+    error instanceof SyntaxError ||
+    (error instanceof UnreadableFileError && (error.reason === 'encoding' || error.reason === 'invalid-json'))
+  );
+}
+
+async function manifestFailureCode(projectFile: string, error: unknown): Promise<ManifestFailureCode> {
+  if (error instanceof NotAProjectError) return error.code;
+  if (manifestContentUnreadable(error)) return 'manifest_unreadable';
+  return (await projectFileIsMissing(projectFile)) ? 'project_file_missing' : 'project_unavailable';
+}
+
+/**
+ * `lastOpenedAt` ne s'écrit pas : le dossier refuse (lecture seule, disque plein), et le fichier reste
+ * tel quel. Sauf si le manifeste s'est abîmé depuis qu'on l'a lu : c'est encore son contenu qui refuse.
+ */
+function manifestWriteFailureCode(error: unknown): ManifestFailureCode | 'manifest_unwritable' {
+  if (error instanceof NotAProjectError) return error.code;
+  return manifestContentUnreadable(error) ? 'manifest_unreadable' : 'manifest_unwritable';
+}
+
 export class ProjectManager {
   private currentProject: Project | null = null;
   private currentProjectPath: string | null = null;
@@ -317,9 +351,7 @@ export class ProjectManager {
       // Chaque récent passe ici à chaque ouverture du panneau : pas de pile pour un disque débranché.
       const message = error instanceof Error ? error.message : String(error);
       console.warn('⚠️ Project metadata unavailable:', message);
-      const code = error instanceof NotAProjectError
-        ? error.code
-        : (await projectFileIsMissing(projectPath)) ? 'project_file_missing' : 'project_unavailable';
+      const code = await manifestFailureCode(projectPath, error);
       return { success: false as const, code, fileName: path.basename(projectPath), error: message };
     }
   }
@@ -462,13 +494,16 @@ export class ProjectManager {
     success: boolean;
     project?: Project;
     configIssue?: WorkspaceConfigIssue;
-    code?: NotAProjectError['code'];
+    code?: ManifestFailureCode | 'manifest_unwritable';
     fileName?: string;
     error?: string;
   }> {
+    // L'étape qui échoue choisit le message : relire le manifeste, puis y écrire `lastOpenedAt`.
+    let stage: 'read' | 'write' | null = 'read';
     try {
       // Refusé ici, B n'a rien subi, pas même sa migration, et le projet courant reste en place.
       await readManifestToOpen(projectPath);
+      stage = null;
       const projectDir = path.dirname(projectPath);
       // Le nom que relit tout le code, celui du verrou d'écriture, celui que gardent les récents.
       const projectFile = path.join(projectDir, PROJECT_FILE);
@@ -480,6 +515,7 @@ export class ProjectManager {
       // Le projet s'ouvre quand même : son texte n'y est pour rien. L'interface dit ce qui manque.
       const configIssue = await workspaceConfigIssue(projectDir);
 
+      stage = 'write';
       const project = await this.updateProjectFile(projectFile, (stored) => {
         // Migration: Convert absolute paths to relative paths
         if (stored.bibliographySource?.filePath && path.isAbsolute(stored.bibliographySource.filePath)) {
@@ -512,6 +548,7 @@ export class ProjectManager {
 
         stored.lastOpenedAt = new Date().toISOString();
       });
+      stage = null;
 
       // Load bibliography if configured (resolve relative path to absolute)
       console.log('🔍 Checking for bibliography source:', project.bibliographySource);
@@ -560,9 +597,13 @@ export class ProjectManager {
     } catch (error: unknown) {
       console.error('❌ Failed to load project:', error);
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof NotAProjectError) {
-        return { success: false, code: error.code, fileName: path.basename(projectPath), error: message };
-      }
+      const code =
+        stage === 'read'
+          ? await manifestFailureCode(projectPath, error)
+          : stage === 'write'
+            ? manifestWriteFailureCode(error)
+            : undefined;
+      if (code) return { success: false, code, fileName: path.basename(projectPath), error: message };
       return { success: false, error: message };
     }
   }

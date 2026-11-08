@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FilePlus, FolderOpen, X, FileDown, FileType, ExternalLink, FileText, FileSignature, Target, Presentation, Bug } from 'lucide-react';
-import { NotAProjectError, useProjectStore, type Project } from '../../stores/projectStore';
+import { NotAProjectError, ProjectOpenError, useProjectStore, type Project } from '../../stores/projectStore';
 import { openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
@@ -34,6 +34,19 @@ const WordExportModal = lazy(() =>
 const ReportIssueModal = lazy(() =>
   import('../Report/ReportIssueModal').then((m) => ({ default: m.ReportIssueModal })),
 );
+
+/**
+ * Le message de chaque refus d'ouverture. « project.json est peut-être illisible ou endommagé » ne
+ * vaut que pour un manifeste qui se lit mal : il couvrait tout, et l'auteur cherchait à réparer un
+ * fichier intact quand un service n'avait pas démarré (BT1-5). Sans code connu, rien n'est supposé.
+ */
+const OPEN_FAILURE_KEYS: Readonly<Record<string, string>> = {
+  manifest_unreadable: 'project.openError',
+  manifest_unwritable: 'project.openNotWritable',
+  project_unavailable: 'project.openUnavailable',
+  project_file_missing: 'project.openUnavailable',
+  services_failed: 'project.servicesFailed',
+};
 
 export const ProjectPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -133,10 +146,11 @@ export const ProjectPanel: React.FC = () => {
   };
 
   /** Le refus d'une ouverture, dans les mots de l'auteur : le fichier choisi nommé, jamais un code. */
-  const openFailureMessage = (error: unknown): string =>
-    error instanceof NotAProjectError
-      ? t('project.notAProject', { file: error.fileName })
-      : t(openErrorKey(error, 'project.openError'));
+  const openFailureMessage = (error: unknown): string => {
+    if (error instanceof NotAProjectError) return t('project.notAProject', { file: error.fileName });
+    const key = error instanceof ProjectOpenError && error.code ? OPEN_FAILURE_KEYS[error.code] : undefined;
+    return t(key ?? openErrorKey(error, 'project.openFailed'));
+  };
 
   const handleOpenProject = async () => {
     try {
