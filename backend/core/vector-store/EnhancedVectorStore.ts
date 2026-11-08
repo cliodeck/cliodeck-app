@@ -533,6 +533,10 @@ export class EnhancedVectorStore {
     return this.vectorStore.getDocumentIdsByFilePath(filePath);
   }
 
+  getMovedCopyIds(bibtexKey: string, filePath: string): string[] {
+    return this.vectorStore.getMovedCopyIds(bibtexKey, filePath);
+  }
+
   mergeDocumentsInto(keepId: string, replacedIds: string[]): void {
     this.vectorStore.mergeDocumentsInto(keepId, replacedIds);
     if (replacedIds.some((id) => id !== keepId)) this.indexesStale = true;

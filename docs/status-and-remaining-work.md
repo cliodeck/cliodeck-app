@@ -501,6 +501,19 @@ liste ci-dessus : l'utilisateur est prévenu.
   embeddings) n'a toujours pas de test d'intégration, et `TropyOCRPipeline`
   (Tesseract, parseurs ALTO / PAGE XML / Transkribus) aucun. C'est là qu'un
   corpus entier a été perdu en silence — voir §2
+- **Un PDF renommé dont l'ancien fichier a disparu laisse son ancien document**
+  (rc.6, L05-6). « Ré-indexer » ne supprime plus rien d'avance (S03-1-3) :
+  `PDFIndexer.indexPDF` remplace, une fois les nouveaux extraits écrits, le
+  document du même fichier et celui d'un PDF *déplacé* (même clé BibTeX, même
+  nom, ancien fichier disparu : `VectorStore.getMovedCopyIds`). Un PDF
+  *renommé* — Zotero « Renommer d'après les métadonnées », ou un nouveau format
+  de nommage — n'est pas fondu : l'ancien document reste à côté du nouveau, avec
+  ses extraits, et le chat les trouve en double. Le nettoyage du démarrage ne le
+  voit pas, puisque les chemins réels diffèrent. Jusqu'à la rc.6, le bouton
+  supprimait le document de la clé, quitte à tout perdre sur un échec. Le
+  retirer à coup sûr demande de savoir que la clé n'a pas de jumelle (deux
+  notices Zotero sous la même clé Better BibTeX, L05-4) : seul le renderer le
+  sait. Suite à décider
 - **`pdf-service.ts`** remains a delegating facade for search — down to 839
   lines from 1084, still mixing indexing and graph building
 - **~414 lint warnings** (`no-explicit-any`, `react-hooks/exhaustive-deps`,

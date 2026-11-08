@@ -32,12 +32,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import {
   ReadingNotesStore,
+  READING_NOTE_HEADER_VERSION,
   readingNoteHeader,
   readingNoteId,
   readingNotesStorePath,
   type ReadingNoteRecord,
 } from '../../../backend/core/vector-store/ReadingNotesStore.js';
-import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
+import { chunkManuscriptChapter, CHUNKER_VERSION } from '../../../backend/core/rag/manuscript-chunker.js';
 import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
@@ -67,6 +68,13 @@ export interface ReadingNotesIndexReport {
    * notes. L'index est resté tel quel.
    */
   withheldFrom?: string;
+  /**
+   * Présent quand une réindexation complète (`reindexAll`) a été abandonnée,
+   * avec la raison : le fournisseur d'embeddings a échoué sur une note, ou
+   * l'écriture a été refusée. Rien n'a été écrit : l'index précédent reste
+   * celui que le chat consulte.
+   */
+  abandoned?: string;
 }
 
 export interface ReadingNotesIndexStats {
@@ -106,8 +114,32 @@ function notesWithheldFrom(): string | null {
   }
 }
 
+/**
+ * Empreinte d'une note : son texte brut, la version du découpage et celle de
+ * l'en-tête embarqué avec chaque extrait (cf. `manuscript-index-service`).
+ * Sans les deux versions, changer le découpeur ou l'en-tête ne réembarquait
+ * aucune note avant sa prochaine modification. Les incrémenter réembarque
+ * donc toutes les notes, une fois, à la passe suivante.
+ */
 function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(`chunker:${CHUNKER_VERSION}\n`)
+    .update(`header:${READING_NOTE_HEADER_VERSION}\n`)
+    .update(content)
+    .digest('hex');
+}
+
+function reasonOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Ce que rend une suite de passes (cf. `schedule`). */
+interface ScheduledReports {
+  /** La dernière passe. */
+  last: ReadingNotesIndexReport;
+  /** La dernière passe forcée (« Tout réindexer »), s'il y en a eu une. */
+  forced: ReadingNotesIndexReport | null;
 }
 
 /** Dépendances substituables, pour tester sans Electron. */
@@ -125,9 +157,12 @@ export interface ReadingNotesIndexDeps {
 export class ReadingNotesIndexService {
   private store: ReadingNotesStore | null = null;
   private workspaceRoot: string | null = null;
-  private running: Promise<ReadingNotesIndexReport> | null = null;
-  /** Demande arrivée pendant une passe : une passe de plus suit, pour ne rien manquer. */
-  private rerun: EmbeddingProvider | null = null;
+  private running: Promise<ScheduledReports> | null = null;
+  /**
+   * Demande arrivée pendant une passe : une passe de plus suit, pour ne rien
+   * manquer. Complète (`force`) si l'une des demandes l'était.
+   */
+  private rerun: { embedder: EmbeddingProvider; force: boolean } | null = null;
 
   constructor(
     private readonly deps: ReadingNotesIndexDeps = {
@@ -214,18 +249,30 @@ export class ReadingNotesIndexService {
    * sauvegarde restait hors de l'index jusqu'à la sauvegarde suivante.
    */
   async index(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
+    return (await this.schedule(embedder, false)).last;
+  }
+
+  /**
+   * Lance une passe, ou en programme une de plus derrière celle en cours. Rend le rapport de la
+   * dernière passe et celui de la dernière passe forcée : une passe incrémentale demandée pendant
+   * « Tout réindexer » la suit, et son rapport (« 3 inchangées ») ne doit pas remplacer celui de
+   * la réindexation, que la section des réglages affiche (abandon, notes réembarquées).
+   */
+  private schedule(embedder: EmbeddingProvider, force: boolean): Promise<ScheduledReports> {
     if (this.running) {
-      this.rerun = embedder;
+      this.rerun = { embedder, force: force || (this.rerun?.force ?? false) };
       return this.running;
     }
-    const run = async (): Promise<ReadingNotesIndexReport> => {
-      let report = await this.runIndex(embedder);
+    const run = async (): Promise<ScheduledReports> => {
+      let last = await this.runIndex(embedder, force);
+      let forced = force ? last : null;
       while (this.rerun) {
         const next = this.rerun;
         this.rerun = null;
-        report = await this.runIndex(next);
+        last = await this.runIndex(next.embedder, next.force);
+        if (next.force) forced = last;
       }
-      return report;
+      return { last, forced };
     };
     this.running = run().finally(() => {
       this.running = null;
@@ -233,7 +280,20 @@ export class ReadingNotesIndexService {
     return this.running;
   }
 
-  private async runIndex(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
+  /**
+   * Une passe. Incrémentale par défaut : chaque note s'écrit dans sa propre
+   * transaction, aussitôt embarquée.
+   *
+   * `force` (« Tout réindexer ») ignore les empreintes et ne détruit rien
+   * avant d'avoir le remplaçant : tous les embeddings sont d'abord obtenus en
+   * mémoire. Le fournisseur échoue sur une note (arrêté, ou un nombre de
+   * vecteurs faux) : rien n'est écrit, et l'index précédent reste consulté.
+   * Sinon tout s'écrit en une transaction, dimension remise à zéro : un
+   * changement de modèle (768 → 1024) réembarque toutes les notes. Une note
+   * illisible garde ses anciens extraits, dans l'ancienne dimension ; elle
+   * figure dans les échecs.
+   */
+  private async runIndex(embedder: EmbeddingProvider, force: boolean): Promise<ReadingNotesIndexReport> {
     const started = Date.now();
     const report: ReadingNotesIndexReport = {
       indexed: 0,
@@ -278,6 +338,13 @@ export class ReadingNotesIndexService {
     }
 
     const seenIds = new Set<string>();
+    /** En force, les écritures attendent la fin des embeddings : toutes ensemble, ou aucune. */
+    const writes: Array<() => void> = [];
+    const write = (fn: () => void): void => {
+      if (force) writes.push(fn);
+      else store.transaction(fn);
+    };
+    let abandoned: string | undefined;
     for (const file of files) {
       const relativePath = path.relative(workspaceRoot, file);
       // Un lien qui sort du projet n'est pas une note : ni lu ni envoyé au fournisseur,
@@ -317,7 +384,7 @@ export class ReadingNotesIndexService {
         };
 
         const existing = store.getNote(id);
-        if (existing && existing.contentHash === record.contentHash) {
+        if (!force && existing && existing.contentHash === record.contentHash) {
           // Inchangé, mais peut-être renommé : le chemin suit sans réembarquer.
           if (existing.relativePath !== relativePath) store.upsertNote({ ...existing, relativePath });
           report.unchanged += 1;
@@ -327,7 +394,7 @@ export class ReadingNotesIndexService {
         const chunks = chunkManuscriptChapter(note.body);
         if (chunks.length === 0) {
           // Note encore vide (titre seul) : l'empreinte suffit, rien à embarquer.
-          store.transaction(() => {
+          write(() => {
             store.upsertNote(record);
             store.deleteNoteChunks(id);
           });
@@ -336,21 +403,23 @@ export class ReadingNotesIndexService {
         }
 
         const header = readingNoteHeader(record);
-        const vectors = await this.embedBatched(
+        const vectors = await this.embedNote(
           embedder,
           chunks.map((c) => `${header}\n\n${c.content}`)
         );
-        if (vectors.length !== chunks.length) {
-          report.failures.push({
-            relativePath,
-            reason: `provider returned ${vectors.length} vectors for ${chunks.length} chunks`,
-          });
+        if (typeof vectors === 'string') {
+          // La note garde son état d'index précédent ; en force, toutes le gardent.
+          report.failures.push({ relativePath, reason: vectors });
+          if (force) {
+            abandoned = vectors;
+            break;
+          }
           continue;
         }
 
         // Tout ou rien : une empreinte sans ses extraits ferait sauter la
         // note à la passe suivante, et elle disparaîtrait de l'index.
-        store.transaction(() => {
+        write(() => {
           store.upsertNote(record);
           store.deleteNoteChunks(id);
           chunks.forEach((c, i) => {
@@ -371,37 +440,62 @@ export class ReadingNotesIndexService {
         report.indexed += 1;
         report.chunks += chunks.length;
       } catch (e) {
-        // Front matter illisible, provider absent, écriture refusée : la note
-        // garde son état d'index précédent — illisible n'est pas supprimée.
-        report.failures.push({ relativePath, reason: e instanceof Error ? e.message : String(e) });
+        // Front matter illisible, écriture refusée : la note garde son état
+        // d'index précédent — illisible n'est pas supprimée.
+        report.failures.push({ relativePath, reason: reasonOf(e) });
         const kept = store.listNotes().find((n) => n.relativePath === relativePath);
         if (kept) seenIds.add(kept.id);
       }
     }
 
-    for (const known of store.listNotes()) {
-      if (!seenIds.has(known.id)) {
-        store.deleteNote(known.id);
-        report.removed += 1;
+    const abandon = (reason: string): ReadingNotesIndexReport => ({
+      indexed: 0,
+      unchanged: 0,
+      removed: 0,
+      chunks: 0,
+      failures: report.failures,
+      durationMs: Date.now() - started,
+      abandoned: reason,
+    });
+    if (abandoned !== undefined) return abandon(abandoned);
+
+    const removeUnseen = (): void => {
+      for (const known of store.listNotes()) {
+        if (!seenIds.has(known.id)) {
+          store.deleteNote(known.id);
+          report.removed += 1;
+        }
       }
+    };
+    if (!force) {
+      removeUnseen();
+      return done();
+    }
+    try {
+      store.transaction(() => {
+        store.resetDimension();
+        for (const fn of writes) fn();
+        removeUnseen();
+      });
+    } catch (e) {
+      // Deux dimensions dans la même passe, écriture refusée : la transaction
+      // est annulée, l'index précédent reste.
+      report.failures.push({ relativePath: '(store)', reason: reasonOf(e) });
+      return abandon(reasonOf(e));
     }
     return done();
   }
 
-  /** Réindexe tout, empreintes ignorées (changement de modèle d'embedding). */
+  /**
+   * Réindexe tout, empreintes ignorées (changement de modèle d'embedding),
+   * sans rien vider d'avance (cf. `runIndex`). Une réindexation refusée
+   * (fournisseur distant sans consentement) n'efface rien non plus.
+   */
   async reindexAll(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
     if (this.running) await this.running.catch(() => undefined);
-    // Avant de vider l'index : une réindexation refusée ne doit rien effacer.
-    if (this.workspaceRoot && this.isEnabled() && this.deps.withheldFrom?.()) {
-      return this.index(embedder);
-    }
-    const store = this.getStore();
-    if (store) {
-      store.transaction(() => {
-        for (const note of store.listNotes()) store.deleteNote(note.id);
-      });
-    }
-    return this.index(embedder);
+    const { last, forced } = await this.schedule(embedder, true);
+    // `forced` manque seulement si le projet a changé entre-temps (`detachStore` oublie la relance).
+    return forced ?? last;
   }
 
   stats(): ReadingNotesIndexStats | null {
@@ -411,6 +505,18 @@ export class ReadingNotesIndexService {
   /** Le store à interroger, ou `null` si le corpus est désactivé ou sans projet. */
   getSearchStore(): ReadingNotesStore | null {
     return this.isEnabled() ? this.getStore() : null;
+  }
+
+  /** Les vecteurs d'une note, ou ce qui a empêché le fournisseur de les rendre. */
+  private async embedNote(embedder: EmbeddingProvider, texts: string[]): Promise<Float32Array[] | string> {
+    try {
+      const vectors = await this.embedBatched(embedder, texts);
+      return vectors.length === texts.length
+        ? vectors
+        : `provider returned ${vectors.length} vectors for ${texts.length} chunks`;
+    } catch (e) {
+      return reasonOf(e);
+    }
   }
 
   private async embedBatched(embedder: EmbeddingProvider, texts: string[]): Promise<Float32Array[]> {

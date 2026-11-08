@@ -96,21 +96,6 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     }
   },
 
-  getDocumentIdForCitation: async (citationId: string) => {
-    try {
-      const result = await window.electron.pdf.getAll();
-      if (result.success && Array.isArray(result.documents)) {
-        // Find document with matching bibtexKey
-        const doc = result.documents.find((d: { bibtexKey?: string; id?: string }) => d.bibtexKey === citationId);
-        return doc?.id || null;
-      }
-      return null;
-    } catch (error) {
-      console.error('Failed to get document ID for citation:', error);
-      return null;
-    }
-  },
-
   reindexPDFFromCitation: async (citationId: string) => {
     try {
       const { citations } = get();
@@ -120,13 +105,15 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         throw new Error('Citation not found');
       }
 
-      // Après chaque attente : un autre projet ouvert entre-temps aurait son document de même clé
-      // supprimé, et le PDF de celui-ci dans son corpus.
-      const { projectPath, left, leftNow } = leavingCheck();
+      // Après chaque attente : un autre projet ouvert entre-temps recevrait le PDF de celui-ci
+      // dans son corpus.
+      const { projectPath, left } = leavingCheck();
 
       // Resolution order for the PDF path on disk:
-      //   1. `citation.file` — what BibTeX or the in-memory Zotero download
-      //      flow gave us. Cheapest and most accurate when available.
+      //   1. `citation.file`, when it is a PDF — what BibTeX or the in-memory
+      //      Zotero download flow gave us. Cheapest and most accurate. A
+      //      legacy HTML snapshot (`PDFs/1706.html`) is not: indexing it fails
+      //      on « Invalid PDF structure », and the known PDF below is skipped.
       //   2. Existing indexed document's `fileURL` — the previous index
       //      knows exactly which file it ran on. Restoring this covers the
       //      Zotero-only flow whose BibTeX has no `file =` and whose
@@ -135,7 +122,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       //      populated state).
       //   3. First downloaded Zotero attachment's `localPath`.
       // If none of the three resolves, indexing is genuinely impossible.
-      let filePath: string | undefined = citation.file ?? undefined;
+      let filePath: string | undefined = isPdfPath(citation.file) ? citation.file : undefined;
       if (!filePath) {
         try {
           const allDocs = await window.electron.pdf.getAll();
@@ -163,26 +150,10 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         );
       }
 
-      // Find and delete existing indexed document
-      const documentId = await get().getDocumentIdForCitation(citationId);
-      if (await left()) return { interrupted: true };
-      if (documentId) {
-        console.log(`🗑️ Deleting existing indexed PDF for: ${citation.title}`);
-        await window.electron.pdf.delete(documentId);
-        // Le document est retiré de ce projet : sa réindexation part aussitôt, le main refuse s'il a
-        // déjà basculé. Attendre l'issue d'une ouverture la ferait refuser à coup sûr, et le
-        // document manquerait au corpus sans que rien ne le dise.
-        if (leftNow()) return { interrupted: true };
-
-        // Remove from indexed set
-        set((state) => {
-          const newIndexedPaths = new Set(state.indexedFilePaths);
-          newIndexedPaths.delete(filePath!);
-          return { indexedFilePaths: newIndexedPaths };
-        });
-      }
-
-      // Now re-index
+      // Rien n'est supprimé d'avance (S03-1-3) : `pdf:index` remplace le document de ce fichier une
+      // fois les nouveaux extraits écrits, et lui rattache les citations entrantes et les
+      // collections (`mergeDocumentsInto`). Un échec (Ollama arrêté, PDF illisible, délai du worker)
+      // laisse l'ancien document dans le corpus, cherchable par le chat.
       console.log(`🔄 Re-indexing PDF for citation: ${citation.title}`);
 
       window.dispatchEvent(new CustomEvent('bibliography:indexing-start', {
@@ -211,7 +182,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         throw new Error(result.error || 'Failed to re-index PDF');
       }
 
-      // Add back to indexed set
+      // Add to indexed set
       set((state) => ({
         indexedFilePaths: new Set([...state.indexedFilePaths, filePath!])
       }));
