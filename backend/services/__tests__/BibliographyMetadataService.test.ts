@@ -16,6 +16,7 @@ import * as path from 'path';
 import { BibliographyMetadataService } from '../BibliographyMetadataService.js';
 import type { Citation, ZoteroAttachmentInfo } from '../../types/citation.js';
 import { symlinkAvailable } from '../../__tests__/helpers/native-guards.js';
+import { BibTeXParser } from '../../core/bibliography/BibTeXParser.js';
 
 const makeCitation = (overrides: Partial<Citation>): Citation =>
   ({
@@ -311,6 +312,8 @@ describe.skipIf(!symlinkAvailable)('BibliographyMetadataService — .cliodeck li
 describe('BibliographyMetadataService — patchAttachment', () => {
   let tmpDir: string;
   const pdf = (name: string) => path.join(tmpDir, 'PDFs', `${name}.pdf`);
+  /** Le même chemin, tel que le fichier le range : relatif au projet (S07-2-1). */
+  const kept = (name: string) => `PDFs/${name}.pdf`;
   const stored = async () => (await BibliographyMetadataService.loadMetadata(tmpDir))!.citations;
 
   beforeEach(async () => {
@@ -334,7 +337,7 @@ describe('BibliographyMetadataService — patchAttachment', () => {
     const after = await stored();
     expect(Object.keys(after)).toHaveLength(20);
     for (let i = 0; i < 20; i++) {
-      expect(after[`ZK${i}`].zoteroAttachments).toEqual([{ ...attachment(`ATT${i}`), downloaded: true, localPath: pdf(`n${i}`) }]);
+      expect(after[`ZK${i}`].zoteroAttachments).toEqual([{ ...attachment(`ATT${i}`), downloaded: true, localPath: kept(`n${i}`) }]);
     }
   });
 
@@ -357,7 +360,7 @@ describe('BibliographyMetadataService — patchAttachment', () => {
     expect(after.OTHER).toEqual(before.OTHER);
     expect(after.TARGET).toEqual({
       ...before.TARGET,
-      zoteroAttachments: [attachment('ATT1'), { ...attachment('ATT2'), downloaded: true, localPath: pdf('deux') }],
+      zoteroAttachments: [attachment('ATT1'), { ...attachment('ATT2'), downloaded: true, localPath: kept('deux') }],
     });
   });
 
@@ -373,7 +376,7 @@ describe('BibliographyMetadataService — patchAttachment', () => {
     expect((await stored()).NEW1).toEqual({
       id: 'Lester_1935',
       zoteroKey: 'NEW1',
-      zoteroAttachments: [{ ...attachment('ATTN'), downloaded: true, localPath: pdf('nouveau') }],
+      zoteroAttachments: [{ ...attachment('ATTN'), downloaded: true, localPath: kept('nouveau') }],
       zoteroTags: [{ tag: 'lu', automatic: false }],
     });
   });
@@ -386,7 +389,7 @@ describe('BibliographyMetadataService — patchAttachment', () => {
       pdf('manuel')
     );
 
-    expect((await stored()).manuel_2020.zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: pdf('manuel') });
+    expect((await stored()).manuel_2020.zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: kept('manuel') });
   });
 });
 
@@ -398,6 +401,8 @@ describe('BibliographyMetadataService — patchAttachment', () => {
 describe('BibliographyMetadataService — saveFromSync relit le fichier', () => {
   let tmpDir: string;
   const pdf = (name: string) => path.join(tmpDir, 'PDFs', `${name}.pdf`);
+  /** Le même chemin, tel que le fichier le range : relatif au projet (S07-2-1). */
+  const kept = (name: string) => `PDFs/${name}.pdf`;
   const stored = async () => (await BibliographyMetadataService.loadMetadata(tmpDir))!.citations;
 
   beforeEach(async () => {
@@ -418,7 +423,7 @@ describe('BibliographyMetadataService — saveFromSync relit le fichier', () => 
     await BibliographyMetadataService.saveFromSync(tmpDir, readBySync);
 
     const after = await stored();
-    expect(after.XKEY.zoteroAttachments).toEqual([{ ...attachment('ATTX'), downloaded: true, localPath: pdf('x') }]);
+    expect(after.XKEY.zoteroAttachments).toEqual([{ ...attachment('ATTX'), downloaded: true, localPath: kept('x') }]);
     expect(after.XKEY.zoteroTags).toEqual([{ tag: 'nouveau', automatic: false }]);
   });
 
@@ -448,5 +453,290 @@ describe('BibliographyMetadataService — saveFromSync relit le fichier', () => 
     await BibliographyMetadataService.saveFromSync(tmpDir, [{ ...x, zoteroAttachments: [attachment('ATTX')] }]);
 
     expect((await stored()).XKEY.zoteroAttachments).toEqual([attachment('ATTX')]);
+  });
+});
+
+/**
+ * Les PDF téléchargés se rangent relatifs au projet et se retrouvent au chargement (S07-2-1).
+ * Rangés en absolu, ils ne menaient plus nulle part dès que le dossier du projet changeait de nom
+ * ou de machine : la fiche gardait son étiquette PDF, mais « Indexer » échouait, « Télécharger
+ * tous les PDF manquants » l'ignorait, et la fenêtre des orphelins proposait de supprimer le vrai.
+ */
+describe('BibliographyMetadataService — chemins des PDF relatifs au projet', () => {
+  let root: string;
+  let project: string;
+  const pdf = (dir: string, name = 'a.pdf') => path.join(dir, 'PDFs', name);
+  const onDisk = () =>
+    (JSON.parse(fs.readFileSync(BibliographyMetadataService.getMetadataPath(project), 'utf8')) as {
+      citations: Record<string, { zoteroAttachments?: Array<{ localPath?: string }> }>;
+    }).citations;
+  const downloaded = makeCitation({ zoteroKey: 'ZK', zoteroAttachments: [attachment('ATT')] });
+  const reload = async (dir: string, fromBib: Partial<Citation> = {}) =>
+    BibliographyMetadataService.mergeCitationsWithMetadata(
+      [makeCitation({ zoteroKey: 'ZK', ...fromBib })],
+      await BibliographyMetadataService.loadMetadata(dir),
+      dir
+    )[0];
+
+  beforeEach(async () => {
+    root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-chemins-'));
+    project = path.join(root, 'These');
+    fs.mkdirSync(path.join(project, 'PDFs'), { recursive: true });
+    fs.writeFileSync(pdf(project), '%PDF-1.4 Dupont');
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  });
+
+  it('un rattachement range le chemin relatif au projet', async () => {
+    await BibliographyMetadataService.patchAttachment(project, downloaded, 'ATT', pdf(project));
+
+    expect(onDisk().ZK.zoteroAttachments?.[0].localPath).toBe('PDFs/a.pdf');
+  });
+
+  it('la synchronisation range aussi en relatif le chemin qu’elle apporte', async () => {
+    await BibliographyMetadataService.saveFromSync(project, [
+      { ...downloaded, zoteroAttachments: [{ ...attachment('ATT'), downloaded: true, localPath: pdf(project) }] },
+    ]);
+
+    expect(onDisk().ZK.zoteroAttachments?.[0].localPath).toBe('PDFs/a.pdf');
+  });
+
+  it('projet renommé : le PDF se retrouve au chargement, en chemin absolu pour le panneau', async () => {
+    await BibliographyMetadataService.patchAttachment(project, downloaded, 'ATT', pdf(project));
+    const renamed = path.join(root, 'These-2026');
+    fs.renameSync(project, renamed);
+
+    const merged = await reload(renamed);
+
+    expect(merged.file).toBe(pdf(renamed));
+    expect(merged.zoteroAttachments?.[0].localPath).toBe(pdf(renamed));
+  });
+
+  // Métadonnées et .bib écrits avant ce correctif, dans un dossier qui s'appelait autrement.
+  it('anciens chemins absolus d’un projet renommé : rebasés dans PDFs/', async () => {
+    const before = path.join(root, 'These-avant');
+    fs.mkdirSync(path.dirname(BibliographyMetadataService.getMetadataPath(project)), { recursive: true });
+    fs.writeFileSync(
+      BibliographyMetadataService.getMetadataPath(project),
+      JSON.stringify({
+        version: 2,
+        lastUpdated: '2026-01-01',
+        citations: { ZK: { id: 'Lester_1935', zoteroKey: 'ZK', zoteroAttachments: [{ ...attachment('ATT'), downloaded: true, localPath: pdf(before) }] } },
+      })
+    );
+
+    const merged = await reload(project, { file: pdf(before) });
+
+    expect(merged.file).toBe(pdf(project));
+    expect(merged.zoteroAttachments?.[0].localPath).toBe(pdf(project));
+  });
+
+  it('la synchronisation suivante range en relatif un ancien chemin absolu, une fois retrouvé', async () => {
+    const before = path.join(root, 'These-avant');
+    await BibliographyMetadataService.saveFromSync(project, [
+      { ...downloaded, zoteroAttachments: [{ ...attachment('ATT'), downloaded: true, localPath: pdf(before) }] },
+    ]);
+
+    await BibliographyMetadataService.saveFromSync(project, [downloaded]);
+
+    expect(onDisk().ZK.zoteroAttachments?.[0].localPath).toBe('PDFs/a.pdf');
+  });
+
+  // Un .bib réécrit par une ancienne synchronisation : `~` lu comme une espace, ou des
+  // `\textbackslash` en trop. Le chemin finit par .pdf, mais ne mène à rien.
+  it.each([
+    '/Users/jean/Library/Mobile Documents/com apple CloudDocs/These/PDFs/a.pdf',
+    'C:\\textbackslash{}Users\\textbackslash{}jean\\textbackslash{}These\\textbackslash{}PDFs\\textbackslash{}a.pdf',
+  ])('un .bib abîmé (%s) cède devant le PDF téléchargé qui existe', async (damaged) => {
+    await BibliographyMetadataService.patchAttachment(project, downloaded, 'ATT', pdf(project));
+
+    const merged = await reload(project, { file: damaged });
+
+    expect(merged.file).toBe(pdf(project));
+  });
+
+  it('témoin : le PDF du .bib, quand il existe, garde la main', async () => {
+    const chosen = path.join(project, 'choisi-a-la-main.pdf');
+    fs.writeFileSync(chosen, '%PDF-1.4');
+    await BibliographyMetadataService.patchAttachment(project, downloaded, 'ATT', pdf(project));
+
+    expect((await reload(project, { file: chosen })).file).toBe(chosen);
+  });
+
+  it('une référence sans métadonnées, au PDF rangé dans PDFs/ d’un projet renommé : rebasée', () => {
+    const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+      [makeCitation({ id: 'manuel_2020', file: pdf(path.join(root, 'These-avant')) })],
+      null,
+      project
+    );
+
+    expect(merged.file).toBe(pdf(project));
+  });
+
+  // Mendeley Desktop sous macOS écrit `:Users/jean/…:pdf`, sans barre initiale : le parseur le
+  // rattache au dossier du .bib. Le fichier, lui, part de la racine du disque.
+  it.skipIf(process.platform === 'win32')('chemin Mendeley sous macOS, relu sous le dossier du .bib : retrouvé depuis la racine', () => {
+    const elsewhere = path.join(root, 'Mendeley Desktop', 'b.pdf');
+    fs.mkdirSync(path.dirname(elsewhere));
+    fs.writeFileSync(elsewhere, '%PDF-1.4');
+    const fromBib = new BibTeXParser().parse(`@book{mendeley_2015, title={T}, file={:${elsewhere.slice(1)}:pdf}}`, project);
+
+    const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(fromBib, null, project);
+
+    expect(fromBib[0].file).toBe(path.join(project, elsewhere));
+    expect(merged.file).toBe(elsewhere);
+  });
+
+  // Le .bib dans un sous-dossier du projet : le parseur a mis le dossier du .bib devant le chemin.
+  it.skipIf(process.platform === 'win32')('chemin Mendeley sous macOS, .bib rangé dans un sous-dossier : retrouvé depuis la racine', () => {
+    const elsewhere = path.join(root, 'Mendeley Desktop', 'b.pdf');
+    fs.mkdirSync(path.dirname(elsewhere));
+    fs.writeFileSync(elsewhere, '%PDF-1.4');
+    const bibDir = path.join(project, 'biblio');
+    const fromBib = new BibTeXParser().parse(`@book{mendeley_2015, title={T}, file={:${elsewhere.slice(1)}:pdf}}`, bibDir);
+
+    const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(fromBib, null, project);
+
+    expect(fromBib[0].file).toBe(path.join(bibDir, elsewhere));
+    expect(merged.file).toBe(elsewhere);
+  });
+
+  /**
+   * Un projet écrit avant ce correctif, copié (sauvegarde, « Dupliquer » du Finder) puis rouvert,
+   * l'original encore en place : le .bib et les métadonnées désignent les PDF de l'original, qui
+   * existent. La copie se servait de ceux-là ; la synchronisation suivante réécrivait le chemin de
+   * l'original dans son .bib, et la fenêtre des orphelins proposait de supprimer ses vrais PDF.
+   */
+  describe('copie d’un projet écrit avant le correctif, l’original encore là', () => {
+    let copy: string;
+
+    beforeEach(() => {
+      fs.mkdirSync(path.dirname(BibliographyMetadataService.getMetadataPath(project)), { recursive: true });
+      fs.writeFileSync(
+        BibliographyMetadataService.getMetadataPath(project),
+        JSON.stringify({
+          version: 2,
+          lastUpdated: '2026-01-01',
+          citations: { ZK: { id: 'Lester_1935', zoteroKey: 'ZK', zoteroAttachments: [{ ...attachment('ATT'), downloaded: true, localPath: pdf(project) }] } },
+        })
+      );
+      copy = path.join(root, 'These-copie');
+      fs.cpSync(project, copy, { recursive: true });
+    });
+
+    it('au chargement, file et la pièce jointe désignent les PDF de la copie', async () => {
+      const merged = await reload(copy, { file: pdf(project) });
+
+      expect(merged.file).toBe(pdf(copy));
+      expect(merged.zoteroAttachments?.[0].localPath).toBe(pdf(copy));
+    });
+
+    it('la synchronisation suivante range le PDF de la copie, en relatif', async () => {
+      await BibliographyMetadataService.saveFromSync(copy, [downloaded]);
+
+      const stored = (JSON.parse(fs.readFileSync(BibliographyMetadataService.getMetadataPath(copy), 'utf8')) as {
+        citations: Record<string, { zoteroAttachments?: Array<{ localPath?: string }> }>;
+      }).citations;
+      expect(stored.ZK.zoteroAttachments?.[0].localPath).toBe('PDFs/a.pdf');
+    });
+
+    // Le PDF de la copie a changé depuis (téléchargé de nouveau, annoté) : il n'est plus identique à
+    // celui de l'original. C'est toujours le téléchargement de la référence dans ce projet.
+    it('le PDF de la copie, téléchargé de nouveau depuis, reste le sien', async () => {
+      fs.writeFileSync(pdf(copy), '%PDF-1.4 Dupont, version corrigée dans Zotero');
+      await BibliographyMetadataService.patchAttachment(copy, downloaded, 'ATT', pdf(copy));
+
+      const merged = await reload(copy, { file: pdf(project) });
+
+      expect(merged.file).toBe(pdf(copy));
+    });
+
+    // Rien ne dit que l'homonyme de PDFs/ est le sien : le .bib peut venir d'un import, et un
+    // homonyme d'être une autre référence. Le PDF du .bib, qui existe, garde la main (étape 3).
+    it('témoin : une référence que le projet n’a pas téléchargée garde le PDF du .bib, qui existe', () => {
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+        [makeCitation({ id: 'manuel_2020', file: pdf(project) })],
+        null,
+        copy
+      );
+
+      expect(merged.file).toBe(pdf(project));
+    });
+
+    it('témoin : un PDF de Zotero (storage/<clé>/…) du .bib garde la main sur un homonyme de PDFs/', async () => {
+      const zotero = path.join(root, 'Zotero', 'storage', 'AB12CD34', 'a.pdf');
+      fs.mkdirSync(path.dirname(zotero), { recursive: true });
+      fs.writeFileSync(zotero, '%PDF-1.4 Zotero');
+
+      expect((await reload(copy, { file: zotero })).file).toBe(zotero);
+    });
+  });
+
+  /**
+   * Le `.bib` d'un autre projet ClioDeck fusionné dans celui-ci : le parseur résout son
+   * `PDFs/doc.pdf` en `<autre projet>/PDFs/doc.pdf`, qui existe. Les homonymes sont fréquents dans
+   * `PDFs/` (#131 : sur un corpus de presse, la collision est la règle) : celui du projet est le PDF
+   * d'une autre référence. La référence importée recevait ce PDF-là, et la réécriture suivante du
+   * `.bib` l'y inscrivait, en relatif.
+   */
+  describe('le .bib d’un autre projet fusionné, PDFs/ du projet a un homonyme', () => {
+    let other: string;
+    const imported = () => makeCitation({ id: 'A_2001', zoteroKey: 'ZA', file: pdf(other, 'doc.pdf') });
+
+    beforeEach(() => {
+      other = path.join(root, 'Autre-projet');
+      fs.mkdirSync(path.join(other, 'PDFs'), { recursive: true });
+      fs.writeFileSync(pdf(other, 'doc.pdf'), '%PDF-1.4 A, de l’autre projet');
+      fs.writeFileSync(pdf(project, 'doc.pdf'), '%PDF-1.4 C, une autre référence du projet');
+    });
+
+    it('la référence importée garde son PDF, celui de l’autre projet', () => {
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata([imported()], null, project);
+
+      expect(merged.file).toBe(pdf(other, 'doc.pdf'));
+    });
+
+    it('téléchargée ici sous un nom suffixé : jamais l’homonyme d’une autre référence', async () => {
+      fs.writeFileSync(pdf(project, 'doc_KA.pdf'), '%PDF-1.4 A, téléchargée ici');
+      await BibliographyMetadataService.patchAttachment(
+        project,
+        { ...imported(), zoteroAttachments: [attachment('KA', 'doc.pdf')] },
+        'KA',
+        pdf(project, 'doc_KA.pdf')
+      );
+
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+        [imported()],
+        await BibliographyMetadataService.loadMetadata(project),
+        project
+      );
+
+      expect(merged.file).not.toBe(pdf(project, 'doc.pdf'));
+    });
+
+    it('témoin : téléchargée ici sous ce nom, c’est son PDF dans ce projet', async () => {
+      await BibliographyMetadataService.patchAttachment(
+        project,
+        { ...imported(), zoteroAttachments: [attachment('KA', 'doc.pdf')] },
+        'KA',
+        pdf(project, 'doc.pdf')
+      );
+
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+        [imported()],
+        await BibliographyMetadataService.loadMetadata(project),
+        project
+      );
+
+      expect(merged.file).toBe(pdf(project, 'doc.pdf'));
+    });
+  });
+
+  it('témoin : introuvable partout, le chemin reste tel quel', async () => {
+    const gone = pdf(path.join(root, 'These-avant'), 'disparu.pdf');
+
+    expect((await reload(project, { file: gone })).file).toBe(gone);
   });
 });

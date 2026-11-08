@@ -66,6 +66,8 @@ async function downloadsStarted(count: number): Promise<void> {
 }
 
 const pdfOf = (attachmentKey: string) => path.join(project, 'PDFs', `${attachmentKey}.pdf`);
+/** Le même chemin, tel que les métadonnées le rangent : relatif au projet (S07-2-1). */
+const keptOf = (attachmentKey: string) => `PDFs/${attachmentKey}.pdf`;
 
 function installMain(): void {
   updateAttachment = vi.fn(
@@ -159,12 +161,13 @@ describe('« Télécharger et indexer » un PDF Zotero : deux fiches en même te
 
     expect(inStore(X.id)?.file).toBe(pdfOf('QQBJJVQY'));
     expect(inStore(Y.id)?.file).toBe(pdfOf('GC9BPFL6'));
-    expect(await onDisk('XKEY2023')).toEqual([expect.objectContaining({ downloaded: true, localPath: pdfOf('QQBJJVQY') })]);
-    expect(await onDisk('YKEY2023')).toEqual([expect.objectContaining({ downloaded: true, localPath: pdfOf('GC9BPFL6') })]);
+    expect(await onDisk('XKEY2023')).toEqual([expect.objectContaining({ downloaded: true, localPath: keptOf('QQBJJVQY') })]);
+    expect(await onDisk('YKEY2023')).toEqual([expect.objectContaining({ downloaded: true, localPath: keptOf('GC9BPFL6') })]);
     // Au lancement suivant : les deux références retrouvent leur PDF.
     const reloaded = BibliographyMetadataService.mergeCitationsWithMetadata(
       [X, Y].map(({ zoteroAttachments: _dropped, ...fromBib }) => fromBib) as never,
-      await BibliographyMetadataService.loadMetadata(project)
+      await BibliographyMetadataService.loadMetadata(project),
+      project
     );
     expect(reloaded.map((c) => c.file)).toEqual([pdfOf('QQBJJVQY'), pdfOf('GC9BPFL6')]);
   });
@@ -244,12 +247,13 @@ describe('deux notices Zotero de même clé BibTeX (jumeaux Better BibTeX)', () 
   });
 
   async function expectEachAttachedToItsOwn(): Promise<void> {
-    expect(await onDisk('ZKA')).toEqual([expect.objectContaining({ key: 'ATTA', downloaded: true, localPath: pdfOf('ATTA') })]);
-    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ key: 'ATTB', downloaded: true, localPath: pdfOf('ATTB') })]);
+    expect(await onDisk('ZKA')).toEqual([expect.objectContaining({ key: 'ATTA', downloaded: true, localPath: keptOf('ATTA') })]);
+    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ key: 'ATTB', downloaded: true, localPath: keptOf('ATTB') })]);
     // Au lancement suivant, chacune retrouve son PDF.
     const reloaded = BibliographyMetadataService.mergeCitationsWithMetadata(
       [A, B].map(({ zoteroAttachments: _dropped, ...fromBib }) => fromBib) as never,
-      await BibliographyMetadataService.loadMetadata(project)
+      await BibliographyMetadataService.loadMetadata(project),
+      project
     );
     expect(reloaded.map((c) => c.file)).toEqual([pdfOf('ATTA'), pdfOf('ATTB')]);
   }
@@ -273,7 +277,7 @@ describe('deux notices Zotero de même clé BibTeX (jumeaux Better BibTeX)', () 
     expect(await bib().downloadAndIndexZoteroPDF('Lester_1935', 'ATTB', project)).toEqual({});
 
     expect(updateAttachment.mock.calls[0][0]).toMatchObject({ citation: { zoteroKey: 'ZKB' }, attachmentKey: 'ATTB' });
-    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ downloaded: true, localPath: pdfOf('ATTB') })]);
+    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ downloaded: true, localPath: keptOf('ATTB') })]);
     expect(await onDisk('ZKA')).toEqual([expect.objectContaining({ downloaded: false })]);
     expect(twinInStore('ZKB')?.file).toBe(pdfOf('ATTB'));
     expect(twinInStore('ZKA')?.file).toBeUndefined();

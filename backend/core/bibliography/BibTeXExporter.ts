@@ -1,5 +1,7 @@
 import type { Citation } from '../../types/citation';
 import * as fs from 'fs/promises';
+import * as path from 'path';
+import { toStoredPath } from './stored-path';
 
 /**
  * Champs que BibLaTeX — et pandoc, qui lit les `.bib` en BibLaTeX — prend
@@ -65,21 +67,25 @@ const LATEX_ESCAPES: Record<string, string> = {
  */
 export class BibTeXExporter {
   /**
-   * Export citations to BibTeX file
+   * Export citations to BibTeX file. Le chemin d'un PDF rangé sous le dossier du fichier exporté
+   * s'y écrit relatif ; ailleurs, absolu.
    */
   async exportToFile(citations: Citation[], filePath: string): Promise<void> {
-    const bibtexContent = this.exportToString(citations);
+    const bibtexContent = this.exportToString(citations, { fileBaseDir: path.dirname(path.resolve(filePath)) });
     await fs.writeFile(filePath, bibtexContent, 'utf-8');
   }
 
   /**
-   * Export citations to BibTeX string
+   * Export citations to BibTeX string. `fileBaseDir`, le dossier où le `.bib` sera écrit : le
+   * chemin d'un PDF qui s'y trouve s'écrit relatif à lui, comme le parseur le relit (S07-2-1). Le
+   * `.bib` se relit alors dans un projet renommé ou sur un autre Mac, et ne dit plus le chemin local
+   * de l'auteur. Un PDF rangé ailleurs garde son chemin absolu.
    */
-  exportToString(citations: Citation[]): string {
+  exportToString(citations: Citation[], options: { fileBaseDir?: string } = {}): string {
     const entries: string[] = [];
 
     for (const citation of citations) {
-      const entry = this.citationToBibTeX(citation);
+      const entry = this.citationToBibTeX(citation, options.fileBaseDir);
       entries.push(entry);
     }
 
@@ -89,7 +95,7 @@ export class BibTeXExporter {
   /**
    * Convert a single citation to BibTeX entry
    */
-  private citationToBibTeX(citation: Citation): string {
+  private citationToBibTeX(citation: Citation, fileBaseDir?: string): string {
     const lines: string[] = [];
 
     // Entry type and key
@@ -131,7 +137,7 @@ export class BibTeXExporter {
 
     // File path (if present)
     if (citation.file) {
-      lines.push(this.formatFileField(citation.file));
+      lines.push(this.formatFileField(fileBaseDir ? toStoredPath(citation.file, fileBaseDir) : citation.file));
     }
 
     // Tags (export as semicolon-separated list)

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { BibTeXExporter, verbatimSafe } from '../BibTeXExporter';
 import { BibTeXParser } from '../BibTeXParser';
 import { auditParsedBib } from '../bibAudit';
@@ -282,6 +285,50 @@ describe('champ file', () => {
     for (let i = 0; i < 3; i++) citations = parser.parse(exporter.exportToString(citations), BIB_DIR);
     expect(citations[0].file).toBe(file);
     expect(exporter.exportToString(citations)).toBe(written);
+  });
+
+  // Le .bib voyage : relatif à son dossier, le chemin d'un PDF du projet se relit dans un projet
+  // renommé ou sur un autre Mac, et ne dit plus le chemin local de l'auteur (S07-2-1).
+  it('relatif au dossier du .bib quand le PDF y est, et relu à l’identique', () => {
+    const bib = exporter.exportToString([withFile('/projets/these/PDFs/Farge 1982.pdf')], { fileBaseDir: BIB_DIR });
+
+    expect(bib).toContain('file = {PDFs/Farge 1982.pdf}');
+    const [reread] = parser.parse(bib, BIB_DIR);
+    expect(reread.file).toBe('/projets/these/PDFs/Farge 1982.pdf');
+    expect(exporter.exportToString([reread], { fileBaseDir: BIB_DIR })).toBe(bib);
+  });
+
+  it('absolu quand le PDF est ailleurs, un dossier voisin au nom prolongé compris', () => {
+    const bib = exporter.exportToString(
+      [withFile('/projets/these-2/PDFs/a.pdf'), withFile('/Users/fred/Zotero/storage/AB/b.pdf')],
+      { fileBaseDir: BIB_DIR }
+    );
+
+    expect(bib).toContain('file = {/projets/these-2/PDFs/a.pdf}');
+    expect(bib).toContain('file = {/Users/fred/Zotero/storage/AB/b.pdf}');
+  });
+
+  it('sous Windows aussi, relatif en barres obliques normales', () => {
+    const bib = exporter.exportToString([withFile('C:\\Users\\fred\\These\\PDFs\\a_b.pdf')], { fileBaseDir: 'C:\\Users\\fred\\These' });
+
+    expect(bib).toContain('file = {PDFs/a_b.pdf}');
+  });
+
+  it('exportToFile écrit relatif au dossier du fichier exporté, et garde absolu ce qui n’y est pas', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-export-bib-'));
+    try {
+      const inProject = path.join(dir, 'These', 'PDFs', 'a.pdf');
+      fs.mkdirSync(path.join(dir, 'These'));
+      fs.mkdirSync(path.join(dir, 'Export'));
+
+      await exporter.exportToFile([withFile(inProject)], path.join(dir, 'These', 'bibliography.bib'));
+      await exporter.exportToFile([withFile(inProject)], path.join(dir, 'Export', 'envoi.bib'));
+
+      expect(fs.readFileSync(path.join(dir, 'These', 'bibliography.bib'), 'utf8')).toContain('file = {PDFs/a.pdf}');
+      expect(fs.readFileSync(path.join(dir, 'Export', 'envoi.bib'), 'utf8')).toContain(`file = {${inProject}}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('un instantané HTML reste un instantané : relire file verbatim ne change pas ce qui est un PDF', () => {

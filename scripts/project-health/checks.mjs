@@ -105,7 +105,8 @@ export function attachedPdfPaths(projectPath, project) {
       const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
       for (const entry of Object.values(meta.citations ?? {})) {
         for (const att of entry.zoteroAttachments ?? []) {
-          if (att.downloaded && att.localPath) attached.add(fileIdentity(att.localPath));
+          // Relatif au projet depuis S07-2-1, absolu avant.
+          if (att.downloaded && att.localPath) attached.add(fileIdentity(path.resolve(projectPath, att.localPath)));
         }
       }
     } catch {
@@ -308,7 +309,7 @@ export function runHealthChecks(projectPath, db) {
         for (const entry of Object.values(entries)) {
           for (const att of entry.zoteroAttachments ?? []) {
             if (!att.downloaded || !att.localPath) continue;
-            const id = fileIdentity(att.localPath);
+            const id = fileIdentity(path.resolve(projectPath, att.localPath));
             const refs = referencesByFile.get(id) ?? new Set();
             refs.add(entry.id ?? '?');
             referencesByFile.set(id, refs);

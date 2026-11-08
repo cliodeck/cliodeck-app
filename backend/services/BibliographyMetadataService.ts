@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
+import { fromStoredPath, projectCopyOf, toStoredPath } from '../core/bibliography/stored-path';
 import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
 import { atomicWriteFile, parseUserJson, readUserFile, withFileLock } from '../core/fs/user-files';
 
@@ -44,6 +45,58 @@ export class MetadataUnreadableError extends Error {
     this.name = 'MetadataUnreadableError';
     this.filePath = filePath;
   }
+}
+
+/**
+ * Le PDF d'une référence au chargement du projet (S07-2-1) : celui du `.bib` s'il existe, sinon le
+ * PDF téléchargé s'il existe (`downloaded`, déjà résolu), sinon celui du `.bib` retrouvé dans
+ * `PDFs/` du projet (renommé, ouvert sur un autre Mac) ou depuis la racine du disque ; sinon la
+ * valeur d'avant, telle quelle. Un `.bib` abîmé par une ancienne synchronisation (`com apple
+ * CloudDocs`, `\textbackslash`) désigne un « PDF » qui ne mène à rien : le PDF téléchargé passe
+ * devant. Un chemin qui n'est pas un PDF (instantané HTML) cède toujours devant le PDF téléchargé.
+ *
+ * Une seule exception à « celui du `.bib` s'il existe » : rangé dans `PDFs/` d'un autre dossier,
+ * alors que le téléchargement de la référence dans ce projet est son homonyme de `PDFs/`
+ * (`projectCopyOf`). C'est la copie d'un projet écrit avant ce correctif, l'original encore en
+ * place : la copie se sert de ses propres PDF. Sans ce téléchargement, rien ne dit que l'homonyme
+ * est le sien : le `file` du `.bib` vient aussi d'un import (le `.bib` d'un autre projet, que le
+ * parseur résout dans celui-ci), et un homonyme de `PDFs/` est souvent le PDF d'une autre référence
+ * (#131). Le PDF du `.bib` garde alors la main.
+ */
+function resolvePdf(file: string | undefined, downloaded: string | undefined, projectPath: string): string | undefined {
+  const fromBib = isPdfPath(file) ? file : undefined;
+  const ownCopy = fromBib && downloaded && projectCopyOf(fromBib, projectPath) === downloaded ? downloaded : undefined;
+  const candidates: Array<() => string | undefined> = [
+    () => ownCopy,
+    () => fromBib,
+    () => downloaded,
+    () => fromBib && fromStoredPath(fromBib, projectPath),
+    () => fromBib && fromDiskRoot(fromBib, projectPath),
+  ];
+  for (const candidate of candidates) {
+    const found = candidate();
+    if (found && fs.existsSync(found)) return found;
+  }
+  return fromBib ?? downloaded ?? file;
+}
+
+/**
+ * Mendeley Desktop sous macOS écrit `:Users/jean/…:pdf`, sans la barre initiale : le parseur le
+ * rattache au dossier du `.bib`, qui peut être un sous-dossier du projet (`biblio/refs.bib`). Un
+ * chemin relu sous le projet et introuvable se cherche donc aussi depuis la racine du disque, privé
+ * tour à tour de chacun de ses dossiers sous le projet, jusqu'au premier qui existe ; jamais réduit
+ * au seul nom du fichier. Pas sous Windows, où Mendeley écrit la lettre de lecteur.
+ */
+function fromDiskRoot(file: string, projectPath: string): string | undefined {
+  if (process.platform === 'win32') return undefined;
+  const relative = toStoredPath(file, projectPath);
+  if (relative === file) return undefined;
+  const segments = relative.split('/');
+  for (let start = 0; start < segments.length - 1; start++) {
+    const candidate = `/${segments.slice(start).join('/')}`;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 /**
@@ -157,7 +210,9 @@ export class BibliographyMetadataService {
           zoteroAttachments: citation.zoteroAttachments?.map((att) => {
             const onFile = onDisk.get(att.key);
             const download = onFile?.downloaded && onFile.localPath ? onFile : att;
-            return { ...att, downloaded: download.downloaded, localPath: download.localPath };
+            // Rangé relatif au projet (S07-2-1) ; un ancien chemin absolu l'est aussi, une fois retrouvé.
+            const localPath = download.localPath && toStoredPath(fromStoredPath(download.localPath, projectPath), projectPath);
+            return { ...att, downloaded: download.downloaded, localPath };
           }),
         };
       }
@@ -188,7 +243,8 @@ export class BibliographyMetadataService {
         citation.zoteroAttachments?.find((att) => att.key === attachmentKey);
       if (!attachment) throw new Error(`Pièce jointe ${attachmentKey} inconnue de la référence ${citation.id}`);
 
-      const downloaded = { ...attachment, downloaded: true, localPath };
+      // Rangé relatif au projet, qui peut changer de nom ou de machine (S07-2-1).
+      const downloaded = { ...attachment, downloaded: true, localPath: toStoredPath(localPath, projectPath) };
       const zoteroAttachments = attachments.some((att) => att.key === attachmentKey)
         ? attachments.map((att) => (att.key === attachmentKey ? downloaded : att))
         : [...attachments, downloaded];
@@ -247,20 +303,31 @@ export class BibliographyMetadataService {
   /**
    * Merge metadata into citations
    * This is called when loading a bibliography to restore Zotero-specific data
+   *
+   * Avec `projectPath`, les chemins rangés se résolvent contre le projet tel qu'il est (S07-2-1) :
+   * ceux des pièces jointes téléchargées, en absolu, et `file` de chaque référence (`resolvePdf`).
+   * Sans lui, rien n'est résolu.
    */
-  static mergeCitationsWithMetadata(citations: Citation[], metadata: BibliographyMetadataFile | null): Citation[] {
-    if (!metadata || !metadata.citations) {
+  static mergeCitationsWithMetadata(
+    citations: Citation[],
+    metadata: BibliographyMetadataFile | null,
+    projectPath?: string
+  ): Citation[] {
+    if (!metadata?.citations && !projectPath) {
       return citations;
     }
 
     let mergedCount = 0;
 
     const mergedCitations = citations.map(citation => {
-      const citationMeta = metadata.citations[this.storageKeyFor(citation)];
+      const citationMeta = metadata?.citations?.[this.storageKeyFor(citation)];
 
       if (citationMeta) {
         mergedCount++;
-        const attachments = citationMeta.zoteroAttachments || citation.zoteroAttachments;
+        const stored = citationMeta.zoteroAttachments || citation.zoteroAttachments;
+        const attachments = projectPath
+          ? stored?.map((att) => (att.localPath ? { ...att, localPath: fromStoredPath(att.localPath, projectPath) } : att))
+          : stored;
         // Derive citation.file from a previously-downloaded Zotero attachment
         // when the BibTeX entry carries no `file =` field. Without this, a
         // citation that was first indexed via the Zotero download flow comes
@@ -281,13 +348,17 @@ export class BibliographyMetadataService {
           zoteroNotes: citationMeta.zoteroNotes ?? citation.zoteroNotes,
           dateAdded: citationMeta.dateAdded || citation.dateAdded,
           dateModified: citationMeta.dateModified || citation.dateModified,
-          file: isPdfPath(citation.file)
-            ? citation.file
-            : downloadedAttachment?.localPath ?? citation.file,
+          file: projectPath
+            ? resolvePdf(citation.file, downloadedAttachment?.localPath, projectPath)
+            : isPdfPath(citation.file)
+              ? citation.file
+              : downloadedAttachment?.localPath ?? citation.file,
         };
       }
 
-      return citation;
+      if (!projectPath) return citation;
+      const file = resolvePdf(citation.file, undefined, projectPath);
+      return file === citation.file ? citation : { ...citation, file };
     });
 
     console.log(`🔗 Merged metadata into ${mergedCount} citations`);

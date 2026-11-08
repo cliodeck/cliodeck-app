@@ -174,8 +174,9 @@ describe('synchronisation Zotero et rattachement simultané', () => {
     const result = await sync;
 
     expect(result).toMatchObject({ success: true, status: 'applied', written: true });
+    // Rangé relatif au projet (S07-2-1).
     expect(attachmentsOf('XKEY2023')).toEqual([
-      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: pdf }),
+      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: 'PDFs/2023_-_Documents_sauvegardés.pdf' }),
     ]);
     // Ce que la synchronisation apporte est bien écrit.
     expect(Object.keys(JSON.parse(fs.readFileSync(metadataPath(), 'utf-8')).citations).sort()).toEqual(['XKEY2023', 'YKEY2023']);

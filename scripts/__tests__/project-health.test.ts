@@ -244,6 +244,35 @@ describe('bilan de santé — un PDF pour deux références (#131)', () => {
   });
 });
 
+/**
+ * Depuis S07-2-1, `bibliography-metadata.json` range le chemin d'un PDF téléchargé relatif au
+ * projet (`PDFs/a.pdf`) ; les anciens restent absolus. Le bilan doit lire les deux.
+ */
+describe('bilan de santé — chemins des PDF rangés relatifs au projet', () => {
+  it('un PDF Zotero rangé relatif compte comme rattaché, et comme partagé avec la même pièce rangée en absolu', async () => {
+    write('PDFs/Zotero.pdf', '%PDF-1.4');
+    const shared = write('PDFs/Partage.pdf', '%PDF-1.4');
+    write('bibliography.bib', '@article{a_2024, title={A}}\n@article{b_2024, title={B}}\n@article{c_2024, title={C}}\n');
+    write('.cliodeck/bibliography-metadata.json', JSON.stringify({
+      version: 2,
+      citations: {
+        ZA: { id: 'a_2024', zoteroAttachments: [{ key: 'A1', downloaded: true, localPath: 'PDFs/Zotero.pdf' }] },
+        ZB: { id: 'b_2024', zoteroAttachments: [{ key: 'B1', downloaded: true, localPath: 'PDFs/Partage.pdf' }] },
+        ZC: { id: 'c_2024', zoteroAttachments: [{ key: 'C1', downloaded: true, localPath: shared }] },
+      },
+    }));
+    createBrain(() => {});
+
+    const findings = await check();
+
+    const pdf = findings.filter((f) => f.domaine === 'pdf');
+    expect(pdf.find((f) => f.message.includes('non rattaché'))).toBeUndefined();
+    expect(pdf.find((f) => f.message.includes('rattaché(s) à la bibliographie mais non indexé'))?.message).toContain('Zotero.pdf');
+    const messages = ecarts(findings, 'bibliographie').map((f) => f.message).join('\n');
+    expect(messages).toMatch(/1 fichier\(s\) PDF rattaché\(s\) à plusieurs références : Partage\.pdf ← b_2024 \+ c_2024/);
+  });
+});
+
 describe('bilan de santé — PDF sans texte (#132)', () => {
   it('signale un PDF image, mesuré en base ou recalculé sur ses extraits', async () => {
     const a = write('PDFs/Wang_2025.pdf', '%PDF-1.4');
