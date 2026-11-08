@@ -82,18 +82,88 @@ function standInFor(escape: string): string {
 /**
  * Le champ `file` est un chemin : il échappe au nettoyage LaTeX, qui changeait `~` en espace
  * (iCloud : `com~apple~CloudDocs`) et `--` en tiret demi-cadratin (S07-1-16). En sont seulement
- * retirés les échappements LaTeX qu'y écrivaient les versions précédentes de ClioDeck (`\_`,
- * `\&`, `\textbackslash\{\}`…) — les noms de fichiers Zotero contiennent presque toujours un `_` —
- * et l'accolade échappée qu'il écrit encore.
+ * retirés :
+ * - les échappements LaTeX qu'y écrivaient les versions précédentes de ClioDeck (`\_`, `\&`,
+ *   `\textbackslash\{\}`…) — les noms de fichiers Zotero contiennent presque toujours un `_` ;
+ * - `\{`, `\}`, `\:` et `\;`, qu'il écrit encore (cf. `BibTeXExporter.formatFileField`) ;
+ * - `\\`, `\:`, `\;` et `\$`, qu'écrivent le traducteur BibTeX de Zotero
+ *   (`encodeFilePathComponent`) et JabRef dans chaque partie de description:chemin:type ;
+ * - `\~{}` et ses semblables, qu'écrit Mendeley (décodés aussi par l'import de Zotero).
  */
-const LEGACY_FILE_ESCAPE = /\\textbackslash(?:\{\}|\\\{\\\})|\\([_&%#${}])/g;
+const FILE_ESCAPE = /\\textbackslash(?:\{\}|\\\{\\\})|\\([^A-Za-z0-9])\{\}|\\([_&%#${}:;\\])/g;
 
 function unescapeFilePath(value: string): string {
-  return value.replace(LEGACY_FILE_ESCAPE, (_escape, char: string | undefined) => char ?? '\\');
+  return value.replace(
+    FILE_ESCAPE,
+    (_escape, mendeley: string | undefined, char: string | undefined) => mendeley ?? char ?? '\\'
+  );
+}
+
+/**
+ * Mendeley Desktop écrit en LaTeX la barre oblique inverse qui échappe le deux-points d'une lettre
+ * de lecteur : `:C$\backslash$:/Users/…:pdf`. Ramenée à `\`, elle échappe ce deux-points comme les
+ * autres.
+ */
+const MENDELEY_BACKSLASH = '$\\backslash$';
+
+/** Coupe `text` sur chaque `separator` que ne précède pas une barre oblique inverse. */
+function splitUnescaped(text: string, separator: ':' | ';'): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\') {
+      i++;
+    } else if (text[i] === separator) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
 }
 
 /** Un chemin Windows à lettre de lecteur : `C:/…` ou `C:\…`. */
 const DRIVE_PATH = /^[A-Za-z]:[\\/]/;
+
+/**
+ * La première pièce jointe d'un champ `file` : jusqu'au premier point-virgule non échappé que suit
+ * une autre pièce jointe au format description:chemin:type. Un point-virgule que rien de tel ne
+ * suit fait partie du nom du fichier : Mendeley ne l'échappe pas, ni les versions précédentes de
+ * ClioDeck.
+ */
+function firstAttachment(value: string): string {
+  const [attachment, ...rest] = splitUnescaped(value, ';');
+  let first = attachment;
+  for (const piece of rest) {
+    if (splitUnescaped(piece, ':').length >= 3) break;
+    first += `;${piece}`;
+  }
+  return first;
+}
+
+/**
+ * Le chemin que porte un champ `file`, désechappé. Le découpage se fait avant : un deux-points ou
+ * un point-virgule échappé fait partie du chemin (`C\:\\Users…` de Zotero sous Windows, `\;` dans
+ * un nom de fichier).
+ * - Format description:chemin:type (Zotero, JabRef, Mendeley), plusieurs pièces jointes séparées
+ *   par `;` : le chemin de la première, entre son premier et son dernier deux-points non échappés,
+ *   lettre de lecteur comprise (`PDF:C:/x/a.pdf:application/pdf`).
+ * - chemin:type ou description:chemin : jamais le deux-points d'une lettre de lecteur
+ *   (`C:/x/a.pdf`), dont on ne gardait que « C ».
+ * - Sinon, la pièce jointe entière.
+ */
+function filePathOf(field: string): string {
+  const attachment = firstAttachment(field.replaceAll(MENDELEY_BACKSLASH, '\\'));
+  const parts = splitUnescaped(attachment, ':');
+  let filePath = attachment;
+  if (parts.length >= 3) {
+    filePath = parts.slice(1, -1).join(':');
+  } else if (parts.length === 2 && !DRIVE_PATH.test(attachment)) {
+    // Si le deuxième segment ressemble à un type MIME, prendre le premier.
+    filePath = parts[1].includes('/') ? parts[0] : parts[1];
+  }
+  return unescapeFilePath(filePath);
+}
 
 const skipBlanks = (text: string, index: number): number => {
   while (index < text.length && /\s/.test(text[index])) index++;
@@ -215,10 +285,11 @@ export class BibTeXParser {
       // (URL, DOI…) et les adresses de BibDesk (bdsk-url-1…) échappent au
       // nettoyage LaTeX : il changerait `~` en espace et `--` en tiret
       // demi-cadratin, donc l'adresse elle-même. Le chemin du PDF aussi,
-      // cf. unescapeFilePath.
+      // cf. filePathOf.
       if (value) {
         if (fieldName === 'file') {
-          fields.file = unescapeFilePath(value.trim());
+          const filePath = filePathOf(value.trim());
+          if (filePath) fields.file = filePath;
         } else {
           fields[fieldName] = isVerbatimField(fieldName) ? value.trim() : this.cleanValue(value);
         }
@@ -583,29 +654,9 @@ export class BibTeXParser {
     });
   }
 
-  // Résout le chemin du fichier PDF depuis le champ BibTeX file
-  // Gère les formats Zotero: "Attachments/file.pdf" ou "Description:chemin:mimetype"
-  private resolveFilePath(fileField: string, bibDir: string): string {
-    let filePath = fileField;
-
-    // Format Zotero avec description: "Nom:chemin:application/pdf", plusieurs
-    // pièces jointes séparées par `;` : le chemin de la première, tout ce qui
-    // est entre son premier et son dernier deux-points — lettre de lecteur
-    // comprise ("PDF:C:/x/a.pdf:application/pdf").
-    const attachment = fileField.split(';')[0];
-    const firstColon = attachment.indexOf(':');
-    const lastColon = attachment.lastIndexOf(':');
-    if (lastColon > firstColon) {
-      filePath = attachment.slice(firstColon + 1, lastColon);
-    } else if (firstColon !== -1 && !DRIVE_PATH.test(attachment)) {
-      // Format: chemin:mimetype ou description:chemin
-      // Si le deuxième segment ressemble à un mimetype, prendre le premier.
-      // Jamais le deux-points d'une lettre de lecteur (C:/x/a.pdf), qui fait
-      // partie du chemin : on n'en gardait que « C ».
-      const [head, tail] = [attachment.slice(0, firstColon), attachment.slice(firstColon + 1)];
-      filePath = tail.includes('/') ? head : tail;
-    }
-
+  // Résout le chemin du fichier PDF, déjà extrait du champ BibTeX file (cf. filePathOf),
+  // par rapport au dossier du .bib.
+  private resolveFilePath(filePath: string, bibDir: string): string {
     // Si le chemin est déjà absolu, le retourner tel quel — un chemin Windows
     // aussi, même relu sur un Mac : rattaché au dossier du .bib, il serait faux
     // partout, et réécrit tel quel à la synchronisation suivante.

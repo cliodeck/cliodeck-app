@@ -30,10 +30,13 @@ export function isVerbatimField(name: string): boolean {
 
 /**
  * Valeur verbatim écrivable entre accolades : les accolades, qui
- * délimiteraient la valeur, sont encodées comme dans une URL.
+ * délimiteraient la valeur, sont encodées comme dans une URL. Une barre
+ * oblique inverse finale aussi (`%5C`) : écrite `{…\}`, elle se lirait comme
+ * une accolade échappée (cf. `findMatchingBrace`), et l'entrée ne se
+ * refermerait plus si elle contient aussi une accolade isolée.
  */
 export function verbatimSafe(value: string): string {
-  return value.trim().replaceAll('{', '%7B').replaceAll('}', '%7D');
+  return value.trim().replaceAll('{', '%7B').replaceAll('}', '%7D').replace(/\\$/, '%5C');
 }
 
 /**
@@ -194,10 +197,13 @@ export class BibTeXExporter {
    * Chemin du PDF, verbatim comme les champs de {@link VERBATIM_FIELDS} : l'échappement LaTeX le
    * corrompait à la relecture (S07-1-16). Barres obliques normales, que Windows accepte : `\`
    * serait relu comme un échappement. Pas de {@link verbatimSafe}, dont le `%7B` changerait le
-   * nom du fichier : une accolade, qui déséquilibrerait l'entrée, s'écrit `\{` ou `\}`.
+   * nom du fichier : une accolade, qui déséquilibrerait l'entrée, s'écrit `\{` ou `\}`. Le
+   * deux-points et le point-virgule s'écrivent `\:` et `\;`, comme les écrivent Zotero et JabRef :
+   * la relecture découpe le champ sur ceux qui ne sont pas échappés (description:chemin:type,
+   * plusieurs pièces jointes), et coupait le chemin à cet endroit.
    */
   private formatFileField(filePath: string): string {
-    const written = filePath.replaceAll('\\', '/').replace(/[{}]/g, (brace) => `\\${brace}`);
+    const written = filePath.replaceAll('\\', '/').replace(/[{}:;]/g, (char) => `\\${char}`);
     return `  file = {${written}},`;
   }
 

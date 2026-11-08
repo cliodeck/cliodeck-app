@@ -217,6 +217,17 @@ describe('BibTeXParser', () => {
       expect(b.customFields?.abstract).toBe('Autre résumé');
     });
 
+    // Un nom invalide (ici, une espace) est ignoré, mais sa valeur est sautée quand même : sinon
+    // `{x, y}, title` passait pour le nom du champ suivant, et le titre était perdu.
+    it('saute la valeur d’un nom de champ invalide, et lit le titre qui suit', () => {
+      const [citation] = parser.parse('@misc{k, my field = {x, y}, title = {T}, year = {2001}}');
+
+      expect(parser.lastRejected).toEqual([]);
+      expect(citation?.title).toBe('T');
+      expect(citation.year).toBe('2001');
+      expect(citation.customFields).toBeUndefined();
+    });
+
     it('should handle empty or invalid input', () => {
       const citations1 = parser.parse('');
       expect(citations1).toHaveLength(0);

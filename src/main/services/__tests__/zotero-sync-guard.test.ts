@@ -384,6 +384,18 @@ describe('zotero:synchronize — une entrée venue de Zotero se corrige dans le 
     expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: false });
     expect(attachmentsOf('ODD2021')).toEqual([expect.objectContaining({ key: 'ATT1', downloaded: true, localPath: pdf })]);
   });
+
+  // Écrite `{…\}`, l'adresse se lisait comme une accolade échappée : avec l'accolade isolée du
+  // titre, l'entrée ne se refermait plus, et la synchronisation suivante refusait le .bib.
+  it('adresse Zotero qui finit par une barre oblique inverse, titre à accolade isolée : rien à réécrire au passage suivant', async () => {
+    makeProject(GARDE + '\n');
+    const odd = notice('ODD2021', 'Code: function() {', 'Odd');
+    contents = { COLL: [{ ...odd, data: { ...odd.data, url: 'https://ex.org/a\\' } }] };
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('url = {https://ex.org/a%5C}');
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: false });
+  });
 });
 
 describe('zotero:synchronize — des métadonnées illisibles arrêtent tout', () => {
