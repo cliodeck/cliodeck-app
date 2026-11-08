@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
-import { fromStoredPath, toStoredPath } from '../core/bibliography/stored-path';
+import { fromStoredPath, projectCopyOf, toStoredPath } from '../core/bibliography/stored-path';
 import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
 import { atomicWriteFile, parseUserJson, readUserFile, withFileLock } from '../core/fs/user-files';
 
@@ -51,13 +51,17 @@ export class MetadataUnreadableError extends Error {
  * Le PDF d'une référence au chargement du projet (S07-2-1) : celui du `.bib` s'il existe, sinon le
  * PDF téléchargé s'il existe (`downloaded`, déjà résolu), sinon celui du `.bib` retrouvé dans
  * `PDFs/` du projet (renommé, ouvert sur un autre Mac) ou depuis la racine du disque ; sinon la
- * valeur d'avant, telle quelle. Un `.bib` abîmé par une ancienne synchronisation (`com apple
- * CloudDocs`, `\textbackslash`) désigne un « PDF » qui ne mène à rien : le PDF téléchargé passe
- * devant. Un chemin qui n'est pas un PDF (instantané HTML) cède toujours devant le PDF téléchargé.
+ * valeur d'avant, telle quelle. Quand le PDF du `.bib` est rangé dans `PDFs/` d'un autre dossier et
+ * que le projet a le sien (`projectCopyOf`), c'est celui du projet qui passe : la copie d'un projet
+ * écrit avant ce correctif ne se sert pas des PDF de l'original. Un `.bib` abîmé par une ancienne
+ * synchronisation (`com apple CloudDocs`, `\textbackslash`) désigne un « PDF » qui ne mène à rien :
+ * le PDF téléchargé passe devant. Un chemin qui n'est pas un PDF (instantané HTML) cède toujours
+ * devant le PDF téléchargé.
  */
 function resolvePdf(file: string | undefined, downloaded: string | undefined, projectPath: string): string | undefined {
   const fromBib = isPdfPath(file) ? file : undefined;
   const candidates: Array<() => string | undefined> = [
+    () => fromBib && projectCopyOf(fromBib, projectPath),
     () => fromBib,
     () => downloaded,
     () => fromBib && fromStoredPath(fromBib, projectPath),
@@ -72,13 +76,21 @@ function resolvePdf(file: string | undefined, downloaded: string | undefined, pr
 
 /**
  * Mendeley Desktop sous macOS écrit `:Users/jean/…:pdf`, sans la barre initiale : le parseur le
- * rattache au dossier du `.bib`. Un chemin relu sous le projet se cherche donc aussi depuis la
- * racine du disque. Pas sous Windows, où Mendeley écrit la lettre de lecteur.
+ * rattache au dossier du `.bib`, qui peut être un sous-dossier du projet (`biblio/refs.bib`). Un
+ * chemin relu sous le projet et introuvable se cherche donc aussi depuis la racine du disque, privé
+ * tour à tour de chacun de ses dossiers sous le projet, jusqu'au premier qui existe ; jamais réduit
+ * au seul nom du fichier. Pas sous Windows, où Mendeley écrit la lettre de lecteur.
  */
 function fromDiskRoot(file: string, projectPath: string): string | undefined {
   if (process.platform === 'win32') return undefined;
   const relative = toStoredPath(file, projectPath);
-  return relative === file ? undefined : `/${relative}`;
+  if (relative === file) return undefined;
+  const segments = relative.split('/');
+  for (let start = 0; start < segments.length - 1; start++) {
+    const candidate = `/${segments.slice(start).join('/')}`;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 /**

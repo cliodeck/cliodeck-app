@@ -49,20 +49,42 @@ export function toStoredPath(absolute: string, baseDir: string): string {
   return fold(file).startsWith(fold(prefix)) ? file.slice(prefix.length) : absolute;
 }
 
+/** Le PDF de même nom dans `PDFs/` du projet. */
+const rebase = (stored: string, projectPath: string): string =>
+  pathApi(projectPath).join(projectPath, PDF_DIR, baseName(stored));
+
 /**
- * Le chemin absolu d'un chemin rangé : relatif, rattaché au projet tel qu'il est maintenant ; absolu
- * et présent, tel quel ; absolu mais disparu (projet renommé, écrit sur un autre poste), le PDF de
- * même nom dans `PDFs/` du projet s'il y est. Sinon tel quel : un fichier rangé hors du projet n'est
- * jamais déplacé en pensée.
+ * Quand `stored` est un chemin absolu rangé dans le dossier `PDFs` d'un autre dossier : le PDF de
+ * même nom dans `PDFs/` du projet, qui en tient lieu. Le téléchargement Zotero n'écrit que dans
+ * `PDFs/` du projet ouvert : un tel chemin vient d'un projet écrit avant S07-2-1, puis renommé, ou
+ * copié (sauvegarde, « Dupliquer » du Finder) alors que l'original reste en place. La copie se
+ * servait des PDF de l'original, et sa synchronisation réécrivait leur chemin absolu dans son
+ * `.bib`. Hors de ce cas, `undefined` : un PDF de Zotero (`storage/<clé>/…`), ou rangé ailleurs, n'a
+ * pas de double ici. L'existence du fichier n'est pas vérifiée.
+ */
+export function projectCopyOf(stored: string, projectPath: string): string | undefined {
+  if (!isAbsoluteAnywhere(stored)) return undefined;
+  const inPdfDir = slashed(stored).split('/').slice(-2, -1)[0] === PDF_DIR;
+  const outside = isAbsoluteAnywhere(toStoredPath(stored, projectPath));
+  return inPdfDir && outside ? rebase(stored, projectPath) : undefined;
+}
+
+/**
+ * Le chemin absolu d'un chemin rangé : relatif, rattaché au projet tel qu'il est maintenant. Absolu,
+ * dans `PDFs/` d'un autre dossier, et le projet a le sien (`projectCopyOf`) : celui du projet, même
+ * si l'autre existe encore. Absolu et présent : tel quel. Absolu mais disparu (projet renommé, écrit
+ * sur un autre poste) : le PDF de même nom dans `PDFs/` du projet s'il y est. Sinon tel quel : un
+ * fichier rangé hors du projet n'est jamais déplacé en pensée.
  */
 export function fromStoredPath(
   stored: string,
   projectPath: string,
   exists: (p: string) => boolean = existsSync
 ): string {
-  const api = pathApi(projectPath);
-  if (!isAbsoluteAnywhere(stored)) return api.join(projectPath, ...stored.split(/[\\/]/));
+  if (!isAbsoluteAnywhere(stored)) return pathApi(projectPath).join(projectPath, ...stored.split(/[\\/]/));
+  const copy = projectCopyOf(stored, projectPath);
+  if (copy && exists(copy)) return copy;
   if (exists(stored)) return stored;
-  const rebased = api.join(projectPath, PDF_DIR, baseName(stored));
+  const rebased = rebase(stored, projectPath);
   return exists(rebased) ? rebased : stored;
 }

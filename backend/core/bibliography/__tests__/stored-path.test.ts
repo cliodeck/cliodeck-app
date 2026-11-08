@@ -75,6 +75,37 @@ describe('fromStoredPath', () => {
     expect(fromStoredPath('PDFs/Dupont.pdf', 'C:\\Users\\jean\\These', disk())).toBe('C:\\Users\\jean\\These\\PDFs\\Dupont.pdf');
   });
 
+  // Un projet écrit avant S07-2-1 puis copié, l'original encore en place : son PDF rangé en absolu
+  // existe toujours, mais c'est celui de l'original. La copie a le sien, sous le même nom.
+  it('absolu présent dans PDFs/ d’un autre projet, la copie a le sien : celui de la copie', () => {
+    const original = '/Users/jean/These/PDFs/Dupont.pdf';
+    const copy = '/Users/jean/These-copie/PDFs/Dupont.pdf';
+    expect(fromStoredPath(original, '/Users/jean/These-copie', disk(original, copy))).toBe(copy);
+  });
+
+  it('chemin Windows d’un projet copié, l’original encore là : celui de la copie', () => {
+    const original = 'C:\\Users\\jean\\These\\PDFs\\Dupont.pdf';
+    const copy = 'C:\\Users\\jean\\These-copie\\PDFs\\Dupont.pdf';
+    expect(fromStoredPath(original, 'C:\\Users\\jean\\These-copie', disk(original, copy))).toBe(copy);
+  });
+
+  it('témoin : absolu présent dans PDFs/ d’un autre projet, sans PDF de ce nom ici : tel quel', () => {
+    const original = '/Users/jean/These/PDFs/Dupont.pdf';
+    expect(fromStoredPath(original, '/Users/jean/These-copie', disk(original))).toBe(original);
+  });
+
+  it('témoin : un PDF de Zotero présent garde la main sur un PDF de même nom dans PDFs/', () => {
+    const zotero = '/Users/jean/Zotero/storage/AB12CD34/Dupont.pdf';
+    const homonym = '/Users/jean/These/PDFs/Dupont.pdf';
+    expect(fromStoredPath(zotero, '/Users/jean/These', disk(zotero, homonym))).toBe(zotero);
+  });
+
+  it('témoin : un PDF présent dans un sous-dossier PDFs du projet reste le sien', () => {
+    const nested = '/Users/jean/These/annexes/PDFs/Dupont.pdf';
+    const homonym = '/Users/jean/These/PDFs/Dupont.pdf';
+    expect(fromStoredPath(nested, '/Users/jean/These', disk(nested, homonym))).toBe(nested);
+  });
+
   it('fichier hors du projet, introuvable : conservé tel quel', () => {
     const pdf = '/Users/jean/Zotero/storage/AB/a.pdf';
     expect(fromStoredPath(pdf, '/Users/jean/These', disk())).toBe(pdf);

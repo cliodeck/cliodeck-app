@@ -164,6 +164,32 @@ function renamed(project: string): string {
   return to;
 }
 
+const metadataPathOf = (project: string) => path.join(project, '.cliodeck', 'bibliography-metadata.json');
+
+/**
+ * Le même projet, tel que l'app l'écrivait avant ce correctif : le PDF en chemin absolu, dans le
+ * `.bib` comme dans les métadonnées. Les projets réels de l'auteur ont tous été écrits ainsi.
+ */
+async function writtenBeforeTheFix(): Promise<string> {
+  const project = await downloadedThenSynchronized();
+  const pdf = path.join(project, 'PDFs', 'Dupont.pdf');
+  const bib = fs.readFileSync(bibOf(project), 'utf8');
+  expect(bib).toContain('file = {PDFs/Dupont.pdf}');
+  fs.writeFileSync(bibOf(project), bib.replace('file = {PDFs/Dupont.pdf}', `file = {${pdf}}`));
+  const metadata = fs.readFileSync(metadataPathOf(project), 'utf8');
+  fs.writeFileSync(metadataPathOf(project), metadata.replace('"localPath": "PDFs/Dupont.pdf"', `"localPath": ${JSON.stringify(pdf)}`));
+  expect(metadataOf(project).citations.DUPO2020.zoteroAttachments?.[0].localPath).toBe(pdf);
+  return project;
+}
+
+/** L'historien copie le dossier du projet (sauvegarde, « Dupliquer » du Finder) et ouvre la copie. L'original reste. */
+function copied(project: string): string {
+  const to = path.join(root, 'These-copie');
+  fs.cpSync(project, to, { recursive: true });
+  h.projectPath = to;
+  return to;
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-projet-renomme-'));
   zoteroTitle = 'Le temps des archives';
@@ -225,5 +251,56 @@ describe('projet renommé : les PDF Zotero restent rattachés', () => {
       expect.objectContaining({ key: 'PDF1ATT1', downloaded: true, localPath: 'PDFs/Dupont.pdf' }),
     ]);
     expect((await load(project)).file).toBe(path.join(project, 'PDFs', 'Dupont.pdf'));
+  });
+});
+
+/**
+ * Un projet écrit avant ce correctif, copié puis ouvert, l'original encore en place : le `.bib` et
+ * les métadonnées désignent les PDF de l'original, qui existent. La copie s'en servait. Sa fenêtre
+ * des orphelins proposait de supprimer ses propres PDF, et la synchronisation suivante réécrivait
+ * dans son `.bib` le chemin absolu de l'original, nom d'utilisateur compris.
+ */
+describe('copie d’un projet écrit avant le correctif, l’original encore là', () => {
+  it('au chargement, la fiche désigne le PDF de la copie, et aucun PDF de la copie n’est orphelin', async () => {
+    const project = copied(await writtenBeforeTheFix());
+
+    const citation = await load(project);
+
+    const pdf = path.join(project, 'PDFs', 'Dupont.pdf');
+    expect(citation.file).toBe(pdf);
+    expect(citation.zoteroAttachments).toEqual([expect.objectContaining({ key: 'PDF1ATT1', downloaded: true, localPath: pdf })]);
+    const orphans = await h.handlers.get('bibliography:detect-orphan-pdfs')!({}, { projectPath: project, citations: [citation] });
+    expect(orphans).toMatchObject({ success: true, totalOrphans: 0, orphans: [] });
+  });
+
+  it('retélécharger dans la copie réécrit son propre PDF, sans en faire une copie suffixée', async () => {
+    const original = await writtenBeforeTheFix();
+    const project = copied(original);
+    zoteroPdf = '%PDF-1.4 Dupont, Le temps des archives, version corrigée dans Zotero';
+
+    const again = await download(project);
+
+    expect(again).toMatchObject({ success: true, filePath: path.join(project, 'PDFs', 'Dupont.pdf') });
+    expect(fs.readdirSync(path.join(project, 'PDFs'))).toEqual(['Dupont.pdf']);
+    expect(fs.readFileSync(path.join(original, 'PDFs', 'Dupont.pdf'), 'utf8')).not.toContain('version corrigée');
+  });
+
+  it('la synchronisation suivante écrit dans la copie des chemins relatifs, et laisse l’original intact', async () => {
+    const original = await writtenBeforeTheFix();
+    const originalBib = fs.readFileSync(bibOf(original), 'utf8');
+    const originalMetadata = fs.readFileSync(metadataPathOf(original), 'utf8');
+    const project = copied(original);
+    zoteroTitle = 'Le temps des archives, troisième édition';
+
+    expect(await synchronize(project)).toMatchObject({ success: true, status: 'applied', written: true });
+
+    const bib = fs.readFileSync(bibOf(project), 'utf8');
+    expect(bib).toContain('file = {PDFs/Dupont.pdf}');
+    expect(bib).not.toContain(root);
+    expect(metadataOf(project).citations.DUPO2020.zoteroAttachments).toEqual([
+      expect.objectContaining({ key: 'PDF1ATT1', downloaded: true, localPath: 'PDFs/Dupont.pdf' }),
+    ]);
+    expect(fs.readFileSync(bibOf(original), 'utf8')).toBe(originalBib);
+    expect(fs.readFileSync(metadataPathOf(original), 'utf8')).toBe(originalMetadata);
   });
 });
