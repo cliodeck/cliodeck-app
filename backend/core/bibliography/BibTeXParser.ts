@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation } from '../../types/citation';
 import { createCitation } from '../../types/citation';
-import { VERBATIM_FIELDS } from './BibTeXExporter';
+import { isVerbatimField } from './BibTeXExporter';
 
 /**
  * Position du délimiteur qui ferme une valeur, en partant de `from` : `}` au niveau de l'accolade
@@ -212,14 +212,15 @@ export class BibTeXParser {
 
     for (const [fieldName, value] of this.readFields(fieldsString)) {
       // Nettoyer et stocker la valeur. Les champs verbatim de BibLaTeX
-      // (URL, DOI…) échappent au nettoyage LaTeX : il changerait `~` en
-      // espace et `--` en tiret demi-cadratin, donc l'adresse elle-même.
-      // Le chemin du PDF aussi, cf. unescapeFilePath.
+      // (URL, DOI…) et les adresses de BibDesk (bdsk-url-1…) échappent au
+      // nettoyage LaTeX : il changerait `~` en espace et `--` en tiret
+      // demi-cadratin, donc l'adresse elle-même. Le chemin du PDF aussi,
+      // cf. unescapeFilePath.
       if (value) {
         if (fieldName === 'file') {
           fields.file = unescapeFilePath(value.trim());
         } else {
-          fields[fieldName] = VERBATIM_FIELDS.has(fieldName) ? value.trim() : this.cleanValue(value);
+          fields[fieldName] = isVerbatimField(fieldName) ? value.trim() : this.cleanValue(value);
         }
       }
     }

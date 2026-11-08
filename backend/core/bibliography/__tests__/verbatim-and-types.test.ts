@@ -73,6 +73,52 @@ describe('champs verbatim', () => {
 });
 
 /**
+ * BibDesk range les adresses d'une notice dans `bdsk-url-1`, `bdsk-url-2`…, le fichier lié dans
+ * `bdsk-file-1`… (un alias en base64) ; ses anciennes versions, dans `local-url`. Lus depuis que les
+ * noms à tiret le sont (S07-1-14), ces champs passaient par le nettoyage LaTeX (`~` en espace, `--`
+ * en tiret demi-cadratin) puis par l'échappement (`_` en `\_`) : la première synchronisation
+ * réécrivait des adresses fausses.
+ */
+describe('champs verbatim de BibDesk', () => {
+  const exporter = new BibTeXExporter();
+  const parser = new BibTeXParser();
+  const URL_BDSK = 'http://www.univ.edu/~garde/these--2000_v2.pdf?a=1&b=50%25#p';
+  const ALIAS = 'YnBsaXN0MDDSAQIDBFxy+ZWxhdGl2ZVBhdGhZ/YWxpYXNEYXRh==';
+  const LOCAL_URL = 'file://localhost/Users/jean/Thèse/a~b--c_d.pdf';
+  const bib = [
+    '@book{Garde2000,',
+    '\tDate-Added = {2020-01-02 10:00:00 +0100},',
+    '\tTitle = {Le temps des archives},',
+    `\tBdsk-File-1 = {${ALIAS}},`,
+    `\tBdsk-Url-1 = {${URL_BDSK}},`,
+    `\tLocal-Url = {${LOCAL_URL}},`,
+    '\tmendeley-groups = {a_b--c}}',
+  ].join('\n');
+
+  it('relit bdsk-url-N, bdsk-file-N et local-url tels quels', () => {
+    const [citation] = parser.parse(bib);
+
+    expect(citation.customFields).toMatchObject({ 'bdsk-url-1': URL_BDSK, 'bdsk-file-1': ALIAS, 'local-url': LOCAL_URL });
+  });
+
+  it('les réécrit tels quels, et une réécriture de plus ne change rien', () => {
+    const written = exporter.exportToString(parser.parse(bib));
+
+    expect(written).toContain(`bdsk-url-1 = {${URL_BDSK}}`);
+    expect(written).toContain(`bdsk-file-1 = {${ALIAS}}`);
+    expect(written).toContain(`local-url = {${LOCAL_URL}}`);
+    expect(exporter.exportToString(parser.parse(written))).toBe(written);
+  });
+
+  it('témoin : un autre champ à tiret reste un texte, nettoyé à la lecture et échappé à l’écriture', () => {
+    const [citation] = parser.parse(bib);
+
+    expect(citation.customFields?.['mendeley-groups']).toBe('a_b–c');
+    expect(exporter.exportToString([citation])).toContain('mendeley-groups = {a\\_b–c}');
+  });
+});
+
+/**
  * Le chemin du PDF (`file`) se relit tel qu'il a été écrit. Le nettoyage LaTeX changeait `~` en
  * espace (iCloud : `com~apple~CloudDocs`) et `--` en tiret demi-cadratin ; l'échappement de
  * l'exporteur changeait `\` en `\textbackslash{}`, qui grossissait à chaque synchronisation ; la

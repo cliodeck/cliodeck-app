@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BibTeXParser } from '../core/bibliography/BibTeXParser';
+import { auditParsedBib } from '../core/bibliography/bibAudit';
 
 describe('BibTeXParser', () => {
   const parser = new BibTeXParser();
@@ -185,6 +186,20 @@ describe('BibTeXParser', () => {
       ]);
       expect(citations[0].customFields?.address).toBe('Archives nationales, Paris');
       expect(citations[0].year).toBe('1950');
+    });
+
+    // Le caractère qui suit un antislash ne compte pas (S07-1-32) : `\}` de `{C:\dossier\}` non
+    // plus. Sans fermeture à ce compte, on recompte toutes les accolades, comme BibTeX.
+    it('referme une valeur qui finit par un antislash, sans perdre l’entrée ni la suivante', () => {
+      const bibtex = ['@misc{A, title={C:\\dossier\\}, year={2000}}', '@misc{B, title={Suite}, year={2001}}'].join('\n');
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations.map((c) => [c.id, c.title, c.year])).toEqual([
+        ['A', 'C:\\dossier\\', '2000'],
+        ['B', 'Suite', '2001'],
+      ]);
+      expect(auditParsedBib(bibtex, citations).unreadKeys).toEqual([]);
     });
 
     // Le résumé devenait `note` à la réécriture, et disparaissait quand l'entrée en avait une.

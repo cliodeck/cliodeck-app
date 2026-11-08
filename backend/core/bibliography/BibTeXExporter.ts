@@ -11,6 +11,24 @@ import * as fs from 'fs/promises';
 export const VERBATIM_FIELDS = new Set(['url', 'doi', 'eprint', 'date', 'urldate']);
 
 /**
+ * Champs à tiret de BibDesk qui portent une adresse ou un fichier : `bdsk-url-1`, `bdsk-url-2`…,
+ * `bdsk-file-1`… (un alias en base64), et `local-url`, où d'anciennes versions de BibDesk
+ * rangeaient le fichier lié. Lus depuis que les noms à tiret le sont (S07-1-14), ils passaient par
+ * le nettoyage LaTeX puis par l'échappement : la première réécriture abîmait l'adresse (`~` en
+ * espace, `--` en tiret demi-cadratin, `_` en `\_`).
+ */
+const BIBDESK_VERBATIM = /^(?:bdsk-(?:url|file)-\d+|local-url)$/;
+
+/**
+ * Champ lu et écrit tel quel : ceux de {@link VERBATIM_FIELDS} et les adresses de BibDesk. Une
+ * seule règle pour le parseur et l'exporteur, sans égard à la casse (BibDesk écrit `Bdsk-Url-1`).
+ */
+export function isVerbatimField(name: string): boolean {
+  const lower = name.toLowerCase();
+  return VERBATIM_FIELDS.has(lower) || BIBDESK_VERBATIM.test(lower);
+}
+
+/**
  * Valeur verbatim écrivable entre accolades : les accolades, qui
  * délimiteraient la valeur, sont encodées comme dans une URL.
  */
@@ -162,11 +180,11 @@ export class BibTeXExporter {
   }
 
   /**
-   * Champ libre : verbatim pour ceux que BibLaTeX lit tels quels (cf.
-   * {@link VERBATIM_FIELDS}), échappé pour les autres.
+   * Champ libre : verbatim pour ceux que BibLaTeX lit tels quels et pour les adresses de BibDesk
+   * (cf. {@link isVerbatimField}), échappé pour les autres.
    */
   private formatCustomField(name: string, value: string): string {
-    if (VERBATIM_FIELDS.has(name.toLowerCase())) {
+    if (isVerbatimField(name)) {
       return `  ${name} = {${verbatimSafe(value)}},`;
     }
     return this.formatField(name, value);
@@ -359,7 +377,7 @@ export class BibTeXExporter {
     if (citation.customFields) {
       for (const [key, value] of Object.entries(citation.customFields)) {
         lines.push(
-          VERBATIM_FIELDS.has(key.toLowerCase())
+          isVerbatimField(key)
             ? this.formatCustomField(key, value)
             : this.formatFieldLegacy(key, value)
         );

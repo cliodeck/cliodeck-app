@@ -261,6 +261,37 @@ describe('zotero:synchronize — ce que le parseur lit depuis L05-7 se synchroni
     expect(written).toContain('title = {Les archives}');
     expect(written).toContain('mendeley-groups = {These}');
   });
+
+  // Une entrée BibDesk se lit aussi, donc se réécrit : son adresse bdsk-url-1 est verbatim comme
+  // `url`. Nettoyée puis échappée, elle sortait « http://www.univ.edu/ garde/these–2000\_v2.pdf ».
+  it('une entrée BibDesk : l’adresse de bdsk-url-1 est réécrite à l’identique', async () => {
+    const url = 'http://www.univ.edu/~garde/these--2000_v2.pdf';
+    const before = [
+      '@string{AN = {Archives nationales}}',
+      '',
+      '@book{Garde2000,',
+      '\tdate-added = {2020-01-02 10:00:00 +0100},',
+      '\tpublisher = AN,',
+      '\ttitle = {Le temps des archives},',
+      `\tbdsk-url-1 = {${url}}}`,
+      '',
+      '@comment{BibDesk Static Groups{',
+      '<plist version="1.0"><array></array></plist>',
+      '}}',
+      '',
+    ].join('\n');
+    makeProject(before);
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+
+    const written = fs.readFileSync(bibPath(), 'utf-8');
+    expect(written).toContain(`bdsk-url-1 = {${url}}`);
+    expect(written).toContain('publisher = {Archives nationales}');
+    expect(written).toContain('Martin');
+    // Le bloc des groupes BibDesk n'est pas réécrit (perte connue, hors L05-7) : la copie de
+    // sécurité garde le fichier d'avant.
+    expect(fs.readFileSync(backupPath(), 'utf-8')).toBe(before);
+  });
 });
 
 describe('zotero:synchronize — une entrée venue de Zotero se corrige dans le .bib, sans la supprimer', () => {

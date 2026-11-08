@@ -20,6 +20,9 @@ const BIB_DIR = '/projets/these';
 
 const fixture = (name: string) => readFileSync(path.join(FIXTURES, `${name}.bib`), 'utf-8');
 
+/** L'adresse de la fixture BibDesk : tilde, tiret double et tiret bas. */
+const BDSK_URL = 'https://www.univ.example/~garde/these--2000_v2.pdf';
+
 function parse(bib: string): Citation[] {
   return new BibTeXParser().parse(bib, BIB_DIR);
 }
@@ -104,12 +107,22 @@ describe('aller-retour : ce que chaque format met à l’épreuve', () => {
     expect(garde.title).toBe('Le temps des archives');
     expect(garde.publisher).toBe('Archives nationales');
     expect(garde.customFields?.['date-added']).toBe('2020-01-02 10:00:00 +0100');
-    expect(garde.customFields?.['bdsk-url-1']).toBe('https://www.example.org/garde');
+    expect(garde.customFields?.['bdsk-url-1']).toBe(BDSK_URL);
     expect(byId(citations, 'Leduc1990').journal).toBe('Archives nationales : bulletin');
     // À la réécriture, la valeur est écrite développée ; la définition @string ne l'est plus.
     const written = exportBib(citations);
     expect(written).toContain('publisher = {Archives nationales}');
     expect(written).not.toContain('{AN}');
+  });
+
+  // Une adresse rangée par BibDesk dans bdsk-url-N est verbatim comme `url` : `~`, `--` et `_`
+  // sortent de la réécriture tels qu'ils sont dans le fichier d'origine.
+  it('BibDesk : la ligne bdsk-url-1 écrite est celle du fichier d’origine', () => {
+    const original = fixture('bibdesk');
+    const line = `bdsk-url-1 = {${BDSK_URL}}`;
+    expect(original).toContain(line);
+
+    expect(exportBib(parse(original))).toContain(line);
   });
 
   it('JabRef : le PDF relatif au dossier du fichier, le résumé gardé', () => {
@@ -131,6 +144,19 @@ describe('aller-retour : valeurs difficiles', () => {
 
     expect(reread?.title).toBe(title);
     expect(exportBib([reread])).toBe(written);
+  });
+
+  // Le texte écrit, pas seulement sa relecture : le parseur relit aussi l'ancienne forme
+  // `\textbackslash\{\}`, que pandoc imprime « \{} » (mesuré avec pandoc 3.13, `--citeproc -t
+  // plain` : « C:\{}users\{}x »). Écrit en un seul passage, `\textbackslash{}` garde son accolade.
+  it.each([
+    ['C:\\Users\\x', 'title = {C:\\textbackslash{}Users\\textbackslash{}x}'],
+    ['a~b', 'title = {a\\textasciitilde{}b}'],
+    ['Code: function() {', 'title = {Code: function() \\{}'],
+  ])('le titre « %s » s’écrit %s', (title, line) => {
+    const written = exportBib([createCitation({ id: 'K_2020', type: 'misc', author: '', year: '2020', title })]);
+
+    expect(written).toContain(line);
   });
 
   it('une accolade isolée ne fait pas perdre l’entrée, ni la suivante', () => {

@@ -10,8 +10,12 @@
 % documentation de BibDesk (bibdesk.sourceforge.io) ; notices fictives.
 % Formes reprises : en-tête en commentaires doubles, abréviations string avant les entrées,
 % indentation par tabulation, champs par ordre alphabétique avec date-added et date-modified,
-% champs bdsk-url-1 et bdsk-file-1 en fin d'entrée, entrée refermée sur la ligne du dernier champ.
-% Pièges : champs à tiret avant title ; abréviation employée seule et concaténée par dièse.
+% champs bdsk-url-1 et bdsk-file-1 en fin d'entrée, entrée refermée sur la ligne du dernier champ,
+% groupes statiques en fin de fichier dans un bloc comment « BibDesk Static Groups » (liste de
+% propriétés XML d'Apple), forme reprise de mémoire des fichiers BibDesk publiés, sans revérification.
+% Pièges : champs à tiret avant title ; abréviation employée seule et concaténée par dièse ;
+% adresse bdsk-url-1 avec tilde, tiret double et tiret bas, que le nettoyage LaTeX abîmait.
+% La réécriture par ClioDeck ne garde pas le bloc des groupes (perte connue, hors L05-7).
 
 
 @string{AN = {Archives nationales}}
@@ -26,7 +30,7 @@
 	title = {Le temps des archives},
 	year = {2000},
 	bdsk-file-1 = {YnBsaXN0MDDSAQIDBFxyZWxhdGl2ZVBhdGhZYWxpYXNEYXRhXxAPR2FyZGUyMDAwLnBkZk8QAA==},
-	bdsk-url-1 = {https://www.example.org/garde}}
+	bdsk-url-1 = {https://www.univ.example/~garde/these--2000_v2.pdf}}
 
 @article{Leduc1990,
 	author = {Leduc, Anne},
@@ -36,3 +40,18 @@
 	pages = {3--17},
 	title = {Le carnet},
 	year = {1990}}
+
+@comment{BibDesk Static Groups{
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>group name</key>
+		<string>Thèse</string>
+		<key>keys</key>
+		<string>Garde2000,Leduc1990</string>
+	</dict>
+</array>
+</plist>
+}}
