@@ -103,7 +103,7 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
   });
 
   /*
-   * Revue de L05-6. Le document de la tentative est enregistré avant les embeddings. Il restait
+   * Revue de L05-6. Le document de la tentative était enregistré avant les embeddings. Il restait
    * après l'échec, vide, à côté de l'ancien que « Ré-indexer » ne supprime plus : le panneau
    * listait la référence deux fois, et l'ouverture suivante copiait tout `brain.db` avant de
    * fondre ce doublon.

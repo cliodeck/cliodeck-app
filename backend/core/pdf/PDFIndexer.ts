@@ -213,10 +213,6 @@ export class PDFIndexer {
     console.log(`   File: ${filePath}`);
     console.log(`   BibtexKey: ${bibtexKey || 'none'}`);
 
-    // Document de cette passe, enregistré avant ses extraits (étape 8), tant qu'il n'a pas pris la
-    // place des copies précédentes : un échec d'ici là le retire (cf. le catch).
-    let pendingDocumentId: string | null = null;
-
     try {
       // 1. Extraire le texte + métadonnées
       console.log('🔍 [INDEXER] Step 1: Extracting text and metadata...');
@@ -348,35 +344,7 @@ export class PDFIndexer {
       (document as any).summary = summary;
       (document as any).summaryEmbedding = summaryEmbedding;
 
-      // 8. Sauvegarder le document
-      this.vectorStore.saveDocument(document);
-      pendingDocumentId = documentId;
-
-      // 9. Matcher et sauvegarder les citations avec documents existants
-      const allDocuments = this.vectorStore.getAllDocuments();
-      const citationMatches = this.citationExtractor.matchCitationsWithDocuments(
-        citations,
-        allDocuments
-      );
-
-      // Sauvegarder les citations matchées en BDD
-      for (const citation of citations) {
-        const citationId = randomUUID();
-        const targetDocId = citationMatches.get(citation.id);
-
-        this.vectorStore.saveCitation({
-          id: citationId,
-          sourceDocId: documentId,
-          targetCitation: citation.text,
-          targetDocId,
-          context: citation.context,
-          pageNumber: citation.pageNumber,
-        });
-      }
-
-      if (citationMatches.size > 0) {
-        console.log(`   Citations matchées: ${citationMatches.size}/${citations.length}`);
-      }
+      // Rien n'est écrit avant la fin : document, citations et extraits partent ensemble (étape 15).
 
       // 10. Preprocess pages (if enabled)
       let processedPages = pages;
@@ -466,7 +434,7 @@ export class PDFIndexer {
         totalChunks: chunks.length,
       });
 
-      // 11. Générer les embeddings et sauvegarder
+      // 14. Générer les embeddings, tous en mémoire jusqu'à l'écriture
       onProgress?.({
         stage: 'embedding',
         progress: 50,
@@ -474,102 +442,98 @@ export class PDFIndexer {
         totalChunks: chunks.length,
       });
 
-      // Check if we're using EnhancedVectorStore
       const isEnhancedStore = this.vectorStore instanceof EnhancedVectorStore;
-      console.log(`🔍 [INDEXER] Step 7: Generating embeddings (EnhancedStore: ${isEnhancedStore})...`);
+      console.log(`🔍 [INDEXER] Generating embeddings (EnhancedStore: ${isEnhancedStore})...`);
+      const chunksWithEmbeddings: Array<{ chunk: DocumentChunk; embedding: Float32Array }> = [];
 
-      if (isEnhancedStore) {
-        // Batch processing for EnhancedVectorStore
-        console.log('📦 Using batch indexing for EnhancedVectorStore');
-        const chunksWithEmbeddings = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const embedding = await this.generateEmbeddingFn(chunk.content);
+        chunksWithEmbeddings.push({ chunk, embedding });
 
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
+        // Mise à jour de la progression
+        const progress = 50 + Math.floor((i / chunks.length) * 40);
+        onProgress?.({
+          stage: 'embedding',
+          progress,
+          message: `Embeddings: ${i + 1}/${chunks.length}`,
+          currentChunk: i + 1,
+          totalChunks: chunks.length,
+        });
 
-          // Générer l'embedding
-          console.log(`🔍 [INDEXER] Generating embedding ${i + 1}/${chunks.length}...`);
-          const embedding = await this.generateEmbeddingFn(chunk.content);
-          console.log(`🔍 [INDEXER] Embedding ${i + 1} generated, dimension: ${embedding.length}`);
+        // Log progression tous les 10 chunks
+        if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
+          console.log(`  Embeddings: ${i + 1}/${chunks.length}`);
+        }
+      }
 
-          chunksWithEmbeddings.push({ chunk, embedding });
+      // 15. Écrire document, citations et extraits, tout ou rien. Écrit avant les embeddings, le
+      // document restait sans extrait quand l'indexation s'arrêtait en route (Ollama arrêté, app
+      // quittée) : le renderer le comptait « déjà indexé », et aucune recherche ne le trouvait
+      // (S03-1-0). Un extrait en échec au milieu laissait une copie partielle, que le nettoyage du
+      // démarrage préfère à la complète (S01-1-14). Synchrone : une autre indexation du même fichier
+      // ne voit ce document qu'une fois complet, et la dernière à finir remplace l'autre, au lieu
+      // de supprimer un document encore en cours (S01-1-13).
+      this.vectorStore.transaction(() => {
+        this.vectorStore.saveDocument(document);
 
-          // Mise à jour de la progression
-          const progress = 50 + Math.floor((i / chunks.length) * 40);
-          onProgress?.({
-            stage: 'embedding',
-            progress,
-            message: `Embeddings: ${i + 1}/${chunks.length}`,
-            currentChunk: i + 1,
-            totalChunks: chunks.length,
+        // Matcher les citations avec les documents existants, celui-ci compris
+        const citationMatches = this.citationExtractor.matchCitationsWithDocuments(
+          citations,
+          this.vectorStore.getAllDocuments()
+        );
+        for (const citation of citations) {
+          this.vectorStore.saveCitation({
+            id: randomUUID(),
+            sourceDocId: documentId,
+            targetCitation: citation.text,
+            targetDocId: citationMatches.get(citation.id),
+            context: citation.context,
+            pageNumber: citation.pageNumber,
           });
-
-          // Log progression tous les 10 chunks
-          if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
-            console.log(`  Embeddings: ${i + 1}/${chunks.length}`);
-          }
+        }
+        if (citationMatches.size > 0) {
+          console.log(`   Citations matchées: ${citationMatches.size}/${citations.length}`);
         }
 
-        // Batch add to all indexes (HNSW, BM25, SQLite)
-        console.log(`🔍 [INDEXER] Step 8: Adding ${chunksWithEmbeddings.length} chunks to indexes...`);
-        console.log(`🔍 [INDEXER] First embedding dimension: ${chunksWithEmbeddings[0]?.embedding?.length || 'N/A'}`);
-        await (this.vectorStore as EnhancedVectorStore).addChunks(chunksWithEmbeddings);
-        console.log(`🔍 [INDEXER] Step 8 complete: Chunks added to HNSW, BM25, SQLite`);
+        for (const { chunk, embedding } of chunksWithEmbeddings) {
+          this.vectorStore.saveChunk(chunk, embedding);
+        }
+
+        // Un fichier, un document. Réindexer un PDF déjà présent le REMPLACE :
+        // chaque bouton qui relançait l'indexation (tout indexer, télécharger
+        // depuis Zotero, glisser-déposer, réindexer) ajoutait une copie, et
+        // aucun garde-fou côté interface ne les couvrait tous. Fait APRÈS
+        // l'écriture des nouveaux extraits, dans la même transaction : un échec
+        // laisse l'ancienne copie intacte. Par le store de l'indexeur, qui
+        // marque HNSW et BM25 périmés. Un PDF déplacé (même clé, même nom,
+        // ancien fichier disparu) est remplacé de même, sans quoi il ferait
+        // doublon. Un PDF renommé (autre nom) ne l'est pas : cf. `getMovedCopyIds`.
+        const previousCopies = [
+          ...new Set([
+            ...this.vectorStore.getDocumentIdsByFilePath(filePath),
+            ...(bibtexKey ? this.vectorStore.getMovedCopyIds(bibtexKey, filePath) : []),
+          ]),
+        ].filter((id) => id !== documentId);
+        if (previousCopies.length > 0) {
+          this.vectorStore.mergeDocumentsInto(documentId, previousCopies);
+          console.log(`♻️  ${previousCopies.length} copie(s) précédente(s) remplacée(s)`);
+        }
+      });
+
+      // 16. HNSW et BM25, hors transaction : un échec y laisse le document complet en base, et ces
+      // index périmés (cf. `addToSearchIndexes`).
+      if (isEnhancedStore) {
+        await (this.vectorStore as EnhancedVectorStore).addToSearchIndexes(chunksWithEmbeddings);
 
         onProgress?.({
           stage: 'embedding',
           progress: 95,
           message: 'Index HNSW et BM25 construits',
         });
-      } else {
-        // Original behavior for VectorStore
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-
-          // Générer l'embedding
-          const embedding = await this.generateEmbeddingFn(chunk.content);
-
-          // Sauvegarder le chunk avec son embedding
-          this.vectorStore.saveChunk(chunk, embedding);
-
-          // Mise à jour de la progression
-          const progress = 50 + Math.floor((i / chunks.length) * 45);
-          onProgress?.({
-            stage: 'embedding',
-            progress,
-            message: `Embeddings: ${i + 1}/${chunks.length}`,
-            currentChunk: i + 1,
-            totalChunks: chunks.length,
-          });
-
-          // Log progression tous les 10 chunks
-          if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
-            console.log(`  Embeddings: ${i + 1}/${chunks.length}`);
-          }
-        }
       }
 
-      // Un fichier, un document. Réindexer un PDF déjà présent le REMPLACE :
-      // chaque bouton qui relançait l'indexation (tout indexer, télécharger
-      // depuis Zotero, glisser-déposer, réindexer) ajoutait une copie, et
-      // aucun garde-fou côté interface ne les couvrait tous. Fait APRÈS
-      // l'écriture des nouveaux extraits : un échec en cours de route laisse
-      // l'ancienne copie intacte, et retire le document de cette passe
-      // (`discardFailedDocument`). Un PDF déplacé (même clé, même nom, ancien
-      // fichier disparu) est remplacé de même, sans quoi il ferait doublon.
-      // Un PDF renommé (autre nom) ne l'est pas : cf. `getMovedCopyIds`.
-      const previousCopies = [
-        ...new Set([
-          ...this.vectorStore.getDocumentIdsByFilePath(filePath),
-          ...(bibtexKey ? this.vectorStore.getMovedCopyIds(bibtexKey, filePath) : []),
-        ]),
-      ].filter((id) => id !== documentId);
-      if (previousCopies.length > 0) {
-        this.vectorStore.mergeDocumentsInto(documentId, previousCopies);
-        console.log(`♻️  ${previousCopies.length} copie(s) précédente(s) remplacée(s)`);
-      }
-      pendingDocumentId = null;
-
-      // 12. Calculer les similarités avec les autres documents
+      // 17. Calculer les similarités avec les autres documents
       onProgress?.({
         stage: 'similarities',
         progress: 95,
@@ -601,40 +565,12 @@ export class PDFIndexer {
       return document;
     } catch (error) {
       console.error('❌ Erreur indexation PDF:', error);
-      if (pendingDocumentId) this.discardFailedDocument(pendingDocumentId);
       onProgress?.({
         stage: 'error',
         progress: 0,
         message: `Erreur: ${error}`,
       });
       throw error;
-    }
-  }
-
-  /**
-   * Retire le document d'une passe qui a échoué avant de remplacer les copies précédentes, avec
-   * ce qu'il a déjà écrit (extraits, citations sortantes : `ON DELETE CASCADE`). Laissé en place,
-   * vide ou partiel, il faisait doublon avec l'ancien document, que la réindexation ne supprime
-   * plus d'avance (S03-1-3) : le panneau listait la référence deux fois, l'ouverture suivante
-   * copiait `brain.db` avant de fondre ce doublon, et le nettoyage du démarrage, qui garde la copie
-   * la plus récente ayant des extraits, aurait préféré une copie partielle à la complète. Une
-   * première indexation qui échoue ne laisse pas non plus de document sans extrait.
-   * Best-effort : l'erreur de l'indexation reste celle que l'on rend.
-   *
-   * Sans extrait en base, rien n'a atteint HNSW ni BM25 (`addChunks` écrit SQLite d'abord) : le
-   * retrait passe alors par le store de base, qui ne marque pas ces index périmés. Sinon un
-   * « Indexer tous les PDF » sur Ollama arrêté coûterait une reconstruction complète, pour rien.
-   */
-  private discardFailedDocument(documentId: string): void {
-    try {
-      const store =
-        this.vectorStore instanceof EnhancedVectorStore &&
-        this.vectorStore.getBaseStore().getChunksForDocument(documentId).length === 0
-          ? this.vectorStore.getBaseStore()
-          : this.vectorStore;
-      store.deleteDocument(documentId);
-    } catch (cleanupError) {
-      console.warn(`⚠️ [INDEXER] Document de la passe échouée non retiré (${documentId}) :`, cleanupError);
     }
   }
 

@@ -195,45 +195,34 @@ export class EnhancedVectorStore {
   }
 
   /**
-   * Batch add chunks (more efficient)
+   * Ajoute à HNSW et BM25 des extraits déjà écrits dans SQLite, puis enregistre l'index.
+   *
+   * SQLite les reçoit avant, dans la transaction de l'indexation (`transaction`), avec leur
+   * document : HNSW et BM25 ne savent pas s'y joindre. Si ces index ne les prennent pas tous, la
+   * base les garde : ils sont marqués périmés, et la reconstruction que planifie toute indexation
+   * les y mettra depuis SQLite.
    */
-  async addChunks(
+  async addToSearchIndexes(
     chunks: Array<{ chunk: DocumentChunk; embedding: Float32Array }>
   ): Promise<void> {
-    console.log(`📥 [ENHANCED] Adding ${chunks.length} chunks to all indexes...`);
+    console.log(`📥 [ENHANCED] Adding ${chunks.length} chunks to HNSW and BM25...`);
     this.markStaleIfIncomplete();
 
-    // Save to SQLite
-    console.log(`📥 [ENHANCED] Step 1: Saving ${chunks.length} chunks to SQLite...`);
-    for (let i = 0; i < chunks.length; i++) {
-      const { chunk, embedding } = chunks[i];
-      await this.vectorStore.saveChunk(chunk, embedding);
-      if ((i + 1) % 10 === 0) {
-        console.log(`📥 [ENHANCED] SQLite: ${i + 1}/${chunks.length} saved`);
-      }
+    try {
+      await this.hnswStore.addChunks(chunks);
+      this.bm25Index.addChunks(chunks.map((c) => c.chunk));
+      await this.save();
+    } catch (error) {
+      this.indexesStale = true;
+      throw error;
     }
-    console.log(`📥 [ENHANCED] Step 1 complete: SQLite save done`);
-
-    // Add to HNSW (batch)
-    console.log(`📥 [ENHANCED] Step 2: Adding to HNSW index...`);
-    await this.hnswStore.addChunks(chunks);
-    console.log(`📥 [ENHANCED] Step 2 complete: HNSW add done`);
-
-    // Add to BM25 (batch)
-    console.log(`📥 [ENHANCED] Step 3: Adding to BM25 index...`);
-    this.bm25Index.addChunks(chunks.map((c) => c.chunk));
-    console.log(`📥 [ENHANCED] Step 3 complete: BM25 add done`);
-
-    // Save indexes to disk
-    console.log(`📥 [ENHANCED] Step 4: Saving indexes to disk...`);
-    await this.save();
-    console.log(`📥 [ENHANCED] Step 4 complete: Indexes saved`);
+    console.log(`📥 [ENHANCED] HNSW and BM25 updated, indexes saved`);
   }
 
   /**
    * De nouveaux extraits sur un index incomplet sont un nouveau motif : la reconstruction
-   * que planifie toute indexation refera le corpus entier. Avant d'écrire : même si
-   * l'ajout échoue en route, SQLite a pu les recevoir.
+   * que planifie toute indexation refera le corpus entier. Avant de les ajouter : même si
+   * l'ajout échoue en route, SQLite les a déjà reçus.
    */
   private markStaleIfIncomplete(): void {
     if (this.indexesIncomplete) this.indexesStale = true;
@@ -503,6 +492,11 @@ export class EnhancedVectorStore {
    */
   getBaseStore(): VectorStore {
     return this.vectorStore;
+  }
+
+  /** Une transaction sur la base, pour les écritures déléguées ci-dessous (cf. `VectorStore.transaction`). */
+  transaction<T>(fn: () => T): T {
+    return this.vectorStore.transaction(fn);
   }
 
   /**
