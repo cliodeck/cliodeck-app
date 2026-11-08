@@ -243,6 +243,11 @@
     "batchInterrupted": "„{{batch}}“ unterbrochen: „{{project}}“, das Projekt, in dem der Vorgang gestartet wurde, ist nicht mehr geöffnet. In „{{project}}“: {{done}} PDF(s) verarbeitet, {{errors}} Fehler, {{remaining}} nicht verarbeitet.",
     "batchInterruptedResume": "Öffnen Sie „{{project}}“ erneut und starten Sie „{{batch}}“ noch einmal, um die Arbeit abzuschließen.",
     "batchInterruptedToIndex": "{{pending}} PDF(s) heruntergeladen, aber nicht indexiert: Starten Sie in „{{project}}“ „{{indexAll}}“, um sie zu indexieren.",
+    "pdfNotAttached": "Das PDF von „{{title}}“ wurde nach PDFs/ ({{file}}) heruntergeladen, konnte aber nicht mit der Referenz verknüpft werden, die ohne PDF bleibt; es wurde nicht indexiert. {{reason}}",
+    "pdfNotAttachedMetadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar. Reparieren Sie sie oder stellen Sie eine Kopie wieder her, und starten Sie den Download dann erneut.",
+    "pdfNotAttachedCause": "Ursache: {{error}}",
+    "downloadAllStopped": "„{{batch}}“ angehalten: {{done}} PDF(s) verarbeitet, {{errors}} Fehler, {{remaining}} nicht verarbeitet.",
+    "downloadAllStoppedRest": "Auch die folgenden hätten nicht verknüpft werden können.",
     "viewStatistics": "Statistiken der Bibliographie anzeigen",
     "statistics": "Statistiken",
     "exportBibTeX": "Bibliographie als BibTeX exportieren",
@@ -677,6 +682,7 @@
       "unreadEntries": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden, und ein erneutes Schreiben der Datei hätte sie gelöscht. Korrigieren Sie sie in {{file}} mit einem Texteditor: Ergänzen Sie einen Titel (title = {…}) bei Einträgen ohne Titel; schließen Sie offen gebliebene geschweifte Klammern; ersetzen Sie die runden Klammern um einen Eintrag oder eine @string-Definition durch geschweifte Klammern: @string{AN = {…}}, nicht @string(AN = …). Betroffene Einträge:",
       "unreadFromZotero": "Aus Zotero stammend (Feld zoterokey): {{keys}}. Korrigieren Sie diese Einträge in {{file}}, ohne sie zu löschen: Ein gelöschter Eintrag käme aus Zotero als neue Referenz zurück, und das bereits heruntergeladene PDF wäre nicht mehr mit ihm verknüpft.",
       "metadataUnreadable": "{{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist nicht lesbar: Die Synchronisierung hätte sie ersetzt, und diese Verknüpfungen wären verloren gegangen. Reparieren Sie sie oder stellen Sie eine Kopie wieder her. Wenn Sie sie löschen, beginnen Sie von vorn: Bereits heruntergeladene PDFs bleiben auf der Festplatte, müssen aber erneut heruntergeladen werden, um verknüpft zu werden.",
+      "metadataUnreadableAfterBib": "Synchronisierung fehlgeschlagen: {{bib}} wurde aktualisiert, aber {{file}}, in der die mit den Referenzen verknüpften Zotero-PDFs vermerkt sind, ist während der Synchronisierung nicht mehr lesbar geworden: Sie wurde nicht neu geschrieben, und die verknüpften PDFs wurden darin nicht aktualisiert. Reparieren Sie sie oder stellen Sie eine Kopie wieder her.",
       "fixThenRetry": "Starten Sie danach „Mit Zotero synchronisieren“ erneut."
     }
   },

@@ -1,23 +1,85 @@
-import type { Citation, ZoteroSliceState, BibliographySliceCreator } from './types';
+import type { TFunction } from 'i18next';
+import type { Citation, NotAttached, ZoteroSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { idleBatchIndexing } from './indexingSlice';
 import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
+import i18n from '../../i18n';
+
+/** Le PDF est dans `PDFs/`, mais pas rattaché : la fiche le dit, et il n'est pas indexé. */
+export class AttachmentNotSavedError extends Error {
+  readonly notAttached: NotAttached;
+
+  constructor(notAttached: NotAttached) {
+    super(`PDF téléchargé mais non rattaché : ${notAttached.filePath} (${notAttached.detail})`);
+    this.name = 'AttachmentNotSavedError';
+    this.notAttached = notAttached;
+  }
+}
+
+/** Où est le PDF, qu'il n'est pas rattaché, et pourquoi. */
+export function describeNotAttached(t: TFunction, notAttached: NotAttached): string {
+  const reason = notAttached.metadataUnreadable
+    ? t('bibliography.pdfNotAttachedMetadataUnreadable', { file: '.cliodeck/bibliography-metadata.json' })
+    : t('bibliography.pdfNotAttachedCause', { error: notAttached.detail });
+  const file = notAttached.filePath.split(/[\\/]/).pop() || notAttached.filePath;
+  return t('bibliography.pdfNotAttached', { title: notAttached.title, file, reason });
+}
+
+type AttachResponse = { success?: boolean; error?: string; code?: string };
+
+/**
+ * Rattache le PDF à sa seule pièce jointe : le main relit le fichier et n'y change que cela. La
+ * liste entière, prise avant le téléchargement, effaçait le rattachement d'un téléchargement
+ * simultané (S07-1-5). Un échec revient comme réponse, jamais levé : le PDF est déjà là.
+ */
+async function attach(projectPath: string, citation: Citation, attachmentKey: string, filePath: string): Promise<AttachResponse> {
+  const { id, zoteroKey, zoteroAttachments, zoteroTags, zoteroNotes, dateAdded, dateModified } = citation;
+  try {
+    return await window.electron.bibliography.updateAttachment({
+      projectPath,
+      citation: { id, zoteroKey, zoteroAttachments, zoteroTags, zoteroNotes, dateAdded, dateModified },
+      attachmentKey,
+      localPath: filePath,
+    });
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * La clé sous laquelle `bibliography-metadata.json` range une référence (`storageKeyFor`) : la clé
+ * Zotero, sinon la clé BibTeX. Deux notices Zotero peuvent partager leur clé BibTeX (jumeaux
+ * Better BibTeX, `Lester_1935`) : cherchée par celle-ci, la seconde rendait toujours la première.
+ */
+const entryKey = (citation: Pick<Citation, 'id' | 'zoteroKey'>): string => citation.zoteroKey || citation.id;
+
+/** La référence telle que le store la tient maintenant, retrouvée comme le fichier la range. */
+const latestOf = (citations: Citation[], citation: Citation): Citation =>
+  citations.find((c) => entryKey(c) === entryKey(citation)) ?? citation;
+
+const notAttachedOf = (citation: Citation, filePath: string, response: AttachResponse): NotAttached => ({
+  title: citation.title,
+  filePath,
+  metadataUnreadable: response.code === 'metadata-unreadable',
+  detail: response.error ?? '',
+});
 
 /**
  * Rattache un PDF téléchargé à son entrée : `file` pour la session, et la
  * pièce jointe marquée `downloaded` / `localPath` — c'est elle que
  * `bibliography-metadata.json` conserve et qui recrée `file` au lancement
  * suivant (`mergeCitationsWithMetadata`). Sans elle, le lien ne vit qu'en
- * mémoire.
+ * mémoire. La référence est désignée comme le fichier la range (`entryKey`) : par sa seule clé
+ * BibTeX, le PDF d'une notice allait aussi à sa jumelle.
  */
 export function withDownloadedAttachment(
   citations: Citation[],
-  citationId: string,
+  entry: Pick<Citation, 'id' | 'zoteroKey'>,
   attachmentKey: string,
   filePath: string
 ): Citation[] {
   return citations.map((c) =>
-    c.id === citationId
+    entryKey(c) === entryKey(entry)
       ? {
           ...c,
           file: filePath,
@@ -36,7 +98,10 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
     const left = async () => !(await stillIn(projectPath));
     try {
       const { citations } = get();
-      const citation = citations.find((c) => c.id === citationId);
+      // La pièce jointe désigne la notice : deux notices Zotero peuvent partager leur clé BibTeX.
+      const citation =
+        citations.find((c) => c.id === citationId && c.zoteroAttachments?.some((att) => att.key === attachmentKey)) ??
+        citations.find((c) => c.id === citationId);
 
       if (!citation) {
         throw new Error('Citation not found');
@@ -108,32 +173,22 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }
 
       console.log(`✅ PDF downloaded to: ${downloadResult.filePath}`);
+      const filePath = downloadResult.filePath;
 
-      // Update citation with local file path and mark attachment as downloaded
-      const updatedCitations = withDownloadedAttachment(
-        citations,
-        citationId,
-        attachmentKey,
-        downloadResult.filePath
-      );
-
-      set({ citations: updatedCitations });
-      get().applyFilters();
-
-      // Save updated metadata to persist the local file path
-      try {
-        const saved = await window.electron.bibliography.saveMetadata({
-          projectPath,
-          citations: updatedCitations,
-        });
-        if (refusedAsProjectChanged(saved)) return { interrupted: true };
-        console.log('💾 Metadata saved after PDF download');
-      } catch (metaError) {
-        console.error('⚠️ Failed to save metadata after PDF download:', metaError);
-      }
+      // Le rattachement d'abord, pour qu'il survive au lancement suivant. Refusé, le PDF reste
+      // dans PDFs/ sans être rattaché ni indexé, et l'historien le sait.
+      const attached = await attach(projectPath, latestOf(get().citations, citation), attachmentKey, filePath);
+      if (refusedAsProjectChanged(attached)) return { interrupted: true };
+      if (attached.success !== true) throw new AttachmentNotSavedError(notAttachedOf(citation, filePath, attached));
+      console.log('💾 Metadata saved after PDF download');
       // Le PDF est rattaché dans ce projet : son indexation part aussitôt, le main refuse s'il a
       // déjà basculé. Attendre l'issue d'une ouverture la ferait refuser à coup sûr.
       if (!stillShown(projectPath)) return { interrupted: true };
+
+      // Sur la liste du moment, pas sur celle d'avant le téléchargement : un autre téléchargement
+      // ou une synchronisation l'a changée depuis (S07-1-5).
+      set((state) => ({ citations: withDownloadedAttachment(state.citations, citation, attachmentKey, filePath) }));
+      get().applyFilters();
 
       // Index the downloaded PDF
       console.log(`🔍 Indexing downloaded PDF for citation: ${citation.title}`);
@@ -238,6 +293,20 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
         const remaining = citationsNeedingPDFs.length - downloaded - skipped - errors.length - toIndex;
         return { downloaded, skipped, errors, interrupted: true as const, remaining, toIndex };
       };
+      /** Arrêté sur le PDF d'indice `index`, téléchargé mais pas rattaché : les suivants ne partent pas. */
+      const stop = (notAttached: NotAttached, index: number) => {
+        set({
+          batchIndexing: {
+            isIndexing: false,
+            current: index + 1,
+            total: citationsNeedingPDFs.length,
+            skipped,
+            indexed: downloaded,
+            errors,
+          },
+        });
+        return { downloaded, skipped, errors, stopped: notAttached, remaining: citationsNeedingPDFs.length - index - 1 };
+      };
       if (!(await stillIn(projectPath))) return interrupt();
 
       if (citationsNeedingPDFs.length === 0) {
@@ -314,34 +383,33 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           // si l'indexation échouait ou si l'app était fermée, le PDF restait
           // dans le dossier mais l'entrée n'avait plus de fichier au lancement
           // suivant, et « Indexer tous les PDFs » l'écartait sans la compter.
-          const updatedCitations = withDownloadedAttachment(
-            get().citations,
-            citation.id,
+          const filePath = downloadResult.filePath;
+          const attached = await attach(
+            projectPath,
+            latestOf(get().citations, citation),
             firstAttachment.key,
-            downloadResult.filePath
+            filePath
           );
-
-          set({ citations: updatedCitations });
-          get().applyFilters();
-
-          let attached = false;
-          try {
-            const saved = await window.electron.bibliography.saveMetadata({
-              projectPath,
-              citations: updatedCitations,
-            });
-            if (refusedAsProjectChanged(saved)) return interrupt();
-            attached = saved?.success === true;
-          } catch (metaError) {
-            console.warn('⚠️ Métadonnées non sauvegardées après téléchargement :', metaError);
+          if (refusedAsProjectChanged(attached)) return interrupt();
+          if (attached.success !== true) {
+            // Pas rattaché, donc pas indexé : jamais compté comme un succès. Des métadonnées
+            // illisibles refuseraient aussi tous les suivants : le lot s'arrête là, et le dit.
+            const notAttached = notAttachedOf(citation, filePath, attached);
+            if (notAttached.metadataUnreadable) return stop(notAttached, i);
+            errors.push(describeNotAttached(i18n.t, notAttached));
+            continue;
           }
           // Le PDF est rattaché dans ce projet : une relance du téléchargement l'écarterait. Son
           // indexation part donc aussitôt, le main refuse s'il a déjà basculé ; attendre l'issue
           // d'une ouverture la ferait refuser à coup sûr.
           if (!stillShown(projectPath)) {
-            if (attached) toIndex++;
+            toIndex++;
             return interrupt();
           }
+          set((state) => ({
+            citations: withDownloadedAttachment(state.citations, citation, firstAttachment.key, filePath),
+          }));
+          get().applyFilters();
 
           // Index the downloaded PDF
           set((state) => ({
@@ -372,7 +440,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           // Refusé ou en échec, il reste rattaché sans être indexé.
           if (refusedAsProjectChanged(indexResult) || !(await stillIn(projectPath))) {
             if (indexResult.success) downloaded++;
-            else if (attached) toIndex++;
+            else toIndex++;
             return interrupt();
           }
 

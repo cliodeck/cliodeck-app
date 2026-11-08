@@ -243,6 +243,11 @@
     "batchInterrupted": "“{{batch}}” interrupted: “{{project}}”, the project it was started in, is no longer open. In “{{project}}”: {{done}} PDF(s) processed, {{errors}} error(s), {{remaining}} not processed.",
     "batchInterruptedResume": "Reopen “{{project}}” and run “{{batch}}” again to finish the job.",
     "batchInterruptedToIndex": "{{pending}} PDF(s) downloaded but not indexed: in “{{project}}”, run “{{indexAll}}” to index them.",
+    "pdfNotAttached": "The PDF of “{{title}}” was downloaded to PDFs/ ({{file}}), but it could not be attached to the reference, which remains without a PDF; it was not indexed. {{reason}}",
+    "pdfNotAttachedMetadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read. Repair it, or restore a copy of it, then run the download again.",
+    "pdfNotAttachedCause": "Cause: {{error}}",
+    "downloadAllStopped": "“{{batch}}” stopped: {{done}} PDF(s) processed, {{errors}} error(s), {{remaining}} not processed.",
+    "downloadAllStoppedRest": "The next ones could not have been attached either.",
     "viewStatistics": "View bibliography statistics",
     "statistics": "Statistics",
     "exportBibTeX": "Export bibliography to BibTeX",
@@ -677,6 +682,7 @@
       "unreadEntries": "{{count}} entry(ies) in {{file}} could not be read, and rewriting the file would have erased them. Fix them in {{file}} with a text editor: add a title (title = {…}) to any entry that has none; close any brace left open; replace with braces the parentheses around an entry or an @string definition: @string{AN = {…}}, not @string(AN = …). Entries concerned:",
       "unreadFromZotero": "From Zotero (zoterokey field): {{keys}}. Fix these entries in {{file}} without deleting them: a deleted entry would come back from Zotero as a new reference, and the PDF already downloaded would no longer be attached to it.",
       "metadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read: the synchronization would have replaced it, and those attachments would have been lost. Repair it, or restore a copy of it. Deleting it starts from scratch: PDFs already downloaded stay on disk, but they will have to be downloaded again to be attached.",
+      "metadataUnreadableAfterBib": "Synchronization failed: {{bib}} was updated, but {{file}}, which records the Zotero PDFs attached to the references, became unreadable during the synchronization: it was not rewritten, and the attached PDFs were not updated in it. Repair it, or restore a copy of it.",
       "fixThenRetry": "Then run “Sync with Zotero” again."
     }
   },

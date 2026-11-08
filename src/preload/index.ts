@@ -174,11 +174,38 @@ const api = {
       projectPath: string;
       archiveSubdir?: string;
     }) => ipcRenderer.invoke('bibliography:archive-orphan-pdfs', options),
-    /** Refusé (`project-changed`) si `projectPath` n'est pas le projet ouvert. */
-    saveMetadata: (options: {
+    /**
+     * Rattache un PDF téléchargé à sa seule pièce jointe dans `bibliography-metadata.json`.
+     * Refusé (`project-changed`) si `projectPath` n'est pas le projet ouvert ; métadonnées
+     * illisibles : `code: 'metadata-unreadable'`, et rien n'est écrit.
+     */
+    updateAttachment: (options: {
       projectPath: string;
-      citations: any[];
-    }) => ipcRenderer.invoke('bibliography:save-metadata', options),
+      citation: {
+        id: string;
+        zoteroKey?: string;
+        zoteroAttachments?: Array<{
+          key: string;
+          filename: string;
+          contentType: string;
+          downloaded: boolean;
+          localPath?: string;
+          dateModified?: string;
+          md5?: string;
+        }>;
+        zoteroTags?: Array<{ tag: string; automatic: boolean }>;
+        zoteroNotes?: Array<{ key: string; text: string }>;
+        dateAdded?: string;
+        dateModified?: string;
+      };
+      attachmentKey: string;
+      localPath: string;
+    }) =>
+      ipcRenderer.invoke('bibliography:update-attachment', options) as Promise<{
+        success: boolean;
+        error?: string;
+        code?: string;
+      }>,
     /**
      * Notes de lecture du projet ouvert : un fichier Markdown par référence
      * (`reading-notes/`), dont le front matter porte les étiquettes du projet.

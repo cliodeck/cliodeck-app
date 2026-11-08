@@ -393,6 +393,18 @@ export const ZoteroImport: React.FC = () => {
         await useDialogStore.getState().showAlert(describeRefusal(result));
         return;
       }
+      // Le `.bib` est déjà réécrit : ce n'est pas un refus (« rien n'a été écrit »).
+      if (!result.success && result.error === 'metadata-unreadable-after-bib') {
+        await useDialogStore
+          .getState()
+          .showAlert(
+            [
+              t('zotero.sync.metadataUnreadableAfterBib', { bib: result.bibFile, file: result.file }),
+              t('zotero.sync.fixThenRetry'),
+            ].join('\n\n')
+          );
+        return;
+      }
       if (!result.success || result.status !== 'applied' || !result.report) {
         await useDialogStore
           .getState()
