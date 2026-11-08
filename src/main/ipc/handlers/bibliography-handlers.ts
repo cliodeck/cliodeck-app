@@ -1,8 +1,17 @@
 /**
  * Bibliography IPC handlers
  */
+import path from 'path';
 import { ipcMain } from 'electron';
-import { BibliographyMissingError, bibliographyService } from '../../services/bibliography-service.js';
+import {
+  BibliographyMissingError,
+  BibNotFullyReadError,
+  bibliographyService,
+  mergeIntoProjectBibliography,
+  readBibFile,
+  rewriteProjectBibliography,
+  type BibFileRead,
+} from '../../services/bibliography-service.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import { OrphanPDFDetector } from '../../../../backend/services/OrphanPDFDetector.js';
 import {
@@ -11,6 +20,7 @@ import {
   type BibliographyMetadataFile,
 } from '../../../../backend/services/BibliographyMetadataService.js';
 import { validateReadPath, validateWritePath } from '../utils/path-validator.js';
+import { authorizeDocumentPath } from '../utils/document-path-authorization.js';
 import {
   validate,
   StringPathSchema,
@@ -23,6 +33,7 @@ import {
   BibliographyUpdateAttachmentSchema,
   BibliographyLoadWithMetadataSchema,
   BibliographyGetStatisticsSchema,
+  BibliographyImportSchema,
   ReadingNoteOpenSchema,
   ReadingNoteSetTagsSchema,
 } from '../utils/validation.js';
@@ -33,7 +44,7 @@ import {
   listReadingNotes,
   setProjectTags,
 } from '../../../../backend/core/bibliography/readingNotes.js';
-import { UnreadableFileError } from '../../../../backend/core/fs/user-files.js';
+import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 
 /**
@@ -74,6 +85,41 @@ function bibliographyLoadFailure(error: unknown) {
   return { ...errorResponse(error), citations: [] };
 }
 
+/**
+ * La fusion refusée, avant toute écriture, parce que le `.bib` du projet ne s'est pas lu en entier :
+ * les codes de la synchronisation Zotero, que le renderer traduit. Ils ne s'affichent jamais tels quels.
+ */
+function mergeRefusal(error: unknown) {
+  if (error instanceof BibNotFullyReadError) {
+    return { success: false as const, error: 'bib-unread', file: path.basename(error.filePath), unreadKeys: error.unreadKeys };
+  }
+  if (error instanceof UnreadableFileError) {
+    return {
+      success: false as const,
+      error: 'bib-unreadable',
+      file: path.basename(error.filePath),
+      reason: error.reason,
+      detail: error.message,
+    };
+  }
+  return null;
+}
+
+/**
+ * Le `.bib` du projet tel qu'il est sur le disque après l'import : le total annoncé est le sien. Le
+ * main le reprend pour les exports et l'aperçu, si le projet ouvert est encore celui de l'import.
+ */
+async function rereadAfterImport(projectPath: string, bibPath: string): Promise<number> {
+  const current = projectManager.getCurrentProjectPath();
+  if (current && sameFile(current, projectPath)) {
+    return (await bibliographyService.loadFromFile(bibPath)).citations.length;
+  }
+  const read = await readBibFile(bibPath);
+  if (read.kind === 'absent') throw new BibliographyMissingError(bibPath);
+  if (read.kind === 'unreadable') throw new UnreadableFileError(bibPath, read.reason, read.message);
+  return read.citations.length;
+}
+
 export function setupBibliographyHandlers() {
   ipcMain.handle('bibliography:load', async (_event, rawFilePath: unknown) => {
     try {
@@ -83,6 +129,96 @@ export function setupBibliographyHandlers() {
     } catch (error: unknown) {
       console.error('❌ bibliography:load error:', error);
       return bibliographyLoadFailure(error);
+    }
+  });
+
+  // Importer un `.bib` dans le projet ouvert (S07-1-3). Le main lit la source, écrit le fichier du
+  // projet et le relit : « Fusionner » y écrit la fusion, « Remplacer » y met le fichier importé sous
+  // son nom. Avant, la fusion ne vivait que dans le panneau, et la copie du renderer écrasait.
+  ipcMain.handle('bibliography:import', async (_event, rawOptions: unknown) => {
+    const { sourcePath, mode, expectedProjectPath } = validate(BibliographyImportSchema, rawOptions);
+    // Le projet vient du processus principal : c'est lui qu'on va réécrire. Lu une fois, avant tout
+    // `await`, et refusé si ce n'est plus celui où l'on a cliqué.
+    const projectPath = projectManager.getCurrentProjectPath();
+    if (!projectPath) {
+      return errorResponse(new Error('Aucun projet ouvert.'));
+    }
+    if (!sameFile(projectPath, expectedProjectPath)) {
+      console.warn('⚠️ bibliography:import refusé : le projet a changé depuis la demande');
+      return errorResponse('project-changed');
+    }
+    console.log('📞 IPC Call: bibliography:import', { sourcePath, mode });
+
+    // La source, lue sans passer par le singleton : un import qui échoue ne doit rien y laisser.
+    let source: string;
+    let read: Extract<BibFileRead, { kind: 'ok' }>;
+    try {
+      // Hors du projet, seul un fichier choisi dans le dialogue se lit (S11-1-9).
+      source = await authorizeDocumentPath(sourcePath, 'read');
+      const sourceRead = await readBibFile(source);
+      if (sourceRead.kind === 'absent') throw new BibliographyMissingError(source);
+      if (sourceRead.kind === 'unreadable') throw new UnreadableFileError(source, sourceRead.reason, sourceRead.message);
+      read = sourceRead;
+    } catch (error: unknown) {
+      console.error('❌ bibliography:import, source refusée ou illisible :', error);
+      return bibliographyLoadFailure(error);
+    }
+
+    try {
+      const projectFile = path.join(projectPath, 'project.json');
+      // Sur le disque, et non en mémoire : une synchronisation Zotero a pu y poser la source.
+      const manifest = await projectManager.getConfig(projectFile);
+      const declared = manifest?.bibliographySource;
+      let bibPath: string;
+      let newCitations = 0;
+      let duplicates = 0;
+      if (mode === 'merge') {
+        // Sans project.json, on ne sait pas dans quel fichier fusionner : rien n'est écrit.
+        if (!manifest) return { success: false, error: 'project-unreadable' };
+        bibPath = path.resolve(projectPath, declared?.filePath || 'bibliography.bib');
+        try {
+          ({ newCount: newCitations, duplicates } = await mergeIntoProjectBibliography(projectPath, bibPath, read.citations));
+        } catch (error: unknown) {
+          const refusal = mergeRefusal(error);
+          if (!refusal) throw error;
+          console.warn('⚠️ bibliography:import, fusion refusée :', error);
+          return refusal;
+        }
+      } else {
+        // Un homonyme rangé ailleurs ne remplace le `.bib` du projet qu'après sa copie de sécurité.
+        // Le contenu brut, pas réexporté : un `@comment` ou un `@preamble` de la source reste.
+        bibPath = path.join(projectPath, path.basename(source));
+        if (!sameFile(source, bibPath)) {
+          await withFileLock(bibPath, () => rewriteProjectBibliography(projectPath, bibPath, read.content));
+        }
+      }
+
+      // `setBibliographySource` efface ce qu'on ne lui repasse pas : le type et la collection Zotero
+      // en place y retournent. « Fusionner » n'y touche pas si le projet avait déjà son fichier.
+      const saved =
+        mode === 'merge' && declared?.filePath
+          ? { success: true }
+          : await projectManager.setBibliographySource({
+              projectPath: projectFile,
+              type: declared?.type ?? 'file',
+              filePath: path.basename(bibPath),
+              zoteroCollection: declared?.zoteroCollection,
+            });
+
+      const total = await rereadAfterImport(projectPath, bibPath);
+      console.log('📤 IPC Response: bibliography:import', { bibPath, total, newCitations, duplicates, sourceSaved: saved.success });
+      return successResponse({
+        bibPath,
+        total,
+        newCitations,
+        duplicates,
+        unreadKeys: read.unreadKeys,
+        sourceSaved: saved.success === true,
+        ...('error' in saved && saved.error ? { sourceError: saved.error } : {}),
+      });
+    } catch (error: unknown) {
+      console.error('❌ bibliography:import error:', error);
+      return errorResponse(error);
     }
   });
 

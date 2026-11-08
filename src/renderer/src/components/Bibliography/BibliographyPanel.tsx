@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward, AlertTriangle } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import type { BibliographyProblem } from '../../stores/bibliography/types';
-import { BibliographyFileError } from '../../stores/bibliography/citationSlice';
+import { BibliographyFileError, BibliographyMergeRefusedError } from '../../stores/bibliography/citationSlice';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
@@ -143,6 +143,8 @@ export const BibliographyPanel: React.FC = () => {
     totalCitations: 0,
     newCitations: 0,
     duplicates: 0,
+    unreadKeys: [] as string[],
+    file: '',
   });
   const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
 
@@ -179,8 +181,9 @@ export const BibliographyPanel: React.FC = () => {
   }, [menuIntent]);
 
   /**
-   * Le fichier importé ne se lit pas : dire pourquoi et quoi faire, dans la langue de l'interface.
-   * Rien n'a été copié dans le projet, et le bandeau, qui parle du `.bib` du projet, ne change pas.
+   * L'import n'a pas abouti : dire pourquoi et quoi faire, dans la langue de l'interface. Un fichier
+   * importé qui ne se lit pas, une fusion arrêtée parce que le `.bib` du projet ne s'est pas lu en
+   * entier : le main n'a rien écrit, et le bandeau, qui parle du `.bib` du projet, ne change pas.
    */
   const importFailureMessage = (error: unknown): string => {
     if (error instanceof BibliographyFileError) {
@@ -193,79 +196,56 @@ export const BibliographyPanel: React.FC = () => {
         error: problem.kind === 'unreadable' ? problem.detail : error.message,
       });
     }
-    return `Failed to import bibliography: ${error instanceof Error ? error.message : String(error)}`;
+    if (error instanceof BibliographyMergeRefusedError) {
+      const { problem } = error;
+      if (!problem) return t('bibImport.projectUnreadable');
+      // Les mots du bandeau et de la synchronisation Zotero, refusée pour la même raison.
+      let detail: string;
+      if (problem.kind === 'partial') {
+        const listed = problem.unreadKeys.slice(0, SHOWN_KEYS).map((key) => `• @${key}`);
+        if (problem.unreadKeys.length > SHOWN_KEYS) {
+          listed.push(t('zotero.sync.more', { count: problem.unreadKeys.length - SHOWN_KEYS }));
+        }
+        detail = `${t('zotero.sync.unreadEntries', { count: problem.unreadKeys.length, file: problem.file })}\n${listed.join('\n')}`;
+      } else {
+        detail =
+          problem.reason === 'encoding'
+            ? t('bibliography.bibNotUtf8', { file: problem.file })
+            : t('bibliography.bibUnreadable', { file: problem.file, error: problem.detail });
+      }
+      return `${t('bibImport.mergeRefused')}\n\n${detail}`;
+    }
+    return withErrorDetails(t('bibImport.failed'), [error instanceof Error ? error.message : String(error)]);
   };
 
   const performImport = async (sourcePath: string, mode: 'replace' | 'merge') => {
-    // Ce que montrait le panneau avant l'import : tant que le fichier n'est pas copié dans le
-    // projet, le `.bib` du projet n'a pas changé, ni donc sa liste ou son bandeau.
-    const { citations: citationsBefore, bibliographyProblem: problemBefore } = useBibliographyStore.getState();
-    const projectPath = currentProject?.path;
-    let loaded = false;
-    let copied = false;
+    // Le projet où l'on a cliqué : le main y écrit, et rien ne s'affiche dans un autre.
+    const projectPath = currentProject?.path ?? null;
     try {
-      let newCitations = 0;
-      let duplicates = 0;
-      let total = 0;
+      const outcome = await useBibliographyStore.getState().importBibliography(sourcePath, mode, projectPath);
+      if (!outcome) return;
 
-      if (mode === 'replace') {
-        // Replace: load bibliography (replaces all)
-        await useBibliographyStore.getState().loadBibliography(sourcePath);
-        total = useBibliographyStore.getState().citations.length;
-      } else {
-        // Merge: use mergeBibliography
-        const result = await useBibliographyStore.getState().mergeBibliography(sourcePath);
-        newCitations = result.newCitations;
-        duplicates = result.duplicates;
-        total = result.total;
-      }
-      loaded = true;
-
-      // If we have a project, save the bibliography source configuration
-      if (currentProject) {
-        // Copy the .bib file to the project directory
-        const bibFileName = sourcePath.split('/').pop() || 'bibliography.bib';
-        const targetPath = `${currentProject.path}/${bibFileName}`;
-
-        // Copy file to project directory
-        await window.electron.fs.copyFile(sourcePath, targetPath);
-        copied = true;
-
-        // Save the bibliography source to project.json
-        const projectJsonPath = `${currentProject.path}/project.json`;
-        const saved = await window.electron.project.setBibliographySource({
-          projectPath: projectJsonPath,
-          type: 'file',
-          filePath: bibFileName,
-        });
-
-        if (saved?.success) {
-          console.log('✅ Bibliography source saved to project');
-        } else {
-          // Le main rend son refus sans lever. Les références sont bien chargées : le résumé suit.
-          await useDialogStore
-            .getState()
-            .showAlert(withErrorDetails(t('bibliography.sourceNotSaved'), saved?.error ? [saved.error] : []));
-        }
+      // Le main rend le refus de project.json sans lever. Les références sont écrites et relues :
+      // le récapitulatif suit.
+      if (!outcome.sourceSaved) {
+        await useDialogStore
+          .getState()
+          .showAlert(withErrorDetails(t('bibliography.sourceNotSaved'), outcome.sourceError ? [outcome.sourceError] : []));
       }
 
-      // Show summary modal
       setImportSummary({
         mode,
-        totalCitations: total,
-        newCitations,
-        duplicates,
+        totalCitations: outcome.total,
+        newCitations: outcome.newCitations,
+        duplicates: outcome.duplicates,
+        unreadKeys: outcome.unreadKeys,
+        file: outcome.file,
       });
       setShowSummaryModal(true);
     } catch (error) {
       console.error('Failed to import BibTeX:', error);
-      // Le fichier importé s'est lu, mais n'est pas entré dans le projet (copie refusée) : le
-      // panneau revient à ce qu'il montrait, bandeau compris, s'il montre encore ce projet.
-      if (loaded && !copied && projectPath && (await stillIn(projectPath))) {
-        useBibliographyStore.setState({ citations: citationsBefore, bibliographyProblem: problemBefore });
-        useBibliographyStore.getState().applyFilters();
-        await useBibliographyStore.getState().refreshIndexedPDFs();
-      }
+      // Un échec arrivé pendant que l'auteur ouvrait un autre projet ne s'y affiche pas.
+      if (projectPath && !(await stillIn(projectPath))) return;
       await useDialogStore.getState().showAlert(importFailureMessage(error));
     }
   };
@@ -720,6 +700,8 @@ export const BibliographyPanel: React.FC = () => {
         totalCitations={importSummary.totalCitations}
         newCitations={importSummary.newCitations}
         duplicates={importSummary.duplicates}
+        unreadKeys={importSummary.unreadKeys}
+        file={importSummary.file}
       />
 
       {/* Orphan PDF Cleanup Modal */}

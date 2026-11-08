@@ -580,7 +580,7 @@ test.describe('project.json refuse une écriture demandée depuis un panneau', (
 
   test('import d’un .bib : l’auteur lit que project.json ne l’a pas retenu, et le fichier reste à l’octet', async () => {
     const project = makeProject('ProjetBib');
-    // Dans le projet : hors de lui, `fs:copy-file` refuse d'abord (S11-1-9, à venir dans L05-5).
+    // Rangé dans un sous-dossier du projet, sous un autre nom : « Remplacer » l'y copie sous ce nom.
     const bib = join(project.dir, 'import', 'refs.bib');
     mkdirSync(dirname(bib));
     writeFileSync(bib, '@book{braudel1949,\n  title={La Méditerranée},\n  author={Braudel, Fernand},\n  year={1949}\n}\n');

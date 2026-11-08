@@ -3,10 +3,12 @@ import { mkdir, readFile } from 'fs/promises';
 import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js';
 import { BibTeXExporter } from '../../../backend/core/bibliography/BibTeXExporter.js';
 import { auditParsedBib, type BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
+import { mergeCitationLists } from '../../../backend/core/bibliography/mergeCitations.js';
 import {
   atomicWriteFile,
   readUserFile,
   UnreadableFileError,
+  withFileLock,
   type UserFileRead,
 } from '../../../backend/core/fs/user-files.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
@@ -25,10 +27,27 @@ export class BibliographyMissingError extends Error {
   }
 }
 
+/**
+ * Le `.bib` du projet n'a pas été lu en entier : le réécrire effacerait les entrées que le parseur
+ * n'a pas rendues (S07-1-2). Rien n'est écrit, et les clés en cause sont rendues.
+ */
+export class BibNotFullyReadError extends Error {
+  readonly code = 'bib-unread';
+  readonly filePath: string;
+  readonly unreadKeys: string[];
+
+  constructor(filePath: string, unreadKeys: string[]) {
+    super(`${path.basename(filePath)} n'a pas été lu en entier ; rien n'a été écrit.`);
+    this.name = 'BibNotFullyReadError';
+    this.filePath = filePath;
+    this.unreadKeys = unreadKeys;
+  }
+}
+
 export type BibFileRead =
   | { kind: 'absent' }
   | Extract<UserFileRead, { kind: 'unreadable' }>
-  | ({ kind: 'ok'; citations: Citation[] } & BibAudit);
+  | ({ kind: 'ok'; content: string; citations: Citation[] } & BibAudit);
 
 /**
  * Lit un `.bib` sans confondre absent, illisible et vide, puis contrôle le parse : les entrées du
@@ -40,7 +59,7 @@ export async function readBibFile(filePath: string): Promise<BibFileRead> {
   const read = await readUserFile(filePath);
   if (read.kind !== 'ok') return read;
   const citations = new BibTeXParser().parse(read.content, path.dirname(path.resolve(filePath)));
-  return { kind: 'ok', citations, ...auditParsedBib(read.content, citations) };
+  return { kind: 'ok', content: read.content, citations, ...auditParsedBib(read.content, citations) };
 }
 
 /**
@@ -71,6 +90,30 @@ export async function rewriteProjectBibliography(projectPath: string, bibtexPath
     await atomicWriteFile(backup, previous);
   }
   await atomicWriteFile(bibtexPath, content);
+}
+
+/**
+ * Ajoute au `.bib` du projet les références d'`incoming` qu'il n'a pas encore (même item Zotero,
+ * sinon même clé BibTeX), relu, fusionné et réécrit sous son verrou. Absent, il naît de la fusion.
+ * Illisible, ou une seule de ses entrées non lue : rien n'est écrit. Rien de nouveau : il n'est pas
+ * réécrit, et la copie de sécurité garde l'état qu'elle gardait.
+ */
+export function mergeIntoProjectBibliography(
+  projectPath: string,
+  bibtexPath: string,
+  incoming: Citation[]
+): Promise<{ newCount: number; duplicates: number }> {
+  return withFileLock(bibtexPath, async () => {
+    const read = await readBibFile(bibtexPath);
+    if (read.kind === 'unreadable') throw new UnreadableFileError(bibtexPath, read.reason, read.message);
+    if (read.kind === 'ok' && read.unreadKeys.length > 0) throw new BibNotFullyReadError(bibtexPath, read.unreadKeys);
+
+    const { merged, newCount, duplicates } = mergeCitationLists(read.kind === 'ok' ? read.citations : [], incoming);
+    if (newCount > 0 || read.kind === 'absent') {
+      await rewriteProjectBibliography(projectPath, bibtexPath, new BibTeXExporter().exportToString(merged));
+    }
+    return { newCount, duplicates };
+  });
 }
 
 class BibliographyService {

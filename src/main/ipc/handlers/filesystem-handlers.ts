@@ -21,7 +21,6 @@ import {
   FsReadDirectorySchema,
   FsWriteFileSchema,
   FsReadFileSchema,
-  FsCopyFileSchema,
   FsSameFileSchema,
   StringPathSchema,
   StringUrlSchema,
@@ -213,22 +212,6 @@ export function setupFilesystemHandlers() {
     } catch (error: unknown) {
       console.error('❌ fs:quarantine-file error:', error);
       return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('fs:copy-file', async (_event, rawSource: unknown, rawTarget: unknown) => {
-    const { source: sourcePath, destination: targetPath } = validate(FsCopyFileSchema, { source: rawSource, destination: rawTarget });
-    console.log('📞 IPC Call: fs:copy-file', { sourcePath, targetPath });
-    try {
-      const validatedSource = await validateReadPath(sourcePath);
-      const validatedTarget = await validateWritePath(targetPath);
-      const { copyFile } = await import('fs/promises');
-      await copyFile(validatedSource, validatedTarget);
-      console.log('📤 IPC Response: fs:copy-file - success');
-      return successResponse();
-    } catch (error: unknown) {
-      console.error('❌ fs:copy-file error:', error);
-      throw error;
     }
   });
 

@@ -175,6 +175,31 @@ const api = {
       archiveSubdir?: string;
     }) => ipcRenderer.invoke('bibliography:archive-orphan-pdfs', options),
     /**
+     * Importe un `.bib` dans le projet ouvert : `merge` écrit la fusion dans le `.bib` du projet,
+     * `replace` y met le fichier importé sous son nom, après une copie de sécurité de celui qu'il
+     * remplace. `total` est relu sur le disque. Refus : `project-changed` si le projet ouvert n'est
+     * plus `expectedProjectPath` ; `problem` pour une source absente ou illisible ; `bib-unread`,
+     * `bib-unreadable` ou `project-unreadable` pour une fusion arrêtée avant d'écrire.
+     */
+    import: (options: { sourcePath: string; mode: 'merge' | 'replace'; expectedProjectPath: string }) =>
+      ipcRenderer.invoke('bibliography:import', options) as Promise<{
+        success: boolean;
+        error?: string;
+        bibPath?: string;
+        total?: number;
+        newCitations?: number;
+        duplicates?: number;
+        /** Entrées du fichier importé que le parseur n'a pas rendues ; ou, refus `bib-unread`, du `.bib` du projet. */
+        unreadKeys?: string[];
+        /** `project.json` a retenu le fichier, ou n'avait pas à changer. */
+        sourceSaved?: boolean;
+        sourceError?: string;
+        problem?: 'missing' | 'unreadable';
+        reason?: string;
+        file?: string;
+        detail?: string;
+      }>,
+    /**
      * Rattache un PDF téléchargé à sa seule pièce jointe dans `bibliography-metadata.json`.
      * Refusé (`project-changed`) si `projectPath` n'est pas le projet ouvert ; métadonnées
      * illisibles : `code: 'metadata-unreadable'`, et rien n'est écrit.
@@ -394,7 +419,6 @@ const api = {
       filePath: string
     ): Promise<{ success: true; backupPath: string } | { success: false; error: string }> =>
       ipcRenderer.invoke('fs:quarantine-file', filePath),
-    copyFile: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('fs:copy-file', sourcePath, targetPath),
     /** Le même fichier sur le disque, à la casse et aux liens près. Faux pour un chemin refusé. */
     sameFile: (a: string, b: string): Promise<boolean> => ipcRenderer.invoke('fs:same-file', a, b),
   },

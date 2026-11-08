@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, CheckCircle } from 'lucide-react';
+import { X, CheckCircle, AlertTriangle } from 'lucide-react';
 import './BibImportSummaryModal.css';
 
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -12,7 +12,14 @@ interface BibImportSummaryModalProps {
   totalCitations: number;
   newCitations: number;
   duplicates: number;
+  /** Les entrées du fichier importé que le parseur n'a pas rendues. */
+  unreadKeys?: string[];
+  /** Le nom du fichier importé. */
+  file?: string;
 }
+
+/** Clés montrées avant « … et N autre(s) », comme dans le bandeau du panneau. */
+const SHOWN_KEYS = 8;
 
 export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
   isOpen,
@@ -21,6 +28,8 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
   totalCitations,
   newCitations,
   duplicates,
+  unreadKeys = [],
+  file = '',
 }) => {
   const { t } = useTranslation('common');
   // Échap ferme la modale (le piège de focus s'active quand la ref
@@ -78,6 +87,24 @@ export const BibImportSummaryModal: React.FC<BibImportSummaryModalProps> = ({
                   )}
                 </div>
               </>
+            )}
+            {/* Ce que le fichier importé contenait et qui n'est pas entré : nommé, pas seulement compté. */}
+            {unreadKeys.length > 0 && (
+              <div className="bib-import-summary-unread">
+                <AlertTriangle size={16} aria-hidden="true" />
+                <div>
+                  <p>
+                    {t(mode === 'merge' ? 'bibImportSummary.unreadMerged' : 'bibImportSummary.unreadReplaced', {
+                      count: unreadKeys.length,
+                      file,
+                    })}
+                  </p>
+                  <p className="bib-import-summary-keys">
+                    {unreadKeys.slice(0, SHOWN_KEYS).map((key) => `@${key}`).join(', ')}
+                    {unreadKeys.length > SHOWN_KEYS && ` ${t('zotero.sync.more', { count: unreadKeys.length - SHOWN_KEYS })}`}
+                  </p>
+                </div>
+              </div>
             )}
           </div>
 

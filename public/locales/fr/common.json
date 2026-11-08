@@ -2357,7 +2357,10 @@
     "cancel": "Annuler",
     "import": "Importer",
     "projectFileMissing": "La bibliographie du projet, {{file}}, est introuvable : le fichier importé la remplacera.",
-    "projectFileUnread": "La bibliographie du projet, {{file}}, ne s'est pas lue, ou pas en entier (voir le bandeau). Le fichier importé la remplacera ; s'il porte le même nom, il l'écrasera sur le disque, et ce que ClioDeck n'a pas pu lire sera perdu. Pour le garder, annulez et corrigez d'abord {{file}}."
+    "projectFileUnread": "La bibliographie du projet, {{file}}, ne s'est pas lue, ou pas en entier (voir le bandeau). Le fichier importé la remplacera ; s'il porte le même nom, il l'écrasera sur le disque, et ce que ClioDeck n'a pas pu lire sera perdu. Pour le garder, annulez et corrigez d'abord {{file}}.",
+    "failed": "L'import n'a pas abouti.",
+    "mergeRefused": "Fusion interrompue : rien n'a été écrit.",
+    "projectUnreadable": "Rien n'a été fusionné : le fichier project.json de ce projet ne se lit pas, et ClioDeck ne sait plus dans quel fichier de bibliographie fusionner. Vérifiez qu'il est lisible, puis recommencez."
   },
   "bibImportSummary": {
     "title": "Import terminé",
@@ -2365,7 +2368,9 @@
     "total": "Références au total",
     "merged": "Bibliographie fusionnée.",
     "newAdded": "Nouvelles références ajoutées",
-    "duplicates": "Doublons ignorés"
+    "duplicates": "Doublons ignorés",
+    "unreadMerged": "{{count}} entrée(s) de {{file}} n'ont pas pu être lues : elles n'ont pas été ajoutées à la bibliographie du projet. Corrigez-les dans {{file}}, avec un éditeur de texte, puis fusionnez-le de nouveau : les références déjà ajoutées seront reconnues comme doublons. Entrées en cause :",
+    "unreadReplaced": "{{count}} entrée(s) de {{file}} n'ont pas pu être lues : elles sont dans le fichier du projet, mais ne s'affichent pas, et le bandeau du panneau « Bibliographie » dit comment les corriger. Entrées en cause :"
   },
   "tagManager": {
     "none": "Aucun mot-clé",
