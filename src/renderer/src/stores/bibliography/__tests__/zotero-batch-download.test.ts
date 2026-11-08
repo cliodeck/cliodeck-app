@@ -101,10 +101,24 @@ describe('withDownloadedAttachment', () => {
       { key: 'ATT1', filename: 'a.pdf' },
       { key: 'ATT2', filename: 'b.pdf' },
     ] as Citation['zoteroAttachments'];
-    const [updated] = withDownloadedAttachment([c], 'Schuh_2024', 'ATT2', PDF);
+    const [updated] = withDownloadedAttachment([c], { id: 'Schuh_2024', zoteroKey: 'ZK1' }, 'ATT2', PDF);
 
     expect(updated.file).toBe(PDF);
     expect(updated.zoteroAttachments?.[0]).not.toHaveProperty('downloaded');
     expect(updated.zoteroAttachments?.[1]).toMatchObject({ downloaded: true, localPath: PDF });
+  });
+
+  it('deux notices de même clé BibTeX : seule celle de cette clé Zotero prend le PDF', () => {
+    const first = fromBib();
+    const second: Citation = {
+      ...fromBib(),
+      zoteroKey: 'ZK2',
+      zoteroAttachments: [{ key: 'ATT9', filename: 'c.pdf' }] as Citation['zoteroAttachments'],
+    };
+    const [a, b] = withDownloadedAttachment([first, second], second, 'ATT9', PDF);
+
+    expect(a).toEqual(first);
+    expect(b.file).toBe(PDF);
+    expect(b.zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: PDF });
   });
 });

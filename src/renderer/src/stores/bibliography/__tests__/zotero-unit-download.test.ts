@@ -226,6 +226,65 @@ describe('un PDF téléchargé que le main ne rattache pas', () => {
   });
 });
 
+describe('deux notices Zotero de même clé BibTeX (jumeaux Better BibTeX)', () => {
+  // Deux entrées du journal de Lester exportées sous la même clé : seules leurs clés Zotero et
+  // leurs pièces jointes les distinguent, et `bibliography-metadata.json` les range sous leur clé
+  // Zotero. Chercher la référence par sa seule clé BibTeX rendait toujours la première.
+  const twin = (zoteroKey: string, attachmentKey: string): Citation => ({
+    ...reference('Lester_1935', zoteroKey, attachmentKey),
+    title: `Diary ${zoteroKey}`,
+  });
+  const A = twin('ZKA', 'ATTA');
+  const B = twin('ZKB', 'ATTB');
+  const twinInStore = (zoteroKey: string) => bib().citations.find((c) => c.zoteroKey === zoteroKey);
+
+  beforeEach(async () => {
+    await BibliographyMetadataService.saveFromSync(project, [A, B] as never);
+    useBibliographyStore.setState({ citations: [A, B], filteredCitations: [A, B] });
+  });
+
+  async function expectEachAttachedToItsOwn(): Promise<void> {
+    expect(await onDisk('ZKA')).toEqual([expect.objectContaining({ key: 'ATTA', downloaded: true, localPath: pdfOf('ATTA') })]);
+    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ key: 'ATTB', downloaded: true, localPath: pdfOf('ATTB') })]);
+    // Au lancement suivant, chacune retrouve son PDF.
+    const reloaded = BibliographyMetadataService.mergeCitationsWithMetadata(
+      [A, B].map(({ zoteroAttachments: _dropped, ...fromBib }) => fromBib) as never,
+      await BibliographyMetadataService.loadMetadata(project)
+    );
+    expect(reloaded.map((c) => c.file)).toEqual([pdfOf('ATTA'), pdfOf('ATTB')]);
+  }
+
+  it('le lot rattache le PDF de la seconde à la seconde, pas à la première', async () => {
+    const result = await bib().downloadAllMissingPDFs(project);
+
+    expect(result).toMatchObject({ downloaded: 2, errors: [] });
+    expect(updateAttachment.mock.calls.map((call) => [call[0].citation.zoteroKey, call[0].attachmentKey])).toEqual([
+      ['ZKA', 'ATTA'],
+      ['ZKB', 'ATTB'],
+    ]);
+    await expectEachAttachedToItsOwn();
+    // Le panneau aussi : la première ne prend pas le PDF de la seconde.
+    expect(twinInStore('ZKA')?.file).toBe(pdfOf('ATTA'));
+    expect(twinInStore('ZKB')?.file).toBe(pdfOf('ATTB'));
+    expect(twinInStore('ZKA')?.zoteroAttachments).toEqual([expect.objectContaining({ key: 'ATTA', downloaded: true })]);
+  });
+
+  it('à l’unité, la fiche de la seconde télécharge et rattache son propre PDF', async () => {
+    expect(await bib().downloadAndIndexZoteroPDF('Lester_1935', 'ATTB', project)).toEqual({});
+
+    expect(updateAttachment.mock.calls[0][0]).toMatchObject({ citation: { zoteroKey: 'ZKB' }, attachmentKey: 'ATTB' });
+    expect(await onDisk('ZKB')).toEqual([expect.objectContaining({ downloaded: true, localPath: pdfOf('ATTB') })]);
+    expect(await onDisk('ZKA')).toEqual([expect.objectContaining({ downloaded: false })]);
+    expect(twinInStore('ZKB')?.file).toBe(pdfOf('ATTB'));
+    expect(twinInStore('ZKA')?.file).toBeUndefined();
+
+    expect(await bib().downloadAndIndexZoteroPDF('Lester_1935', 'ATTA', project)).toEqual({});
+    await expectEachAttachedToItsOwn();
+    expect(twinInStore('ZKA')?.file).toBe(pdfOf('ATTA'));
+    expect(twinInStore('ZKB')?.file).toBe(pdfOf('ATTB'));
+  });
+});
+
 describe('« Télécharger tous les PDFs manquants » : un rattachement refusé', () => {
   it('métadonnées illisibles : le lot s’arrête au premier PDF et le dit, sans rien indexer', async () => {
     const damaged = damageMetadata();

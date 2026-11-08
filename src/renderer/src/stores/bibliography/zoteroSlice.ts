@@ -46,6 +46,17 @@ async function attach(projectPath: string, citation: Citation, attachmentKey: st
   }
 }
 
+/**
+ * La clé sous laquelle `bibliography-metadata.json` range une référence (`storageKeyFor`) : la clé
+ * Zotero, sinon la clé BibTeX. Deux notices Zotero peuvent partager leur clé BibTeX (jumeaux
+ * Better BibTeX, `Lester_1935`) : cherchée par celle-ci, la seconde rendait toujours la première.
+ */
+const entryKey = (citation: Pick<Citation, 'id' | 'zoteroKey'>): string => citation.zoteroKey || citation.id;
+
+/** La référence telle que le store la tient maintenant, retrouvée comme le fichier la range. */
+const latestOf = (citations: Citation[], citation: Citation): Citation =>
+  citations.find((c) => entryKey(c) === entryKey(citation)) ?? citation;
+
 const notAttachedOf = (citation: Citation, filePath: string, response: AttachResponse): NotAttached => ({
   title: citation.title,
   filePath,
@@ -58,16 +69,17 @@ const notAttachedOf = (citation: Citation, filePath: string, response: AttachRes
  * pièce jointe marquée `downloaded` / `localPath` — c'est elle que
  * `bibliography-metadata.json` conserve et qui recrée `file` au lancement
  * suivant (`mergeCitationsWithMetadata`). Sans elle, le lien ne vit qu'en
- * mémoire.
+ * mémoire. La référence est désignée comme le fichier la range (`entryKey`) : par sa seule clé
+ * BibTeX, le PDF d'une notice allait aussi à sa jumelle.
  */
 export function withDownloadedAttachment(
   citations: Citation[],
-  citationId: string,
+  entry: Pick<Citation, 'id' | 'zoteroKey'>,
   attachmentKey: string,
   filePath: string
 ): Citation[] {
   return citations.map((c) =>
-    c.id === citationId
+    entryKey(c) === entryKey(entry)
       ? {
           ...c,
           file: filePath,
@@ -86,7 +98,10 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
     const left = async () => !(await stillIn(projectPath));
     try {
       const { citations } = get();
-      const citation = citations.find((c) => c.id === citationId);
+      // La pièce jointe désigne la notice : deux notices Zotero peuvent partager leur clé BibTeX.
+      const citation =
+        citations.find((c) => c.id === citationId && c.zoteroAttachments?.some((att) => att.key === attachmentKey)) ??
+        citations.find((c) => c.id === citationId);
 
       if (!citation) {
         throw new Error('Citation not found');
@@ -162,7 +177,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
 
       // Le rattachement d'abord, pour qu'il survive au lancement suivant. Refusé, le PDF reste
       // dans PDFs/ sans être rattaché ni indexé, et l'historien le sait.
-      const attached = await attach(projectPath, get().citations.find((c) => c.id === citationId) ?? citation, attachmentKey, filePath);
+      const attached = await attach(projectPath, latestOf(get().citations, citation), attachmentKey, filePath);
       if (refusedAsProjectChanged(attached)) return { interrupted: true };
       if (attached.success !== true) throw new AttachmentNotSavedError(notAttachedOf(citation, filePath, attached));
       console.log('💾 Metadata saved after PDF download');
@@ -172,7 +187,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
 
       // Sur la liste du moment, pas sur celle d'avant le téléchargement : un autre téléchargement
       // ou une synchronisation l'a changée depuis (S07-1-5).
-      set((state) => ({ citations: withDownloadedAttachment(state.citations, citationId, attachmentKey, filePath) }));
+      set((state) => ({ citations: withDownloadedAttachment(state.citations, citation, attachmentKey, filePath) }));
       get().applyFilters();
 
       // Index the downloaded PDF
@@ -371,7 +386,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           const filePath = downloadResult.filePath;
           const attached = await attach(
             projectPath,
-            get().citations.find((c) => c.id === citation.id) ?? citation,
+            latestOf(get().citations, citation),
             firstAttachment.key,
             filePath
           );
@@ -392,7 +407,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
             return interrupt();
           }
           set((state) => ({
-            citations: withDownloadedAttachment(state.citations, citation.id, firstAttachment.key, filePath),
+            citations: withDownloadedAttachment(state.citations, citation, firstAttachment.key, filePath),
           }));
           get().applyFilters();
 
