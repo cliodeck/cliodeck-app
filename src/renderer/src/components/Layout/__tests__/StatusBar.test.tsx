@@ -4,9 +4,23 @@
  *
  * Il n'était affiché qu'avec un chemin : un tampon sans titre n'en a pas, et une page
  * entière pouvait s'y écrire sans que rien ne dise qu'elle n'était nulle part.
+ *
+ * Et le fichier lui-même (G7) : rien à l'écran ne le nommait. Après « Enregistrer sous »,
+ * l'éditeur reste sur le nouveau fichier, et l'auteur a changé les droits de document.md
+ * alors qu'il en éditait un autre.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, act } from '@testing-library/react';
+
+// Le simulacre commun rend la clé seule : l'infobulle d'un fichier hors du projet doit
+// porter son chemin, que seule l'interpolation y met.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params && typeof params.path === 'string' ? `${key} ${params.path}` : key,
+  }),
+  initReactI18next: { type: '3rdParty', init: () => undefined },
+}));
 
 import { StatusBar } from '../StatusBar';
 import { useEditorStore } from '../../../stores/editorStore';
@@ -35,7 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useProjectStore.setState({ currentProject: null });
-  useEditorStore.setState({ filePath: null, isDirty: false });
+  useEditorStore.setState({ filePath: null, isDirty: false, bufferDetached: false });
 });
 
 describe('StatusBar : état d’enregistrement', () => {
@@ -65,5 +79,49 @@ describe('StatusBar : état d’enregistrement', () => {
     await mountWith({ filePath: '/p/document.md', isDirty: true });
 
     expect(screen.getByText('statusBar.unsaved')).toBeInTheDocument();
+  });
+});
+
+/** L'élément qui nomme le fichier ouvert, s'il y en a un. */
+const fileLabel = (): HTMLElement | null => document.querySelector('.status-bar__item--file');
+
+describe('StatusBar : le fichier ouvert est nommé (G7)', () => {
+  it('fichier du projet : son chemin relatif au projet, le chemin complet en infobulle', async () => {
+    await mountWith({ filePath: '/p/chapters/03-guerre.md', isDirty: false });
+
+    expect(fileLabel()).toHaveTextContent(/^chapters\/03-guerre\.md$/);
+    expect(fileLabel()).toHaveAttribute('title', '/p/chapters/03-guerre.md');
+  });
+
+  it('fichier hors du projet : son nom seul, et l’infobulle dit où il est', async () => {
+    // `/p-bis` n'est pas un dossier de `/p` : une comparaison de chaînes naïve l'y rangerait.
+    await mountWith({ filePath: '/p-bis/notes/note.md', isDirty: false });
+
+    expect(fileLabel()).toHaveTextContent(/^note\.md$/);
+    expect(fileLabel()).toHaveAttribute('title', 'statusBar.fileOutsideProjectTooltip /p-bis/notes/note.md');
+  });
+
+  it('tampon sans titre : le libellé « sans titre »', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+
+    expect(fileLabel()).toHaveTextContent(/^statusBar\.untitled$/);
+  });
+
+  it('la valeur suit l’éditeur : après « Enregistrer sous », la barre nomme le nouveau fichier', async () => {
+    await mountWith({ filePath: '/p/document.md', isDirty: false });
+    expect(fileLabel()).toHaveTextContent(/^document\.md$/);
+
+    act(() => {
+      useEditorStore.setState({ filePath: '/p/note.md' });
+    });
+
+    expect(fileLabel()).toHaveTextContent(/^note\.md$/);
+  });
+
+  it('témoin : hors de tout document, le temps d’un changement de projet, rien n’est nommé', async () => {
+    useEditorStore.setState({ bufferDetached: true });
+    await mountWith({ filePath: null, isDirty: false });
+
+    expect(fileLabel()).toBeNull();
   });
 });

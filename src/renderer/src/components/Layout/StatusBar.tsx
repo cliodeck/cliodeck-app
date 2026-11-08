@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { currentRelativePath } from '../../stores/manuscriptStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useUsageJournalStore } from '../../stores/usageJournalStore';
@@ -29,6 +30,7 @@ export const StatusBar: React.FC = () => {
   const isDirty = useEditorStore((s) => s.isDirty);
   const filePath = useEditorStore((s) => s.filePath);
   const lastSavedAt = useEditorStore((s) => s.lastSavedAt);
+  const bufferDetached = useEditorStore((s) => s.bufferDetached);
   // Re-rend chaque minute pour que « il y a 3 min » reste vrai sans
   // re-rendre à la frappe.
   const [, setTick] = useState(0);
@@ -110,15 +112,35 @@ export const StatusBar: React.FC = () => {
 
   if (!currentProject) return null;
 
+  // Le fichier que montre l'éditeur (G7) : après « Enregistrer sous », l'éditeur reste sur
+  // le nouveau fichier, et rien à l'écran ne le nommait. Lu sur le magasin, jamais sur le
+  // disque ; rien pendant un changement de projet, où l'éditeur n'est sur aucun document.
+  const relativePath = currentRelativePath();
+  const openFile = bufferDetached
+    ? null
+    : filePath === null
+      ? { label: t('statusBar.untitled'), title: undefined }
+      : relativePath !== null
+        ? { label: relativePath, title: filePath }
+        : {
+            label: filePath.split(/[\\/]/).pop() || filePath,
+            title: t('statusBar.fileOutsideProjectTooltip', { path: filePath }),
+          };
+
   const readyCount = mcpClients.filter((c) => c.state === 'ready').length;
   const failedCount = mcpClients.filter((c) => c.state === 'failed').length;
 
   return (
     <div className="status-bar" role="status" aria-live="polite">
-      <div className="status-bar__section">
-        <span className="status-bar__item" title={currentProject.name}>
+      <div className="status-bar__section status-bar__section--left">
+        <span className="status-bar__item status-bar__item--project" title={currentProject.name}>
           {currentProject.name}
         </span>
+        {openFile && (
+          <span className="status-bar__item status-bar__item--file" title={openFile.title}>
+            {openFile.label}
+          </span>
+        )}
       </div>
 
       <div className="status-bar__section status-bar__section--right">

@@ -974,6 +974,89 @@ for (const door of ['bouton', 'menu'] as const) {
   });
 }
 
+/** Ce que la barre d'état nomme : le fichier que montre l'éditeur (G7). */
+const fileInStatusBar = (window: Page) => window.locator('.status-bar .status-bar__item--file');
+
+// C3 et C11 : après « Enregistrer sous », l'éditeur reste sur le nouveau fichier, et rien à
+// l'écran ne le nommait. L'auteur a changé les droits de document.md alors qu'il en éditait un
+// autre, et en a conclu qu'il fallait quitter l'app.
+test('la barre d’état nomme le fichier ouvert : note.md après Enregistrer sous, document.md rouvert du panneau Projet', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const note = join(projet.dir, 'note.md');
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    await expect(fileInStatusBar(window)).toHaveText('document.md');
+
+    await untitledBuffer(app, window, 'Une idée à part.');
+    await expect(fileInStatusBar(window)).toHaveText('Sans titre');
+
+    await stubSaveDialog(app, note);
+    await sendMenu(app, 'menu:save-file');
+    await expect.poll(() => existsSync(note), { timeout: 15_000 }).toBe(true);
+    await expect(fileInStatusBar(window)).toHaveText('note.md');
+    await expect(fileInStatusBar(window)).toHaveAttribute('title', note);
+
+    await window.locator('.project-file-item', { hasText: 'document.md' }).click();
+    await expect(editorOf(window)).toContainText('Texte déjà écrit');
+    await expect(fileInStatusBar(window)).toHaveText('document.md');
+    expect(readFileSync(note, 'utf8')).toBe('Une idée à part.');
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
+test('un chemin long dans une fenêtre étroite : le nom se tronque, et l’état d’enregistrement reste à l’écran', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const projet = makeProject();
+  const dossier = 'annexes-documentaires-du-chapitre-sur-la-mobilisation';
+  const relatif = `${dossier}/transcription-integrale-des-correspondances-du-prefet-1914-1918.md`;
+  mkdirSync(join(projet.dir, dossier));
+  writeFileSync(join(projet.dir, relatif), '# Annexe\n\nTexte de l’annexe.\n');
+
+  try {
+    await openProject(app, window, projet.projectJson);
+    await expect(editorOf(window)).toContainText('Texte déjà écrit', { timeout: 20_000 });
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setSize(640, 800);
+    });
+    await expect.poll(() => window.evaluate(() => window.innerWidth), { timeout: 5_000 }).toBeLessThanOrEqual(640);
+
+    await stubOpenDialog(app, join(projet.dir, relatif));
+    await sendMenu(app, 'menu:open-file');
+    await expect(editorOf(window)).toContainText('Texte de l’annexe', { timeout: 10_000 });
+    await expect(fileInStatusBar(window)).toHaveText(relatif);
+
+    const state = window.locator('.status-bar__item', { hasText: 'Non modifié' });
+    await expect(state).toBeVisible();
+    const box = await state.boundingBox();
+    const viewport = await window.evaluate(() => document.documentElement.clientWidth);
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport);
+    // L'état se lit en entier ; c'est le nom qui cède la place, par des points de suspension.
+    expect(await state.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await fileInStatusBar(window).evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(projet.dir, { recursive: true, force: true });
+  }
+});
+
 for (const [language, saveLabel, message, openMessage] of [
   ['en', 'Save', 'Error saving file', 'This file could not be opened. It may be missing or unreadable.'],
   [

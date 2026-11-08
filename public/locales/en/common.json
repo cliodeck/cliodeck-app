@@ -1900,7 +1900,9 @@
     "unsaved": "Unsaved changes",
     "unsavedTooltip": "The document has changes that are not written to disk.",
     "notModified": "Not modified",
-    "notModifiedTooltip": "This document has not been changed since it was opened."
+    "notModifiedTooltip": "This document has not been changed since it was opened.",
+    "untitled": "Untitled",
+    "fileOutsideProjectTooltip": "Outside the project: {{path}}"
   },
   "security": {
     "revokeTitle": "Key revocation",
