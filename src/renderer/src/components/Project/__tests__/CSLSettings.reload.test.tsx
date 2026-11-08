@@ -136,6 +136,18 @@ describe('style CSL du projet', () => {
     expectNothingReloaded();
   });
 
+  it('copie dans le projet impossible : le style s’applique depuis sa place, et l’auteur le sait', async () => {
+    await mountPanel();
+    setCSLPath.mockResolvedValue({ success: true, cslPath: '/ailleurs/chicago.csl', notCopied: true });
+
+    await click(screen.getByText('project.selectCSL'));
+
+    expect(useProjectStore.getState().currentProject?.cslPath).toBe('/ailleurs/chicago.csl');
+    expect(useDialogStore.getState().alertOpen).toBe(true);
+    expect(useDialogStore.getState().alertMessage).toBe('project.cslNotCopied');
+    expectNothingReloaded();
+  });
+
   it('enregistrement refusé par le main : rien ne change, et l’auteur est prévenu', async () => {
     await mountPanel();
     setCSLPath.mockResolvedValue({ success: false, error: 'disque plein' });

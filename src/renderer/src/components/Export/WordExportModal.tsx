@@ -41,6 +41,8 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
   const afterSuccess = useMountedTimeout();
   const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
+  // Style du projet introuvable : le document est écrit sans lui.
+  const [missingCsl, setMissingCsl] = useState<string | null>(null);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
   const [citation, setCitation] = useState<ExportCitationValue>({
@@ -146,6 +148,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setError(null);
     setSuccess(false);
     setUnresolvedCitations([]);
+    setMissingCsl(null);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -227,11 +230,14 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       const unresolved: string[] = Array.isArray(result.unresolvedCitations)
         ? result.unresolvedCitations
         : [];
-      if (result.success && unresolved.length > 0) {
-        // Le document est écrit, mais il contient ces clés telles quelles :
-        // la modale reste ouverte pour que l'auteur le lise.
+      const cslMissing = typeof result.missingCsl === 'string' ? result.missingCsl : null;
+      if (result.success && (unresolved.length > 0 || cslMissing)) {
+        // Le document est écrit, mais il contient ces clés telles quelles, ou
+        // n'a pas le style du projet : la modale reste ouverte pour que
+        // l'auteur le lise.
         setSuccess(true);
         setUnresolvedCitations(unresolved);
+        setMissingCsl(cslMissing);
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
@@ -267,6 +273,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       setError(null);
       setSuccess(false);
       setUnresolvedCitations([]);
+      setMissingCsl(null);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -416,6 +423,13 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
               <span>
                 {t('export.word.unresolvedCitations', { keys: unresolvedCitations.join(', ') })}
               </span>
+            </div>
+          )}
+
+          {missingCsl && (
+            <div className="export-error" data-testid="export-csl-missing">
+              <AlertCircle size={16} />
+              <span>{t('export.cslMissing', { file: missingCsl })}</span>
             </div>
           )}
         </div>

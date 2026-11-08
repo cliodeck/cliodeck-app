@@ -58,6 +58,7 @@ interface ExportOutcome {
   errorCode?: string;
   timeLimitMinutes?: number;
   unresolvedCitations?: string[];
+  missingCsl?: string;
 }
 
 type ExportModal = React.FC<{ isOpen: boolean; onClose: () => void }>;
@@ -609,3 +610,27 @@ it('le menu « Bibliographie » pendant un export Word ne fait pas perdre les ci
 
   expect(await screen.findByTestId('word-export-unresolved')).toBeInTheDocument();
 });
+
+/**
+ * BT1-4 : le style CSL du projet introuvable n'est plus écarté en silence. Le
+ * document est écrit, sans ce style : la modale reste ouverte pour le dire,
+ * comme pour les citations non résolues.
+ */
+describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
+  'modale d’export $name : style du projet introuvable',
+  ({ Modal, exportLabel, exportingLabel }) => {
+    it('le dit, et reste ouverte', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const finish = installElectron();
+      const onClose = vi.fn();
+      render(<Host Modal={Modal} onClose={onClose} />);
+      await startExport(exportLabel, exportingLabel);
+
+      finish({ success: true, missingCsl: '/tmp/demo/style.csl' });
+
+      expect(await screen.findByTestId('export-csl-missing')).toHaveTextContent('export.cslMissing');
+      await advance(10_000);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  }
+);

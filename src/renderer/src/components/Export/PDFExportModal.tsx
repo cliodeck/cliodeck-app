@@ -41,6 +41,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   // La minuterie de succès appelle le `onClose` du parent : démontée, la
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
   const afterSuccess = useMountedTimeout();
+  // Style du projet introuvable : le PDF est écrit sans lui.
+  const [missingCsl, setMissingCsl] = useState<string | null>(null);
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
@@ -158,6 +160,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    setMissingCsl(null);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -254,7 +257,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         },
       });
 
-      if (result.success) {
+      if (result.success && typeof result.missingCsl === 'string') {
+        // Le PDF est écrit, mais sans le style du projet : la modale reste
+        // ouverte pour que l'auteur le lise.
+        setSuccess(true);
+        setMissingCsl(result.missingCsl);
+        setIsExporting(false);
+      } else if (result.success) {
         setSuccess(true);
         afterSuccess(() => {
           onClose();
@@ -287,6 +296,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       // Reset state
       setError(null);
       setSuccess(false);
+      setMissingCsl(null);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -465,6 +475,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
             <div className="export-success">
               <CheckCircle size={16} />
               <span>{t('export.pdf.success', { path: outputPath })}</span>
+            </div>
+          )}
+
+          {missingCsl && (
+            <div className="export-error" data-testid="export-csl-missing">
+              <AlertCircle size={16} />
+              <span>{t('export.cslMissing', { file: missingCsl })}</span>
             </div>
           )}
         </div>

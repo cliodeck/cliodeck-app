@@ -54,6 +54,11 @@ export interface ExportResult {
   errorCode?: ExportErrorCode;
   /** Avec `export_timed_out` : le message ne doit pas écrire ce nombre en dur. */
   timeLimitMinutes?: number;
+  /**
+   * Word et PDF : le style CSL des paramètres du projet, déclaré mais
+   * introuvable à ce chemin. Le document est écrit sans lui ; la modale le dit.
+   */
+  missingCsl?: string;
 }
 
 export class ExportTimedOutError extends Error {

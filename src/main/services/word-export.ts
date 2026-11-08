@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
-import { join, dirname, extname, isAbsolute } from 'path';
+import { join, dirname, extname } from 'path';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -35,6 +35,7 @@ import {
   type ExportResult,
 } from './export-time-limit.js';
 import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
+import { resolveProjectBibliography, resolveProjectCsl } from './export-project-files.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // @ts-ignore - No type definitions available
@@ -268,12 +269,8 @@ export class WordExportService {
         const engineCsl = options.citation?.useEngine
           ? new CitationEngine().stylePath(options.citation.style ?? 'chicago-note-bibliography')
           : undefined;
-        // `project.json` enregistre un chemin relatif au projet.
-        const projectCsl =
-          options.cslPath && !isAbsolute(options.cslPath)
-            ? join(options.projectPath, options.cslPath)
-            : options.cslPath;
-        const cslPath = engineCsl ?? projectCsl;
+        // CSL du projet : résolu en absolu par `runExport`, absent s'il manque.
+        const cslPath = engineCsl ?? options.cslPath;
         if (cslPath && (await pathExists(cslPath))) {
           pandocArgs.push('--csl', cslPath);
           console.log('📚 Using CSL style:', cslPath);
@@ -380,6 +377,20 @@ export class WordExportService {
         progress: 10,
       });
 
+      // Bibliographie et style du projet relus ici, et non pris dans l'état du
+      // renderer, figé à l'ouverture : un `.bib` importé pendant la séance
+      // envoyait l'export au générateur interne, qui ignorait le style.
+      const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
+      options = {
+        ...options,
+        bibliographyPath: await resolveProjectBibliography(options.projectPath, options.bibliographyPath),
+        cslPath: projectCsl.path,
+      };
+      // Case « style intégré » cochée, le style du projet n'est pas demandé :
+      // son absence n'a rien à dire.
+      const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
+      if (missingCsl) console.warn('⚠️ word-export: style CSL du projet introuvable:', missingCsl);
+
       // Load abstract if needed
       let abstract = options.metadata?.abstract;
       let abstractTitle = 'Résumé';
@@ -445,11 +456,11 @@ export class WordExportService {
       const hasBibliography =
         options.bibliographyPath && (await pathExists(options.bibliographyPath));
       const hasPandoc = await this.checkPandoc();
-      const useEnginePipeline = !!options.citation?.useEngine;
 
       if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
-        return await this.exportWithPandoc(options, outputPath, onProgress, clock);
+        const result = await this.exportWithPandoc(options, outputPath, onProgress, clock);
+        return result.success && missingCsl ? { ...result, missingCsl } : result;
       }
 
       if (hasBibliography && !hasPandoc) {
@@ -468,18 +479,31 @@ export class WordExportService {
       // into FootnoteReferenceRuns.
       // L'assemblage du manuscrit a déjà eu lieu plus haut (avant le
       // branchement pandoc) : options.content est le flux complet.
+      // Même choix du style que sur le chemin pandoc : case cochée, le style
+      // intégré ; décochée, celui du projet. Le moteur ne tournait que case
+      // cochée, et le .docx gardait les clés malgré le style du projet.
       let sourceMarkdown = options.content;
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       let unresolvedCitations: string[] = [];
-      if (useEnginePipeline) {
+      const projectStyle = options.citation?.useEngine ? undefined : options.cslPath;
+      const engineStyle = options.citation?.useEngine
+        ? (options.citation.style ?? 'chicago-note-bibliography')
+        : projectStyle;
+      if (engineStyle) {
         try {
-          const style = options.citation?.style ?? 'chicago-note-bibliography';
           const locale = options.citation?.locale ?? 'fr-FR';
+          const engine = new CitationEngine();
+          // Le CSL du projet se lit ici, sans bloquer : le moteur ne lit
+          // lui-même que les styles embarqués.
+          if (projectStyle) {
+            engine.registerStyle(projectStyle, await readFile(projectStyle, 'utf-8'));
+          }
           const processed = await processMarkdownCitations(sourceMarkdown, {
-            style,
+            style: engineStyle,
             locale,
             resolve: (key) => bibliographyService.getByCitationKey(key),
+            engine,
           });
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
@@ -784,6 +808,7 @@ export class WordExportService {
         success: true,
         outputPath,
         ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
+        ...(missingCsl ? { missingCsl } : {}),
       };
     } catch (error: unknown) {
       console.error('❌ Word export failed:', error);

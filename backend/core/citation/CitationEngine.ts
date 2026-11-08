@@ -102,6 +102,16 @@ export class CitationEngine {
     return /<style\b[^>]*\bclass="note"/.test(this.loadStyle(styleId));
   }
 
+  /**
+   * Style lu par l'appelant, sous l'identifiant qu'il lui donne : le CSL des
+   * paramètres du projet. Le moteur ne lit lui-même que les styles embarqués,
+   * et de façon synchrone ; un fichier du projet se lit sans bloquer, un
+   * disque qui ne répond plus ne doit pas geler le processus principal.
+   */
+  registerStyle(styleId: StyleId, xml: string): void {
+    this.styleCache.set(styleId, xml);
+  }
+
   /** List available styles (files ending in .csl). */
   listStyles(): string[] {
     if (!fs.existsSync(this.resourcesRoot)) return [];

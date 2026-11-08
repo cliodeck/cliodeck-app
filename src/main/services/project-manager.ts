@@ -1020,7 +1020,7 @@ export class ProjectManager {
   async setCSLPath(data: {
     projectPath: string;
     cslPath?: string;
-  }): Promise<{ success: boolean; cslPath?: string; error?: string }> {
+  }): Promise<{ success: boolean; cslPath?: string; notCopied?: true; error?: string }> {
     try {
       console.log('📝 setCSLPath called with:', data);
 
@@ -1034,6 +1034,7 @@ export class ProjectManager {
       const projectDir = dirname(data.projectPath);
 
       let relativeCslPath: string | undefined = undefined;
+      let notCopied = false;
 
       // If a CSL file is provided, copy it to project if it's external
       if (data.cslPath && existsSync(data.cslPath)) {
@@ -1053,8 +1054,10 @@ export class ProjectManager {
             console.log('✅ CSL file copied successfully, stored as relative path:', relativeCslPath);
           } catch (copyError: unknown) {
             console.error('❌ Failed to copy CSL file:', copyError);
-            // Fall back to using absolute path
+            // Le style reste utilisable depuis sa place, et l'auteur le sait :
+            // il ne suivra pas le projet sur une autre machine.
             relativeCslPath = data.cslPath;
+            notCopied = true;
           }
         } else {
           // File is already in project directory, store as relative path
@@ -1069,12 +1072,18 @@ export class ProjectManager {
       });
 
       console.log('✅ CSL path configured:', relativeCslPath);
-      // Return the absolute path for the UI
-      const absolutePath = relativeCslPath ? join(projectDir, relativeCslPath) : undefined;
+      // Return the absolute path for the UI. Une copie ratée garde le chemin
+      // absolu de la source : le joindre au dossier du projet rendait un
+      // chemin qui n'existe pas, et l'export écartait le style en silence.
+      const absolutePath = relativeCslPath
+        ? path.isAbsolute(relativeCslPath)
+          ? relativeCslPath
+          : join(projectDir, relativeCslPath)
+        : undefined;
       if (this.currentProject && this.isCurrentProject(projectDir)) {
         this.currentProject.cslPath = absolutePath;
       }
-      return { success: true, cslPath: absolutePath };
+      return { success: true, cslPath: absolutePath, ...(notCopied ? { notCopied: true as const } : {}) };
     } catch (error: unknown) {
       console.error('❌ Failed to set CSL path:', error);
       const message = error instanceof Error ? error.message : String(error);
