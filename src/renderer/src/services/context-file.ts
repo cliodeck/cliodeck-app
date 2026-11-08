@@ -1,9 +1,8 @@
 import type { TFunction } from 'i18next';
 import { detectLineSeparator } from '@/editor/cm/fidelity';
-import type { EditorFacade } from '@/editor/facade';
 import { useEditorStore, writeOpenDocumentWhileDirty } from '../stores/editorStore';
 import { logger } from '../utils/logger';
-import { waitForEditorFacade } from './wait-for-facade';
+import { waitForDocumentFacade } from './wait-for-facade';
 
 /**
  * `context.md` s'écrit depuis trois portes : la zone des Réglages, l'assistant de démarrage et
@@ -101,20 +100,37 @@ function firstChangedLine(before: string, after: string): number | null {
 /**
  * Le rechargement recrée la vue en haut du fichier : un paragraphe ajouté à la fin d'un long
  * `context.md` restait hors de l'écran, et l'éditeur semblait ne pas l'avoir. La première ligne
- * changée y est amenée, curseur compris, dès que la nouvelle vue est montée. Sans le focus : les
- * Paramètres sont encore ouverts par-dessus, et une frappe partirait dans l'éditeur, derrière eux.
+ * changée y est amenée, curseur compris, dès que la vue de ce document est montée : tout de suite
+ * en Écriture, au retour dans ce mode sinon (Paramètres ouverts depuis Brainstormer). Sans le
+ * focus : les Paramètres peuvent être encore ouverts par-dessus, et une frappe partirait dans
+ * l'éditeur, derrière eux.
  */
-async function revealChange(previous: EditorFacade | null, version: number, line: number): Promise<void> {
-  const facade = await waitForEditorFacade(previous);
-  // Éditeur non monté (autre mode), ou un autre document a pris la place : rien à montrer.
-  if (!facade || useEditorStore.getState().documentVersion !== version) return;
-  facade.revealLine(line, { focus: false });
+async function revealChange(version: number, line: number): Promise<void> {
+  // Un autre document a pris la place avant le montage : rien à montrer.
+  const facade = await waitForDocumentFacade(version);
+  facade?.revealLine(line, { focus: false });
 }
+
+/** Les deux textes sont le même, au BOM près, que l'éditeur ne porte pas. */
+const sameText = (a: string, b: string): boolean => withoutBom(a) === withoutBom(b);
 
 /** L'éditeur montre toujours ce fichier, mais pas ce qui vient de s'y écrire. */
 function stillShowsOtherText(filePath: string, written: string): boolean {
   const now = useEditorStore.getState();
-  return now.filePath === filePath && withoutBom(now.getLiveContent()) !== withoutBom(written);
+  return now.filePath === filePath && !sameText(now.getLiveContent(), written);
+}
+
+/**
+ * Le tampon n'est pas à suivre, il est à garder : un conflit. Il s'écrit tout de suite, faute de
+ * quoi l'autosave l'écrirait plus tard sans rien dire, et l'appelant annonce le conflit : ce qu'il
+ * voulait écrire est toujours chez lui.
+ */
+async function keepBuffer(): Promise<ContextResponse> {
+  await useEditorStore
+    .getState()
+    .saveFile()
+    .catch((error: unknown) => logger.error('ContextFile', error));
+  return { success: false, error: 'context_conflict' };
 }
 
 /**
@@ -122,15 +138,13 @@ function stillShowsOtherText(filePath: string, written: string): boolean {
  * repart d'un état neuf : l'annulation se vide, et Cmd+Z ne ramène pas l'ancien texte.
  *
  * Rend faux si le tampon garde son texte : l'auteur a tapé pendant l'écriture, et une frappe ne
- * se jette pas. L'autosave réécrirait de toute façon ce tampon, sans rien dire. Il est donc écrit
- * tout de suite, et l'appelant annonce le conflit : ce qu'il voulait écrire est toujours chez lui.
+ * se jette pas. L'appelant le garde alors (`keepBuffer`).
  */
 async function bufferFollowed(filePath: string, written: string): Promise<boolean> {
   const editor = useEditorStore.getState();
   // L'auteur est passé à un autre document : celui-ci se relira à son retour.
   if (editor.filePath !== filePath) return true;
   const before = editor.getLiveContent();
-  const previousFacade = editor.editorFacade;
   // Une autre demande peut prendre le pas sur la relecture sans remplacer ce tampon : un verrou
   // posé puis levé pendant la lecture, une ouverture qui n'aboutit pas. Le tenir pour suivi
   // laissait l'ancien texte à l'écran, propre, et la frappe suivante l'écrivait par-dessus celui
@@ -149,9 +163,7 @@ async function bufferFollowed(filePath: string, written: string): Promise<boolea
       const { content, documentVersion } = useEditorStore.getState();
       const line = firstChangedLine(before, content);
       if (line !== null) {
-        void revealChange(previousFacade, documentVersion, line).catch((error: unknown) =>
-          logger.error('ContextFile', error)
-        );
+        void revealChange(documentVersion, line).catch((error: unknown) => logger.error('ContextFile', error));
       }
       return true;
     }
@@ -159,12 +171,21 @@ async function bufferFollowed(filePath: string, written: string): Promise<boolea
     // texte : rien à relire. Toute autre issue que « remplacé » se règle plus bas.
     if (outcome?.status !== 'superseded' || !stillShowsOtherText(filePath, written)) break;
   }
-  if (!stillShowsOtherText(filePath, written)) return true;
-  await useEditorStore
-    .getState()
-    .saveFile()
-    .catch((error: unknown) => logger.error('ContextFile', error));
-  return false;
+  return !stillShowsOtherText(filePath, written);
+}
+
+/**
+ * Reconnu ouvert seulement une fois écrit : un fichier absent n'a pas de chemin réel, et
+ * `sameFile` ne pardonne pas sa casse (`Context.md` ouvert dans l'éditeur, puis supprimé dehors,
+ * sous macOS). Son tampon n'a donc été ni écrit avant, ni comparé à ce qu'a lu la zone. S'il
+ * porte un autre texte que les deux, c'est la seule copie de ce texte : le recharger l'effaçait
+ * du disque, de l'éditeur et de l'annulation, sous « enregistré ».
+ */
+function heldOutsideTheRead(filePath: string, expectedRaw: string, written: string): boolean {
+  const now = useEditorStore.getState();
+  if (now.filePath !== filePath) return false;
+  const live = now.getLiveContent();
+  return !sameText(live, expectedRaw) && !sameText(live, written);
 }
 
 /** Écrit `context.md` sur le texte lu, sans lever. Rien n'est écrit en cas d'échec. */
@@ -178,13 +199,12 @@ export async function saveContextFile(markdown: string, guard: ContextGuard): Pr
       projectPath,
     })) as ContextResponse;
     if (!written.success) return written;
-    // Un fichier absent n'a pas de chemin réel : ouvert sous une autre casse, puis supprimé
-    // dehors, il n'était pas reconnu avant d'être écrit. Il l'est maintenant qu'il existe.
+    // Ouvert entre-temps, ou absent et ouvert sous une autre casse : reconnu maintenant qu'il
+    // existe. Le tampon ne suit alors que s'il n'a rien que la zone n'ait lu.
     const shown = opened ?? (await openedAs(sourcePath));
-    if (shown && !(await bufferFollowed(shown, markdown))) {
-      return { success: false, error: 'context_conflict' };
-    }
-    return written;
+    if (!shown) return written;
+    if (!opened && heldOutsideTheRead(shown, expectedRaw, markdown)) return await keepBuffer();
+    return (await bufferFollowed(shown, markdown)) ? written : await keepBuffer();
   } catch (error) {
     return failureOf(error);
   }

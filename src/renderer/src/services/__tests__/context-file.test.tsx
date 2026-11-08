@@ -37,6 +37,16 @@ vi.setConfig({ testTimeout: 30_000 });
 // jsdom ne mesure rien, et CM6 journalise chaque échec de ses mesures.
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 
+/** macOS et Windows : un seul fichier sous deux casses. Sous Linux, deux fichiers possibles. */
+const caseInsensitive = ((): boolean => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-casse-'));
+  fs.writeFileSync(path.join(dir, 'sonde'), '');
+  const insensitive = fs.existsSync(path.join(dir, 'SONDE'));
+  fs.rmSync(path.join(dir, 'sonde'));
+  fs.rmdirSync(dir);
+  return insensitive;
+})();
+
 const ORIGINAL = '# Contexte\n\nDanzig, 1919-1939.\n';
 const WITH_PARAGRAPH = `${ORIGINAL}\nParagraphe des Réglages.\n`;
 const DEADLINE = { timeout: 15_000, interval: 10 };
@@ -494,25 +504,56 @@ describe('le rechargement n’aboutit pas, et l’éditeur montre toujours conte
     expect(editor().isDirty).toBe(false);
   });
 
-  it('ouvert sous une autre casse puis supprimé dehors : reconnu une fois écrit, et la frappe suivante garde le paragraphe', async () => {
+  // macOS : un fichier absent n'a pas de chemin réel, et `sameFile` ne pardonne pas sa casse. La
+  // lecture ne voit donc pas que l'éditeur le tient : la zone part de rien, et l'éditeur garde seul
+  // tout l'ancien texte. Le reconnaître une fois écrit puis le recharger effaçait ce texte partout.
+  it.runIf(caseInsensitive)('ouvert sous une autre casse puis supprimé dehors : le texte que tenait l’éditeur reste, et le conflit se dit', async () => {
     const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
-    if (!fs.existsSync(shouted)) return; // Ce disque distingue la casse : deux fichiers, rien à prouver.
     await rememberConsentedPath(shouted);
     await open(shouted);
     await mountEditor();
     fs.rmSync(contextMd);
-    // Un fichier absent n'a pas de chemin réel : la lecture ne voit pas que l'éditeur le tient.
     const hints = await read();
-    expect(hints.sources.context.blank).toBe(true);
+    expect(hints.raw).toBe('');
 
-    const saved = await saveOver(hints);
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
+
+    expect(saved).toMatchObject({ success: false, error: 'context_conflict' });
+    expect(disk()).toBe(ORIGINAL);
+    expect(currentView().state.doc.toString()).toBe(ORIGINAL);
+    expect(editor().isDirty).toBe(false);
+  });
+
+  it.runIf(caseInsensitive)('ouvert sous une autre casse, vide, puis supprimé dehors : rien à garder, le tampon suit', async () => {
+    fs.writeFileSync(contextMd, '');
+    const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
+    await rememberConsentedPath(shouted);
+    await open(shouted);
+    await mountEditor();
+    fs.rmSync(contextMd);
+    const hints = await read();
+
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
     typeAtEnd('x');
     await act(async () => {
       await editor().saveFile();
     });
 
     expect(saved.success).toBe(true);
-    expect(disk()).toBe(`${WITH_PARAGRAPH}x`);
+    expect(disk()).toBe('Paragraphe des Réglages.\nx');
+  });
+
+  it('context.md ouvert dans l’éditeur pendant l’écriture : le tampon suit, sans faux conflit', async () => {
+    await open(documentMd);
+    await mountEditor();
+    const hints = await read();
+    passage.beforeHintsWrite = () => open(contextMd);
+
+    const saved = await saveOver(hints);
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(WITH_PARAGRAPH);
+    await awaitEditorText(WITH_PARAGRAPH);
   });
 });
 
@@ -542,6 +583,43 @@ describe('après le rechargement, la première ligne changée est amenée à l�
     }, DEADLINE);
     expect(document.activeElement).toBe(zone);
     zone.remove();
+  });
+
+  // Paramètres ouverts depuis Brainstormer : l'éditeur n'est pas monté. L'attente de la façade
+  // s'arrêtait au bout de 2 s, et le retour en Écriture ouvrait la vue en haut du fichier.
+  it('éditeur démonté par un changement de mode, remonté plus de 2 s après : la ligne ajoutée y est amenée', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    cleanup();
+    expect(editor().editorFacade).toBeNull();
+
+    const saved = await saveOver(hints, `${LONG}\n${ADDED}\n`);
+    expect(saved.success).toBe(true);
+    // L'auteur reste dans l'autre mode au-delà de ces 2 s : c'est le scénario, pas une attente.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await mountEditor();
+
+    await vi.waitFor(() => {
+      const { state } = currentView();
+      expect(state.doc.lineAt(state.selection.main.head).text).toBe(ADDED);
+    }, DEADLINE);
+  });
+
+  it('un autre document a pris la place avant le retour de l’éditeur : rien ne s’y déplace', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    cleanup();
+
+    expect((await saveOver(hints, `${LONG}\n${ADDED}\n`)).success).toBe(true);
+    await open(documentMd);
+    await mountEditor();
+
+    expect(currentView().state.doc.toString()).toBe('# Manuscrit\n');
+    expect(currentView().state.selection.main.head).toBe(0);
   });
 });
 
