@@ -382,6 +382,7 @@
     "cslHelp": "The CSL file defines the citation and bibliography format in PDF and Word exports",
     "cslSelectError": "Error selecting CSL file",
     "cslSaveError": "Error saving CSL path",
+    "cslNotCopied": "The style could not be copied into the project folder: it is used where it is ({{path}}). If it is moved, or the project goes to another computer, the export will say it is missing.",
     "cslRemoveError": "Error removing CSL path",
     "openInFinder": "Open in file manager",
     "openFolderError": "The project folder could not be opened.",
@@ -482,7 +483,11 @@
       "wholeBook_other": "Whole book ({{count}} parts)",
       "currentChapter": "This chapter only (working draft)"
     },
-    "manuscriptUnreadable": "Could not read {{file}}. Check that the file exists in the project."
+    "manuscriptUnreadable": "Could not read {{file}}. Check that the file exists in the project.",
+    "cslMissing": "The citation style set in the project settings was not found ({{file}}): it was not applied to this document. Choose it again in the project settings.",
+    "cslDependent": "The citation style set in the project settings ({{file}}) depends on another style, its parent style, which only Pandoc can fetch: it was not applied to this document, whose citations remain as keys. Install Pandoc, or choose the parent style in the project settings.",
+    "cslUnreadable": "The citation style set in the project settings ({{file}}) could not be read: it was not applied to this document, whose citations remain as keys. Check the file, or choose another style in the project settings.",
+    "cslNumeric": "The citation style set in the project settings ({{file}}) numbers its references, and without Pandoc ClioDeck cannot number them: it was not applied to this document, whose citations remain as keys. Install Pandoc, or choose a style without numbers in the project settings."
   },
   "rag": {
     "title": "RAG Configuration",

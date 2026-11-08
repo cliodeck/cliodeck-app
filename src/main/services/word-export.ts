@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
-import { join, dirname, extname, isAbsolute } from 'path';
+import { join, dirname, extname } from 'path';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -21,7 +21,7 @@ import {
   ORDERED_LIST_NUMBERING,
   type BlockChild,
 } from './word-markdown.js';
-import { CitationEngine } from '../../../backend/core/citation/CitationEngine.js';
+import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
 import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
@@ -35,6 +35,7 @@ import {
   type ExportResult,
 } from './export-time-limit.js';
 import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
+import { resolveProjectBibliography, resolveProjectCsl } from './export-project-files.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // @ts-ignore - No type definitions available
@@ -134,6 +135,15 @@ export interface WordExportResult extends ExportResult {
    * seule façon que l'auteur l'apprenne avant son relecteur.
    */
   unresolvedCitations?: string[];
+  /**
+   * Sans pandoc : le style CSL du projet, présent, que le moteur interne ne
+   * sait pas appliquer (`dependent` : style « dépendant », dont seul pandoc
+   * va chercher le parent ; `unreadable` : style qu'il ne lit pas ;
+   * `numeric` : style qui numérote ses références, ce que le moteur, qui rend
+   * chaque groupe à part, ne sait pas faire). Les citations restent sous
+   * forme de clés ; la modale le dit.
+   */
+  unusableCsl?: { path: string; reason: StyleProblem };
 }
 
 /**
@@ -268,12 +278,8 @@ export class WordExportService {
         const engineCsl = options.citation?.useEngine
           ? new CitationEngine().stylePath(options.citation.style ?? 'chicago-note-bibliography')
           : undefined;
-        // `project.json` enregistre un chemin relatif au projet.
-        const projectCsl =
-          options.cslPath && !isAbsolute(options.cslPath)
-            ? join(options.projectPath, options.cslPath)
-            : options.cslPath;
-        const cslPath = engineCsl ?? projectCsl;
+        // CSL du projet : résolu en absolu par `runExport`, absent s'il manque.
+        const cslPath = engineCsl ?? options.cslPath;
         if (cslPath && (await pathExists(cslPath))) {
           pandocArgs.push('--csl', cslPath);
           console.log('📚 Using CSL style:', cslPath);
@@ -380,6 +386,20 @@ export class WordExportService {
         progress: 10,
       });
 
+      // Bibliographie et style du projet relus ici, et non pris dans l'état du
+      // renderer, figé à l'ouverture : un `.bib` importé pendant la séance
+      // envoyait l'export au générateur interne, qui ignorait le style.
+      const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
+      options = {
+        ...options,
+        bibliographyPath: await resolveProjectBibliography(options.projectPath, options.bibliographyPath),
+        cslPath: projectCsl.path,
+      };
+      // Case « style intégré » cochée, le style du projet n'est pas demandé :
+      // son absence n'a rien à dire.
+      const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
+      if (missingCsl) console.warn('⚠️ word-export: style CSL du projet introuvable:', missingCsl);
+
       // Load abstract if needed
       let abstract = options.metadata?.abstract;
       let abstractTitle = 'Résumé';
@@ -445,11 +465,11 @@ export class WordExportService {
       const hasBibliography =
         options.bibliographyPath && (await pathExists(options.bibliographyPath));
       const hasPandoc = await this.checkPandoc();
-      const useEnginePipeline = !!options.citation?.useEngine;
 
       if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
-        return await this.exportWithPandoc(options, outputPath, onProgress, clock);
+        const result = await this.exportWithPandoc(options, outputPath, onProgress, clock);
+        return result.success && missingCsl ? { ...result, missingCsl } : result;
       }
 
       if (hasBibliography && !hasPandoc) {
@@ -468,18 +488,52 @@ export class WordExportService {
       // into FootnoteReferenceRuns.
       // L'assemblage du manuscrit a déjà eu lieu plus haut (avant le
       // branchement pandoc) : options.content est le flux complet.
+      // Même choix du style que sur le chemin pandoc : case cochée, le style
+      // intégré ; décochée, celui du projet. Le moteur ne tournait que case
+      // cochée, et le .docx gardait les clés malgré le style du projet.
       let sourceMarkdown = options.content;
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       let unresolvedCitations: string[] = [];
-      if (useEnginePipeline) {
+      let unusableCsl: WordExportResult['unusableCsl'];
+      const locale = options.citation?.locale ?? 'fr-FR';
+      const engine = new CitationEngine();
+      let engineStyle = options.citation?.useEngine
+        ? (options.citation.style ?? 'chicago-note-bibliography')
+        : undefined;
+      // Le style du projet, seulement avec une bibliographie, comme pandoc
+      // qui n'applique `--csl` qu'avec `--bibliography`. Sans elle, le moteur
+      // résolvait les clés dans la bibliographie restée en mémoire, celle
+      // d'un autre projet peut-être (S07-1-31) : les clés restent.
+      const projectStyle =
+        options.citation?.useEngine || !hasBibliography ? undefined : options.cslPath;
+      if (projectStyle) {
+        // Lu ici, sans bloquer : le moteur ne lit lui-même que les styles
+        // embarqués. Un style qu'il ne sait pas appliquer n'est pas tenté :
+        // dépendant ou illisible, il remplaçait chaque clé par
+        // `[NO_PRINTED_FORM]` ; numéroté, il imprimait `[1]` partout, qui
+        // renvoyait à la première référence de la liste. Sans un mot.
+        const reason = await readFile(projectStyle, 'utf-8').then(
+          (xml) => {
+            engine.registerStyle(projectStyle, xml);
+            return engine.styleProblem(projectStyle, locale);
+          },
+          () => 'unreadable' as const
+        );
+        if (reason) {
+          unusableCsl = { path: projectStyle, reason };
+          console.warn(`⚠️ word-export: style CSL du projet inapplicable sans pandoc (${reason}):`, projectStyle);
+        } else {
+          engineStyle = projectStyle;
+        }
+      }
+      if (engineStyle) {
         try {
-          const style = options.citation?.style ?? 'chicago-note-bibliography';
-          const locale = options.citation?.locale ?? 'fr-FR';
           const processed = await processMarkdownCitations(sourceMarkdown, {
-            style,
+            style: engineStyle,
             locale,
             resolve: (key) => bibliographyService.getByCitationKey(key),
+            engine,
           });
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
@@ -784,6 +838,8 @@ export class WordExportService {
         success: true,
         outputPath,
         ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
+        ...(missingCsl ? { missingCsl } : {}),
+        ...(unusableCsl ? { unusableCsl } : {}),
       };
     } catch (error: unknown) {
       console.error('❌ Word export failed:', error);

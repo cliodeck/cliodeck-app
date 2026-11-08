@@ -859,7 +859,7 @@ describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', (
         const { cslPath } = optionalFiles();
         const bibliographyPath = bibliography;
 
-        await pdfExportService.exportToPDF(
+        const withCsl = await pdfExportService.exportToPDF(
           { ...pdfOptions(), cslPath, bibliographyPath },
           undefined,
           LIMIT
@@ -867,17 +867,20 @@ describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', (
         expect(args()).toContain('--bibliography');
         expect(args()).toContain('--csl');
         expect(args()).toContain('Un résumé.');
+        expect(withCsl).not.toHaveProperty('missingCsl');
 
         // Le CSL ne compte qu'avec une bibliographie : d'abord lui seul.
+        // Absent, il n'est plus écarté en silence (BT1-4) : l'export le dit.
         rmSync(join(root, 'arguments'));
         rmSync(cslPath);
-        await pdfExportService.exportToPDF(
+        const withoutCsl = await pdfExportService.exportToPDF(
           { ...pdfOptions(), cslPath, bibliographyPath },
           undefined,
           LIMIT
         );
         expect(args()).toContain('--bibliography');
         expect(args()).not.toContain('--csl');
+        expect(withoutCsl).toMatchObject({ success: true, missingCsl: cslPath });
 
         rmSync(join(root, 'arguments'));
         rmSync(bibliographyPath);
@@ -906,9 +909,10 @@ describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', (
 
         rmSync(join(root, 'arguments'));
         rmSync(cslPath);
-        await pdfExportService.exportToPDF(options, undefined, LIMIT);
+        const withoutCsl = await pdfExportService.exportToPDF(options, undefined, LIMIT);
         expect(args()).toContain('--citeproc');
         expect(args()).not.toContain('--csl');
+        expect(withoutCsl).toMatchObject({ success: true, missingCsl: cslPath });
 
         // Sans bibliographie sur le disque, plus de citeproc par chapitre.
         rmSync(join(root, 'appels'));

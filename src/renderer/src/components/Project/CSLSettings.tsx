@@ -63,6 +63,11 @@ export const CSLSettings: React.FC<CSLSettingsProps> = ({
       const finalPath = result.cslPath || path;
       setCSLPath(finalPath);
       onCSLChange?.(finalPath);
+      // La copie dans le projet a échoué : le style s'applique depuis sa place,
+      // et ne suivra pas le projet. L'auteur doit le savoir.
+      if (result.notCopied) {
+        void useDialogStore.getState().showAlert(t('project.cslNotCopied', { path: finalPath }));
+      }
 
       console.log('✅ CSL path saved:', finalPath);
     } catch (error: unknown) {

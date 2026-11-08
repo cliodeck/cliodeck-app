@@ -81,3 +81,79 @@ describe('CitationEngine', () => {
     ]);
   });
 });
+
+/**
+ * BT1-4 : un style du projet que le moteur ne sait pas appliquer se reconnaît
+ * avant de rendre le document, qui gardait sinon `[NO_PRINTED_FORM]` à la
+ * place de chaque citation. Styles écrits ici : aucun téléchargement.
+ */
+describe('CitationEngine.styleProblem', () => {
+  const info = '<info><title>Essai</title><id>http://cliodeck.invalid/essai</id></info>';
+  const style = (body: string, head = info) =>
+    `<?xml version="1.0" encoding="utf-8"?>\n<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">${head}${body}</style>`;
+
+  it('un style embarqué ou complet : rien à redire', () => {
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'complet',
+      style('<citation><layout><names variable="author"><name/></names></layout></citation>')
+    );
+    expect(engine.styleProblem('chicago-note-bibliography', 'fr-FR')).toBeUndefined();
+    expect(engine.styleProblem('complet', 'fr-FR')).toBeUndefined();
+  });
+
+  it('un style dépendant, qui renvoie à son parent', () => {
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'dependant',
+      style(
+        '',
+        '<info><title>Revue</title><id>x</id><link href="http://cliodeck.invalid/parent" rel="independent-parent"/></info>'
+      )
+    );
+    expect(engine.styleProblem('dependant', 'fr-FR')).toBe('dependent');
+  });
+
+  it('un style sans citation, ou que citeproc-js ne lit pas', () => {
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle('sans-citation', style('<bibliography><layout><text variable="title"/></layout></bibliography>'));
+    engine.registerStyle('pas-du-xml', 'ceci n’est pas un style');
+    expect(engine.styleProblem('sans-citation', 'fr-FR')).toBe('unreadable');
+    expect(engine.styleProblem('pas-du-xml', 'fr-FR')).toBe('unreadable');
+  });
+
+  it('les styles embarqués ne numérotent pas', () => {
+    const engine = new CitationEngine(resourcesRoot);
+    expect(engine.styleProblem('modern-language-association', 'fr-FR')).toBeUndefined();
+    expect(engine.styleProblem('chicago-note-bibliography', 'en-US')).toBeUndefined();
+  });
+
+  it('un style qui numérote ses références, comme IEEE', () => {
+    // Chaque groupe est rendu à part : chaque citation y serait « [1] ».
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'numerote',
+      style(
+        '<citation><layout prefix="[" suffix="]"><text variable="citation-number"/></layout></citation>' +
+          '<bibliography><layout><text variable="citation-number"/></layout></bibliography>'
+      )
+    );
+    expect(engine.styleProblem('numerote', 'fr-FR')).toBe('numeric');
+  });
+
+  it('un style qui numérote par une macro, dans l’ordre alphabétique décroissant', () => {
+    // Le numéro ne se lit pas dans `<citation>`, et la référence citée la
+    // première peut recevoir le numéro 2 : seul l'essai le voit.
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'numerote-macro',
+      style(
+        '<macro name="numero"><text variable="citation-number"/></macro>' +
+          '<citation><layout prefix="(" suffix=")"><text macro="numero"/></layout></citation>' +
+          '<bibliography><sort><key variable="author" sort="descending"/></sort>' +
+          '<layout><text variable="citation-number"/></layout></bibliography>'
+      )
+    );
+    expect(engine.styleProblem('numerote-macro', 'fr-FR')).toBe('numeric');
+  });
+});

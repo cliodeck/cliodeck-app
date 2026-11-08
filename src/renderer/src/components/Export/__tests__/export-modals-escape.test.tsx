@@ -58,6 +58,8 @@ interface ExportOutcome {
   errorCode?: string;
   timeLimitMinutes?: number;
   unresolvedCitations?: string[];
+  missingCsl?: string;
+  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' | 'numeric' };
 }
 
 type ExportModal = React.FC<{ isOpen: boolean; onClose: () => void }>;
@@ -608,4 +610,53 @@ it('le menu « Bibliographie » pendant un export Word ne fait pas perdre les ci
   finish({ success: true, unresolvedCitations: ['absente'] });
 
   expect(await screen.findByTestId('word-export-unresolved')).toBeInTheDocument();
+});
+
+/**
+ * BT1-4 : le style CSL du projet introuvable n'est plus écarté en silence. Le
+ * document est écrit, sans ce style : la modale reste ouverte pour le dire,
+ * comme pour les citations non résolues.
+ */
+describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
+  'modale d’export $name : style du projet introuvable',
+  ({ Modal, exportLabel, exportingLabel }) => {
+    it('le dit, et reste ouverte', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const finish = installElectron();
+      const onClose = vi.fn();
+      render(<Host Modal={Modal} onClose={onClose} />);
+      await startExport(exportLabel, exportingLabel);
+
+      finish({ success: true, missingCsl: '/tmp/demo/style.csl' });
+
+      expect(await screen.findByTestId('export-csl-missing')).toHaveTextContent('export.cslMissing');
+      await advance(10_000);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  }
+);
+
+/**
+ * BT1-4, revue : sans pandoc, un style du projet que le moteur interne ne sait
+ * pas appliquer (dépendant, illisible, numéroté) n'est pas tenté. Le document garde ses
+ * clés ; la modale dit pourquoi, et reste ouverte.
+ */
+describe.each([
+  { reason: 'dependent' as const, key: 'export.cslDependent' },
+  { reason: 'unreadable' as const, key: 'export.cslUnreadable' },
+  { reason: 'numeric' as const, key: 'export.cslNumeric' },
+])('modale d’export Word : style du projet inapplicable ($reason)', ({ reason, key }) => {
+  it('le dit, et reste ouverte', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    const onClose = vi.fn();
+    render(<Host Modal={WordExportModal} onClose={onClose} />);
+    await startExport('export.word.export', 'export.word.exporting');
+
+    finish({ success: true, unusableCsl: { path: '/tmp/demo/revue.csl', reason } });
+
+    expect(await screen.findByTestId('export-csl-unusable')).toHaveTextContent(key);
+    await advance(10_000);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

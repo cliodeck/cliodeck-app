@@ -16,6 +16,7 @@ import {
   type ExportResult,
 } from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
+import { resolveProjectCsl } from './export-project-files.js';
 import {
   type BeamerConfig,
   buildBeamerCustomizations,
@@ -606,6 +607,15 @@ export class PDFExportService {
 
       onProgress?.({ stage: 'preparing', message: 'Préparation des fichiers...', progress: 20 });
 
+      // Style du projet : résolu contre le projet (un chemin relatif était
+      // cherché dans le dossier courant), et son absence se dit au lieu
+      // d'écarter `--csl` en silence. Case « style intégré » cochée, il n'est
+      // pas demandé.
+      const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
+      options = { ...options, cslPath: projectCsl.path };
+      const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
+      if (missingCsl) console.warn('⚠️ pdf-export: style CSL du projet introuvable:', missingCsl);
+
       // Try to load abstract from abstract.md if no abstract in metadata
       let abstract = options.metadata?.abstract;
       if (!abstract && (options.projectType === 'article' || options.projectType === 'book')) {
@@ -825,7 +835,7 @@ export class PDFExportService {
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 
       console.log('✅ PDF exported successfully:', outputPath);
-      return { success: true, outputPath };
+      return { success: true, outputPath, ...(missingCsl ? { missingCsl } : {}) };
     } catch (error: unknown) {
       console.error('❌ PDF export failed:', error);
       return {

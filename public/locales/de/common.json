@@ -382,6 +382,7 @@
     "cslHelp": "Die CSL-Datei definiert das Zitat- und Literaturverzeichnisformat in PDF- und Word-Exporten",
     "cslSelectError": "Fehler beim Auswählen der CSL-Datei",
     "cslSaveError": "Fehler beim Speichern des CSL-Pfads",
+    "cslNotCopied": "Der Stil konnte nicht in den Projektordner kopiert werden: Er wird an seinem Speicherort verwendet ({{path}}). Wird er verschoben oder kommt das Projekt auf einen anderen Computer, meldet der Export, dass er fehlt.",
     "cslRemoveError": "Fehler beim Entfernen des CSL-Pfads",
     "openInFinder": "Im Dateimanager öffnen",
     "openFolderError": "Der Projektordner konnte nicht geöffnet werden.",
@@ -482,7 +483,11 @@
       "wholeBook_other": "Ganzes Buch ({{count}} Teile)",
       "currentChapter": "Nur dieses Kapitel (Arbeitsfassung)"
     },
-    "manuscriptUnreadable": "{{file}} konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist."
+    "manuscriptUnreadable": "{{file}} konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
+    "cslMissing": "Der in den Projekteinstellungen festgelegte Zitierstil wurde nicht gefunden ({{file}}): Er wurde auf dieses Dokument nicht angewendet. Wählen Sie ihn in den Projekteinstellungen erneut aus.",
+    "cslDependent": "Der in den Projekteinstellungen festgelegte Zitierstil ({{file}}) hängt von einem anderen Stil ab, seinem übergeordneten Stil, den nur Pandoc abrufen kann: Er wurde auf dieses Dokument nicht angewendet, die Zitate bleiben als Zitierschlüssel stehen. Installieren Sie Pandoc oder wählen Sie den übergeordneten Stil in den Projekteinstellungen.",
+    "cslUnreadable": "Der in den Projekteinstellungen festgelegte Zitierstil ({{file}}) konnte nicht gelesen werden: Er wurde auf dieses Dokument nicht angewendet, die Zitate bleiben als Zitierschlüssel stehen. Prüfen Sie die Datei oder wählen Sie einen anderen Stil in den Projekteinstellungen.",
+    "cslNumeric": "Der in den Projekteinstellungen festgelegte Zitierstil ({{file}}) nummeriert seine Quellen, und ohne Pandoc kann ClioDeck sie nicht nummerieren: Er wurde auf dieses Dokument nicht angewendet, die Zitate bleiben als Zitierschlüssel stehen. Installieren Sie Pandoc oder wählen Sie in den Projekteinstellungen einen Stil ohne Nummern."
   },
   "rag": {
     "title": "RAG-Konfiguration",

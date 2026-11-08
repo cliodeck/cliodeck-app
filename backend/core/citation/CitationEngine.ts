@@ -42,6 +42,25 @@ export interface FormatResult {
 type Locale = string;
 type StyleId = string; // filename without .csl
 
+/** Notices fictives de {@link CitationEngine.styleProblem}. */
+const STYLE_PROBE_ITEM: CSLItem = {
+  id: 'cliodeck-style-probe',
+  type: 'book',
+  title: 'Essai',
+  author: [{ family: 'Essai', given: 'A.' }],
+  issued: { 'date-parts': [[2000]] },
+};
+const STYLE_PROBE_OTHER: CSLItem = {
+  id: 'cliodeck-style-probe-2',
+  type: 'book',
+  title: 'Second essai',
+  author: [{ family: 'Witt', given: 'Z.' }],
+  issued: { 'date-parts': [[2001]] },
+};
+
+/** Ce qui empêche un style de rendre les citations du moteur interne. */
+export type StyleProblem = 'dependent' | 'unreadable' | 'numeric';
+
 /**
  * Dossier `resources/csl` par défaut.
  *
@@ -100,6 +119,54 @@ export class CitationEngine {
    */
   isNoteStyle(styleId: StyleId): boolean {
     return /<style\b[^>]*\bclass="note"/.test(this.loadStyle(styleId));
+  }
+
+  /**
+   * Style lu par l'appelant, sous l'identifiant qu'il lui donne : le CSL des
+   * paramètres du projet. Le moteur ne lit lui-même que les styles embarqués,
+   * et de façon synchrone ; un fichier du projet se lit sans bloquer, un
+   * disque qui ne répond plus ne doit pas geler le processus principal.
+   */
+  registerStyle(styleId: StyleId, xml: string): void {
+    this.styleCache.set(styleId, xml);
+  }
+
+  /**
+   * Ce qui empêche ce style de rendre une citation, ou `undefined`.
+   *
+   * - `dependent` : un style « dépendant » (`<link rel="independent-parent">`,
+   *   la plupart des styles de revue du dépôt Zotero) ne fait que renvoyer à
+   *   son parent. Pandoc va chercher ce parent en ligne ; citeproc-js rend
+   *   `[NO_PRINTED_FORM]` à la place de chaque citation.
+   * - `unreadable` : citeproc-js n'en tire aucune citation (XML qu'il ne lit
+   *   pas, style sans `<citation>`).
+   * - `numeric` : le rendu d'une citation dépend des autres références du
+   *   document, comme le numéro d'un style IEEE, Nature ou Vancouver. Le
+   *   pipeline rend chaque groupe dans un moteur neuf (un appel à
+   *   {@link formatCitation} par groupe) : chaque citation y recevait le
+   *   numéro 1, alors que la bibliographie numérote 1, 2… Ginzburg imprimé
+   *   `[1]` renvoyait à Farge. Tant que tout le document ne passe pas par un
+   *   seul moteur (L05-19), un tel style n'est pas tenté.
+   *
+   * Essai sur des notices fictives, avant de rendre le document : sans lui, un
+   * export remplaçait chaque clé par `[NO_PRINTED_FORM]`, ou par un numéro
+   * faux, et se disait réussi. Le numéro peut venir d'une macro, et la
+   * bibliographie peut trier les références à rebours : seul l'essai le voit,
+   * en comparant chaque notice rendue seule et rendue à côté de l'autre.
+   */
+  styleProblem(styleId: StyleId, locale: Locale = 'en-US'): StyleProblem | undefined {
+    try {
+      if (/<link\b[^>]*\brel\s*=\s*["']independent-parent["']/.test(this.loadStyle(styleId))) {
+        return 'dependent';
+      }
+      const [alone] = this.formatCitation([STYLE_PROBE_ITEM], styleId, locale).footnotes;
+      if (!alone || alone.includes('NO_PRINTED_FORM')) return 'unreadable';
+      const [otherAlone] = this.formatCitation([STYLE_PROBE_OTHER], styleId, locale).footnotes;
+      const together = this.formatCitation([STYLE_PROBE_ITEM, STYLE_PROBE_OTHER], styleId, locale).footnotes;
+      return together[0] !== alone || together[1] !== otherAlone ? 'numeric' : undefined;
+    } catch {
+      return 'unreadable';
+    }
   }
 
   /** List available styles (files ending in .csl). */

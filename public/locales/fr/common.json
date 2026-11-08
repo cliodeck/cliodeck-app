@@ -382,6 +382,7 @@
     "cslHelp": "Le fichier CSL définit le format des citations et de la bibliographie dans les exports PDF et Word",
     "cslSelectError": "Erreur lors de la sélection du fichier CSL",
     "cslSaveError": "Erreur lors de la sauvegarde du chemin CSL",
+    "cslNotCopied": "Le style n’a pas pu être copié dans le dossier du projet : il est utilisé là où il se trouve ({{path}}). S’il est déplacé, ou si le projet change d’ordinateur, l’export dira qu’il manque.",
     "cslRemoveError": "Erreur lors de la suppression du chemin CSL",
     "openInFinder": "Ouvrir dans le gestionnaire de fichiers",
     "openFolderError": "Le dossier du projet n'a pas pu être ouvert.",
@@ -482,7 +483,11 @@
       "wholeBook_other": "Tout le livre ({{count}} pièces)",
       "currentChapter": "Ce chapitre seul (tirage de travail)"
     },
-    "manuscriptUnreadable": "Impossible de lire {{file}}. Vérifiez que le fichier existe dans le projet."
+    "manuscriptUnreadable": "Impossible de lire {{file}}. Vérifiez que le fichier existe dans le projet.",
+    "cslMissing": "Le style de citation des paramètres du projet est introuvable ({{file}}) : il n’a pas été appliqué à ce document. Choisissez-le de nouveau dans les paramètres du projet.",
+    "cslDependent": "Le style de citation des paramètres du projet ({{file}}) dépend d’un autre style, son style parent, que seul Pandoc sait aller chercher : il n’a pas été appliqué à ce document, dont les citations restent sous forme de clés. Installez Pandoc, ou choisissez le style parent dans les paramètres du projet.",
+    "cslUnreadable": "Le style de citation des paramètres du projet ({{file}}) n’a pas pu être lu : il n’a pas été appliqué à ce document, dont les citations restent sous forme de clés. Vérifiez le fichier, ou choisissez un autre style dans les paramètres du projet.",
+    "cslNumeric": "Le style de citation des paramètres du projet ({{file}}) numérote ses références, et sans Pandoc ClioDeck ne sait pas les numéroter : il n’a pas été appliqué à ce document, dont les citations restent sous forme de clés. Installez Pandoc, ou choisissez un style sans numéros dans les paramètres du projet."
   },
   "rag": {
     "title": "Configuration RAG",
