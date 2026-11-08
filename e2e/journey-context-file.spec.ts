@@ -214,6 +214,57 @@ test('context.md ouvert dans l’éditeur : le paragraphe des Réglages survit �
   }
 });
 
+/**
+ * C38 (BT1-2) : le rechargement recréait la vue en haut du fichier. Sur un `context.md` de
+ * plusieurs écrans, le paragraphe ajouté à la fin restait hors de l'écran : « l'éditeur ne montre
+ * pas le nouveau paragraphe ». `toContainText` ne le voyait pas sur un fichier de sept lignes.
+ */
+test('long context.md ouvert et défilé en bas : le paragraphe des Réglages est à l’écran, et la frappe suivante le garde', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const long = `# Danzig\n\n${Array.from({ length: 80 }, (_, i) => `Consigne ${i + 1}.`).join('\n')}\n`;
+  const project = makeProject(long);
+
+  try {
+    await openProject(app, window, project.projectJson);
+    await window.locator('.project-file-item', { hasText: 'context.md' }).click();
+    const editor = window.locator('.codemirror-editor .cm-content');
+    await expect(editor).toContainText('Consigne 1.');
+    await editor.click();
+    await window.keyboard.press('ControlOrMeta+End');
+    await expect(window.locator('.codemirror-editor .cm-line', { hasText: 'Consigne 80.' })).toBeInViewport();
+
+    await openContextSettings(window);
+    await typeAtEndOfZone(window, `\n${PARAGRAPH}\n`);
+    await saveButton(window).click();
+    await expect(window.locator('.settings-content')).toContainText('enregistré');
+    const added = window.locator('.codemirror-editor .cm-line', { hasText: PARAGRAPH });
+    await expect(added).toBeInViewport();
+    // Les Paramètres sont encore ouverts : une frappe n'a pas à partir dans l'éditeur, derrière eux.
+    await expect(editor).not.toBeFocused();
+
+    await window.keyboard.press('Escape');
+    await expect(window.locator('.settings-content')).toHaveCount(0);
+    await expect(added).toBeInViewport();
+    await added.click();
+    await window.keyboard.type('Z');
+
+    // L'autosave est passé quand la lettre est sur le disque : c'est elle qu'on attend.
+    await expect.poll(() => readFileSync(project.contextMd, 'utf8'), { timeout: 20_000 }).toContain('Z');
+    const written = readFileSync(project.contextMd, 'utf8');
+    expect(written.startsWith(long)).toBe(true);
+    expect(written).toContain(PARAGRAPH);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(project.dir, { recursive: true, force: true });
+  }
+});
+
 test('modifié ailleurs depuis l’ouverture des Réglages : conflit, fichier inchangé, texte de la zone gardé', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {

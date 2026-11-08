@@ -300,7 +300,7 @@ function createFacade(
       });
       return true;
     },
-    revealLine: (lineNumber) => {
+    revealLine: (lineNumber, options) => {
       cancelScrollRestore();
       const line = view.state.doc.line(
         Math.max(1, Math.min(lineNumber, view.state.doc.lines))
@@ -309,7 +309,7 @@ function createFacade(
         selection: EditorSelection.cursor(line.from),
         effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
       });
-      view.focus();
+      if (options?.focus !== false) view.focus();
     },
     focus: () => view.focus(),
     onContentChange: (callback) => {

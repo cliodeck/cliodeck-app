@@ -84,8 +84,12 @@ export interface EditorFacade {
    */
   propose(proposal: Partial<Proposal>): boolean;
 
-  /** Fait défiler jusqu'à la ligne (1-indexée), y place le curseur, focus. */
-  revealLine(lineNumber: number): void;
+  /**
+   * Fait défiler jusqu'à la ligne (1-indexée), y place le curseur, focus. Sans le focus si
+   * `focus: false` : une fenêtre encore ouverte par-dessus l'éditeur garde la main, et une
+   * frappe ne part pas derrière elle.
+   */
+  revealLine(lineNumber: number, options?: { focus?: boolean }): void;
 
   focus(): void;
 

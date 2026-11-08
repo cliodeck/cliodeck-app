@@ -16,7 +16,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { installMain, main, passage } from './helpers/real-main';
+import { installMain, ipc, main, passage } from './helpers/real-main';
 import { rememberConsentedPath } from '../../../../main/ipc/utils/user-consented-paths';
 import { CONTEXT_TEMPLATE } from '../../../../../backend/core/hints/loader';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards';
@@ -433,6 +433,115 @@ describe('une frappe pendant la séquence ne se perd pas', () => {
     expect(disk()).toBe(ORIGINAL);
     expect(currentView().state.doc.toString()).toBe(`${ORIGINAL}K`);
     expect(editor().isDirty).toBe(true);
+  });
+});
+
+/**
+ * Les `times` prochaines lectures de l'éditeur sont périmées à leur arrivée : un verrou se pose
+ * et se lève pendant qu'elles lisent, comme une renumérotation éclair. `loadFile` rend alors
+ * `superseded`, sans avoir rien remplacé.
+ */
+function supersedeNextLoads(times: number): void {
+  let left = times;
+  passage.editorLoad = async (filePath) => {
+    const response = await ipc('editor:load-file', filePath);
+    if (left > 0) {
+      left -= 1;
+      act(() => {
+        editor().setSwitchLock('book.renumberInProgress');
+        editor().setSwitchLock(null);
+      });
+    }
+    return response;
+  };
+}
+
+/**
+ * Le rechargement qui suit l'écriture n'a pas abouti, et l'éditeur montre toujours ce fichier
+ * (BT1-2, C38). Il passait pour suivi : l'ancien texte restait à l'écran, propre, et la frappe
+ * suivante l'écrivait par-dessus le paragraphe des Réglages, sans un mot.
+ */
+describe('le rechargement n’aboutit pas, et l’éditeur montre toujours context.md', () => {
+  it('remplacé une fois pendant sa lecture : relu, et la frappe suivante garde le paragraphe', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    supersedeNextLoads(1);
+
+    const saved = await saveOver(hints);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(`${WITH_PARAGRAPH}x`);
+    expect(currentView().state.doc.toString()).toBe(`${WITH_PARAGRAPH}x`);
+  });
+
+  it('remplacé encore à la relecture : le conflit se dit, et rien ne reste à écrire par-dessus en silence', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    supersedeNextLoads(2);
+
+    const saved = await saveOver(hints);
+
+    expect(saved).toMatchObject({ success: false, error: 'context_conflict' });
+    // Le disque porte ce que l'éditeur montre : la frappe suivante n'efface rien que la section
+    // ait annoncé comme enregistré, et le texte des Réglages est resté dans leur zone.
+    expect(disk()).toBe(currentView().state.doc.toString());
+    expect(editor().isDirty).toBe(false);
+  });
+
+  it('ouvert sous une autre casse puis supprimé dehors : reconnu une fois écrit, et la frappe suivante garde le paragraphe', async () => {
+    const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
+    if (!fs.existsSync(shouted)) return; // Ce disque distingue la casse : deux fichiers, rien à prouver.
+    await rememberConsentedPath(shouted);
+    await open(shouted);
+    await mountEditor();
+    fs.rmSync(contextMd);
+    // Un fichier absent n'a pas de chemin réel : la lecture ne voit pas que l'éditeur le tient.
+    const hints = await read();
+    expect(hints.sources.context.blank).toBe(true);
+
+    const saved = await saveOver(hints);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(`${WITH_PARAGRAPH}x`);
+  });
+});
+
+/**
+ * Le rechargement recrée la vue en haut du fichier : le paragraphe ajouté à la fin d'un long
+ * `context.md` restait hors de l'écran, et l'éditeur semblait ne pas l'avoir (BT1-2, C38).
+ */
+describe('après le rechargement, la première ligne changée est amenée à l’écran', () => {
+  const LONG = `# Contexte\n\n${Array.from({ length: 80 }, (_, i) => `Ligne ${i + 1} des consignes.`).join('\n')}\n`;
+  const ADDED = 'Paragraphe des Réglages.';
+
+  it('le curseur est sur la ligne ajoutée, et le focus reste où il était', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    // La zone des Réglages, par-dessus l'éditeur : elle garde le focus.
+    const zone = document.body.appendChild(document.createElement('textarea'));
+    zone.focus();
+
+    const saved = await saveOver(hints, `${LONG}\n${ADDED}\n`);
+
+    expect(saved.success).toBe(true);
+    await vi.waitFor(() => {
+      const { state } = currentView();
+      expect(state.doc.lineAt(state.selection.main.head).text).toBe(ADDED);
+    }, DEADLINE);
+    expect(document.activeElement).toBe(zone);
+    zone.remove();
   });
 });
 
