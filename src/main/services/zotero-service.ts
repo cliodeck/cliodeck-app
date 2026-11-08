@@ -27,6 +27,7 @@ import {
 } from '../../../backend/services/BibliographyMetadataService.js';
 import { readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
 import type { BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
+import { fromStoredPath } from '../../../backend/core/bibliography/stored-path.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
 import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import type { Citation } from '../../../backend/types/citation.js';
@@ -288,6 +289,7 @@ class ZoteroService {
           collectionKey: options.collectionKey,
           savedCollectionKey,
           confirmation: options.confirmation,
+          bibDir: path.dirname(bibtexPath),
         });
 
         if (result.status === 'needs-confirmation') {
@@ -446,7 +448,7 @@ async function readLocalBibliography(bibtexPath: string, projectPath: string): P
     throw new BibUnreadError(bibtexPath, read);
   }
   const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
-  return BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], metadata);
+  return BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], metadata, projectPath);
 }
 
 /**
@@ -615,7 +617,8 @@ async function downloadedAttachmentOwners(projectPath: string): Promise<Attachme
   for (const entry of Object.values(metadata?.citations ?? {})) {
     for (const attachment of entry.zoteroAttachments ?? []) {
       if (attachment.downloaded && attachment.localPath) {
-        owners.push({ attachmentKey: attachment.key, localPath: attachment.localPath });
+        // Rangé relatif au projet, ou absolu d'un projet depuis renommé (S07-2-1).
+        owners.push({ attachmentKey: attachment.key, localPath: fromStoredPath(attachment.localPath, projectPath) });
       }
     }
   }

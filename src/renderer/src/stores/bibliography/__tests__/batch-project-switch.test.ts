@@ -163,7 +163,7 @@ function installMain(): void {
       loadWithMetadata: vi.fn(async ({ filePath, projectPath }: { filePath: string; projectPath: string }) => {
         const citations = new BibTeXParser().parseFile(filePath);
         const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
-        return { success: true, citations: BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata) };
+        return { success: true, citations: BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata, projectPath) };
       }),
       updateAttachment: vi.fn(
         async (options: { projectPath: string; citation: Citation; attachmentKey: string; localPath: string }) => {

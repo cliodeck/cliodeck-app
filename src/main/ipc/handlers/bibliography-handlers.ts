@@ -46,6 +46,7 @@ import {
 } from '../../../../backend/core/bibliography/readingNotes.js';
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { isInsideAsync, sameFile } from '../../../../backend/core/vector-store/file-identity.js';
+import { PDF_DIR, toStoredPath } from '../../../../backend/core/bibliography/stored-path.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -383,6 +384,16 @@ export function setupBibliographyHandlers() {
       console.warn('⚠️ bibliography:update-attachment refusé : ce n\'est pas le projet ouvert');
       return errorResponse('project-changed');
     }
+    // Le chemin se range relatif au projet (S07-2-1) : il ne peut désigner qu'un PDF de `PDFs/`, où
+    // le téléchargement Zotero l'a écrit. Ailleurs, n'importe quel fichier du disque devenait le
+    // « PDF téléchargé » d'une référence.
+    if (!toStoredPath(options.localPath, options.projectPath).startsWith(`${PDF_DIR}/`)) {
+      console.warn('⚠️ bibliography:update-attachment refusé : le PDF n\'est pas dans PDFs/ du projet', options.localPath);
+      return {
+        ...errorResponse(new Error(`${path.basename(options.localPath)} n'est pas dans le dossier ${PDF_DIR} du projet.`)),
+        code: 'attachment-outside-pdfs',
+      };
+    }
     try {
       await BibliographyMetadataService.patchAttachment(
         options.projectPath,
@@ -425,7 +436,8 @@ export function setupBibliographyHandlers() {
         console.warn('⚠️ Métadonnées bibliographiques illisibles :', error.message);
         metadataUnreadable = true;
       }
-      const mergedCitations = BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata);
+      // Les chemins rangés relatifs au projet se résolvent contre lui : le panneau reçoit des chemins absolus (S07-2-1).
+      const mergedCitations = BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata, options.projectPath);
 
       console.log('📤 IPC Response: bibliography:load-with-metadata', {
         totalCitations: mergedCitations.length,

@@ -101,6 +101,11 @@ export interface SynchronizeInput {
   savedCollectionKey?: string;
   /** Accord donné sur un rapport : il ne couvre que ce que ce rapport montrait. */
   confirmation?: SyncConfirmation;
+  /**
+   * Le dossier du `.bib` qui sera écrit : le chemin d'un PDF qui s'y trouve s'y écrit relatif
+   * (S07-2-1). Absent, les chemins s'écrivent tels qu'ils sont en mémoire.
+   */
+  bibDir?: string;
 }
 
 const entry = (c: Citation): SyncEntry => ({ id: c.id, title: c.title });
@@ -174,7 +179,7 @@ export class ZoteroSynchronizer {
       status: 'applied',
       report,
       citations,
-      bibtex: new BibTeXExporter().exportToString(citations),
+      bibtex: new BibTeXExporter().exportToString(citations, { fileBaseDir: input.bibDir }),
       changed,
       items,
     };

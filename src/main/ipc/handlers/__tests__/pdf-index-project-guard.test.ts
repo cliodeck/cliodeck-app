@@ -217,8 +217,9 @@ describe('bibliography:update-attachment — le projet ouvert seulement', () => 
     expect(result.success).toBe(true);
     const citations = JSON.parse(fs.readFileSync(metadataOf(A), 'utf-8')).citations;
     expect(Object.keys(citations)).toEqual(['ZA0', 'ZB1']);
-    expect(citations.ZA0.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: path.join(A, 'PDFs', 'a0.pdf') });
-    expect(citations.ZB1.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: path.join(A, 'PDFs', 'b1.pdf') });
+    // Rangés relatifs au projet (S07-2-1).
+    expect(citations.ZA0.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: 'PDFs/a0.pdf' });
+    expect(citations.ZB1.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: 'PDFs/b1.pdf' });
   });
 
   it('métadonnées illisibles : refusé avec son code, et rien n’est écrit', async () => {

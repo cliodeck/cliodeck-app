@@ -422,6 +422,32 @@ describe('ce que le projet est seul à connaître', () => {
     ]);
   });
 
+  // Le .bib voyage (coauteurs, autre Mac) : il ne dit plus le chemin local de l'auteur, et se
+  // relit dans un projet renommé (S07-2-1).
+  it('écrit relatif au dossier du .bib le chemin d’un PDF qui s’y trouve, absolu celui d’un PDF rangé ailleurs', async () => {
+    const library: Library = {
+      collections: [collection('ARTICLE')],
+      contents: { ARTICLE: [item('AAA', { title: 'T' }), item('BBB', { title: 'U', lastName: 'Durand' })] },
+    };
+    const local = [
+      createCitation({ id: 'Dupont_2022', type: 'article', author: 'Dupont, A.', year: '2022', title: 'T', zoteroKey: 'AAA', file: '/Users/jean/These/PDFs/a.pdf' }),
+      createCitation({ id: 'Durand_2022', type: 'article', author: 'Durand, A.', year: '2022', title: 'U', zoteroKey: 'BBB', file: '/Users/jean/Zotero/storage/XY/b.pdf' }),
+    ];
+
+    const result = applied(
+      await new ZoteroSynchronizer(source(library)).synchronize({ local, collectionKey: 'ARTICLE', bibDir: '/Users/jean/These' })
+    );
+
+    expect(result.bibtex).toContain('file = {PDFs/a.pdf}');
+    expect(result.bibtex).toContain('file = {/Users/jean/Zotero/storage/XY/b.pdf}');
+    expect(result.bibtex).not.toContain('/Users/jean/These');
+    // En mémoire, le chemin reste absolu : le panneau n'en voit pas d'autre.
+    expect(result.citations.find((c) => c.id === 'Dupont_2022')?.file).toBe('/Users/jean/These/PDFs/a.pdf');
+    // Relu depuis le dossier du .bib, même renommé, il mène au PDF.
+    const reread = new BibTeXParser().parse(result.bibtex, '/Users/jean/These-2026');
+    expect(reread.find((c) => c.id === 'Dupont_2022')?.file).toBe('/Users/jean/These-2026/PDFs/a.pdf');
+  });
+
   it('ne déduit pas d’un échec de lecture que les PDF ont disparu', async () => {
     const library: Library = {
       collections: [collection('ARTICLE')],

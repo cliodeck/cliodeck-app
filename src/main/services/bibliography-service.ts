@@ -13,6 +13,7 @@ import {
 } from '../../../backend/core/fs/user-files.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import type { Citation } from '../../../backend/types/citation.js';
+import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
 import { BibliographyStatsEngine, type BibliographyStatistics } from '../../../backend/services/BibliographyStats.js';
 
 /** Le `.bib` attendu n'est pas là : ce n'est pas une bibliographie vide. */
@@ -108,9 +109,13 @@ export function mergeIntoProjectBibliography(
     if (read.kind === 'unreadable') throw new UnreadableFileError(bibtexPath, read.reason, read.message);
     if (read.kind === 'ok' && read.unreadKeys.length > 0) throw new BibNotFullyReadError(bibtexPath, read.unreadKeys);
 
-    const { merged, newCount, duplicates } = mergeCitationLists(read.kind === 'ok' ? read.citations : [], incoming);
+    // Les PDF du projet retrouvés où ils sont (projet renommé, ouvert sur un autre Mac) : la
+    // réécriture les range relatifs au `.bib` (S07-2-1).
+    const local = BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], null, projectPath);
+    const { merged, newCount, duplicates } = mergeCitationLists(local, incoming);
     if (newCount > 0 || read.kind === 'absent') {
-      await rewriteProjectBibliography(projectPath, bibtexPath, new BibTeXExporter().exportToString(merged));
+      const bibtex = new BibTeXExporter().exportToString(merged, { fileBaseDir: path.dirname(path.resolve(bibtexPath)) });
+      await rewriteProjectBibliography(projectPath, bibtexPath, bibtex);
     }
     return { newCount, duplicates };
   });

@@ -77,6 +77,8 @@ const notice: ZoteroItem = {
 };
 
 const metadataPath = () => BibliographyMetadataService.getMetadataPath(h.projectPath);
+/** Le chemin d'un PDF du projet, tel que le fichier le range : relatif au projet (S07-2-1). */
+const kept = (pdf: string) => path.relative(h.projectPath, pdf).split(path.sep).join('/');
 const attachmentsOnDisk = () =>
   (JSON.parse(fs.readFileSync(metadataPath(), 'utf-8')) as {
     citations: Record<string, { zoteroAttachments: Array<Record<string, unknown>> }>;
@@ -92,7 +94,8 @@ async function panelCitation(): Promise<Citation> {
   const fromBib: Citation = { ...fromZotero, zoteroAttachments: undefined };
   const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
     [fromBib],
-    await BibliographyMetadataService.loadMetadata(h.projectPath)
+    await BibliographyMetadataService.loadMetadata(h.projectPath),
+    h.projectPath
   );
   return JSON.parse(JSON.stringify(merged)) as Citation;
 }
@@ -136,7 +139,7 @@ describe('bibliography:update-attachment — la référence telle que Zotero l�
 
     expect(result).toMatchObject({ success: true });
     expect(attachmentsOnDisk()).toEqual([
-      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: pdf }),
+      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: kept(pdf) }),
       expect.objectContaining({ key: 'GC9BPFL6', downloaded: false, md5: null }),
     ]);
   });
@@ -148,7 +151,7 @@ describe('bibliography:update-attachment — la référence telle que Zotero l�
     const result = await updateAttachment(citation, 'GC9BPFL6', pdf);
 
     expect(result).toMatchObject({ success: true });
-    expect(attachmentsOnDisk()[1]).toMatchObject({ key: 'GC9BPFL6', downloaded: true, localPath: pdf });
+    expect(attachmentsOnDisk()[1]).toMatchObject({ key: 'GC9BPFL6', downloaded: true, localPath: kept(pdf) });
   });
 
   it('entrée absente des métadonnées, créée depuis la référence : les null n’empêchent rien', async () => {
@@ -160,7 +163,7 @@ describe('bibliography:update-attachment — la référence telle que Zotero l�
 
     expect(result).toMatchObject({ success: true });
     expect(attachmentsOnDisk()).toEqual([
-      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: pdf }),
+      expect.objectContaining({ key: 'QQBJJVQY', downloaded: true, localPath: kept(pdf) }),
       expect.objectContaining({ key: 'GC9BPFL6', downloaded: false }),
     ]);
   });
@@ -171,5 +174,35 @@ describe('bibliography:update-attachment — la référence telle que Zotero l�
     await expect(updateAttachment(citation, '../../evil', path.join(h.projectPath, 'PDFs', 'x.pdf'))).rejects.toThrow(
       /attachmentKey: Attachment key must be a Zotero key/
     );
+  });
+});
+
+/**
+ * Le chemin rattaché se range relatif au projet (S07-2-1) : il ne peut donc désigner qu'un PDF de
+ * `PDFs/`, où le téléchargement Zotero les écrit. Le main ne le vérifiait pas : n'importe quel
+ * fichier du disque pouvait devenir le « PDF téléchargé » d'une référence.
+ */
+describe('bibliography:update-attachment — le PDF rattaché est dans PDFs/ du projet', () => {
+  it('le chemin rangé est relatif au projet', async () => {
+    const citation = await panelCitation();
+
+    await updateAttachment(citation, 'QQBJJVQY', path.join(h.projectPath, 'PDFs', '2023_-_Documents_sauvegardés.pdf'));
+
+    expect(attachmentsOnDisk()[0]).toMatchObject({ downloaded: true, localPath: 'PDFs/2023_-_Documents_sauvegardés.pdf' });
+  });
+
+  it.each([
+    ['hors du projet', () => path.join(os.tmpdir(), 'ailleurs.pdf')],
+    ['à la racine du projet', () => path.join(h.projectPath, 'a.pdf')],
+    ['qui ressort de PDFs/ par « .. »', () => `${h.projectPath}/PDFs/../../a.pdf`],
+    ['dans un dossier voisin au nom prolongé', () => `${h.projectPath}-2026/PDFs/a.pdf`],
+  ])('un PDF %s est refusé, et rien n’est écrit', async (_where, localPath) => {
+    const citation = await panelCitation();
+    const before = fs.readFileSync(metadataPath(), 'utf8');
+
+    const result = await updateAttachment(citation, 'QQBJJVQY', localPath());
+
+    expect(result).toMatchObject({ success: false, code: 'attachment-outside-pdfs' });
+    expect(fs.readFileSync(metadataPath(), 'utf8')).toBe(before);
   });
 });

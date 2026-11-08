@@ -206,6 +206,35 @@ describe('« Fusionner » : la fusion est écrite dans le .bib du projet', () =>
     expect(bibliographyService.getByCitationKey('Main_2010')?.title).toBe('Une note à la main');
   });
 
+  // La fusion réécrit le .bib : un PDF du projet y passe en relatif, celui d'un collègue rangé
+  // ailleurs garde son chemin (S07-2-1).
+  it('la réécriture range relatif au .bib le PDF du projet, et garde absolu celui rangé ailleurs', async () => {
+    await openProject();
+    // Tel qu'une ancienne synchronisation l'a écrit : le chemin absolu du PDF téléchargé.
+    fs.writeFileSync(projectBib(), PROJET.replace('year = {2000},', () => `year = {2000},\n  file = {${projectDir}/PDFs/Garde.pdf},`));
+    const source = downloaded('collegue.bib', entry('Autre_2015', 'Un autre livre', '\n  file = {/Users/collegue/PDFs/Autre.pdf},'));
+
+    expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+
+    const written = fs.readFileSync(projectBib(), 'utf8');
+    expect(written).toContain('file = {PDFs/Garde.pdf}');
+    expect(written).toContain('file = {/Users/collegue/PDFs/Autre.pdf}');
+    expect(written).not.toContain(projectDir);
+  });
+
+  // Le .bib d'une ancienne synchronisation désigne encore l'ancien dossier du projet, renommé depuis.
+  it('projet renommé : la réécriture range relatif le PDF que l’ancien chemin absolu désignait', async () => {
+    await openProject();
+    fs.mkdirSync(path.join(projectDir, 'PDFs'));
+    fs.writeFileSync(path.join(projectDir, 'PDFs', 'Garde.pdf'), '%PDF-1.4');
+    fs.writeFileSync(projectBib(), PROJET.replace('year = {2000},', () => `year = {2000},\n  file = {${projectDir}-avant/PDFs/Garde.pdf},`));
+    const source = downloaded('collegue.bib', COLLEGUE);
+
+    expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+
+    expect(fs.readFileSync(projectBib(), 'utf8')).toContain('file = {PDFs/Garde.pdf}');
+  });
+
   it('projet sans bibliographie : un bibliography.bib neuf, que project.json retient', async () => {
     await openProject({ bibliographySource: null, bib: null });
     const source = downloaded('collegue.bib', COLLEGUE);
