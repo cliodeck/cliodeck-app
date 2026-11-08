@@ -208,10 +208,27 @@ for (const tab of ['Idées', 'Tableau'] as const) {
           const cards = window.locator('.ideas-canvas__card');
           await expect(cards).toHaveCount(titles.length + 1);
           // Avant, les dix revenues s'empilaient en (0,0), sous la barre d'outils, jusqu'au remontage.
-          const spots = await cards.evaluateAll((all) =>
-            all.map((card) => `${(card as HTMLElement).style.left},${(card as HTMLElement).style.top}`),
+          // Les rectangles mesurés, pas seulement des positions distinctes : deux cartes décalées de
+          // quelques pixels se recouvrent. Seulement entre les revenues : la nouvelle, posée au
+          // centre de la vue, peut en recouvrir une, la grille ignorant les cartes déjà placées.
+          const boxes = await cards.evaluateAll(
+            (all, returnedTitles) =>
+              all.flatMap((card) => {
+                const title = card.querySelector('.ideas-canvas__card-title')?.textContent ?? '';
+                if (!returnedTitles.includes(title)) return [];
+                const { left, top, right, bottom } = card.getBoundingClientRect();
+                return [{ title, left, top, right, bottom }];
+              }),
+            titles,
           );
-          expect(new Set(spots).size).toBe(titles.length + 1);
+          expect(boxes).toHaveLength(titles.length);
+          const overlapping = boxes.flatMap((a, i) =>
+            boxes
+              .slice(i + 1)
+              .filter((b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)
+              .map((b) => `${a.title} / ${b.title}`),
+          );
+          expect(overlapping).toEqual([]);
         }
         await expect(banner(window)).toContainText(backup[0]);
         expect(backups(project)).toEqual(backup);

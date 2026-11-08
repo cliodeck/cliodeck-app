@@ -287,8 +287,26 @@ describe('le fichier sain recopié à côté de sa mise de côté, pendant la se
 
     const cards = [...document.querySelectorAll<HTMLElement>('.ideas-canvas__card')];
     expect(cards).toHaveLength(returnedTitles.length + 1);
-    const spots = new Set(cards.map((card) => `${card.style.left},${card.style.top}`));
-    expect(spots.size).toBe(cards.length);
+    // Des positions distinctes ne suffisent pas : deux cartes de 200 px décalées de 10 px se
+    // recouvrent. jsdom ne mesure rien : largeur lue sur la carte, hauteur prêtée par le Tableau
+    // (CARD_HEIGHT, 120 px). Seulement entre les revenues : la nouvelle, posée au centre de la vue,
+    // peut en recouvrir une, la grille ignorant les cartes déjà placées (comme au montage).
+    const returned = cards
+      .filter((card) => returnedTitles.includes(card.querySelector('.ideas-canvas__card-title')?.textContent ?? ''))
+      .map((card) => ({
+        title: card.querySelector('.ideas-canvas__card-title')?.textContent,
+        x: parseFloat(card.style.left),
+        y: parseFloat(card.style.top),
+        width: parseFloat(card.style.width),
+      }));
+    expect(returned).toHaveLength(returnedTitles.length);
+    const overlapping = returned.flatMap((a, i) =>
+      returned
+        .slice(i + 1)
+        .filter((b) => Math.abs(a.x - b.x) < a.width && Math.abs(a.y - b.y) < 120)
+        .map((b) => `${a.title} / ${b.title}`)
+    );
+    expect(overlapping).toEqual([]);
     expect(useIdeaStore.getState().ideas.find((i) => i.id === created.id)?.position).toEqual(created.position);
     expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
     expect(backups()).toEqual(backup);
