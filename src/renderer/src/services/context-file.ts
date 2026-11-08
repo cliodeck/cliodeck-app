@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { detectLineSeparator } from '@/editor/cm/fidelity';
-import { useEditorStore, writeOpenDocumentWhileDirty } from '../stores/editorStore';
+import { bufferRequestsSettled, useEditorStore, writeOpenDocumentWhileDirty } from '../stores/editorStore';
 import { logger } from '../utils/logger';
 import { waitForDocumentFacade } from './wait-for-facade';
 
@@ -149,6 +149,8 @@ async function bufferFollowed(filePath: string, written: string): Promise<boolea
   // posé puis levé pendant la lecture, une ouverture qui n'aboutit pas. Le tenir pour suivi
   // laissait l'ancien texte à l'écran, propre, et la frappe suivante l'écrivait par-dessus celui
   // des Réglages, sans un mot (BT1-2). On relit donc une fois ; ensuite, c'est un conflit.
+  // Une demande encore en route aboutit d'abord : une ouverture lancée par l'auteur, que la
+  // relecture relancée aussitôt chasserait à son tour. On ne regarde l'éditeur qu'après elle.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const outcome = await useEditorStore
       .getState()
@@ -167,9 +169,12 @@ async function bufferFollowed(filePath: string, written: string): Promise<boolea
       }
       return true;
     }
+    // Toute autre issue que « remplacé » ou « chassé » se règle plus bas.
+    if (outcome?.status !== 'superseded') break;
+    await bufferRequestsSettled();
     // L'éditeur a quitté ce fichier (changement de projet, autre document) ou montre déjà ce
-    // texte : rien à relire. Toute autre issue que « remplacé » se règle plus bas.
-    if (outcome?.status !== 'superseded' || !stillShowsOtherText(filePath, written)) break;
+    // texte : rien à relire.
+    if (!stillShowsOtherText(filePath, written)) break;
   }
   return !stillShowsOtherText(filePath, written);
 }

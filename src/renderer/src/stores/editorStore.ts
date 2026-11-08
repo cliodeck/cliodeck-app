@@ -261,6 +261,37 @@ export function needsFlush(state: {
 /** Une demande de remplacement chasse la précédente, et la pose du verrou aussi. */
 let bufferRequestSeq = 0;
 
+/**
+ * Les demandes de remplacement pas encore closes. Une demande chassée peut l'avoir été par une
+ * autre encore en route : la relancer aussitôt chasserait celle-là à son tour, sans un mot.
+ */
+let bufferRequestsOpen = 0;
+let onBufferRequestsSettled: Array<() => void> = [];
+
+function trackBufferRequest<A extends unknown[], R>(
+  request: (...args: A) => Promise<R>
+): (...args: A) => Promise<R> {
+  return async (...args) => {
+    bufferRequestsOpen += 1;
+    try {
+      return await request(...args);
+    } finally {
+      bufferRequestsOpen -= 1;
+      if (bufferRequestsOpen === 0) {
+        const waiting = onBufferRequestsSettled;
+        onBufferRequestsSettled = [];
+        for (const resolve of waiting) resolve();
+      }
+    }
+  };
+}
+
+/** Résout dès qu'aucune demande de remplacement n'est plus en route, aboutie ou non. */
+export function bufferRequestsSettled(): Promise<void> {
+  if (bufferRequestsOpen === 0) return Promise.resolve();
+  return new Promise((resolve) => onBufferRequestsSettled.push(resolve));
+}
+
 /** On peut taper pendant l'écriture : quelques passes, pas une boucle sans fin. */
 const MAX_FLUSH_PASSES = 3;
 
@@ -360,7 +391,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  replaceBuffer: async (next: BufferTarget, reason: BufferReason): Promise<BufferOutcome> => {
+  replaceBuffer: trackBufferRequest(async (next: BufferTarget, reason: BufferReason): Promise<BufferOutcome> => {
     logger.store('Editor', 'replaceBuffer called', { next, reason });
     const openPath = next.kind === 'open' ? next.filePath : null;
 
@@ -467,7 +498,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     return commit(text, untitledText);
-  },
+  }),
 
   loadFile: (filePath: string) => get().replaceBuffer({ kind: 'open', filePath }, 'open-file'),
 
