@@ -548,10 +548,14 @@ export class PDFIndexer {
       // depuis Zotero, glisser-déposer, réindexer) ajoutait une copie, et
       // aucun garde-fou côté interface ne les couvrait tous. Fait APRÈS
       // l'écriture des nouveaux extraits : un échec en cours de route laisse
-      // l'ancienne copie intacte.
-      const previousCopies = this.vectorStore
-        .getDocumentIdsByFilePath(filePath)
-        .filter((id) => id !== documentId);
+      // l'ancienne copie intacte. Un PDF déplacé (même clé, même nom, ancien
+      // fichier disparu) est remplacé de même, sans quoi il ferait doublon.
+      const previousCopies = [
+        ...new Set([
+          ...this.vectorStore.getDocumentIdsByFilePath(filePath),
+          ...(bibtexKey ? this.vectorStore.getMovedCopyIds(bibtexKey, filePath) : []),
+        ]),
+      ].filter((id) => id !== documentId);
       if (previousCopies.length > 0) {
         this.vectorStore.mergeDocumentsInto(documentId, previousCopies);
         console.log(`♻️  ${previousCopies.length} copie(s) précédente(s) remplacée(s)`);

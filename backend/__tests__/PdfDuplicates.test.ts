@@ -201,6 +201,74 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
       expect(store.getStatistics().documentCount).toBe(1);
     });
 
+    /*
+     * « Réindexer » depuis la fiche supprimait le document de la clé avant d'indexer (S03-1-3) :
+     * c'est ce qui retirait aussi la copie d'un PDF déplacé. Sans la suppression, l'indexeur
+     * reconnaît lui-même un PDF déplacé : même clé, ancien fichier disparu, même nom.
+     */
+    it('un PDF déplacé est fondu dans sa réindexation, et la citation entrante le suit', async () => {
+      const before = realPdf('Kansteiner_2022.pdf');
+      const first = await indexer(store).indexPDF(before, 'Kansteiner_2022', undefined, META);
+      store.saveDocument(doc('citant', realPdf('Citant.pdf'), '2026-09-11T10:00:00Z'));
+      store.saveCitation({ id: 'cit', sourceDocId: 'citant', targetCitation: 'Kansteiner 2022', targetDocId: first.id });
+      const after = path.join(dir, 'Rangés', 'Kansteiner_2022.pdf');
+      fs.mkdirSync(path.dirname(after), { recursive: true });
+      fs.renameSync(before, after);
+
+      const second = await indexer(store).indexPDF(after, 'Kansteiner_2022', undefined, META);
+
+      expect(store.getDocument(first.id)).toBeNull();
+      expect(store.getStatistics().documentCount).toBe(2);
+      expect(store.getCitationsForDocument('citant')[0]).toMatchObject({ targetDocId: second.id });
+      expect(store.getAllChunksWithEmbeddings().every((c) => c.chunk.documentId !== first.id)).toBe(true);
+    });
+
+    it('une notice à deux PDF présents garde les deux, même de même nom', async () => {
+      const original = realPdf('Kansteiner_2022.pdf');
+      const annotated = path.join(dir, 'Annotés', 'Kansteiner_2022.pdf');
+      fs.mkdirSync(path.dirname(annotated), { recursive: true });
+      fs.writeFileSync(annotated, '%PDF-1.4');
+
+      const first = await indexer(store).indexPDF(original, 'Kansteiner_2022', undefined, META);
+      const second = await indexer(store).indexPDF(annotated, 'Kansteiner_2022', undefined, META);
+
+      expect(store.getStatistics().documentCount).toBe(2);
+      expect(store.getDocument(first.id)).not.toBeNull();
+      expect(store.getDocument(second.id)).not.toBeNull();
+    });
+
+    it('un PDF disparu d’un autre nom, sous la même clé, n’est pas fondu', async () => {
+      const gone = realPdf('Kansteiner_2022_original.pdf');
+      const first = await indexer(store).indexPDF(gone, 'Kansteiner_2022', undefined, META);
+      fs.rmSync(gone);
+
+      await indexer(store).indexPDF(realPdf('Kansteiner_2022_annote.pdf'), 'Kansteiner_2022', undefined, META);
+
+      expect(store.getDocument(first.id)).not.toBeNull();
+      expect(store.getStatistics().documentCount).toBe(2);
+    });
+
+    it('jumeaux Better BibTeX : le document d’une jumelle dont le fichier est présent n’est jamais fondu', async () => {
+      // Deux entrées du journal de Lester exportées sous la même clé, chacune son PDF, de même nom.
+      const twinA = path.join(dir, 'ZKA', 'Lester_1935.pdf');
+      const twinB = path.join(dir, 'ZKB', 'Lester_1935.pdf');
+      for (const p of [twinA, twinB]) {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, '%PDF-1.4');
+      }
+      const a = await indexer(store).indexPDF(twinA, 'Lester_1935', undefined, META);
+      const b = await indexer(store).indexPDF(twinB, 'Lester_1935', undefined, META);
+
+      // Réindexer la seconde ne touche pas à la première.
+      const b2 = await indexer(store).indexPDF(twinB, 'Lester_1935', undefined, META);
+
+      expect(store.getDocument(a.id)).not.toBeNull();
+      expect(store.getChunksForDocument(a.id).length).toBeGreaterThan(0);
+      expect(store.getDocument(b.id)).toBeNull();
+      expect(store.getDocumentIdsByFilePath(twinB)).toEqual([b2.id]);
+      expect(store.getStatistics().documentCount).toBe(2);
+    });
+
     it('le nettoyage de démarrage fond les copies héritées sous un autre chemin du même fichier', () => {
       const real = realPdf('Kansteiner_2022.pdf');
       const link = path.join(dir, 'lien.pdf');

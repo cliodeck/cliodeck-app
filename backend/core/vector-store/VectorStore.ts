@@ -394,6 +394,24 @@ export class VectorStore {
   }
 
   /**
+   * Documents d'un PDF déplacé que l'on indexe sous `filePath` : même clé BibTeX, fichier qui
+   * n'existe plus, même nom (`mayBeSameFile`). Ce ne sont pas des copies du même fichier sur le
+   * disque (`getDocumentIdsByFilePath` ne les voit pas), mais la réindexation doit les remplacer :
+   * « Réindexer » les supprimait d'avance, quitte à tout perdre sur un échec (S03-1-3).
+   *
+   * Un fichier présent n'est jamais pris : une notice à deux PDF garde les deux, et deux notices
+   * Zotero de même clé BibTeX (jumeaux Better BibTeX, `Lester_1935`) gardent chacune le sien.
+   */
+  getMovedCopyIds(bibtexKey: string, filePath: string): string[] {
+    const rows = this.db
+      .prepare('SELECT id, file_path FROM pdf_documents WHERE bibtex_key = ? ORDER BY indexed_at DESC')
+      .all(bibtexKey) as Array<{ id: string; file_path: string }>;
+    return rows
+      .filter((r) => mayBeSameFile(r.file_path, filePath) && !existsSync(r.file_path))
+      .map((r) => r.id);
+  }
+
+  /**
    * Fond des documents dans `keepId`, puis les supprime.
    *
    * Un même PDF indexé N fois donnait N documents et N jeux d'extraits : le
