@@ -25,8 +25,9 @@ export interface FootnoteOccurrence {
   kind: 'reference' | 'definition';
   /**
    * Définition collée au paragraphe qui la précède, sans ligne vide : Lezer y
-   * voit une définition, pandoc la suite du paragraphe — l'export l'imprime
-   * en clair (mesuré, pandoc 3.13).
+   * voit une définition, pandoc la suite du paragraphe — les exports qui
+   * passent par pandoc (PDF, Word avec bibliographie) l'impriment en clair
+   * (mesuré, pandoc 3.13). Le générateur Word interne, lui, en fait une note.
    */
   glued?: boolean;
 }
@@ -134,10 +135,13 @@ export function nextFootnoteNumber(content: string): number {
 export interface UnlinkedFootnote {
   /**
    * `reference` : appel sans définition ; `definition` : définition sans
-   * appel ; `glued` : définition collée au paragraphe, que l'export
-   * imprimera en clair (voir `FootnoteOccurrence.glued`).
+   * appel ; `shared` : plusieurs appels liés à la même définition alors que
+   * leur numéro en avait plusieurs — la règle de liaison a tranché, l'auteur
+   * doit vérifier (une entrée par définition) ; `glued` : définition collée
+   * au paragraphe, qu'un export par pandoc imprimera en clair (voir
+   * `FootnoteOccurrence.glued`).
    */
-  kind: 'reference' | 'definition' | 'glued';
+  kind: 'reference' | 'definition' | 'shared' | 'glued';
   label: string;
 }
 
@@ -155,7 +159,9 @@ const isNumericLabel = (label: string): boolean => /^\d+$/.test(label);
  * ne garde que la dernière définition d'un numéro — le texte de la première
  * disparaissait de l'export. Chaque appel se lie à la première définition de
  * même numéro qui le suit, à défaut à la dernière (le choix de pandoc).
- * Ce qui reste sans lien est rendu dans `unlinked`, pour être dit à l'auteur.
+ * Ce qui reste sans lien est rendu dans `unlinked`, pour être dit à l'auteur,
+ * comme ce que cette règle a dû trancher : quand un numéro a plusieurs
+ * définitions, deux appels liés à la même peuvent avoir changé de texte.
  */
 export function renumberFootnotes(
   content: string,
@@ -181,7 +187,8 @@ export function renumberFootnotes(
   // La note de chaque occurrence : sa définition. Les appels d'un numéro qui
   // n'a aucune définition partagent ce numéro pour clé.
   const owner = new Map<FootnoteOccurrence, FootnoteOccurrence | string>();
-  const linked = new Set<FootnoteOccurrence>();
+  // Nombre d'appels liés à chaque définition.
+  const calls = new Map<FootnoteOccurrence, number>();
   for (const occ of occurrences) {
     if (!isNumericLabel(occ.label)) continue;
     if (occ.kind === 'definition') {
@@ -190,9 +197,15 @@ export function renumberFootnotes(
     }
     const same = definitionsByLabel.get(occ.label) ?? [];
     const definition = same.find((d) => d.from > occ.from) ?? same[same.length - 1];
-    if (definition) linked.add(definition);
+    if (definition) calls.set(definition, (calls.get(definition) ?? 0) + 1);
     owner.set(occ, definition ?? occ.label);
   }
+  // Une note appelée deux fois est permise. Mais si son numéro avait d'autres
+  // définitions, rien ne dit que chaque appel va avec celle-ci : l'appel
+  // d'origine a pu recevoir le texte d'une note insérée sous son numéro.
+  const shared = (definition: FootnoteOccurrence): boolean =>
+    (calls.get(definition) ?? 0) > 1 &&
+    (definitionsByLabel.get(definition.label)?.length ?? 0) > 1;
 
   const numbers = new Map<FootnoteOccurrence | string, string>();
   let next = startAt;
@@ -208,7 +221,7 @@ export function renumberFootnotes(
   }
 
   const unlinked: UnlinkedFootnote[] = [];
-  const reported = new Set<string>();
+  const reported = new Set<FootnoteOccurrence | string>();
   for (const occ of occurrences) {
     const note = owner.get(occ);
     const label = note === undefined ? undefined : numbers.get(note);
@@ -216,8 +229,14 @@ export function renumberFootnotes(
     if (typeof note === 'string') {
       if (!reported.has(note)) unlinked.push({ kind: 'reference', label });
       reported.add(note);
-    } else if (note === occ && (occ.glued || !linked.has(occ))) {
-      unlinked.push({ kind: occ.glued ? 'glued' : 'definition', label });
+    } else if (note === occ) {
+      if (occ.glued || !calls.has(occ)) {
+        unlinked.push({ kind: occ.glued ? 'glued' : 'definition', label });
+      }
+    } else if (shared(note) && !reported.has(note)) {
+      // Au premier des appels en cause : l'ordre du document.
+      unlinked.push({ kind: 'shared', label });
+      reported.add(note);
     }
   }
 

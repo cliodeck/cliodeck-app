@@ -100,7 +100,7 @@ test('livre : une note insérée sous un numéro déjà pris devient une note di
     await expect(alert).not.toContainText('déjà numérotées');
     // La définition collée, que pandoc imprimerait en clair, est nommée avec son chapitre.
     await expect(alert).toContainText('Définition collée au paragraphe qui la précède : [^7] (« Troisième »).');
-    await expect(alert).toContainText('Sans ligne vide entre les deux');
+    await expect(alert).toContainText('Ajoutez une ligne vide avant');
     await window.locator('.alert-dialog-btn-ok').click();
 
     expect(readFileSync(book.chapter(2), 'utf8')).toBe(SECOND_RENUMBERED);

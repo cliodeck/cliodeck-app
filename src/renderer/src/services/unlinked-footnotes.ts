@@ -42,6 +42,10 @@ export function unlinkedFootnotesNote(
       t('editor.renumberMissingCall', { count: missingCall.length, notes: listed(missingCall) })
     );
   }
+  const shared = notes('shared');
+  if (shared.length > 0) {
+    parts.push(t('editor.renumberShared', { count: shared.length, notes: listed(shared) }));
+  }
   const glued = notes('glued');
   if (glued.length > 0) {
     parts.push(t('editor.renumberGlued', { count: glued.length, notes: listed(glued) }));

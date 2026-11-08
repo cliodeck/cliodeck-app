@@ -43,7 +43,21 @@ describe('unlinkedFootnotesNote', () => {
       'Notes à vérifier. Appel sans définition : [^4] (« Deux »). ' +
         'Définitions sans appel : [^7] (« Deux »), [^9] (« Trois »). ' +
         'Définition collée au paragraphe qui la précède : [^8] (« Deux »). ' +
-        "Sans ligne vide entre les deux, l'export l'imprime telle quelle. " +
+        "Ajoutez une ligne vide avant : sans elle, l'export peut l'imprimer telle quelle. " +
+        'Corrigez le texte, puis relancez la renumérotation.'
+    );
+  });
+
+  it('nomme les appels liés à une même définition, et dit quoi vérifier', () => {
+    const note = unlinkedFootnotesNote(
+      [{ unlinked: [{ kind: 'shared', label: '2' }, { kind: 'definition', label: '3' }] }],
+      t
+    );
+
+    expect(note).toBe(
+      'Notes à vérifier. Définition sans appel : [^3]. ' +
+        'Appels liés à une même définition : [^2]. Leur ancien numéro en avait plusieurs : ' +
+        'vérifiez que chacun renvoie au bon texte. ' +
         'Corrigez le texte, puis relancez la renumérotation.'
     );
   });

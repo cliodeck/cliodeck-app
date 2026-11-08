@@ -163,8 +163,35 @@ describe('renumberFootnotes — une note par définition', () => {
     // Plus jamais deux définitions de même numéro : chaque texte reste dans le document.
     const definitions = collectFootnotes(result.content).filter((o) => o.kind === 'definition');
     expect(new Set(definitions.map((d) => d.label)).size).toBe(definitions.length);
-    expect(result.unlinked).toEqual([{ kind: 'definition', label: '3' }]);
-    expect(result.content).toContain('[^3]: deux.');
+    // L'appel d'origine a reçu le texte ajouté : il est nommé, pas seulement
+    // la définition restée sans appel.
+    expect(result.content).toBe(
+      'Un[^1] deux[^2].\n\nAjout[^2].\n\n[^2]: ajoutée.\n\n[^1]: un.\n[^3]: deux.\n'
+    );
+    expect(result.unlinked).toEqual([
+      { kind: 'shared', label: '2' },
+      { kind: 'definition', label: '3' },
+    ]);
+  });
+
+  it('signale l’appel qu’il relie à un autre texte : une note appelée deux fois, un numéro réemployé entre les deux', () => {
+    // X appelle deux fois NOTE-X ; Y, inséré entre les deux appels, reprend le
+    // numéro. Pandoc donnait NOTE-X au premier X ; la règle « première
+    // définition qui suit » lui donne NOTE-Y. Ce n'est pas tranchable : le dire.
+    const doc = 'X[^2].\n\nY[^2].\n\n[^2]: NOTE-Y\n\nEncore X[^2].\n\n[^2]: NOTE-X\n';
+    const result = renumberFootnotes(doc);
+
+    expect(result.content).toBe(
+      'X[^1].\n\nY[^1].\n\n[^1]: NOTE-Y\n\nEncore X[^2].\n\n[^2]: NOTE-X\n'
+    );
+    expect(result.unlinked).toEqual([{ kind: 'shared', label: '1' }]);
+  });
+
+  it('ne signale pas une note appelée deux fois quand son numéro n’a qu’une définition', () => {
+    const result = renumberFootnotes('A[^3] et B[^3].\n\nC[^4].\n\n[^3]: une.\n[^4]: deux.\n');
+
+    expect(result.content).toBe('A[^1] et B[^1].\n\nC[^2].\n\n[^1]: une.\n[^2]: deux.\n');
+    expect(result.unlinked).toEqual([]);
   });
 
   it('signale un appel sans définition et une définition sans appel', () => {
