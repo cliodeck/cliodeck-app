@@ -6,6 +6,9 @@
  * `:focus-visible` : Annuler restait gris, sans anneau, et seul Confirmer, en aplat d'accent,
  * avait l'air du bouton actif. Seule l'app réelle le montre : jsdom ne calcule pas `:focus-visible`.
  * Vrais clics, comme l'auteur ; rien n'est purgé, le test refuse à la fin.
+ *
+ * Sans aplat, le libellé rouge de Confirmer se lit sur le panneau sombre : en teinte pure, il y
+ * tombait à 2,75:1 une fois survolé. Le contraste se mesure ici sur la cascade réelle.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -21,6 +24,34 @@ const purgeButton = (window: Page) => window.locator('.journal-purge-btn');
 
 /** L'anneau que l'écran donne à Annuler : c'est lui qui dit quel bouton Entrée actionnera. */
 const cancelOutline = (window: Page) => cancelButton(window).evaluate((button) => getComputedStyle(button).outlineStyle);
+
+/**
+ * Le contraste WCAG du libellé de Confirmer sur ce que l'écran montre derrière lui : son fond
+ * teinté, posé sur le panneau du dialogue. Mesuré une fois ses transitions finies.
+ */
+const confirmLabelContrast = (window: Page) =>
+  confirmButton(window).evaluate(async (button) => {
+    await Promise.all(button.getAnimations().map((animation) => animation.finished));
+    const parse = (value: string): number[] => {
+      const srgb = /^color\(srgb ([-\d.e]+) ([-\d.e]+) ([-\d.e]+)(?: \/ ([-\d.e]+))?\)$/.exec(value);
+      if (srgb) return [1, 2, 3].map((i) => Number(srgb[i]) * 255).concat(srgb[4] === undefined ? 1 : Number(srgb[4]));
+      const rgb = /^rgba?\(([\d.]+), ([\d.]+), ([\d.]+)(?:, ([\d.]+))?\)$/.exec(value);
+      if (rgb) return [1, 2, 3].map((i) => Number(rgb[i])).concat(rgb[4] === undefined ? 1 : Number(rgb[4]));
+      throw new Error(`couleur non lue : ${value}`);
+    };
+    const over = (top: number[], under: number[]) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3]));
+    const luminance = (rgb: number[]) => {
+      const lin = (c: number) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+    };
+    const dialog = button.closest('.confirm-dialog');
+    if (!dialog) throw new Error('Confirmer hors du dialogue');
+    const panel = parse(getComputedStyle(dialog).backgroundColor);
+    const background = over(parse(getComputedStyle(button).backgroundColor), panel);
+    const text = over(parse(getComputedStyle(button).color), background.concat(1));
+    const [hi, lo] = [luminance(text), luminance(background)].sort((a, b) => b - a);
+    return (hi + 0.05) / (lo + 0.05);
+  });
 
 function makeArticle(): { dir: string; projectJson: string } {
   const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-purge-'));
@@ -72,6 +103,12 @@ test('purge du journal : aux deux questions, Annuler porte l’anneau du focus, 
     expect(first).not.toBe('none');
     expect(second).not.toBe('none');
     await expect(confirmButton(window)).toHaveClass(/\bis-danger\b/);
+
+    // La souris est restée sur Confirmer : c'est son état survolé qu'on lit, en thème sombre (celui
+    // d'un userData neuf), le pire cas. Le libellé doit atteindre le seuil AA d'un texte de 14 px.
+    await confirmButton(window).hover();
+    expect(await confirmLabelContrast(window)).toBeGreaterThanOrEqual(4.5);
+    await expect(cancelButton(window)).toBeFocused();
 
     // Annuler : rien n'est purgé.
     await cancelButton(window).click();
