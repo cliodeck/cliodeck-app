@@ -2584,6 +2584,7 @@
     "indexDone_one": "{{count}} note indexed.",
     "indexDone_other": "{{count}} notes indexed.",
     "partialFailure": "{{count}} note(s) could not be indexed; the rest were.",
+    "abandoned": "Reindexing abandoned: no note was changed, the index is left as it is. Cause: {{reason}}",
     "noProvider": "No embedding provider available — is Ollama running? The index is left as it is.",
     "withheld": "Notes not indexed: embeddings go through {{provider}}, off this machine, and sending reading notes to online models is not allowed. Tick the option above to index them; the index is left as it is.",
     "indexError": "Indexing failed.",

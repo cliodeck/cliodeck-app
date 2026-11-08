@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { sqliteAvailable, symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { ReadingNotesIndexService } from '../reading-notes-index-service.js';
 import {
@@ -38,6 +39,31 @@ function fakeEmbedder(): FakeEmbedder {
   };
   return provider as unknown as FakeEmbedder;
 }
+
+/** Un fournisseur de `dimension` dimensions : 768 pour nomic-embed-text, 1024 pour mxbai. */
+function sizedEmbedder(dimension: number): FakeEmbedder {
+  const provider = {
+    calls: 0,
+    texts: [] as string[],
+    async embed(texts: string[]): Promise<number[][]> {
+      provider.calls += 1;
+      provider.texts.push(...texts);
+      return texts.map((t) => {
+        const v = new Array(dimension).fill(0);
+        for (let i = 0; i < t.length; i++) v[i % dimension] += t.charCodeAt(i) / 1000;
+        return v;
+      });
+    },
+  };
+  return provider as unknown as FakeEmbedder;
+}
+
+/** Ollama arrêté : chaque appel échoue. */
+const stoppedEmbedder = {
+  async embed(): Promise<number[][]> {
+    throw new Error('fetch failed (Ollama arrêté)');
+  },
+} as unknown as EmbeddingProvider;
 
 function writeNote(root: string, file: string, frontMatter: string, body: string): string {
   const dir = path.join(root, READING_NOTES_DIR);
@@ -215,6 +241,135 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService', () => {
     await Promise.all([first, second]);
 
     expect(service.getSearchStore()!.searchLexical('corrigée', 5)).toHaveLength(1);
+  });
+});
+
+/**
+ * « Tout réindexer » (S04-1-18, S02-1-21). Le bouton vidait l'index avant de savoir si le
+ * fournisseur répondait : Ollama arrêté, plus aucune note consultée. Et le store gardait la
+ * dimension du premier extrait de la session : après un changement de modèle d'embedding, chaque
+ * note échouait sur « dimension mismatch », sur un index déjà vidé.
+ */
+describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer', () => {
+  const NOTES = [
+    ['Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa longue durée écrase l’événement.\n'],
+    ['Bloch_1949.md', 'citekey: Bloch_1949\nzotero_key: BLOC0001\ntags: []', '# Bloch\n\nLe métier d’historien.\n'],
+    ['Febvre_1942.md', 'citekey: Febvre_1942\nzotero_key: FEBV0001\ntags: []', '# Febvre\n\nL’incroyance au XVIe siècle.\n'],
+  ] as const;
+
+  /** Les dimensions des extraits en base, lues par une autre connexion : ce que la recherche verra. */
+  function storedDimensions(): number[] {
+    const db = new Database(readingNotesStorePath(tmp), { readonly: true });
+    try {
+      return (db.prepare('SELECT DISTINCT dimension FROM reading_notes_chunks ORDER BY dimension').all() as Array<{
+        dimension: number;
+      }>).map((r) => r.dimension);
+    } finally {
+      db.close();
+    }
+  }
+
+  beforeEach(async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-tout-'));
+    service = new ReadingNotesIndexService({
+      isEnabled: () => true,
+      openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
+    });
+    service.configure(tmp);
+    for (const [file, front, body] of NOTES) writeNote(tmp, file, front, body);
+    expect(await service.index(sizedEmbedder(768))).toMatchObject({ indexed: 3, failures: [] });
+  });
+
+  afterEach(() => {
+    service.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('fournisseur en panne : l’index précédent reste entier et consulté, les échecs sont rendus', async () => {
+    const before = service.stats();
+
+    const report = await service.reindexAll(stoppedEmbedder);
+
+    expect(service.stats()).toEqual(before);
+    expect(storedDimensions()).toEqual([768]);
+    expect(service.getSearchStore()!.searchLexical('Méditerranée Braudel', 5)).not.toEqual([]);
+    expect(report.indexed).toBe(0);
+    expect(report.failures).toEqual([expect.objectContaining({ reason: expect.stringMatching(/Ollama arrêté/) })]);
+    expect(report.abandoned).toMatch(/Ollama arrêté/);
+  });
+
+  it('un nombre de vecteurs faux compte comme une panne : rien n’est écrit', async () => {
+    const before = service.stats();
+    const short = {
+      async embed(texts: string[]): Promise<number[][]> {
+        return texts.slice(1).map(() => new Array(1024).fill(0.5));
+      },
+    } as unknown as EmbeddingProvider;
+
+    const report = await service.reindexAll(short);
+
+    expect(service.stats()).toEqual(before);
+    expect(storedDimensions()).toEqual([768]);
+    expect(report.abandoned).toMatch(/0 vectors for 1 chunks/);
+  });
+
+  it('le fournisseur tombe en cours de passe : même les notes déjà embarquées restent dans l’ancien index', async () => {
+    const working = sizedEmbedder(1024);
+    let calls = 0;
+    const flaky = {
+      async embed(texts: string[]): Promise<number[][]> {
+        calls += 1;
+        if (calls > 1) throw new Error('fetch failed');
+        return working.embed(texts);
+      },
+    } as unknown as EmbeddingProvider;
+    const before = service.stats();
+
+    await service.reindexAll(flaky);
+
+    expect(calls).toBe(2);
+    expect(service.stats()).toEqual(before);
+    expect(storedDimensions()).toEqual([768]);
+  });
+
+  it('changement de modèle (768 → 1024) : toutes les notes sont réembarquées dans la nouvelle dimension', async () => {
+    const mxbai = sizedEmbedder(1024);
+
+    const report = await service.reindexAll(mxbai);
+
+    expect(report).toMatchObject({ indexed: 3, failures: [] });
+    expect(report.abandoned).toBeUndefined();
+    expect(service.stats()).toMatchObject({ noteCount: 3, chunkCount: 3 });
+    expect(storedDimensions()).toEqual([1024]);
+    // Les sauvegardes suivantes écrivent dans la nouvelle dimension, sans « dimension mismatch ».
+    const braudel = path.join(tmp, READING_NOTES_DIR, 'Braudel_1949.md');
+    fs.writeFileSync(braudel, fs.readFileSync(braudel, 'utf8').replace('écrase', 'domine'));
+    expect(await service.index(mxbai)).toMatchObject({ indexed: 1, failures: [] });
+    const [hit] = service.getSearchStore()!.search(new Float32Array(1024).fill(1), 'domine', 1);
+    expect(hit.note.citekey).toBe('Braudel_1949');
+  });
+
+  it('une note retirée du dossier sort de l’index ; une note illisible garde ses extraits et figure dans les échecs', async () => {
+    fs.rmSync(path.join(tmp, READING_NOTES_DIR, 'Febvre_1942.md'));
+    fs.writeFileSync(path.join(tmp, READING_NOTES_DIR, 'Bloch_1949.md'), '---\ncitekey: [pas fermé\n---\n\nTexte.\n');
+
+    const report = await service.reindexAll(sizedEmbedder(768));
+
+    expect(report).toMatchObject({ indexed: 1, removed: 1 });
+    expect(report.failures.map((f) => f.relativePath)).toEqual([path.join(READING_NOTES_DIR, 'Bloch_1949.md')]);
+    const notes = service.getSearchStore()!.listNotes().map((n) => n.citekey);
+    expect(notes).toEqual(['Bloch_1949', 'Braudel_1949']);
+  });
+
+  it('une passe demandée pendant la réindexation la suit, sans la perdre', async () => {
+    const mxbai = sizedEmbedder(1024);
+    const all = service.reindexAll(mxbai);
+    const next = service.index(mxbai);
+
+    await Promise.all([all, next]);
+
+    expect(storedDimensions()).toEqual([1024]);
+    expect(service.stats()?.noteCount).toBe(3);
   });
 });
 

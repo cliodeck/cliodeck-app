@@ -114,11 +114,14 @@ export function readingNoteHeader(note: Pick<ReadingNoteRecord, 'citekey' | 'tit
 export class ReadingNotesStore {
   private db: Database.Database;
   private dimension: number | null;
+  /** La dimension donnée au constructeur : celle que `resetDimension` rend. */
+  private readonly configuredDimension: number | null;
 
   constructor(cfg: ReadingNotesStoreConfig) {
     fs.mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
     this.db = new Database(cfg.dbPath);
-    this.dimension = cfg.dimension ?? null;
+    this.configuredDimension = cfg.dimension ?? null;
+    this.dimension = this.configuredDimension;
     this.db.pragma('journal_mode = WAL');
     // `brain.db` a plusieurs writers : sans busy_timeout, une écriture
     // concurrente échoue immédiatement sur SQLITE_BUSY.
@@ -128,9 +131,30 @@ export class ReadingNotesStore {
     this.initSchema();
   }
 
-  /** Empreinte et extraits d'une note s'écrivent tout ou rien (cf. `ManuscriptStore`). */
+  /**
+   * Empreinte et extraits d'une note s'écrivent tout ou rien (cf. `ManuscriptStore`). Une
+   * transaction annulée rend aussi la dimension d'avant : sinon un `resetDimension` annulé
+   * laisserait le prochain extrait fixer la sienne, à côté d'anciens extraits restés en base.
+   */
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    const dimension = this.dimension;
+    try {
+      return this.db.transaction(fn)();
+    } catch (e) {
+      this.dimension = dimension;
+      throw e;
+    }
+  }
+
+  /**
+   * Oublie la dimension verrouillée par le premier `addChunk` de la session : le prochain extrait
+   * fixe la sienne. Pour une réindexation complète après un changement de modèle d'embedding
+   * (768 → 1024), sans quoi chaque note échoue sur « dimension mismatch » jusqu'au redémarrage.
+   * À appeler dans la `transaction` qui remplace **tous** les extraits : ailleurs, deux dimensions
+   * cohabiteraient dans l'index.
+   */
+  resetDimension(): void {
+    this.dimension = this.configuredDimension;
   }
 
   private initSchema(): void {

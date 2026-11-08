@@ -27,6 +27,8 @@ interface IndexReport {
   durationMs: number;
   /** Fournisseur d'embeddings distant auquel les notes n'ont pas été envoyées. */
   withheldFrom?: string;
+  /** Réindexation abandonnée, rien d'écrit : sa raison (fournisseur arrêté…). */
+  abandoned?: string;
 }
 
 interface IndexResponse {
@@ -106,6 +108,10 @@ export const ReadingNotesCorpusSection: React.FC<Props> = ({
         setError(t('readingNotesCorpus.noProvider'));
       } else if (res.report?.withheldFrom) {
         setError(t('readingNotesCorpus.withheld', { provider: res.report.withheldFrom }));
+      } else if (res.report?.abandoned) {
+        // Pas « N note(s) n'ont pas pu être indexées ; le reste l'a été » : rien ne l'a été, et
+        // l'index d'avant est toujours celui du chat.
+        setError(t('readingNotesCorpus.abandoned', { reason: res.report.abandoned }));
       } else if (res.report) {
         setNotice(t('readingNotesCorpus.indexDone', { count: res.report.indexed }));
         if (res.report.failures.length > 0) {

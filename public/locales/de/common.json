@@ -2584,6 +2584,7 @@
     "indexDone_one": "{{count}} Notiz indexiert.",
     "indexDone_other": "{{count}} Notizen indexiert.",
     "partialFailure": "{{count}} Notiz(en) konnten nicht indexiert werden; der Rest wurde indexiert.",
+    "abandoned": "Neuindexierung abgebrochen: Keine Notiz wurde geändert, der Index bleibt unverändert. Ursache: {{reason}}",
     "noProvider": "Kein Embedding-Anbieter verfügbar – läuft Ollama? Der Index bleibt unverändert.",
     "withheld": "Notizen nicht indexiert: Die Embeddings laufen über {{provider}}, außerhalb dieses Rechners, und das Senden von Lesenotizen an Online-Modelle ist nicht erlaubt. Kreuzen Sie die Option oben an, um sie zu indexieren; der Index bleibt unverändert.",
     "indexError": "Die Indexierung ist fehlgeschlagen.",
