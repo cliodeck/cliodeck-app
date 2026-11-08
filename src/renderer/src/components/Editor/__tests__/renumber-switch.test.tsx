@@ -78,6 +78,12 @@ const DISORDERED = {
 };
 
 let disk: Record<string, string>;
+/**
+ * Clé du disque simulé. Sous une lettre de lecteur, `\\` et `/` désignent le même fichier,
+ * comme sur NTFS ; ailleurs, la graphie est la clé.
+ */
+const diskKey = (path: string): string =>
+  /^[A-Za-z]:/.test(path) ? path.replace(/\\/g, '/') : path;
 /** Chapitres que le main refuse de lire, et sa raison. */
 let unreadableOnDisk: Map<string, string>;
 let writes: Array<[string, string]>;
@@ -102,7 +108,8 @@ function chapterOf(path: string, order: number): ResolvedChapter {
 async function openBook(
   files: Record<string, string>,
   open: string = A,
-  type: 'book' | 'article' = 'book'
+  type: 'book' | 'article' = 'book',
+  projectPath: string = PROJECT
 ): Promise<void> {
   disk = { ...files };
   unreadableOnDisk = new Map();
@@ -120,19 +127,19 @@ async function openBook(
           files: data.filePaths.map((filePath) =>
             unreadableOnDisk.has(filePath)
               ? { filePath, reason: unreadableOnDisk.get(filePath), error: 'illisible' }
-              : { filePath, content: disk[`${PROJECT}/${filePath}`] }
+              : { filePath, content: disk[diskKey(`${projectPath}/${filePath}`)] }
           ),
         };
       }),
       getChapters: vi.fn(async () => ({ success: true, chapters: [], unattached: [] })),
     },
     editor: {
-      loadFile: vi.fn(async (path: string) => ({ success: true, content: disk[path] })),
+      loadFile: vi.fn(async (path: string) => ({ success: true, content: disk[diskKey(path)] })),
       saveFile: vi.fn(async (path: string, content: string) => {
         const verdict = await beforeWrite(path);
         if (verdict) return verdict;
         writes.push([path, content]);
-        disk[path] = content;
+        disk[diskKey(path)] = content;
         return { success: true };
       }),
     },
@@ -142,19 +149,19 @@ async function openBook(
     currentProject: {
       id: 'p1',
       name: 'Livre',
-      path: PROJECT,
+      path: projectPath,
       type,
       createdAt: new Date(),
       lastOpenedAt: new Date(),
     },
     chapters: Object.keys(files).map(chapterOf),
     bookSettings: { ...DEFAULT_BOOK_SETTINGS },
-    currentChapterId: chapterOf(open, 0).id,
-    loadState: { kind: 'ready', loadedAt: 'avant', path: PROJECT },
+    currentChapterId: chapterOf(diskKey(open), 0).id,
+    loadState: { kind: 'ready', loadedAt: 'avant', path: projectPath },
   });
   useEditorStore.setState({
     filePath: open,
-    content: files[open],
+    content: files[diskKey(open)],
     isDirty: false,
     editorFacade: null,
   });
@@ -185,7 +192,7 @@ async function clickRenumberWhileReading(): Promise<() => Promise<void>> {
 function switchBypassingLock(path: string): void {
   useEditorStore.setState((s) => ({
     filePath: path,
-    content: disk[path],
+    content: disk[diskKey(path)],
     documentVersion: s.documentVersion + 1,
   }));
 }
@@ -968,6 +975,91 @@ describe('remise en état après un échec d’écriture', () => {
     expect(alertMessage()).toBe('book.renumberRestoreFailed');
     expect(disk[B]).toBe(DISORDERED[B]);
     expect(live()).toBe(DISORDERED[C]);
+  });
+});
+
+/**
+ * Sous Windows, le dossier du projet vient de `path.dirname` et le chapitre ouvert par
+ * « Fichier > Ouvrir » vient d'un dialogue : barres obliques inverses, alors que le renderer
+ * compose les autres chemins avec `/`. `currentRelativePath` reconnaît ce chapitre ; la
+ * remise en état le reconnaissait par la chaîne brute, et le laissait renuméroté dans
+ * l'éditeur sous « le manuscrit est inchangé » : l'enregistrement suivant l'aurait écrit.
+ */
+describe('projet Windows : chapitre ouvert par un dialogue', () => {
+  const WIN = 'C:\\Users\\h\\livre';
+  const onWinDisk = (name: string) => `C:/Users/h/livre/chapters/${name}.md`;
+  const WIN_DISORDERED = {
+    [onWinDisk('a')]: DISORDERED[A],
+    [onWinDisk('b')]: DISORDERED[B],
+    [onWinDisk('c')]: DISORDERED[C],
+  };
+  const OPENED_A = `${WIN}\\chapters\\a.md`;
+  const RENUMBERED_A = '# A\n\nTexte A[^1] suite[^2].\n\n[^1]: une\n\n[^2]: deux\n';
+  const REFUSED = { success: false, error: 'refusé' } as const;
+
+  const clickRenumber = () =>
+    act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+  const waitForAutosave = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(useEditorStore.getState().settings.autoSaveDelay);
+    });
+
+  it('témoin : le chapitre ouvert est renuméroté par l’éditeur, et le disque le suit', async () => {
+    await openBook(WIN_DISORDERED, OPENED_A, 'book', WIN);
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(live()).toBe(RENUMBERED_A);
+    expect(disk[onWinDisk('a')]).toBe(RENUMBERED_A);
+  });
+
+  it('échec d’écriture sur C : le chapitre ouvert revient dans l’éditeur comme sur le disque', async () => {
+    await openBook(WIN_DISORDERED, OPENED_A, 'book', WIN);
+    beforeWrite = async (path) => (diskKey(path) === onWinDisk('c') ? REFUSED : undefined);
+    vi.useFakeTimers();
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberError');
+    expect(disk).toEqual(WIN_DISORDERED);
+    expect(live()).toBe(DISORDERED[A]);
+    expect(locks()).toEqual(FREE);
+
+    // La frappe suivante enregistre le tampon : il doit porter le texte d'origine.
+    useEditorStore.getState().editorFacade?.setValue(`${live()}\nAjout.\n`);
+    await waitForAutosave();
+    expect(disk[onWinDisk('a')]).toBe(`${DISORDERED[A]}\nAjout.\n`);
+    expect(disk[onWinDisk('b')]).toBe(DISORDERED[B]);
+  });
+
+  it('projet remplacé : rien n’est restauré dans le chapitre de même nom de l’autre projet', async () => {
+    await openBook(WIN_DISORDERED, OPENED_A, 'book', WIN);
+    const other = 'C:\\Users\\h\\autre\\chapters\\a.md';
+    const otherText = '# A de l’autre livre\n';
+    let switched = false;
+    beforeWrite = async (path) => {
+      if (diskKey(path) === onWinDisk('b') && !switched) {
+        switched = true;
+        disk[diskKey(other)] = otherText;
+        useProjectStore.setState({
+          currentProject: {
+            ...useProjectStore.getState().currentProject!,
+            path: 'C:\\Users\\h\\autre',
+          },
+        });
+        switchBypassingLock(other);
+      }
+    };
+
+    await clickRenumber();
+
+    expect(alertMessage()).toBe('book.renumberInterrupted');
+    expect(disk[onWinDisk('a')]).toBe(DISORDERED[A]);
+    expect(disk[diskKey(other)]).toBe(otherText);
+    expect(live()).toBe(otherText);
   });
 });
 

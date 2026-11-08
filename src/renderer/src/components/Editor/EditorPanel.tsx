@@ -277,7 +277,14 @@ export const EditorPanel: React.FC = () => {
         if (original === undefined) continue;
         const target = `${project.path}/${key}`;
         let restored: boolean;
-        if (useEditorStore.getState().filePath === target) {
+        // Reconnu comme à l'aller (`readManuscript`, `editorMoved`), et non par la chaîne
+        // brute : sous Windows, un chapitre ouvert par un dialogue s'écrit avec `\`, et la
+        // remise en état laissait alors son texte renuméroté dans l'éditeur. Le projet en
+        // plus : le chapitre de même nom d'un autre projet n'est pas celui-ci.
+        if (
+          useProjectStore.getState().currentProject?.path === project.path &&
+          currentRelativePath() === key
+        ) {
           // Ni l'un ni l'autre des textes de l'opération : l'auteur a tapé depuis.
           // Le remettre à l'original effacerait sa frappe, puis l'enregistrerait.
           const live = useEditorStore.getState().getLiveContent();
