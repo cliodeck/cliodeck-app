@@ -56,6 +56,9 @@ async function answerQuestions(window: Page, topic: string = TOPIC): Promise<voi
 
 const finish = (window: Page) => window.locator('.onboarding-wizard__btn', { hasText: 'Terminer' });
 
+/** Les titres de premier niveau du fichier, dans l'ordre. */
+const topTitles = (text: string): string[] => text.split(/\r\n|\r|\n/).filter((line) => line.startsWith('# '));
+
 /** C'est écrit : l'assistant le dit et dit où, puis c'est l'auteur qui le ferme. */
 async function closeDoneScreen(window: Page): Promise<void> {
   await expect(window.locator('.onboarding-wizard__question')).toContainText('context.md', { timeout: 10_000 });
@@ -124,6 +127,8 @@ test('rejouer l’assistant sur un context.md écrit à la main : on demande, re
     expect(written.startsWith(WRITTEN_BY_HAND.trimEnd())).toBe(true);
     expect(written).toContain('## Research Topic');
     expect(written.indexOf('Historiographie')).toBeLessThan(written.indexOf(TOPIC));
+    // La section ajoutée ne repose pas le nom du projet en second titre (BT1-8).
+    expect(topTitles(written)).toEqual(['# Danzig']);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
@@ -161,6 +166,7 @@ test('un projet neuf : le gabarit se remplace sans question', async () => {
 
     const written = readFileSync(join(parent, 'Neuf', 'context.md'), 'utf8');
     expect(written.startsWith('# Neuf\n')).toBe(true);
+    expect(topTitles(written)).toEqual(['# Neuf']);
     expect(written).toContain(TOPIC);
     expect(written).not.toContain('Décrivez ici');
   } finally {

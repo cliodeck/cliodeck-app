@@ -38,6 +38,8 @@ const LEGACY_TEMPLATE =
 
 const dialogs = () => useDialogStore.getState();
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+/** Les titres de premier niveau du fichier, dans l'ordre. */
+const topTitles = (text: string): string[] => text.split(/\r\n|\r|\n/).filter((line) => line.startsWith('# '));
 
 let project: string;
 let outside: string;
@@ -168,6 +170,24 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     expect(normalized).toContain(TOPIC);
   });
 
+  it('la section ajoutée ne porte pas de second titre : le seul reste celui de l’auteur (BT1-8)', async () => {
+    const twoLines = '# Ma thèse sur Danzig\nProblématique : la ville libre, 1919-1939.\n';
+    fs.writeFileSync(contextMd, twoLines);
+    await renderPanel();
+
+    await replayAssistant();
+    await awaitConfirm();
+    await answerConfirm(true);
+    await closeDoneScreen();
+
+    const written = fs.readFileSync(contextMd, 'utf8');
+    expect(written.startsWith(twoLines.trimEnd())).toBe(true);
+    expect(topTitles(written)).toEqual(['# Ma thèse sur Danzig']);
+    // La section commence directement par ses sous-sections.
+    expect(written).toContain('1939.\n\n## Research Topic');
+    expect(written).toContain(TOPIC);
+  });
+
   it('refuser : fichier identique à l’octet, et l’assistant garde ce qui a été répondu', async () => {
     fs.writeFileSync(contextMd, AUTHOR_TEXT);
     const before = fs.statSync(contextMd).mtimeMs;
@@ -285,6 +305,8 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written).toContain(TOPIC);
     expect(written).toContain('Hanse tardive');
+    // Deux sections ajoutées, et toujours un seul titre, celui du fichier.
+    expect(topTitles(written)).toEqual(['# Danzig']);
   });
 
   it('un double clic sur Terminer ne pose qu’une question et n’ajoute qu’une section', async () => {
@@ -458,7 +480,11 @@ describe('rejouer l’assistant quand context.md ne porte rien de l’auteur', (
     await closeDoneScreen();
 
     expect(dialogs().confirmOpen).toBe(false);
-    expect(fs.readFileSync(contextMd, 'utf8')).toContain(TOPIC);
+    const written = fs.readFileSync(contextMd, 'utf8');
+    // Le fichier se crée avec son titre, le nom du projet, et un seul.
+    expect(written.startsWith('# Danzig\n\n## Research Topic')).toBe(true);
+    expect(topTitles(written)).toEqual(['# Danzig']);
+    expect(written).toContain(TOPIC);
   });
 
   it.each<[string, string]>([
@@ -475,6 +501,7 @@ describe('rejouer l’assistant quand context.md ne porte rien de l’auteur', (
     expect(dialogs().confirmOpen).toBe(false);
     const written = fs.readFileSync(contextMd, 'utf8');
     expect(written.startsWith('# Danzig\n')).toBe(true);
+    expect(topTitles(written)).toEqual(['# Danzig']);
     expect(written).not.toContain('Décrivez ici');
     expect(written).toContain(TOPIC);
   });
