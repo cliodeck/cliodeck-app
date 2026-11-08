@@ -105,9 +105,10 @@ export class NotAProjectError extends Error {
 }
 
 /**
- * Tout autre refus du main. Son code choisit le message : un `project.json` abîmé, un dossier
- * introuvable, un service qui n'a pas démarré n'appellent pas le même geste. Le texte de l'erreur
- * reste pour le journal.
+ * Tout autre refus du main, à l'ouverture comme à la création. Son code choisit le message : un
+ * `project.json` abîmé, un dossier introuvable, un service qui n'a pas démarré n'appellent pas le
+ * même geste. Le texte de l'erreur reste pour le journal, et pour les refus de création, qui le
+ * portent dans leur texte (`project_exists`).
  */
 export class ProjectOpenError extends Error {
   readonly code: string | undefined;
@@ -583,7 +584,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
-        throw new Error(result.error || 'Failed to create project');
+        throw new ProjectOpenError(result.code, result.error || 'Failed to create project');
       }
 
       await openProjectContents(result.project, set, detached);

@@ -197,7 +197,7 @@ describe('ProjectPanel : les autres refus disent leur cause, jamais « project.j
 });
 
 describe('les messages d’échec d’ouverture, dans les trois langues', () => {
-  const OTHER_CAUSES = ['servicesFailed', 'openUnavailable', 'openNotWritable', 'openFailed'];
+  const OTHER_CAUSES = ['servicesFailed', 'createServicesFailed', 'openUnavailable', 'openNotWritable', 'openFailed'];
   const projectTexts = (language: string): Record<string, string> => {
     const file = path.join(process.cwd(), 'public', 'locales', language, 'common.json');
     return (JSON.parse(readFileSync(file, 'utf8')) as { project: Record<string, string> }).project;
@@ -219,6 +219,32 @@ describe('les messages d’échec d’ouverture, dans les trois langues', () => 
 
   it.each(['fr', 'en', 'de'])('%s : un service en panne dit que project.json n’y est pour rien', (language) => {
     expect(projectTexts(language).servicesFailed).toContain('project.json');
+  });
+
+  // Revue de BT1-5 : huit services passent par startService, la parenthèse en nomme trois. Donnée
+  // comme une liste close, elle désignait des services qui avaient démarré quand le mode ou le
+  // journal d'usage échouait. La cause exacte reste dans la ligne « ❌ project:load error: ».
+  it.each<[string, string]>([
+    ['fr', '(par exemple '],
+    ['en', '(for example '],
+    ['de', '(zum Beispiel '],
+  ])('%s : les services nommés sont des exemples, pas la liste de ceux qui ont échoué', (language, marker) => {
+    const texts = projectTexts(language);
+    expect(texts.servicesFailed).toContain(marker);
+    expect(texts.createServicesFailed).toContain(marker);
+  });
+
+  // La création a eu lieu : le message le dit, nomme le projet et son dossier, et dit comment l'ouvrir.
+  it.each<[string, string, string]>([
+    ['fr', 'a été créé', '« Ouvrir un projet »'],
+    ['en', 'was created', '“Open a project”'],
+    ['de', 'wurde in {{folder}} erstellt', '„Projekt öffnen“'],
+  ])('%s : un service en panne après la création dit que le projet existe', (language, created, openLabel) => {
+    const text = projectTexts(language).createServicesFailed;
+    expect(text).toContain('{{name}}');
+    expect(text).toContain('{{folder}}');
+    expect(text).toContain(created);
+    expect(text).toContain(openLabel);
   });
 });
 

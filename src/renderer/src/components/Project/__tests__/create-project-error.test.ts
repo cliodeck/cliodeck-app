@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createProjectErrorMessage } from '../create-project-error';
 import { OutgoingSaveError } from '../../../stores/editorStore';
+import { ProjectOpenError } from '../../../stores/projectStore';
 
 const t = (key: string, options?: Record<string, unknown>) =>
   options ? `${key} ${JSON.stringify(options)}` : key;
@@ -29,6 +30,16 @@ describe('createProjectErrorMessage', () => {
   it('le document ouvert qui ne s’écrit pas : le message parle de l’enregistrement', () => {
     const cause = new Error("EACCES: permission denied, access '/Documents/project_exists/document.md'");
     expect(createProjectErrorMessage(t, new OutgoingSaveError(cause), where)).toBe('toolbar.saveError');
+  });
+
+  // Revue de BT1-5 : le projet est sur le disque, un service n'a pas démarré. « Vérifiez que le
+  // dossier choisi est accessible en écriture » envoyait chercher ailleurs, et un nouvel essai se
+  // heurtait à « existe déjà ».
+  it('un service n’a pas démarré après la création : le projet existe, le message le dit', () => {
+    const error = new ProjectOpenError('services_failed', 'registre de fournisseurs invalide');
+    expect(createProjectErrorMessage(t, error, where)).toBe(
+      `project.createServicesFailed ${JSON.stringify(where)}`
+    );
   });
 
   it('garde le message général pour toute autre erreur', () => {

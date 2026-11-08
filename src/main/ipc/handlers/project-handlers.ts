@@ -67,6 +67,20 @@ async function startService(service: string, start: () => unknown): Promise<void
   }
 }
 
+/**
+ * La réponse d'un échec de `project:create` ou de `project:load`. Un service en panne a son code,
+ * à la création comme à l'ouverture : le projet créé est sur le disque, et « vérifiez que le dossier
+ * est accessible en écriture » enverrait l'auteur chercher ailleurs.
+ */
+function projectFailure(channel: 'project:create' | 'project:load', error: unknown) {
+  if (error instanceof ProjectServiceError) {
+    console.error(`❌ ${channel} error:`, `service ${error.service} :`, error.cause);
+    return { success: false, code: 'services_failed', error: error.message };
+  }
+  console.error(`❌ ${channel} error:`, error);
+  return errorResponse(error);
+}
+
 export function setupProjectHandlers() {
   ipcMain.handle('project:get-recent', () => {
     console.log('📞 IPC Call: project:get-recent');
@@ -94,22 +108,24 @@ export function setupProjectHandlers() {
         console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
         // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`), comme à l'ouverture.
         const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) modeService.init(projectPath);
-        await closeWorkspaceServices();
+        if (projectPath) await startService('modeService', () => modeService.init(projectPath));
+        await startService('closeWorkspaceServices', closeWorkspaceServices);
       } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
           console.log('🔧 Initializing services for new project:', projectPath);
-          await historyService.init(projectPath);
-          modeService.init(projectPath);
+          await startService('historyService', () => historyService.init(projectPath));
+          await startService('modeService', () => modeService.init(projectPath));
 
           // Initialize PDF service with rebuild progress callback
-          await pdfService.init(projectPath, (progress) => {
-            event.sender.send('project:rebuild-progress', progress);
-          });
+          await startService('pdfService', () =>
+            pdfService.init(projectPath, (progress) => {
+              event.sender.send('project:rebuild-progress', progress);
+            })
+          );
 
           // Initialize Tropy service
-          await tropyService.init(projectPath);
+          await startService('tropyService', () => tropyService.init(projectPath));
 
           // Initialize MCP clients (fire-and-forget so a dead server
           // doesn't block project loading).
@@ -126,8 +142,7 @@ export function setupProjectHandlers() {
       console.log('📤 IPC Response: project:create', result);
       return result;
     } catch (error: unknown) {
-      console.error('❌ project:create error:', error);
-      return errorResponse(error);
+      return projectFailure('project:create', error);
     }
   });
 
@@ -197,12 +212,7 @@ export function setupProjectHandlers() {
       console.log('📤 IPC Response: project:load', result.success ? 'success' : 'failed');
       return result;
     } catch (error: unknown) {
-      if (error instanceof ProjectServiceError) {
-        console.error('❌ project:load error:', `service ${error.service} :`, error.cause);
-        return { success: false, code: 'services_failed', error: error.message };
-      }
-      console.error('❌ project:load error:', error);
-      return errorResponse(error);
+      return projectFailure('project:load', error);
     }
   });
 
