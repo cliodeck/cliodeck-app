@@ -125,7 +125,7 @@ describe('ProjectPanel : le document ouvert ne s’écrit pas', () => {
   it.each(OPEN_DOORS)('témoin, par %s : un project.json illisible garde son message', async (_door, open) => {
     await renderPanel();
     // La liste des récents a son projet, seule l'ouverture qui suit lit un fichier abîmé.
-    getMetadata.mockResolvedValue({ success: false, error: 'invalid_json' });
+    getMetadata.mockResolvedValue({ success: false, code: 'manifest_unreadable', error: 'invalid_json' });
 
     await open();
     await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));

@@ -110,6 +110,21 @@ describe('ProjectPanel : créer un projet', () => {
     expect(screen.getByText('actions.create')).toBeInTheDocument();
   });
 
+  // Revue de BT1-5 : le main a créé le projet, puis un service n'a pas démarré. Le message ne parle
+  // plus d'un dossier en lecture seule, et la cause technique reste au journal.
+  it('un service ne démarre pas après la création : le message le dit, sans la cause technique', async () => {
+    create.mockResolvedValue({ success: false, code: 'services_failed', error: 'registre de fournisseurs invalide' });
+    await act(async () => {
+      render(<ProjectPanel />);
+    });
+
+    await submitCreation('Neuf');
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    expect(dialogs().alertMessage).toBe('project.createServicesFailed');
+    expect(screen.queryByTestId('onboarding')).not.toBeInTheDocument();
+  });
+
   it('verrou de la renumérotation : la raison est dite, et la modale reste', async () => {
     useEditorStore.setState({ switchLock: 'book.renumberInProgress' } as never);
     await act(async () => {

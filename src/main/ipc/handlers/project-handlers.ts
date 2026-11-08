@@ -42,6 +42,45 @@ async function closeWorkspaceServices(): Promise<void> {
   manuscriptIndexService.clear();
 }
 
+/**
+ * Un service du projet n'a pas démarré. `project.json` n'y est pour rien : la réponse le dit par
+ * son code, et le journal du processus principal nomme le service, dont la cause technique ne va
+ * pas dans l'alerte.
+ */
+class ProjectServiceError extends Error {
+  readonly service: string;
+  readonly cause: unknown;
+
+  constructor(service: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'ProjectServiceError';
+    this.service = service;
+    this.cause = cause;
+  }
+}
+
+async function startService(service: string, start: () => unknown): Promise<void> {
+  try {
+    await start();
+  } catch (error: unknown) {
+    throw new ProjectServiceError(service, error);
+  }
+}
+
+/**
+ * La réponse d'un échec de `project:create` ou de `project:load`. Un service en panne a son code,
+ * à la création comme à l'ouverture : le projet créé est sur le disque, et « vérifiez que le dossier
+ * est accessible en écriture » enverrait l'auteur chercher ailleurs.
+ */
+function projectFailure(channel: 'project:create' | 'project:load', error: unknown) {
+  if (error instanceof ProjectServiceError) {
+    console.error(`❌ ${channel} error:`, `service ${error.service} :`, error.cause);
+    return { success: false, code: 'services_failed', error: error.message };
+  }
+  console.error(`❌ ${channel} error:`, error);
+  return errorResponse(error);
+}
+
 export function setupProjectHandlers() {
   ipcMain.handle('project:get-recent', () => {
     console.log('📞 IPC Call: project:get-recent');
@@ -69,22 +108,24 @@ export function setupProjectHandlers() {
         console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
         // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`), comme à l'ouverture.
         const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) modeService.init(projectPath);
-        await closeWorkspaceServices();
+        if (projectPath) await startService('modeService', () => modeService.init(projectPath));
+        await startService('closeWorkspaceServices', closeWorkspaceServices);
       } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
           console.log('🔧 Initializing services for new project:', projectPath);
-          await historyService.init(projectPath);
-          modeService.init(projectPath);
+          await startService('historyService', () => historyService.init(projectPath));
+          await startService('modeService', () => modeService.init(projectPath));
 
           // Initialize PDF service with rebuild progress callback
-          await pdfService.init(projectPath, (progress) => {
-            event.sender.send('project:rebuild-progress', progress);
-          });
+          await startService('pdfService', () =>
+            pdfService.init(projectPath, (progress) => {
+              event.sender.send('project:rebuild-progress', progress);
+            })
+          );
 
           // Initialize Tropy service
-          await tropyService.init(projectPath);
+          await startService('tropyService', () => tropyService.init(projectPath));
 
           // Initialize MCP clients (fire-and-forget so a dead server
           // doesn't block project loading).
@@ -101,8 +142,7 @@ export function setupProjectHandlers() {
       console.log('📤 IPC Response: project:create', result);
       return result;
     } catch (error: unknown) {
-      console.error('❌ project:create error:', error);
-      return errorResponse(error);
+      return projectFailure('project:create', error);
     }
   });
 
@@ -133,8 +173,8 @@ export function setupProjectHandlers() {
         console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
         // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`).
         const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) modeService.init(projectPath);
-        await closeWorkspaceServices();
+        if (projectPath) await startService('modeService', () => modeService.init(projectPath));
+        await startService('closeWorkspaceServices', closeWorkspaceServices);
       } else if (result.success) {
         const projectPath = projectManager.getCurrentProjectPath();
         if (projectPath) {
@@ -142,24 +182,28 @@ export function setupProjectHandlers() {
 
           // Initialize independent services in parallel
           await Promise.all([
-            historyService.init(projectPath),
-            Promise.resolve(modeService.init(projectPath)),
-            Promise.resolve(usageJournalService.init(projectPath)),
-            tropyService.init(projectPath),
+            startService('historyService', () => historyService.init(projectPath)),
+            startService('modeService', () => modeService.init(projectPath)),
+            startService('usageJournalService', () => usageJournalService.init(projectPath)),
+            startService('tropyService', () => tropyService.init(projectPath)),
           ]);
 
           // Initialize PDF service (depends on config, must run after)
-          await pdfService.init(projectPath, (progress) => {
-            event.sender.send('project:rebuild-progress', progress);
-          });
+          await startService('pdfService', () =>
+            pdfService.init(projectPath, (progress) => {
+              event.sender.send('project:rebuild-progress', progress);
+            })
+          );
 
           // Une note éditée hors de ClioDeck (Obsidian) entre deux sessions.
-          indexReadingNotesInBackground('ouverture du projet');
+          await startService('readingNotes', () => indexReadingNotesInBackground('ouverture du projet'));
 
           // Un chapitre indexé puis devenu lien sortant : ses extraits partent avant la
           // première question, sans attendre une sauvegarde.
-          manuscriptIndexService.configure(projectPath);
-          manuscriptIndexService.purgeOutside();
+          await startService('manuscriptIndexService', () => {
+            manuscriptIndexService.configure(projectPath);
+            manuscriptIndexService.purgeOutside();
+          });
 
           console.log('✅ All services initialized successfully');
         }
@@ -168,8 +212,7 @@ export function setupProjectHandlers() {
       console.log('📤 IPC Response: project:load', result.success ? 'success' : 'failed');
       return result;
     } catch (error: unknown) {
-      console.error('❌ project:load error:', error);
-      return errorResponse(error);
+      return projectFailure('project:load', error);
     }
   });
 

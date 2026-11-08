@@ -42,7 +42,10 @@ vi.mock('../../../services/config-manager.js', () => ({
 vi.mock('../../../services/pdf-service.js', () => ({
   pdfService: { init: h.pdfInit, close: h.pdfClose, getCurrentProjectPath: () => null },
 }));
-vi.mock('../../../services/mcp-clients-service.js', () => ({ mcpClientsService: {} }));
+// La création les charge sans attendre ; l'ouverture n'y touche pas.
+vi.mock('../../../services/mcp-clients-service.js', () => ({
+  mcpClientsService: { loadProject: vi.fn(async () => undefined) },
+}));
 // Elle tire tout le service de recherche ; sans fournisseur d'embeddings elle ne fait rien.
 vi.mock('../../../services/reading-notes-indexing.js', () => ({ indexReadingNotesInBackground: vi.fn() }));
 vi.mock('../../../services/retrieval-service.js', () => ({ retrievalService: { clear: vi.fn() } }));
@@ -271,5 +274,112 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
 
     expect(result.configIssue).toBeUndefined();
     expect(h.pdfInit).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Un service qui ne démarre pas (BT1-5) : `project:load` le rendait comme une erreur nue, que
+ * l'interface traduisait par « project.json peut-être illisible ou endommagé ». Le manifeste n'y
+ * est pour rien : la réponse porte son propre code, et le journal du processus principal nomme le
+ * service, sans que sa cause technique parte dans l'alerte.
+ */
+describe.skipIf(!sqliteAvailable)('project:load — un service du projet ne démarre pas', () => {
+  interface Refusal {
+    success: boolean;
+    code?: string;
+    error?: string;
+  }
+
+  const loggedLoadErrors = (spy: ReturnType<typeof vi.spyOn>): string[] =>
+    spy.mock.calls
+      .filter((args: unknown[]) => args[0] === '❌ project:load error:')
+      .map((args: unknown[]) => args.map((part) => (part instanceof Error ? part.message : String(part))).join(' '));
+
+  it('pdfService.init rejette : services_failed, et le journal nomme pdfService', async () => {
+    h.pdfInit.mockRejectedValueOnce(new Error('registre de fournisseurs invalide'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const result = await call<Refusal>('project:load', path.join(projectDir, 'project.json'));
+
+      expect(result).toMatchObject({ success: false, code: 'services_failed' });
+      const lines = loggedLoadErrors(logged);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('pdfService');
+      expect(lines[0]).toContain('registre de fournisseurs invalide');
+    } finally {
+      logged.mockRestore();
+      await call('project:close');
+    }
+  });
+
+  it('un service ouvert en parallèle rejette : services_failed, et le journal le nomme', async () => {
+    const init = vi.spyOn(modeService, 'init').mockImplementationOnce(() => {
+      throw new Error('modes illisibles');
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const result = await call<Refusal>('project:load', path.join(projectDir, 'project.json'));
+
+      expect(result).toMatchObject({ success: false, code: 'services_failed' });
+      expect(loggedLoadErrors(logged)[0]).toContain('modeService');
+    } finally {
+      init.mockRestore();
+      logged.mockRestore();
+      await call('project:close');
+    }
+  });
+
+  it('témoin : tous les services démarrent, aucun code', async () => {
+    const result = await openThenClose();
+    expect(result.success).toBe(true);
+    expect((result as Refusal).code).toBeUndefined();
+  });
+});
+
+/**
+ * La porte voisine, la création (revue de BT1-5). Si un service ne démarre pas après la création,
+ * `project:create` rendait une erreur nue : l'auteur lisait « Vérifiez que le dossier choisi est
+ * accessible en écriture » alors que le projet existait sur le disque, et un nouvel essai se
+ * heurtait à « existe déjà ». La réponse porte le même code qu'à l'ouverture.
+ */
+describe.skipIf(!sqliteAvailable)('project:create — un service du projet ne démarre pas', () => {
+  interface Refusal {
+    success: boolean;
+    code?: string;
+    error?: string;
+  }
+
+  const loggedCreateErrors = (spy: ReturnType<typeof vi.spyOn>): string[] =>
+    spy.mock.calls
+      .filter((args: unknown[]) => args[0] === '❌ project:create error:')
+      .map((args: unknown[]) => args.map((part) => (part instanceof Error ? part.message : String(part))).join(' '));
+
+  it('pdfService.init rejette après la création : services_failed, le journal nomme pdfService, le projet existe', async () => {
+    h.pdfInit.mockRejectedValueOnce(new Error('registre de fournisseurs invalide'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const result = await call<Refusal>('project:create', { name: 'Neuve', type: 'article', path: workDir });
+
+      expect(result).toMatchObject({ success: false, code: 'services_failed' });
+      const lines = loggedCreateErrors(logged);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('pdfService');
+      expect(lines[0]).toContain('registre de fournisseurs invalide');
+      expect(lstatSync(path.join(workDir, 'Neuve', 'project.json')).isFile()).toBe(true);
+    } finally {
+      logged.mockRestore();
+      await call('project:close');
+    }
+  });
+
+  it('témoin : tous les services démarrent, aucun code', async () => {
+    const result = await call<Refusal>('project:create', { name: 'Neuve', type: 'article', path: workDir });
+    await call('project:close');
+
+    expect(result.success).toBe(true);
+    expect(result.code).toBeUndefined();
   });
 });

@@ -379,12 +379,13 @@ describe('un fichier qui ne peut pas être un projet n’a pas besoin du disque 
     expect(result).toMatchObject({ success: false, code: 'project_unavailable' });
   });
 
-  it('un project.json abîmé garde son code, et l’erreur de lecture son texte', async () => {
+  it('un project.json abîmé garde son code aux deux portes, et l’erreur de lecture son texte', async () => {
     const file = writeHere('project.json', '{ "name": "Thèse", ');
-    expect(await metadataOf(file)).toMatchObject({ success: false, code: 'project_unavailable' });
+    expect(await metadataOf(file)).toMatchObject({ success: false, code: 'manifest_unreadable' });
     const result = await load(file);
-    expect(result.success).toBe(false);
-    expect(result.code).toBeUndefined();
+    expect(result).toMatchObject({ success: false, code: 'manifest_unreadable', fileName: 'project.json' });
+    expect(result.error).toBeTruthy();
+    expect(result.error).not.toBe('manifest_unreadable');
   });
 });
 
@@ -465,8 +466,8 @@ describe('un project.json avec BOM, posé par un éditeur Windows : un vrai proj
   });
 
   it.each<[string, string, string]>([
-    ['un BOM seul', BOM, 'project_unavailable'],
-    ['un BOM et un JSON invalide', `${BOM}{ "name": `, 'project_unavailable'],
+    ['un BOM seul', BOM, 'manifest_unreadable'],
+    ['un BOM et un JSON invalide', `${BOM}{ "name": `, 'manifest_unreadable'],
     ['un BOM et un objet vide', `${BOM}{}`, 'manifest_invalid'],
     ['un BOM et un tableau', `${BOM}[]`, 'manifest_invalid'],
   ])('%s : le BOM n’ouvre pas ce qui n’est pas un projet, et rien ne s’écrit', async (_label, content, code) => {
@@ -474,7 +475,7 @@ describe('un project.json avec BOM, posé par un éditeur Windows : un vrai proj
     const before = folderState(projectDir);
 
     expect(await metadataOf(file)).toMatchObject({ success: false, code });
-    expect((await load(file)).success).toBe(false);
+    expect(await load(file)).toMatchObject({ success: false, code });
 
     expect(folderState(projectDir)).toEqual(before);
     expect(addRecentProject).not.toHaveBeenCalled();

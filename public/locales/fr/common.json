@@ -329,7 +329,12 @@
     "createErrorExists": "Un projet nommé « {{name}} » existe déjà dans {{folder}}. Rien n'a été modifié. Ouvrez-le avec « Ouvrir un projet », ou choisissez un autre nom ou un autre emplacement.",
     "createErrorFilesExist": "Le dossier « {{name}} » de {{folder}} contient déjà des fichiers que la création remplacerait. Rien n'a été modifié. Choisissez un autre nom ou un autre emplacement.",
     "createErrorNameInvalid": "Le nom d'un projet ne peut contenir ni / ni \\, et ne peut pas être « . » ou « .. ».",
+    "createServicesFailed": "Le projet « {{name}} » a été créé dans {{folder}}, mais il n'a pas pu être préparé : un des services de ClioDeck (par exemple le journal de recherche, les sources primaires ou l'index des PDF) n'a pas démarré. Ouvrez-le avec « Ouvrir un projet ». Si cela se reproduit, relancer ClioDeck peut suffire.",
     "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
+    "openUnavailable": "Ce projet n'a pas pu être ouvert : son dossier ou son fichier project.json est introuvable ou inaccessible (disque débranché, dossier déplacé ou renommé, droits de lecture retirés). Rien n'a été modifié.",
+    "openNotWritable": "Ce projet n'a pas pu être ouvert : son fichier project.json n'a pas pu être écrit. Il n'a pas été modifié. Vérifiez que ce fichier et le dossier du projet sont accessibles en écriture.",
+    "servicesFailed": "Ce projet n'a pas pu être préparé : un des services de ClioDeck (par exemple le journal de recherche, les sources primaires ou l'index des PDF) n'a pas démarré. Son fichier project.json n'y est pour rien. Si cela se reproduit, relancer ClioDeck peut suffire.",
+    "openFailed": "Ce projet n'a pas pu être ouvert.",
     "notAProject": "« {{file}} » n'est pas un fichier de projet ClioDeck. Il n'a pas été modifié, et ce qui était ouvert reste ouvert. Pour ouvrir un projet, choisissez le fichier project.json que ClioDeck a créé dans son dossier.",
     "configUnreadable": {
       "title": "Réglages du projet illisibles",

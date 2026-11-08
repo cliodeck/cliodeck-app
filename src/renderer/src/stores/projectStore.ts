@@ -104,11 +104,29 @@ export class NotAProjectError extends Error {
   }
 }
 
+/**
+ * Tout autre refus du main, à l'ouverture comme à la création. Son code choisit le message : un
+ * `project.json` abîmé, un dossier introuvable, un service qui n'a pas démarré n'appellent pas le
+ * même geste. Le texte de l'erreur reste pour le journal, et pour les refus de création, qui le
+ * portent dans leur texte (`project_exists`).
+ */
+export class ProjectOpenError extends Error {
+  readonly code: string | undefined;
+
+  constructor(code: string | undefined, message: string) {
+    super(message);
+    this.name = 'ProjectOpenError';
+    this.code = code;
+  }
+}
+
 /** L'erreur d'un refus du main, à `project:get-metadata` comme à `project:load`. */
 function projectRefusal(response: { code?: string; fileName?: string; error?: string }, projectPath: string): Error {
   const message = response.error || 'Failed to load project';
   const notAProject = response.code === 'not_a_project' || response.code === 'manifest_invalid';
-  return notAProject ? new NotAProjectError(response.fileName ?? projectPath, message) : new Error(message);
+  return notAProject
+    ? new NotAProjectError(response.fileName ?? projectPath, message)
+    : new ProjectOpenError(response.code, message);
 }
 
 /**
@@ -452,8 +470,8 @@ async function openProjectContents(
  * Le verrou de bascule de l'éditeur vaut aussi pour le projet : une
  * renumérotation écrit le manuscrit du projet courant, fichier par fichier.
  * Rend vrai si l'action doit s'arrêter, l'auteur étant alors prévenu. Une
- * alerte et non un rejet : les appelants traduiraient un rejet par « project.json
- * endommagé », et le bouton de fermeture n'en attrape aucun.
+ * alerte et non un rejet : les appelants traduiraient un rejet par « ce projet n'a
+ * pas pu être ouvert », et le bouton de fermeture n'en attrape aucun.
  */
 async function refusedBySwitchLock(): Promise<boolean> {
   const { useEditorStore } = await import('./editorStore');
@@ -566,7 +584,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
-        throw new Error(result.error || 'Failed to create project');
+        throw new ProjectOpenError(result.code, result.error || 'Failed to create project');
       }
 
       await openProjectContents(result.project, set, detached);
