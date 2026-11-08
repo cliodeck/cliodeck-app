@@ -208,7 +208,8 @@ function installMain(): void {
         const at = mainCurrent;
         const gate = getAllGates.shift();
         if (gate) await gate;
-        return { success: true, documents: docsOf(at) };
+        // Comme `VectorStore.getAllDocuments` : un document indexé a ses extraits, et le dit.
+        return { success: true, documents: docsOf(at).map((d) => ({ ...d, chunkCount: 3 })) };
       }),
       delete: vi.fn(async (id: string) => {
         deleteCalls.push(id);

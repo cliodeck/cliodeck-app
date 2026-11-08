@@ -27,6 +27,19 @@ function leavingCheck(): {
   };
 }
 
+/** Ce que `refreshIndexedPDFs` lit d'un document de `pdf:get-all` (`VectorStore.getAllDocuments`). */
+interface IndexedDocumentSummary {
+  fileURL?: string;
+  bibtexKey?: string;
+  chunkCount?: number;
+  metadata?: { textDensity?: { lowText?: boolean } };
+}
+
+/** Indexé pour de bon : des extraits, ou un PDF sans couche de texte qui n'en aura jamais. */
+function isSearchable(doc: IndexedDocumentSummary): boolean {
+  return (doc.chunkCount ?? 0) > 0 || doc.metadata?.textDensity?.lowText === true;
+}
+
 export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> = (set, get) => ({
   indexedFilePaths: new Set<string>(),
   indexedBibtexKeys: new Set<string>(),
@@ -372,7 +385,12 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           console.log('📄 Sample document structure:', JSON.stringify(result.documents[0], null, 2));
         }
 
-        result.documents.forEach((doc: { fileURL?: string; bibtexKey?: string }) => {
+        result.documents.forEach((doc: IndexedDocumentSummary) => {
+          // Un document sans extrait n'est pas cherchable : une indexation interrompue d'avant
+          // l'écriture tout ou rien l'a laissé là. Compté indexé, il n'était plus jamais reproposé,
+          // ni par son chemin ni par sa clé (S03-1-0). Un PDF sans texte (`lowText`, #132) n'a pas
+          // d'extrait non plus, mais le réindexer ne donnerait rien de plus.
+          if (!isSearchable(doc)) return;
           // Document stores file path as fileURL (from backend)
           if (doc.fileURL) {
             indexedPaths.add(doc.fileURL);
