@@ -1015,7 +1015,7 @@ test('la barre d’état nomme le fichier ouvert : note.md après Enregistrer so
   }
 });
 
-test('un chemin long dans une fenêtre étroite : le nom se tronque, et l’état d’enregistrement reste à l’écran', async () => {
+test('un chemin long dans une fenêtre étroite : le dossier se tronque, le nom du fichier et l’état d’enregistrement restent à l’écran', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
@@ -1023,9 +1023,11 @@ test('un chemin long dans une fenêtre étroite : le nom se tronque, et l’éta
   }
   const { app, window, userDataDir } = outcome.value;
   const projet = makeProject();
-  const dossier = 'annexes-documentaires-du-chapitre-sur-la-mobilisation';
-  const relatif = `${dossier}/transcription-integrale-des-correspondances-du-prefet-1914-1918.md`;
-  mkdirSync(join(projet.dir, dossier));
+  const dossier =
+    'annexes-documentaires-du-chapitre-sur-la-mobilisation/correspondances-du-prefet-avec-le-ministere-de-la-guerre';
+  const nom = 'transcription-1914-1918.md';
+  const relatif = `${dossier}/${nom}`;
+  mkdirSync(join(projet.dir, dossier), { recursive: true });
   writeFileSync(join(projet.dir, relatif), '# Annexe\n\nTexte de l’annexe.\n');
 
   try {
@@ -1047,9 +1049,16 @@ test('un chemin long dans une fenêtre étroite : le nom se tronque, et l’éta
     const viewport = await window.evaluate(() => document.documentElement.clientWidth);
     expect(box).not.toBeNull();
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport);
-    // L'état se lit en entier ; c'est le nom qui cède la place, par des points de suspension.
-    expect(await state.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect(await fileInStatusBar(window).evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    // L'état se lit en entier, le nom du fichier aussi : c'est le dossier qui cède la place, par
+    // des points de suspension. Tronqué par la fin, le chemin perdait le nom, l'information cherchée.
+    const entier = (el: Element): boolean => el.scrollWidth <= el.clientWidth;
+    expect(await state.evaluate(entier)).toBe(true);
+    const nomAffiche = fileInStatusBar(window).locator('.status-bar__file-name');
+    await expect(nomAffiche).toHaveText(`/${nom}`);
+    expect(await nomAffiche.evaluate(entier)).toBe(true);
+    const nomBox = await nomAffiche.boundingBox();
+    expect((nomBox?.x ?? 0) + (nomBox?.width ?? 0)).toBeLessThanOrEqual(box?.x ?? 0);
+    expect(await fileInStatusBar(window).locator('.status-bar__file-dir').evaluate(entier)).toBe(false);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

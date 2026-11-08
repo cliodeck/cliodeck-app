@@ -118,6 +118,34 @@ describe('StatusBar : le fichier ouvert est nommé (G7)', () => {
     expect(fileLabel()).toHaveTextContent(/^note\.md$/);
   });
 
+  it('sous Windows, une note ouverte par un dialogue est dans le projet : chemin relatif, sans « hors du projet »', async () => {
+    // Le dossier du projet vient de `path.dirname`, le chemin de la note d'un dialogue ou de
+    // `path.join` : barres obliques inverses des deux côtés.
+    useProjectStore.setState({
+      currentProject: {
+        id: 'p1',
+        name: 'Projet',
+        path: 'C:\\Users\\h\\proj',
+        type: 'article',
+        createdAt: new Date(),
+        lastOpenedAt: new Date(),
+      },
+    });
+    await mountWith({ filePath: 'C:\\Users\\h\\proj\\reading-notes\\Lester_1935.md', isDirty: false });
+
+    expect(fileLabel()).toHaveTextContent(/^reading-notes\/Lester_1935\.md$/);
+    expect(fileLabel()).toHaveAttribute('title', 'C:\\Users\\h\\proj\\reading-notes\\Lester_1935.md');
+  });
+
+  it('un dossier long cède avant le nom du fichier : deux parties, le nom à part', async () => {
+    await mountWith({ filePath: '/p/annexes-documentaires/transcription.md', isDirty: false });
+
+    // La mise en page (le dossier se tronque, le nom reste entier) se vérifie dans l'app réelle ;
+    // ici, la découpe qui la rend possible.
+    expect(fileLabel()?.querySelector('.status-bar__file-dir')).toHaveTextContent(/^annexes-documentaires$/);
+    expect(fileLabel()?.querySelector('.status-bar__file-name')).toHaveTextContent(/^\/transcription\.md$/);
+  });
+
   it('témoin : hors de tout document, le temps d’un changement de projet, rien n’est nommé', async () => {
     useEditorStore.setState({ bufferDetached: true });
     await mountWith({ filePath: null, isDirty: false });

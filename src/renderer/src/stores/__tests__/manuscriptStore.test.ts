@@ -99,6 +99,43 @@ describe('currentRelativePath', () => {
     useEditorStore.setState({ filePath: '/ailleurs/note.md' });
     expect(currentRelativePath()).toBeNull();
   });
+
+  describe('sous Windows', () => {
+    // Le dossier du projet vient de `path.dirname` (barres obliques inverses), comme le chemin
+    // que rend un dialogue ; le renderer compose les siens avec `/`.
+    const projectAt = (path: string): void => {
+      useProjectStore.setState({
+        currentProject: { name: 'Livre', path, type: 'book', createdAt: new Date() } as never,
+      });
+    };
+
+    it('un chemin rendu par un dialogue est dans le projet, et se rend avec `/`', () => {
+      projectAt('C:\\Users\\h\\livre');
+      useEditorStore.setState({ filePath: 'C:\\Users\\h\\livre\\reading-notes\\Lester_1935.md' });
+      expect(currentRelativePath()).toBe('reading-notes/Lester_1935.md');
+
+      useEditorStore.setState({ filePath: 'C:\\Users\\h\\livre\\chapters\\01.md' });
+      expect(currentRelativePath()).toBe('chapters/01.md');
+    });
+
+    it('un chemin composé par le renderer garde son relatif', () => {
+      projectAt('C:\\Users\\h\\livre');
+      useEditorStore.setState({ filePath: 'C:\\Users\\h\\livre/chapters/01.md' });
+      expect(currentRelativePath()).toBe('chapters/01.md');
+    });
+
+    it('témoin : un dossier voisin au nom prolongé n’est pas le projet', () => {
+      projectAt('C:\\Users\\h\\livre');
+      useEditorStore.setState({ filePath: 'C:\\Users\\h\\livre-bis\\note.md' });
+      expect(currentRelativePath()).toBeNull();
+    });
+  });
+
+  it('témoin POSIX : une barre oblique inverse est un caractère de nom, pas un séparateur', () => {
+    // Un dossier nommé `livre\annexes`, voisin du projet `/p/livre` : il n'en fait pas partie.
+    useEditorStore.setState({ filePath: '/p/livre\\annexes/note.md' });
+    expect(currentRelativePath()).toBeNull();
+  });
 });
 
 describe('readManuscript', () => {

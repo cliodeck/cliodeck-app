@@ -45,10 +45,28 @@
 }
 
 .status-bar__item--file {
-  display: block;
+  gap: 0;
   min-width: 0;
   max-width: none;
   color: var(--text-secondary);
+}
+
+/* Le dossier cède le premier ; le nom du fichier ne se tronque que s'il ne tient pas seul. */
+.status-bar__file-dir,
+.status-bar__file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-bar__file-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.status-bar__file-name {
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .status-bar__item--warning {

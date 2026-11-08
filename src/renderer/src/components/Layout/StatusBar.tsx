@@ -115,15 +115,22 @@ export const StatusBar: React.FC = () => {
   // Le fichier que montre l'éditeur (G7) : après « Enregistrer sous », l'éditeur reste sur
   // le nouveau fichier, et rien à l'écran ne le nommait. Lu sur le magasin, jamais sur le
   // disque ; rien pendant un changement de projet, où l'éditeur n'est sur aucun document.
+  // Un chemin du projet en deux parties, le dossier et le nom (séparateur compris) : quand la
+  // place manque, le dossier cède avant le nom, qui est l'information cherchée.
   const relativePath = currentRelativePath();
+  const nameAt =
+    relativePath === null
+      ? 0
+      : Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'), 0);
   const openFile = bufferDetached
     ? null
     : filePath === null
-      ? { label: t('statusBar.untitled'), title: undefined }
+      ? { dir: '', name: t('statusBar.untitled'), title: undefined }
       : relativePath !== null
-        ? { label: relativePath, title: filePath }
+        ? { dir: relativePath.slice(0, nameAt), name: relativePath.slice(nameAt), title: filePath }
         : {
-            label: filePath.split(/[\\/]/).pop() || filePath,
+            dir: '',
+            name: filePath.split(/[\\/]/).pop() || filePath,
             title: t('statusBar.fileOutsideProjectTooltip', { path: filePath }),
           };
 
@@ -138,7 +145,8 @@ export const StatusBar: React.FC = () => {
         </span>
         {openFile && (
           <span className="status-bar__item status-bar__item--file" title={openFile.title}>
-            {openFile.label}
+            {openFile.dir && <span className="status-bar__file-dir">{openFile.dir}</span>}
+            <span className="status-bar__file-name">{openFile.name}</span>
           </span>
         )}
       </div>
