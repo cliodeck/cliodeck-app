@@ -99,7 +99,11 @@ function chapterOf(path: string, order: number): ResolvedChapter {
   return { id: name, title: name, filePath: `chapters/${name}.md`, order, kind: 'chapter' };
 }
 
-async function openBook(files: Record<string, string>, open: string = A): Promise<void> {
+async function openBook(
+  files: Record<string, string>,
+  open: string = A,
+  type: 'book' | 'article' = 'book'
+): Promise<void> {
   disk = { ...files };
   unreadableOnDisk = new Map();
   writes = [];
@@ -139,7 +143,7 @@ async function openBook(files: Record<string, string>, open: string = A): Promis
       id: 'p1',
       name: 'Livre',
       path: PROJECT,
-      type: 'book',
+      type,
       createdAt: new Date(),
       lastOpenedAt: new Date(),
     },
@@ -299,6 +303,74 @@ describe('renumérotation sans bascule', () => {
 
     expect(alertMessage()).toBe('book.renumberNoChange');
     expect(writes).toEqual([]);
+  });
+});
+
+/**
+ * Une note insérée à la main sous un numéro déjà pris (BT1-3) : la
+ * renumérotation répondait « déjà numérotées » et laissait deux notes de même
+ * numéro, dont pandoc ne gardait qu'une à l'export.
+ */
+describe('un numéro réemployé à la main', () => {
+  // Numérotation continue : B reprend après A.
+  const REUSED = {
+    [A]: '# A\n\nTexte A[^1].\n\n[^1]: une\n',
+    [B]: '# B\n\nUn[^2].\n\nAjout[^3].\n\n[^3]: ajoutée\n\nDeux[^3].\n\n[^2]: un\n[^3]: deux\n',
+  };
+  // Rien à renuméroter, mais une définition sans appel.
+  const UNLINKED = {
+    [A]: '# A\n\nTexte A[^1].\n\n[^1]: une\n',
+    [B]: '# B\n\nTexte B[^2].\n\n[^2]: deux\n[^3]: sans appel\n',
+  };
+
+  it('livre : deux notes distinctes sur le disque, et non « déjà numérotées »', async () => {
+    await openBook(REUSED);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toBe('book.renumberDone');
+    expect(disk[B]).toBe(
+      '# B\n\nUn[^2].\n\nAjout[^3].\n\n[^3]: ajoutée\n\nDeux[^4].\n\n[^2]: un\n[^4]: deux\n'
+    );
+    expect(disk[A]).toBe(REUSED[A]);
+  });
+
+  it('livre : ce qui n’a pas pu être lié est dit à la place de « déjà numérotées »', async () => {
+    await openBook(UNLINKED);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).not.toContain('book.renumberNoChange');
+    expect(alertMessage()).toContain('editor.renumberUnlinked');
+    expect(writes).toEqual([]);
+    expect(locks()).toEqual(FREE);
+  });
+
+  it('article : le texte ouvert est renuméroté', async () => {
+    await openBook({ [A]: REUSED[B] }, A, 'article');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(live()).toBe(
+      '# B\n\nUn[^1].\n\nAjout[^2].\n\n[^2]: ajoutée\n\nDeux[^3].\n\n[^1]: un\n[^3]: deux\n'
+    );
+  });
+
+  it('article : ce qui n’a pas pu être lié est dit, au lieu du silence', async () => {
+    await openBook({ [A]: UNLINKED[B] }, A, 'article');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('toolbar.renumberFootnotes'));
+    });
+
+    expect(alertMessage()).toContain('editor.renumberUnlinked');
+    expect(live()).toBe('# B\n\nTexte B[^1].\n\n[^1]: deux\n[^2]: sans appel\n');
   });
 });
 
