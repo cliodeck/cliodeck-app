@@ -11,12 +11,51 @@ import * as fs from 'fs/promises';
 export const VERBATIM_FIELDS = new Set(['url', 'doi', 'eprint', 'date', 'urldate']);
 
 /**
+ * Champs à tiret de BibDesk qui portent une adresse ou un fichier : `bdsk-url-1`, `bdsk-url-2`…,
+ * `bdsk-file-1`… (un alias en base64), et `local-url`, où d'anciennes versions de BibDesk
+ * rangeaient le fichier lié. Lus depuis que les noms à tiret le sont (S07-1-14), ils passaient par
+ * le nettoyage LaTeX puis par l'échappement : la première réécriture abîmait l'adresse (`~` en
+ * espace, `--` en tiret demi-cadratin, `_` en `\_`).
+ */
+const BIBDESK_VERBATIM = /^(?:bdsk-(?:url|file)-\d+|local-url)$/;
+
+/**
+ * Champ lu et écrit tel quel : ceux de {@link VERBATIM_FIELDS} et les adresses de BibDesk. Une
+ * seule règle pour le parseur et l'exporteur, sans égard à la casse (BibDesk écrit `Bdsk-Url-1`).
+ */
+export function isVerbatimField(name: string): boolean {
+  const lower = name.toLowerCase();
+  return VERBATIM_FIELDS.has(lower) || BIBDESK_VERBATIM.test(lower);
+}
+
+/**
  * Valeur verbatim écrivable entre accolades : les accolades, qui
- * délimiteraient la valeur, sont encodées comme dans une URL.
+ * délimiteraient la valeur, sont encodées comme dans une URL. Une barre
+ * oblique inverse finale aussi (`%5C`) : écrite `{…\}`, elle se lirait comme
+ * une accolade échappée (cf. `findMatchingBrace`), et l'entrée ne se
+ * refermerait plus si elle contient aussi une accolade isolée.
  */
 export function verbatimSafe(value: string): string {
-  return value.trim().replaceAll('{', '%7B').replaceAll('}', '%7D');
+  return value.trim().replaceAll('{', '%7B').replaceAll('}', '%7D').replace(/\\$/, '%5C');
 }
+
+/**
+ * Caractères spéciaux de LaTeX et leur forme échappée, appliqués en un seul passage : échapper
+ * d'abord `\` en `\textbackslash{}`, puis toutes les accolades, échappait aussi les siennes
+ * (`\textbackslash\{\}`), que la relecture ne savait pas défaire — un `\textbackslash` de plus à
+ * chaque réécriture (S07-1-30). `~` serait relu comme une espace insécable.
+ */
+const LATEX_ESCAPES: Record<string, string> = {
+  '\\': '\\textbackslash{}',
+  '&': '\\&',
+  '%': '\\%',
+  '$': '\\$',
+  '#': '\\#',
+  '_': '\\_',
+  '{': '\\{',
+  '}': '\\}',
+  '~': '\\textasciitilde{}',
+};
 
 /**
  * BibTeX Exporter
@@ -92,7 +131,7 @@ export class BibTeXExporter {
 
     // File path (if present)
     if (citation.file) {
-      lines.push(this.formatField('file', citation.file));
+      lines.push(this.formatFileField(citation.file));
     }
 
     // Tags (export as semicolon-separated list)
@@ -144,14 +183,28 @@ export class BibTeXExporter {
   }
 
   /**
-   * Champ libre : verbatim pour ceux que BibLaTeX lit tels quels (cf.
-   * {@link VERBATIM_FIELDS}), échappé pour les autres.
+   * Champ libre : verbatim pour ceux que BibLaTeX lit tels quels et pour les adresses de BibDesk
+   * (cf. {@link isVerbatimField}), échappé pour les autres.
    */
   private formatCustomField(name: string, value: string): string {
-    if (VERBATIM_FIELDS.has(name.toLowerCase())) {
+    if (isVerbatimField(name)) {
       return `  ${name} = {${verbatimSafe(value)}},`;
     }
     return this.formatField(name, value);
+  }
+
+  /**
+   * Chemin du PDF, verbatim comme les champs de {@link VERBATIM_FIELDS} : l'échappement LaTeX le
+   * corrompait à la relecture (S07-1-16). Barres obliques normales, que Windows accepte : `\`
+   * serait relu comme un échappement. Pas de {@link verbatimSafe}, dont le `%7B` changerait le
+   * nom du fichier : une accolade, qui déséquilibrerait l'entrée, s'écrit `\{` ou `\}`. Le
+   * deux-points et le point-virgule s'écrivent `\:` et `\;`, comme les écrivent Zotero et JabRef :
+   * la relecture découpe le champ sur ceux qui ne sont pas échappés (description:chemin:type,
+   * plusieurs pièces jointes), et coupait le chemin à cet endroit.
+   */
+  private formatFileField(filePath: string): string {
+    const written = filePath.replaceAll('\\', '/').replace(/[{}:;]/g, (char) => `\\${char}`);
+    return `  file = {${written}},`;
   }
 
   /**
@@ -173,25 +226,8 @@ export class BibTeXExporter {
    * Escape special LaTeX characters in value
    */
   private escapeValue(value: string): string {
-    let escaped = value;
-
-    // Escape special LaTeX characters (but not Unicode characters)
-    const escapeMap: Array<[string, string]> = [
-      ['\\', '\\textbackslash{}'], // Must be first
-      ['&', '\\&'],
-      ['%', '\\%'],
-      ['$', '\\$'],
-      ['#', '\\#'],
-      ['_', '\\_'],
-      ['{', '\\{'],
-      ['}', '\\}'],
-    ];
-
-    for (const [char, latex] of escapeMap) {
-      escaped = escaped.replaceAll(char, latex);
-    }
-
-    return escaped;
+    // Escape special LaTeX characters (but not Unicode characters), cf. LATEX_ESCAPES
+    return value.replace(/[\\&%$#_{}~]/g, (char) => LATEX_ESCAPES[char]);
   }
 
   /**
@@ -316,7 +352,7 @@ export class BibTeXExporter {
     }
 
     if (citation.file) {
-      lines.push(this.formatField('file', citation.file)); // Don't convert file paths
+      lines.push(this.formatFileField(citation.file)); // Don't convert file paths
     }
 
     if (citation.tags && citation.tags.length > 0) {
@@ -347,7 +383,7 @@ export class BibTeXExporter {
     if (citation.customFields) {
       for (const [key, value] of Object.entries(citation.customFields)) {
         lines.push(
-          VERBATIM_FIELDS.has(key.toLowerCase())
+          isVerbatimField(key)
             ? this.formatCustomField(key, value)
             : this.formatFieldLegacy(key, value)
         );

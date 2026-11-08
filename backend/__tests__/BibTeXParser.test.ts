@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BibTeXParser } from '../core/bibliography/BibTeXParser';
+import { auditParsedBib } from '../core/bibliography/bibAudit';
 
 describe('BibTeXParser', () => {
   const parser = new BibTeXParser();
@@ -108,6 +109,123 @@ describe('BibTeXParser', () => {
 
       expect(citations).toHaveLength(1);
       expect(citations[0].title).toContain('Test');
+    });
+
+    // Mendeley et BibDesk rangent leurs champs par ordre alphabétique : un nom à tiret
+    // (mendeley-groups, Date-Added) arrive avant title. Le parseur avançait juste après son `=`
+    // sans sauter la valeur, et plus aucun champ n'était lu : l'entrée, sans titre, était rejetée.
+    it('lit une entrée Mendeley dont mendeley-groups précède le titre', () => {
+      const bibtex = `@article{Smith2010, author={Smith, John}, doi={10.1000/xyz}, journal={Revue}, mendeley-groups={These}, pages={1--10}, title={{A Title}}, year={2010}}`;
+
+      const citations = parser.parse(bibtex);
+
+      expect(parser.lastRejected).toEqual([]);
+      expect(citations).toHaveLength(1);
+      expect(citations[0].title).toBe('A Title');
+      expect(citations[0].year).toBe('2010');
+      expect(citations[0].customFields).toMatchObject({ 'mendeley-groups': 'These', pages: '1–10', doi: '10.1000/xyz' });
+    });
+
+    it('lit les champs qui suivent un champ à tiret placé après le titre', () => {
+      const bibtex = `@misc{A, title={T}, mendeley-tags={x}, url={https://example.org/a}, year={2001}}`;
+
+      const [citation] = parser.parse(bibtex);
+
+      expect(citation.year).toBe('2001');
+      expect(citation.customFields).toMatchObject({ 'mendeley-tags': 'x', url: 'https://example.org/a' });
+    });
+
+    it('lit une entrée BibDesk dont Date-Added précède Title', () => {
+      const bibtex = [
+        '@book{Garde2000,',
+        '\tAuthor = {Garde, Paul},',
+        '\tDate-Added = {2020-01-02 10:00:00 +0100},',
+        '\tDate-Modified = {2020-01-03 11:00:00 +0100},',
+        '\tTitle = {Le temps des archives},',
+        '\tYear = {2000},',
+        '\tBdsk-Url-1 = {https://example.org/garde}}',
+      ].join('\n');
+
+      const [citation] = parser.parse(bibtex);
+
+      expect(citation?.title).toBe('Le temps des archives');
+      expect(citation.year).toBe('2000');
+      expect(citation.customFields).toMatchObject({ 'date-added': '2020-01-02 10:00:00 +0100', 'bdsk-url-1': 'https://example.org/garde' });
+    });
+
+    // Le tréma s'écrit {\"u} : la valeur entre guillemets s'arrêtait au guillemet de l'accent.
+    it('lit une valeur entre guillemets qui contient un tréma {\\"u}, dans l’auteur et le titre', () => {
+      const bibtex = `@book{k2, author = "M{\\"u}ller, Hans", title = "Die M{\\"u}nchner Geschichte", year = 1999}`;
+
+      const citations = parser.parse(bibtex);
+
+      expect(parser.lastRejected).toEqual([]);
+      expect(citations).toHaveLength(1);
+      expect(citations[0].author).toBe('Müller, Hans');
+      expect(citations[0].title).toBe('Die Münchner Geschichte');
+      expect(citations[0].year).toBe('1999');
+    });
+
+    it('développe les abréviations @string, sans égard à la casse, et les concaténations #', () => {
+      const bibtex = [
+        '@string{AN = {Archives nationales}}',
+        '@String{par = "Paris"}',
+        '@STRING{anp = an # ", " # PAR}',
+        '@book{k3, title={Inventaire}, publisher = AN, address = anp, year=1950}',
+        '@book{k4, title={Fonds}, publisher = an # { (site de } # Par # {)}, year=1960}',
+        '@book{k5, title={Inconnu}, publisher = XYZ}',
+      ].join('\n');
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations.map((c) => c.publisher)).toEqual([
+        'Archives nationales',
+        'Archives nationales (site de Paris)',
+        // Une abréviation jamais définie reste écrite telle quelle.
+        'XYZ',
+      ]);
+      expect(citations[0].customFields?.address).toBe('Archives nationales, Paris');
+      expect(citations[0].year).toBe('1950');
+    });
+
+    // Le caractère qui suit un antislash ne compte pas (S07-1-32) : `\}` de `{C:\dossier\}` non
+    // plus. Sans fermeture à ce compte, on recompte toutes les accolades, comme BibTeX.
+    it('referme une valeur qui finit par un antislash, sans perdre l’entrée ni la suivante', () => {
+      const bibtex = ['@misc{A, title={C:\\dossier\\}, year={2000}}', '@misc{B, title={Suite}, year={2001}}'].join('\n');
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations.map((c) => [c.id, c.title, c.year])).toEqual([
+        ['A', 'C:\\dossier\\', '2000'],
+        ['B', 'Suite', '2001'],
+      ]);
+      expect(auditParsedBib(bibtex, citations).unreadKeys).toEqual([]);
+    });
+
+    // Le résumé devenait `note` à la réécriture, et disparaissait quand l'entrée en avait une.
+    it('garde abstract et note distincts', () => {
+      const bibtex = [
+        '@book{A_2000, title={T}, abstract={Long résumé}}',
+        '@book{B_2001, title={U}, note={Réimpr.}, abstract={Autre résumé}}',
+      ].join('\n');
+
+      const [a, b] = parser.parse(bibtex);
+
+      expect(a.notes).toBeUndefined();
+      expect(a.customFields?.abstract).toBe('Long résumé');
+      expect(b.notes).toBe('Réimpr.');
+      expect(b.customFields?.abstract).toBe('Autre résumé');
+    });
+
+    // Un nom invalide (ici, une espace) est ignoré, mais sa valeur est sautée quand même : sinon
+    // `{x, y}, title` passait pour le nom du champ suivant, et le titre était perdu.
+    it('saute la valeur d’un nom de champ invalide, et lit le titre qui suit', () => {
+      const [citation] = parser.parse('@misc{k, my field = {x, y}, title = {T}, year = {2001}}');
+
+      expect(parser.lastRejected).toEqual([]);
+      expect(citation?.title).toBe('T');
+      expect(citation.year).toBe('2001');
+      expect(citation.customFields).toBeUndefined();
     });
 
     it('should handle empty or invalid input', () => {

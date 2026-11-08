@@ -102,9 +102,13 @@ describe('auditParsedBib — les entrées que le parseur a laissées', () => {
   });
 
   it('une entrée non lue qui porte zoterokey vient de Zotero : elle est désignée comme telle', () => {
-    const bib = new BibTeXExporter().exportToString([
-      createCitation({ id: 'Odd_2021', type: 'article', author: 'Odd, A.', year: '2021', title: 'Ensemble } fermé', zoteroKey: 'ODD2021' }),
-    ]);
+    // Le titre retiré à la main du .bib : la seule façon pour une entrée venue de Zotero de ne
+    // plus se lire, depuis que le parseur lit les accolades échappées (L05-7).
+    const bib = new BibTeXExporter()
+      .exportToString([
+        createCitation({ id: 'Odd_2021', type: 'article', author: 'Odd, A.', year: '2021', title: 'Ensemble fermé', zoteroKey: 'ODD2021' }),
+      ])
+      .replace(/^\s*title = .*\n/m, '');
     const result = audit(`${bib}\n@misc{entretien_dupont,\n  note = {Entretien},\n}\n`);
 
     expect(result.unreadKeys).toEqual(['Odd_2021', 'entretien_dupont']);
@@ -181,5 +185,40 @@ describe('auditParsedBib — pas de refus à tort', () => {
     ]);
 
     expect(audit(bib)).toMatchObject({ unreadKeys: [], hasStringMacros: false });
+  });
+
+  // L'exporteur écrit une accolade isolée `\{` ou `\}`, que le parseur ne compte plus : l'audit
+  // compte comme lui, sinon il signalerait à tort les entrées que le parseur lit.
+  it('témoin : une accolade isolée ou une barre oblique inverse écrites par ClioDeck ne sont pas signalées', () => {
+    const bib = new BibTeXExporter().exportToString([
+      createCitation({ id: 'Odd_2021', type: 'article', author: 'Odd, A.', year: '2021', title: 'Ensemble } fermé', zoteroKey: 'ODD2021' }),
+      createCitation({ id: 'Code_2020', type: 'misc', author: '', year: '2020', title: 'Code: function() {' }),
+      createCitation({ id: 'Win_2020', type: 'misc', author: '', year: '2020', title: 'C:\\Users\\x' }),
+    ]);
+    const result = audit(bib);
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Odd_2021', 'Code_2020', 'Win_2020']);
+    expect(result.unreadKeys).toEqual([]);
+  });
+});
+
+describe('auditParsedBib — les @string que le parseur ne lit pas', () => {
+  it('témoin : une définition entre accolades se lit et se développe, rien n’est signalé', () => {
+    const result = audit('@string{AN = {Archives nationales}}\n@book{Garde_2000,\n  title = {Le temps},\n  publisher = AN,\n}\n');
+
+    expect(result.parsed[0].publisher).toBe('Archives nationales');
+    expect(result.unreadKeys).toEqual([]);
+  });
+
+  it('une définition entre parenthèses, que le parseur ne lit pas, est signalée', () => {
+    const result = audit('@string(AN = "Archives nationales")\n@book{Garde_2000,\n  title = {Le temps},\n  publisher = AN,\n}\n');
+
+    expect(result.unreadKeys).toEqual(['string']);
+  });
+
+  it('une définition dont l’accolade ne se ferme pas est signalée', () => {
+    const result = audit('@string{AN = {Archives nationales}\n\n@book{Garde_2000,\n  title = {Le temps},\n  publisher = AN,\n}\n');
+
+    expect(result.unreadKeys).toContain('string');
   });
 });

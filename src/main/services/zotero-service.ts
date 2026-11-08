@@ -367,7 +367,6 @@ class BibUnreadError extends Error {
   readonly filePath: string;
   readonly unreadKeys: string[];
   readonly unreadFromZotero: string[];
-  readonly hasStringMacros: boolean;
 
   constructor(filePath: string, audit: BibAudit) {
     super(`${path.basename(filePath)} n'a pas été lu en entier ; synchronisation interrompue pour ne rien effacer.`);
@@ -375,7 +374,6 @@ class BibUnreadError extends Error {
     this.filePath = filePath;
     this.unreadKeys = audit.unreadKeys;
     this.unreadFromZotero = audit.unreadFromZotero;
-    this.hasStringMacros = audit.hasStringMacros;
   }
 }
 
@@ -389,9 +387,8 @@ interface SyncRefusalDetails {
   /** Le fichier en cause, relatif au projet. */
   file?: string;
   unreadKeys?: string[];
-  /** Parmi `unreadKeys`, les entrées venues de Zotero : à corriger dans la notice. */
+  /** Parmi `unreadKeys`, les entrées venues de Zotero : à corriger sans les supprimer. */
   unreadFromZotero?: string[];
-  hasStringMacros?: boolean;
   /** Raison de `readUserFile` (`encoding`, `permission`…), et message du système. */
   reason?: string;
   detail?: string;
@@ -405,7 +402,6 @@ function syncRefusal(error: unknown): ({ success: false; error: string } & SyncR
       file: path.basename(error.filePath),
       unreadKeys: error.unreadKeys,
       unreadFromZotero: error.unreadFromZotero,
-      hasStringMacros: error.hasStringMacros,
     };
   }
   if (error instanceof BibFileUnreadableError) {
@@ -439,14 +435,16 @@ async function readProjectJson(projectJsonPath: string): Promise<ProjectJson> {
  * (PDF Zotero, téléchargements). Un fichier présent mais illisible arrête
  * tout : le traiter comme vide ferait tout « ajouter » depuis Zotero et
  * effacerait à l'écriture les entrées qu'il contenait. Une seule entrée que
- * le parseur n'a pas rendue, ou une définition `@string`, arrête tout aussi :
- * la réécriture partirait des seules entrées lues (S07-1-2). Des métadonnées
- * illisibles, même sans `.bib` encore écrit, de même (S07-1-10).
+ * le parseur n'a pas rendue, ou une définition `@string` qu'il n'a pas lue,
+ * arrête tout aussi : la réécriture partirait des seules entrées lues
+ * (S07-1-2). Celles qu'il lit, il les développe, et la réécriture écrit les
+ * valeurs développées (L05-7). Des métadonnées illisibles, même sans `.bib`
+ * encore écrit, de même (S07-1-10).
  */
 async function readLocalBibliography(bibtexPath: string, projectPath: string): Promise<Citation[]> {
   const read = await readBibFile(bibtexPath);
   if (read.kind === 'unreadable') throw new BibFileUnreadableError(bibtexPath, read.reason, read.message);
-  if (read.kind === 'ok' && (read.unreadKeys.length > 0 || read.hasStringMacros)) {
+  if (read.kind === 'ok' && read.unreadKeys.length > 0) {
     throw new BibUnreadError(bibtexPath, read);
   }
   const metadata = await BibliographyMetadataService.loadMetadata(projectPath);

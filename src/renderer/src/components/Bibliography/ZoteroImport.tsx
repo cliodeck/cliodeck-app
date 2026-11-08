@@ -41,7 +41,7 @@ interface SyncReport {
  * réécrire perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10).
  */
 type SyncRefusal = { success: false; file: string } & (
-  | { error: 'bib-unread'; unreadKeys: string[]; unreadFromZotero?: string[]; hasStringMacros: boolean }
+  | { error: 'bib-unread'; unreadKeys: string[]; unreadFromZotero?: string[] }
   | { error: 'bib-unreadable'; reason: string; detail: string }
   | { error: 'metadata-unreadable' }
 );
@@ -290,15 +290,14 @@ export const ZoteroImport: React.FC = () => {
             listSome(refusal.unreadKeys.map((key) => `• @${key}`))
         );
       }
-      // Une entrée venue de Zotero, la synchronisation la réécrit depuis la notice : la corriger
-      // dans le .bib seul, c'est retrouver le refus à la synchronisation suivante.
+      // Une entrée venue de Zotero se corrige dans le .bib, sans être supprimée : elle reviendrait
+      // de Zotero comme une référence nouvelle, sans le PDF déjà téléchargé.
       const fromZotero = refusal.unreadFromZotero ?? [];
       if (fromZotero.length > 0) {
         const more = fromZotero.length > 8 ? ` ${t('zotero.sync.more', { count: fromZotero.length - 8 })}` : '';
         const keys = fromZotero.slice(0, 8).map((key) => `@${key}`).join(', ') + more;
         parts.push(t('zotero.sync.unreadFromZotero', { file: refusal.file, keys }));
       }
-      if (refusal.hasStringMacros) parts.push(t('zotero.sync.stringMacros', { file: refusal.file }));
     } else if (refusal.error === 'bib-unreadable') {
       parts.push(
         refusal.reason === 'encoding'

@@ -8,12 +8,17 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import i18next from 'i18next';
 
 import { ZoteroImport } from '../ZoteroImport';
 import { useBibliographyStore } from '../../../stores/bibliographyStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useProjectStore } from '../../../stores/projectStore';
 
+const LOCALES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../../public/locales');
 const A = '/projets/A';
 let synchronize: ReturnType<typeof vi.fn>;
 let loadWithMetadata: ReturnType<typeof vi.fn>;
@@ -64,7 +69,6 @@ describe('synchronisation refusée : le message, pas le code', () => {
       error: 'bib-unread',
       file: 'ma-biblio.bib',
       unreadKeys: ['entretien_dupont', 'carton_AN_F7_1234'],
-      hasStringMacros: false,
     });
 
     expect(message).toContain('zotero.sync.refused');
@@ -74,18 +78,16 @@ describe('synchronisation refusée : le message, pas le code', () => {
     expect(message).toContain('zotero.sync.fixThenRetry');
     expect(message).not.toContain('bib-unread');
     expect(message).not.toContain('zotero.sync.error');
-    expect(message).not.toContain('zotero.sync.stringMacros');
     expect(loadWithMetadata).not.toHaveBeenCalled();
   });
 
-  it('entrées venues de Zotero : le message dit de corriger la notice dans Zotero, puis de supprimer l’entrée', async () => {
+  it('entrées venues de Zotero : le message dit de les corriger sans les supprimer', async () => {
     const message = await synchronizeWith({
       success: false,
       error: 'bib-unread',
       file: 'ma-biblio.bib',
       unreadKeys: ['entretien_dupont', 'Odd_2021'],
       unreadFromZotero: ['Odd_2021'],
-      hasStringMacros: false,
     });
 
     expect(message).toContain('zotero.sync.unreadEntries');
@@ -100,7 +102,6 @@ describe('synchronisation refusée : le message, pas le code', () => {
       file: 'b.bib',
       unreadKeys: ['entretien_dupont'],
       unreadFromZotero: [],
-      hasStringMacros: false,
     });
 
     expect(message).not.toContain('zotero.sync.unreadFromZotero');
@@ -108,18 +109,11 @@ describe('synchronisation refusée : le message, pas le code', () => {
 
   it('beaucoup d’entrées : les premières, puis « et N autres »', async () => {
     const unreadKeys = Array.from({ length: 30 }, (_, i) => `e${i + 1}`);
-    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys, hasStringMacros: false });
+    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys });
 
     expect(message).toContain('@e8');
     expect(message).not.toContain('@e9\n');
     expect(message).toContain('zotero.sync.more');
-  });
-
-  it('@string : la définition à remplacer est dite', async () => {
-    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys: [], hasStringMacros: true });
-
-    expect(message).toContain('zotero.sync.stringMacros');
-    expect(message).not.toContain('zotero.sync.unreadEntries');
   });
 
   it('pas en UTF-8 : le message dit d’enregistrer en UTF-8', async () => {
@@ -150,5 +144,38 @@ describe('synchronisation refusée : le message, pas le code', () => {
     const message = await synchronizeWith({ success: false, error: 'connexion refusée' });
 
     expect(message).toBe('zotero.sync.error');
+  });
+});
+
+/**
+ * Une définition `@string(…)` entre parenthèses ne se lit pas : l'audit la nomme `@string` dans la
+ * liste des entrées non lues. Le conseil de cette liste doit valoir pour elle aussi, dans les
+ * trois langues, au panneau comme à la synchronisation : « ajoutez un titre » et « refermez une
+ * accolade » ne la corrigent pas.
+ */
+describe('le conseil des entrées non lues vaut pour une définition @string entre parenthèses', () => {
+  const locales = ['fr', 'en', 'de'] as const;
+  const messages = (lng: (typeof locales)[number]) => {
+    const common = JSON.parse(readFileSync(path.join(LOCALES_DIR, lng, 'common.json'), 'utf-8')) as {
+      bibliography: { unreadEntries: string };
+      zotero: { sync: { unreadEntries: string } };
+    };
+    return [common.bibliography.unreadEntries, common.zotero.sync.unreadEntries];
+  };
+
+  it.each(locales)('%s : les deux messages disent d’écrire @string{…}', (lng) => {
+    for (const message of messages(lng)) expect(message).toContain('@string{AN = {…}}');
+  });
+
+  it('i18next rend l’exemple tel quel, et interpole le reste', async () => {
+    const fr = JSON.parse(readFileSync(path.join(LOCALES_DIR, 'fr', 'common.json'), 'utf-8')) as Record<string, unknown>;
+    const instance = i18next.createInstance();
+    await instance.init({ lng: 'fr', ns: ['common'], defaultNS: 'common', resources: { fr: { common: fr } }, interpolation: { escapeValue: false } });
+
+    for (const key of ['zotero.sync.unreadEntries', 'bibliography.unreadEntries']) {
+      const text = instance.t(key, { count: 2, file: 'ma-biblio.bib' });
+      expect(text).toContain('@string{AN = {…}}, et non @string(AN = …).');
+      expect(text).toContain('2 entrée(s) de ma-biblio.bib');
+    }
   });
 });

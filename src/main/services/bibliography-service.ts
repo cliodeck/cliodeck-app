@@ -32,9 +32,9 @@ export type BibFileRead =
 
 /**
  * Lit un `.bib` sans confondre absent, illisible et vide, puis contrôle le parse : les entrées du
- * texte que le parseur n'a pas rendues, et les `@string`. UTF-8 strict : un `.bib` Latin-1 est
- * illisible, plutôt que relu avec des caractères de remplacement qu'une réécriture rendrait
- * définitifs.
+ * texte que le parseur n'a pas rendues, et les `@string` qu'il n'a pas lus. UTF-8 strict : un
+ * `.bib` Latin-1 est illisible, plutôt que relu avec des caractères de remplacement qu'une
+ * réécriture rendrait définitifs.
  */
 export async function readBibFile(filePath: string): Promise<BibFileRead> {
   const read = await readUserFile(filePath);

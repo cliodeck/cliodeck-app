@@ -2,7 +2,173 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Citation } from '../../types/citation';
 import { createCitation } from '../../types/citation';
-import { VERBATIM_FIELDS } from './BibTeXExporter';
+import { isVerbatimField } from './BibTeXExporter';
+
+/**
+ * Position du délimiteur qui ferme une valeur, en partant de `from` : `}` au niveau de l'accolade
+ * ouvrante, ou `"` hors de toute accolade. `escapes` : le caractère qui suit un antislash ne compte
+ * pas, sauf un guillemet, qui ferme toujours une valeur entre guillemets, comme dans BibTeX.
+ */
+function scanToClose(text: string, from: number, closer: '}' | '"', escapes: boolean): number {
+  let depth = 0;
+  for (let i = from; i < text.length; i++) {
+    const char = text[i];
+    if (escapes && char === '\\' && text[i + 1] !== '"') {
+      i++;
+    } else if (char === '{') {
+      depth++;
+    } else if (char === '}') {
+      if (closer === '}' && depth === 0) return i;
+      if (depth > 0) depth--;
+    } else if (char === '"' && closer === '"' && depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Accolade qui ferme celle ouverte en `openIndex`, ou -1.
+ *
+ * Une accolade précédée d'un antislash ne compte pas : `\{` et `\}` sont des accolades écrites, et
+ * c'est ainsi que l'exporteur écrit une accolade isolée. Comptées, elles empêchaient l'entrée de se
+ * refermer, et elle disparaissait à la relecture du fichier que ClioDeck venait d'écrire
+ * (S07-1-32). Sans fermeture à ce compte, on recompte toutes les accolades, comme BibTeX : une
+ * valeur qui finit par un antislash (`{C:\dossier\}`) se referme quand même.
+ *
+ * `bibAudit` compte avec cette fonction : il contrôle ce que le parseur a lu.
+ */
+export function findMatchingBrace(text: string, openIndex: number): number {
+  const closing = scanToClose(text, openIndex + 1, '}', true);
+  return closing !== -1 ? closing : scanToClose(text, openIndex + 1, '}', false);
+}
+
+/**
+ * Guillemet qui ferme la valeur ouverte en `openIndex`, hors accolades : le tréma s'écrit
+ * `{\"u}`, et le premier guillemet venu coupait la valeur au milieu du nom (S07-1-15).
+ */
+function findClosingQuote(text: string, openIndex: number): number {
+  const closing = scanToClose(text, openIndex + 1, '"', true);
+  return closing !== -1 ? closing : scanToClose(text, openIndex + 1, '"', false);
+}
+
+/**
+ * Nom de champ : tout sauf blancs, accolades, guillemets, `#`, `,` et `=`. Mendeley et BibDesk
+ * écrivent `mendeley-groups`, `Date-Added`, `bdsk-url-1`.
+ */
+const FIELD_NAME = /^[^\s{}"#,=]+$/;
+
+/**
+ * Ce que l'exporteur échappe et que le nettoyage doit rendre tel quel : `\{` et `\}` (une accolade
+ * écrite), `\textbackslash{}` (une barre oblique inverse) et `\textasciitilde{}` (un tilde, que `~`
+ * seul ferait lire comme une espace). Mis de côté avant le nettoyage, remis après : sinon les
+ * accolades de `\textbackslash{}` tombaient avec les autres, et il restait `\textbackslash` collé
+ * au mot suivant, un de plus à chaque réécriture. `\textbackslash\{\}` est la forme qu'écrivaient
+ * les versions précédentes. `\\` (saut de ligne) est lu d'un bloc, comme le fait le compte des
+ * accolades : son second antislash n'échappe pas l'accolade qui suit.
+ */
+const ESCAPED_LITERAL = /\\textbackslash(?:\{\}|\\\{\\\})|\\textasciitilde\{\}|\\[{}]|\\\\/g;
+
+/** Caractères de substitution, le temps du nettoyage (zone d'usage privé d'Unicode). */
+const STAND_IN = { backslash: '\uE000', tilde: '\uE001', open: '\uE002', close: '\uE003' } as const;
+
+function standInFor(escape: string): string {
+  if (escape === '\\\\') return escape;
+  if (escape.startsWith('\\textbackslash')) return STAND_IN.backslash;
+  if (escape.startsWith('\\textasciitilde')) return STAND_IN.tilde;
+  return escape === '\\{' ? STAND_IN.open : STAND_IN.close;
+}
+
+/**
+ * Le champ `file` est un chemin : il échappe au nettoyage LaTeX, qui changeait `~` en espace
+ * (iCloud : `com~apple~CloudDocs`) et `--` en tiret demi-cadratin (S07-1-16). En sont seulement
+ * retirés :
+ * - les échappements LaTeX qu'y écrivaient les versions précédentes de ClioDeck (`\_`, `\&`,
+ *   `\textbackslash\{\}`…) — les noms de fichiers Zotero contiennent presque toujours un `_` ;
+ * - `\{`, `\}`, `\:` et `\;`, qu'il écrit encore (cf. `BibTeXExporter.formatFileField`) ;
+ * - `\\`, `\:`, `\;` et `\$`, qu'écrivent le traducteur BibTeX de Zotero
+ *   (`encodeFilePathComponent`) et JabRef dans chaque partie de description:chemin:type ;
+ * - `\~{}` et ses semblables, qu'écrit Mendeley (décodés aussi par l'import de Zotero).
+ */
+const FILE_ESCAPE = /\\textbackslash(?:\{\}|\\\{\\\})|\\([^A-Za-z0-9])\{\}|\\([_&%#${}:;\\])/g;
+
+function unescapeFilePath(value: string): string {
+  return value.replace(
+    FILE_ESCAPE,
+    (_escape, mendeley: string | undefined, char: string | undefined) => mendeley ?? char ?? '\\'
+  );
+}
+
+/**
+ * Mendeley Desktop écrit en LaTeX la barre oblique inverse qui échappe le deux-points d'une lettre
+ * de lecteur : `:C$\backslash$:/Users/…:pdf`. Ramenée à `\`, elle échappe ce deux-points comme les
+ * autres.
+ */
+const MENDELEY_BACKSLASH = '$\\backslash$';
+
+/** Coupe `text` sur chaque `separator` que ne précède pas une barre oblique inverse. */
+function splitUnescaped(text: string, separator: ':' | ';'): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\') {
+      i++;
+    } else if (text[i] === separator) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** Un chemin Windows à lettre de lecteur : `C:/…` ou `C:\…`. */
+const DRIVE_PATH = /^[A-Za-z]:[\\/]/;
+
+/**
+ * La première pièce jointe d'un champ `file` : jusqu'au premier point-virgule non échappé que suit
+ * une autre pièce jointe au format description:chemin:type. Un point-virgule que rien de tel ne
+ * suit fait partie du nom du fichier : Mendeley ne l'échappe pas, ni les versions précédentes de
+ * ClioDeck.
+ */
+function firstAttachment(value: string): string {
+  const [attachment, ...rest] = splitUnescaped(value, ';');
+  let first = attachment;
+  for (const piece of rest) {
+    if (splitUnescaped(piece, ':').length >= 3) break;
+    first += `;${piece}`;
+  }
+  return first;
+}
+
+/**
+ * Le chemin que porte un champ `file`, désechappé. Le découpage se fait avant : un deux-points ou
+ * un point-virgule échappé fait partie du chemin (`C\:\\Users…` de Zotero sous Windows, `\;` dans
+ * un nom de fichier).
+ * - Format description:chemin:type (Zotero, JabRef, Mendeley), plusieurs pièces jointes séparées
+ *   par `;` : le chemin de la première, entre son premier et son dernier deux-points non échappés,
+ *   lettre de lecteur comprise (`PDF:C:/x/a.pdf:application/pdf`).
+ * - chemin:type ou description:chemin : jamais le deux-points d'une lettre de lecteur
+ *   (`C:/x/a.pdf`), dont on ne gardait que « C ».
+ * - Sinon, la pièce jointe entière.
+ */
+function filePathOf(field: string): string {
+  const attachment = firstAttachment(field.replaceAll(MENDELEY_BACKSLASH, '\\'));
+  const parts = splitUnescaped(attachment, ':');
+  let filePath = attachment;
+  if (parts.length >= 3) {
+    filePath = parts.slice(1, -1).join(':');
+  } else if (parts.length === 2 && !DRIVE_PATH.test(attachment)) {
+    // Si le deuxième segment ressemble à un type MIME, prendre le premier.
+    filePath = parts[1].includes('/') ? parts[0] : parts[1];
+  }
+  return unescapeFilePath(filePath);
+}
+
+const skipBlanks = (text: string, index: number): number => {
+  while (index < text.length && /\s/.test(text[index])) index++;
+  return index;
+};
 
 export class BibTeXParser {
   /**
@@ -15,6 +181,13 @@ export class BibTeXParser {
   get lastRejected(): ReadonlyArray<{ key: string; reason: 'missing-title' }> {
     return this.rejected;
   }
+
+  /**
+   * Abréviations `@string` du parse en cours, par nom en minuscules : BibTeX ne distingue pas
+   * `AN` de `an`. Les valeurs qui les citent sont développées ; ignorées, elles étaient lues
+   * comme du texte (`publisher = {AN}`), et la définition disparaissait à la réécriture (S07-1-26).
+   */
+  private strings = new Map<string, string>();
 
   // Parse un fichier BibTeX et retourne une liste de citations
   parseFile(filePath: string): Citation[] {
@@ -32,6 +205,7 @@ export class BibTeXParser {
   // bibDir: répertoire de base pour résoudre les chemins relatifs des fichiers
   parse(content: string, bibDir?: string): Citation[] {
     this.rejected = [];
+    this.strings = new Map();
     const citations: Citation[] = [];
 
     // ✅ APPROCHE SIMPLIFIÉE : Trouver chaque @type{key, et parser jusqu'au } correspondant
@@ -50,8 +224,22 @@ export class BibTeXParser {
 
       const typeString = content.slice(currentIndex, openBraceIndex).trim();
 
-      // Ignorer @comment, @string, @preamble
-      if (['comment', 'string', 'preamble'].includes(typeString.toLowerCase())) {
+      // Mémoriser les abréviations @string, pour les entrées qui suivent
+      if (typeString.toLowerCase() === 'string') {
+        const closing = findMatchingBrace(content, openBraceIndex);
+        if (closing === -1) {
+          currentIndex = openBraceIndex + 1;
+          continue;
+        }
+        for (const [name, value] of this.readFields(content.slice(openBraceIndex + 1, closing))) {
+          this.strings.set(name, value);
+        }
+        currentIndex = closing + 1;
+        continue;
+      }
+
+      // Ignorer @comment, @preamble
+      if (['comment', 'preamble'].includes(typeString.toLowerCase())) {
         currentIndex = openBraceIndex + 1;
         continue;
       }
@@ -67,7 +255,7 @@ export class BibTeXParser {
       currentIndex = commaIndex + 1;
 
       // Trouver le } fermant (en comptant les accolades)
-      const closingBraceIndex = this.findMatchingBrace(content, openBraceIndex);
+      const closingBraceIndex = findMatchingBrace(content, openBraceIndex);
       if (closingBraceIndex === -1) continue;
 
       const fieldsString = content.slice(commaIndex + 1, closingBraceIndex);
@@ -88,105 +276,53 @@ export class BibTeXParser {
     return citations;
   }
 
-  // Trouve l'accolade fermante correspondante
-  private findMatchingBrace(content: string, startIndex: number): number {
-    let braceCount = 1;
-    let i = startIndex + 1;
-
-    while (i < content.length && braceCount > 0) {
-      if (content[i] === '{') {
-        braceCount++;
-      } else if (content[i] === '}') {
-        braceCount--;
-      }
-
-      if (braceCount === 0) {
-        return i;
-      }
-
-      i++;
-    }
-
-    return -1;
-  }
-
   // Parse les champs d'une entrée BibTeX de manière robuste
   private parseFields(fieldsString: string): Record<string, string> {
     const fields: Record<string, string> = {};
 
+    for (const [fieldName, value] of this.readFields(fieldsString)) {
+      // Nettoyer et stocker la valeur. Les champs verbatim de BibLaTeX
+      // (URL, DOI…) et les adresses de BibDesk (bdsk-url-1…) échappent au
+      // nettoyage LaTeX : il changerait `~` en espace et `--` en tiret
+      // demi-cadratin, donc l'adresse elle-même. Le chemin du PDF aussi,
+      // cf. filePathOf.
+      if (value) {
+        if (fieldName === 'file') {
+          const filePath = filePathOf(value.trim());
+          if (filePath) fields.file = filePath;
+        } else {
+          fields[fieldName] = isVerbatimField(fieldName) ? value.trim() : this.cleanValue(value);
+        }
+      }
+    }
+
+    return fields;
+  }
+
+  // Lit les champs « nom = valeur » d'une entrée ou d'un @string : valeurs brutes,
+  // abréviations développées. La valeur d'un nom invalide est sautée quand même :
+  // sinon elle passait pour le nom du champ suivant, et plus aucun champ n'était
+  // lu (S07-1-14).
+  private readFields(text: string): Array<[string, string]> {
+    const fields: Array<[string, string]> = [];
     let currentIndex = 0;
 
-    while (currentIndex < fieldsString.length) {
+    while (currentIndex < text.length) {
       // Chercher "nom ="
-      const equalsIndex = fieldsString.indexOf('=', currentIndex);
+      const equalsIndex = text.indexOf('=', currentIndex);
       if (equalsIndex === -1) break;
 
-      // Extraire le nom du champ
-      const fieldName = fieldsString
-        .slice(currentIndex, equalsIndex)
-        .trim()
-        .toLowerCase();
+      const fieldName = text.slice(currentIndex, equalsIndex).trim().toLowerCase();
+      const { value, end } = this.readValue(text, equalsIndex + 1);
+      currentIndex = end;
 
-      // Ignorer si pas un nom valide
-      if (!fieldName || !/^[a-z0-9_]+$/i.test(fieldName)) {
-        currentIndex = equalsIndex + 1;
-        continue;
-      }
-
-      currentIndex = equalsIndex + 1;
-
-      // Passer les espaces après le =
-      while (currentIndex < fieldsString.length && /\s/.test(fieldsString[currentIndex])) {
-        currentIndex++;
-      }
-
-      if (currentIndex >= fieldsString.length) break;
-
-      // Déterminer le type de valeur
-      const firstChar = fieldsString[currentIndex];
-      let value = '';
-
-      if (firstChar === '{') {
-        // Valeur entre accolades
-        const closingBrace = this.findMatchingBrace(fieldsString, currentIndex);
-        if (closingBrace !== -1) {
-          value = fieldsString.slice(currentIndex + 1, closingBrace);
-          currentIndex = closingBrace + 1;
-        }
-      } else if (firstChar === '"') {
-        // Valeur entre guillemets
-        currentIndex++;
-        const quoteEnd = fieldsString.indexOf('"', currentIndex);
-        if (quoteEnd !== -1) {
-          value = fieldsString.slice(currentIndex, quoteEnd);
-          currentIndex = quoteEnd + 1;
-        }
-      } else {
-        // Valeur brute (nombre, variable) jusqu'à la virgule ou fin
-        let endIndex = currentIndex;
-        while (endIndex < fieldsString.length) {
-          const char = fieldsString[endIndex];
-          if (char === ',' || char === '\n' || char === '\r') {
-            break;
-          }
-          endIndex++;
-        }
-        value = fieldsString.slice(currentIndex, endIndex).trim();
-        currentIndex = endIndex;
-      }
-
-      // Nettoyer et stocker la valeur. Les champs verbatim de BibLaTeX
-      // (URL, DOI…) échappent au nettoyage LaTeX : il changerait `~` en
-      // espace et `--` en tiret demi-cadratin, donc l'adresse elle-même.
-      if (value) {
-        fields[fieldName] = VERBATIM_FIELDS.has(fieldName)
-          ? value.trim()
-          : this.cleanValue(value);
+      if (FIELD_NAME.test(fieldName)) {
+        fields.push([fieldName, value]);
       }
 
       // Passer au champ suivant (chercher la virgule)
-      while (currentIndex < fieldsString.length) {
-        if (fieldsString[currentIndex] === ',') {
+      while (currentIndex < text.length) {
+        if (text[currentIndex] === ',') {
           currentIndex++;
           break;
         }
@@ -197,9 +333,49 @@ export class BibTeXParser {
     return fields;
   }
 
+  // Lit une valeur et ses concaténations `#` : rend le texte brut, abréviations
+  // développées, et la position qui la suit.
+  private readValue(text: string, from: number): { value: string; end: number } {
+    let value = '';
+    let index = skipBlanks(text, from);
+
+    for (;;) {
+      const part = this.readPart(text, index);
+      if (!part) break;
+      value += part.value;
+      index = skipBlanks(text, part.end);
+      if (text[index] !== '#') break;
+      index = skipBlanks(text, index + 1);
+    }
+
+    return { value, end: index };
+  }
+
+  // Une valeur entre accolades, entre guillemets, ou brute (nombre, abréviation).
+  // `null` si son délimiteur ne se ferme pas.
+  private readPart(text: string, index: number): { value: string; end: number } | null {
+    const firstChar = text[index];
+
+    if (firstChar === '{' || firstChar === '"') {
+      const closing = firstChar === '{' ? findMatchingBrace(text, index) : findClosingQuote(text, index);
+      if (closing === -1) return null;
+      return { value: text.slice(index + 1, closing), end: closing + 1 };
+    }
+
+    // Valeur brute jusqu'à la virgule, au `#` ou à la fin de ligne ; une abréviation
+    // jamais définie reste écrite telle quelle.
+    let end = index;
+    while (end < text.length && !',#\n\r'.includes(text[end])) {
+      end++;
+    }
+    const token = text.slice(index, end).trim();
+    return { value: this.strings.get(token.toLowerCase()) ?? token, end };
+  }
+
   // ✅ Nettoie une valeur BibTeX (convertit les commandes LaTeX en Unicode)
   private cleanValue(value: string): string {
-    let cleaned = value;
+    // 0. Mettre de côté les caractères échappés (cf. ESCAPED_LITERAL), remis en 9
+    let cleaned = value.replace(ESCAPED_LITERAL, standInFor);
 
     // ⚠️ IMPORTANT : L'ordre est crucial !
     // On traite d'abord les variantes avec accolades (plus spécifiques)
@@ -352,8 +528,6 @@ export class BibTeXParser {
       ['\\$', '$'],
       ['\\_', '_'],
       ['\\#', '#'],
-      ['\\{', '{'],
-      ['\\}', '}'],
     ];
 
     for (const [latex, char] of escapedCharMap) {
@@ -385,6 +559,13 @@ export class BibTeXParser {
     // (« Lire : un braconnage ») : les fusionner les effaçait du .bib dès
     // qu'une synchronisation le réécrivait depuis sa relecture.
     cleaned = cleaned.replace(/[ \t\r\n\f\v]+/g, ' ');
+
+    // 9. Remettre les caractères échappés mis de côté en 0
+    cleaned = cleaned
+      .replaceAll(STAND_IN.backslash, '\\')
+      .replaceAll(STAND_IN.tilde, '~')
+      .replaceAll(STAND_IN.open, '{')
+      .replaceAll(STAND_IN.close, '}');
 
     return cleaned.trim();
   }
@@ -428,10 +609,12 @@ export class BibTeXParser {
     // Known BibTeX fields to exclude from custom fields
     // `date` n'y figure pas : il sert de repli pour l'année, mais porte
     // souvent davantage (jour et mois d'un article de presse) et doit
-    // survivre à un aller-retour par le fichier.
+    // survivre à un aller-retour par le fichier. `abstract` non plus : lu
+    // comme `notes`, il était réécrit en `note`, que biblatex imprime dans
+    // la bibliographie, ou perdu quand l'entrée avait déjà une note (S07-2-3).
     const knownFields = new Set([
       'author', 'editor', 'year', 'title', 'shorttitle', 'journal', 'journaltitle',
-      'publisher', 'booktitle', 'file', 'keywords', 'tags', 'note', 'abstract',
+      'publisher', 'booktitle', 'file', 'keywords', 'tags', 'note',
       'zoterokey', 'dateadded', 'datemodified'
     ]);
 
@@ -458,7 +641,7 @@ export class BibTeXParser {
       file: filePath,
       tags,
       keywords: fields.keywords,
-      notes: fields.note || fields.abstract,
+      notes: fields.note,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
       // Carry zoterokey through: ZoteroDiffEngine matches local↔remote
       // citations by zoteroKey. Dropping it here made every remote item
@@ -471,33 +654,13 @@ export class BibTeXParser {
     });
   }
 
-  // Résout le chemin du fichier PDF depuis le champ BibTeX file
-  // Gère les formats Zotero: "Attachments/file.pdf" ou "Description:chemin:mimetype"
-  private resolveFilePath(fileField: string, bibDir: string): string {
-    let filePath = fileField;
-
-    // Format Zotero avec description: "Nom:chemin:application/pdf"
-    // Peut aussi être "chemin:application/pdf" sans description
-    if (fileField.includes(':')) {
-      const parts = fileField.split(':');
-      // Le chemin est généralement la partie avant le dernier segment (mimetype)
-      // ou la partie du milieu si 3 segments (description:chemin:mimetype)
-      if (parts.length >= 3) {
-        // Format: description:chemin:mimetype
-        filePath = parts[1];
-      } else if (parts.length === 2) {
-        // Format: chemin:mimetype ou description:chemin
-        // Si le deuxième segment ressemble à un mimetype, prendre le premier
-        if (parts[1].includes('/')) {
-          filePath = parts[0];
-        } else {
-          filePath = parts[1];
-        }
-      }
-    }
-
-    // Si le chemin est déjà absolu, le retourner tel quel
-    if (path.isAbsolute(filePath)) {
+  // Résout le chemin du fichier PDF, déjà extrait du champ BibTeX file (cf. filePathOf),
+  // par rapport au dossier du .bib.
+  private resolveFilePath(filePath: string, bibDir: string): string {
+    // Si le chemin est déjà absolu, le retourner tel quel — un chemin Windows
+    // aussi, même relu sur un Mac : rattaché au dossier du .bib, il serait faux
+    // partout, et réécrit tel quel à la synchronisation suivante.
+    if (path.isAbsolute(filePath) || DRIVE_PATH.test(filePath)) {
       return filePath;
     }
 
