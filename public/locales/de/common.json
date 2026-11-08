@@ -1900,7 +1900,9 @@
     "unsaved": "Nicht gespeicherte Änderungen",
     "unsavedTooltip": "Das Dokument enthält Änderungen, die nicht auf der Festplatte gespeichert sind.",
     "notModified": "Nicht geändert",
-    "notModifiedTooltip": "Dieses Dokument wurde seit dem Öffnen nicht geändert."
+    "notModifiedTooltip": "Dieses Dokument wurde seit dem Öffnen nicht geändert.",
+    "untitled": "Unbenannt",
+    "fileOutsideProjectTooltip": "Außerhalb des Projekts: {{path}}"
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",

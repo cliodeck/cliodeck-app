@@ -89,13 +89,27 @@ interface ManuscriptState {
   clear: () => void;
 }
 
-/** Chemin relatif au projet du fichier actuellement ouvert, si c'en est un. */
+/**
+ * Chemin relatif au projet du fichier actuellement ouvert, si c'en est un. Le dossier du
+ * projet est suivi d'un séparateur : `/projetX` n'est pas un dossier de `/projet`.
+ *
+ * Sous Windows, le dossier du projet vient de `path.dirname` (barres obliques inverses), comme
+ * un chemin rendu par un dialogue ou par le main, alors que le renderer compose les siens avec
+ * `/` (`${project.path}/chapters/01.md`) : la graphie exacte d'abord, puis les séparateurs
+ * ramenés à `/`, et le relatif s'écrit alors avec `/`, comme le manifeste. Seulement pour un
+ * projet Windows : ailleurs, `\` est un caractère de nom de fichier.
+ */
 export function currentRelativePath(): string | null {
   const { currentProject } = useProjectStore.getState();
   const { filePath } = useEditorStore.getState();
   if (!currentProject || !filePath) return null;
   const prefix = `${currentProject.path}/`;
-  return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : null;
+  if (filePath.startsWith(prefix)) return filePath.slice(prefix.length);
+  if (!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(currentProject.path)) return null;
+  const toSlash = (p: string): string => p.replace(/\\/g, '/');
+  const slashPrefix = `${toSlash(currentProject.path).replace(/\/+$/, '')}/`;
+  const file = toSlash(filePath);
+  return file.startsWith(slashPrefix) ? file.slice(slashPrefix.length) : null;
 }
 
 function derive(content: string): ChapterInfo {
