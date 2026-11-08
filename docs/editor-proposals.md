@@ -51,12 +51,15 @@ interface Proposal {
 Cycle de vie :
 
 - **Affichage** : original barré (teinte danger) + proposé en encart (teinte
-  accent) avec ✓ / ✗ / ✎. Insertion pure : pas de barré.
-- **Accepter** (✓ ou Tab au curseur) : le range est remplacé par `proposed`,
+  accent, bordure gauche accent). L'encart s'ouvre sur sa barre : « Proposition
+  IA », puis Accepter, Rejeter et Modifier, chacun avec son icône et son
+  libellé ; le libellé long, raccourci compris, est leur `title` et leur
+  `aria-label`. Le texte proposé vient dessous. Insertion pure : pas de barré.
+- **Accepter** (bouton ou Tab au curseur) : le range est remplacé par `proposed`,
   transaction annotée `ai-proposal-accepted`.
-- **Modifier** (✎) : édition du texte proposé en place, application annotée
+- **Modifier** (bouton) : édition du texte proposé en place, application annotée
   `ai-proposal-modified`, l'événement porte `final`.
-- **Rejeter** (✗ ou Échap au curseur) : retrait sans édition. **Annotation de
+- **Rejeter** (bouton ou Échap au curseur) : retrait sans édition. **Annotation de
   rejet échantillonnée** (arbitrage 1) : 1 rejet sur 5 — jamais deux de
   suite — ouvre un champ « pourquoi ? » optionnel et non bloquant (Entrée
   envoie, Échap/clic ailleurs passe).
@@ -77,6 +80,22 @@ Cycle de vie :
   curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit. Au
   retour d'un mode, le défilement restauré n'arrive qu'à l'image suivante :
   `propose` et `revealLine` l'annulent, sinon il repasserait sur eux.
+  Pour amener la proposition à l'écran, CodeMirror ne vise pas toujours
+  l'encart (`LineTile.resolveInline`, @codemirror/view 6.43). Deux cas, chacun
+  couvert par des e2e à longue réponse (BT1-1) :
+  - **L'encart passe à la ligne visuelle suivante** : au milieu d'un
+    paragraphe, avec retour à la ligne (C33, C35). CodeMirror vise alors le
+    tampon qui le précède, c'est-à-dire la ligne de l'auteur. C'est la barre,
+    en tête de l'encart, qui met les boutons à l'écran, juste sous cette ligne.
+  - **L'encart est sur la même ligne visuelle que ce tampon** : toujours sans
+    retour à la ligne, et avec, sur une ligne vide ou en début de ligne.
+    CodeMirror vise l'encart lui-même, et le widget situe alors sa position à
+    sa barre (`coordsAt`). Situé par sa boîte entière, un encart plus haut que
+    l'écran s'y montrait par le bas, et, sans retour à la ligne, hors de
+    l'écran en largeur.
+
+  La barre reste donc le premier enfant de l'encart, et `coordsAt` vaut dans
+  tous les cas, retour à la ligne ou non.
 - **Fins de ligne** : le texte accepté ou modifié entre avec le séparateur du
   document. CM6 ne découpe une chaîne que sur le séparateur déclaré : un `\n`
   resterait à l'intérieur d'une ligne d'un fichier CRLF, qui deviendrait mixte.

@@ -14,9 +14,13 @@ import { proposals } from '../proposals';
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 
 const LABELS = {
+  heading: 'proposition IA',
   accept: 'accepter',
   reject: 'rejeter',
   modify: 'modifier',
+  acceptShort: 'accepter',
+  rejectShort: 'rejeter',
+  modifyShort: 'modifier',
   rejectionPrompt: 'pourquoi ?',
   apply: 'appliquer',
   cancel: 'annuler',

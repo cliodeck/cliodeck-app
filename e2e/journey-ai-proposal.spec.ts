@@ -57,9 +57,24 @@ function makeArticle(text: string = TEXT): { projectJson: string; document: stri
   return { projectJson, document };
 }
 
-async function start(): Promise<Session | null> {
-  const ollama = await startFakeOllama(ANSWER);
+/**
+ * Une trentaine de paragraphes, comme en rend un vrai modèle local. Une phrase ne montrait pas que
+ * les boutons, au bout de l'encart, tombaient sous le bas de l'écran (C33 à C35).
+ */
+const LONG_ANSWER = Array.from(
+  { length: 30 },
+  (_, i) => `Paragraphe ${i + 1} de la réponse du modèle, sur le corridor de Danzig et ce qu’il faut pour remplir plus d’une ligne de l’éditeur.`,
+).join('\n\n');
+
+async function start(options: { answer?: string; wordWrap?: false } = {}): Promise<Session | null> {
+  const ollama = await startFakeOllama(options.answer ?? ANSWER);
   toClean.push(ollama.userDataDir);
+  if (options.wordWrap === false) {
+    // Le réglage « Retour à la ligne », lu au démarrage comme celui de l'auteur.
+    const configPath = join(ollama.userDataDir, 'cliodeck-config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, editor: { wordWrap: false } }));
+  }
   const outcome = await launchApp({ userDataDir: ollama.userDataDir });
   if (outcome.kind === 'skip') {
     await ollama.close();
@@ -137,6 +152,35 @@ async function expectOnScreen(window: Page, target: Locator): Promise<void> {
         const box = el.getBoundingClientRect();
         const zone = (el.closest('.cm-scroller') as Element).getBoundingClientRect();
         return box.top < zone.bottom && box.bottom > zone.top;
+      }),
+    )
+    .toBe(true);
+}
+
+/** Le bouton Accepter de la proposition, par son nom accessible, raccourci compris. */
+const acceptButton = (window: Page) => proposal(window).getByRole('button', { name: 'Accepter la proposition (Tab)' });
+
+/**
+ * Tout entier dans la zone visible de l'éditeur, sur les deux axes : sans retour à la ligne, un
+ * bouton peut être à la bonne hauteur et hors de l'écran à droite. Barres de défilement exclues.
+ */
+async function expectWhollyOnScreen(window: Page, target: Locator): Promise<void> {
+  await window.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  await expect
+    .poll(() =>
+      target.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const scroller = el.closest('.cm-scroller') as HTMLElement;
+        const zone = scroller.getBoundingClientRect();
+        return (
+          box.width > 0 &&
+          box.left >= zone.left &&
+          box.right <= zone.left + scroller.clientWidth &&
+          box.top >= zone.top &&
+          box.bottom <= zone.top + scroller.clientHeight
+        );
       }),
     )
     .toBe(true);
@@ -447,6 +491,165 @@ test('l’auteur lisait sans avoir cliqué : la proposition arrive à l’écran
     await expect(lastLine(window).locator('.cm-proposal-box')).toBeVisible();
     await expectOnScreen(window, proposal(window));
     expect(readFileSync(document, 'utf8')).toBe(LONG_DOCUMENT);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('une longue réponse au milieu d’un paragraphe : Accepter est à l’écran, avec son libellé ; Échap ne laisse rien, et Cmd+Z retire le texte accepté', async () => {
+  const session = await start({ answer: LONG_ANSWER });
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+  const onDisk = () => readFileSync(document, 'utf8');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    // C33 : le curseur au milieu du 2e paragraphe.
+    await line(window, 'Deuxième paragraphe').click();
+    await window.keyboard.press('Home');
+    for (let i = 0; i < 10; i += 1) await window.keyboard.press('ArrowRight');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposal(window)).toContainText('Paragraphe 30 de la réponse');
+    await expectWhollyOnScreen(window, acceptButton(window));
+    await expect(acceptButton(window)).toHaveText('Accepter');
+    expect(onDisk()).toBe(TEXT);
+
+    // C34 : Échap ne laisse rien, ni à l'écran ni sur le disque.
+    await window.keyboard.press('Escape');
+    await expect(proposal(window)).toHaveCount(0);
+    await window.waitForTimeout(AUTOSAVE_MS);
+    expect(onDisk()).toBe(TEXT);
+
+    // Une seconde fois, acceptée : le texte entre, et Cmd+Z le retire.
+    await window.locator('.right-panel #right-tab-chat').click();
+    await sendToWriteButton(window).click();
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expectWhollyOnScreen(window, acceptButton(window));
+    await acceptButton(window).click();
+    await expect(proposal(window)).toHaveCount(0);
+    await expect.poll(onDisk, { timeout: 10_000 }).toContain('Paragraphe 30 de la réponse');
+
+    await undo(window);
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(TEXT);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('C35, une longue réponse alors que l’auteur lisait loin de son curseur : Accepter arrive à l’écran', async () => {
+  const session = await start({ answer: LONG_ANSWER });
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle(LONG_DOCUMENT);
+  const scroller = window.locator('.cm-scroller');
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Paragraphe numéro 2,')).toBeVisible({ timeout: 20_000 });
+    // Le curseur au fil du document, loin du début : la proposition a de la place au-dessus d'elle.
+    await scroller.evaluate((el) => {
+      el.scrollTop = 8000;
+    });
+    await expect.poll(() => scrollTop(window)).toBeGreaterThan(7000);
+    // Le premier paragraphe sous le milieu de l'écran, une fois les lignes de cet endroit rendues :
+    // un clic au milieu tomberait parfois sur une ligne vide.
+    let cursorParagraph = '';
+    await expect
+      .poll(async () => {
+        cursorParagraph = await scroller.evaluate((el) => {
+          const middle = (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
+          const below = [...el.querySelectorAll('.cm-line')].find(
+            (l) => l.textContent?.startsWith('Paragraphe numéro') && l.getBoundingClientRect().top > middle,
+          );
+          return below?.textContent?.match(/^Paragraphe numéro \d+,/)?.[0] ?? '';
+        });
+        return cursorParagraph;
+      })
+      .not.toBe('');
+    await line(window, cursorParagraph).click();
+    // Puis l'auteur remonte lire le début.
+    await scroller.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await expect.poll(() => scrollTop(window)).toBe(0);
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).toContainText(cursorParagraph);
+    await expectWhollyOnScreen(window, acceptButton(window));
+    expect(readFileSync(document, 'utf8')).toBe(LONG_DOCUMENT);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('sans retour à la ligne, une longue réponse au milieu d’une longue ligne : Accepter est à l’écran, aussi en largeur', async () => {
+  const session = await start({ answer: LONG_ANSWER, wordWrap: false });
+  if (!session) return;
+  const { app, window } = session;
+  const text = TEXT.replace(
+    'Deuxième paragraphe, au milieu duquel on écrit.',
+    `Deuxième paragraphe, ${'une phrase qui ne finit pas, '.repeat(40)}et sa fin.`,
+  );
+  const { projectJson, document } = makeArticle(text);
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    await line(window, 'Deuxième paragraphe').click();
+    await window.keyboard.press('End');
+    for (let i = 0; i < 20; i += 1) await window.keyboard.press('ArrowLeft');
+    // Le réglage a bien pris : la ligne ne revient pas à la ligne, l'éditeur a défilé en largeur.
+    await expect.poll(() => window.locator('.cm-scroller').evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).toContainText('et sa fin.');
+    await expectWhollyOnScreen(window, acceptButton(window));
+    expect(readFileSync(document, 'utf8')).toBe(text);
+  } finally {
+    await stop(session);
+  }
+});
+
+test('avec retour à la ligne, une longue réponse sur une ligne vide : Accepter est à l’écran', async () => {
+  const session = await start({ answer: LONG_ANSWER });
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    // La ligne vide avant le 2e paragraphe, là où l'auteur ouvre un paragraphe. Rien ne précède
+    // l'encart sur sa ligne : CodeMirror le vise lui-même, et non le texte de l'auteur. Au milieu
+    // d'un paragraphe, il passe à la ligne et laisse viser le texte qui le précède.
+    await line(window, 'Deuxième paragraphe').click();
+    await window.keyboard.press('Home');
+    await window.keyboard.press('ArrowUp');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).not.toContainText('Premier');
+    await expect(proposalLine(window)).not.toContainText('Deuxième');
+    await expectWhollyOnScreen(window, acceptButton(window));
+    expect(readFileSync(document, 'utf8')).toBe(TEXT);
   } finally {
     await stop(session);
   }
