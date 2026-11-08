@@ -28,12 +28,11 @@ import { useDialogStore } from '../../../stores/dialogStore';
 import { useProjectStore } from '../../../stores/projectStore';
 
 const citation = (id: string) => ({ id, type: 'book', author: 'Garde', year: '2000', title: id });
-let loadBibliography: ReturnType<typeof vi.fn>;
-/** Le vrai `loadBibliography` du store, avant qu'un test ne le remplace. */
-const realLoadBibliography = useBibliographyStore.getState().loadBibliography;
+let importBibliography: ReturnType<typeof vi.fn>;
+/** Le vrai `importBibliography` du store, avant qu'un test ne le remplace. */
+const realImportBibliography = useBibliographyStore.getState().importBibliography;
 const dialogs = () => useDialogStore.getState();
-const electron = () =>
-  (window as unknown as { electron: { fs: { copyFile: ReturnType<typeof vi.fn> }; bibliography?: unknown } }).electron;
+const electron = () => (window as unknown as { electron: { bibliography?: unknown } }).electron;
 
 function show(state: Record<string, unknown>): void {
   useBibliographyStore.setState({ citations: [], filteredCitations: [], ...state } as never);
@@ -45,13 +44,15 @@ function show(state: Record<string, unknown>): void {
 const banner = () => screen.queryByRole('alert');
 
 beforeEach(() => {
-  loadBibliography = vi.fn(async () => undefined);
+  importBibliography = vi.fn(async () => ({ total: 1, newCitations: 0, duplicates: 0, unreadKeys: [], file: 'refs.bib', sourceSaved: true }));
   (window as unknown as { electron: unknown }).electron = {
     dialog: { openFile: vi.fn(async () => ({ canceled: false, filePaths: ['/ailleurs/refs.bib'] })) },
-    fs: { copyFile: vi.fn(async () => ({ success: true })) },
-    project: { setBibliographySource: vi.fn(async () => ({ success: true })) },
   };
-  useBibliographyStore.setState({ refreshIndexedPDFs: vi.fn(async () => undefined), loadBibliography } as never);
+  useBibliographyStore.setState({
+    refreshIndexedPDFs: vi.fn(async () => undefined),
+    loadReadingNotes: vi.fn(async () => undefined),
+    importBibliography,
+  } as never);
   useProjectStore.setState({
     currentProject: { id: 'p1', name: 'Thèse', path: '/p/these', type: 'article', createdAt: new Date(), lastOpenedAt: new Date() },
   } as never);
@@ -135,7 +136,7 @@ describe('importer un .bib pendant que le bandeau est là', () => {
       fireEvent.click(screen.getByTitle('bibliography.import'));
     });
 
-    expect(loadBibliography).not.toHaveBeenCalled();
+    expect(importBibliography).not.toHaveBeenCalled();
     expect(screen.getByText('bibImport.title')).toBeInTheDocument();
   });
 
@@ -146,7 +147,7 @@ describe('importer un .bib pendant que le bandeau est là', () => {
       fireEvent.click(screen.getByTitle('bibliography.import'));
     });
 
-    expect(loadBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib');
+    expect(importBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib', 'replace', '/p/these');
   });
 
   const openImport = async () => {
@@ -155,9 +156,9 @@ describe('importer un .bib pendant que le bandeau est là', () => {
     });
   };
 
-  // Le fichier importé est copié dans le projet sous son nom : un `refs.bib` importé écrase le
-  // `refs.bib` du projet. La fenêtre disait « Votre bibliographie est vide » (S07-1-11).
-  it('.bib du projet illisible, aucune référence : la fenêtre ne dit pas « vide », et Annuler ne copie rien', async () => {
+  // « Remplacer » met le fichier importé dans le projet sous son nom : un `refs.bib` importé remplace
+  // le `refs.bib` du projet. La fenêtre disait « Votre bibliographie est vide » (S07-1-11).
+  it('.bib du projet illisible, aucune référence : la fenêtre ne dit pas « vide », et Annuler n’importe rien', async () => {
     show({ bibliographyProblem: { kind: 'unreadable', file: 'refs.bib', reason: 'encoding', detail: 'x' } });
     await openImport();
 
@@ -169,8 +170,7 @@ describe('importer un .bib pendant que le bandeau est là', () => {
       fireEvent.click(screen.getByRole('button', { name: 'bibImport.cancel' }));
     });
 
-    expect(loadBibliography).not.toHaveBeenCalled();
-    expect(electron().fs.copyFile).not.toHaveBeenCalled();
+    expect(importBibliography).not.toHaveBeenCalled();
   });
 
   it('entrées non lues sans aucune entrée lue (BibDesk) : même avertissement', async () => {
@@ -189,8 +189,7 @@ describe('importer un .bib pendant que le bandeau est là', () => {
       fireEvent.click(screen.getByRole('button', { name: 'bibImport.replace' }));
     });
 
-    expect(loadBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib');
-    expect(electron().fs.copyFile).toHaveBeenCalledWith('/ailleurs/refs.bib', '/p/these/refs.bib');
+    expect(importBibliography).toHaveBeenCalledWith('/ailleurs/refs.bib', 'replace', '/p/these');
   });
 
   it('.bib du projet introuvable : la fenêtre le dit', async () => {
@@ -227,17 +226,17 @@ describe('importer un .bib pendant que le bandeau est là', () => {
 });
 
 describe('un import qui ne va pas jusqu’au projet', () => {
-  // Le fichier importé se lit, mais la copie dans le projet est refusée (fichier rangé hors du
-  // projet, S11-1-9) : le `.bib` du projet n'a pas bougé. Le panneau montrait les références du
-  // fichier importé, sans le bandeau, alors que le fichier du projet ne se lisait toujours pas.
+  // Le main refuse l'import (fichier rangé hors du projet sans passer par le dialogue, par exemple) :
+  // il n'a rien écrit ni chargé, et le `.bib` du projet n'a pas bougé. Le panneau ne doit montrer ni
+  // les références du fichier importé, ni perdre le bandeau du fichier du projet, qui ne se lit pas.
   const PROBLEM = { kind: 'unreadable', file: 'refs.bib', reason: 'encoding', detail: 'x' } as const;
 
-  async function replaceWith(copy: () => Promise<unknown>): Promise<void> {
+  async function replaceWith(response: Record<string, unknown>): Promise<void> {
     electron().bibliography = {
-      load: vi.fn(async () => ({ success: true, citations: [citation('Import_2020')], unreadKeys: [], metadataUnreadable: false })),
+      import: vi.fn(async () => response),
+      loadWithMetadata: vi.fn(async () => ({ success: true, citations: [citation('Import_2020')], unreadKeys: [], metadataUnreadable: false })),
     };
-    electron().fs.copyFile.mockImplementation(copy);
-    useBibliographyStore.setState({ loadBibliography: realLoadBibliography } as never);
+    useBibliographyStore.setState({ importBibliography: realImportBibliography } as never);
     show({ bibliographyProblem: PROBLEM });
     await act(async () => {
       fireEvent.click(screen.getByTitle('bibliography.import'));
@@ -247,10 +246,8 @@ describe('un import qui ne va pas jusqu’au projet', () => {
     });
   }
 
-  it('copie refusée : le bandeau du projet reste, pas la liste du fichier importé', async () => {
-    await replaceWith(async () => {
-      throw new Error('Read access denied: /ailleurs/refs.bib is outside allowed directories');
-    });
+  it('import refusé : le bandeau du projet reste, pas la liste du fichier importé', async () => {
+    await replaceWith({ success: false, error: 'Read access denied: /ailleurs/refs.bib is outside allowed directories' });
 
     expect(dialogs().alertOpen).toBe(true);
     expect(dialogs().alertMessage).toContain('Read access denied');
@@ -260,8 +257,8 @@ describe('un import qui ne va pas jusqu’au projet', () => {
     expect(screen.queryByText('liste : Import_2020')).toBeNull();
   });
 
-  it('témoin : la copie réussit, le bandeau part et la liste importée s’affiche', async () => {
-    await replaceWith(async () => ({ success: true }));
+  it('témoin : l’import réussit, le bandeau part et le fichier du projet relu s’affiche', async () => {
+    await replaceWith({ success: true, bibPath: '/p/these/refs.bib', total: 1, unreadKeys: [], sourceSaved: true });
 
     expect(useBibliographyStore.getState().bibliographyProblem).toBeNull();
     expect(useBibliographyStore.getState().citations.map((c) => c.id)).toEqual(['Import_2020']);
@@ -270,12 +267,12 @@ describe('un import qui ne va pas jusqu’au projet', () => {
 });
 
 describe('importer un .bib qui ne se lit pas', () => {
-  // `bibliography:load` lit en UTF-8 strict : un vieux `.bib` en windows-1252 est refusé. Le
-  // message brut du main s'affichait derrière « Failed to import bibliography: », en français
-  // quelle que soit la langue, sans dire quoi faire.
+  // Le main lit en UTF-8 strict : un vieux `.bib` en windows-1252 est refusé. Le message brut du
+  // main s'affichait derrière « Failed to import bibliography: », en français quelle que soit la
+  // langue, sans dire quoi faire.
   async function importRefused(response: Record<string, unknown>): Promise<string> {
-    electron().bibliography = { load: vi.fn(async () => ({ success: false, citations: [], ...response })) };
-    useBibliographyStore.setState({ loadBibliography: realLoadBibliography } as never);
+    electron().bibliography = { import: vi.fn(async () => ({ success: false, citations: [], ...response })) };
+    useBibliographyStore.setState({ importBibliography: realImportBibliography } as never);
     show({ bibliographyProblem: null });
     await act(async () => {
       fireEvent.click(screen.getByTitle('bibliography.import'));
@@ -284,7 +281,7 @@ describe('importer un .bib qui ne se lit pas', () => {
     return dialogs().alertMessage;
   }
 
-  it('pas en UTF-8 : le message traduit dit d’enregistrer en UTF-8, rien n’est copié', async () => {
+  it('pas en UTF-8 : le message traduit dit d’enregistrer en UTF-8', async () => {
     const message = await importRefused({
       problem: 'unreadable',
       reason: 'encoding',
@@ -292,7 +289,6 @@ describe('importer un .bib qui ne se lit pas', () => {
     });
 
     expect(message).toBe('bibliography.bibNotUtf8');
-    expect(electron().fs.copyFile).not.toHaveBeenCalled();
     // Le bandeau parle du `.bib` du projet, que l'import n'a pas touché.
     expect(banner()).toBeNull();
   });

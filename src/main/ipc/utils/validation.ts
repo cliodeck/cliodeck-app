@@ -291,11 +291,6 @@ export const FsReadFileSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),
 });
 
-export const FsCopyFileSchema = z.object({
-  source: z.string().min(1, 'Source path is required'),
-  destination: z.string().min(1, 'Destination path is required'),
-});
-
 export const FsSameFileSchema = z.object({
   a: z.string().min(1, 'File path is required'),
   b: z.string().min(1, 'File path is required'),
@@ -521,6 +516,16 @@ export const ReadingNoteSetTagsSchema = ReadingNoteReferenceSchema.extend({
 export const BibliographyLoadWithMetadataSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),
   projectPath: z.string().min(1, 'Project path is required'),
+});
+
+/**
+ * Importer un `.bib` dans le projet ouvert. Le projet attendu est celui où l'on a cliqué : le main
+ * refuse s'il en a ouvert un autre depuis.
+ */
+export const BibliographyImportSchema = z.object({
+  sourcePath: z.string().min(1, 'Source path is required'),
+  mode: z.enum(['merge', 'replace']),
+  expectedProjectPath: z.string().min(1, 'Project path is required'),
 });
 
 // Corpus schemas (optional options objects)

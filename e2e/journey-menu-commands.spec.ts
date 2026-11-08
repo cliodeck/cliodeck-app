@@ -195,26 +195,123 @@ test('Fichier › Nouveau projet, depuis la Bibliographie : la modale de créati
 });
 
 test('Bibliographie › Importer BibTeX : l’import, puis le choix remplacer / fusionner quand il y a déjà des références', async () => {
-  await withArticle(async (app, window, article) => {
-    const bib = join(article.dir, 'source.bib');
-    writeFileSync(bib, BIBTEX);
-    const opened = await stubOpenDialog(app, bib);
+  // Rangé hors du projet, comme un fichier téléchargé : le dialogue l'autorise (S07-1-3).
+  const downloads = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-telechargements-'));
+  try {
+    await withArticle(async (app, window, article) => {
+      const bib = join(downloads, 'source.bib');
+      writeFileSync(bib, BIBTEX);
+      const opened = await stubOpenDialog(app, bib);
 
-    await sendMenu(app, 'menu:import-bibtex');
-    await expect(window.locator('#left-tab-bibliography')).toHaveAttribute('aria-selected', 'true');
-    await expect(window.locator('.citation-card')).toHaveCount(1, { timeout: 10_000 });
-    expect(await opened()).toBe(1);
-    // Le bilan de l'import est une modale : sous elle, le menu ne change pas de panneau.
-    await expect(window.locator('.bib-import-summary-modal')).toBeVisible({ timeout: 10_000 });
-    await window.locator('.bib-import-summary-modal .close-button').click();
-    await expect(window.locator('.bib-import-summary-modal')).toHaveCount(0);
+      await sendMenu(app, 'menu:import-bibtex');
+      await expect(window.locator('#left-tab-bibliography')).toHaveAttribute('aria-selected', 'true');
+      await expect(window.locator('.citation-card')).toHaveCount(1, { timeout: 10_000 });
+      expect(await opened()).toBe(1);
+      // Le bilan de l'import est une modale : sous elle, le menu ne change pas de panneau.
+      await expect(window.locator('.bib-import-summary-modal')).toBeVisible({ timeout: 10_000 });
+      await window.locator('.bib-import-summary-modal .close-button').click();
+      await expect(window.locator('.bib-import-summary-modal')).toHaveCount(0);
+      // Entré dans le projet sous son nom, et retenu par project.json.
+      expect(readFileSync(join(article.dir, 'source.bib'), 'utf8')).toBe(BIBTEX);
+      expect(JSON.parse(readFileSync(article.projectJson, 'utf8')).bibliographySource).toEqual({
+        type: 'file',
+        filePath: 'source.bib',
+      });
 
-    // Une bibliographie existe : la commande ne la remplace pas sans demander.
-    await sendMenu(app, 'menu:import-bibtex');
-    await expect(window.locator('.modal-overlay .modal-question')).toBeVisible({ timeout: 10_000 });
-    expect(await opened()).toBe(2);
-    await expect(window.locator('.citation-card')).toHaveCount(1);
-  });
+      // Une bibliographie existe : la commande ne la remplace pas sans demander.
+      await sendMenu(app, 'menu:import-bibtex');
+      await expect(window.locator('.modal-overlay .modal-question')).toBeVisible({ timeout: 10_000 });
+      expect(await opened()).toBe(2);
+      await expect(window.locator('.citation-card')).toHaveCount(1);
+    });
+  } finally {
+    rmSync(downloads, { recursive: true, force: true });
+  }
+});
+
+/**
+ * « Fusionner » un `.bib` téléchargé, du même nom que celui du projet (S07-1-3). La fusion
+ * n'existait que dans le panneau, la copie du fichier rangé hors du projet était refusée, et
+ * l'alerte était anglaise ; un homonyme copié aurait écrasé le `.bib` du projet et effacé sa
+ * collection Zotero. Le total annoncé doit être celui que la réouverture relit.
+ */
+test('Bibliographie › Importer BibTeX › Fusionner, un .bib téléchargé : le total annoncé est relu à la réouverture, et la collection Zotero reste', async () => {
+  const downloads = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-telechargements-'));
+  const article = makeArticle('Projet fusion');
+  const source = { type: 'zotero', filePath: 'bibliography.bib', zoteroCollection: 'COLL1234' };
+  const manifest = () => JSON.parse(readFileSync(article.projectJson, 'utf8')) as Record<string, unknown>;
+  writeFileSync(article.projectJson, JSON.stringify({ ...manifest(), bibliographySource: source, zotero: { collectionKey: 'COLL1234' } }));
+  const projectBib = join(article.dir, 'bibliography.bib');
+  writeFileSync(
+    projectBib,
+    `${BIBTEX}\n@book{martin2015,\n  author = {Martin, Anne},\n  title = {Les dépôts d'archives},\n  year = {2015}\n}\n`,
+  );
+  const downloaded = join(downloads, 'bibliography.bib');
+  writeFileSync(
+    downloaded,
+    `${BIBTEX}\n@article{leroy2018,\n  author = {Leroy, Paul},\n  title = {Lire les registres},\n  year = {2018}\n}\n`,
+  );
+
+  const openArticle = async (app: ElectronApplication, window: Page) => {
+    await stubOpenDialog(app, article.projectJson);
+    await window.locator('button[title="Ouvrir un projet"]').first().click();
+    await expect(editor(window)).toContainText('Huit mille mots', { timeout: 20_000 });
+    await window.locator('#left-tab-bibliography').click();
+  };
+
+  let userDataDir: string | null = null;
+  try {
+    const first = await launchApp();
+    if (first.kind === 'skip') {
+      test.skip(true, first.reason);
+      return;
+    }
+    userDataDir = first.value.userDataDir;
+    let announced = '';
+    try {
+      const { app, window } = first.value;
+      await openArticle(app, window);
+      await expect(window.locator('.citation-card')).toHaveCount(2, { timeout: 10_000 });
+
+      await stubOpenDialog(app, downloaded);
+      await sendMenu(app, 'menu:import-bibtex');
+      await window.locator('.import-option-btn.merge-btn').click();
+
+      const summary = window.locator('.bib-import-summary-modal');
+      await expect(summary).toBeVisible({ timeout: 10_000 });
+      await expect(window.locator('#alert-dialog-message')).toHaveCount(0);
+      announced = (await summary.locator('.stat-item', { hasText: 'Références au total' }).locator('.stat-value').textContent()) ?? '';
+      expect(announced).toBe('3');
+      await summary.locator('.close-button').click();
+      await expect(window.locator('.citation-card')).toHaveCount(3);
+
+      // La fusion est sur le disque, dans le fichier du projet ; le fichier téléchargé n'a pas bougé.
+      const written = readFileSync(projectBib, 'utf8');
+      for (const key of ['dupont2020', 'martin2015', 'leroy2018']) expect(written).toContain(`{${key},`);
+      expect(manifest().bibliographySource).toEqual(source);
+      expect(manifest().zotero).toEqual({ collectionKey: 'COLL1234' });
+    } finally {
+      await first.value.app.close();
+    }
+
+    // Fermer, rouvrir : le panneau relit le fichier du projet, et y trouve le total annoncé.
+    const second = await launchApp({ userDataDir });
+    if (second.kind === 'skip') {
+      test.skip(true, second.reason);
+      return;
+    }
+    try {
+      await openArticle(second.value.app, second.value.window);
+      await expect(second.value.window.locator('.citation-card')).toHaveCount(Number(announced), { timeout: 10_000 });
+      expect(manifest().bibliographySource).toEqual(source);
+    } finally {
+      await second.value.app.close();
+    }
+  } finally {
+    if (userDataDir) rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+    rmSync(downloads, { recursive: true, force: true });
+  }
 });
 
 test('Bibliographie › Connecter Zotero : les Réglages', async () => {

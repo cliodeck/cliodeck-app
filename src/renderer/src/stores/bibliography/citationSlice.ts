@@ -1,5 +1,13 @@
-import type { BibliographyProblem, Citation, CitationSliceState, BibliographySliceCreator } from './types';
+import type {
+  BibliographyImportOutcome,
+  BibliographyProblem,
+  Citation,
+  CitationSliceState,
+  BibliographySliceCreator,
+} from './types';
 import { referenceTags } from './referenceTags';
+import { mergeCitationLists } from '../../../../../backend/core/bibliography/mergeCitations';
+import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
 
 /** Un fichier qui ne s'est pas lu du tout. */
 type UnreadFileProblem = Extract<BibliographyProblem, { kind: 'missing' | 'unreadable' }>;
@@ -50,6 +58,70 @@ export class BibliographyFileError extends Error {
 function loadFailure(filePath: string, result: BibliographyLoadResponse | undefined): Error {
   const message = result?.error || 'Failed to load bibliography';
   return result?.problem ? new BibliographyFileError(failureProblem(filePath, result), message) : new Error(message);
+}
+
+/** Ce que rend le main pour un import dans le projet ouvert. */
+interface BibliographyImportResponse extends Omit<BibliographyLoadResponse, 'citations'> {
+  bibPath?: string;
+  total?: number;
+  newCitations?: number;
+  duplicates?: number;
+  sourceSaved?: boolean;
+  sourceError?: string;
+  /** Fusion ou remplacement refusés : le `.bib` du projet en cause, et pourquoi. */
+  file?: string;
+  detail?: string;
+}
+
+/**
+ * La fusion arrêtée avant d'écrire : le `.bib` du projet ne s'est pas lu en entier (`problem`), ou
+ * `project.json` ne dit plus lequel c'est (`problem` nul). Le main n'a rien écrit.
+ */
+export class BibliographyMergeRefusedError extends Error {
+  readonly problem: Extract<BibliographyProblem, { kind: 'partial' | 'unreadable' }> | null;
+
+  constructor(problem: BibliographyMergeRefusedError['problem'], message: string) {
+    super(message);
+    this.name = 'BibliographyMergeRefusedError';
+    this.problem = problem;
+  }
+}
+
+/**
+ * Le remplacement refusé avant d'écrire : dans le projet, le nom du fichier importé est un lien vers
+ * un fichier rangé ailleurs, que l'écriture aurait suivi. Le main n'a rien écrit.
+ */
+export class BibliographyReplaceRefusedError extends Error {
+  readonly file: string;
+
+  constructor(file: string, message: string) {
+    super(message);
+    this.name = 'BibliographyReplaceRefusedError';
+    this.file = file;
+  }
+}
+
+/**
+ * L'échec de `bibliography.import` : une fusion ou un remplacement refusés, une source qui ne se lit
+ * pas, ou un autre.
+ */
+function importFailure(sourcePath: string, result: BibliographyImportResponse): Error {
+  const file = result.file ?? '';
+  if (result.error === 'bib-outside-project') return new BibliographyReplaceRefusedError(file, result.error);
+  if (result.error === 'bib-unread') {
+    return new BibliographyMergeRefusedError(
+      { kind: 'partial', file, unreadKeys: result.unreadKeys ?? [], metadataUnreadable: false },
+      result.error
+    );
+  }
+  if (result.error === 'bib-unreadable') {
+    return new BibliographyMergeRefusedError(
+      { kind: 'unreadable', file, reason: result.reason ?? 'io', detail: result.detail ?? '' },
+      result.error
+    );
+  }
+  if (result.error === 'project-unreadable') return new BibliographyMergeRefusedError(null, result.error);
+  return loadFailure(sourcePath, result);
 }
 
 export const createCitationSlice: BibliographySliceCreator<CitationSliceState> = (set, get) => ({
@@ -144,73 +216,54 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
     }
   },
 
-  mergeBibliography: async (filePath: string) => {
-    try {
-      const result: BibliographyLoadResponse = await window.electron.bibliography.load(filePath);
+  importBibliography: async (sourcePath, mode, projectPath): Promise<BibliographyImportOutcome | null> => {
+    const file = fileName(sourcePath);
 
-      if (!result.success || !Array.isArray(result.citations)) {
-        console.error('Invalid response from bibliography.load:', result);
-        throw loadFailure(filePath, result);
+    // Sans projet, rien à écrire : le fichier remplace la liste du panneau, ou la rejoint.
+    if (!projectPath) {
+      if (mode === 'replace') {
+        await get().loadBibliography(sourcePath);
+        const problem = get().bibliographyProblem;
+        const unreadKeys = problem?.kind === 'partial' ? problem.unreadKeys : [];
+        return { total: get().citations.length, newCitations: 0, duplicates: 0, unreadKeys, file, sourceSaved: true };
       }
-
-      const { citations: currentCitations } = get();
-      const newCitationsFromFile = result.citations;
-
-      // Un doublon, c'est le même item Zotero — pas la même clé BibTeX.
-      // Deux œuvres distinctes peuvent partager une clé (trois ouvrages en
-      // `Unknown_2022`, mesuré) : déduire le doublon de l'`id` en écartait
-      // alors une à l'import. Le `zoteroKey` fait foi quand il existe.
-      const existingZoteroKeys = new Set(
-        currentCitations.map(c => c.zoteroKey).filter(Boolean) as string[]
-      );
-      const existingIds = new Set(currentCitations.map(c => c.id));
-
-      // Separate new citations from duplicates
-      const newCitations: Citation[] = [];
-      let duplicatesCount = 0;
-
-      newCitationsFromFile.forEach((citation: Citation) => {
-        const isDuplicate = citation.zoteroKey
-          ? existingZoteroKeys.has(citation.zoteroKey)
-          : existingIds.has(citation.id);
-
-        if (isDuplicate) {
-          duplicatesCount++;
-          console.log(`🔄 Duplicate found: ${citation.id} - ${citation.title}`);
-        } else {
-          newCitations.push(citation);
-          if (citation.zoteroKey) existingZoteroKeys.add(citation.zoteroKey);
-          existingIds.add(citation.id);
-        }
-      });
-
-      // Merge: existing + new (no duplicates)
-      const mergedCitations = [...currentCitations, ...newCitations];
-
-      console.log(`✅ Bibliography merge complete:`, {
-        existing: currentCitations.length,
-        fromFile: newCitationsFromFile.length,
-        newAdded: newCitations.length,
-        duplicates: duplicatesCount,
-        total: mergedCitations.length,
-      });
-
-      set({
-        citations: mergedCitations,
-        filteredCitations: mergedCitations,
-      });
-
+      const result: BibliographyLoadResponse = await window.electron.bibliography.load(sourcePath);
+      if (!result.success || !Array.isArray(result.citations)) throw loadFailure(sourcePath, result);
+      const { merged, newCount, duplicates } = mergeCitationLists(get().citations, result.citations);
+      set({ citations: merged, filteredCitations: merged });
       get().applyFilters();
-
       return {
-        newCitations: newCitations.length,
-        duplicates: duplicatesCount,
-        total: mergedCitations.length,
+        total: merged.length,
+        newCitations: newCount,
+        duplicates,
+        unreadKeys: result.unreadKeys ?? [],
+        file,
+        sourceSaved: true,
       };
-    } catch (error) {
-      console.error('Failed to merge bibliography:', error);
-      throw error;
     }
+
+    // Le main écrit le `.bib` du projet et le relit : le panneau n'a rien touché avant sa réponse.
+    const result: BibliographyImportResponse = await window.electron.bibliography.import({
+      sourcePath,
+      mode,
+      expectedProjectPath: projectPath,
+    });
+    // Refusé par le main, ou le projet a changé pendant l'écriture : rien ne s'affiche dans l'autre.
+    if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return null;
+    if (!result.success || !result.bibPath) throw importFailure(sourcePath, result);
+
+    // Le panneau se relit depuis le fichier du projet, rattachements Zotero compris.
+    await get().loadBibliographyWithMetadata(result.bibPath, projectPath);
+    if (!(await stillIn(projectPath))) return null;
+    return {
+      total: result.total ?? get().citations.length,
+      newCitations: result.newCitations ?? 0,
+      duplicates: result.duplicates ?? 0,
+      unreadKeys: result.unreadKeys ?? [],
+      file,
+      sourceSaved: result.sourceSaved === true,
+      ...(result.sourceError ? { sourceError: result.sourceError } : {}),
+    };
   },
 
   searchCitations: (query: string) => {

@@ -2357,7 +2357,11 @@
     "cancel": "Cancel",
     "import": "Import",
     "projectFileMissing": "The project's bibliography, {{file}}, cannot be found: the imported file will replace it.",
-    "projectFileUnread": "The project's bibliography, {{file}}, could not be read, or not in full (see the banner). The imported file will replace it; if it has the same name, it will overwrite it on disk, and whatever ClioDeck could not read will be lost. To keep it, cancel and fix {{file}} first."
+    "projectFileUnread": "The project's bibliography, {{file}}, could not be read, or not in full (see the banner). “Merge” will stop without writing anything until {{file}} is fixed. “Replace” will put the imported file in its place; if it has the same name, {{file}} will first be copied as is to .cliodeck/bibliography.bib.bak, a backup copy that the next rewrite of the bibliography will replace. To keep what ClioDeck could not read, cancel and fix {{file}} first.",
+    "failed": "The import did not go through.",
+    "mergeRefused": "Merge stopped: nothing was written.",
+    "projectUnreadable": "Nothing was merged: this project's project.json file cannot be read, and ClioDeck no longer knows which bibliography file to merge into. Check that it is readable, then try again.",
+    "targetOutsideProject": "Nothing was replaced: in this project, {{file}} is a link pointing outside the project, and ClioDeck does not write through it. The file it points to is untouched. To import this file, give it another name, then try again: it will enter the project under that name."
   },
   "bibImportSummary": {
     "title": "Import complete",
@@ -2365,7 +2369,10 @@
     "total": "References in total",
     "merged": "Bibliography merged.",
     "newAdded": "New references added",
-    "duplicates": "Duplicates ignored"
+    "duplicates": "Duplicates ignored",
+    "unreadMerged": "{{count}} entry(ies) in {{file}} could not be read: they were not added to the project's bibliography. Fix them in {{file}} with a text editor, then merge it again: the references already added will be recognized as duplicates. Entries concerned:",
+    "unreadReplaced": "{{count}} entry(ies) in {{file}} could not be read: they are in the project's file, but are not shown, and the banner of the “Bibliography” panel explains how to fix them. Entries concerned:",
+    "unreadNoProject": "{{count}} entry(ies) in {{file}} could not be read: they are not shown. Fix them in {{file}} with a text editor, then import it again. Entries concerned:"
   },
   "tagManager": {
     "none": "No tags",

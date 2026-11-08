@@ -108,6 +108,20 @@ export type BibliographyProblem =
   | { kind: 'unreadable'; file: string; reason: string; detail: string }
   | { kind: 'partial'; file: string; unreadKeys: string[]; metadataUnreadable: boolean };
 
+/** Ce que l'import a fait, pour le récapitulatif. Dans un projet, `total` est relu sur le disque. */
+export interface BibliographyImportOutcome {
+  total: number;
+  newCitations: number;
+  duplicates: number;
+  /** Les entrées du fichier importé que le parseur n'a pas rendues. */
+  unreadKeys: string[];
+  /** Le nom du fichier importé. */
+  file: string;
+  /** `project.json` a retenu le fichier, ou n'avait pas à changer ; sinon `sourceError` dit pourquoi. */
+  sourceSaved: boolean;
+  sourceError?: string;
+}
+
 // MARK: - Slice State Interfaces
 
 export interface CitationSliceState {
@@ -125,7 +139,16 @@ export interface CitationSliceState {
   // Actions
   loadBibliography: (filePath: string) => Promise<void>;
   loadBibliographyWithMetadata: (filePath: string, projectPath: string) => Promise<void>;
-  mergeBibliography: (filePath: string) => Promise<{ newCitations: number; duplicates: number; total: number }>;
+  /**
+   * Importe un `.bib`. Dans le projet `projectPath`, le main écrit le fichier du projet et le
+   * panneau le relit ; sans projet, le fichier remplace ou rejoint la liste du panneau. `null` : le
+   * projet a changé en route, et rien ne doit s'afficher.
+   */
+  importBibliography: (
+    sourcePath: string,
+    mode: 'replace' | 'merge',
+    projectPath: string | null
+  ) => Promise<BibliographyImportOutcome | null>;
   searchCitations: (query: string) => void;
   setSortBy: (field: 'author' | 'year' | 'title') => void;
   toggleSortOrder: () => void;
