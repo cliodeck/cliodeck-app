@@ -36,6 +36,7 @@ import { useManuscriptStore, currentRelativePath } from '../../stores/manuscript
 import { runCitationCheck } from '../../services/check-citations';
 import { newDocument } from '../../services/new-document';
 import { unreadableChaptersNote } from '../../services/unreadable-chapters';
+import { unlinkedFootnotesNote } from '../../services/unlinked-footnotes';
 import { ExportReadTimedOutError, startExportReadLimit } from '../Export/export-read-limit';
 import { logger } from '../../utils/logger';
 import './EditorPanel.css';
@@ -216,8 +217,14 @@ export const EditorPanel: React.FC = () => {
       docs.map((d) => ({ key: d.chapter.filePath, content: d.content })),
       mode
     );
+    // Ce qui n'a pas pu être lié se dit, que le reste ait changé ou non.
+    const titles = new Map(docs.map((d) => [d.chapter.filePath, d.chapter.title]));
+    const unlinkedNote = unlinkedFootnotesNote(
+      renumbered.map((d) => ({ title: titles.get(d.key) ?? d.key, unlinked: d.unlinked })),
+      t
+    );
     const changed = renumbered.filter((d) => d.changed);
-    if (changed.length === 0) return t('book.renumberNoChange');
+    if (changed.length === 0) return unlinkedNote ?? t('book.renumberNoChange');
 
     const openKey = docs.find((d) => d.live)?.chapter.filePath;
     const originals = new Map(docs.map((d) => [d.chapter.filePath, d.content]));
@@ -309,7 +316,8 @@ export const EditorPanel: React.FC = () => {
     // Sans l'attendre : le travail est fait, une relecture qui traînerait
     // retiendrait les verrous et le message de fin.
     void useManuscriptStore.getState().refreshAll();
-    return t('book.renumberDone', { count: changed.length });
+    const done = t('book.renumberDone', { count: changed.length });
+    return unlinkedNote ? `${done} ${unlinkedNote}` : done;
   };
 
   // Renumérotation manuelle des notes (arbitrage 2 du plan CM6 : commande
@@ -317,11 +325,12 @@ export const EditorPanel: React.FC = () => {
   const handleRenumberFootnotes = async () => {
     logger.component('EditorPanel', 'handleRenumberFootnotes clicked');
 
-    // Document isolé : comportement historique.
+    // Document isolé : comportement historique, et ce qui n'a pas pu être lié se dit.
     if (!isBook) {
       const result = renumberFootnotes(useEditorStore.getState().getLiveContent());
-      if (!result.changed) return;
-      setOpenEditorText(result.content);
+      if (result.changed) setOpenEditorText(result.content);
+      const unlinkedNote = unlinkedFootnotesNote([{ unlinked: result.unlinked }], t);
+      if (unlinkedNote) await useDialogStore.getState().showAlert(unlinkedNote);
       return;
     }
 

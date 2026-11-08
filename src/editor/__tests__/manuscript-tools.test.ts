@@ -62,6 +62,45 @@ describe('renumberManuscript — numérotation continue', () => {
     expect(out[1].changed).toBe(false);
   });
 
+  it('(d) un numéro réemployé dans le chapitre 2 : notes distinctes, la suite continue', () => {
+    const out = renumberManuscript(
+      [
+        docs[0],
+        {
+          key: 'ch2.md',
+          content:
+            '# Deux\n\nUn[^1].\n\nAjout[^2].\n\n[^2]: ajoutée.\n\nDeux[^2] trois[^3].\n\n' +
+            '[^1]: un.\n[^2]: deux.\n[^3]: trois.\n',
+        },
+        { key: 'ch3.md', content: '# Trois\n\nFin[^1].\n\n[^1]: fin.\n' },
+      ],
+      'continuous'
+    );
+
+    expect(out[1].content).toBe(
+      '# Deux\n\nUn[^3].\n\nAjout[^4].\n\n[^4]: ajoutée.\n\nDeux[^5] trois[^6].\n\n' +
+        '[^3]: un.\n[^5]: deux.\n[^6]: trois.\n'
+    );
+    expect(out[2].content).toBe('# Trois\n\nFin[^7].\n\n[^7]: fin.\n');
+    expect(out.map((d) => d.unlinked)).toEqual([[], [], []]);
+  });
+
+  it('rend, chapitre par chapitre, ce qui n’a pas pu être lié', () => {
+    const out = renumberManuscript(
+      [
+        docs[0],
+        { key: 'ch2.md', content: '# Deux\n\nSans texte[^1].\n\n[^2]: sans appel.\n' },
+      ],
+      'continuous'
+    );
+
+    expect(out[0].unlinked).toEqual([]);
+    expect(out[1].unlinked).toEqual([
+      { kind: 'reference', label: '3' },
+      { kind: 'definition', label: '4' },
+    ]);
+  });
+
   it('ignore les notes des blocs de code', () => {
     const out = renumberManuscript(
       [

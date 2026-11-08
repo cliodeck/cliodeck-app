@@ -1,5 +1,5 @@
 import { parser as markdownParser, GFM } from '@lezer/markdown';
-import type { Tree } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { Footnotes, PandocCitations } from './lezer-extensions/index.js';
 
 /**
@@ -23,6 +23,13 @@ export interface FootnoteOccurrence {
   from: number;
   to: number;
   kind: 'reference' | 'definition';
+  /**
+   * Définition collée au paragraphe qui la précède, sans ligne vide : Lezer y
+   * voit une définition, pandoc la suite du paragraphe — les exports qui
+   * passent par pandoc (PDF, Word avec bibliographie) l'impriment en clair
+   * (mesuré, pandoc 3.13). Le générateur Word interne, lui, en fait une note.
+   */
+  glued?: boolean;
 }
 
 function parse(content: string): Tree {
@@ -41,10 +48,34 @@ function parse(content: string): Tree {
  */
 const HTML_FOOTNOTE_REFERENCE = /\[\^([^\]\s]+)\](?!:)/g;
 
+/**
+ * La ligne avant `from` termine-t-elle un paragraphe hors de toute définition ?
+ * Pandoc lit alors une définition posée là comme la suite du paragraphe. Il la
+ * sépare en revanche d'une autre définition, d'un titre ou d'un bloc de code.
+ */
+function followsParagraph(tree: Tree, content: string, from: number): boolean {
+  const lineStart = content.lastIndexOf('\n', from - 1) + 1;
+  if (lineStart === 0) return false;
+  const previousStart = content.lastIndexOf('\n', lineStart - 2) + 1;
+  const previous = content.slice(previousStart, lineStart - 1).trimEnd();
+  if (previous.trim() === '') return false;
+  let paragraph = false;
+  for (
+    let node: SyntaxNode | null = tree.resolveInner(previousStart + previous.length, -1);
+    node;
+    node = node.parent
+  ) {
+    if (node.name === 'FootnoteDefinition') return false;
+    if (node.name === 'Paragraph') paragraph = true;
+  }
+  return paragraph;
+}
+
 /** Toutes les occurrences de notes (appels et définitions), ordre du document. */
 export function collectFootnotes(content: string): FootnoteOccurrence[] {
   const out: FootnoteOccurrence[] = [];
-  parse(content).iterate({
+  const tree = parse(content);
+  tree.iterate({
     enter: (node) => {
       if (node.name === 'HTMLBlock') {
         // Bloc opaque pour Lezer : on y cherche les appels nous-mêmes.
@@ -66,12 +97,16 @@ export function collectFootnotes(content: string): FootnoteOccurrence[] {
       }
       const label = node.node.getChild('FootnoteLabel');
       if (label) {
-        out.push({
+        const occ: FootnoteOccurrence = {
           label: content.slice(label.from, label.to),
           from: label.from,
           to: label.to,
           kind: node.name === 'FootnoteReference' ? 'reference' : 'definition',
-        });
+        };
+        if (occ.kind === 'definition' && followsParagraph(tree, content, node.from)) {
+          occ.glued = true;
+        }
+        out.push(occ);
       }
       // Les définitions peuvent contenir des appels dans leur corps :
       // continuer la descente.
@@ -96,12 +131,37 @@ export function nextFootnoteNumber(content: string): number {
   return max + 1;
 }
 
+/** Ce que la renumérotation n'a pas pu lier, sous le numéro qu'elle lui a donné. */
+export interface UnlinkedFootnote {
+  /**
+   * `reference` : appel sans définition ; `definition` : définition sans
+   * appel ; `shared` : plusieurs appels liés à la même définition alors que
+   * leur numéro en avait plusieurs — la règle de liaison a tranché, l'auteur
+   * doit vérifier (une entrée par définition) ; `glued` : définition collée
+   * au paragraphe, qu'un export par pandoc imprimera en clair (voir
+   * `FootnoteOccurrence.glued`).
+   */
+  kind: 'reference' | 'definition' | 'shared' | 'glued';
+  label: string;
+}
+
+const isNumericLabel = (label: string): boolean => /^\d+$/.test(label);
+
 /**
  * Renumérotation manuelle (arbitrage 2 du plan : commande explicite, jamais
  * silencieuse). Les labels NUMÉRIQUES sont renumérotés 1..n dans l'ordre
  * d'apparition des appels ; les définitions orphelines numériques passent en
  * queue de numérotation ; les identifiants libres restent intacts. Le reste
  * du document est préservé octet pour octet.
+ *
+ * Une note est une DÉFINITION, pas une étiquette (BT1-3) : une note insérée à
+ * la main sous un numéro déjà pris restait confondue avec l'autre, et pandoc
+ * ne garde que la dernière définition d'un numéro — le texte de la première
+ * disparaissait de l'export. Chaque appel se lie à la première définition de
+ * même numéro qui le suit, à défaut à la dernière (le choix de pandoc).
+ * Ce qui reste sans lien est rendu dans `unlinked`, pour être dit à l'auteur,
+ * comme ce que cette règle a dû trancher : quand un numéro a plusieurs
+ * définitions, deux appels liés à la même peuvent avoir changé de texte.
  */
 export function renumberFootnotes(
   content: string,
@@ -111,39 +171,88 @@ export function renumberFootnotes(
   changed: boolean;
   /** Prochain numéro libre — sert la numérotation continue d'un ouvrage. */
   nextNumber: number;
+  /** Ce que l'export ne liera pas, dans l'ordre du document. */
+  unlinked: UnlinkedFootnote[];
 } {
   const occurrences = collectFootnotes(content);
 
-  const mapping = new Map<string, string>();
-  let next = startAt;
-  const assign = (label: string) => {
-    if (/^\d+$/.test(label) && !mapping.has(label)) {
-      mapping.set(label, String(next++));
-    }
-  };
+  const definitionsByLabel = new Map<string, FootnoteOccurrence[]>();
   for (const occ of occurrences) {
-    if (occ.kind === 'reference') assign(occ.label);
-  }
-  for (const occ of occurrences) {
-    if (occ.kind === 'definition') assign(occ.label);
+    if (occ.kind !== 'definition' || !isNumericLabel(occ.label)) continue;
+    const same = definitionsByLabel.get(occ.label) ?? [];
+    same.push(occ);
+    definitionsByLabel.set(occ.label, same);
   }
 
-  let changed = false;
-  for (const [oldLabel, newLabel] of mapping) {
-    if (oldLabel !== newLabel) changed = true;
+  // La note de chaque occurrence : sa définition. Les appels d'un numéro qui
+  // n'a aucune définition partagent ce numéro pour clé.
+  const owner = new Map<FootnoteOccurrence, FootnoteOccurrence | string>();
+  // Nombre d'appels liés à chaque définition.
+  const calls = new Map<FootnoteOccurrence, number>();
+  for (const occ of occurrences) {
+    if (!isNumericLabel(occ.label)) continue;
+    if (occ.kind === 'definition') {
+      owner.set(occ, occ);
+      continue;
+    }
+    const same = definitionsByLabel.get(occ.label) ?? [];
+    const definition = same.find((d) => d.from > occ.from) ?? same[same.length - 1];
+    if (definition) calls.set(definition, (calls.get(definition) ?? 0) + 1);
+    owner.set(occ, definition ?? occ.label);
   }
-  if (!changed) return { content, changed: false, nextNumber: next };
+  // Une note appelée deux fois est permise. Mais si son numéro avait d'autres
+  // définitions, rien ne dit que chaque appel va avec celle-ci : l'appel
+  // d'origine a pu recevoir le texte d'une note insérée sous son numéro.
+  const shared = (definition: FootnoteOccurrence): boolean =>
+    (calls.get(definition) ?? 0) > 1 &&
+    (definitionsByLabel.get(definition.label)?.length ?? 0) > 1;
+
+  const numbers = new Map<FootnoteOccurrence | string, string>();
+  let next = startAt;
+  const assign = (note: FootnoteOccurrence | string) => {
+    if (!numbers.has(note)) numbers.set(note, String(next++));
+  };
+  for (const occ of occurrences) {
+    const note = owner.get(occ);
+    if (occ.kind === 'reference' && note !== undefined) assign(note);
+  }
+  for (const occ of occurrences) {
+    if (occ.kind === 'definition' && owner.has(occ)) assign(occ);
+  }
+
+  const unlinked: UnlinkedFootnote[] = [];
+  const reported = new Set<FootnoteOccurrence | string>();
+  for (const occ of occurrences) {
+    const note = owner.get(occ);
+    const label = note === undefined ? undefined : numbers.get(note);
+    if (note === undefined || label === undefined) continue;
+    if (typeof note === 'string') {
+      if (!reported.has(note)) unlinked.push({ kind: 'reference', label });
+      reported.add(note);
+    } else if (note === occ) {
+      if (occ.glued || !calls.has(occ)) {
+        unlinked.push({ kind: occ.glued ? 'glued' : 'definition', label });
+      }
+    } else if (shared(note) && !reported.has(note)) {
+      // Au premier des appels en cause : l'ordre du document.
+      unlinked.push({ kind: 'shared', label });
+      reported.add(note);
+    }
+  }
 
   // Remplacement de la fin vers le début : les positions restent valides.
   let out = content;
+  let changed = false;
   for (let i = occurrences.length - 1; i >= 0; i--) {
     const occ = occurrences[i];
-    const replacement = mapping.get(occ.label);
+    const note = owner.get(occ);
+    const replacement = note === undefined ? undefined : numbers.get(note);
     if (replacement !== undefined && replacement !== occ.label) {
       out = out.slice(0, occ.from) + replacement + out.slice(occ.to);
+      changed = true;
     }
   }
-  return { content: out, changed: true, nextNumber: next };
+  return { content: changed ? out : content, changed, nextNumber: next, unlinked };
 }
 
 /** Un document du manuscrit, dans l'ordre du manifeste. */
@@ -155,6 +264,8 @@ export interface ManuscriptDoc {
 
 export interface RenumberedDoc extends ManuscriptDoc {
   changed: boolean;
+  /** Ce que ce document laisse sans lien (voir `renumberFootnotes`). */
+  unlinked: UnlinkedFootnote[];
 }
 
 /**
@@ -176,7 +287,12 @@ export function renumberManuscript(
   return docs.map((doc) => {
     const result = renumberFootnotes(doc.content, mode === 'continuous' ? next : 1);
     if (mode === 'continuous') next = result.nextNumber;
-    return { key: doc.key, content: result.content, changed: result.changed };
+    return {
+      key: doc.key,
+      content: result.content,
+      changed: result.changed,
+      unlinked: result.unlinked,
+    };
   });
 }
 
