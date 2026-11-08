@@ -80,10 +80,22 @@ Cycle de vie :
   curseur s'il est ailleurs, car Tab et Échap n'agissent qu'à son endroit. Au
   retour d'un mode, le défilement restauré n'arrive qu'à l'image suivante :
   `propose` et `revealLine` l'annulent, sinon il repasserait sur eux.
-  L'encart se situe à sa barre (`coordsAt` du widget) : c'est elle que
-  `scrollIntoView` amène à l'écran, y compris sans retour à la ligne. Situé
-  par sa boîte entière, un encart plus haut que l'écran s'y montrait par le
-  bas, et ses actions, placées après le texte, restaient hors de vue (BT1-1).
+  Pour amener la proposition à l'écran, CodeMirror ne vise pas toujours
+  l'encart (`LineTile.resolveInline`, @codemirror/view 6.43). Deux cas, chacun
+  couvert par des e2e à longue réponse (BT1-1) :
+  - **L'encart passe à la ligne visuelle suivante** : au milieu d'un
+    paragraphe, avec retour à la ligne (C33, C35). CodeMirror vise alors le
+    tampon qui le précède, c'est-à-dire la ligne de l'auteur. C'est la barre,
+    en tête de l'encart, qui met les boutons à l'écran, juste sous cette ligne.
+  - **L'encart est sur la même ligne visuelle que ce tampon** : toujours sans
+    retour à la ligne, et avec, sur une ligne vide ou en début de ligne.
+    CodeMirror vise l'encart lui-même, et le widget situe alors sa position à
+    sa barre (`coordsAt`). Situé par sa boîte entière, un encart plus haut que
+    l'écran s'y montrait par le bas, et, sans retour à la ligne, hors de
+    l'écran en largeur.
+
+  La barre reste donc le premier enfant de l'encart, et `coordsAt` vaut dans
+  tous les cas, retour à la ligne ou non.
 - **Fins de ligne** : le texte accepté ou modifié entre avec le séparateur du
   document. CM6 ne découpe une chaîne que sur le séparateur déclaré : un `\n`
   resterait à l'intérieur d'une ligne d'un fichier CRLF, qui deviendrait mixte.

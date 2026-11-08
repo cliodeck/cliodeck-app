@@ -74,8 +74,13 @@ class ProposalWidget extends WidgetType {
   }
 
   /**
-   * L'encart se situe à sa barre : c'est elle que `scrollIntoView` amène à l'écran. Sinon, la
-   * position est l'encart entier, et un encart plus haut que l'écran s'y montre par le bas.
+   * Quand CodeMirror vise l'encart lui-même, sa position est sa barre, et c'est elle que
+   * `scrollIntoView` amène à l'écran. Sinon ce serait l'encart entier : plus haut que l'écran, il
+   * s'y montrait par le bas. CodeMirror le vise quand il est sur la ligne visuelle du tampon qui le
+   * précède : toujours sans retour à la ligne, et avec, sur une ligne vide ou en début de ligne.
+   * Au milieu d'un paragraphe, avec retour à la ligne, l'encart passe à la ligne suivante et
+   * CodeMirror vise le texte de l'auteur : c'est alors la barre en tête qui met les boutons à
+   * l'écran (`LineTile.resolveInline`, @codemirror/view). Voir docs/editor-proposals.md.
    */
   override coordsAt(dom: HTMLElement): Rect | null {
     return dom.querySelector('.cm-proposal-bar')?.getBoundingClientRect() ?? null;

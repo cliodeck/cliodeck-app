@@ -625,6 +625,36 @@ test('sans retour à la ligne, une longue réponse au milieu d’une longue lign
   }
 });
 
+test('avec retour à la ligne, une longue réponse sur une ligne vide : Accepter est à l’écran', async () => {
+  const session = await start({ answer: LONG_ANSWER });
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Deuxième paragraphe')).toBeVisible({ timeout: 20_000 });
+    // La ligne vide avant le 2e paragraphe, là où l'auteur ouvre un paragraphe. Rien ne précède
+    // l'encart sur sa ligne : CodeMirror le vise lui-même, et non le texte de l'auteur. Au milieu
+    // d'un paragraphe, il passe à la ligne et laisse viser le texte qui le précède.
+    await line(window, 'Deuxième paragraphe').click();
+    await window.keyboard.press('Home');
+    await window.keyboard.press('ArrowUp');
+
+    await toMode(window, 'Brainstormer');
+    await askChat(window, '.center-panel');
+    await sendToWriteButton(window).click();
+
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposalLine(window)).not.toContainText('Premier');
+    await expect(proposalLine(window)).not.toContainText('Deuxième');
+    await expectWhollyOnScreen(window, acceptButton(window));
+    expect(readFileSync(document, 'utf8')).toBe(TEXT);
+  } finally {
+    await stop(session);
+  }
+});
+
 test('un fichier CRLF garde ses fins de ligne : rien n’est écrit sans décision, puis aucun LF nu', async () => {
   const session = await start();
   if (!session) return;
