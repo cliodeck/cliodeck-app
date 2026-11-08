@@ -10,6 +10,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -170,6 +171,56 @@ test('le fichier réparé et remis à sa place pendant la session : la nouvelle 
     rmSync(project.dir, { recursive: true, force: true });
   }
 });
+
+// C40 puis C41 : le fichier sain recopié (`cp`), la copie mise de côté restant en place, donc la
+// bannière aussi. Des idées sans position : le Tableau doit les placer.
+for (const tab of ['Idées', 'Tableau'] as const) {
+  test(`fichier sain recopié à côté de sa mise de côté, sur l’onglet ${tab} : les idées reviennent sans changer d’onglet, et la bannière reste`, async () => {
+    const titles = Array.from({ length: 10 }, (_, i) => `Revenue ${i}`);
+    const project = makeProject();
+    const saneCopy = join(project.dir, 'ideas-sain.json');
+    writeFileSync(saneCopy, ideasFile(...titles));
+    writeFileSync(project.ideasJson, readFileSync(saneCopy).subarray(0, 20));
+    try {
+      await withApp(async (app, window) => {
+        await openProject(app, window, project.projectJson);
+        await window.locator('.workspace-mode-bar button', { hasText: 'Brainstormer' }).click();
+        await expect(banner(window)).toBeVisible({ timeout: 10_000 });
+        await window.locator('.brainstorm-panel__tab', { hasText: tab }).click();
+        const backup = backups(project);
+        expect(backup).toHaveLength(1);
+
+        copyFileSync(saneCopy, project.ideasJson);
+        await window.locator('button[title="Nouvelle idée"]').first().click();
+        await expect
+          .poll(() => existsSync(project.ideasJson) && JSON.parse(readFileSync(project.ideasJson, 'utf8')).ideas.length, {
+            timeout: 10_000,
+          })
+          .toBe(titles.length + 1);
+
+        await expect(window.locator('.brainstorm-panel__tab.is-active')).toContainText(tab);
+        if (tab === 'Idées') {
+          await expect(window.locator('.ideas-panel__item')).toHaveCount(titles.length + 1);
+          for (const title of titles) {
+            await expect(window.locator('.ideas-panel__item', { hasText: title })).toBeVisible();
+          }
+        } else {
+          const cards = window.locator('.ideas-canvas__card');
+          await expect(cards).toHaveCount(titles.length + 1);
+          // Avant, les dix revenues s'empilaient en (0,0), sous la barre d'outils, jusqu'au remontage.
+          const spots = await cards.evaluateAll((all) =>
+            all.map((card) => `${(card as HTMLElement).style.left},${(card as HTMLElement).style.top}`),
+          );
+          expect(new Set(spots).size).toBe(titles.length + 1);
+        }
+        await expect(banner(window)).toContainText(backup[0]);
+        expect(backups(project)).toEqual(backup);
+      });
+    } finally {
+      rmSync(project.dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('qui reste sur le chat le sait aussi, et la bannière survit à un aller-retour et à Cmd+R', async () => {
   const whole = ideasFile(...Array.from({ length: 40 }, (_, i) => `Idée ${i}`));
