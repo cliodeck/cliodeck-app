@@ -486,7 +486,8 @@
     "manuscriptUnreadable": "Could not read {{file}}. Check that the file exists in the project.",
     "cslMissing": "The citation style set in the project settings was not found ({{file}}): it was not applied to this document. Choose it again in the project settings.",
     "cslDependent": "The citation style set in the project settings ({{file}}) depends on another style, its parent style, which only Pandoc can fetch: it was not applied to this document, whose citations remain as keys. Install Pandoc, or choose the parent style in the project settings.",
-    "cslUnreadable": "The citation style set in the project settings ({{file}}) could not be read: it was not applied to this document, whose citations remain as keys. Check the file, or choose another style in the project settings."
+    "cslUnreadable": "The citation style set in the project settings ({{file}}) could not be read: it was not applied to this document, whose citations remain as keys. Check the file, or choose another style in the project settings.",
+    "cslNumeric": "The citation style set in the project settings ({{file}}) numbers its references, and without Pandoc ClioDeck cannot number them: it was not applied to this document, whose citations remain as keys. Install Pandoc, or choose a style without numbers in the project settings."
   },
   "rag": {
     "title": "RAG Configuration",

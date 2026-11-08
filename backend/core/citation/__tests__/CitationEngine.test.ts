@@ -121,4 +121,39 @@ describe('CitationEngine.styleProblem', () => {
     expect(engine.styleProblem('sans-citation', 'fr-FR')).toBe('unreadable');
     expect(engine.styleProblem('pas-du-xml', 'fr-FR')).toBe('unreadable');
   });
+
+  it('les styles embarqués ne numérotent pas', () => {
+    const engine = new CitationEngine(resourcesRoot);
+    expect(engine.styleProblem('modern-language-association', 'fr-FR')).toBeUndefined();
+    expect(engine.styleProblem('chicago-note-bibliography', 'en-US')).toBeUndefined();
+  });
+
+  it('un style qui numérote ses références, comme IEEE', () => {
+    // Chaque groupe est rendu à part : chaque citation y serait « [1] ».
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'numerote',
+      style(
+        '<citation><layout prefix="[" suffix="]"><text variable="citation-number"/></layout></citation>' +
+          '<bibliography><layout><text variable="citation-number"/></layout></bibliography>'
+      )
+    );
+    expect(engine.styleProblem('numerote', 'fr-FR')).toBe('numeric');
+  });
+
+  it('un style qui numérote par une macro, dans l’ordre alphabétique décroissant', () => {
+    // Le numéro ne se lit pas dans `<citation>`, et la référence citée la
+    // première peut recevoir le numéro 2 : seul l'essai le voit.
+    const engine = new CitationEngine(resourcesRoot);
+    engine.registerStyle(
+      'numerote-macro',
+      style(
+        '<macro name="numero"><text variable="citation-number"/></macro>' +
+          '<citation><layout prefix="(" suffix=")"><text macro="numero"/></layout></citation>' +
+          '<bibliography><sort><key variable="author" sort="descending"/></sort>' +
+          '<layout><text variable="citation-number"/></layout></bibliography>'
+      )
+    );
+    expect(engine.styleProblem('numerote-macro', 'fr-FR')).toBe('numeric');
+  });
 });

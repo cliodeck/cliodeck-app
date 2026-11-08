@@ -42,7 +42,7 @@ export interface FormatResult {
 type Locale = string;
 type StyleId = string; // filename without .csl
 
-/** Notice fictive de {@link CitationEngine.styleProblem}. */
+/** Notices fictives de {@link CitationEngine.styleProblem}. */
 const STYLE_PROBE_ITEM: CSLItem = {
   id: 'cliodeck-style-probe',
   type: 'book',
@@ -50,6 +50,16 @@ const STYLE_PROBE_ITEM: CSLItem = {
   author: [{ family: 'Essai', given: 'A.' }],
   issued: { 'date-parts': [[2000]] },
 };
+const STYLE_PROBE_OTHER: CSLItem = {
+  id: 'cliodeck-style-probe-2',
+  type: 'book',
+  title: 'Second essai',
+  author: [{ family: 'Witt', given: 'Z.' }],
+  issued: { 'date-parts': [[2001]] },
+};
+
+/** Ce qui empêche un style de rendre les citations du moteur interne. */
+export type StyleProblem = 'dependent' | 'unreadable' | 'numeric';
 
 /**
  * Dossier `resources/csl` par défaut.
@@ -130,17 +140,30 @@ export class CitationEngine {
    *   `[NO_PRINTED_FORM]` à la place de chaque citation.
    * - `unreadable` : citeproc-js n'en tire aucune citation (XML qu'il ne lit
    *   pas, style sans `<citation>`).
+   * - `numeric` : le rendu d'une citation dépend des autres références du
+   *   document, comme le numéro d'un style IEEE, Nature ou Vancouver. Le
+   *   pipeline rend chaque groupe dans un moteur neuf (un appel à
+   *   {@link formatCitation} par groupe) : chaque citation y recevait le
+   *   numéro 1, alors que la bibliographie numérote 1, 2… Ginzburg imprimé
+   *   `[1]` renvoyait à Farge. Tant que tout le document ne passe pas par un
+   *   seul moteur (L05-19), un tel style n'est pas tenté.
    *
-   * Essai sur une notice fictive, avant de rendre le document : sans lui, un
-   * export remplaçait chaque clé par `[NO_PRINTED_FORM]` et se disait réussi.
+   * Essai sur des notices fictives, avant de rendre le document : sans lui, un
+   * export remplaçait chaque clé par `[NO_PRINTED_FORM]`, ou par un numéro
+   * faux, et se disait réussi. Le numéro peut venir d'une macro, et la
+   * bibliographie peut trier les références à rebours : seul l'essai le voit,
+   * en comparant chaque notice rendue seule et rendue à côté de l'autre.
    */
-  styleProblem(styleId: StyleId, locale: Locale = 'en-US'): 'dependent' | 'unreadable' | undefined {
+  styleProblem(styleId: StyleId, locale: Locale = 'en-US'): StyleProblem | undefined {
     try {
       if (/<link\b[^>]*\brel\s*=\s*["']independent-parent["']/.test(this.loadStyle(styleId))) {
         return 'dependent';
       }
-      const [citation] = this.formatCitation([STYLE_PROBE_ITEM], styleId, locale).footnotes;
-      return !citation || citation.includes('NO_PRINTED_FORM') ? 'unreadable' : undefined;
+      const [alone] = this.formatCitation([STYLE_PROBE_ITEM], styleId, locale).footnotes;
+      if (!alone || alone.includes('NO_PRINTED_FORM')) return 'unreadable';
+      const [otherAlone] = this.formatCitation([STYLE_PROBE_OTHER], styleId, locale).footnotes;
+      const together = this.formatCitation([STYLE_PROBE_ITEM, STYLE_PROBE_OTHER], styleId, locale).footnotes;
+      return together[0] !== alone || together[1] !== otherAlone ? 'numeric' : undefined;
     } catch {
       return 'unreadable';
     }

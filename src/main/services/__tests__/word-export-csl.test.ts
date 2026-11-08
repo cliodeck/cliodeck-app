@@ -68,6 +68,38 @@ const DEPENDANT_CSL = `<?xml version="1.0" encoding="utf-8"?>
 </style>
 `;
 
+/**
+ * Un style qui numérote comme IEEE : `[1]` renvoie à la première référence
+ * citée, `[2]` à la deuxième. Le numéro d'une citation dépend donc de tout le
+ * document. Écrit ici : aucun téléchargement.
+ */
+const NUMEROTE_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info>
+    <title>Numéroté</title>
+    <id>http://cliodeck.invalid/styles/numerote</id>
+    <category citation-format="numeric"/>
+    <updated>2026-11-08T00:00:00+00:00</updated>
+  </info>
+  <citation collapse="citation-number">
+    <sort><key variable="citation-number"/></sort>
+    <layout prefix="[" suffix="]" delimiter=", ">
+      <text variable="citation-number"/>
+    </layout>
+  </citation>
+  <bibliography>
+    <layout>
+      <text variable="citation-number" prefix="NUM-BIB [" suffix="] "/>
+      <names variable="author"><name/></names>
+      <text variable="title" prefix=", "/>
+    </layout>
+  </bibliography>
+</style>
+`;
+
+/** Deux références, dans l'ordre : Farge, Ginzburg, Farge encore. */
+const DEUX_REFERENCES = 'Farge [@farge1989] puis Ginzburg [@ginzburg1980] puis Farge encore [@farge1989].\n';
+
 /** Un style que citeproc-js ne sait pas lire : une balise jamais fermée. */
 const ILLISIBLE_CSL = `<?xml version="1.0" encoding="utf-8"?>
 <style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
@@ -85,6 +117,13 @@ const BIB = `@book{farge1989,
   title = {Le goût de l'archive},
   publisher = {Seuil},
   year = {1989}
+}
+
+@book{ginzburg1980,
+  author = {Ginzburg, Carlo},
+  title = {Le fromage et les vers},
+  publisher = {Flammarion},
+  year = {1980}
 }
 `;
 
@@ -230,6 +269,18 @@ describe.skipIf(!pandocAvailable())('export Word par pandoc : le style CSL du pr
 
     expect(result).toMatchObject({ success: true, missingCsl: join(projectPath, 'marqueur.csl') });
   });
+
+  it('style numéroté : pandoc numérote dans l’ordre des références citées (témoin)', async () => {
+    const projectPath = makeProject('article');
+    writeFileSync(join(projectPath, 'marqueur.csl'), NUMEROTE_CSL);
+    const options: WordExportOptions = { ...articleOptions(projectPath), content: DEUX_REFERENCES };
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result).toMatchObject({ success: true });
+    expect(result).not.toHaveProperty('unusableCsl');
+    expect(docxText(options.outputPath!)).toContain('Farge [1] puis Ginzburg [2] puis Farge encore [1]');
+  });
 });
 
 /**
@@ -311,6 +362,24 @@ describe('export Word sans pandoc : le moteur interne et le style du projet', ()
       unusableCsl: { path: stylePath, reason: 'unreadable' },
     });
     // La clé existe : la dire « introuvable » tromperait l'auteur.
+    expect(result).not.toHaveProperty('unresolvedCitations');
+  });
+
+  it('style numéroté : pas de numéro faux, les clés restent, et l’export dit pourquoi', async () => {
+    // Le moteur rend chaque groupe à part : chaque citation y recevait le
+    // numéro 1, et `[1]` après Ginzburg renvoyait à Farge dans la liste.
+    const projectPath = makeProject('article');
+    const stylePath = join(projectPath, 'marqueur.csl');
+    writeFileSync(stylePath, NUMEROTE_CSL);
+
+    const { result, text } = await exportNative({ ...articleOptions(projectPath), content: DEUX_REFERENCES });
+
+    expect(text).not.toContain('Ginzburg [1]');
+    expect(text).toContain('Farge [@farge1989] puis Ginzburg [@ginzburg1980]');
+    expect(result).toMatchObject({
+      success: true,
+      unusableCsl: { path: stylePath, reason: 'numeric' },
+    });
     expect(result).not.toHaveProperty('unresolvedCitations');
   });
 

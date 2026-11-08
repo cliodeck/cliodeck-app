@@ -21,7 +21,7 @@ import {
   ORDERED_LIST_NUMBERING,
   type BlockChild,
 } from './word-markdown.js';
-import { CitationEngine } from '../../../backend/core/citation/CitationEngine.js';
+import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
 import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
@@ -138,10 +138,12 @@ export interface WordExportResult extends ExportResult {
   /**
    * Sans pandoc : le style CSL du projet, présent, que le moteur interne ne
    * sait pas appliquer (`dependent` : style « dépendant », dont seul pandoc
-   * va chercher le parent ; `unreadable` : style qu'il ne lit pas). Les
-   * citations restent sous forme de clés ; la modale le dit.
+   * va chercher le parent ; `unreadable` : style qu'il ne lit pas ;
+   * `numeric` : style qui numérote ses références, ce que le moteur, qui rend
+   * chaque groupe à part, ne sait pas faire). Les citations restent sous
+   * forme de clés ; la modale le dit.
    */
-  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' };
+  unusableCsl?: { path: string; reason: StyleProblem };
 }
 
 /**
@@ -507,9 +509,10 @@ export class WordExportService {
         options.citation?.useEngine || !hasBibliography ? undefined : options.cslPath;
       if (projectStyle) {
         // Lu ici, sans bloquer : le moteur ne lit lui-même que les styles
-        // embarqués. Un style qu'il ne sait pas appliquer (dépendant,
-        // illisible) n'est pas tenté : il remplaçait chaque clé par
-        // `[NO_PRINTED_FORM]`, sans un mot.
+        // embarqués. Un style qu'il ne sait pas appliquer n'est pas tenté :
+        // dépendant ou illisible, il remplaçait chaque clé par
+        // `[NO_PRINTED_FORM]` ; numéroté, il imprimait `[1]` partout, qui
+        // renvoyait à la première référence de la liste. Sans un mot.
         const reason = await readFile(projectStyle, 'utf-8').then(
           (xml) => {
             engine.registerStyle(projectStyle, xml);

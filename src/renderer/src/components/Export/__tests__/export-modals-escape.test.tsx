@@ -59,7 +59,7 @@ interface ExportOutcome {
   timeLimitMinutes?: number;
   unresolvedCitations?: string[];
   missingCsl?: string;
-  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' };
+  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' | 'numeric' };
 }
 
 type ExportModal = React.FC<{ isOpen: boolean; onClose: () => void }>;
@@ -638,12 +638,13 @@ describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
 
 /**
  * BT1-4, revue : sans pandoc, un style du projet que le moteur interne ne sait
- * pas appliquer (dépendant, illisible) n'est pas tenté. Le document garde ses
+ * pas appliquer (dépendant, illisible, numéroté) n'est pas tenté. Le document garde ses
  * clés ; la modale dit pourquoi, et reste ouverte.
  */
 describe.each([
   { reason: 'dependent' as const, key: 'export.cslDependent' },
   { reason: 'unreadable' as const, key: 'export.cslUnreadable' },
+  { reason: 'numeric' as const, key: 'export.cslNumeric' },
 ])('modale d’export Word : style du projet inapplicable ($reason)', ({ reason, key }) => {
   it('le dit, et reste ouverte', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

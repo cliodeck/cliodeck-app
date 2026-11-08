@@ -17,19 +17,27 @@ import {
 import { backdropClose } from '../../utils/backdropClose';
 import './PDFExportModal.css'; // Reuse the same CSS
 
-/** `WordExportResult.unusableCsl`, côté main. */
+/**
+ * `WordExportResult.unusableCsl`, côté main : pourquoi le moteur interne n'a
+ * pas appliqué le style du projet, et le message qui le dit.
+ */
+const UNUSABLE_CSL_MESSAGES = {
+  dependent: 'export.cslDependent',
+  unreadable: 'export.cslUnreadable',
+  numeric: 'export.cslNumeric',
+} as const;
+
 interface UnusableCsl {
   path: string;
-  reason: 'dependent' | 'unreadable';
+  reason: keyof typeof UNUSABLE_CSL_MESSAGES;
 }
 
 /** Le résultat arrive de l'IPC sans type : seule une forme connue s'affiche. */
 function readUnusableCsl(value: unknown): UnusableCsl | null {
   if (!value || typeof value !== 'object') return null;
-  const { path, reason } = value as Partial<UnusableCsl>;
-  return typeof path === 'string' && (reason === 'dependent' || reason === 'unreadable')
-    ? { path, reason }
-    : null;
+  const { path, reason } = value as { path?: unknown; reason?: unknown };
+  const known = (Object.keys(UNUSABLE_CSL_MESSAGES) as UnusableCsl['reason'][]).find((r) => r === reason);
+  return typeof path === 'string' && known ? { path, reason: known } : null;
 }
 
 interface WordExportModalProps {
@@ -459,9 +467,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             <div className="export-error" data-testid="export-csl-unusable">
               <AlertCircle size={16} />
               <span>
-                {t(unusableCsl.reason === 'dependent' ? 'export.cslDependent' : 'export.cslUnreadable', {
-                  file: unusableCsl.path,
-                })}
+                {t(UNUSABLE_CSL_MESSAGES[unusableCsl.reason], { file: unusableCsl.path })}
               </span>
             </div>
           )}
