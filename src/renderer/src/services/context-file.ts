@@ -1,7 +1,8 @@
 import type { TFunction } from 'i18next';
 import { detectLineSeparator } from '@/editor/cm/fidelity';
-import { useEditorStore, writeOpenDocumentWhileDirty } from '../stores/editorStore';
+import { bufferRequestsSettled, useEditorStore, writeOpenDocumentWhileDirty } from '../stores/editorStore';
 import { logger } from '../utils/logger';
+import { waitForDocumentFacade } from './wait-for-facade';
 
 /**
  * `context.md` s'écrit depuis trois portes : la zone des Réglages, l'assistant de démarrage et
@@ -86,33 +87,110 @@ export async function readContextFile(): Promise<ContextResponse> {
   }
 }
 
+/** La première ligne (1-indexée) où `after` diffère de `before`, `null` s'ils ont les mêmes lignes. */
+function firstChangedLine(before: string, after: string): number | null {
+  const was = before.split(/\r\n|\r|\n/);
+  const now = after.split(/\r\n|\r|\n/);
+  for (let i = 0; i < Math.max(was.length, now.length); i += 1) {
+    if (was[i] !== now[i]) return i + 1;
+  }
+  return null;
+}
+
+/**
+ * Le rechargement recrée la vue en haut du fichier : un paragraphe ajouté à la fin d'un long
+ * `context.md` restait hors de l'écran, et l'éditeur semblait ne pas l'avoir. La première ligne
+ * changée y est amenée, curseur compris, dès que la vue de ce document est montée : tout de suite
+ * en Écriture, au retour dans ce mode sinon (Paramètres ouverts depuis Brainstormer). Sans le
+ * focus : les Paramètres peuvent être encore ouverts par-dessus, et une frappe partirait dans
+ * l'éditeur, derrière eux.
+ */
+async function revealChange(version: number, line: number): Promise<void> {
+  // Un autre document a pris la place avant le montage : rien à montrer.
+  const facade = await waitForDocumentFacade(version);
+  facade?.revealLine(line, { focus: false });
+}
+
+/** Les deux textes sont le même, au BOM près, que l'éditeur ne porte pas. */
+const sameText = (a: string, b: string): boolean => withoutBom(a) === withoutBom(b);
+
+/** L'éditeur montre toujours ce fichier, mais pas ce qui vient de s'y écrire. */
+function stillShowsOtherText(filePath: string, written: string): boolean {
+  const now = useEditorStore.getState();
+  return now.filePath === filePath && !sameText(now.getLiveContent(), written);
+}
+
+/**
+ * Le tampon n'est pas à suivre, il est à garder : un conflit. Il s'écrit tout de suite, faute de
+ * quoi l'autosave l'écrirait plus tard sans rien dire, et l'appelant annonce le conflit : ce qu'il
+ * voulait écrire est toujours chez lui.
+ */
+async function keepBuffer(): Promise<ContextResponse> {
+  await useEditorStore
+    .getState()
+    .saveFile()
+    .catch((error: unknown) => logger.error('ContextFile', error));
+  return { success: false, error: 'context_conflict' };
+}
+
 /**
  * L'éditeur reprend ce qui vient de s'écrire, par la seule porte qui remplace un document. Il
  * repart d'un état neuf : l'annulation se vide, et Cmd+Z ne ramène pas l'ancien texte.
  *
  * Rend faux si le tampon garde son texte : l'auteur a tapé pendant l'écriture, et une frappe ne
- * se jette pas. L'autosave réécrirait de toute façon ce tampon, sans rien dire. Il est donc écrit
- * tout de suite, et l'appelant annonce le conflit : ce qu'il voulait écrire est toujours chez lui.
+ * se jette pas. L'appelant le garde alors (`keepBuffer`).
  */
 async function bufferFollowed(filePath: string, written: string): Promise<boolean> {
   const editor = useEditorStore.getState();
   // L'auteur est passé à un autre document : celui-ci se relira à son retour.
   if (editor.filePath !== filePath) return true;
-  const outcome = await editor.loadFile(filePath).catch((error: unknown) => {
-    logger.error('ContextFile', error);
-    return null;
-  });
-  if (outcome?.status === 'replaced') {
-    // Le fichier vient de s'écrire : la barre d'état ne doit pas dire « Non enregistré ».
-    useEditorStore.setState({ lastSavedAt: Date.now() });
-    return true;
+  const before = editor.getLiveContent();
+  // Une autre demande peut prendre le pas sur la relecture sans remplacer ce tampon : un verrou
+  // posé puis levé pendant la lecture, une ouverture qui n'aboutit pas. Le tenir pour suivi
+  // laissait l'ancien texte à l'écran, propre, et la frappe suivante l'écrivait par-dessus celui
+  // des Réglages, sans un mot (BT1-2). On relit donc une fois ; ensuite, c'est un conflit.
+  // Une demande encore en route aboutit d'abord : une ouverture lancée par l'auteur, que la
+  // relecture relancée aussitôt chasserait à son tour. On ne regarde l'éditeur qu'après elle.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const outcome = await useEditorStore
+      .getState()
+      .loadFile(filePath)
+      .catch((error: unknown) => {
+        logger.error('ContextFile', error);
+        return null;
+      });
+    if (outcome?.status === 'replaced') {
+      // Le fichier vient de s'écrire : la barre d'état ne doit pas dire « Non enregistré ».
+      useEditorStore.setState({ lastSavedAt: Date.now() });
+      const { content, documentVersion } = useEditorStore.getState();
+      const line = firstChangedLine(before, content);
+      if (line !== null) {
+        void revealChange(documentVersion, line).catch((error: unknown) => logger.error('ContextFile', error));
+      }
+      return true;
+    }
+    // Toute autre issue que « remplacé » ou « chassé » se règle plus bas.
+    if (outcome?.status !== 'superseded') break;
+    await bufferRequestsSettled();
+    // L'éditeur a quitté ce fichier (changement de projet, autre document) ou montre déjà ce
+    // texte : rien à relire.
+    if (!stillShowsOtherText(filePath, written)) break;
   }
-  // Une autre demande a pris le pas (changement de projet, autre document) : elle relit le disque.
-  if (outcome?.status === 'superseded') return true;
+  return !stillShowsOtherText(filePath, written);
+}
+
+/**
+ * Reconnu ouvert seulement une fois écrit : un fichier absent n'a pas de chemin réel, et
+ * `sameFile` ne pardonne pas sa casse (`Context.md` ouvert dans l'éditeur, puis supprimé dehors,
+ * sous macOS). Son tampon n'a donc été ni écrit avant, ni comparé à ce qu'a lu la zone. S'il
+ * porte un autre texte que les deux, c'est la seule copie de ce texte : le recharger l'effaçait
+ * du disque, de l'éditeur et de l'annulation, sous « enregistré ».
+ */
+function heldOutsideTheRead(filePath: string, expectedRaw: string, written: string): boolean {
   const now = useEditorStore.getState();
-  if (now.filePath !== filePath || withoutBom(now.getLiveContent()) === withoutBom(written)) return true;
-  await now.saveFile().catch((error: unknown) => logger.error('ContextFile', error));
-  return false;
+  if (now.filePath !== filePath) return false;
+  const live = now.getLiveContent();
+  return !sameText(live, expectedRaw) && !sameText(live, written);
 }
 
 /** Écrit `context.md` sur le texte lu, sans lever. Rien n'est écrit en cas d'échec. */
@@ -125,10 +203,13 @@ export async function saveContextFile(markdown: string, guard: ContextGuard): Pr
       expectedRaw,
       projectPath,
     })) as ContextResponse;
-    if (written.success && opened && !(await bufferFollowed(opened, markdown))) {
-      return { success: false, error: 'context_conflict' };
-    }
-    return written;
+    if (!written.success) return written;
+    // Ouvert entre-temps, ou absent et ouvert sous une autre casse : reconnu maintenant qu'il
+    // existe. Le tampon ne suit alors que s'il n'a rien que la zone n'ait lu.
+    const shown = opened ?? (await openedAs(sourcePath));
+    if (!shown) return written;
+    if (!opened && heldOutsideTheRead(shown, expectedRaw, markdown)) return await keepBuffer();
+    return (await bufferFollowed(shown, markdown)) ? written : await keepBuffer();
   } catch (error) {
     return failureOf(error);
   }

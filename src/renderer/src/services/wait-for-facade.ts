@@ -54,6 +54,33 @@ export function waitForEditorFacade(
 }
 
 /**
+ * Rend la façade de la vue qui montre le document `documentVersion` dès qu'elle est montée, ou
+ * `null` dès qu'un autre document a pris sa place.
+ *
+ * Sans délai, contrairement à `waitForEditorFacade` : hors du mode Écriture, l'éditeur peut ne se
+ * remonter que bien plus tard, et c'est cette vue-là qu'on attend. Un remplacement de document
+ * retire la façade du store en même temps qu'il change ce numéro (`replaceBuffer`) : une façade
+ * présente sous ce numéro appartient donc à une vue créée pour lui.
+ */
+export function waitForDocumentFacade(documentVersion: number): Promise<EditorFacade | null> {
+  type State = ReturnType<typeof useEditorStore.getState>;
+  // `undefined` : rien de tranché, on attend encore.
+  const settle = (state: State): EditorFacade | null | undefined =>
+    state.documentVersion !== documentVersion ? null : (state.editorFacade ?? undefined);
+
+  const now = settle(useEditorStore.getState());
+  if (now !== undefined) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const unsubscribe = useEditorStore.subscribe((state) => {
+      const outcome = settle(state);
+      if (outcome === undefined) return;
+      unsubscribe();
+      resolve(outcome);
+    });
+  });
+}
+
+/**
  * Passe en Écriture et rend la façade de l'éditeur qui s'y trouve, `null` s'il ne monte pas.
  *
  * L'éditeur n'est monté qu'en mode Écriture. Hors de ce mode, une façade encore là appartient à

@@ -79,10 +79,16 @@ export const passage = {
   /** Une écriture de l'éditeur qui échoue, ou que le test retient. */
   editorSave: (filePath: string, content: string): Promise<unknown> =>
     ipc('editor:save-file', filePath, content),
+  /** Une lecture de l'éditeur, pendant laquelle le test fait arriver autre chose. */
+  editorLoad: (filePath: string): Promise<unknown> => ipc('editor:load-file', filePath),
+  /** La comparaison de deux chemins, que le test peut faire répondre comme un autre système. */
+  sameFile: (a: string, b: string): Promise<unknown> => ipc('fs:same-file', a, b),
   reset(): void {
     this.beforeHintsWrite = async () => undefined;
     this.afterHintsWrite = async () => undefined;
     this.editorSave = (filePath, content) => ipc('editor:save-file', filePath, content);
+    this.editorLoad = (filePath) => ipc('editor:load-file', filePath);
+    this.sameFile = (a, b) => ipc('fs:same-file', a, b);
   },
 };
 
@@ -101,10 +107,10 @@ export function installMain(): void {
       },
     },
     fs: {
-      sameFile: (a: string, b: string) => ipc('fs:same-file', a, b),
+      sameFile: (a: string, b: string) => passage.sameFile(a, b),
     },
     editor: {
-      loadFile: (filePath: string) => ipc('editor:load-file', filePath),
+      loadFile: (filePath: string) => passage.editorLoad(filePath),
       saveFile: (filePath: string, content: string) => passage.editorSave(filePath, content),
       onInsertText: () => () => undefined,
     },

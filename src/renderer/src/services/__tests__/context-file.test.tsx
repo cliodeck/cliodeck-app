@@ -16,13 +16,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { installMain, main, passage } from './helpers/real-main';
+import { installMain, ipc, main, passage } from './helpers/real-main';
 import { rememberConsentedPath } from '../../../../main/ipc/utils/user-consented-paths';
 import { CONTEXT_TEMPLATE } from '../../../../../backend/core/hints/loader';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards';
 import { CodeMirrorEditor } from '../../components/Editor/CodeMirrorEditor';
 import { resetEditorStates } from '../../components/Editor/editor-state-memory';
-import { useEditorStore } from '../../stores/editorStore';
+import { useEditorStore, type BufferOutcome } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import {
   appendToContext,
@@ -36,6 +36,23 @@ vi.setConfig({ testTimeout: 30_000 });
 
 // jsdom ne mesure rien, et CM6 journalise chaque échec de ses mesures.
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+
+/** macOS et Windows : un seul fichier sous deux casses. Sous Linux, deux fichiers possibles. */
+const caseInsensitive = ((): boolean => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-casse-'));
+  fs.writeFileSync(path.join(dir, 'sonde'), '');
+  const insensitive = fs.existsSync(path.join(dir, 'SONDE'));
+  fs.rmSync(path.join(dir, 'sonde'));
+  fs.rmdirSync(dir);
+  return insensitive;
+})();
+
+/**
+ * Le cas de la casse n'existe que sous macOS : un fichier absent n'y a pas de chemin réel, et
+ * `sameFile` ne pardonne pas sa casse. Windows la pardonne toujours (`file-identity.ts`) et
+ * reconnaît le fichier dès la lecture ; Linux distingue deux fichiers.
+ */
+const macCaseScenario = process.platform === 'darwin' && caseInsensitive;
 
 const ORIGINAL = '# Contexte\n\nDanzig, 1919-1939.\n';
 const WITH_PARAGRAPH = `${ORIGINAL}\nParagraphe des Réglages.\n`;
@@ -433,6 +450,295 @@ describe('une frappe pendant la séquence ne se perd pas', () => {
     expect(disk()).toBe(ORIGINAL);
     expect(currentView().state.doc.toString()).toBe(`${ORIGINAL}K`);
     expect(editor().isDirty).toBe(true);
+  });
+});
+
+/**
+ * Les `times` prochaines lectures de l'éditeur sont périmées à leur arrivée : un verrou se pose
+ * et se lève pendant qu'elles lisent, comme une renumérotation éclair. `loadFile` rend alors
+ * `superseded`, sans avoir rien remplacé.
+ */
+function supersedeNextLoads(times: number): void {
+  let left = times;
+  passage.editorLoad = async (filePath) => {
+    const response = await ipc('editor:load-file', filePath);
+    if (left > 0) {
+      left -= 1;
+      act(() => {
+        editor().setSwitchLock('book.renumberInProgress');
+        editor().setSwitchLock(null);
+      });
+    }
+    return response;
+  };
+}
+
+/**
+ * Le rechargement qui suit l'écriture n'a pas abouti, et l'éditeur montre toujours ce fichier
+ * (BT1-2, C38). Il passait pour suivi : l'ancien texte restait à l'écran, propre, et la frappe
+ * suivante l'écrivait par-dessus le paragraphe des Réglages, sans un mot.
+ */
+describe('le rechargement n’aboutit pas, et l’éditeur montre toujours context.md', () => {
+  it('remplacé une fois pendant sa lecture : relu, et la frappe suivante garde le paragraphe', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    supersedeNextLoads(1);
+
+    const saved = await saveOver(hints);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(`${WITH_PARAGRAPH}x`);
+    expect(currentView().state.doc.toString()).toBe(`${WITH_PARAGRAPH}x`);
+  });
+
+  it('remplacé encore à la relecture : le conflit se dit, et rien ne reste à écrire par-dessus en silence', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    supersedeNextLoads(2);
+
+    const saved = await saveOver(hints);
+
+    expect(saved).toMatchObject({ success: false, error: 'context_conflict' });
+    // Le disque porte ce que l'éditeur montre : la frappe suivante n'efface rien que la section
+    // ait annoncé comme enregistré, et le texte des Réglages est resté dans leur zone.
+    expect(disk()).toBe(currentView().state.doc.toString());
+    expect(editor().isDirty).toBe(false);
+  });
+
+  // macOS : un fichier absent n'a pas de chemin réel, et `sameFile` ne pardonne pas sa casse. La
+  // lecture ne voit donc pas que l'éditeur le tient : la zone part de rien, et l'éditeur garde seul
+  // tout l'ancien texte. Le reconnaître une fois écrit puis le recharger effaçait ce texte partout.
+  // Les deux tests qui suivent le rejouent tel quel ; ceux d'après, sur tout système.
+  it.runIf(macCaseScenario)('ouvert sous une autre casse puis supprimé dehors : le texte que tenait l’éditeur reste, et le conflit se dit', async () => {
+    const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
+    await rememberConsentedPath(shouted);
+    await open(shouted);
+    await mountEditor();
+    fs.rmSync(contextMd);
+    const hints = await read();
+    expect(hints.raw).toBe('');
+
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
+
+    expect(saved).toMatchObject({ success: false, error: 'context_conflict' });
+    expect(disk()).toBe(ORIGINAL);
+    expect(currentView().state.doc.toString()).toBe(ORIGINAL);
+    expect(editor().isDirty).toBe(false);
+  });
+
+  it.runIf(macCaseScenario)('ouvert sous une autre casse, vide, puis supprimé dehors : rien à garder, le tampon suit', async () => {
+    fs.writeFileSync(contextMd, '');
+    const shouted = path.join(base, 'PROJET', 'CONTEXT.MD');
+    await rememberConsentedPath(shouted);
+    await open(shouted);
+    await mountEditor();
+    fs.rmSync(contextMd);
+    const hints = await read();
+
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe('Paragraphe des Réglages.\nx');
+  });
+
+  /**
+   * Le mécanisme du cas de la casse, sur tout système et donc en CI : `sameFile` ne reconnaît le
+   * fichier ouvert qu'une fois qu'il existe de nouveau.
+   */
+  function recognizedOnlyOnceWritten(): void {
+    let written = false;
+    passage.afterHintsWrite = async () => {
+      written = true;
+    };
+    passage.sameFile = (a, b) => (written ? ipc('fs:same-file', a, b) : Promise.resolve(false));
+  }
+
+  it('reconnu ouvert seulement une fois écrit : le texte que tenait l’éditeur reste, et le conflit se dit', async () => {
+    await open();
+    await mountEditor();
+    fs.rmSync(contextMd);
+    recognizedOnlyOnceWritten();
+    const hints = await read();
+    expect(hints.raw).toBe('');
+
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
+
+    expect(saved).toMatchObject({ success: false, error: 'context_conflict' });
+    expect(disk()).toBe(ORIGINAL);
+    expect(currentView().state.doc.toString()).toBe(ORIGINAL);
+    expect(editor().isDirty).toBe(false);
+  });
+
+  it('reconnu ouvert seulement une fois écrit, éditeur vide : rien à garder, le tampon suit', async () => {
+    fs.writeFileSync(contextMd, '');
+    await open();
+    await mountEditor();
+    fs.rmSync(contextMd);
+    recognizedOnlyOnceWritten();
+    const hints = await read();
+
+    const saved = await saveOver(hints, `${hints.raw}Paragraphe des Réglages.\n`);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe('Paragraphe des Réglages.\nx');
+  });
+
+  /**
+   * L'auteur ouvre `target` pendant la relecture de context.md, et cette ouverture lit plus
+   * lentement : elle est encore en route quand la relecture revient chassée par elle. Rend la
+   * demande de l'auteur, avec l'erreur d'une ouverture qui échoue comme issue.
+   */
+  function openDuringReload(target: string): () => Promise<BufferOutcome | unknown> {
+    let userOpen: Promise<BufferOutcome | unknown> | undefined;
+    let reloadRead: Promise<unknown> | undefined;
+    passage.editorLoad = async (filePath) => {
+      if (filePath === contextMd && !userOpen) {
+        userOpen = editor()
+          .loadFile(target)
+          .catch((error: unknown) => error);
+        reloadRead = ipc('editor:load-file', filePath);
+        return reloadRead;
+      }
+      if (filePath === target) {
+        // Après tout ce que la relecture enchaîne à son retour, sans attendre de délai.
+        await reloadRead;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      return ipc('editor:load-file', filePath);
+    };
+    return async () => {
+      if (!userOpen) throw new Error('aucune ouverture lancée pendant la relecture');
+      return userOpen;
+    };
+  }
+
+  // La relecture relancée aussitôt chassait à son tour l'ouverture de l'auteur : l'éditeur restait
+  // sur context.md, et l'autre document ne s'ouvrait pas, sans un mot.
+  it('une ouverture lancée pendant la relecture aboutit, et le paragraphe reste sur le disque', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    const userOpen = openDuringReload(documentMd);
+
+    const saved = await saveOver(hints);
+
+    expect(await userOpen()).toEqual({ status: 'replaced' });
+    expect(editor().filePath).toBe(documentMd);
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(WITH_PARAGRAPH);
+    await open(contextMd);
+    await awaitEditorText(WITH_PARAGRAPH);
+  });
+
+  it('une ouverture qui échoue pendant la relecture : context.md est relu après elle', async () => {
+    await open();
+    await mountEditor();
+    const hints = await read();
+    const userOpen = openDuringReload(path.join(project, 'absent.md'));
+
+    const saved = await saveOver(hints);
+    typeAtEnd('x');
+    await act(async () => {
+      await editor().saveFile();
+    });
+
+    expect(await userOpen()).toBeInstanceOf(Error);
+    expect(saved.success).toBe(true);
+    expect(editor().filePath).toBe(contextMd);
+    expect(disk()).toBe(`${WITH_PARAGRAPH}x`);
+  });
+
+  it('context.md ouvert dans l’éditeur pendant l’écriture : le tampon suit, sans faux conflit', async () => {
+    await open(documentMd);
+    await mountEditor();
+    const hints = await read();
+    passage.beforeHintsWrite = () => open(contextMd);
+
+    const saved = await saveOver(hints);
+
+    expect(saved.success).toBe(true);
+    expect(disk()).toBe(WITH_PARAGRAPH);
+    await awaitEditorText(WITH_PARAGRAPH);
+  });
+});
+
+/**
+ * Le rechargement recrée la vue en haut du fichier : le paragraphe ajouté à la fin d'un long
+ * `context.md` restait hors de l'écran, et l'éditeur semblait ne pas l'avoir (BT1-2, C38).
+ */
+describe('après le rechargement, la première ligne changée est amenée à l’écran', () => {
+  const LONG = `# Contexte\n\n${Array.from({ length: 80 }, (_, i) => `Ligne ${i + 1} des consignes.`).join('\n')}\n`;
+  const ADDED = 'Paragraphe des Réglages.';
+
+  it('le curseur est sur la ligne ajoutée, et le focus reste où il était', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    // La zone des Réglages, par-dessus l'éditeur : elle garde le focus.
+    const zone = document.body.appendChild(document.createElement('textarea'));
+    zone.focus();
+
+    const saved = await saveOver(hints, `${LONG}\n${ADDED}\n`);
+
+    expect(saved.success).toBe(true);
+    await vi.waitFor(() => {
+      const { state } = currentView();
+      expect(state.doc.lineAt(state.selection.main.head).text).toBe(ADDED);
+    }, DEADLINE);
+    expect(document.activeElement).toBe(zone);
+    zone.remove();
+  });
+
+  // Paramètres ouverts depuis Brainstormer : l'éditeur n'est pas monté. L'attente de la façade
+  // s'arrêtait au bout de 2 s, et le retour en Écriture ouvrait la vue en haut du fichier.
+  it('éditeur démonté par un changement de mode, remonté plus de 2 s après : la ligne ajoutée y est amenée', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    cleanup();
+    expect(editor().editorFacade).toBeNull();
+
+    const saved = await saveOver(hints, `${LONG}\n${ADDED}\n`);
+    expect(saved.success).toBe(true);
+    // L'auteur reste dans l'autre mode au-delà de ces 2 s : c'est le scénario, pas une attente.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await mountEditor();
+
+    await vi.waitFor(() => {
+      const { state } = currentView();
+      expect(state.doc.lineAt(state.selection.main.head).text).toBe(ADDED);
+    }, DEADLINE);
+  });
+
+  it('un autre document a pris la place avant le retour de l’éditeur : rien ne s’y déplace', async () => {
+    fs.writeFileSync(contextMd, LONG);
+    await open();
+    await mountEditor();
+    const hints = await read();
+    cleanup();
+
+    expect((await saveOver(hints, `${LONG}\n${ADDED}\n`)).success).toBe(true);
+    await open(documentMd);
+    await mountEditor();
+
+    expect(currentView().state.doc.toString()).toBe('# Manuscrit\n');
+    expect(currentView().state.selection.main.head).toBe(0);
   });
 });
 
