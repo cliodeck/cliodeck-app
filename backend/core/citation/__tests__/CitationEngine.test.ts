@@ -87,7 +87,10 @@ describe('CitationEngine', () => {
  * avant de rendre le document, qui gardait sinon `[NO_PRINTED_FORM]` à la
  * place de chaque citation. Styles écrits ici : aucun téléchargement.
  */
-describe('CitationEngine.styleProblem', () => {
+// Chaque essai bâtit trois moteurs citeproc-js ; sur un style embarqué complet (Chicago, MLA),
+// c'est environ une seconde sur un Mac, et plus de cinq sur la CI chargée (#251) : le délai par
+// défaut de Vitest ne mesure pas le style, mais la machine.
+describe('CitationEngine.styleProblem', { timeout: 30_000 }, () => {
   const info = '<info><title>Essai</title><id>http://cliodeck.invalid/essai</id></info>';
   const style = (body: string, head = info) =>
     `<?xml version="1.0" encoding="utf-8"?>\n<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">${head}${body}</style>`;
