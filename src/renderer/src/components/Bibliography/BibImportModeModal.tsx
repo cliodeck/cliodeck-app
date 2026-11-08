@@ -17,9 +17,10 @@ interface BibImportModeModalProps {
 }
 
 /**
- * Ce que l'import ferait au `.bib` du projet qui ne se lit pas. Le fichier importé est copié dans
- * le projet sous son nom : de même nom, il écrase ce que ClioDeck n'a pas pu lire. Des métadonnées
- * seules illisibles ne changent rien : le `.bib` s'est lu en entier.
+ * Ce que l'import ferait au `.bib` du projet qui ne se lit pas. « Fusionner » s'arrête sans rien
+ * écrire ; « Remplacer » met le fichier importé à sa place, et, de même nom, ne garde l'ancien que
+ * dans la copie de sécurité, jusqu'à la réécriture suivante. Des métadonnées seules illisibles ne
+ * changent rien : le `.bib` s'est lu en entier.
  */
 function importWarningKey(problem: BibliographyProblem | null | undefined): string | null {
   if (!problem) return null;

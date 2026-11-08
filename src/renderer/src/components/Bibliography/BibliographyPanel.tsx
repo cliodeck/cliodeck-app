@@ -3,7 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { Plus, FileStack, Download, BarChart3, Trash2, FileDown, ArrowDown, ArrowUp, CheckCircle, Search, SkipForward, AlertTriangle } from 'lucide-react';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import type { BibliographyProblem } from '../../stores/bibliography/types';
-import { BibliographyFileError, BibliographyMergeRefusedError } from '../../stores/bibliography/citationSlice';
+import {
+  BibliographyFileError,
+  BibliographyMergeRefusedError,
+  BibliographyReplaceRefusedError,
+} from '../../stores/bibliography/citationSlice';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
@@ -145,6 +149,7 @@ export const BibliographyPanel: React.FC = () => {
     duplicates: 0,
     unreadKeys: [] as string[],
     file: '',
+    inProject: true,
   });
   const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
 
@@ -215,6 +220,9 @@ export const BibliographyPanel: React.FC = () => {
       }
       return `${t('bibImport.mergeRefused')}\n\n${detail}`;
     }
+    if (error instanceof BibliographyReplaceRefusedError) {
+      return t('bibImport.targetOutsideProject', { file: error.file });
+    }
     return withErrorDetails(t('bibImport.failed'), [error instanceof Error ? error.message : String(error)]);
   };
 
@@ -240,6 +248,8 @@ export const BibliographyPanel: React.FC = () => {
         duplicates: outcome.duplicates,
         unreadKeys: outcome.unreadKeys,
         file: outcome.file,
+        // Sans projet, il n'y a pas de fichier du projet : le récapitulatif n'en parle pas.
+        inProject: projectPath !== null,
       });
       setShowSummaryModal(true);
     } catch (error) {
@@ -702,6 +712,7 @@ export const BibliographyPanel: React.FC = () => {
         duplicates={importSummary.duplicates}
         unreadKeys={importSummary.unreadKeys}
         file={importSummary.file}
+        inProject={importSummary.inProject}
       />
 
       {/* Orphan PDF Cleanup Modal */}

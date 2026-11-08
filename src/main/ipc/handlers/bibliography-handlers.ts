@@ -45,7 +45,7 @@ import {
   setProjectTags,
 } from '../../../../backend/core/bibliography/readingNotes.js';
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
-import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
+import { isInsideAsync, sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -189,6 +189,13 @@ export function setupBibliographyHandlers() {
         // Le contenu brut, pas réexporté : un `@comment` ou un `@preamble` de la source reste.
         bibPath = path.join(projectPath, path.basename(source));
         if (!sameFile(source, bibPath)) {
+          // Ce nom, dans le projet, peut être un lien vers un fichier rangé ailleurs (une bibliographie
+          // commune, un lien venu avec un projet partagé) : l'écriture le suivrait, et la copie de
+          // sécurité ferait entrer ce fichier dans le projet. `fs:copy-file` le refusait, cet import aussi.
+          if (!(await isInsideAsync(projectPath, bibPath))) {
+            console.warn('⚠️ bibliography:import, remplacement refusé : la cible mène hors du projet', bibPath);
+            return { success: false, error: 'bib-outside-project', file: path.basename(bibPath) };
+          }
           await withFileLock(bibPath, () => rewriteProjectBibliography(projectPath, bibPath, read.content));
         }
       }

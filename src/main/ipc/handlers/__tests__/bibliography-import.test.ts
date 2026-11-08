@@ -114,11 +114,21 @@ async function openProject(options: { bibliographySource?: object | null; bib?: 
   if (bib !== null) await bibliographyService.loadFromFile(projectBib());
 }
 
-/** Ce que fait le bouton : le dialogue natif, puis l'import du fichier choisi. */
-async function importBib(sourcePath: string, mode: 'merge' | 'replace', expectedProjectPath = projectDir): Promise<ImportResponse> {
+/** Le fichier choisi dans le dialogue natif, que le vrai `dialog:open-file` inscrit au registre de consentement. */
+async function choose(sourcePath: string): Promise<void> {
   h.chosen = sourcePath;
   await h.handlers.get('dialog:open-file')!({}, { filters: [{ name: 'BibTeX', extensions: ['bib'] }] });
+}
+
+/** L'import d'un fichier déjà choisi. */
+async function importChosen(sourcePath: string, mode: 'merge' | 'replace', expectedProjectPath = projectDir): Promise<ImportResponse> {
   return (await h.handlers.get('bibliography:import')!({}, { sourcePath, mode, expectedProjectPath })) as ImportResponse;
+}
+
+/** Ce que fait le bouton : le dialogue natif, puis l'import du fichier choisi. */
+async function importBib(sourcePath: string, mode: 'merge' | 'replace', expectedProjectPath = projectDir): Promise<ImportResponse> {
+  await choose(sourcePath);
+  return importChosen(sourcePath, mode, expectedProjectPath);
 }
 
 /** Un fichier rangé dans les Téléchargements de l'auteur, hors du projet. */
@@ -243,6 +253,21 @@ describe('« Fusionner » : la fusion est écrite dans le .bib du projet', () =>
     expect(fs.existsSync(bibBackupPath(projectDir))).toBe(false);
   });
 
+  it('deux fusions lancées ensemble dans le même .bib (l’import relancé pendant le premier) : le fichier garde l’une et l’autre', async () => {
+    await openProject();
+    const first = downloaded('collegue.bib', entry('Autre_2015', 'Un autre livre'));
+    const second = downloaded('seminaire.bib', entry('Tiers_2020', 'Un troisième livre'));
+    await choose(first);
+    await choose(second);
+
+    // Sans le verrou du .bib, chacune relisait l'état d'avant l'autre, et la dernière écrite effaçait la première.
+    const results = await Promise.all([importChosen(first, 'merge'), importChosen(second, 'merge')]);
+
+    expect(results.map((r) => r.success)).toEqual([true, true]);
+    expect([...idsOf(projectBib())].sort()).toEqual(['Autre_2015', 'Garde_2000', 'Main_2010', 'Tiers_2020']);
+    expect(bibliographyService.getCitations()).toHaveLength(4);
+  });
+
   it('les entrées non lues de la source sont rendues, et seules les autres sont fusionnées', async () => {
     await openProject();
     const source = downloaded('collegue.bib', `${COLLEGUE}\n@misc{sans_titre,\n  note = {Rien},\n}\n`);
@@ -289,6 +314,24 @@ describe('« Remplacer » : le fichier importé entre dans le projet sans rien �
     expect(fs.readFileSync(path.join(projectDir, 'collegue.bib'), 'utf8')).toBe(COLLEGUE);
     expect(fs.readFileSync(projectBib(), 'utf8')).toBe(PROJET);
     expect(manifest().bibliographySource).toEqual({ ...SOURCE, filePath: 'collegue.bib' });
+  });
+
+  it('dans le projet, ce nom est un lien vers un fichier rangé dehors : rien n’est écrit, ni dehors ni dans la copie de sécurité', async () => {
+    await openProject();
+    // Une bibliographie maîtresse commune à plusieurs projets, ou un lien venu avec un projet partagé.
+    const shared = path.join(tempDir('cliodeck-bibliotheque-commune-'), 'maitresse.bib');
+    const MAITRESSE = entry('Maitre_1990', 'La bibliographie commune');
+    fs.writeFileSync(shared, MAITRESSE);
+    fs.symlinkSync(shared, path.join(projectDir, 'refs.bib'));
+    const source = downloaded('refs.bib', COLLEGUE);
+
+    const result = await importBib(source, 'replace');
+
+    expect(result).toEqual({ success: false, error: 'bib-outside-project', file: 'refs.bib' });
+    expect(fs.readFileSync(shared, 'utf8')).toBe(MAITRESSE);
+    expect(fs.existsSync(bibBackupPath(projectDir))).toBe(false);
+    expect(manifest().bibliographySource).toEqual(SOURCE);
+    expect(bibliographyService.getCitations().map((c) => c.id)).toEqual(['Garde_2000', 'Main_2010']);
   });
 
   it('le .bib du projet lui-même : rien n’est écrit, pas de copie de sécurité', async () => {

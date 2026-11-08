@@ -2357,10 +2357,11 @@
     "cancel": "Abbrechen",
     "import": "Importieren",
     "projectFileMissing": "Die Bibliographie des Projekts, {{file}}, ist nicht auffindbar: Die importierte Datei wird sie ersetzen.",
-    "projectFileUnread": "Die Bibliographie des Projekts, {{file}}, konnte nicht oder nicht vollständig gelesen werden (siehe Hinweis). Die importierte Datei wird sie ersetzen; trägt sie denselben Namen, überschreibt sie sie auf dem Datenträger, und was ClioDeck nicht lesen konnte, geht verloren. Um es zu behalten, brechen Sie ab und korrigieren Sie zuerst {{file}}.",
+    "projectFileUnread": "Die Bibliographie des Projekts, {{file}}, konnte nicht oder nicht vollständig gelesen werden (siehe Hinweis). „Zusammenführen“ bricht ab, ohne etwas zu schreiben, solange {{file}} nicht korrigiert ist. „Ersetzen“ setzt die importierte Datei an ihre Stelle; trägt sie denselben Namen, wird {{file}} zuvor unverändert nach .cliodeck/bibliography.bib.bak kopiert, eine Sicherungskopie, die beim nächsten Neuschreiben der Bibliographie ersetzt wird. Um zu behalten, was ClioDeck nicht lesen konnte, brechen Sie ab und korrigieren Sie zuerst {{file}}.",
     "failed": "Der Import ist nicht gelungen.",
     "mergeRefused": "Zusammenführung abgebrochen: Es wurde nichts geschrieben.",
-    "projectUnreadable": "Es wurde nichts zusammengeführt: Die Datei project.json dieses Projekts ist nicht lesbar, und ClioDeck weiß nicht mehr, in welche Bibliographiedatei zusammengeführt werden soll. Prüfen Sie, ob sie lesbar ist, und versuchen Sie es dann erneut."
+    "projectUnreadable": "Es wurde nichts zusammengeführt: Die Datei project.json dieses Projekts ist nicht lesbar, und ClioDeck weiß nicht mehr, in welche Bibliographiedatei zusammengeführt werden soll. Prüfen Sie, ob sie lesbar ist, und versuchen Sie es dann erneut.",
+    "targetOutsideProject": "Es wurde nichts ersetzt: In diesem Projekt ist {{file}} ein Link, der aus dem Projekt herausführt, und ClioDeck schreibt nicht über ihn. Die Zieldatei bleibt unverändert. Um diese Datei zu importieren, geben Sie ihr einen anderen Namen und versuchen Sie es dann erneut: Sie wird unter diesem Namen in das Projekt aufgenommen."
   },
   "bibImportSummary": {
     "title": "Import abgeschlossen",
@@ -2370,7 +2371,8 @@
     "newAdded": "Neue Titel aufgenommen",
     "duplicates": "Doppelte übergangen",
     "unreadMerged": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie wurden nicht in die Bibliographie des Projekts aufgenommen. Korrigieren Sie sie in {{file}} mit einem Texteditor und führen Sie die Datei dann erneut zusammen: Die bereits aufgenommenen Titel werden als Doppelte erkannt. Betroffene Einträge:",
-    "unreadReplaced": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie stehen in der Datei des Projekts, werden aber nicht angezeigt, und der Hinweis im Bereich „Bibliographie“ erklärt, wie sie zu korrigieren sind. Betroffene Einträge:"
+    "unreadReplaced": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie stehen in der Datei des Projekts, werden aber nicht angezeigt, und der Hinweis im Bereich „Bibliographie“ erklärt, wie sie zu korrigieren sind. Betroffene Einträge:",
+    "unreadNoProject": "{{count}} Eintrag/Einträge in {{file}} konnten nicht gelesen werden: Sie werden nicht angezeigt. Korrigieren Sie sie in {{file}} mit einem Texteditor und importieren Sie die Datei dann erneut. Betroffene Einträge:"
   },
   "tagManager": {
     "none": "Keine Schlagwörter",

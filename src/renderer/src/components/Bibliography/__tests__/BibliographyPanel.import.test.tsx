@@ -181,6 +181,39 @@ describe('« Fusionner » un .bib rangé hors du projet', () => {
   });
 });
 
+describe('sans projet ouvert, le récapitulatif ne parle pas d’un fichier du projet', () => {
+  beforeEach(() => {
+    useProjectStore.setState({ currentProject: null } as never);
+    loadIpc.mockResolvedValue({ success: true, citations: [citation('Garde_2000'), citation('Autre_2015')], unreadKeys: ['sans_titre'] });
+  });
+
+  it.each([
+    ['bibImport.merge', 'bibImportSummary.unreadMerged'],
+    ['bibImport.replace', 'bibImportSummary.unreadReplaced'],
+  ] as const)('%s : les entrées non lues sont nommées, sans renvoyer au projet', async (mode, inProjectKey) => {
+    await importBib(mode);
+
+    expect(screen.getByText('bibImportSummary.unreadNoProject')).toBeInTheDocument();
+    expect(screen.queryByText(inProjectKey)).toBeNull();
+    // Dans le récapitulatif : en remplacement, le bandeau du panneau les nomme aussi.
+    expect(screen.getAllByText('@sans_titre').some((el) => el.closest('.bib-import-summary-modal'))).toBe(true);
+  });
+});
+
+describe('« Remplacer » refusé par le main', () => {
+  it('dans le projet, ce nom est un lien qui mène dehors : l’alerte le dit dans la langue de l’interface', async () => {
+    importIpc.mockResolvedValue({ success: false, error: 'bib-outside-project', file: 'refs.bib' });
+
+    await importBib('bibImport.replace');
+
+    expect(dialogs().alertOpen).toBe(true);
+    expect(dialogs().alertMessage).toBe('bibImport.targetOutsideProject');
+    // Le main n'a rien écrit : le panneau montre toujours la bibliographie du projet.
+    expect(ids()).toEqual(['Garde_2000', 'Main_2010']);
+    expect(loadWithMetadata).not.toHaveBeenCalled();
+  });
+});
+
 describe('project.json ne retient pas le fichier', () => {
   beforeEach(() => {
     useBibliographyStore.setState({ citations: [], filteredCitations: [] } as never);

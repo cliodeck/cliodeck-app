@@ -68,7 +68,7 @@ interface BibliographyImportResponse extends Omit<BibliographyLoadResponse, 'cit
   duplicates?: number;
   sourceSaved?: boolean;
   sourceError?: string;
-  /** Refus de fusion : le `.bib` du projet en cause, et pourquoi. */
+  /** Fusion ou remplacement refusés : le `.bib` du projet en cause, et pourquoi. */
   file?: string;
   detail?: string;
 }
@@ -87,9 +87,27 @@ export class BibliographyMergeRefusedError extends Error {
   }
 }
 
-/** L'échec de `bibliography.import` : une fusion refusée, une source qui ne se lit pas, ou un autre. */
+/**
+ * Le remplacement refusé avant d'écrire : dans le projet, le nom du fichier importé est un lien vers
+ * un fichier rangé ailleurs, que l'écriture aurait suivi. Le main n'a rien écrit.
+ */
+export class BibliographyReplaceRefusedError extends Error {
+  readonly file: string;
+
+  constructor(file: string, message: string) {
+    super(message);
+    this.name = 'BibliographyReplaceRefusedError';
+    this.file = file;
+  }
+}
+
+/**
+ * L'échec de `bibliography.import` : une fusion ou un remplacement refusés, une source qui ne se lit
+ * pas, ou un autre.
+ */
 function importFailure(sourcePath: string, result: BibliographyImportResponse): Error {
   const file = result.file ?? '';
+  if (result.error === 'bib-outside-project') return new BibliographyReplaceRefusedError(file, result.error);
   if (result.error === 'bib-unread') {
     return new BibliographyMergeRefusedError(
       { kind: 'partial', file, unreadKeys: result.unreadKeys ?? [], metadataUnreadable: false },
