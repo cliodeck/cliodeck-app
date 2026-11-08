@@ -74,7 +74,7 @@ function deferred<T>() {
 }
 
 let downloadPDF: ReturnType<typeof vi.fn>;
-let saveMetadata: ReturnType<typeof vi.fn>;
+let updateAttachment: ReturnType<typeof vi.fn>;
 let pdfIndex: ReturnType<typeof vi.fn>;
 let getAll: ReturnType<typeof vi.fn>;
 const dialogs = () => useDialogStore.getState();
@@ -112,14 +112,14 @@ beforeEach(() => {
     success: true,
     filePath: `${options.targetDirectory}/PDFs/${options.attachmentKey}.pdf`,
   }));
-  saveMetadata = vi.fn(async () => ({ success: true }));
+  updateAttachment = vi.fn(async () => ({ success: true }));
   pdfIndex = vi.fn(async () => ({ success: true }));
   getAll = vi.fn(async () => ({ success: true, documents: [] }));
   (window as unknown as { electron: unknown }).electron = {
     config: { get: vi.fn(async () => ({ mode: 'local', dataDirectory: '/zotero-simule' })) },
     project: { getConfig: vi.fn(async () => ({})) },
     zotero: { downloadPDF },
-    bibliography: { saveMetadata },
+    bibliography: { updateAttachment },
     pdf: { index: pdfIndex, getAll },
   };
 });
@@ -156,10 +156,10 @@ describe('« Télécharger tous les PDFs manquants depuis Zotero » interrompu p
   it('le dernier PDF, téléchargé et rattaché mais pas indexé : l’alerte renvoie à « Indexer tous les PDFs », pas à une relance du téléchargement', async () => {
     // La relance l'écarterait : sa notice a désormais son fichier.
     const written = deferred<unknown>();
-    saveMetadata.mockReturnValueOnce(written.promise);
+    updateAttachment.mockReturnValueOnce(written.promise);
     await mountIn([fromZotero('a1')]);
     await launch('Télécharger tous les PDFs manquants depuis Zotero');
-    expect(saveMetadata).toHaveBeenCalledTimes(1);
+    expect(updateAttachment).toHaveBeenCalledTimes(1);
 
     await switchToB();
     await act(async () => {
@@ -228,5 +228,36 @@ describe('« Tout ré-indexer » interrompu par l’ouverture de B', () => {
     expect(dialogs().alertMessage).toContain('« Mémoire A »');
     // Le main sait pour quel projet partait le PDF en vol.
     expect(pdfIndex).toHaveBeenCalledWith(`${A}/PDFs/a1.pdf`, undefined, expect.anything(), A);
+  });
+});
+
+describe('« Télécharger tous les PDFs manquants depuis Zotero » : métadonnées illisibles', () => {
+  it('le lot s’arrête au premier PDF, et l’alerte dit où il est, qu’il n’est pas rattaché, et pourquoi', async () => {
+    updateAttachment.mockResolvedValueOnce({ success: false, error: 'Unexpected end of JSON input', code: 'metadata-unreadable' });
+    await mountIn([fromZotero('a1'), fromZotero('a2'), fromZotero('a3')]);
+    await launch('Télécharger tous les PDFs manquants depuis Zotero');
+
+    expect(dialogs().queue).toHaveLength(1);
+    const message = dialogs().alertMessage;
+    expect(message).toContain(
+      '« Télécharger tous les PDFs manquants depuis Zotero » arrêté : 0 PDF(s) traité(s), 0 erreur(s), 2 non traité(s). ' +
+        'Les suivants n\'auraient pas pu être rattachés non plus.'
+    );
+    expect(message).toContain('Le PDF de « Article a1 » a été téléchargé dans PDFs/ (ATTa1.pdf), mais il n\'a pas pu être rattaché');
+    expect(message).toContain('.cliodeck/bibliography-metadata.json, qui retient les PDF Zotero rattachés aux références, est illisible');
+    expect(message).not.toContain('Téléchargement terminé');
+    expect(downloadPDF).toHaveBeenCalledTimes(1);
+    expect(pdfIndex).not.toHaveBeenCalled();
+  });
+
+  it('le dernier PDF : rien ne dit qu’il y en avait d’autres', async () => {
+    updateAttachment.mockResolvedValueOnce({ success: false, error: 'Unexpected end of JSON input', code: 'metadata-unreadable' });
+    await mountIn([fromZotero('a1')]);
+    await launch('Télécharger tous les PDFs manquants depuis Zotero');
+
+    const message = dialogs().alertMessage;
+    expect(message).toContain('arrêté : 0 PDF(s) traité(s), 0 erreur(s), 0 non traité(s).');
+    expect(message).not.toContain('Les suivants');
+    expect(message).toContain('Le PDF de « Article a1 » a été téléchargé dans PDFs/ (ATTa1.pdf)');
   });
 });

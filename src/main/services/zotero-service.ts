@@ -1,4 +1,5 @@
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { mkdir, readFile, rename, rm } from 'fs/promises';
 import { ZoteroAPI } from '../../../backend/integrations/zotero/ZoteroAPI.js';
@@ -7,6 +8,7 @@ import { ZoteroLocalDB } from '../../../backend/integrations/zotero/ZoteroLocalD
 import { collectionsForProject } from '../../../backend/integrations/zotero/projectCollections.js';
 import {
   assertInside,
+  assertSafeAttachmentKey,
   chooseAttachmentDestination,
   sanitizeAttachmentFilename,
   type AttachmentOwner,
@@ -17,7 +19,7 @@ import {
   type SyncConfirmation,
   type SyncReport,
 } from '../../../backend/integrations/zotero/ZoteroSynchronizer.js';
-import { parseUserJson, UnreadableFileError, updateJsonFile } from '../../../backend/core/fs/user-files.js';
+import { parseUserJson, UnreadableFileError, updateJsonFile, withFileLock } from '../../../backend/core/fs/user-files.js';
 import {
   BibliographyMetadataService,
   MetadataUnreadableError,
@@ -191,40 +193,24 @@ class ZoteroService {
       try {
         const pdfDir = path.join(options.targetDirectory, 'PDFs');
 
-        // Jamais écraser le fichier d'une autre pièce jointe (#131) : deux
-        // pièces jointes de même nom — « AAAA - Documents sauvegardés.pdf »
-        // d'Europresse — se remplaçaient, et une référence perdait son PDF.
-        const decision = chooseAttachmentDestination({
-          pdfDir,
-          filename: options.filename,
-          attachmentKey: options.attachmentKey,
-          owners: await downloadedAttachmentOwners(options.targetDirectory),
-          exists: existsSync,
-        });
-
         // Téléchargement dans un fichier temporaire : un transfert interrompu
-        // ne laisse jamais un PDF tronqué à la place d'un bon.
+        // ne laisse jamais un PDF tronqué à la place d'un bon. Un temporaire
+        // par appel : nommé par la seule clé, il était commun à deux
+        // téléchargements de la même pièce jointe, et le premier fini emportait
+        // celui de l'autre (ENOENT au rename, S07-1-4). La clé sert à le
+        // nommer : elle est validée avant, et le chemin doit rester dans PDFs/.
+        assertSafeAttachmentKey(options.attachmentKey);
         await mkdir(pdfDir, { recursive: true });
-        // La clé est validée par chooseAttachmentDestination ; les deux
-        // chemins construits avec elle doivent rester dans PDFs/.
-        const temporary = path.join(pdfDir, `.${options.attachmentKey}.part`);
+        const temporary = path.join(pdfDir, `.${options.attachmentKey}.${randomUUID()}.part`);
         assertInside(pdfDir, temporary);
-        assertInside(pdfDir, decision.path);
-        if (decision.kind === 'compare') assertInside(pdfDir, decision.fallback);
-        let savePath = decision.path;
+        let savePath: string;
         try {
           await ds.downloadFile(options.attachmentKey, temporary);
-
-          if (decision.kind === 'compare') {
-            // Un fichier de ce nom existe sans propriétaire connu : identique,
-            // on le garde ; différent, on ne le remplace pas.
-            if (await sameContent(temporary, decision.path)) {
-              console.log(`✅ PDF déjà présent, identique : ${path.basename(savePath)}`);
-              return { success: true, filePath: savePath };
-            }
-            savePath = decision.fallback;
-          }
-          await rename(temporary, savePath);
+          // Le nom se décide une fois le fichier là, un téléchargement à la fois
+          // dans ce dossier : décidé avant le transfert, il paraissait libre aux
+          // deux appels simultanés, et le second écrasait le premier (S07-1-4).
+          // Le verrou ne couvre jamais le réseau.
+          savePath = await withFileLock(pdfDir, () => moveIntoPdfDir(temporary, pdfDir, options));
         } finally {
           await rm(temporary, { force: true });
         }
@@ -309,7 +295,7 @@ class ZoteroService {
           // (coupure, OneDrive au mauvais moment) perdrait la bibliographie, et la réécriture
           // perd ce que le parseur ignore (@comment, @preamble).
           await rewriteProjectBibliography(options.projectPath, bibtexPath, result.bibtex);
-          await BibliographyMetadataService.saveMetadata(options.projectPath, result.citations);
+          await saveSyncedMetadata(options.projectPath, bibtexPath, result.citations);
           // Une clé refaite ne doit pas couper une note de lecture de sa
           // référence : la note suit (front matter et nom de fichier).
           try {
@@ -452,6 +438,25 @@ async function readLocalBibliography(bibtexPath: string, projectPath: string): P
 }
 
 /**
+ * Les métadonnées que la synchronisation a lues, écrites sur le fichier relu à ce moment : un PDF
+ * rattaché pendant la lecture de Zotero garde son rattachement (S07-1-6). Devenues illisibles
+ * entre-temps, elles ne sont pas réécrites ; le `.bib` l'est déjà, et l'échec ne doit pas se dire
+ * « rien n'a été écrit », comme le refus d'avant toute lecture de Zotero.
+ */
+async function saveSyncedMetadata(projectPath: string, bibtexPath: string, citations: Citation[]): Promise<void> {
+  try {
+    await BibliographyMetadataService.saveFromSync(projectPath, citations);
+  } catch (error: unknown) {
+    if (!(error instanceof MetadataUnreadableError)) throw error;
+    throw new Error(
+      `${path.basename(bibtexPath)} a été mis à jour, mais .cliodeck/${path.basename(error.filePath)} est devenu illisible ` +
+        'pendant la synchronisation : les PDF rattachés n’y ont pas été mis à jour. Réparez-le, ou remettez-en une copie, ' +
+        'puis relancez la synchronisation.'
+    );
+  }
+}
+
+/**
  * Mémorise dans `project.json` la collection que suit la bibliographie, sous le verrou du fichier :
  * la synchronisation dure, et le plan ou les réglages ont pu changer pendant ce temps.
  */
@@ -481,6 +486,41 @@ export async function recordProjectCollection(
       updatedAt: new Date().toISOString(),
     };
   });
+}
+
+/**
+ * Met le PDF téléchargé à sa place dans `PDFs/`, sous le verrou de ce dossier : les propriétaires
+ * relus ici voient les rattachements écrits pendant le transfert. Jamais écraser le fichier d'une
+ * autre pièce jointe (#131) : deux pièces jointes de même nom — « AAAA - Documents
+ * sauvegardés.pdf » d'Europresse — se remplaçaient, et une référence perdait son PDF.
+ */
+async function moveIntoPdfDir(
+  temporary: string,
+  pdfDir: string,
+  options: { attachmentKey: string; filename: string; targetDirectory: string }
+): Promise<string> {
+  const decision = chooseAttachmentDestination({
+    pdfDir,
+    filename: options.filename,
+    attachmentKey: options.attachmentKey,
+    owners: await downloadedAttachmentOwners(options.targetDirectory),
+    exists: existsSync,
+  });
+  assertInside(pdfDir, decision.path);
+  if (decision.kind === 'compare') assertInside(pdfDir, decision.fallback);
+
+  let savePath = decision.path;
+  if (decision.kind === 'compare') {
+    // Un fichier de ce nom existe sans propriétaire connu : identique,
+    // on le garde ; différent, on ne le remplace pas.
+    if (await sameContent(temporary, decision.path)) {
+      console.log(`✅ PDF déjà présent, identique : ${path.basename(savePath)}`);
+      return savePath;
+    }
+    savePath = decision.fallback;
+  }
+  await rename(temporary, savePath);
+  return savePath;
 }
 
 /** Clé BibTeX → collections Zotero de la notice correspondante. */

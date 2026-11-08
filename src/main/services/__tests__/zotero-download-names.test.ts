@@ -163,3 +163,132 @@ describe('téléchargement Zotero : pièces jointes de même nom', () => {
     expect(fs.existsSync(path.join(project, '..', 'evil'))).toBe(false);
   });
 });
+
+/**
+ * Deux téléchargements en même temps (S07-1-4). Le nom se décidait avant le transfert, sur des
+ * propriétaires que le renderer n'écrit qu'après coup : les deux appels voyaient le nom libre, et
+ * le second `rename` écrasait le premier. Le fichier temporaire, nommé par la seule clé, était
+ * commun à deux appels de même clé : le premier fini emportait celui de l'autre (ENOENT).
+ *
+ * La source retient chaque transfert : ses octets sont écrits, sa fin attend qu'on la relâche.
+ * Aucun délai : l'ordre est forcé par des promesses.
+ */
+describe('téléchargement Zotero : deux transferts en même temps', () => {
+  interface HeldTransfer {
+    key: string;
+    release: () => void;
+  }
+  /** Les transferts en cours, dans l'ordre d'arrivée. */
+  let held: HeldTransfer[] = [];
+  let arrived: () => void = () => undefined;
+
+  function heldSource() {
+    return {
+      downloadFile: async (key: string, savePath: string) => {
+        if (!(key in library)) throw new Error(`pièce jointe inconnue : ${key}`);
+        fs.writeFileSync(savePath, library[key]);
+        let release: () => void = () => undefined;
+        const done = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        held.push({ key, release });
+        arrived();
+        await done;
+        return { filename: key, size: library[key].length };
+      },
+      close: () => {},
+    };
+  }
+
+  /**
+   * Attend que `count` transferts soient en cours. Le suivant ne part qu'ensuite : sous charge,
+   * deux appels lancés ensemble peuvent commencer leur transfert dans l'autre ordre.
+   */
+  async function transfersStarted(count: number): Promise<void> {
+    while (held.length < count) {
+      await new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+    }
+  }
+
+  beforeEach(() => {
+    held = [];
+    // @ts-expect-error méthode privée remplacée par une source qui retient les transferts
+    vi.spyOn(zoteroService, 'createDataSource').mockImplementation(heldSource);
+  });
+
+  const pdfFiles = () => fs.readdirSync(path.join(project, 'PDFs')).sort();
+
+  it('deux pièces jointes de même nom, la seconde finie d’abord : deux fichiers, chacun son contenu', async () => {
+    const x = download('QQBJJVQY');
+    await transfersStarted(1);
+    const y = download('GC9BPFL6');
+    await transfersStarted(2);
+
+    held[1].release();
+    const second = await y;
+    held[0].release();
+    const first = await x;
+
+    expect(second).toMatchObject({ success: true, filePath: path.join(project, 'PDFs', SAFE) });
+    expect(first).toMatchObject({
+      success: true,
+      filePath: path.join(project, 'PDFs', '2023_-_Documents_sauvegardés_QQBJJVQY.pdf'),
+    });
+    expect(fs.readFileSync(first.filePath!, 'utf8')).toBe(library.QQBJJVQY);
+    expect(fs.readFileSync(second.filePath!, 'utf8')).toBe(library.GC9BPFL6);
+    expect(pdfFiles()).toEqual(['2023_-_Documents_sauvegardés.pdf', '2023_-_Documents_sauvegardés_QQBJJVQY.pdf']);
+  });
+
+  it('la même pièce jointe deux fois, la seconde finie d’abord : un seul fichier, sans ENOENT', async () => {
+    const once = download('QQBJJVQY');
+    await transfersStarted(1);
+    const twice = download('QQBJJVQY');
+    await transfersStarted(2);
+
+    held[1].release();
+    const second = await twice;
+    held[0].release();
+    const first = await once;
+
+    expect(second).toMatchObject({ success: true, filePath: path.join(project, 'PDFs', SAFE) });
+    expect(first).toMatchObject({ success: true, filePath: path.join(project, 'PDFs', SAFE) });
+    expect(fs.readFileSync(path.join(project, 'PDFs', SAFE), 'utf8')).toBe(library.QQBJJVQY);
+    // Aucun temporaire laissé derrière.
+    expect(pdfFiles()).toEqual([SAFE]);
+  });
+
+  it('un transfert qui échoue pendant qu’un autre aboutit : rien de partiel, l’autre intact', async () => {
+    library.FAILKEY1 = '%PDF-1.4 jamais fini';
+    const failing = heldSource();
+    const working = heldSource();
+    let calls = 0;
+    // @ts-expect-error méthode privée remplacée : le premier transfert échoue après avoir écrit
+    vi.spyOn(zoteroService, 'createDataSource').mockImplementation(() => {
+      calls++;
+      if (calls === 1) {
+        return {
+          ...failing,
+          downloadFile: async (key: string, savePath: string) => {
+            await failing.downloadFile(key, savePath);
+            throw new Error('connexion coupée');
+          },
+        };
+      }
+      return working;
+    });
+
+    const broken = download('FAILKEY1');
+    await transfersStarted(1);
+    const good = download('GC9BPFL6');
+    await transfersStarted(2);
+    held[0].release();
+    held[1].release();
+
+    expect(await broken).toMatchObject({ success: false });
+    expect(await good).toMatchObject({ success: true, filePath: path.join(project, 'PDFs', SAFE) });
+    expect(pdfFiles()).toEqual([SAFE]);
+    expect(fs.readFileSync(path.join(project, 'PDFs', SAFE), 'utf8')).toBe(library.GC9BPFL6);
+  });
+});

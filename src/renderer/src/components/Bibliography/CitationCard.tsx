@@ -21,6 +21,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { EditorFileError, openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
+import { AttachmentNotSavedError, describeNotAttached } from '../../stores/bibliography/zoteroSlice';
 import {
   hiddenAutomaticCount,
   projectTagsOf,
@@ -184,7 +185,14 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
       if ((await downloadAndIndexZoteroPDF(citation.id, attachmentKey, currentProject.path)).interrupted) return;
       await useDialogStore.getState().showAlert(t('bibliography.pdfDownloadedAndIndexed', { title: citation.title }));
     } catch (error) {
-      await useDialogStore.getState().showAlert(`${t('bibliography.downloadError')} ${error}`);
+      // Téléchargé mais pas rattaché : le PDF est dans PDFs/, et l'historien doit le savoir.
+      await useDialogStore
+        .getState()
+        .showAlert(
+          error instanceof AttachmentNotSavedError
+            ? describeNotAttached(t, error.notAttached)
+            : `${t('bibliography.downloadError')} ${error}`
+        );
     } finally {
       setIsIndexing(false);
     }

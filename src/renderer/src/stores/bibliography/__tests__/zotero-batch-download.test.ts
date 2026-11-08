@@ -6,7 +6,10 @@
  * restait dans le dossier, mais l'entrée n'avait plus de fichier au
  * lancement suivant et « Indexer tous les PDFs » l'écartait sans la compter.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { useBibliographyStore } from '../../bibliographyStore';
 import { useProjectStore } from '../../projectStore';
 import { withDownloadedAttachment } from '../zoteroSlice';
@@ -26,18 +29,26 @@ const fromBib = (): Citation => ({
 });
 
 let originalElectron: unknown;
-let saveMetadata: ReturnType<typeof vi.fn>;
+/** Le projet sur le disque, où le main simulé écrit le rattachement par le vrai service. */
+const project = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-lot-zotero-'));
+let updateAttachment: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   originalElectron = (window as unknown as { electron?: unknown }).electron;
-  saveMetadata = vi.fn().mockResolvedValue({ success: true });
+  fs.rmSync(path.join(project, '.cliodeck'), { recursive: true, force: true });
+  updateAttachment = vi.fn(
+    async (options: { citation: Citation; attachmentKey: string; localPath: string }) => {
+      await BibliographyMetadataService.patchAttachment(project, options.citation as never, options.attachmentKey, options.localPath);
+      return { success: true };
+    }
+  );
   (window as unknown as { electron: unknown }).electron = {
     config: { get: vi.fn().mockResolvedValue({ mode: 'api', userId: 'u', apiKey: 'k' }) },
     project: { getConfig: vi.fn().mockResolvedValue({}) },
     zotero: { downloadPDF: vi.fn().mockResolvedValue({ success: true, filePath: PDF }) },
     // L'indexation échoue : c'est là que le lien se perdait.
     pdf: { index: vi.fn().mockResolvedValue({ success: false, error: 'Ollama éteint' }) },
-    bibliography: { saveMetadata },
+    bibliography: { updateAttachment },
   };
   useBibliographyStore.setState({ citations: [fromBib()] });
   // Le lot s'arrête si son projet n'est plus l'ouvert (S18-2-0) : il est ouvert ici.
@@ -51,27 +62,26 @@ afterEach(() => {
   (window as unknown as { electron: unknown }).electron = originalElectron;
 });
 
+afterAll(() => {
+  fs.rmSync(project, { recursive: true, force: true });
+});
+
 describe('téléchargement en lot depuis Zotero (#125)', () => {
   it('sauvegarde le rattachement du PDF même quand l’indexation échoue', async () => {
     const result = await useBibliographyStore.getState().downloadAllMissingPDFs('/projet');
 
     expect(result.errors).toHaveLength(1);
-    expect(saveMetadata).toHaveBeenCalledTimes(1);
-    const saved = (saveMetadata.mock.calls[0][0] as { citations: Citation[] }).citations;
-    expect(saved[0].zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: PDF });
+    expect(updateAttachment).toHaveBeenCalledTimes(1);
+    expect(updateAttachment.mock.calls[0][0]).toMatchObject({ attachmentKey: 'ATT1', localPath: PDF });
+    const written = await BibliographyMetadataService.loadMetadata(project);
+    expect(written?.citations.ZK1.zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: PDF });
   });
 
   it('au lancement suivant, l’entrée relue du .bib retrouve son PDF', async () => {
     await useBibliographyStore.getState().downloadAllMissingPDFs('/projet');
-    const saved = (saveMetadata.mock.calls[0][0] as { citations: Citation[] }).citations;
 
-    // Ce que `saveMetadata` écrit dans bibliography-metadata.json.
-    const metadata = {
-      version: 2,
-      citations: Object.fromEntries(
-        saved.map((c) => [c.zoteroKey ?? c.id, { id: c.id, zoteroKey: c.zoteroKey, zoteroAttachments: c.zoteroAttachments }])
-      ),
-    } as unknown as Parameters<typeof BibliographyMetadataService.mergeCitationsWithMetadata>[1];
+    // Ce que le rattachement a écrit dans bibliography-metadata.json.
+    const metadata = await BibliographyMetadataService.loadMetadata(project);
 
     // Le service du main manipule le type `Citation` du backend (champs calculés
     // en plus) ; seuls les champs lus ici comptent.

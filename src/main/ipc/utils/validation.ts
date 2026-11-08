@@ -431,9 +431,35 @@ export const BibliographyArchiveOrphanPdfsSchema = z.object({
   archiveSubdir: z.string().optional(),
 });
 
-export const BibliographySaveMetadataSchema = z.object({
+/**
+ * Un PDF téléchargé, rattaché à sa seule pièce jointe. La référence ne sert qu'à créer son entrée
+ * dans les métadonnées si elle y manque.
+ */
+export const BibliographyUpdateAttachmentSchema = z.object({
   projectPath: z.string().min(1, 'Project path is required'),
-  citations: z.array(z.record(z.string(), z.unknown())),
+  citation: z.object({
+    id: z.string().min(1),
+    zoteroKey: z.string().optional(),
+    zoteroAttachments: z
+      .array(
+        z.object({
+          key: z.string().min(1),
+          filename: z.string(),
+          contentType: z.string().default('application/pdf'),
+          downloaded: z.boolean().default(false),
+          localPath: z.string().optional(),
+          dateModified: z.string().optional(),
+          md5: z.string().optional(),
+        })
+      )
+      .optional(),
+    zoteroTags: z.array(z.object({ tag: z.string(), automatic: z.boolean() })).optional(),
+    zoteroNotes: z.array(z.object({ key: z.string(), text: z.string() })).optional(),
+    dateAdded: z.string().optional(),
+    dateModified: z.string().optional(),
+  }),
+  attachmentKey: z.string().regex(/^[A-Za-z0-9]{1,32}$/, 'Attachment key must be a Zotero key'),
+  localPath: z.string().min(1, 'Local path is required'),
 });
 
 /** Référence visée par une note de lecture (identité, pas de chemin). */

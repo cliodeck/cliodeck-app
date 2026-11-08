@@ -131,7 +131,8 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       //      knows exactly which file it ran on. Restoring this covers the
       //      Zotero-only flow whose BibTeX has no `file =` and whose
       //      metadata.json got saved with an empty attachments array
-      //      (separate bug — saveMetadata can overwrite populated state).
+      //      (separate bug — a whole-file metadata write could overwrite
+      //      populated state).
       //   3. First downloaded Zotero attachment's `localPath`.
       // If none of the three resolves, indexing is genuinely impossible.
       let filePath: string | undefined = citation.file ?? undefined;

@@ -20,7 +20,7 @@ import {
   BibliographyDetectOrphanPdfsSchema,
   BibliographyDeleteOrphanPdfsSchema,
   BibliographyArchiveOrphanPdfsSchema,
-  BibliographySaveMetadataSchema,
+  BibliographyUpdateAttachmentSchema,
   BibliographyLoadWithMetadataSchema,
   BibliographyGetStatisticsSchema,
   ReadingNoteOpenSchema,
@@ -221,30 +221,41 @@ export function setupBibliographyHandlers() {
     }
   });
 
-  // Save bibliography metadata (zoteroAttachments, etc.)
-  ipcMain.handle('bibliography:save-metadata', async (_event, rawOptions: unknown) => {
-    const options = validate(BibliographySaveMetadataSchema, rawOptions);
-    console.log('📞 IPC Call: bibliography:save-metadata', {
+  // Rattache un PDF Zotero téléchargé à sa pièce jointe, et rien d'autre : le fichier relu sous son
+  // verrou, pas la liste du renderer, prise avant le téléchargement (S07-1-5).
+  ipcMain.handle('bibliography:update-attachment', async (_event, rawOptions: unknown) => {
+    const options = validate(BibliographyUpdateAttachmentSchema, rawOptions);
+    console.log('📞 IPC Call: bibliography:update-attachment', {
       projectPath: options.projectPath,
-      citationCount: options.citations.length
+      citationId: options.citation.id,
+      attachmentKey: options.attachmentKey,
     });
-    // Le fichier est réécrit en entier : les références d'un autre projet, enregistrées sous
-    // celui-ci par un lot qui a survécu à la bascule, effaçaient tous ses rattachements (S18-2-0).
+    // Les références d'un autre projet, enregistrées sous celui-ci par un lot qui a survécu à la
+    // bascule, y écrivaient leurs rattachements (S18-2-0).
     const currentProject = projectManager.getCurrentProjectPath();
     if (!currentProject) {
       return errorResponse(new Error('Aucun projet ouvert.'));
     }
     if (!sameFile(currentProject, options.projectPath)) {
-      console.warn('⚠️ bibliography:save-metadata refusé : ce n\'est pas le projet ouvert');
+      console.warn('⚠️ bibliography:update-attachment refusé : ce n\'est pas le projet ouvert');
       return errorResponse('project-changed');
     }
     try {
-      await BibliographyMetadataService.saveMetadata(options.projectPath, options.citations as any[]);
-      console.log('📤 IPC Response: bibliography:save-metadata - Success');
+      await BibliographyMetadataService.patchAttachment(
+        options.projectPath,
+        options.citation,
+        options.attachmentKey,
+        options.localPath
+      );
+      console.log('📤 IPC Response: bibliography:update-attachment - Success');
       return successResponse({ success: true });
     } catch (error: unknown) {
-      console.error('❌ bibliography:save-metadata error:', error);
-      return errorResponse(error);
+      console.error('❌ bibliography:update-attachment error:', error);
+      // Illisibles, les métadonnées ne sont pas réécrites : le PDF reste dans PDFs/ sans rattachement,
+      // et le renderer le dit dans les mots du bandeau.
+      return error instanceof MetadataUnreadableError
+        ? { ...errorResponse(error), code: error.code }
+        : errorResponse(error);
     }
   });
 

@@ -105,7 +105,7 @@ async function makeProjects(): Promise<void> {
   );
   const a0Pdf = path.join(A, 'PDFs', 'ATTA0.pdf');
   fs.writeFileSync(a0Pdf, '%PDF-1.4 a0');
-  await BibliographyMetadataService.saveMetadata(
+  await BibliographyMetadataService.saveFromSync(
     A,
     ['a0', 'a1', 'a2', 'a3'].map((c, i) => ({
       id: c,
@@ -117,7 +117,7 @@ async function makeProjects(): Promise<void> {
 
   // B : sa propre notice Zotero, avec un PDF à télécharger.
   fs.writeFileSync(path.join(B, 'bibliography.bib'), notice('b1', 'ZB1'));
-  await BibliographyMetadataService.saveMetadata(B, [
+  await BibliographyMetadataService.saveFromSync(B, [
     { id: 'b1', zoteroKey: 'ZB1', zoteroAttachments: [attachment('ATTB1')] },
   ] as never);
 
@@ -164,14 +164,21 @@ function installMain(): void {
         const metadata = await BibliographyMetadataService.loadMetadata(projectPath);
         return { success: true, citations: BibliographyMetadataService.mergeCitationsWithMetadata(citations, metadata) };
       }),
-      saveMetadata: vi.fn(async ({ projectPath, citations }: { projectPath: string; citations: Citation[] }) => {
-        saveCalls.push({ projectPath, ids: citations.map((c) => c.id) });
-        await BibliographyMetadataService.saveMetadata(projectPath, citations as never);
-        // Écrit, accepté : seule la réponse tarde.
-        const gate = saveGates.shift();
-        if (gate) await gate;
-        return { success: true };
-      }),
+      updateAttachment: vi.fn(
+        async (options: { projectPath: string; citation: Citation; attachmentKey: string; localPath: string }) => {
+          saveCalls.push({ projectPath: options.projectPath, ids: [options.citation.id] });
+          await BibliographyMetadataService.patchAttachment(
+            options.projectPath,
+            options.citation as never,
+            options.attachmentKey,
+            options.localPath
+          );
+          // Écrit, accepté : seule la réponse tarde.
+          const gate = saveGates.shift();
+          if (gate) await gate;
+          return { success: true };
+        }
+      ),
       readingNotes: { list: vi.fn(async () => ({ success: true, notes: [] })) },
     },
     zotero: {
@@ -371,6 +378,7 @@ describe('« Télécharger tous les PDFs manquants » : B ouvert pendant le prem
     expect(result).toMatchObject({ downloaded: 3, errors: [] });
     expect(result.interrupted).toBeUndefined();
     expect(indexCalls.map((c) => c.expected)).toEqual([A, A, A]);
+    expect(saveCalls).toHaveLength(3);
     expect(saveCalls.every((c) => c.projectPath === A)).toBe(true);
   });
 });

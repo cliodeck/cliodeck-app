@@ -1,9 +1,9 @@
 /**
- * `pdf:index`, `bibliography:save-metadata` et `zotero:download-pdf` refusent un autre projet que
- * le projet ouvert (S18-2-0).
+ * `pdf:index`, `bibliography:update-attachment` et `zotero:download-pdf` refusent un autre projet
+ * que le projet ouvert (S18-2-0).
  *
  * Un lot lancé dans A continuait après l'ouverture de B : `pdf:index` indexait les PDF de A dans
- * le corpus du projet courant, `save-metadata` écrivait au chemin que le renderer donnait, et
+ * le corpus du projet courant, les métadonnées s'écrivaient au chemin que le renderer donnait, et
  * `download-pdf` téléchargeait dans `<targetDirectory>/PDFs` sans le confronter au projet. Le
  * renderer s'arrête désormais de lui-même ; le main refuse en plus ce qui partirait quand même
  * (l'ouverture de B, que le main prend avant l'écran).
@@ -90,7 +90,7 @@ const pdfsOf = (project: string) =>
 
 /** Les métadonnées de A : a0 téléchargée lors d'une session antérieure. */
 async function seedMetadata(project: string): Promise<void> {
-  await BibliographyMetadataService.saveMetadata(project, [
+  await BibliographyMetadataService.saveFromSync(project, [
     {
       id: 'a0',
       zoteroKey: 'ZA0',
@@ -121,9 +121,15 @@ const download = (targetDirectory: string) =>
   });
 
 const save = (projectPath: string) =>
-  call('bibliography:save-metadata', {
+  call('bibliography:update-attachment', {
     projectPath,
-    citations: [{ id: 'b1', zoteroKey: 'ZB1', zoteroAttachments: [] }],
+    citation: {
+      id: 'b1',
+      zoteroKey: 'ZB1',
+      zoteroAttachments: [{ key: 'ATTB1', filename: 'b1.pdf', contentType: 'application/pdf', downloaded: false }],
+    },
+    attachmentKey: 'ATTB1',
+    localPath: path.join(projectPath, 'PDFs', 'b1.pdf'),
   });
 
 beforeEach(async () => {
@@ -183,8 +189,8 @@ describe('pdf:index — le projet attendu', () => {
   });
 });
 
-describe('bibliography:save-metadata — le projet ouvert seulement', () => {
-  it('B ouvert : les métadonnées de A ne sont pas réécrites avec celles de B', async () => {
+describe('bibliography:update-attachment — le projet ouvert seulement', () => {
+  it('B ouvert : les métadonnées de A ne reçoivent pas le rattachement de B', async () => {
     const before = bytes(metadataOf(A));
 
     const result = await save(A);
@@ -203,13 +209,26 @@ describe('bibliography:save-metadata — le projet ouvert seulement', () => {
     expect(result.success).toBe(false);
   });
 
-  it('témoin : dans le projet ouvert, les métadonnées sont écrites', async () => {
+  it('témoin : dans le projet ouvert, le rattachement est écrit, à côté de ceux d’avant', async () => {
     current = A;
 
     const result = await save(A);
 
     expect(result.success).toBe(true);
-    expect(Object.keys(JSON.parse(fs.readFileSync(metadataOf(A), 'utf-8')).citations)).toEqual(['ZB1']);
+    const citations = JSON.parse(fs.readFileSync(metadataOf(A), 'utf-8')).citations;
+    expect(Object.keys(citations)).toEqual(['ZA0', 'ZB1']);
+    expect(citations.ZA0.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: path.join(A, 'PDFs', 'a0.pdf') });
+    expect(citations.ZB1.zoteroAttachments[0]).toMatchObject({ downloaded: true, localPath: path.join(A, 'PDFs', 'b1.pdf') });
+  });
+
+  it('métadonnées illisibles : refusé avec son code, et rien n’est écrit', async () => {
+    current = A;
+    fs.writeFileSync(metadataOf(A), '{"version": 2, "citat');
+
+    const result = (await save(A)) as Response & { code?: string };
+
+    expect(result).toMatchObject({ success: false, code: 'metadata-unreadable' });
+    expect(bytes(metadataOf(A))).toBe('{"version": 2, "citat');
   });
 
   it.skipIf(!symlinkAvailable)('témoin : le projet ouvert désigné par un lien est accepté', async () => {

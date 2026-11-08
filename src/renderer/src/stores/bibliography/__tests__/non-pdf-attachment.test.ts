@@ -47,7 +47,7 @@ beforeEach(() => {
     project: { getConfig: vi.fn().mockResolvedValue({}) },
     zotero: { downloadPDF: downloadPdf },
     pdf: { index: indexPdf, getAll: vi.fn().mockResolvedValue({ success: true, documents: [] }) },
-    bibliography: { saveMetadata: vi.fn().mockResolvedValue({ success: true }) },
+    bibliography: { updateAttachment: vi.fn().mockResolvedValue({ success: true }) },
   };
   useBibliographyStore.setState({
     citations: citations(),

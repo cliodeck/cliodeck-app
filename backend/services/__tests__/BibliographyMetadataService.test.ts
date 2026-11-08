@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { BibliographyMetadataService } from '../BibliographyMetadataService.js';
-import type { Citation } from '../../types/citation.js';
+import type { Citation, ZoteroAttachmentInfo } from '../../types/citation.js';
 import { symlinkAvailable } from '../../__tests__/helpers/native-guards.js';
 
 const makeCitation = (overrides: Partial<Citation>): Citation =>
@@ -27,6 +27,14 @@ const makeCitation = (overrides: Partial<Citation>): Citation =>
     ...overrides,
   }) as Citation;
 
+/** Une pièce jointe PDF telle que la synchronisation la rapporte : pas encore téléchargée. */
+const attachment = (key: string, filename = `${key}.pdf`): ZoteroAttachmentInfo => ({
+  key,
+  filename,
+  contentType: 'application/pdf',
+  downloaded: false,
+});
+
 describe('BibliographyMetadataService', () => {
   let tmpDir: string;
 
@@ -38,7 +46,7 @@ describe('BibliographyMetadataService', () => {
     await fs.promises.rm(tmpDir, { recursive: true, force: true });
   });
 
-  describe('saveMetadata', () => {
+  describe('saveFromSync', () => {
     it('keeps one row per zoteroKey even when bibtexKeys collide', async () => {
       const citations: Citation[] = [
         makeCitation({
@@ -58,7 +66,7 @@ describe('BibliographyMetadataService', () => {
         }),
       ];
 
-      await BibliographyMetadataService.saveMetadata(tmpDir, citations);
+      await BibliographyMetadataService.saveFromSync(tmpDir, citations);
 
       const loaded = await BibliographyMetadataService.loadMetadata(tmpDir);
       expect(loaded).not.toBeNull();
@@ -77,7 +85,7 @@ describe('BibliographyMetadataService', () => {
         }),
       ];
 
-      await BibliographyMetadataService.saveMetadata(tmpDir, citations);
+      await BibliographyMetadataService.saveFromSync(tmpDir, citations);
 
       const loaded = await BibliographyMetadataService.loadMetadata(tmpDir);
       expect(loaded!.citations).toHaveProperty('manual_entry_1');
@@ -98,7 +106,7 @@ describe('BibliographyMetadataService', () => {
           zoteroAttachments: [{ key: 'att-def', filename: 'feb.pdf' } as any],
         }),
       ];
-      await BibliographyMetadataService.saveMetadata(tmpDir, saved);
+      await BibliographyMetadataService.saveFromSync(tmpDir, saved);
 
       // Simulate a fresh parse from bibtex: the attachments are gone,
       // only id/zoteroKey survive.
@@ -126,7 +134,7 @@ describe('BibliographyMetadataService', () => {
     ] as Citation['zoteroAttachments'];
 
     const reloaded = async (file: string, attachments: Citation['zoteroAttachments']) => {
-      await BibliographyMetadataService.saveMetadata(tmpDir, [
+      await BibliographyMetadataService.saveFromSync(tmpDir, [
         makeCitation({ zoteroKey: 'S84VK4DC', file, zoteroAttachments: attachments }),
       ]);
       const metadata = await BibliographyMetadataService.loadMetadata(tmpDir);
@@ -227,14 +235,33 @@ describe('BibliographyMetadataService — métadonnées illisibles', () => {
     expect(Object.keys(loaded?.citations ?? {})).toEqual(['ABCD1234']);
   });
 
-  it('une mise à jour partielle ne remplace pas un fichier illisible', async () => {
+  // Ni fichier neuf à la place, ni mise de côté : le bandeau demande à l'historien de le réparer ou
+  // d'en remettre une copie (L05-3).
+  const untouched = async (write: () => Promise<void>) => {
     const damaged = RATTACHEMENTS.slice(0, 60);
     fs.writeFileSync(metadataPath(), damaged);
+    const before = fs.readdirSync(path.dirname(metadataPath()));
 
-    await expect(
-      BibliographyMetadataService.updateCitationMetadata(tmpDir, 'ABCD1234', { zoteroTags: [{ tag: 'x', automatic: false }] })
-    ).rejects.toMatchObject({ code: 'metadata-unreadable' });
+    await expect(write()).rejects.toMatchObject({ code: 'metadata-unreadable' });
     expect(fs.readFileSync(metadataPath(), 'utf8')).toBe(damaged);
+    expect(fs.readdirSync(path.dirname(metadataPath()))).toEqual(before);
+  };
+
+  it('un rattachement ne remplace pas un fichier illisible', async () => {
+    await untouched(() =>
+      BibliographyMetadataService.patchAttachment(
+        tmpDir,
+        makeCitation({ zoteroKey: 'ABCD1234', zoteroAttachments: [attachment('att')] }),
+        'att',
+        '/projet/PDFs/a.pdf'
+      )
+    );
+  });
+
+  it('la synchronisation ne remplace pas un fichier devenu illisible pendant qu’elle tournait', async () => {
+    await untouched(() =>
+      BibliographyMetadataService.saveFromSync(tmpDir, [makeCitation({ zoteroKey: 'ABCD1234', zoteroAttachments: [attachment('att')] })])
+    );
   });
 });
 
@@ -262,11 +289,164 @@ describe.skipIf(!symlinkAvailable)('BibliographyMetadataService — .cliodeck li
     const content = JSON.stringify({ version: 2, lastUpdated: 'x', citations: { AUTRE: { id: 'autre' } } });
     fs.writeFileSync(theirs, content);
 
-    await BibliographyMetadataService.saveMetadata(tmpDir, [makeCitation({ zoteroKey: 'ABCD1234' })]);
-    await BibliographyMetadataService.updateCitationMetadata(tmpDir, 'ABCD1234', { zoteroTags: [{ tag: 'x', automatic: false }] });
+    await BibliographyMetadataService.saveFromSync(tmpDir, [makeCitation({ zoteroKey: 'ABCD1234' })]);
+    await BibliographyMetadataService.patchAttachment(
+      tmpDir,
+      makeCitation({ zoteroKey: 'ABCD1234', zoteroAttachments: [attachment('att')] }),
+      'att',
+      path.join(tmpDir, 'PDFs', 'a.pdf')
+    );
 
     expect(await BibliographyMetadataService.loadMetadata(tmpDir)).toBeNull();
     expect(fs.readFileSync(theirs, 'utf8')).toBe(content);
     expect(fs.readdirSync(outside)).toEqual(['bibliography-metadata.json']);
+  });
+});
+
+/**
+ * Un rattachement de PDF s'écrit seul (S07-1-5). Le renderer réécrivait tout le fichier à partir
+ * de sa liste de références, prise avant le téléchargement : deux téléchargements simultanés
+ * s'effaçaient l'un l'autre, et une synchronisation effaçait ceux faits pendant qu'elle tournait.
+ */
+describe('BibliographyMetadataService — patchAttachment', () => {
+  let tmpDir: string;
+  const pdf = (name: string) => path.join(tmpDir, 'PDFs', `${name}.pdf`);
+  const stored = async () => (await BibliographyMetadataService.loadMetadata(tmpDir))!.citations;
+
+  beforeEach(async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-meta-'));
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('20 rattachements simultanés : les 20 sont écrits', async () => {
+    const citations = Array.from({ length: 20 }, (_, i) =>
+      makeCitation({ id: `Lester_${i}`, zoteroKey: `ZK${i}`, zoteroAttachments: [attachment(`ATT${i}`)] })
+    );
+    await BibliographyMetadataService.saveFromSync(tmpDir, citations);
+
+    await Promise.all(
+      citations.map((c, i) => BibliographyMetadataService.patchAttachment(tmpDir, c, `ATT${i}`, pdf(`n${i}`)))
+    );
+
+    const after = await stored();
+    expect(Object.keys(after)).toHaveLength(20);
+    for (let i = 0; i < 20; i++) {
+      expect(after[`ZK${i}`].zoteroAttachments).toEqual([{ ...attachment(`ATT${i}`), downloaded: true, localPath: pdf(`n${i}`) }]);
+    }
+  });
+
+  it('ne touche que cette pièce jointe de cette entrée', async () => {
+    const tags = [{ tag: 'presse', automatic: false }];
+    const other = makeCitation({ id: 'Autre_1936', zoteroKey: 'OTHER', zoteroAttachments: [attachment('ATTO')], zoteroTags: tags });
+    const target = makeCitation({
+      zoteroKey: 'TARGET',
+      zoteroAttachments: [attachment('ATT1'), attachment('ATT2')],
+      zoteroTags: tags,
+      dateAdded: '2021-01-01',
+    });
+    await BibliographyMetadataService.saveFromSync(tmpDir, [other, target]);
+    const before = await stored();
+
+    // La référence du renderer peut différer du fichier : seul le rattachement compte.
+    await BibliographyMetadataService.patchAttachment(tmpDir, { ...target, zoteroTags: [] }, 'ATT2', pdf('deux'));
+
+    const after = await stored();
+    expect(after.OTHER).toEqual(before.OTHER);
+    expect(after.TARGET).toEqual({
+      ...before.TARGET,
+      zoteroAttachments: [attachment('ATT1'), { ...attachment('ATT2'), downloaded: true, localPath: pdf('deux') }],
+    });
+  });
+
+  it('une entrée qui manque est créée depuis la référence', async () => {
+    const citation = makeCitation({
+      zoteroKey: 'NEW1',
+      zoteroAttachments: [attachment('ATTN')],
+      zoteroTags: [{ tag: 'lu', automatic: false }],
+    });
+
+    await BibliographyMetadataService.patchAttachment(tmpDir, citation, 'ATTN', pdf('nouveau'));
+
+    expect((await stored()).NEW1).toEqual({
+      id: 'Lester_1935',
+      zoteroKey: 'NEW1',
+      zoteroAttachments: [{ ...attachment('ATTN'), downloaded: true, localPath: pdf('nouveau') }],
+      zoteroTags: [{ tag: 'lu', automatic: false }],
+    });
+  });
+
+  it('une référence sans clé Zotero est rangée sous sa clé BibTeX', async () => {
+    await BibliographyMetadataService.patchAttachment(
+      tmpDir,
+      makeCitation({ id: 'manuel_2020', zoteroAttachments: [attachment('ATTM')] }),
+      'ATTM',
+      pdf('manuel')
+    );
+
+    expect((await stored()).manuel_2020.zoteroAttachments?.[0]).toMatchObject({ downloaded: true, localPath: pdf('manuel') });
+  });
+});
+
+/**
+ * La synchronisation écrit ce qu'elle a lu de Zotero, sur le fichier tel qu'il est au moment
+ * d'écrire (S07-1-6). Elle remplaçait le fichier par l'état lu à son début : un PDF rattaché
+ * pendant ses minutes de lecture perdait son rattachement.
+ */
+describe('BibliographyMetadataService — saveFromSync relit le fichier', () => {
+  let tmpDir: string;
+  const pdf = (name: string) => path.join(tmpDir, 'PDFs', `${name}.pdf`);
+  const stored = async () => (await BibliographyMetadataService.loadMetadata(tmpDir))!.citations;
+
+  beforeEach(async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cliodeck-biblio-meta-'));
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('un PDF rattaché depuis la lecture de la synchronisation reste rattaché', async () => {
+    const x = makeCitation({ zoteroKey: 'XKEY', zoteroAttachments: [attachment('ATTX')] });
+    await BibliographyMetadataService.saveFromSync(tmpDir, [x]);
+    // La synchronisation a lu l'état ci-dessus ; pendant qu'elle lit Zotero, le PDF de X arrive.
+    const readBySync = [{ ...x, zoteroTags: [{ tag: 'nouveau', automatic: false }] }];
+    await BibliographyMetadataService.patchAttachment(tmpDir, x, 'ATTX', pdf('x'));
+
+    await BibliographyMetadataService.saveFromSync(tmpDir, readBySync);
+
+    const after = await stored();
+    expect(after.XKEY.zoteroAttachments).toEqual([{ ...attachment('ATTX'), downloaded: true, localPath: pdf('x') }]);
+    expect(after.XKEY.zoteroTags).toEqual([{ tag: 'nouveau', automatic: false }]);
+  });
+
+  it('ce qui vient de Zotero vient de la synchronisation, et une entrée qu’elle a supprimée part', async () => {
+    const kept = makeCitation({ zoteroKey: 'KEPT', zoteroAttachments: [attachment('ATTK', 'ancien.pdf')], dateModified: '2020' });
+    const gone = makeCitation({ id: 'Parti_1940', zoteroKey: 'GONE', zoteroAttachments: [attachment('ATTG')] });
+    await BibliographyMetadataService.saveFromSync(tmpDir, [kept, gone]);
+    await BibliographyMetadataService.patchAttachment(tmpDir, gone, 'ATTG', pdf('parti'));
+
+    await BibliographyMetadataService.saveFromSync(tmpDir, [
+      { ...kept, zoteroAttachments: [attachment('ATTK', 'renomme.pdf'), attachment('ATTK2')], dateModified: '2026' },
+    ]);
+
+    const after = await stored();
+    expect(Object.keys(after)).toEqual(['KEPT']);
+    expect(after.KEPT).toMatchObject({
+      dateModified: '2026',
+      zoteroAttachments: [attachment('ATTK', 'renomme.pdf'), attachment('ATTK2')],
+    });
+  });
+
+  it('une pièce jointe retirée dans Zotero ne revient pas avec son rattachement', async () => {
+    const x = makeCitation({ zoteroKey: 'XKEY', zoteroAttachments: [attachment('ATTX'), attachment('ATTY')] });
+    await BibliographyMetadataService.saveFromSync(tmpDir, [x]);
+    await BibliographyMetadataService.patchAttachment(tmpDir, x, 'ATTY', pdf('y'));
+
+    await BibliographyMetadataService.saveFromSync(tmpDir, [{ ...x, zoteroAttachments: [attachment('ATTX')] }]);
+
+    expect((await stored()).XKEY.zoteroAttachments).toEqual([attachment('ATTX')]);
   });
 });

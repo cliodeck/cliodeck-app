@@ -154,10 +154,23 @@ export interface IndexingSliceState {
   isBibtexKeyIndexed: (bibtexKey: string) => boolean;
 }
 
+/** Un PDF téléchargé dans `PDFs/` que le main n'a pas rattaché à sa référence : il n'est pas indexé. */
+export interface NotAttached {
+  title: string;
+  filePath: string;
+  /** Les métadonnées ne se lisent pas : tout rattachement suivant échouerait aussi. */
+  metadataUnreadable: boolean;
+  /** Le message du main. */
+  detail: string;
+}
+
 export interface ZoteroSliceState {
   // Actions only (state is shared via other slices)
   downloadAndIndexZoteroPDF: (citationId: string, attachmentKey: string, projectPath: string) => Promise<ProjectChangedOutcome>;
-  downloadAllMissingPDFs: (projectPath: string) => Promise<{ downloaded: number; skipped: number; errors: string[] } & ProjectChangedOutcome>;
+  /** `stopped` : arrêté sur un PDF que des métadonnées illisibles empêchent de rattacher. */
+  downloadAllMissingPDFs: (
+    projectPath: string
+  ) => Promise<{ downloaded: number; skipped: number; errors: string[]; stopped?: NotAttached } & ProjectChangedOutcome>;
 }
 
 export interface ReadingNotesSliceState {

@@ -6,6 +6,7 @@ import type { BibliographyProblem } from '../../stores/bibliography/types';
 import { BibliographyFileError } from '../../stores/bibliography/citationSlice';
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
+import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
@@ -392,6 +393,29 @@ export const BibliographyPanel: React.FC = () => {
           errors: result.errors,
           toIndex: result.toIndex,
         });
+        return;
+      }
+      if (result.stopped) {
+        // Des métadonnées illisibles refusent tout rattachement : le lot s'est arrêté au premier PDF.
+        await useDialogStore.getState().showAlert(
+          withErrorDetails(
+            [
+              [
+                t('bibliography.downloadAllStopped', {
+                  batch: t('bibliography.downloadAllMissing'),
+                  done: result.downloaded,
+                  errors: result.errors.length,
+                  remaining: result.remaining ?? 0,
+                }),
+                (result.remaining ?? 0) > 0 ? t('bibliography.downloadAllStoppedRest') : '',
+              ]
+                .filter(Boolean)
+                .join(' '),
+              describeNotAttached(t, result.stopped),
+            ].join('\n\n'),
+            result.errors
+          )
+        );
         return;
       }
       await useDialogStore.getState().showAlert(

@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../types/citation';
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
 import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
-import { parseUserJson, readUserFile } from '../core/fs/user-files';
+import { atomicWriteFile, parseUserJson, readUserFile, withFileLock } from '../core/fs/user-files';
 
 /**
  * Metadata stored for each citation (data that can't be stored in BibTeX)
@@ -95,52 +95,106 @@ export class BibliographyMetadataService {
     return path.join(projectPath, '.cliodeck', BibliographyMetadataService.METADATA_FILENAME);
   }
 
+  /** Ce que le fichier garde d'une référence : ce que le `.bib` ne porte pas. */
+  private static metadataOf(
+    citation: Pick<Citation, 'id' | 'zoteroKey' | 'zoteroAttachments' | 'zoteroTags' | 'zoteroNotes' | 'dateAdded' | 'dateModified'>
+  ): CitationMetadata {
+    return {
+      id: citation.id,
+      zoteroKey: citation.zoteroKey,
+      zoteroAttachments: citation.zoteroAttachments,
+      zoteroTags: citation.zoteroTags,
+      zoteroNotes: citation.zoteroNotes,
+      dateAdded: citation.dateAdded,
+      dateModified: citation.dateModified,
+    };
+  }
+
   /**
-   * Save metadata for citations
-   * Only saves metadata that can't be stored in BibTeX (zoteroAttachments, etc.)
+   * Relit le fichier, le change et le réécrit, un écrivain à la fois : chacun part de ce qu'a
+   * écrit le précédent. `.cliodeck` est créé avant le verrou, dont la clé est le chemin réel du
+   * fichier. Illisible : `MetadataUnreadableError`, et rien n'est écrit, ni fichier neuf ni mise
+   * de côté : l'historien le répare ou en remet une copie (L05-3).
    */
-  static async saveMetadata(projectPath: string, citations: Citation[]): Promise<void> {
-    if (this.linkedOutside(projectPath)) return;
+  private static updateMetadataFile(
+    projectPath: string,
+    change: (current: BibliographyMetadataFile | null) => Record<string, CitationMetadata>
+  ): Promise<Record<string, CitationMetadata>> {
     const metadataPath = this.getMetadataPath(projectPath);
-    const metadataDir = path.dirname(metadataPath);
+    fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
+    return withFileLock(metadataPath, async () => {
+      const citations = change(await this.loadMetadata(projectPath));
+      const metadataFile: BibliographyMetadataFile = {
+        version: this.CURRENT_VERSION,
+        lastUpdated: new Date().toISOString(),
+        citations,
+      };
+      await atomicWriteFile(metadataPath, JSON.stringify(metadataFile, null, 2));
+      return citations;
+    });
+  }
 
-    // Ensure .cliodeck directory exists
-    if (!fs.existsSync(metadataDir)) {
-      fs.mkdirSync(metadataDir, { recursive: true });
-    }
+  /**
+   * Ce que la synchronisation Zotero a lu, écrit sur le fichier tel qu'il est au moment d'écrire
+   * (S07-1-6). Entrées, pièces jointes, tags, notes et dates viennent de la synchronisation, et une
+   * entrée qu'elle a retirée part ; mais une pièce jointe que le fichier relu dit téléchargée garde
+   * son PDF : rattaché pendant que la synchronisation lisait Zotero, il était perdu.
+   */
+  static async saveFromSync(projectPath: string, citations: Citation[]): Promise<void> {
+    if (this.linkedOutside(projectPath)) return;
 
-    // Extract metadata from citations. Index by zoteroKey (unique per Zotero
-    // item) when present; fall back to id (bibtexKey) for non-Zotero entries.
-    const citationMetadata: Record<string, CitationMetadata> = {};
-
-    for (const citation of citations) {
-      // Only save if there's metadata worth saving
-      if (citation.zoteroKey || citation.zoteroAttachments?.length) {
+    const written = await this.updateMetadataFile(projectPath, (current) => {
+      // Index by zoteroKey (unique per Zotero item) when present; fall back
+      // to id (bibtexKey) for non-Zotero entries.
+      const citationMetadata: Record<string, CitationMetadata> = {};
+      for (const citation of citations) {
+        // Only save if there's metadata worth saving
+        if (!citation.zoteroKey && !citation.zoteroAttachments?.length) continue;
         const storageKey = this.storageKeyFor(citation);
+        const onDisk = new Map((current?.citations[storageKey]?.zoteroAttachments ?? []).map((att) => [att.key, att]));
         citationMetadata[storageKey] = {
-          id: citation.id,
-          zoteroKey: citation.zoteroKey,
-          zoteroAttachments: citation.zoteroAttachments,
-          zoteroTags: citation.zoteroTags,
-          zoteroNotes: citation.zoteroNotes,
-          dateAdded: citation.dateAdded,
-          dateModified: citation.dateModified,
+          ...this.metadataOf(citation),
+          zoteroAttachments: citation.zoteroAttachments?.map((att) => {
+            const onFile = onDisk.get(att.key);
+            const download = onFile?.downloaded && onFile.localPath ? onFile : att;
+            return { ...att, downloaded: download.downloaded, localPath: download.localPath };
+          }),
         };
       }
-    }
+      return citationMetadata;
+    });
+    console.log(`✅ Bibliography metadata saved: ${Object.keys(written).length} citations with metadata`);
+  }
 
-    const metadataFile: BibliographyMetadataFile = {
-      version: this.CURRENT_VERSION,
-      lastUpdated: new Date().toISOString(),
-      citations: citationMetadata,
-    };
+  /**
+   * Rattache un PDF téléchargé à sa pièce jointe, et rien d'autre (S07-1-5) : le reste du fichier
+   * est celui du disque, pas la liste du renderer, prise avant le téléchargement, avec laquelle
+   * deux téléchargements simultanés s'effaçaient. L'entrée manquante est créée depuis `citation`.
+   */
+  static async patchAttachment(
+    projectPath: string,
+    citation: Pick<Citation, 'id' | 'zoteroKey' | 'zoteroAttachments' | 'zoteroTags' | 'zoteroNotes' | 'dateAdded' | 'dateModified'>,
+    attachmentKey: string,
+    localPath: string
+  ): Promise<void> {
+    if (this.linkedOutside(projectPath)) return;
+    const storageKey = this.storageKeyFor(citation);
 
-    // Write atomically (write to temp, then rename)
-    const tempPath = metadataPath + '.tmp';
-    fs.writeFileSync(tempPath, JSON.stringify(metadataFile, null, 2), 'utf-8');
-    fs.renameSync(tempPath, metadataPath);
+    await this.updateMetadataFile(projectPath, (current) => {
+      const entry = current?.citations[storageKey] ?? this.metadataOf(citation);
+      const attachments = entry.zoteroAttachments ?? [];
+      const attachment =
+        attachments.find((att) => att.key === attachmentKey) ??
+        citation.zoteroAttachments?.find((att) => att.key === attachmentKey);
+      if (!attachment) throw new Error(`Pièce jointe ${attachmentKey} inconnue de la référence ${citation.id}`);
 
-    console.log(`✅ Bibliography metadata saved: ${Object.keys(citationMetadata).length} citations with metadata`);
+      const downloaded = { ...attachment, downloaded: true, localPath };
+      const zoteroAttachments = attachments.some((att) => att.key === attachmentKey)
+        ? attachments.map((att) => (att.key === attachmentKey ? downloaded : att))
+        : [...attachments, downloaded];
+      return { ...current?.citations, [storageKey]: { ...entry, zoteroAttachments } };
+    });
+    console.log(`✅ Updated metadata for citation: ${storageKey}`);
   }
 
   /**
@@ -238,53 +292,6 @@ export class BibliographyMetadataService {
 
     console.log(`🔗 Merged metadata into ${mergedCount} citations`);
     return mergedCitations;
-  }
-
-  /**
-   * Update metadata for a specific citation (partial update).
-   * Useful when downloading a single PDF.
-   *
-   * `storageKey` is the citation's zoteroKey when available, otherwise
-   * its bibtexKey (`id`). Callers should pass whichever key they have —
-   * but if they have a zoteroKey, they MUST pass that, or the entry will
-   * land in the wrong row (colliding with any bibtexKey twin).
-   */
-  static async updateCitationMetadata(
-    projectPath: string,
-    storageKey: string,
-    updates: Partial<CitationMetadata>
-  ): Promise<void> {
-    if (this.linkedOutside(projectPath)) return;
-    const existingMetadata = await this.loadMetadata(projectPath);
-
-    const metadata: BibliographyMetadataFile = existingMetadata || {
-      version: this.CURRENT_VERSION,
-      lastUpdated: new Date().toISOString(),
-      citations: {},
-    };
-
-    // Merge updates
-    metadata.citations[storageKey] = {
-      ...metadata.citations[storageKey],
-      id: updates.id ?? metadata.citations[storageKey]?.id ?? storageKey,
-      ...updates,
-    };
-
-    metadata.lastUpdated = new Date().toISOString();
-
-    // Save
-    const metadataPath = this.getMetadataPath(projectPath);
-    const metadataDir = path.dirname(metadataPath);
-
-    if (!fs.existsSync(metadataDir)) {
-      fs.mkdirSync(metadataDir, { recursive: true });
-    }
-
-    const tempPath = metadataPath + '.tmp';
-    fs.writeFileSync(tempPath, JSON.stringify(metadata, null, 2), 'utf-8');
-    fs.renameSync(tempPath, metadataPath);
-
-    console.log(`✅ Updated metadata for citation: ${storageKey}`);
   }
 
   /**
