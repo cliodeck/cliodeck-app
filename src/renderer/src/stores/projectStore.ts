@@ -192,7 +192,9 @@ async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
   if (ideasError) {
     const leave = await useDialogStore
       .getState()
-      .showConfirm(i18n.t('ideas.switchSaveFailed', { reason: ideasError }), i18n.t('ideas.switchSaveFailedTitle'));
+      .showConfirm(i18n.t('ideas.switchSaveFailed', { reason: ideasError }), i18n.t('ideas.switchSaveFailedTitle'), {
+        danger: true,
+      });
     if (!leave) return null;
   }
 

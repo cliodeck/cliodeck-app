@@ -36,7 +36,9 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({
           t(
             'primarySources.ocrOverwriteConfirm',
             'Re-run OCR? The existing transcription of this source will be replaced.'
-          )
+          ),
+          undefined,
+          { danger: true }
         ))
     ) {
       return;

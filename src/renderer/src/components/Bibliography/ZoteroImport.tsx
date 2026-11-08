@@ -379,7 +379,9 @@ export const ZoteroImport: React.FC = () => {
         const report = result.report as SyncReport;
         const confirmed = await useDialogStore
           .getState()
-          .showConfirm(describeConfirmation(report), t('zotero.sync.confirmTitle'));
+          .showConfirm(describeConfirmation(report), t('zotero.sync.confirmTitle'), {
+            danger: report.deleted.length > 0,
+          });
         if (!confirmed || !(await stillInProject())) return;
         result = await window.electron.zotero.synchronize({ ...request, confirmation: report.confirmation });
         if (!(await stillInProject())) return;

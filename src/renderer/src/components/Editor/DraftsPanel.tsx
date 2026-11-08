@@ -106,7 +106,7 @@ export const DraftsPanel: React.FC = () => {
     if (
       await useDialogStore
         .getState()
-        .showConfirm(t('drafts.clearConfirm', { count: drafts.length }))
+        .showConfirm(t('drafts.clearConfirm', { count: drafts.length }), undefined, { danger: true })
     ) {
       clear();
     }

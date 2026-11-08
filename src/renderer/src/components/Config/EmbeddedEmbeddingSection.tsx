@@ -138,7 +138,7 @@ export const EmbeddedEmbeddingSection: React.FC = () => {
   };
 
   const handleDeleteModel = async (modelId: string) => {
-    if (!(await useDialogStore.getState().showConfirm(t('embeddedLLM.deleteConfirm')))) {
+    if (!(await useDialogStore.getState().showConfirm(t('embeddedLLM.deleteConfirm'), undefined, { danger: true }))) {
       return;
     }
     try {

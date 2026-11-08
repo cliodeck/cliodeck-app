@@ -340,7 +340,7 @@ async function flushOutgoing(request: number): Promise<boolean> {
   const state = useEditorStore.getState();
   if (!state.filePath) {
     if (state.getLiveContent() === '') return true;
-    return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'));
+    return useDialogStore.getState().showConfirm(i18n.t('editor.discardUntitledConfirm'), undefined, { danger: true });
   }
   try {
     await writeOpenDocumentWhileDirty(() => request === bufferRequestSeq);

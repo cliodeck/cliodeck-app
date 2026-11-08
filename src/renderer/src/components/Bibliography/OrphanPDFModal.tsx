@@ -115,7 +115,9 @@ export const OrphanPDFModal: React.FC<OrphanPDFModalProps> = ({
     }
 
     const confirmed = await useDialogStore.getState().showConfirm(
-      t('bibliography.confirmDeleteOrphans', { count: selectedOrphans.size })
+      t('bibliography.confirmDeleteOrphans', { count: selectedOrphans.size }),
+      undefined,
+      { danger: true }
     );
     if (!confirmed) return;
 

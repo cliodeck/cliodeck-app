@@ -115,7 +115,7 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
   const askToCloseWhileRunning = () => {
     void useDialogStore
       .getState()
-      .showConfirm(t('recipeRun.closeWhileRunning'), t('recipeRun.closeWhileRunningTitle'))
+      .showConfirm(t('recipeRun.closeWhileRunning'), t('recipeRun.closeWhileRunningTitle'), { danger: true })
       .then((close) => {
         if (!close) return;
         cancelRun();
