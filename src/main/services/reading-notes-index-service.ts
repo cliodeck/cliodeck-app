@@ -134,6 +134,14 @@ function reasonOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Ce que rend une suite de passes (cf. `schedule`). */
+interface ScheduledReports {
+  /** La dernière passe. */
+  last: ReadingNotesIndexReport;
+  /** La dernière passe forcée (« Tout réindexer »), s'il y en a eu une. */
+  forced: ReadingNotesIndexReport | null;
+}
+
 /** Dépendances substituables, pour tester sans Electron. */
 export interface ReadingNotesIndexDeps {
   isEnabled: () => boolean;
@@ -149,7 +157,7 @@ export interface ReadingNotesIndexDeps {
 export class ReadingNotesIndexService {
   private store: ReadingNotesStore | null = null;
   private workspaceRoot: string | null = null;
-  private running: Promise<ReadingNotesIndexReport> | null = null;
+  private running: Promise<ScheduledReports> | null = null;
   /**
    * Demande arrivée pendant une passe : une passe de plus suit, pour ne rien
    * manquer. Complète (`force`) si l'une des demandes l'était.
@@ -241,22 +249,30 @@ export class ReadingNotesIndexService {
    * sauvegarde restait hors de l'index jusqu'à la sauvegarde suivante.
    */
   async index(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
-    return this.schedule(embedder, false);
+    return (await this.schedule(embedder, false)).last;
   }
 
-  private schedule(embedder: EmbeddingProvider, force: boolean): Promise<ReadingNotesIndexReport> {
+  /**
+   * Lance une passe, ou en programme une de plus derrière celle en cours. Rend le rapport de la
+   * dernière passe et celui de la dernière passe forcée : une passe incrémentale demandée pendant
+   * « Tout réindexer » la suit, et son rapport (« 3 inchangées ») ne doit pas remplacer celui de
+   * la réindexation, que la section des réglages affiche (abandon, notes réembarquées).
+   */
+  private schedule(embedder: EmbeddingProvider, force: boolean): Promise<ScheduledReports> {
     if (this.running) {
       this.rerun = { embedder, force: force || (this.rerun?.force ?? false) };
       return this.running;
     }
-    const run = async (): Promise<ReadingNotesIndexReport> => {
-      let report = await this.runIndex(embedder, force);
+    const run = async (): Promise<ScheduledReports> => {
+      let last = await this.runIndex(embedder, force);
+      let forced = force ? last : null;
       while (this.rerun) {
         const next = this.rerun;
         this.rerun = null;
-        report = await this.runIndex(next.embedder, next.force);
+        last = await this.runIndex(next.embedder, next.force);
+        if (next.force) forced = last;
       }
-      return report;
+      return { last, forced };
     };
     this.running = run().finally(() => {
       this.running = null;
@@ -477,7 +493,9 @@ export class ReadingNotesIndexService {
    */
   async reindexAll(embedder: EmbeddingProvider): Promise<ReadingNotesIndexReport> {
     if (this.running) await this.running.catch(() => undefined);
-    return this.schedule(embedder, true);
+    const { last, forced } = await this.schedule(embedder, true);
+    // `forced` manque seulement si le projet a changé entre-temps (`detachStore` oublie la relance).
+    return forced ?? last;
   }
 
   stats(): ReadingNotesIndexStats | null {

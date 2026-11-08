@@ -34,6 +34,21 @@ vi.mock('../../../../backend/core/rag/manuscript-chunker.js', async (importOrigi
   };
 });
 
+/**
+ * La version du format d'en-tête que voit l'indexeur : la vraie, sauf quand un test simule son
+ * incrément (`header.version`). Le store et l'en-tête eux-mêmes restent les vrais.
+ */
+const header = vi.hoisted(() => ({ version: null as number | null }));
+vi.mock('../../../../backend/core/vector-store/ReadingNotesStore.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../backend/core/vector-store/ReadingNotesStore.js')>();
+  return {
+    ...actual,
+    get READING_NOTE_HEADER_VERSION() {
+      return header.version ?? actual.READING_NOTE_HEADER_VERSION;
+    },
+  };
+});
+
 interface FakeEmbedder extends EmbeddingProvider {
   calls: number;
   texts: string[];
@@ -288,6 +303,7 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
   beforeEach(async () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-tout-'));
     chunker.version = null;
+    header.version = null;
     service = new ReadingNotesIndexService({
       isEnabled: () => true,
       openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
@@ -299,6 +315,7 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
 
   afterEach(() => {
     chunker.version = null;
+    header.version = null;
     service.clear();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
@@ -391,11 +408,70 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
   });
 
   /*
+   * Revue de L05-6 : une passe demandée pendant « Tout réindexer » (sauvegarde ou étiquette d'une
+   * note, synchronisation Zotero) la suit, et `reindexAll` rendait le rapport de cette dernière
+   * passe. L'abandon, que la section des réglages affiche, était perdu : « 0 note indexée », en
+   * vert, Ollama arrêté.
+   */
+  it('une passe demandée pendant une réindexation abandonnée ne fait pas perdre l’abandon', async () => {
+    const all = service.reindexAll(stoppedEmbedder);
+    const next = service.index(stoppedEmbedder);
+
+    const report = await all;
+
+    expect(report.abandoned).toMatch(/Ollama arrêté/);
+    expect(report.failures).not.toEqual([]);
+    // La passe incrémentale garde son propre rapport.
+    expect((await next).abandoned).toBeUndefined();
+  });
+
+  it('une passe demandée pendant une réindexation réussie : le rapport rendu est celui de la réindexation', async () => {
+    const mxbai = sizedEmbedder(1024);
+    const all = service.reindexAll(mxbai);
+    const next = service.index(mxbai);
+
+    expect(await all).toMatchObject({ indexed: 3, unchanged: 0, failures: [] });
+    expect(await next).toMatchObject({ indexed: 0, unchanged: 3 });
+  });
+
+  /*
+   * Revue de L05-6 : la transaction annulée doit rendre la dimension d'avant. Sinon, après une
+   * réindexation abandonnée à l'écriture, le `resetDimension` annulé laisse la nouvelle dimension
+   * en mémoire, et la passe incrémentale suivante écrit des extraits 1024 à côté des 768.
+   */
+  it('une réindexation refusée à l’écriture rend la dimension d’avant : aucune passe ne mêle ensuite 1024 et 768', async () => {
+    const before = service.stats();
+    const nan = {
+      async embed(texts: string[]): Promise<number[][]> {
+        return texts.map(() => new Array(1024).fill(Number.NaN));
+      },
+    } as unknown as EmbeddingProvider;
+
+    const report = await service.reindexAll(nan);
+
+    expect(report.abandoned).toMatch(/non-finite/);
+    expect(service.stats()).toEqual(before);
+    const braudel = path.join(tmp, READING_NOTES_DIR, 'Braudel_1949.md');
+    fs.writeFileSync(braudel, fs.readFileSync(braudel, 'utf8').replace('écrase', 'domine'));
+    const next = await service.index(sizedEmbedder(1024));
+    expect(next.failures).toEqual([expect.objectContaining({ reason: expect.stringMatching(/dimension mismatch/) })]);
+    expect(storedDimensions()).toEqual([768]);
+  });
+
+  /*
    * S04-1-19 : l'empreinte d'une note ne portait que son texte. Un changement du découpage
    * (CHUNKER_VERSION) réindexait tout le manuscrit et aucune note.
    */
   it('CHUNKER_VERSION incrémentée : chaque note est réembarquée une fois, à la passe suivante', async () => {
     chunker.version = 99;
+    const embedder = sizedEmbedder(768);
+
+    expect(await service.index(embedder)).toMatchObject({ indexed: 3, unchanged: 0 });
+    expect(await service.index(embedder)).toMatchObject({ indexed: 0, unchanged: 3 });
+  });
+
+  it('READING_NOTE_HEADER_VERSION incrémentée : chaque note est réembarquée une fois, à la passe suivante', async () => {
+    header.version = 99;
     const embedder = sizedEmbedder(768);
 
     expect(await service.index(embedder)).toMatchObject({ indexed: 3, unchanged: 0 });

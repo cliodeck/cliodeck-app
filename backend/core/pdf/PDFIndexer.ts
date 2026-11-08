@@ -213,6 +213,10 @@ export class PDFIndexer {
     console.log(`   File: ${filePath}`);
     console.log(`   BibtexKey: ${bibtexKey || 'none'}`);
 
+    // Document de cette passe, enregistré avant ses extraits (étape 8), tant qu'il n'a pas pris la
+    // place des copies précédentes : un échec d'ici là le retire (cf. le catch).
+    let pendingDocumentId: string | null = null;
+
     try {
       // 1. Extraire le texte + métadonnées
       console.log('🔍 [INDEXER] Step 1: Extracting text and metadata...');
@@ -346,6 +350,7 @@ export class PDFIndexer {
 
       // 8. Sauvegarder le document
       this.vectorStore.saveDocument(document);
+      pendingDocumentId = documentId;
 
       // 9. Matcher et sauvegarder les citations avec documents existants
       const allDocuments = this.vectorStore.getAllDocuments();
@@ -548,8 +553,10 @@ export class PDFIndexer {
       // depuis Zotero, glisser-déposer, réindexer) ajoutait une copie, et
       // aucun garde-fou côté interface ne les couvrait tous. Fait APRÈS
       // l'écriture des nouveaux extraits : un échec en cours de route laisse
-      // l'ancienne copie intacte. Un PDF déplacé (même clé, même nom, ancien
+      // l'ancienne copie intacte, et retire le document de cette passe
+      // (`discardFailedDocument`). Un PDF déplacé (même clé, même nom, ancien
       // fichier disparu) est remplacé de même, sans quoi il ferait doublon.
+      // Un PDF renommé (autre nom) ne l'est pas : cf. `getMovedCopyIds`.
       const previousCopies = [
         ...new Set([
           ...this.vectorStore.getDocumentIdsByFilePath(filePath),
@@ -560,6 +567,7 @@ export class PDFIndexer {
         this.vectorStore.mergeDocumentsInto(documentId, previousCopies);
         console.log(`♻️  ${previousCopies.length} copie(s) précédente(s) remplacée(s)`);
       }
+      pendingDocumentId = null;
 
       // 12. Calculer les similarités avec les autres documents
       onProgress?.({
@@ -593,12 +601,40 @@ export class PDFIndexer {
       return document;
     } catch (error) {
       console.error('❌ Erreur indexation PDF:', error);
+      if (pendingDocumentId) this.discardFailedDocument(pendingDocumentId);
       onProgress?.({
         stage: 'error',
         progress: 0,
         message: `Erreur: ${error}`,
       });
       throw error;
+    }
+  }
+
+  /**
+   * Retire le document d'une passe qui a échoué avant de remplacer les copies précédentes, avec
+   * ce qu'il a déjà écrit (extraits, citations sortantes : `ON DELETE CASCADE`). Laissé en place,
+   * vide ou partiel, il faisait doublon avec l'ancien document, que la réindexation ne supprime
+   * plus d'avance (S03-1-3) : le panneau listait la référence deux fois, l'ouverture suivante
+   * copiait `brain.db` avant de fondre ce doublon, et le nettoyage du démarrage, qui garde la copie
+   * la plus récente ayant des extraits, aurait préféré une copie partielle à la complète. Une
+   * première indexation qui échoue ne laisse pas non plus de document sans extrait.
+   * Best-effort : l'erreur de l'indexation reste celle que l'on rend.
+   *
+   * Sans extrait en base, rien n'a atteint HNSW ni BM25 (`addChunks` écrit SQLite d'abord) : le
+   * retrait passe alors par le store de base, qui ne marque pas ces index périmés. Sinon un
+   * « Indexer tous les PDF » sur Ollama arrêté coûterait une reconstruction complète, pour rien.
+   */
+  private discardFailedDocument(documentId: string): void {
+    try {
+      const store =
+        this.vectorStore instanceof EnhancedVectorStore &&
+        this.vectorStore.getBaseStore().getChunksForDocument(documentId).length === 0
+          ? this.vectorStore.getBaseStore()
+          : this.vectorStore;
+      store.deleteDocument(documentId);
+    } catch (cleanupError) {
+      console.warn(`⚠️ [INDEXER] Document de la passe échouée non retiré (${documentId}) :`, cleanupError);
     }
   }
 
