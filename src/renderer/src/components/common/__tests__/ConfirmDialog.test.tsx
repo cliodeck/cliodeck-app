@@ -58,3 +58,28 @@ describe('ConfirmDialog : deux questions enchaînées', () => {
     expect(answer).toBe(false);
   });
 });
+
+/**
+ * Confirmer avait toujours l'aspect du bouton principal, même quand le focus était sur Annuler :
+ * au second dialogue de la purge, l'auteur a cru que Confirmer était le bouton actif (BT1-7).
+ */
+describe('ConfirmDialog : une confirmation destructrice', () => {
+  it('Confirmer porte is-danger, Annuler garde le focus ; la question suivante, ordinaire, ne le porte pas', async () => {
+    render(<ConfirmDialog />);
+    await act(async () => {
+      void dialogs().showConfirm('Purger le journal ?', undefined, { danger: true });
+      void dialogs().showConfirm('Ouvrir un document vide ?');
+    });
+    expect(confirmButton().classList.contains('is-danger')).toBe(true);
+    expect(document.activeElement).toBe(cancelButton());
+
+    confirmButton().focus();
+    await act(async () => {
+      fireEvent.click(confirmButton());
+    });
+
+    expect(screen.getByText('Ouvrir un document vide ?')).toBeTruthy();
+    expect(confirmButton().classList.contains('is-danger')).toBe(false);
+    expect(document.activeElement).toBe(cancelButton());
+  });
+});

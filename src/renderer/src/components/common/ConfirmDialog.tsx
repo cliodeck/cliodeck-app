@@ -7,7 +7,7 @@ import './ConfirmDialog.css'
 
 export function ConfirmDialog() {
   const { t } = useTranslation('common')
-  const { confirmOpen, confirmMessage, confirmTitle, confirmResolver, resolveConfirm } = useDialogStore()
+  const { confirmOpen, confirmMessage, confirmTitle, confirmDanger, confirmResolver, resolveConfirm } = useDialogStore()
   const cancelButtonRef = useRef<HTMLButtonElement>(null)
 
   const dialogRef = useFocusTrap({
@@ -68,7 +68,7 @@ export function ConfirmDialog() {
             {t('dialog.cancel')}
           </button>
           <button
-            className="confirm-dialog-btn-confirm"
+            className={`confirm-dialog-btn-confirm${confirmDanger ? ' is-danger' : ''}`}
             onClick={() => resolveConfirm(true)}
           >
             {t('dialog.confirm')}

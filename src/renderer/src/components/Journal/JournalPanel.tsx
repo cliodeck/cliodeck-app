@@ -78,8 +78,8 @@ export const JournalPanel: React.FC = () => {
   // l'utilisateur les a faits.
   const handlePurge = async () => {
     const dialogs = useDialogStore.getState();
-    if (!(await dialogs.showConfirm(t('journal.purgeConfirm1')))) return;
-    if (!(await dialogs.showConfirm(t('journal.purgeConfirm2')))) return;
+    if (!(await dialogs.showConfirm(t('journal.purgeConfirm1'), undefined, { danger: true }))) return;
+    if (!(await dialogs.showConfirm(t('journal.purgeConfirm2'), undefined, { danger: true }))) return;
     const result = await purgeJournal();
     if (result.success) {
       await dialogs.showAlert(
