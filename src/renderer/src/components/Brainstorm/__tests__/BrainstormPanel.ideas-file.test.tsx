@@ -227,6 +227,92 @@ describe('fichier mis de côté', () => {
   });
 });
 
+describe('le fichier sain recopié à côté de sa mise de côté, pendant la session (C40 puis C41)', () => {
+  // Des idées que l'app n'a jamais placées : le Tableau doit le faire.
+  const returnedTitles = Array.from({ length: 10 }, (_, i) => `Revenue ${i}`);
+  const sane = JSON.stringify(
+    {
+      ideas: returnedTitles.map((title) => {
+        const { position: _position, ...unplaced } = idea(title);
+        return unplaced;
+      }),
+    },
+    null,
+    2
+  );
+
+  /** App fermée, le fichier tronqué ; Brainstormer, puis l'onglet : la bannière. */
+  async function quarantinedOn(tab: string): Promise<string[]> {
+    fs.writeFileSync(ideasA, sane.slice(0, 20));
+    openProject(dirA);
+    render(<BrainstormPanel />);
+    await settled();
+    await clickTab(tab);
+    expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
+    return backups();
+  }
+
+  /** Le `cp` : la copie mise de côté reste où elle est. */
+  const copySaneFileBack = () => fs.writeFileSync(ideasA, sane);
+
+  const writtenCount = () =>
+    act(async () => {
+      await vi.waitFor(
+        () => expect(JSON.parse(fs.readFileSync(ideasA, 'utf8')).ideas).toHaveLength(returnedTitles.length + 1),
+        { timeout: 5000, interval: 5 }
+      );
+    });
+
+  it('onglet Idées : les idées revenues s’affichent avec la nouvelle, sans changer d’onglet, et la bannière reste', async () => {
+    const backup = await quarantinedOn('ideas.tabIdeas');
+    copySaneFileBack();
+
+    await userEvent.click(screen.getByTitle('ideas.create'));
+    await writtenCount();
+
+    expect(document.querySelectorAll('.ideas-panel__item')).toHaveLength(returnedTitles.length + 1);
+    for (const title of returnedTitles) expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
+    expect(screen.getByText(path.join(dirA, '.cliodeck', backup[0]))).toBeInTheDocument();
+    expect(backups()).toEqual(backup);
+  });
+
+  it('onglet Tableau : les cartes revenues se placent sans s’empiler, sans changer d’onglet, et la nouvelle ne bouge pas', async () => {
+    const backup = await quarantinedOn('ideas.tabCanvas');
+    copySaneFileBack();
+
+    await userEvent.click(screen.getByTitle('ideas.create'));
+    const [created] = useIdeaStore.getState().ideas;
+    await writtenCount();
+
+    const cards = [...document.querySelectorAll<HTMLElement>('.ideas-canvas__card')];
+    expect(cards).toHaveLength(returnedTitles.length + 1);
+    // Des positions distinctes ne suffisent pas : deux cartes de 200 px décalées de 10 px se
+    // recouvrent. jsdom ne mesure rien : largeur lue sur la carte, hauteur prêtée par le Tableau
+    // (CARD_HEIGHT, 120 px). Seulement entre les revenues : la nouvelle, posée au centre de la vue,
+    // peut en recouvrir une, la grille ignorant les cartes déjà placées (comme au montage).
+    const returned = cards
+      .filter((card) => returnedTitles.includes(card.querySelector('.ideas-canvas__card-title')?.textContent ?? ''))
+      .map((card) => ({
+        title: card.querySelector('.ideas-canvas__card-title')?.textContent,
+        x: parseFloat(card.style.left),
+        y: parseFloat(card.style.top),
+        width: parseFloat(card.style.width),
+      }));
+    expect(returned).toHaveLength(returnedTitles.length);
+    const overlapping = returned.flatMap((a, i) =>
+      returned
+        .slice(i + 1)
+        .filter((b) => Math.abs(a.x - b.x) < a.width && Math.abs(a.y - b.y) < 120)
+        .map((b) => `${a.title} / ${b.title}`)
+    );
+    expect(overlapping).toEqual([]);
+    expect(useIdeaStore.getState().ideas.find((i) => i.id === created.id)?.position).toEqual(created.position);
+    expect(screen.getByText(QUARANTINED)).toBeInTheDocument();
+    expect(backups()).toEqual(backup);
+  });
+});
+
 describe('lecture impossible', () => {
   it.skipIf(IS_ROOT)('la bannière remplace Idées, Tableau et Graphe, et Réessayer suffit', async () => {
     fs.writeFileSync(ideasA, ideasFile('Braudel'));

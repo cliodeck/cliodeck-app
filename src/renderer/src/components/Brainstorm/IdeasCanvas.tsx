@@ -150,7 +150,9 @@ export const IdeasCanvas: React.FC = () => {
     setView((v) => ({ ...v, scale: Math.max(MIN_SCALE, v.scale * 0.8) }));
   }, []);
 
-  // Auto-distribute ideas without positions on first render
+  // Les idées sans position se placent à leur arrivée, pas seulement au montage : celles d'un
+  // fichier revenu pendant la session, relu à la sauvegarde, s'empilaient sinon en (0,0), sous la
+  // barre d'outils, jusqu'au prochain passage par un autre onglet. Une idée placée ne bouge pas.
   useEffect(() => {
     const unpositioned = ideas.filter((i) => !i.position);
     if (unpositioned.length === 0) return;
@@ -164,7 +166,7 @@ export const IdeasCanvas: React.FC = () => {
         })
       )
     );
-  }, []); // Only on mount
+  }, [ideas, arrangeIdeas]);
 
   return (
     <div
