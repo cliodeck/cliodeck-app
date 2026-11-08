@@ -225,7 +225,7 @@ export const PDFIndexPanel: React.FC = () => {
   };
 
   const handleDeletePDF = async (documentId: string) => {
-    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.deleteConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.deleteConfirm'), undefined, { danger: true })) {
       return;
     }
 
@@ -270,7 +270,7 @@ export const PDFIndexPanel: React.FC = () => {
   };
 
   const handleCleanOrphanedChunks = async () => {
-    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.cleanOrphanedConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('pdfIndex.cleanOrphanedConfirm'), undefined, { danger: true })) {
       return;
     }
 

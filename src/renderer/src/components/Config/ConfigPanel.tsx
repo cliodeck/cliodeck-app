@@ -389,7 +389,7 @@ export const ConfigPanel: React.FC = () => {
 
   const handleResetConfig = async () => {
     const question = t('settings.resetConfirm', { model: DEFAULT_CONFIG.llm.ollamaChatModel });
-    if (!await useDialogStore.getState().showConfirm(question)) {
+    if (!await useDialogStore.getState().showConfirm(question, undefined, { danger: true })) {
       return;
     }
     if (writing.current) return;

@@ -59,7 +59,7 @@ export const SimilarityPanel: React.FC = () => {
 
   const handleClearResults = async () => {
     logger.component('SimilarityPanel', 'Clearing results');
-    if (await useDialogStore.getState().showConfirm(t('similarity.clearConfirm'))) {
+    if (await useDialogStore.getState().showConfirm(t('similarity.clearConfirm'), undefined, { danger: true })) {
       clearResults();
     }
   };

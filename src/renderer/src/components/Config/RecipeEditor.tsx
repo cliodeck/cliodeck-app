@@ -152,7 +152,9 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
     }
     if (askingRef.current) return;
     askingRef.current = true;
-    const discard = await useDialogStore.getState().showConfirm(t('recipeEditor.discardConfirm'));
+    const discard = await useDialogStore
+      .getState()
+      .showConfirm(t('recipeEditor.discardConfirm'), undefined, { danger: true });
     askingRef.current = false;
     if (discard) onClose();
   }, [dirty, onClose, t]);

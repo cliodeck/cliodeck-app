@@ -166,7 +166,7 @@ export const VaultConfigSection: React.FC = () => {
   const unlink = useCallback(async () => {
     const api = vaultApi();
     if (!api) return;
-    if (!(await useDialogStore.getState().showConfirm(t('vault.unlinkConfirm')))) {
+    if (!(await useDialogStore.getState().showConfirm(t('vault.unlinkConfirm'), undefined, { danger: true }))) {
       return;
     }
     setBusy(true);

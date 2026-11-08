@@ -81,19 +81,19 @@
   background-color: var(--bg-input-hover);
 }
 
-.confirm-dialog-btn-cancel:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
+/* Sans aplat : l'aplat d'accent est l'aspect du bouton par défaut, et le focus, lui, est sur
+   Annuler. Avec, l'auteur prenait Confirmer pour le bouton actif (BT1-7).
+   Le libellé se lit alors à même le panneau. La teinte pure y restait sous le seuil AA (4,5:1) :
+   3,40:1 pour l'accent en thème sombre, 2,75:1 pour le danger survolé. Mêlée de --text-primary,
+   elle s'éclaircit en sombre et fonce en clair ; le contour garde la teinte pure. */
 .confirm-dialog-btn-confirm {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: var(--spacing-sm) var(--spacing-xl);
-  background-color: var(--color-accent);
-  color: #ffffff;
-  border: none;
+  background-color: transparent;
+  color: color-mix(in srgb, var(--color-accent) 65%, var(--text-primary));
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-base);
   font-weight: 500;
@@ -103,14 +103,24 @@
 }
 
 .confirm-dialog-btn-confirm:hover {
-  background-color: var(--color-accent-hover);
+  background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
-.confirm-dialog-btn-confirm:active {
-  background-color: var(--color-accent-active);
+/* Un geste qui détruit ou abandonne quelque chose : la teinte du bouton Purger du journal. */
+.confirm-dialog-btn-confirm.is-danger {
+  color: color-mix(in srgb, var(--color-danger) 65%, var(--text-primary));
+  border-color: var(--color-danger);
+  background-color: color-mix(in srgb, var(--color-danger) 8%, transparent);
 }
 
-.confirm-dialog-btn-confirm:focus-visible {
+.confirm-dialog-btn-confirm.is-danger:hover {
+  background-color: color-mix(in srgb, var(--color-danger) 16%, transparent);
+}
+
+/* Le focus de ce dialogue est toujours posé par script, sur Annuler. Juste après un clic de souris
+   (sur le bouton qui ouvre la question, ou sur Confirmer au premier dialogue d'une purge), Chromium
+   n'allume pas `:focus-visible` : Annuler restait gris, sans aucun repère. L'anneau suit `:focus`. */
+.confirm-dialog-footer button:focus {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }

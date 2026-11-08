@@ -251,7 +251,7 @@ export const ChapterNavigator: React.FC = () => {
   const handleRemove = async (chapter: ResolvedChapter): Promise<void> => {
     const confirmed = await useDialogStore
       .getState()
-      .showConfirm(t('book.removeChapterConfirm', { title: chapter.title }));
+      .showConfirm(t('book.removeChapterConfirm', { title: chapter.title }), undefined, { danger: true });
     if (!confirmed) return;
     setWorking(true);
     try {

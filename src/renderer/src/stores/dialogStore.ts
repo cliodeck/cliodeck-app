@@ -1,8 +1,16 @@
 import { create } from 'zustand'
 
+export interface ConfirmOptions {
+  /**
+   * Le geste détruit ou abandonne quelque chose (purge, suppression, retrait, modifications
+   * perdues) : Confirmer s'affiche en rouge, pour ne pas ressembler au bouton par défaut.
+   */
+  danger?: boolean
+}
+
 type DialogRequest =
   | { kind: 'alert'; message: string; title?: string; resolve: () => void }
-  | { kind: 'confirm'; message: string; title?: string; resolve: (value: boolean) => void }
+  | { kind: 'confirm'; message: string; title?: string; danger: boolean; resolve: (value: boolean) => void }
 
 interface DialogState {
   // File des demandes : un seul dialogue à l'écran, la tête. Remplacer le
@@ -21,12 +29,13 @@ interface DialogState {
   confirmOpen: boolean
   confirmMessage: string
   confirmTitle: string | undefined
+  confirmDanger: boolean
   confirmResolver: ((value: boolean) => void) | null
 
   // Actions
   showAlert: (message: string, title?: string) => Promise<void>
   closeAlert: () => void
-  showConfirm: (message: string, title?: string) => Promise<boolean>
+  showConfirm: (message: string, title?: string, options?: ConfirmOptions) => Promise<boolean>
   resolveConfirm: (value: boolean) => void
 }
 
@@ -46,6 +55,7 @@ function showingHeadOf(queue: DialogRequest[]) {
     confirmOpen: confirm !== null,
     confirmMessage: confirm?.message ?? '',
     confirmTitle: confirm?.title,
+    confirmDanger: confirm?.danger ?? false,
     confirmResolver: confirm?.resolve ?? null,
   }
 }
@@ -66,9 +76,10 @@ export const useDialogStore = create<DialogState>((set, get) => ({
     head.resolve()
   },
 
-  showConfirm: (message: string, title?: string) => {
+  showConfirm: (message: string, title?: string, options?: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
-      set(showingHeadOf([...get().queue, { kind: 'confirm', message, title, resolve }]))
+      const danger = options?.danger ?? false
+      set(showingHeadOf([...get().queue, { kind: 'confirm', message, title, danger, resolve }]))
     })
   },
 

@@ -54,12 +54,12 @@ export const ActionsSection: React.FC = () => {
       totalChunks: stats.totalChunks
     });
 
-    if (!await useDialogStore.getState().showConfirm(confirmMessage)) {
+    if (!await useDialogStore.getState().showConfirm(confirmMessage, undefined, { danger: true })) {
       return;
     }
 
     // Double confirmation
-    if (!await useDialogStore.getState().showConfirm(t('actions.purgeDatabase.finalConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('actions.purgeDatabase.finalConfirm'), undefined, { danger: true })) {
       return;
     }
 
@@ -92,12 +92,12 @@ export const ActionsSection: React.FC = () => {
       chunkCount: primaryStats.chunkCount
     });
 
-    if (!await useDialogStore.getState().showConfirm(confirmMessage)) {
+    if (!await useDialogStore.getState().showConfirm(confirmMessage, undefined, { danger: true })) {
       return;
     }
 
     // Double confirmation
-    if (!await useDialogStore.getState().showConfirm(t('actions.purgePrimaryDatabase.finalConfirm'))) {
+    if (!await useDialogStore.getState().showConfirm(t('actions.purgePrimaryDatabase.finalConfirm'), undefined, { danger: true })) {
       return;
     }
 

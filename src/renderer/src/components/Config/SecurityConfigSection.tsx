@@ -541,7 +541,7 @@ export const SecurityConfigSection: React.FC<SecurityConfigSectionProps> = ({ on
           onClick={async () => {
             const confirmed = await useDialogStore
               .getState()
-              .showConfirm(t('security.revokeConfirm'));
+              .showConfirm(t('security.revokeConfirm'), undefined, { danger: true });
             if (!confirmed) return;
             setRevoking(true);
             try {

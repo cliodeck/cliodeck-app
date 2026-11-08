@@ -324,7 +324,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const handleSend = consentGuard.guardedSend;
 
   const handleClear = useCallback(async () => {
-    if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'))) {
+    if (await useDialogStore.getState().showConfirm(t('chat.clearConfirm'), undefined, { danger: true })) {
       reset();
     }
   }, [reset, t]);
