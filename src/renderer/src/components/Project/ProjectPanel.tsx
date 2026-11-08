@@ -119,8 +119,11 @@ export const ProjectPanel: React.FC = () => {
    * Seul un fichier sans rien de l'auteur se remplace sans demander. Rend faux si rien n'a été
    * écrit : c'est fermer l'assistant qui abandonne les réponses. Rend vrai quand elles sont dans
    * le fichier : l'assistant passe à son écran de fin, et c'est l'auteur qui le ferme.
+   *
+   * Le nom du projet n'est posé en titre que dans un fichier sans rien de l'auteur : ajouté à la
+   * suite de son texte, il devenait un second titre de premier niveau sous le sien (BT1-8).
    */
-  const finishOnboarding = async (section: string, projectPath: string): Promise<boolean> => {
+  const finishOnboarding = async (section: string, projectName: string, projectPath: string): Promise<boolean> => {
     const { showAlert, showConfirm } = useDialogStore.getState();
     const tellFailure = async (failure: ContextFailure): Promise<boolean> => {
       await showAlert(`${contextFailureText(t, failure)} ${t('onboarding.writeError')}`);
@@ -134,7 +137,7 @@ export const ProjectPanel: React.FC = () => {
 
     const { raw, sourcePath, sources } = read.hints;
     const blank = sources.context.blank;
-    const next = blank ? section : appendToContext(raw, section);
+    const next = blank ? `# ${projectName}\n\n${section}` : appendToContext(raw, section);
     if (next !== raw) {
       if (!blank && !(await showConfirm(t('onboarding.appendConfirm'), t('onboarding.appendConfirmTitle')))) {
         return false;
@@ -568,7 +571,7 @@ export const ProjectPanel: React.FC = () => {
       {onboarding && (
         <OnboardingWizard
           projectName={onboarding.name}
-          onComplete={(section) => finishOnboarding(section, onboarding.path)}
+          onComplete={(section) => finishOnboarding(section, onboarding.name, onboarding.path)}
           onSkip={() => setOnboarding(null)}
         />
       )}

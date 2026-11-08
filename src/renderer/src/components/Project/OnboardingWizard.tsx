@@ -27,7 +27,11 @@ interface OnboardingAnswers {
 
 interface Props {
   projectName: string;
-  /** Rend faux si rien n'a été écrit : l'assistant reste ouvert, avec les réponses de l'auteur. */
+  /**
+   * Reçoit les sections, sans titre : seul un fichier sans rien de l'auteur reçoit le nom du
+   * projet en titre, l'ajout à son texte n'en pose pas un second (BT1-8).
+   * Rend faux si rien n'a été écrit : l'assistant reste ouvert, avec les réponses de l'auteur.
+   */
   onComplete: (hints: string) => Promise<boolean>;
   onSkip: () => void;
 }
@@ -74,12 +78,12 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
     finishingRef.current = true;
     setFinishing(true);
     try {
-      if (await onComplete(generateHints(projectName, answers))) setCurrentStep('done');
+      if (await onComplete(generateHints(answers))) setCurrentStep('done');
     } finally {
       finishingRef.current = false;
       setFinishing(false);
     }
-  }, [answers, projectName, onComplete]);
+  }, [answers, onComplete]);
 
   const advance = useCallback(() => {
     const idx = STEPS.indexOf(currentStep);
@@ -287,10 +291,9 @@ export const OnboardingWizard: React.FC<Props> = ({ projectName, onComplete, onS
   );
 };
 
-function generateHints(projectName: string, answers: OnboardingAnswers): string {
+/** Les sections de `context.md`, sans le titre du fichier, que pose l'appelant s'il y a lieu. */
+function generateHints(answers: OnboardingAnswers): string {
   const lines: string[] = [];
-  lines.push(`# ${projectName}`);
-  lines.push('');
 
   if (answers.topic) {
     lines.push(`## Research Topic`);
