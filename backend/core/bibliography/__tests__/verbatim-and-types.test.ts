@@ -4,6 +4,7 @@ import { BibTeXParser } from '../BibTeXParser';
 import { createCitation } from '../../../types/citation';
 import { citationToCSL } from '../../citation/citationFromZotero';
 import { assignCiteKeys } from '../citekey';
+import { isPdfPath } from '../pdf-attachment';
 import type { ZoteroItem } from '../../../integrations/zotero/ZoteroAPI';
 
 /**
@@ -68,6 +69,76 @@ describe('champs verbatim', () => {
     ]);
     expect(bib).toContain('url = {https://example.org/%7Bid%7D}');
     expect(parser.parse(bib)).toHaveLength(1);
+  });
+});
+
+/**
+ * Le chemin du PDF (`file`) se relit tel qu'il a été écrit. Le nettoyage LaTeX changeait `~` en
+ * espace (iCloud : `com~apple~CloudDocs`) et `--` en tiret demi-cadratin ; l'échappement de
+ * l'exporteur changeait `\` en `\textbackslash{}`, qui grossissait à chaque synchronisation ; la
+ * lettre de lecteur d'un chemin Windows était coupée au deux-points (S07-1-16).
+ */
+describe('champ file', () => {
+  const exporter = new BibTeXExporter();
+  const parser = new BibTeXParser();
+  const BIB_DIR = '/projets/these';
+  const ICLOUD = '/Users/fred/Library/Mobile Documents/com~apple~CloudDocs/These/PDFs/Farge--Foucault_1982 a_b.pdf';
+
+  const withFile = (file: string) =>
+    createCitation({ id: 'Farge_1982', type: 'book', author: 'Farge, Arlette', year: '1982', title: 'Le désordre des familles', file });
+
+  it('relit à l’identique un chemin avec tilde, tiret double et tiret bas, sans l’échapper', () => {
+    const bib = exporter.exportToString([withFile(ICLOUD)]);
+
+    expect(bib).toContain(`file = {${ICLOUD}}`);
+    const [reread] = parser.parse(bib, BIB_DIR);
+    expect(reread.file).toBe(ICLOUD);
+    expect(exporter.exportToString([reread])).toBe(bib);
+  });
+
+  it('écrit un chemin Windows avec des barres obliques, qui ne grossit plus d’une synchronisation à l’autre', () => {
+    let citations = [withFile('C:\\Users\\fred\\PDFs\\Farge_1982.pdf')];
+    for (let i = 0; i < 3; i++) citations = parser.parse(exporter.exportToString(citations), BIB_DIR);
+
+    expect(citations[0].file).toBe('C:/Users/fred/PDFs/Farge_1982.pdf');
+  });
+
+  it('garde la lettre de lecteur d’un chemin Windows', () => {
+    const [plain] = parser.parse('@book{k, title={T}, file={C:/x/a.pdf}}', BIB_DIR);
+    const [described] = parser.parse('@book{k, title={T}, file={Full Text PDF:C:/x/a.pdf:application/pdf}}', BIB_DIR);
+
+    expect(plain.file).toBe('C:/x/a.pdf');
+    expect(described.file).toBe('C:/x/a.pdf');
+  });
+
+  it('relit sans antislash un ancien .bib écrit par ClioDeck, dont les échappements LaTeX sont retirés', () => {
+    const [unix] = parser.parse('@book{k, title={T}, file={/Users/fred/PDFs/Farge\\_1982 \\& co\\%.pdf}}', BIB_DIR);
+    const [windows] = parser.parse(
+      '@book{k, title={T}, file={C:\\textbackslash\\{\\}Users\\textbackslash\\{\\}fred\\textbackslash{}a\\_b.pdf}}',
+      BIB_DIR
+    );
+
+    expect(unix.file).toBe('/Users/fred/PDFs/Farge_1982 & co%.pdf');
+    expect(windows.file).toBe('C:\\Users\\fred\\a_b.pdf');
+  });
+
+  it('témoin : description:chemin:type de Zotero, plusieurs pièces jointes, chemin relatif', () => {
+    const [zotero] = parser.parse(
+      '@book{k, title={T}, file={Full Text PDF:/x/a_b.pdf:application/pdf;Snapshot:/x/b.html:text/html}}',
+      BIB_DIR
+    );
+    const [relative] = parser.parse('@book{k, title={T}, file={PDFs/a_b.pdf}}', BIB_DIR);
+
+    expect(zotero.file).toBe('/x/a_b.pdf');
+    expect(relative.file).toBe('/projets/these/PDFs/a_b.pdf');
+  });
+
+  it('un instantané HTML reste un instantané : relire file verbatim ne change pas ce qui est un PDF', () => {
+    const [snapshot] = parser.parse('@book{k, title={T}, file={PDFs/13082.html}}', BIB_DIR);
+    const [legacy] = parser.parse('@book{k, title={T}, file={PDFs/a\\_b.PDF}}', BIB_DIR);
+
+    expect(isPdfPath(snapshot.file)).toBe(false);
+    expect(isPdfPath(legacy.file)).toBe(true);
   });
 });
 

@@ -19,6 +19,24 @@ export function verbatimSafe(value: string): string {
 }
 
 /**
+ * Caractères spéciaux de LaTeX et leur forme échappée, appliqués en un seul passage : échapper
+ * d'abord `\` en `\textbackslash{}`, puis toutes les accolades, échappait aussi les siennes
+ * (`\textbackslash\{\}`), que la relecture ne savait pas défaire — un `\textbackslash` de plus à
+ * chaque réécriture (S07-1-30). `~` serait relu comme une espace insécable.
+ */
+const LATEX_ESCAPES: Record<string, string> = {
+  '\\': '\\textbackslash{}',
+  '&': '\\&',
+  '%': '\\%',
+  '$': '\\$',
+  '#': '\\#',
+  '_': '\\_',
+  '{': '\\{',
+  '}': '\\}',
+  '~': '\\textasciitilde{}',
+};
+
+/**
  * BibTeX Exporter
  *
  * Exports citations to BibTeX format, preserving all metadata including
@@ -92,7 +110,7 @@ export class BibTeXExporter {
 
     // File path (if present)
     if (citation.file) {
-      lines.push(this.formatField('file', citation.file));
+      lines.push(this.formatFileField(citation.file));
     }
 
     // Tags (export as semicolon-separated list)
@@ -155,6 +173,17 @@ export class BibTeXExporter {
   }
 
   /**
+   * Chemin du PDF, verbatim comme les champs de {@link VERBATIM_FIELDS} : l'échappement LaTeX le
+   * corrompait à la relecture (S07-1-16). Barres obliques normales, que Windows accepte : `\`
+   * serait relu comme un échappement. Pas de {@link verbatimSafe}, dont le `%7B` changerait le
+   * nom du fichier : une accolade, qui déséquilibrerait l'entrée, s'écrit `\{` ou `\}`.
+   */
+  private formatFileField(filePath: string): string {
+    const written = filePath.replaceAll('\\', '/').replace(/[{}]/g, (brace) => `\\${brace}`);
+    return `  file = {${written}},`;
+  }
+
+  /**
    * Format a BibTeX field with proper escaping
    */
   private formatField(name: string, value: string): string {
@@ -173,25 +202,8 @@ export class BibTeXExporter {
    * Escape special LaTeX characters in value
    */
   private escapeValue(value: string): string {
-    let escaped = value;
-
-    // Escape special LaTeX characters (but not Unicode characters)
-    const escapeMap: Array<[string, string]> = [
-      ['\\', '\\textbackslash{}'], // Must be first
-      ['&', '\\&'],
-      ['%', '\\%'],
-      ['$', '\\$'],
-      ['#', '\\#'],
-      ['_', '\\_'],
-      ['{', '\\{'],
-      ['}', '\\}'],
-    ];
-
-    for (const [char, latex] of escapeMap) {
-      escaped = escaped.replaceAll(char, latex);
-    }
-
-    return escaped;
+    // Escape special LaTeX characters (but not Unicode characters), cf. LATEX_ESCAPES
+    return value.replace(/[\\&%$#_{}~]/g, (char) => LATEX_ESCAPES[char]);
   }
 
   /**
@@ -316,7 +328,7 @@ export class BibTeXExporter {
     }
 
     if (citation.file) {
-      lines.push(this.formatField('file', citation.file)); // Don't convert file paths
+      lines.push(this.formatFileField(citation.file)); // Don't convert file paths
     }
 
     if (citation.tags && citation.tags.length > 0) {

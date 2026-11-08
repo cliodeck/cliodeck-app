@@ -50,7 +50,6 @@ type Response = {
   file?: string;
   unreadKeys?: string[];
   unreadFromZotero?: string[];
-  hasStringMacros?: boolean;
   reason?: string;
   written?: boolean;
 };
@@ -184,7 +183,7 @@ describe('zotero:synchronize — une entrée que le parseur n’a pas lue arrêt
   it('une entrée sans titre : refus nommant la clé, .bib identique à l’octet', async () => {
     makeProject(['@misc{entretien_dupont,', '  author = {Dupont, Jean},', '  note = {Entretien},', '  year = {1998},', '}', GARDE, ''].join('\n'));
 
-    await expectRefused({ error: 'bib-unread', file: BIB, unreadKeys: ['entretien_dupont'], hasStringMacros: false });
+    await expectRefused({ error: 'bib-unread', file: BIB, unreadKeys: ['entretien_dupont'] });
   });
 
   it('un titre vide', async () => {
@@ -199,10 +198,10 @@ describe('zotero:synchronize — une entrée que le parseur n’a pas lue arrêt
     await expectRefused({ error: 'bib-unread', unreadKeys: ['Lefort_1999'] });
   });
 
-  it('une définition @string, que la réécriture perdrait', async () => {
-    makeProject(['@string{AN = "Archives nationales"}', '', '@book{Garde_2000,', '  title = {Le temps des archives},', '  publisher = AN,', '}', ''].join('\n'));
+  it('une définition @string entre parenthèses, que le parseur ne lit pas, arrête tout', async () => {
+    makeProject(['@string(AN = "Archives nationales")', '', '@book{Garde_2000,', '  title = {Le temps des archives},', '  publisher = AN,', '}', ''].join('\n'));
 
-    await expectRefused({ error: 'bib-unread', unreadKeys: [], hasStringMacros: true });
+    await expectRefused({ error: 'bib-unread', unreadKeys: ['string'] });
   });
 
   it('un .bib qui n’est pas en UTF-8 est refusé, pas relu avec des caractères de remplacement', async () => {
@@ -232,7 +231,39 @@ describe('zotero:synchronize — une entrée que le parseur n’a pas lue arrêt
   });
 });
 
-describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zotero', () => {
+describe('zotero:synchronize — ce que le parseur lit depuis L05-7 se synchronise', () => {
+  // Le parseur développe les @string (L05-7) : la synchronisation passe, et la réécriture écrit la
+  // valeur développée. La définition n'est plus écrite ; la copie de sécurité garde le fichier d'avant.
+  it('une définition @string : la synchronisation passe, et la réécriture écrit la valeur développée', async () => {
+    const before = ['@string{AN = "Archives nationales"}', '', '@book{Garde_2000,', '  title = {Le temps des archives},', '  publisher = AN,', '}', ''].join('\n');
+    makeProject(before);
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+
+    const written = fs.readFileSync(bibPath(), 'utf-8');
+    expect(written).toContain('publisher = {Archives nationales}');
+    expect(written).not.toContain('{AN}');
+    expect(written).toContain('Martin');
+    expect(fs.readFileSync(backupPath(), 'utf-8')).toBe(before);
+  });
+
+  // Mendeley et BibDesk placent leurs champs à tiret avant le titre : l'entrée, lue sans titre,
+  // était refusée, et la synchronisation avec elle (S07-1-14).
+  it('une entrée Mendeley, champ à tiret avant le titre, se lit et survit à la réécriture', async () => {
+    makeProject(
+      ['@article{Dupont2010,', 'author = {Dupont, Jean},', 'mendeley-groups = {These},', 'title = {{Les archives}},', 'year = {2010}', '}', ''].join('\n')
+    );
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+
+    const written = fs.readFileSync(bibPath(), 'utf-8');
+    expect(written).toContain('@article{Dupont2010,');
+    expect(written).toContain('title = {Les archives}');
+    expect(written).toContain('mendeley-groups = {These}');
+  });
+});
+
+describe('zotero:synchronize — une entrée venue de Zotero se corrige dans le .bib, sans la supprimer', () => {
   it('une entrée non lue qui porte zoterokey est désignée comme venue de Zotero', async () => {
     makeProject(
       [
@@ -252,12 +283,10 @@ describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zot
     await expectRefused({ error: 'bib-unread', unreadKeys: ['entretien_dupont', 'Odd_2021'], unreadFromZotero: ['Odd_2021'] });
   });
 
-  // L'exporteur écrit une accolade isolée `\}`, que le parseur compte (S07-1-32, L05-7) : ce que la
-  // synchronisation écrit, la suivante le refuse. Corriger le .bib seul ne suffit pas : la
-  // synchronisation réécrit l'entrée depuis la notice. Le message dit donc de corriger la notice
-  // dans Zotero, puis de faire la même correction dans l'entrée du .bib. Pas de la supprimer : elle
-  // reviendrait de Zotero comme une référence nouvelle, et le PDF déjà téléchargé ne lui serait plus
-  // rattaché.
+  // Une entrée venue de Zotero ne se lit plus que si on a retouché le .bib à la main : l'accolade
+  // isolée `\}` que l'exporteur écrit, le parseur la lit depuis L05-7 (S07-1-32). Le message dit de
+  // corriger l'entrée dans le .bib, pas de la supprimer : elle reviendrait de Zotero comme une
+  // référence nouvelle, et le PDF déjà téléchargé ne lui serait plus rattaché.
 
   /** Les pièces jointes que les métadonnées rattachent à une notice. */
   const attachmentsOf = (zoteroKey: string) => {
@@ -279,31 +308,6 @@ describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zot
     }));
     fs.writeFileSync(metadataPath(), JSON.stringify(metadata, null, 2));
   };
-
-  it('accolade isolée dans un titre Zotero : le conseil du message débloque la synchronisation', async () => {
-    makeProject(GARDE + '\n');
-    contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
-    attachments = { ODD2021: [pdfAttachment('ATT1', 'odd.pdf')] };
-    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
-    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble \\} fermé');
-    const pdf = path.join(project, 'PDFs', 'odd.pdf');
-    markDownloaded('ODD2021', pdf);
-
-    const refused = await synchronize(request());
-    expect(refused).toMatchObject({ success: false, error: 'bib-unread' });
-    expect(refused.unreadKeys).toHaveLength(1);
-    expect(refused.unreadFromZotero).toEqual(refused.unreadKeys);
-
-    // La notice corrigée dans Zotero, et la même correction dans l'entrée du .bib.
-    contents = { COLL: [notice('ODD2021', 'Ensemble fermé', 'Odd')] };
-    fs.writeFileSync(bibPath(), fs.readFileSync(bibPath(), 'utf-8').replace('Ensemble \\} fermé', 'Ensemble fermé'));
-
-    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied' });
-    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble fermé');
-    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Garde_2000');
-    // Le PDF déjà téléchargé reste rattaché à sa référence.
-    expect(attachmentsOf('ODD2021')).toEqual([expect.objectContaining({ key: 'ATT1', downloaded: true, localPath: pdf })]);
-  });
 
   // Une notice Zotero sans titre s'exporte « Untitled » (`toCitation`) : une entrée venue de Zotero
   // n'en manque que si on a retouché le .bib. Le conseil vaut aussi : le titre remis en place.
@@ -329,12 +333,25 @@ describe('zotero:synchronize — une entrée venue de Zotero se corrige dans Zot
     expect(attachmentsOf('NOTI2021')).toEqual([expect.objectContaining({ key: 'ATT2', downloaded: true, localPath: pdf })]);
   });
 
-  it.fails('accolade isolée dans un titre Zotero : la synchronisation suivante passe (L05-7, S07-1-32)', async () => {
+  it('accolade isolée dans un titre Zotero : la synchronisation suivante passe (L05-7, S07-1-32)', async () => {
     makeProject(GARDE + '\n');
     contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
     await synchronize(request());
 
     expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied' });
+  });
+
+  it('accolade isolée dans un titre Zotero : rien à réécrire au passage suivant, et le PDF reste rattaché', async () => {
+    makeProject(GARDE + '\n');
+    contents = { COLL: [notice('ODD2021', 'Ensemble } fermé', 'Odd')] };
+    attachments = { ODD2021: [pdfAttachment('ATT1', 'odd.pdf')] };
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.readFileSync(bibPath(), 'utf-8')).toContain('Ensemble \\} fermé');
+    const pdf = path.join(project, 'PDFs', 'odd.pdf');
+    markDownloaded('ODD2021', pdf);
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: false });
+    expect(attachmentsOf('ODD2021')).toEqual([expect.objectContaining({ key: 'ATT1', downloaded: true, localPath: pdf })]);
   });
 });
 

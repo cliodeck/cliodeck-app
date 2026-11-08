@@ -64,7 +64,6 @@ describe('synchronisation refusée : le message, pas le code', () => {
       error: 'bib-unread',
       file: 'ma-biblio.bib',
       unreadKeys: ['entretien_dupont', 'carton_AN_F7_1234'],
-      hasStringMacros: false,
     });
 
     expect(message).toContain('zotero.sync.refused');
@@ -74,18 +73,16 @@ describe('synchronisation refusée : le message, pas le code', () => {
     expect(message).toContain('zotero.sync.fixThenRetry');
     expect(message).not.toContain('bib-unread');
     expect(message).not.toContain('zotero.sync.error');
-    expect(message).not.toContain('zotero.sync.stringMacros');
     expect(loadWithMetadata).not.toHaveBeenCalled();
   });
 
-  it('entrées venues de Zotero : le message dit de corriger la notice dans Zotero, puis de supprimer l’entrée', async () => {
+  it('entrées venues de Zotero : le message dit de les corriger sans les supprimer', async () => {
     const message = await synchronizeWith({
       success: false,
       error: 'bib-unread',
       file: 'ma-biblio.bib',
       unreadKeys: ['entretien_dupont', 'Odd_2021'],
       unreadFromZotero: ['Odd_2021'],
-      hasStringMacros: false,
     });
 
     expect(message).toContain('zotero.sync.unreadEntries');
@@ -100,7 +97,6 @@ describe('synchronisation refusée : le message, pas le code', () => {
       file: 'b.bib',
       unreadKeys: ['entretien_dupont'],
       unreadFromZotero: [],
-      hasStringMacros: false,
     });
 
     expect(message).not.toContain('zotero.sync.unreadFromZotero');
@@ -108,18 +104,11 @@ describe('synchronisation refusée : le message, pas le code', () => {
 
   it('beaucoup d’entrées : les premières, puis « et N autres »', async () => {
     const unreadKeys = Array.from({ length: 30 }, (_, i) => `e${i + 1}`);
-    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys, hasStringMacros: false });
+    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys });
 
     expect(message).toContain('@e8');
     expect(message).not.toContain('@e9\n');
     expect(message).toContain('zotero.sync.more');
-  });
-
-  it('@string : la définition à remplacer est dite', async () => {
-    const message = await synchronizeWith({ success: false, error: 'bib-unread', file: 'b.bib', unreadKeys: [], hasStringMacros: true });
-
-    expect(message).toContain('zotero.sync.stringMacros');
-    expect(message).not.toContain('zotero.sync.unreadEntries');
   });
 
   it('pas en UTF-8 : le message dit d’enregistrer en UTF-8', async () => {
