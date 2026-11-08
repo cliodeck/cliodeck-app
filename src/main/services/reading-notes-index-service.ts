@@ -32,12 +32,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import {
   ReadingNotesStore,
+  READING_NOTE_HEADER_VERSION,
   readingNoteHeader,
   readingNoteId,
   readingNotesStorePath,
   type ReadingNoteRecord,
 } from '../../../backend/core/vector-store/ReadingNotesStore.js';
-import { chunkManuscriptChapter } from '../../../backend/core/rag/manuscript-chunker.js';
+import { chunkManuscriptChapter, CHUNKER_VERSION } from '../../../backend/core/rag/manuscript-chunker.js';
 import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
@@ -113,8 +114,20 @@ function notesWithheldFrom(): string | null {
   }
 }
 
+/**
+ * Empreinte d'une note : son texte brut, la version du découpage et celle de
+ * l'en-tête embarqué avec chaque extrait (cf. `manuscript-index-service`).
+ * Sans les deux versions, changer le découpeur ou l'en-tête ne réembarquait
+ * aucune note avant sa prochaine modification. Les incrémenter réembarque
+ * donc toutes les notes, une fois, à la passe suivante.
+ */
 function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(`chunker:${CHUNKER_VERSION}\n`)
+    .update(`header:${READING_NOTE_HEADER_VERSION}\n`)
+    .update(content)
+    .digest('hex');
 }
 
 function reasonOf(e: unknown): string {

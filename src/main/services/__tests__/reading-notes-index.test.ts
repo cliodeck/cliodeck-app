@@ -4,7 +4,8 @@
  * d'appels prouve l'incrémental.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -17,6 +18,21 @@ import {
 } from '../../../../backend/core/vector-store/ReadingNotesStore.js';
 import { READING_NOTES_DIR } from '../../../../backend/core/bibliography/readingNotes.js';
 import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base.js';
+
+/**
+ * La version du découpage que voit l'indexeur : la vraie, sauf quand un test simule son
+ * incrément (`chunker.version`). Le découpage lui-même reste le vrai.
+ */
+const chunker = vi.hoisted(() => ({ version: null as number | null }));
+vi.mock('../../../../backend/core/rag/manuscript-chunker.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../backend/core/rag/manuscript-chunker.js')>();
+  return {
+    ...actual,
+    get CHUNKER_VERSION() {
+      return chunker.version ?? actual.CHUNKER_VERSION;
+    },
+  };
+});
 
 interface FakeEmbedder extends EmbeddingProvider {
   calls: number;
@@ -271,6 +287,7 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
 
   beforeEach(async () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-tout-'));
+    chunker.version = null;
     service = new ReadingNotesIndexService({
       isEnabled: () => true,
       openStore: (root) => new ReadingNotesStore({ dbPath: readingNotesStorePath(root) }),
@@ -281,6 +298,7 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
   });
 
   afterEach(() => {
+    chunker.version = null;
     service.clear();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
@@ -370,6 +388,35 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
 
     expect(storedDimensions()).toEqual([1024]);
     expect(service.stats()?.noteCount).toBe(3);
+  });
+
+  /*
+   * S04-1-19 : l'empreinte d'une note ne portait que son texte. Un changement du découpage
+   * (CHUNKER_VERSION) réindexait tout le manuscrit et aucune note.
+   */
+  it('CHUNKER_VERSION incrémentée : chaque note est réembarquée une fois, à la passe suivante', async () => {
+    chunker.version = 99;
+    const embedder = sizedEmbedder(768);
+
+    expect(await service.index(embedder)).toMatchObject({ indexed: 3, unchanged: 0 });
+    expect(await service.index(embedder)).toMatchObject({ indexed: 0, unchanged: 3 });
+  });
+
+  it('migration : une note indexée avec l’ancienne empreinte (texte seul) est réembarquée une fois', async () => {
+    const db = new Database(readingNotesStorePath(tmp));
+    try {
+      const update = db.prepare('UPDATE reading_notes SET content_hash = ? WHERE relative_path = ?');
+      for (const [file] of NOTES) {
+        const raw = fs.readFileSync(path.join(tmp, READING_NOTES_DIR, file), 'utf8');
+        update.run(crypto.createHash('sha256').update(raw).digest('hex'), path.join(READING_NOTES_DIR, file));
+      }
+    } finally {
+      db.close();
+    }
+    const embedder = sizedEmbedder(768);
+
+    expect(await service.index(embedder)).toMatchObject({ indexed: 3, unchanged: 0 });
+    expect(await service.index(embedder)).toMatchObject({ indexed: 0, unchanged: 3 });
   });
 });
 

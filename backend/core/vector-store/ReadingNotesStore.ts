@@ -98,6 +98,13 @@ function escapeFts(q: string): string {
 }
 
 /**
+ * Version du format de `readingNoteHeader`, mêlée à l'empreinte de chaque note : l'en-tête est
+ * embarqué avec les extraits, et le changer sans réembarquer laisserait l'index sur l'ancien. À
+ * incrémenter à chaque changement de ce que produit `readingNoteHeader`.
+ */
+export const READING_NOTE_HEADER_VERSION = 1;
+
+/**
  * En-tête d'une note : ce qui la rattache à sa référence.
  *
  * Embarqué et indexé avec chaque extrait, pour que « Braudel », une clé de
