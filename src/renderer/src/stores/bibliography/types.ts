@@ -169,7 +169,6 @@ export interface IndexingSliceState {
   // Actions
   indexPDFFromCitation: (citationId: string) => Promise<{ alreadyIndexed: boolean } & ProjectChangedOutcome>;
   reindexPDFFromCitation: (citationId: string) => Promise<ProjectChangedOutcome>;
-  getDocumentIdForCitation: (citationId: string) => Promise<string | null>;
   /** Indexe les PDF des références du projet `projectPath`, tant qu'il reste le projet ouvert. */
   indexAllPDFs: (projectPath: string) => Promise<{ indexed: number; skipped: number; errors: string[] } & ProjectChangedOutcome>;
   refreshIndexedPDFs: () => Promise<void>;

@@ -222,7 +222,7 @@
     "indexing": "Indexing...",
     "alreadyIndexed": "This PDF is already indexed: {{title}}",
     "reindex": "Re-index",
-    "reindexConfirm": "This PDF is already indexed. Do you want to delete it and re-index it?\n\n{{title}}",
+    "reindexConfirm": "This PDF is already indexed. Do you want to re-index it? The current index stays in place until the new one is ready.\n\n{{title}}",
     "pdfReindexed": "PDF re-indexed: {{title}}",
     "indexAllPDFs": "Index all PDFs",
     "noPDFsToIndex": "No PDFs to index in bibliography",

@@ -222,7 +222,7 @@
     "indexing": "Indexation...",
     "alreadyIndexed": "Ce PDF est déjà indexé: {{title}}",
     "reindex": "Ré-indexer",
-    "reindexConfirm": "Ce PDF est déjà indexé. Voulez-vous le supprimer et le ré-indexer ?\n\n{{title}}",
+    "reindexConfirm": "Ce PDF est déjà indexé. Voulez-vous le ré-indexer ? L'index actuel reste en place jusqu'à ce que le nouveau soit prêt.\n\n{{title}}",
     "pdfReindexed": "PDF ré-indexé : {{title}}",
     "indexAllPDFs": "Indexer tous les PDFs",
     "noPDFsToIndex": "Aucun PDF à indexer dans la bibliographie",
