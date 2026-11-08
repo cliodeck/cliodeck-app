@@ -51,17 +51,23 @@ export class MetadataUnreadableError extends Error {
  * Le PDF d'une référence au chargement du projet (S07-2-1) : celui du `.bib` s'il existe, sinon le
  * PDF téléchargé s'il existe (`downloaded`, déjà résolu), sinon celui du `.bib` retrouvé dans
  * `PDFs/` du projet (renommé, ouvert sur un autre Mac) ou depuis la racine du disque ; sinon la
- * valeur d'avant, telle quelle. Quand le PDF du `.bib` est rangé dans `PDFs/` d'un autre dossier et
- * que le projet a le sien (`projectCopyOf`), c'est celui du projet qui passe : la copie d'un projet
- * écrit avant ce correctif ne se sert pas des PDF de l'original. Un `.bib` abîmé par une ancienne
- * synchronisation (`com apple CloudDocs`, `\textbackslash`) désigne un « PDF » qui ne mène à rien :
- * le PDF téléchargé passe devant. Un chemin qui n'est pas un PDF (instantané HTML) cède toujours
- * devant le PDF téléchargé.
+ * valeur d'avant, telle quelle. Un `.bib` abîmé par une ancienne synchronisation (`com apple
+ * CloudDocs`, `\textbackslash`) désigne un « PDF » qui ne mène à rien : le PDF téléchargé passe
+ * devant. Un chemin qui n'est pas un PDF (instantané HTML) cède toujours devant le PDF téléchargé.
+ *
+ * Une seule exception à « celui du `.bib` s'il existe » : rangé dans `PDFs/` d'un autre dossier,
+ * alors que le téléchargement de la référence dans ce projet est son homonyme de `PDFs/`
+ * (`projectCopyOf`). C'est la copie d'un projet écrit avant ce correctif, l'original encore en
+ * place : la copie se sert de ses propres PDF. Sans ce téléchargement, rien ne dit que l'homonyme
+ * est le sien : le `file` du `.bib` vient aussi d'un import (le `.bib` d'un autre projet, que le
+ * parseur résout dans celui-ci), et un homonyme de `PDFs/` est souvent le PDF d'une autre référence
+ * (#131). Le PDF du `.bib` garde alors la main.
  */
 function resolvePdf(file: string | undefined, downloaded: string | undefined, projectPath: string): string | undefined {
   const fromBib = isPdfPath(file) ? file : undefined;
+  const ownCopy = fromBib && downloaded && projectCopyOf(fromBib, projectPath) === downloaded ? downloaded : undefined;
   const candidates: Array<() => string | undefined> = [
-    () => fromBib && projectCopyOf(fromBib, projectPath),
+    () => ownCopy,
     () => fromBib,
     () => downloaded,
     () => fromBib && fromStoredPath(fromBib, projectPath),

@@ -13,7 +13,11 @@ import {
 } from '../../../backend/core/fs/user-files.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import type { Citation } from '../../../backend/types/citation.js';
-import { BibliographyMetadataService } from '../../../backend/services/BibliographyMetadataService.js';
+import {
+  BibliographyMetadataService,
+  MetadataUnreadableError,
+  type BibliographyMetadataFile,
+} from '../../../backend/services/BibliographyMetadataService.js';
 import { BibliographyStatsEngine, type BibliographyStatistics } from '../../../backend/services/BibliographyStats.js';
 
 /** Le `.bib` attendu n'est pas là : ce n'est pas une bibliographie vide. */
@@ -94,6 +98,20 @@ export async function rewriteProjectBibliography(projectPath: string, bibtexPath
 }
 
 /**
+ * Les métadonnées du projet, pour retrouver ses PDF téléchargés. Illisibles, elles n'arrêtent pas la
+ * fusion, qui ne les réécrit pas : les chemins se résolvent sans elles.
+ */
+async function metadataOrNull(projectPath: string): Promise<BibliographyMetadataFile | null> {
+  try {
+    return await BibliographyMetadataService.loadMetadata(projectPath);
+  } catch (error: unknown) {
+    if (!(error instanceof MetadataUnreadableError)) throw error;
+    console.warn('⚠️ Métadonnées bibliographiques illisibles : PDF du projet résolus sans elles', error.message);
+    return null;
+  }
+}
+
+/**
  * Ajoute au `.bib` du projet les références d'`incoming` qu'il n'a pas encore (même item Zotero,
  * sinon même clé BibTeX), relu, fusionné et réécrit sous son verrou. Absent, il naît de la fusion.
  * Illisible, ou une seule de ses entrées non lue : rien n'est écrit. Rien de nouveau : il n'est pas
@@ -109,9 +127,13 @@ export function mergeIntoProjectBibliography(
     if (read.kind === 'unreadable') throw new UnreadableFileError(bibtexPath, read.reason, read.message);
     if (read.kind === 'ok' && read.unreadKeys.length > 0) throw new BibNotFullyReadError(bibtexPath, read.unreadKeys);
 
-    // Les PDF du projet retrouvés où ils sont (projet renommé, ouvert sur un autre Mac) : la
-    // réécriture les range relatifs au `.bib` (S07-2-1).
-    const local = BibliographyMetadataService.mergeCitationsWithMetadata(read.kind === 'ok' ? read.citations : [], null, projectPath);
+    // Les PDF du projet retrouvés où ils sont (projet renommé, copié, ouvert sur un autre Mac) : la
+    // réécriture les range relatifs au `.bib` (S07-2-1). Les métadonnées disent quels PDF le projet a
+    // téléchargés : sans elles, la copie d'un projet ancien réécrirait les chemins de l'original.
+    // Seul `file` en est repris, et là seulement où le `.bib` en avait un : le reste ne change pas.
+    const parsed = read.kind === 'ok' ? read.citations : [];
+    const resolved = BibliographyMetadataService.mergeCitationsWithMetadata(parsed, await metadataOrNull(projectPath), projectPath);
+    const local = parsed.map((citation, i) => (citation.file === undefined ? citation : { ...citation, file: resolved[i].file }));
     const { merged, newCount, duplicates } = mergeCitationLists(local, incoming);
     if (newCount > 0 || read.kind === 'absent') {
       const bibtex = new BibTeXExporter().exportToString(merged, { fileBaseDir: path.dirname(path.resolve(bibtexPath)) });

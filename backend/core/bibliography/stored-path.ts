@@ -55,12 +55,16 @@ const rebase = (stored: string, projectPath: string): string =>
 
 /**
  * Quand `stored` est un chemin absolu rangé dans le dossier `PDFs` d'un autre dossier : le PDF de
- * même nom dans `PDFs/` du projet, qui en tient lieu. Le téléchargement Zotero n'écrit que dans
- * `PDFs/` du projet ouvert : un tel chemin vient d'un projet écrit avant S07-2-1, puis renommé, ou
- * copié (sauvegarde, « Dupliquer » du Finder) alors que l'original reste en place. La copie se
- * servait des PDF de l'original, et sa synchronisation réécrivait leur chemin absolu dans son
- * `.bib`. Hors de ce cas, `undefined` : un PDF de Zotero (`storage/<clé>/…`), ou rangé ailleurs, n'a
- * pas de double ici. L'existence du fichier n'est pas vérifiée.
+ * même nom dans `PDFs/` du projet, qui en tiendrait lieu. Hors de ce cas, `undefined` : un PDF de
+ * Zotero (`storage/<clé>/…`), ou rangé ailleurs, n'a pas de double ici. L'existence du fichier
+ * n'est pas vérifiée.
+ *
+ * Il en tient lieu pour un chemin que le téléchargement de ce projet a écrit (`localPath` des
+ * métadonnées) : celui-ci n'écrit que dans `PDFs/` du projet ouvert, et un tel chemin vient d'un
+ * projet écrit avant S07-2-1, puis renommé, ou copié (sauvegarde, « Dupliquer » du Finder) alors que
+ * l'original reste en place. Pas pour le champ `file` d'un `.bib` : il vient aussi d'un import, et
+ * l'homonyme est alors le PDF d'une autre référence. Le PDF du `.bib` ne cède que devant le
+ * téléchargement de sa référence (cf. `resolvePdf` de `BibliographyMetadataService`).
  */
 export function projectCopyOf(stored: string, projectPath: string): string | undefined {
   if (!isAbsoluteAnywhere(stored)) return undefined;
@@ -70,11 +74,13 @@ export function projectCopyOf(stored: string, projectPath: string): string | und
 }
 
 /**
- * Le chemin absolu d'un chemin rangé : relatif, rattaché au projet tel qu'il est maintenant. Absolu,
- * dans `PDFs/` d'un autre dossier, et le projet a le sien (`projectCopyOf`) : celui du projet, même
- * si l'autre existe encore. Absolu et présent : tel quel. Absolu mais disparu (projet renommé, écrit
- * sur un autre poste) : le PDF de même nom dans `PDFs/` du projet s'il y est. Sinon tel quel : un
- * fichier rangé hors du projet n'est jamais déplacé en pensée.
+ * Le chemin absolu d'un chemin rangé par le téléchargement du projet (`localPath`) : relatif,
+ * rattaché au projet tel qu'il est maintenant. Absolu, dans `PDFs/` d'un autre dossier, et le projet
+ * a le sien (`projectCopyOf`) : celui du projet, même si l'autre existe encore. Absolu et présent :
+ * tel quel. Absolu mais disparu (projet renommé, écrit sur un autre poste) : le PDF de même nom dans
+ * `PDFs/` du projet s'il y est. Sinon tel quel : un fichier rangé hors du projet n'est jamais
+ * déplacé en pensée. Le `file` d'un `.bib` n'y passe qu'une fois disparu (`resolvePdf`) : la
+ * préférence pour la copie se confond alors avec le repli dans `PDFs/`.
  */
 export function fromStoredPath(
   stored: string,

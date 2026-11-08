@@ -642,14 +642,27 @@ describe('BibliographyMetadataService — chemins des PDF relatifs au projet', (
       expect(stored.ZK.zoteroAttachments?.[0].localPath).toBe('PDFs/a.pdf');
     });
 
-    it('une référence sans métadonnées, au PDF rangé dans PDFs/ de l’original : celui de la copie', () => {
+    // Le PDF de la copie a changé depuis (téléchargé de nouveau, annoté) : il n'est plus identique à
+    // celui de l'original. C'est toujours le téléchargement de la référence dans ce projet.
+    it('le PDF de la copie, téléchargé de nouveau depuis, reste le sien', async () => {
+      fs.writeFileSync(pdf(copy), '%PDF-1.4 Dupont, version corrigée dans Zotero');
+      await BibliographyMetadataService.patchAttachment(copy, downloaded, 'ATT', pdf(copy));
+
+      const merged = await reload(copy, { file: pdf(project) });
+
+      expect(merged.file).toBe(pdf(copy));
+    });
+
+    // Rien ne dit que l'homonyme de PDFs/ est le sien : le .bib peut venir d'un import, et un
+    // homonyme d'être une autre référence. Le PDF du .bib, qui existe, garde la main (étape 3).
+    it('témoin : une référence que le projet n’a pas téléchargée garde le PDF du .bib, qui existe', () => {
       const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
         [makeCitation({ id: 'manuel_2020', file: pdf(project) })],
         null,
         copy
       );
 
-      expect(merged.file).toBe(pdf(copy));
+      expect(merged.file).toBe(pdf(project));
     });
 
     it('témoin : un PDF de Zotero (storage/<clé>/…) du .bib garde la main sur un homonyme de PDFs/', async () => {
@@ -658,6 +671,66 @@ describe('BibliographyMetadataService — chemins des PDF relatifs au projet', (
       fs.writeFileSync(zotero, '%PDF-1.4 Zotero');
 
       expect((await reload(copy, { file: zotero })).file).toBe(zotero);
+    });
+  });
+
+  /**
+   * Le `.bib` d'un autre projet ClioDeck fusionné dans celui-ci : le parseur résout son
+   * `PDFs/doc.pdf` en `<autre projet>/PDFs/doc.pdf`, qui existe. Les homonymes sont fréquents dans
+   * `PDFs/` (#131 : sur un corpus de presse, la collision est la règle) : celui du projet est le PDF
+   * d'une autre référence. La référence importée recevait ce PDF-là, et la réécriture suivante du
+   * `.bib` l'y inscrivait, en relatif.
+   */
+  describe('le .bib d’un autre projet fusionné, PDFs/ du projet a un homonyme', () => {
+    let other: string;
+    const imported = () => makeCitation({ id: 'A_2001', zoteroKey: 'ZA', file: pdf(other, 'doc.pdf') });
+
+    beforeEach(() => {
+      other = path.join(root, 'Autre-projet');
+      fs.mkdirSync(path.join(other, 'PDFs'), { recursive: true });
+      fs.writeFileSync(pdf(other, 'doc.pdf'), '%PDF-1.4 A, de l’autre projet');
+      fs.writeFileSync(pdf(project, 'doc.pdf'), '%PDF-1.4 C, une autre référence du projet');
+    });
+
+    it('la référence importée garde son PDF, celui de l’autre projet', () => {
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata([imported()], null, project);
+
+      expect(merged.file).toBe(pdf(other, 'doc.pdf'));
+    });
+
+    it('téléchargée ici sous un nom suffixé : jamais l’homonyme d’une autre référence', async () => {
+      fs.writeFileSync(pdf(project, 'doc_KA.pdf'), '%PDF-1.4 A, téléchargée ici');
+      await BibliographyMetadataService.patchAttachment(
+        project,
+        { ...imported(), zoteroAttachments: [attachment('KA', 'doc.pdf')] },
+        'KA',
+        pdf(project, 'doc_KA.pdf')
+      );
+
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+        [imported()],
+        await BibliographyMetadataService.loadMetadata(project),
+        project
+      );
+
+      expect(merged.file).not.toBe(pdf(project, 'doc.pdf'));
+    });
+
+    it('témoin : téléchargée ici sous ce nom, c’est son PDF dans ce projet', async () => {
+      await BibliographyMetadataService.patchAttachment(
+        project,
+        { ...imported(), zoteroAttachments: [attachment('KA', 'doc.pdf')] },
+        'KA',
+        pdf(project, 'doc.pdf')
+      );
+
+      const [merged] = BibliographyMetadataService.mergeCitationsWithMetadata(
+        [imported()],
+        await BibliographyMetadataService.loadMetadata(project),
+        project
+      );
+
+      expect(merged.file).toBe(pdf(project, 'doc.pdf'));
     });
   });
 

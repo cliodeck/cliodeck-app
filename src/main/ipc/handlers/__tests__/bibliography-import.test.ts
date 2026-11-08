@@ -235,6 +235,96 @@ describe('« Fusionner » : la fusion est écrite dans le .bib du projet', () =>
     expect(fs.readFileSync(projectBib(), 'utf8')).toContain('file = {PDFs/Garde.pdf}');
   });
 
+  // La copie d'un projet écrit avant le correctif, l'original encore en place : le .bib et les
+  // métadonnées désignent le PDF de l'original, qui existe. Celui de la copie est le téléchargement
+  // de la référence dans ce projet : la réécriture le range relatif, sans le chemin de l'original.
+  it('copie d’un projet ancien, l’original en place : la réécriture range relatif le PDF de la copie', async () => {
+    await openProject();
+    const original = tempDir('cliodeck-projet-original-');
+    const originalPdf = path.join(original, 'PDFs', 'Garde.pdf');
+    for (const dir of [original, projectDir]) {
+      fs.mkdirSync(path.join(dir, 'PDFs'));
+      fs.writeFileSync(path.join(dir, 'PDFs', 'Garde.pdf'), '%PDF-1.4 Garde');
+    }
+    fs.writeFileSync(projectBib(), PROJET.replace('year = {2000},', () => `year = {2000},\n  file = {${originalPdf}},`));
+    fs.writeFileSync(
+      path.join(projectDir, '.cliodeck', 'bibliography-metadata.json'),
+      JSON.stringify({
+        version: 2,
+        lastUpdated: '2026-01-01T00:00:00.000Z',
+        citations: {
+          GARD2000: {
+            id: 'Garde_2000',
+            zoteroKey: 'GARD2000',
+            zoteroAttachments: [{ key: 'ATT1', filename: 'Garde.pdf', contentType: 'application/pdf', downloaded: true, localPath: originalPdf }],
+          },
+        },
+      })
+    );
+    const source = downloaded('collegue.bib', COLLEGUE);
+
+    expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+
+    const written = fs.readFileSync(projectBib(), 'utf8');
+    expect(written).toContain('file = {PDFs/Garde.pdf}');
+    expect(written).not.toContain(original);
+  });
+
+  it('des métadonnées illisibles n’arrêtent pas la fusion, qui ne les réécrit pas', async () => {
+    await openProject();
+    const metadataFile = path.join(projectDir, '.cliodeck', 'bibliography-metadata.json');
+    fs.writeFileSync(metadataFile, '{ "citations": ');
+    const source = downloaded('collegue.bib', COLLEGUE);
+
+    expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+
+    expect(idsOf(projectBib())).toEqual(['Garde_2000', 'Main_2010', 'Autre_2015']);
+    expect(fs.readFileSync(metadataFile, 'utf8')).toBe('{ "citations": ');
+  });
+
+  /**
+   * Le .bib d'un autre projet ClioDeck : le parseur résout son `PDFs/doc.pdf` dans l'autre projet,
+   * où il existe. `PDFs/` du projet a un homonyme, le PDF d'une autre référence : la collision est
+   * la règle sur un corpus de presse (#131). La référence importée recevait ce PDF-là.
+   */
+  describe('le .bib d’un autre projet, dont PDFs/ a un homonyme dans le projet', () => {
+    let otherPdf = '';
+
+    beforeEach(async () => {
+      await openProject({ bib: entry('Garde_2000', 'Le temps des archives', '\n  file = {PDFs/doc.pdf},') });
+      fs.mkdirSync(path.join(projectDir, 'PDFs'));
+      fs.writeFileSync(path.join(projectDir, 'PDFs', 'doc.pdf'), '%PDF-1.4 Garde (projet)');
+      const other = tempDir('cliodeck-autre-projet-');
+      fs.mkdirSync(path.join(other, 'PDFs'));
+      otherPdf = path.join(other, 'PDFs', 'doc.pdf');
+      fs.writeFileSync(otherPdf, '%PDF-1.4 Autre (autre projet)');
+      const source = path.join(other, 'bibliography.bib');
+      fs.writeFileSync(source, entry('Autre_2015', 'Un autre livre', '\n  file = {PDFs/doc.pdf},'));
+      expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+    });
+
+    it('au chargement, la référence importée garde son PDF', async () => {
+      const loaded = (await h.handlers.get('bibliography:load-with-metadata')!({}, { filePath: projectBib(), projectPath: projectDir })) as {
+        success: boolean;
+        citations: Array<{ id: string; file?: string }>;
+      };
+
+      expect(loaded.success).toBe(true);
+      expect(loaded.citations.find((c) => c.id === 'Autre_2015')?.file).toBe(otherPdf);
+      expect(loaded.citations.find((c) => c.id === 'Garde_2000')?.file).toBe(path.join(projectDir, 'PDFs', 'doc.pdf'));
+    });
+
+    it('la fusion suivante réécrit son lien tel quel, pas vers l’homonyme du projet', async () => {
+      const next = downloaded('seminaire.bib', entry('Tiers_2020', 'Un troisième livre'));
+
+      expect(await importBib(next, 'merge')).toMatchObject({ success: true, newCitations: 1 });
+
+      const written = fs.readFileSync(projectBib(), 'utf8');
+      expect(written).toContain(`file = {${otherPdf}}`);
+      expect(written.match(/file = \{PDFs\/doc\.pdf\}/g)).toHaveLength(1);
+    });
+  });
+
   it('projet sans bibliographie : un bibliography.bib neuf, que project.json retient', async () => {
     await openProject({ bibliographySource: null, bib: null });
     const source = downloaded('collegue.bib', COLLEGUE);
