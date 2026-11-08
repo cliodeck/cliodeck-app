@@ -682,6 +682,7 @@
       "unreadEntries": "{{count}} entry(ies) in {{file}} could not be read, and rewriting the file would have erased them. Fix them in {{file}} with a text editor: add a title (title = {…}) to any entry that has none; close any brace left open; replace with braces the parentheses around an entry or an @string definition: @string{AN = {…}}, not @string(AN = …). Entries concerned:",
       "unreadFromZotero": "From Zotero (zoterokey field): {{keys}}. Fix these entries in {{file}} without deleting them: a deleted entry would come back from Zotero as a new reference, and the PDF already downloaded would no longer be attached to it.",
       "metadataUnreadable": "{{file}}, which records the Zotero PDFs attached to the references, cannot be read: the synchronization would have replaced it, and those attachments would have been lost. Repair it, or restore a copy of it. Deleting it starts from scratch: PDFs already downloaded stay on disk, but they will have to be downloaded again to be attached.",
+      "metadataUnreadableAfterBib": "Synchronization failed: {{bib}} was updated, but {{file}}, which records the Zotero PDFs attached to the references, became unreadable during the synchronization: it was not rewritten, and the attached PDFs were not updated in it. Repair it, or restore a copy of it.",
       "fixThenRetry": "Then run “Sync with Zotero” again."
     }
   },

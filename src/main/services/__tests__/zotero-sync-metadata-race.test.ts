@@ -191,14 +191,52 @@ describe('synchronisation Zotero et rattachement simultané', () => {
     release();
     const result = await sync;
 
-    // Le .bib est déjà réécrit à ce moment : ce n'est pas le refus d'avant toute écriture.
-    expect(result.success).toBe(false);
-    expect(result.error).not.toBe('metadata-unreadable');
-    expect(result.error).toContain('bibliography-metadata.json');
+    // Le .bib est déjà réécrit à ce moment : ce n'est pas le refus d'avant toute écriture. Un code
+    // et les deux fichiers, pas une phrase : le renderer la formule dans la langue de l'historien.
+    expect(result).toMatchObject({
+      success: false,
+      error: 'metadata-unreadable-after-bib',
+      bibFile: 'bibliography.bib',
+      file: path.join('.cliodeck', 'bibliography-metadata.json'),
+    });
     expect(fs.readFileSync(metadataPath(), 'utf-8')).toBe(damaged);
     // Ni fichier neuf à côté, ni mise de côté : l'historien le répare ou en remet une copie.
     const besideMetadata = fs.readdirSync(path.join(project, '.cliodeck')).filter((name) => /metadata|^\.~/.test(name));
     expect(besideMetadata).toEqual(['bibliography-metadata.json']);
     expect(fs.readFileSync(path.join(project, 'bibliography.bib'), 'utf-8')).toContain('Revue de presse');
+  });
+
+  /**
+   * La synchronisation refait une clé (`Martin_`, héritée de l'ancien générateur) et les
+   * métadonnées deviennent illisibles pendant qu'elle lit Zotero. Le `.bib` porte déjà la nouvelle
+   * clé ; la note de lecture doit la suivre aussi. Sautée avec les métadonnées, elle restait sur
+   * l'ancienne : la synchronisation suivante, qui garde une clé valide et unique, ne refait plus
+   * rien, et la note restait coupée de sa référence.
+   */
+  it('métadonnées devenues illisibles et clé refaite : la note de lecture suit quand même le .bib', async () => {
+    const bibPath = path.join(project, 'bibliography.bib');
+    fs.writeFileSync(bibPath, fs.readFileSync(bibPath, 'utf-8').replace('{Martin_2023,', '{Martin_,'));
+    const notesDir = path.join(project, 'reading-notes');
+    fs.mkdirSync(notesDir);
+    fs.writeFileSync(
+      path.join(notesDir, 'Martin_.md'),
+      '---\ncitekey: Martin_\nzotero_key: XKEY2023\ntags: []\n---\n\nL’article cite trois rapports parlementaires.\n'
+    );
+    const { reading, release } = holdZotero([X, Y]);
+    const damaged = fs.readFileSync(metadataPath(), 'utf-8').slice(0, 50);
+
+    const sync = synchronize();
+    await reading;
+    fs.writeFileSync(metadataPath(), damaged);
+    release();
+    const result = await sync;
+
+    expect(result).toMatchObject({ success: false, error: 'metadata-unreadable-after-bib' });
+    expect(fs.readFileSync(bibPath, 'utf-8')).toContain('{Martin_2023,');
+    expect(fs.readdirSync(notesDir)).toEqual(['Martin_2023.md']);
+    const note = fs.readFileSync(path.join(notesDir, 'Martin_2023.md'), 'utf-8');
+    expect(note).toContain('citekey: Martin_2023');
+    expect(note).toContain('L’article cite trois rapports parlementaires.');
+    expect(fs.readFileSync(metadataPath(), 'utf-8')).toBe(damaged);
   });
 });

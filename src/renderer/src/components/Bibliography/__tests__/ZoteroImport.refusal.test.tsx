@@ -140,6 +140,22 @@ describe('synchronisation refusée : le message, pas le code', () => {
     expect(message).not.toContain('metadata-unreadable');
   });
 
+  it('métadonnées devenues illisibles après la réécriture du .bib : le message dit ce qui a été écrit, dans la langue de l’interface', async () => {
+    const message = await synchronizeWith({
+      success: false,
+      error: 'metadata-unreadable-after-bib',
+      file: '.cliodeck/bibliography-metadata.json',
+      bibFile: 'bibliography.bib',
+    });
+
+    // Ni le refus « rien n'a été écrit », ni l'échec générique avec un code brut.
+    expect(message).toContain('zotero.sync.metadataUnreadableAfterBib');
+    expect(message).toContain('zotero.sync.fixThenRetry');
+    expect(message).not.toContain('zotero.sync.refused');
+    expect(message).not.toContain('zotero.sync.error');
+    expect(message).not.toContain('metadata-unreadable-after-bib');
+  });
+
   it('témoin : un autre échec garde le message d’échec', async () => {
     const message = await synchronizeWith({ success: false, error: 'connexion refusée' });
 

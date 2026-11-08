@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { NUM_CTX_MAX, NUM_CTX_MIN } from '../../../../backend/core/llm/context-windows.js';
+import type { Citation, ZoteroAttachmentInfo } from '../../../../backend/types/citation.js';
 
 // Le nom devient un sous-dossier du dossier choisi : il ne doit pas en sortir.
 const isProjectFolderName = (name: string) => name !== '.' && name !== '..' && !/[/\\]/.test(name);
@@ -431,33 +432,73 @@ export const BibliographyArchiveOrphanPdfsSchema = z.object({
   archiveSubdir: z.string().optional(),
 });
 
+/** Ce que `BibliographyMetadataService.patchAttachment` lit d'une référence. */
+type AttachmentCitation = Pick<
+  Citation,
+  'id' | 'zoteroKey' | 'zoteroAttachments' | 'zoteroTags' | 'zoteroNotes' | 'dateAdded' | 'dateModified'
+>;
+
+/** `null`, tel que l'API Zotero l'écrit pour un champ sans valeur, vaut absent. */
+const absentIfNull = <T>(value: T | null | undefined): T | undefined => value ?? undefined;
+
+/**
+ * Une pièce jointe telle que le panneau la tient : venue de Zotero par `toCitation`, écrite par la
+ * synchronisation et relue des métadonnées, `null` compris. L'API Zotero écrit `"md5": null` pour
+ * une pièce jointe dont le fichier n'est pas sur son stockage (quota plein, jamais envoyé) :
+ * refusé, ce `null` empêchait de rattacher tout PDF de la référence, à chaque essai. La clé et le
+ * nom sont exigés ; ailleurs, un `null` devient absent, ou la valeur par défaut.
+ */
+const ZoteroAttachmentFromPanelSchema = z
+  .object({
+    key: z.string().min(1),
+    filename: z.string(),
+    contentType: z.string().nullish(),
+    downloaded: z.boolean().nullish(),
+    localPath: z.string().nullish(),
+    dateModified: z.string().nullish(),
+    md5: z.string().nullish(),
+  })
+  .transform(
+    (attachment): ZoteroAttachmentInfo => ({
+      key: attachment.key,
+      filename: attachment.filename,
+      contentType: attachment.contentType ?? 'application/pdf',
+      downloaded: attachment.downloaded ?? false,
+      localPath: absentIfNull(attachment.localPath),
+      dateModified: absentIfNull(attachment.dateModified),
+      md5: absentIfNull(attachment.md5),
+    })
+  );
+
 /**
  * Un PDF téléchargé, rattaché à sa seule pièce jointe. La référence ne sert qu'à créer son entrée
- * dans les métadonnées si elle y manque.
+ * dans les métadonnées si elle y manque ; elle arrive telle que le panneau la tient, et ses `null`
+ * deviennent absents. Sont stricts les champs qui désignent le rattachement : `id`, les clés des
+ * pièces jointes, `attachmentKey`.
  */
 export const BibliographyUpdateAttachmentSchema = z.object({
   projectPath: z.string().min(1, 'Project path is required'),
-  citation: z.object({
-    id: z.string().min(1),
-    zoteroKey: z.string().optional(),
-    zoteroAttachments: z
-      .array(
-        z.object({
-          key: z.string().min(1),
-          filename: z.string(),
-          contentType: z.string().default('application/pdf'),
-          downloaded: z.boolean().default(false),
-          localPath: z.string().optional(),
-          dateModified: z.string().optional(),
-          md5: z.string().optional(),
-        })
-      )
-      .optional(),
-    zoteroTags: z.array(z.object({ tag: z.string(), automatic: z.boolean() })).optional(),
-    zoteroNotes: z.array(z.object({ key: z.string(), text: z.string() })).optional(),
-    dateAdded: z.string().optional(),
-    dateModified: z.string().optional(),
-  }),
+  citation: z
+    .object({
+      id: z.string().min(1),
+      zoteroKey: z.string().nullish(),
+      zoteroAttachments: z.array(ZoteroAttachmentFromPanelSchema).nullish(),
+      zoteroTags: z.array(z.object({ tag: z.string(), automatic: z.boolean() })).nullish(),
+      zoteroNotes: z.array(z.object({ key: z.string(), text: z.string() })).nullish(),
+      dateAdded: z.string().nullish(),
+      dateModified: z.string().nullish(),
+    })
+    .transform(
+      (citation): AttachmentCitation => ({
+        id: citation.id,
+        zoteroKey: absentIfNull(citation.zoteroKey),
+        zoteroAttachments: absentIfNull(citation.zoteroAttachments),
+        zoteroTags: absentIfNull(citation.zoteroTags),
+        zoteroNotes: absentIfNull(citation.zoteroNotes),
+        dateAdded: absentIfNull(citation.dateAdded),
+        dateModified: absentIfNull(citation.dateModified),
+      })
+    ),
   attachmentKey: z.string().regex(/^[A-Za-z0-9]{1,32}$/, 'Attachment key must be a Zotero key'),
   localPath: z.string().min(1, 'Local path is required'),
 });
