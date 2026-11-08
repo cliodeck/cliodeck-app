@@ -135,6 +135,13 @@ export interface WordExportResult extends ExportResult {
    * seule façon que l'auteur l'apprenne avant son relecteur.
    */
   unresolvedCitations?: string[];
+  /**
+   * Sans pandoc : le style CSL du projet, présent, que le moteur interne ne
+   * sait pas appliquer (`dependent` : style « dépendant », dont seul pandoc
+   * va chercher le parent ; `unreadable` : style qu'il ne lit pas). Les
+   * citations restent sous forme de clés ; la modale le dit.
+   */
+  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' };
 }
 
 /**
@@ -486,19 +493,39 @@ export class WordExportService {
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       let unresolvedCitations: string[] = [];
-      const projectStyle = options.citation?.useEngine ? undefined : options.cslPath;
-      const engineStyle = options.citation?.useEngine
+      let unusableCsl: WordExportResult['unusableCsl'];
+      const locale = options.citation?.locale ?? 'fr-FR';
+      const engine = new CitationEngine();
+      let engineStyle = options.citation?.useEngine
         ? (options.citation.style ?? 'chicago-note-bibliography')
-        : projectStyle;
+        : undefined;
+      // Le style du projet, seulement avec une bibliographie, comme pandoc
+      // qui n'applique `--csl` qu'avec `--bibliography`. Sans elle, le moteur
+      // résolvait les clés dans la bibliographie restée en mémoire, celle
+      // d'un autre projet peut-être (S07-1-31) : les clés restent.
+      const projectStyle =
+        options.citation?.useEngine || !hasBibliography ? undefined : options.cslPath;
+      if (projectStyle) {
+        // Lu ici, sans bloquer : le moteur ne lit lui-même que les styles
+        // embarqués. Un style qu'il ne sait pas appliquer (dépendant,
+        // illisible) n'est pas tenté : il remplaçait chaque clé par
+        // `[NO_PRINTED_FORM]`, sans un mot.
+        const reason = await readFile(projectStyle, 'utf-8').then(
+          (xml) => {
+            engine.registerStyle(projectStyle, xml);
+            return engine.styleProblem(projectStyle, locale);
+          },
+          () => 'unreadable' as const
+        );
+        if (reason) {
+          unusableCsl = { path: projectStyle, reason };
+          console.warn(`⚠️ word-export: style CSL du projet inapplicable sans pandoc (${reason}):`, projectStyle);
+        } else {
+          engineStyle = projectStyle;
+        }
+      }
       if (engineStyle) {
         try {
-          const locale = options.citation?.locale ?? 'fr-FR';
-          const engine = new CitationEngine();
-          // Le CSL du projet se lit ici, sans bloquer : le moteur ne lit
-          // lui-même que les styles embarqués.
-          if (projectStyle) {
-            engine.registerStyle(projectStyle, await readFile(projectStyle, 'utf-8'));
-          }
           const processed = await processMarkdownCitations(sourceMarkdown, {
             style: engineStyle,
             locale,
@@ -809,6 +836,7 @@ export class WordExportService {
         outputPath,
         ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
         ...(missingCsl ? { missingCsl } : {}),
+        ...(unusableCsl ? { unusableCsl } : {}),
       };
     } catch (error: unknown) {
       console.error('❌ Word export failed:', error);

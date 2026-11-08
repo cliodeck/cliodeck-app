@@ -42,6 +42,15 @@ export interface FormatResult {
 type Locale = string;
 type StyleId = string; // filename without .csl
 
+/** Notice fictive de {@link CitationEngine.styleProblem}. */
+const STYLE_PROBE_ITEM: CSLItem = {
+  id: 'cliodeck-style-probe',
+  type: 'book',
+  title: 'Essai',
+  author: [{ family: 'Essai', given: 'A.' }],
+  issued: { 'date-parts': [[2000]] },
+};
+
 /**
  * Dossier `resources/csl` par défaut.
  *
@@ -110,6 +119,31 @@ export class CitationEngine {
    */
   registerStyle(styleId: StyleId, xml: string): void {
     this.styleCache.set(styleId, xml);
+  }
+
+  /**
+   * Ce qui empêche ce style de rendre une citation, ou `undefined`.
+   *
+   * - `dependent` : un style « dépendant » (`<link rel="independent-parent">`,
+   *   la plupart des styles de revue du dépôt Zotero) ne fait que renvoyer à
+   *   son parent. Pandoc va chercher ce parent en ligne ; citeproc-js rend
+   *   `[NO_PRINTED_FORM]` à la place de chaque citation.
+   * - `unreadable` : citeproc-js n'en tire aucune citation (XML qu'il ne lit
+   *   pas, style sans `<citation>`).
+   *
+   * Essai sur une notice fictive, avant de rendre le document : sans lui, un
+   * export remplaçait chaque clé par `[NO_PRINTED_FORM]` et se disait réussi.
+   */
+  styleProblem(styleId: StyleId, locale: Locale = 'en-US'): 'dependent' | 'unreadable' | undefined {
+    try {
+      if (/<link\b[^>]*\brel\s*=\s*["']independent-parent["']/.test(this.loadStyle(styleId))) {
+        return 'dependent';
+      }
+      const [citation] = this.formatCitation([STYLE_PROBE_ITEM], styleId, locale).footnotes;
+      return !citation || citation.includes('NO_PRINTED_FORM') ? 'unreadable' : undefined;
+    } catch {
+      return 'unreadable';
+    }
   }
 
   /** List available styles (files ending in .csl). */

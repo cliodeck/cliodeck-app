@@ -48,6 +48,38 @@ const MARQUEUR_CSL = `<?xml version="1.0" encoding="utf-8"?>
 </style>
 `;
 
+/**
+ * Un style « dépendant », comme la plupart des styles de revue du dépôt
+ * Zotero : un simple renvoi à son parent, sans citation ni bibliographie.
+ * Pandoc irait chercher le parent en ligne ; le moteur interne rendait
+ * `[NO_PRINTED_FORM]` à la place de chaque citation. Écrit ici : aucun
+ * téléchargement.
+ */
+const DEPENDANT_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" default-locale="fr-FR">
+  <info>
+    <title>Revue dépendante</title>
+    <id>http://cliodeck.invalid/styles/revue-dependante</id>
+    <link href="http://cliodeck.invalid/styles/revue-dependante" rel="self"/>
+    <link href="http://cliodeck.invalid/styles/parent" rel="independent-parent"/>
+    <category citation-format="numeric"/>
+    <updated>2026-11-08T00:00:00+00:00</updated>
+  </info>
+</style>
+`;
+
+/** Un style que citeproc-js ne sait pas lire : une balise jamais fermée. */
+const ILLISIBLE_CSL = `<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Illisible</title><id>http://cliodeck.invalid/styles/illisible</id></info>
+  <citation>
+    <layout prefix="[[X " suffix="]]">
+      <names variable="author"><name/></names><text variable="title"
+    </layout>
+  </citation>
+</style>
+`;
+
 const BIB = `@book{farge1989,
   author = {Farge, Arlette},
   title = {Le goût de l'archive},
@@ -68,16 +100,17 @@ afterAll(() => {
 /**
  * Un projet tel que le main l'a écrit : `project.json` déclare la
  * bibliographie et le style par des chemins relatifs, les fichiers sont à la
- * racine. `type: 'book'` pose trois chapitres.
+ * racine. `type: 'book'` pose trois chapitres ; `bibliography: false`, un
+ * projet qui n'a pas encore de bibliographie.
  */
-function makeProject(type: 'article' | 'book'): string {
+function makeProject(type: 'article' | 'book', { bibliography = true } = {}): string {
   const projectPath = mkdtempSync(join(dir, `${type}-`));
-  writeFileSync(join(projectPath, 'references.bib'), BIB);
+  if (bibliography) writeFileSync(join(projectPath, 'references.bib'), BIB);
   writeFileSync(join(projectPath, 'marqueur.csl'), MARQUEUR_CSL);
   const manifest: Record<string, unknown> = {
     name: 'Essai',
     type,
-    bibliographySource: { type: 'file', filePath: 'references.bib' },
+    ...(bibliography ? { bibliographySource: { type: 'file', filePath: 'references.bib' } } : {}),
     cslPath: 'marqueur.csl',
   };
   if (type === 'book') {
@@ -247,5 +280,51 @@ describe('export Word sans pandoc : le moteur interne et le style du projet', ()
     const { result } = await exportNative(articleOptions(projectPath));
 
     expect(result).toMatchObject({ success: true, missingCsl: join(projectPath, 'marqueur.csl') });
+  });
+
+  it('style dépendant : les clés restent, et l’export dit pourquoi', async () => {
+    const projectPath = makeProject('article');
+    const stylePath = join(projectPath, 'marqueur.csl');
+    writeFileSync(stylePath, DEPENDANT_CSL);
+
+    const { result, text } = await exportNative(articleOptions(projectPath));
+
+    expect(text).not.toContain('NO_PRINTED_FORM');
+    expect(text).toContain('[@farge1989]');
+    expect(result).toMatchObject({
+      success: true,
+      unusableCsl: { path: stylePath, reason: 'dependent' },
+    });
+    expect(result).not.toHaveProperty('unresolvedCitations');
+  });
+
+  it('style que le moteur ne sait pas lire : les clés restent, et l’export le dit', async () => {
+    const projectPath = makeProject('article');
+    const stylePath = join(projectPath, 'marqueur.csl');
+    writeFileSync(stylePath, ILLISIBLE_CSL);
+
+    const { result, text } = await exportNative(articleOptions(projectPath));
+
+    expect(text).toContain('[@farge1989]');
+    expect(result).toMatchObject({
+      success: true,
+      unusableCsl: { path: stylePath, reason: 'unreadable' },
+    });
+    // La clé existe : la dire « introuvable » tromperait l'auteur.
+    expect(result).not.toHaveProperty('unresolvedCitations');
+  });
+
+  it('projet sans bibliographie : ses citations ne viennent pas de celle restée en mémoire', async () => {
+    // La bibliographie chargée plus haut joue celle d'un projet ouvert avant
+    // (le service n'est pas vidé au changement de projet, S07-1-31). Pandoc
+    // n'applique `--csl` qu'avec `--bibliography` : le moteur fait de même.
+    const projectPath = makeProject('article', { bibliography: false });
+    const { bibliographyPath: _aucune, ...options } = articleOptions(projectPath);
+
+    const { result, text } = await exportNative(options);
+
+    expect(result).toMatchObject({ success: true });
+    expect(text).toContain('[@farge1989]');
+    expect(text).not.toContain('MARQUEUR');
   });
 });

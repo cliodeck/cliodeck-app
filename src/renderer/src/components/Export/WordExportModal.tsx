@@ -17,6 +17,21 @@ import {
 import { backdropClose } from '../../utils/backdropClose';
 import './PDFExportModal.css'; // Reuse the same CSS
 
+/** `WordExportResult.unusableCsl`, côté main. */
+interface UnusableCsl {
+  path: string;
+  reason: 'dependent' | 'unreadable';
+}
+
+/** Le résultat arrive de l'IPC sans type : seule une forme connue s'affiche. */
+function readUnusableCsl(value: unknown): UnusableCsl | null {
+  if (!value || typeof value !== 'object') return null;
+  const { path, reason } = value as Partial<UnusableCsl>;
+  return typeof path === 'string' && (reason === 'dependent' || reason === 'unreadable')
+    ? { path, reason }
+    : null;
+}
+
 interface WordExportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,6 +58,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
   // Style du projet introuvable : le document est écrit sans lui.
   const [missingCsl, setMissingCsl] = useState<string | null>(null);
+  // Sans pandoc, style du projet que le moteur interne ne sait pas appliquer :
+  // le document garde ses clés.
+  const [unusableCsl, setUnusableCsl] = useState<UnusableCsl | null>(null);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
   const [citation, setCitation] = useState<ExportCitationValue>({
@@ -149,6 +167,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setSuccess(false);
     setUnresolvedCitations([]);
     setMissingCsl(null);
+    setUnusableCsl(null);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -231,13 +250,15 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         ? result.unresolvedCitations
         : [];
       const cslMissing = typeof result.missingCsl === 'string' ? result.missingCsl : null;
-      if (result.success && (unresolved.length > 0 || cslMissing)) {
+      const cslUnusable = readUnusableCsl(result.unusableCsl);
+      if (result.success && (unresolved.length > 0 || cslMissing || cslUnusable)) {
         // Le document est écrit, mais il contient ces clés telles quelles, ou
         // n'a pas le style du projet : la modale reste ouverte pour que
         // l'auteur le lise.
         setSuccess(true);
         setUnresolvedCitations(unresolved);
         setMissingCsl(cslMissing);
+        setUnusableCsl(cslUnusable);
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
@@ -274,6 +295,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       setSuccess(false);
       setUnresolvedCitations([]);
       setMissingCsl(null);
+      setUnusableCsl(null);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -430,6 +452,17 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             <div className="export-error" data-testid="export-csl-missing">
               <AlertCircle size={16} />
               <span>{t('export.cslMissing', { file: missingCsl })}</span>
+            </div>
+          )}
+
+          {unusableCsl && (
+            <div className="export-error" data-testid="export-csl-unusable">
+              <AlertCircle size={16} />
+              <span>
+                {t(unusableCsl.reason === 'dependent' ? 'export.cslDependent' : 'export.cslUnreadable', {
+                  file: unusableCsl.path,
+                })}
+              </span>
             </div>
           )}
         </div>

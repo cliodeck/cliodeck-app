@@ -484,7 +484,9 @@
       "currentChapter": "Nur dieses Kapitel (Arbeitsfassung)"
     },
     "manuscriptUnreadable": "{{file}} konnte nicht gelesen werden. Prüfen Sie, ob die Datei im Projekt vorhanden ist.",
-    "cslMissing": "Der in den Projekteinstellungen festgelegte Zitierstil wurde nicht gefunden ({{file}}): Er wurde auf dieses Dokument nicht angewendet. Wählen Sie ihn in den Projekteinstellungen erneut aus."
+    "cslMissing": "Der in den Projekteinstellungen festgelegte Zitierstil wurde nicht gefunden ({{file}}): Er wurde auf dieses Dokument nicht angewendet. Wählen Sie ihn in den Projekteinstellungen erneut aus.",
+    "cslDependent": "Der in den Projekteinstellungen festgelegte Zitierstil ({{file}}) hängt von einem anderen Stil ab, seinem übergeordneten Stil, den nur Pandoc abrufen kann: Er wurde auf dieses Dokument nicht angewendet, die Zitate bleiben als Zitierschlüssel stehen. Installieren Sie Pandoc oder wählen Sie den übergeordneten Stil in den Projekteinstellungen.",
+    "cslUnreadable": "Der in den Projekteinstellungen festgelegte Zitierstil ({{file}}) konnte nicht gelesen werden: Er wurde auf dieses Dokument nicht angewendet, die Zitate bleiben als Zitierschlüssel stehen. Prüfen Sie die Datei oder wählen Sie einen anderen Stil in den Projekteinstellungen."
   },
   "rag": {
     "title": "RAG-Konfiguration",

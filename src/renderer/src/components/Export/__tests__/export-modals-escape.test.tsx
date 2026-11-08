@@ -59,6 +59,7 @@ interface ExportOutcome {
   timeLimitMinutes?: number;
   unresolvedCitations?: string[];
   missingCsl?: string;
+  unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' };
 }
 
 type ExportModal = React.FC<{ isOpen: boolean; onClose: () => void }>;
@@ -634,3 +635,27 @@ describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
     });
   }
 );
+
+/**
+ * BT1-4, revue : sans pandoc, un style du projet que le moteur interne ne sait
+ * pas appliquer (dépendant, illisible) n'est pas tenté. Le document garde ses
+ * clés ; la modale dit pourquoi, et reste ouverte.
+ */
+describe.each([
+  { reason: 'dependent' as const, key: 'export.cslDependent' },
+  { reason: 'unreadable' as const, key: 'export.cslUnreadable' },
+])('modale d’export Word : style du projet inapplicable ($reason)', ({ reason, key }) => {
+  it('le dit, et reste ouverte', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    const onClose = vi.fn();
+    render(<Host Modal={WordExportModal} onClose={onClose} />);
+    await startExport('export.word.export', 'export.word.exporting');
+
+    finish({ success: true, unusableCsl: { path: '/tmp/demo/revue.csl', reason } });
+
+    expect(await screen.findByTestId('export-csl-unusable')).toHaveTextContent(key);
+    await advance(10_000);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
