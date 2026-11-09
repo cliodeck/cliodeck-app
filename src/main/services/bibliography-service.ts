@@ -4,6 +4,7 @@ import { BibTeXParser } from '../../../backend/core/bibliography/BibTeXParser.js
 import { BibTeXExporter } from '../../../backend/core/bibliography/BibTeXExporter.js';
 import { auditParsedBib, type BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
 import { mergeCitationLists } from '../../../backend/core/bibliography/mergeCitations.js';
+import { keepOutsideEntries } from '../../../backend/core/bibliography/outsideEntries.js';
 import {
   atomicWriteFile,
   readUserFile,
@@ -79,8 +80,18 @@ export function bibBackupPath(projectPath: string): string {
  * Remplace le `.bib` du projet, tout entier ou pas du tout, après avoir copié la version en place
  * dans `.cliodeck/bibliography.bib.bak`, à l'octet. Une copie qui échoue arrête tout : le `.bib`
  * n'est pas touché. Un `.bib` encore absent n'a rien à copier.
+ *
+ * `keepOutsideEntries` : `content` n'a que des entrées, réécrites depuis les citations (synchronisation
+ * Zotero, « Fusionner ») ; ce que la version en place porte hors de ses entrées — en-tête,
+ * `@comment`, `@preamble`, `@string`, texte libre — y est repris (H2). « Remplacer » ne le passe
+ * pas : le fichier importé arrive avec ses blocs à lui, pas ceux du fichier qu'il remplace.
  */
-export async function rewriteProjectBibliography(projectPath: string, bibtexPath: string, content: string): Promise<void> {
+export async function rewriteProjectBibliography(
+  projectPath: string,
+  bibtexPath: string,
+  content: string,
+  options: { keepOutsideEntries?: boolean } = {}
+): Promise<void> {
   const previous = await readFile(bibtexPath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null;
     throw error;
@@ -94,7 +105,23 @@ export async function rewriteProjectBibliography(projectPath: string, bibtexPath
     await mkdir(path.dirname(backup), { recursive: true });
     await atomicWriteFile(backup, previous);
   }
-  await atomicWriteFile(bibtexPath, content);
+  await atomicWriteFile(bibtexPath, previous && options.keepOutsideEntries ? withOutsideEntriesOf(previous, content) : content);
+}
+
+/**
+ * `content` avec ce que `previous` porte hors de ses entrées. Lu en UTF-8 strict, comme tout `.bib` :
+ * devenu illisible depuis la lecture qui a précédé la réécriture, rien n'en est repris, plutôt que
+ * des caractères de remplacement ; la copie de sécurité le garde tel quel.
+ */
+function withOutsideEntriesOf(previous: Buffer, content: string): string {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(previous);
+  } catch {
+    console.warn('⚠️ Le .bib en place n’est plus en UTF-8 : ce qu’il porte hors de ses entrées n’est pas repris (la copie de sécurité le garde).');
+    return content;
+  }
+  return keepOutsideEntries(text, content);
 }
 
 /**
@@ -115,7 +142,9 @@ async function metadataOrNull(projectPath: string): Promise<BibliographyMetadata
  * Ajoute au `.bib` du projet les références d'`incoming` qu'il n'a pas encore (même item Zotero,
  * sinon même clé BibTeX), relu, fusionné et réécrit sous son verrou. Absent, il naît de la fusion.
  * Illisible, ou une seule de ses entrées non lue : rien n'est écrit. Rien de nouveau : il n'est pas
- * réécrit, et la copie de sécurité garde l'état qu'elle gardait.
+ * réécrit, et la copie de sécurité garde l'état qu'elle gardait. Ce qu'il porte hors de ses entrées
+ * (groupes BibDesk ou JabRef, `@preamble`, commentaires) reste ; ce que le fichier importé porte hors
+ * des siennes n'y entre pas.
  */
 export function mergeIntoProjectBibliography(
   projectPath: string,
@@ -137,7 +166,7 @@ export function mergeIntoProjectBibliography(
     const { merged, newCount, duplicates } = mergeCitationLists(local, incoming);
     if (newCount > 0 || read.kind === 'absent') {
       const bibtex = new BibTeXExporter().exportToString(merged, { fileBaseDir: path.dirname(path.resolve(bibtexPath)) });
-      await rewriteProjectBibliography(projectPath, bibtexPath, bibtex);
+      await rewriteProjectBibliography(projectPath, bibtexPath, bibtex, { keepOutsideEntries: true });
     }
     return { newCount, duplicates };
   });

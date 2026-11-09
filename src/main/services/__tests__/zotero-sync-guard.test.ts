@@ -233,7 +233,8 @@ describe('zotero:synchronize — une entrée que le parseur n’a pas lue arrêt
 
 describe('zotero:synchronize — ce que le parseur lit depuis L05-7 se synchronise', () => {
   // Le parseur développe les @string (L05-7) : la synchronisation passe, et la réécriture écrit la
-  // valeur développée. La définition n'est plus écrite ; la copie de sécurité garde le fichier d'avant.
+  // valeur développée. La définition reste telle quelle, avec ce que le fichier porte hors de ses
+  // entrées (H2), mais plus rien ne la cite ; la copie de sécurité garde le fichier d'avant.
   it('une définition @string : la synchronisation passe, et la réécriture écrit la valeur développée', async () => {
     const before = ['@string{AN = "Archives nationales"}', '', '@book{Garde_2000,', '  title = {Le temps des archives},', '  publisher = AN,', '}', ''].join('\n');
     makeProject(before);
@@ -243,6 +244,7 @@ describe('zotero:synchronize — ce que le parseur lit depuis L05-7 se synchroni
     const written = fs.readFileSync(bibPath(), 'utf-8');
     expect(written).toContain('publisher = {Archives nationales}');
     expect(written).not.toContain('{AN}');
+    expect(written.startsWith('@string{AN = "Archives nationales"}\n')).toBe(true);
     expect(written).toContain('Martin');
     expect(fs.readFileSync(backupPath(), 'utf-8')).toBe(before);
   });
@@ -288,8 +290,9 @@ describe('zotero:synchronize — ce que le parseur lit depuis L05-7 se synchroni
     expect(written).toContain(`bdsk-url-1 = {${url}}`);
     expect(written).toContain('publisher = {Archives nationales}');
     expect(written).toContain('Martin');
-    // Le bloc des groupes BibDesk n'est pas réécrit (perte connue, hors L05-7) : la copie de
-    // sécurité garde le fichier d'avant.
+    // Le bloc des groupes BibDesk reste, en fin de fichier (H2) ; la copie de sécurité garde le
+    // fichier d'avant.
+    expect(written.endsWith('@comment{BibDesk Static Groups{\n<plist version="1.0"><array></array></plist>\n}}\n')).toBe(true);
     expect(fs.readFileSync(backupPath(), 'utf-8')).toBe(before);
   });
 });

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -50,6 +51,7 @@ import { bibliographyService, bibBackupPath } from '../../../services/bibliograp
 import { projectManager } from '../../../services/project-manager.js';
 import { __resetConsentedPaths } from '../../utils/user-consented-paths.js';
 import { BibTeXParser } from '../../../../../backend/core/bibliography/BibTeXParser.js';
+import { auditParsedBib } from '../../../../../backend/core/bibliography/bibAudit.js';
 
 interface ImportResponse {
   success: boolean;
@@ -462,6 +464,74 @@ describe('« Remplacer » : le fichier importé entre dans le projet sans rien �
     expect(fs.readFileSync(projectBib(), 'utf8')).toBe(PROJET);
     expect(fs.statSync(projectBib()).mtimeMs).toBe(mtime);
     expect(fs.existsSync(bibBackupPath(projectDir))).toBe(false);
+  });
+});
+
+/**
+ * Ce que le `.bib` du projet porte hors de ses entrées (H2) : en-tête, `@comment` (les groupes de
+ * BibDesk et de JabRef), `@preamble`, texte libre. « Fusionner » réécrit le fichier depuis ses
+ * citations, et l'exporteur n'écrit que des entrées : tout le reste disparaissait. « Remplacer »
+ * met le fichier importé tel quel, avec ses blocs à lui, pas ceux du fichier qu'il remplace.
+ */
+describe('ce que le .bib du projet porte hors de ses entrées', () => {
+  const FIXTURES = fileURLToPath(new URL('../../../../../backend/core/bibliography/__tests__/fixtures/', import.meta.url));
+  const fixture = (name: string) => fs.readFileSync(path.join(FIXTURES, `${name}.bib`), 'utf8');
+  const count = (text: string, part: string) => text.split(part).length - 1;
+
+  it('« Fusionner » deux fois : l’en-tête BibDesk reste en tête, ses groupes en fin, à l’octet, une seule fois', async () => {
+    const original = fixture('blocs-bibdesk');
+    await openProject({ bib: original });
+    const head = original.slice(0, original.indexOf('@book{Garde2000,')).trimEnd();
+    const groups = original.slice(original.indexOf('@comment{BibDesk Static Groups{')).trimEnd();
+
+    expect(await importBib(downloaded('collegue.bib', entry('Autre_2015', 'Un autre livre')), 'merge')).toMatchObject({
+      success: true,
+      newCitations: 1,
+    });
+    expect(fs.readFileSync(bibBackupPath(projectDir), 'utf8')).toBe(original);
+    expect(await importBib(downloaded('neuf.bib', entry('Neuf_2020', 'Un livre neuf')), 'merge')).toMatchObject({
+      success: true,
+      newCitations: 1,
+    });
+
+    const written = fs.readFileSync(projectBib(), 'utf8');
+    expect(written.startsWith(head)).toBe(true);
+    expect(written.endsWith(`${groups}\n`)).toBe(true);
+    expect([count(written, head), count(written, groups)]).toEqual([1, 1]);
+    const citations = new BibTeXParser().parse(written);
+    expect(citations.map((c) => c.id)).toEqual(['Garde2000', 'Leduc1990', 'Autre_2015', 'Neuf_2020']);
+    expect(auditParsedBib(written, citations).unreadKeys).toEqual([]);
+  });
+
+  it('« Fusionner » : le préambule reste en tête, le texte libre d’entre deux entrées passe en fin, dans l’ordre', async () => {
+    const original = fixture('blocs-preambule');
+    await openProject({ bib: original });
+    const head = original.slice(0, original.indexOf('@book{Garde2000,')).trimEnd();
+    const between = original.slice(original.indexOf('% --- Sources imprimées ---'), original.indexOf('@article{Leduc1990,')).trimEnd();
+    const tail = original.slice(original.indexOf('@comment(à revoir')).trimEnd();
+
+    expect(await importBib(downloaded('collegue.bib', entry('Autre_2015', 'Un autre livre')), 'merge')).toMatchObject({
+      success: true,
+      newCitations: 1,
+    });
+
+    const written = fs.readFileSync(projectBib(), 'utf8');
+    expect(written.startsWith(head)).toBe(true);
+    expect(written.indexOf(between)).toBeGreaterThan(written.indexOf('@book{Autre_2015,'));
+    expect(written.endsWith(`${between}\n\n${tail}\n`)).toBe(true);
+    expect([count(written, head), count(written, between), count(written, tail)]).toEqual([1, 1, 1]);
+    expect(idsOf(projectBib())).toEqual(['Garde2000', 'Leduc1990', 'Autre_2015']);
+  });
+
+  it('« Remplacer » : le fichier écrit est le fichier importé, sans les blocs de l’ancien', async () => {
+    const original = fixture('blocs-bibdesk');
+    await openProject({ bib: original });
+    const imported = `@comment{jabref-meta: databaseType:bibtex;}\n\n${COLLEGUE}`;
+
+    expect(await importBib(downloaded('bibliography.bib', imported), 'replace')).toMatchObject({ success: true, total: 2 });
+
+    expect(fs.readFileSync(projectBib(), 'utf8')).toBe(imported);
+    expect(fs.readFileSync(bibBackupPath(projectDir), 'utf8')).toBe(original);
   });
 });
 
