@@ -299,9 +299,10 @@ class ZoteroService {
         const mustWrite = result.changed || !existsSync(bibtexPath);
         if (mustWrite) {
           // Écriture atomique, après une copie de l'état d'avant : un fichier à moitié écrit
-          // (coupure, OneDrive au mauvais moment) perdrait la bibliographie, et la réécriture
-          // perd ce que le parseur ignore (@comment, @preamble).
-          await rewriteProjectBibliography(options.projectPath, bibtexPath, result.bibtex);
+          // (coupure, OneDrive au mauvais moment) perdrait la bibliographie. `result.bibtex` n'a
+          // que des entrées : ce que le fichier porte hors d'elles (groupes BibDesk et JabRef,
+          // @comment, @preamble, texte libre) est repris du fichier en place (H2).
+          await rewriteProjectBibliography(options.projectPath, bibtexPath, result.bibtex, { keepOutsideEntries: true });
           // Une clé refaite ne doit pas couper une note de lecture de sa
           // référence : la note suit (front matter et nom de fichier). Elle
           // suit le `.bib`, qui porte déjà les nouvelles clés, avant les

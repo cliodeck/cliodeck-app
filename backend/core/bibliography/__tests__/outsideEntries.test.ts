@@ -1,0 +1,318 @@
+import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { keepOutsideEntries } from '../outsideEntries';
+import { BibTeXParser } from '../BibTeXParser';
+import { BibTeXExporter } from '../BibTeXExporter';
+import { auditParsedBib } from '../bibAudit';
+
+/**
+ * Ce qu'un `.bib` porte hors de ses entrées, repris à la réécriture (H2) : la synchronisation
+ * Zotero et « Fusionner » réécrivent le fichier depuis ses citations, et l'exporteur n'écrit que
+ * des entrées. Les fixtures `blocs-*` sont écrites à la main d'après la forme des fichiers de
+ * BibDesk et de JabRef, et l'exemple de préambule de BibTeX (voir leur en-tête).
+ */
+
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const fixture = (name: string) => readFileSync(path.join(FIXTURES, `${name}.bib`), 'utf-8');
+
+const parse = (bib: string) => new BibTeXParser().parse(bib);
+/** Ce qu'écrivent la synchronisation et la fusion : les seules entrées, depuis les citations. */
+const rewrite = (bib: string) => new BibTeXExporter().exportToString(parse(bib));
+const count = (text: string, part: string) => text.split(part).length - 1;
+
+/** Le texte de `bib` à partir de `start`, jusqu'à la fin de `end` (ou du fichier). */
+const from = (bib: string, start: string, end?: string) => {
+  const i = bib.indexOf(start);
+  if (i === -1) throw new Error(`« ${start} » absent`);
+  return end === undefined ? bib.slice(i).trimEnd() : bib.slice(i, bib.indexOf(end, i) + end.length);
+};
+
+const GARDE = '@book{Garde_2000,\n  title = {Le temps des archives},\n}';
+/** Un bloc de groupes BibDesk réduit à sa forme : liste de propriétés entre accolades imbriquées. */
+const GROUPS = '@comment{BibDesk Static Groups{\n<plist version="1.0"><array></array></plist>\n}}\n';
+
+/** Le fichier composé se relit comme les entrées réécrites seules, sans entrée non lue. */
+function expectSameReading(composed: string, rewritten: string): void {
+  const citations = parse(composed);
+  expect(citations).toEqual(parse(rewritten));
+  expect(auditParsedBib(composed, citations).unreadKeys).toEqual([]);
+}
+
+describe('keepOutsideEntries — fichiers de BibDesk, de JabRef, tenus à la main', () => {
+  it('BibDesk : l’en-tête et l’abréviation restent en tête, les deux blocs de groupes en fin, accolades imbriquées comprises', () => {
+    const previous = fixture('blocs-bibdesk');
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    const head = previous.slice(0, previous.indexOf('@book{Garde2000,')).trimEnd();
+    const groups = from(previous, '@comment{BibDesk Static Groups{');
+    expect(kept).toBe(`${head}\n\n${rewritten.trimEnd()}\n\n${groups}\n`);
+    expect(count(kept, '@comment{BibDesk Static Groups{')).toBe(1);
+    expect(count(kept, '@comment{BibDesk Smart Groups{')).toBe(1);
+    expectSameReading(kept, rewritten);
+  });
+
+  it('BibDesk : la ligne d’en-tête qui finit par une espace la garde', () => {
+    const previous = fixture('blocs-bibdesk');
+
+    expect(keepOutsideEntries(previous, rewrite(previous))).toContain('%% Created for Jean Dupont at 2024-03-12 10:15:42 +0100 \n');
+  });
+
+  it('JabRef : les blocs jabref-meta en fin, l’arbre des groupes sur plusieurs lignes, à l’octet', () => {
+    const previous = fixture('blocs-jabref');
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept.startsWith('% Encoding: UTF-8\n')).toBe(true);
+    expect(kept.endsWith(`${from(previous, '@Comment{jabref-meta: databaseType:biblatex;}')}\n`)).toBe(true);
+    expect(count(kept, '@Comment{jabref-meta: grouping:')).toBe(1);
+    expectSameReading(kept, rewritten);
+  });
+
+  it('à la main : le préambule en tête ; le texte d’entre deux entrées en fin, avant ce qui suivait la dernière', () => {
+    const previous = fixture('blocs-preambule');
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept.startsWith('@PREAMBLE{"\\newcommand{\\noopsort}[1]{}"}\n')).toBe(true);
+    expect(kept).toContain('@Comment{Bibliographie de la thèse, tenue à la main.}\n\n@book{Garde2000,');
+    const between = from(previous, '% --- Sources imprimées ---', 'fonds AN F7.');
+    const last = from(previous, '@comment(à revoir');
+    expect(kept.endsWith(`}\n\n${between}\n\n${last}\n`)).toBe(true);
+    expectSameReading(kept, rewritten);
+  });
+
+  it.each(['blocs-bibdesk', 'blocs-jabref', 'blocs-preambule'])('%s : une seconde réécriture rend le même fichier', (name) => {
+    const previous = fixture(name);
+    const rewritten = rewrite(previous);
+    const once = keepOutsideEntries(previous, rewritten);
+
+    expect(keepOutsideEntries(once, rewrite(once))).toBe(once);
+  });
+});
+
+describe('keepOutsideEntries — ce qui se lit comme avant', () => {
+  it('témoin : rien hors des entrées que des lignes vides et un BOM, le texte réécrit tel quel', () => {
+    const previous = `﻿\n\n${GARDE}\n\n\n${GARDE.replace('Garde_2000', 'Autre')}\n\n`;
+    const rewritten = rewrite(previous);
+
+    expect(keepOutsideEntries(previous, rewritten)).toBe(rewritten);
+  });
+
+  it('une définition @string reste telle quelle ; la valeur réécrite est développée', () => {
+    const previous = '@string{AN = {Archives nationales}}\n\n@book{Garde_2000,\n  title = {T},\n  publisher = AN,\n}\n';
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept.startsWith('@string{AN = {Archives nationales}}\n\n')).toBe(true);
+    expect(kept).toContain('publisher = {Archives nationales}');
+  });
+
+  it('un bloc @comment qui ne se referme pas, après la dernière entrée, reste, et l’entrée aussi', () => {
+    const previous = `${GARDE}\n\n@comment{à finir\n`;
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`${rewritten.trimEnd()}\n\n@comment{à finir\n`);
+    expectSameReading(kept, rewritten);
+  });
+
+  it('aucune entrée encore : les blocs restent en tête, la référence ajoutée vient après', () => {
+    const previous = '@Comment{jabref-meta: databaseType:biblatex;}\n';
+    const rewritten = rewrite(GARDE);
+
+    expect(keepOutsideEntries(previous, rewritten)).toBe(`@Comment{jabref-meta: databaseType:biblatex;}\n\n${rewritten}`);
+  });
+
+  // Le fichier composé doit se redécouper à l'identique : une fin de ligne CR seule que le
+  // découpage ne reconnaîtrait pas ferait rejeter l'en-tête et les groupes.
+  it.each([
+    ['CRLF', '\r\n'],
+    ['CR seul', '\r'],
+  ])('fins de ligne %s : l’en-tête et les groupes restent, la réécriture suivante rend le même fichier', (_name, eol) => {
+    const previous = ['%% En-tête', '', '@book{Garde_2000,', '  title = {T},', '}', '', '@comment{groupes}', ''].join(eol);
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`%% En-tête\n\n${rewritten.trimEnd()}\n\n@comment{groupes}\n`);
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
+  });
+
+  // Lu aussi comme CR puis LF, chaque CRLF doublait les découpages qu'essaie le moteur
+  // d'expressions régulières : quarante lignes vides suivies de texte ne finissaient pas.
+  it('CRLF, quarante lignes vides au milieu de l’en-tête : il est repris tel quel', () => {
+    const head = `%% En-tête${'\r\n'.repeat(40)}%% Suite de l’en-tête`;
+    const previous = `${head}\r\n\r\n@book{Garde_2000,\r\n  title = {T},\r\n}\r\n`;
+    const rewritten = rewrite(previous);
+
+    expect(keepOutsideEntries(previous, rewritten)).toBe(`${head}\n\n${rewritten}`);
+  });
+
+  it('toutes les entrées retirées : l’en-tête et les groupes restent', () => {
+    const previous = `% En-tête\n\n${GARDE}\n\n@comment{groupes}\n`;
+
+    expect(keepOutsideEntries(previous, rewrite(''))).toBe('% En-tête\n\n@comment{groupes}\n');
+  });
+});
+
+describe('keepOutsideEntries — ce qui changerait la relecture n’est pas repris', () => {
+  // Le parseur lit une entrée écrite dans un @comment : gardé, le commentaire la doublerait à
+  // chaque réécriture, puisque la réécriture l'écrit aussi.
+  it('une entrée écrite dans un @comment : le texte réécrit seul, rien ne se double', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = '@comment{@article{Cache_1990, title={Dans un commentaire}}}\n\n@book{Garde_2000,\n  title = {T},\n}\n';
+    const rewritten = rewrite(previous);
+    expect(parse(rewritten).map((c) => c.id)).toEqual(['Cache_1990', 'Garde_2000']);
+
+    expect(keepOutsideEntries(previous, rewritten)).toBe(rewritten);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Ce qui ne change pas la relecture reste : une entrée cachée dans un commentaire d'en-tête ne
+  // fait pas perdre les groupes de la fin, qui n'y sont pour rien.
+  it('une entrée dans un @comment d’en-tête, des groupes en fin : les groupes restent, rien ne se double', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `@comment{@article{Cache_1990, title={Dans un commentaire}}}\n\n@book{Garde_2000,\n  title = {T},\n}\n\n${GROUPS}`;
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`${rewritten.trimEnd()}\n\n${GROUPS}`);
+    expectSameReading(kept, rewritten);
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
+    warn.mockRestore();
+  });
+
+  // Le parseur colle au type de la première entrée la fin d'un @comment d'en-tête qui porte une
+  // adresse, et la réécriture l'écrit avec l'entrée : gardé, le bloc la recollerait une seconde
+  // fois. Limite qui tient au parseur ; les groupes de la fin restent.
+  it('une adresse dans un @comment d’en-tête : le bloc n’est pas repris, les groupes de la fin restent', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `@comment{Tenu par jean@univ.example}\n\n${GARDE}\n\n${GROUPS}`;
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`${rewritten.trimEnd()}\n\n${GROUPS}`);
+    expect(warn).toHaveBeenCalled();
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
+    warn.mockRestore();
+  });
+
+  it('une entrée dans un @comment entre deux entrées, un en-tête : l’en-tête reste, rien ne se double', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `% En-tête\n\n${GARDE}\n\n@comment{@article{Cache_1990, title={Dans un commentaire}}}\n\n${GARDE.replace('Garde_2000', 'Autre')}\n`;
+    const rewritten = rewrite(previous);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`% En-tête\n\n${rewritten}`);
+    expectSameReading(kept, rewritten);
+    warn.mockRestore();
+  });
+
+  // Ce qui séparait deux entrées et ce qui suivait la dernière se jugent à part : une entrée cachée
+  // dans un commentaire entre deux entrées ne fait pas perdre les groupes de la fin, qui n'y sont
+  // pour rien. L'audit ne la signale pas : la synchronisation et la fusion écrivent ce fichier.
+  it.each([
+    ['groupes BibDesk', `@comment{@article{Cache_1990, title={Dans un commentaire}}}`, GROUPS],
+    ['réglages JabRef', `@comment{@article{Cache_1990,\n  title = {Dans un commentaire},\n}}`, '@Comment{jabref-meta: databaseType:biblatex;}\n'],
+  ])('une entrée dans un @comment entre deux entrées, des %s en fin : l’en-tête et la fin restent, une fois', (_name, hidden, tail) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `% En-tête\n\n${GARDE}\n\n${hidden}\n\n${GARDE.replace('Garde_2000', 'Autre')}\n\n${tail}`;
+    const rewritten = rewrite(previous);
+    expect(auditParsedBib(previous, parse(previous)).unreadKeys).toEqual([]);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`% En-tête\n\n${rewritten.trimEnd()}\n\n${tail}`);
+    expectSameReading(kept, rewritten);
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+/**
+ * Une arobase hors des entrées, dans un commentaire `%`, une adresse, un bloc entre parenthèses :
+ * le parseur colle au type de l'entrée qui suit tout ce qui va de cette arobase à l'accolade de
+ * l'entrée (défaut antérieur, sur `main` aussi), et la réécriture l'écrit avec l'entrée. Ce texte
+ * appartient donc à l'entrée : repris aussi hors des entrées, il revenait en fin de fichier à
+ * chaque réécriture, une ligne de plus chaque fois.
+ */
+describe('keepOutsideEntries — une arobase hors des entrées', () => {
+  const A = '@book{Garde2000,\n  title = {Le temps des archives},\n  year = {2000},\n}\n';
+  const B = '@article{Leduc1990,\n  title = {Le carnet},\n  year = {1990},\n}\n';
+  const JABREF = '@Comment{jabref-meta: databaseType:biblatex;}';
+
+  /** Quatre réécritures de suite : le fichier de la première, chaque fois. */
+  function expectSettled(previous: string): string {
+    const once = keepOutsideEntries(previous, rewrite(previous));
+    let current = once;
+    for (let i = 0; i < 3; i++) {
+      current = keepOutsideEntries(current, rewrite(current));
+      expect(current, `réécriture ${i + 2}`).toBe(once);
+    }
+    expectSameReading(once, rewrite(previous));
+    return once;
+  }
+
+  it('dans un commentaire % entre deux entrées : rien ne revient en fin de fichier', () => {
+    const kept = expectSettled(`% Bibliographie\n\n${A}\n% voir aussi @Garde2000 pour le contexte\n${B}\n${JABREF}\n`);
+
+    expect(count(kept, '@Garde2000 pour le contexte')).toBe(1);
+    expect(count(kept, '% voir aussi')).toBe(1);
+    expect(kept.startsWith('% Bibliographie\n\n@book{Garde2000,')).toBe(true);
+    expect(kept.endsWith(`${JABREF}\n`)).toBe(true);
+  });
+
+  it('dans un @comment entre deux entrées : le bloc reste, une fois, et rien ne s’ajoute', () => {
+    const kept = expectSettled(`${A}\n@comment{Notices reçues de paul@archives.fr}\n\n${B}\n${GROUPS}`);
+
+    expect(count(kept, '@comment{Notices reçues de paul@archives.fr}')).toBe(1);
+    expect(kept.endsWith(GROUPS)).toBe(true);
+  });
+
+  it('un bloc entre parenthèses entre deux entrées : rien ne s’ajoute', () => {
+    const kept = expectSettled(`${A}\n@comment(à revoir)\n\n${B}\n${JABREF}\n`);
+
+    expect(count(kept, '@comment(à revoir)')).toBe(1);
+    expect(kept.endsWith(`${JABREF}\n`)).toBe(true);
+  });
+
+  // L'adresse colle l'arobase et ce qui la suit au type de la première entrée : l'en-tête garde le
+  // reste de sa ligne, et les groupes de la fin, qui n'y sont pour rien, restent.
+  it('une adresse dans l’en-tête : l’en-tête et les groupes de la fin restent', () => {
+    const previous = `%% Tenu par jean.dupont@univ-paris.example\n\n${A}\n${B}\n${GROUPS}`;
+    const rewritten = rewrite(previous);
+
+    const kept = expectSettled(previous);
+
+    expect(kept).toBe(`%% Tenu par jean.dupont\n\n${rewritten.trimEnd()}\n\n${GROUPS}`);
+  });
+
+  // Le fichier composé doit se redécouper à l'identique. Ici, l'en-tête ouvre un @comment qu'il
+  // ne referme pas, et une adresse suit, dans un bloc entre deux entrées : composé sans ce
+  // contrôle, l'en-tête restait à la première réécriture et partait à la deuxième (trouvé par un
+  // fuzz de la revue). Avec lui, le fichier ne change plus dès la première.
+  it('un @comment non refermé en tête, une adresse dans un bloc entre deux entrées : la réécriture suivante rend le même fichier', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = '@comment{à finir\n@book{K1,\n  title = {T1},\n}\n@comment{Notices de paul@archives.fr}\n@book{K2,\n  title = {T2},\n}\n';
+
+    const kept = expectSettled(previous);
+
+    expect(count(kept, '@comment{Notices de paul@archives.fr}')).toBe(1);
+    expect(kept).not.toContain('@comment{à finir');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
