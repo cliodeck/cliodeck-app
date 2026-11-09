@@ -158,3 +158,30 @@ describe('PrimarySourcesPanel — ce que la synchro n’a pas pu indexer', () =>
     await waitFor(() => expect(screen.queryByText(/pas encore indexée/)).toBeNull());
   });
 });
+
+// G3 : une page passée d'un item OCRisé à l'autre. Les deux sources attendent
+// la passe d'OCR suivante, sans forcer : un état qui dure jusqu'à elle.
+describe('PrimarySourcesPanel — des sources aux pages changées dans Tropy', () => {
+  it('« Synchroniser » : aucune alerte, le panneau dit combien de sources attendent l’OCR', async () => {
+    tropy.sync.mockResolvedValue({ success: true, errors: [], issues: [{ code: 'pages-changed', sources: 2 }] });
+    const showAlert = vi.spyOn(useDialogStore.getState(), 'showAlert').mockResolvedValue(undefined);
+    render(<PrimarySourcesPanel />);
+
+    fireEvent.click(await screen.findByTitle('Synchroniser'));
+
+    expect(await screen.findByText(/les pages de 2 source\(s\) ont changé dans Tropy/)).toBeInTheDocument();
+    expect(showAlert).not.toHaveBeenCalled();
+  });
+
+  it('les trois langues citent les libellés exacts du bouton et de la case de la modale OCR', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const strings = locale(lng).primarySources;
+      const forceLabel = (strings.forceOCR as string).split(' (')[0];
+      const banner = strings.issues.pagesChanged as string;
+      expect(banner, lng).toContain('{{sources}}');
+      expect(banner, lng).toContain(strings.runOCR);
+      expect(banner, lng).toContain(forceLabel);
+      expect(strings.pagesChanged as string, lng).toContain(strings.runOCR);
+    }
+  });
+});

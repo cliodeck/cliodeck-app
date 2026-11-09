@@ -851,6 +851,255 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     ]);
   });
 
+  // G3 : l'OCR n'est rangé que par item. Une page qui passait d'un item
+  // OCRisé à l'autre emportait sa photo et sa note, pas son texte, resté dans
+  // la transcription de l'item qu'elle a quitté : le chat l'attribuait au
+  // mauvais document. Décision (c) : les deux items sont marqués, et la passe
+  // d'OCR suivante, sans forcer, les reconnaît de nouveau.
+  describe('une page passée d’un item OCRisé à l’autre (G3)', () => {
+    const noOcr = { ...syncOptions, performOCR: false };
+    let pages: Record<number, string>;
+
+    // Le texte de chaque page dit d'où il vient : « Feuillet p22 : … ». Une
+    // phrase distincte par page : des pages au même texte tomberaient sous le
+    // filtre de qualité des extraits (trop de mots répétés).
+    const sentences = OCR_TEXT.split(/(?<=\.) /);
+    const pageText = (file: string) => {
+      const page = path.basename(file, '.jpg');
+      return `Feuillet ${page} : ${sentences[['p11', 'p12', 'p21', 'p22', 'p31'].indexOf(page)]}`;
+    };
+
+    beforeEach(() => {
+      pages = {};
+      for (const id of [11, 12, 21, 22, 31]) {
+        pages[id] = path.join(tropyDir, `p${id}.jpg`);
+        fs.writeFileSync(pages[id], 'jpeg factice');
+      }
+      ocrSpy.mockImplementation(async (files: string[]) => ({
+        text: files.map(pageText).join('\n\n'),
+        confidence: 88.5,
+        language: 'fra',
+        pageCount: files.length,
+      }));
+    });
+
+    function ocrItems(): TpyItemSpec[] {
+      return [
+        { id: 10, title: 'Rapport du préfet', photos: [{ id: 11, path: pages[11] }, { id: 12, path: pages[12] }] },
+        { id: 20, title: 'Lettre du commissaire', photos: [{ id: 21, path: pages[21] }, { id: 22, path: pages[22] }] },
+        { id: 30, title: 'Affiche de la Bourse du travail', photos: [{ id: 31, path: pages[31] }] },
+      ];
+    }
+
+    /** Les trois items synchronisés avec l'OCR, puis la doublure remise à zéro. */
+    async function ocrisedProject(items: TpyItemSpec[] = ocrItems()): Promise<string> {
+      const tpy = makeTpy(tropyDir, spec({ items }));
+      await tropyService.openProject(tpy);
+      expect((await tropyService.sync(syncOptions)).errors).toEqual([]);
+      ocrSpy.mockClear();
+      return tpy;
+    }
+
+    function byItem(column: 'ocr_pending' | 'transcription'): Record<number, string | null> {
+      const db = brainDb();
+      try {
+        const rows = db
+          .prepare(`SELECT tropy_id, ${column} AS value FROM tropy_sources ORDER BY tropy_id`)
+          .all() as Array<{ tropy_id: number; value: string | null }>;
+        return Object.fromEntries(rows.map((row) => [row.tropy_id, row.value]));
+      } finally {
+        db.close();
+      }
+    }
+    const marks = () => byItem('ocr_pending');
+    const texts = () => byItem('transcription');
+
+    /** Le texte des extraits d'une source, mis bout à bout. */
+    function extractsOf(tropyId: number): string {
+      const after = snapshot();
+      const source = after.sources.find((s) => s.tropy_id === tropyId);
+      return after.chunks.filter((c) => c.source_id === source?.id).map((c) => c.content).join(' ');
+    }
+
+    /** Les fichiers passés à la reconnaissance, appel par appel. */
+    const ocrCalls = () => ocrSpy.mock.calls.map((call: unknown[]) => (call[0] as string[]).map((f) => path.basename(f)));
+
+    it('vers l’item traité le premier, synchro sans OCR : les deux sources sont marquées, leurs transcriptions intactes', async () => {
+      const tpy = await ocrisedProject();
+      const before = texts();
+      expect(before[20]).toContain('Feuillet p22');
+
+      // La page 22 passe de l'item 20 à l'item 10, que la passe lit le
+      // premier : en réenregistrant sa photo, il la retire à l'item 20 avant
+      // que celui-ci ne compare les siennes. Tropy ne date que l'item qui la
+      // reçoit.
+      movePhoto(tpy, 22, 10, [10]);
+      const result = await tropyService.sync(noOcr);
+
+      expect(result.errors).toEqual([]);
+      expect(marks()).toEqual({ 10: 'pages', 20: 'pages', 30: null });
+      expect(texts()).toEqual(before);
+      expect(ocrSpy).not.toHaveBeenCalled();
+      // Le bandeau de fin de synchro les compte.
+      expect(result.issues).toContainEqual({ code: 'pages-changed', sources: 2 });
+      // La marque va jusqu'au renderer, par la lecture des sources.
+      const pending = tropyService.getAllSources().map((s) => [s.tropyId, s.ocrPending] as const);
+      expect(Object.fromEntries(pending)).toEqual({ 10: 'pages', 20: 'pages', 30: undefined });
+    });
+
+    it('vers l’item traité après, synchro sans OCR : les deux sources sont marquées, leurs transcriptions intactes', async () => {
+      const tpy = await ocrisedProject();
+      const before = texts();
+
+      movePhoto(tpy, 12, 20, [20]);
+      const result = await tropyService.sync(noOcr);
+
+      expect(result.errors).toEqual([]);
+      expect(marks()).toEqual({ 10: 'pages', 20: 'pages', 30: null });
+      expect(texts()).toEqual(before);
+      expect(result.issues).toContainEqual({ code: 'pages-changed', sources: 2 });
+    });
+
+    it('la passe d’OCR suivante, sans forcer, reprend ces deux items seulement : textes refaits, marques levées, extraits refaits', async () => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+      await tropyService.sync(noOcr);
+      expect(extractsOf(20)).toContain('Feuillet p22');
+
+      const result = await tropyService.sync(syncOptions);
+
+      expect(result.errors).toEqual([]);
+      expect(ocrCalls()).toEqual([['p11.jpg', 'p12.jpg', 'p22.jpg'], ['p21.jpg']]);
+      expect(result.transcriptionsWritten).toBe(2);
+      const after = texts();
+      expect(after[10]).toContain('Feuillet p22');
+      expect(after[20]).not.toContain('Feuillet p22');
+      expect(after[20]).toContain('Feuillet p21');
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+      expect(result.issues.map((issue) => issue.code)).not.toContain('pages-changed');
+      // Les extraits suivent : la page 22 n'est plus citée sous l'item 20.
+      expect(extractsOf(10)).toContain('Feuillet p22');
+      expect(extractsOf(20)).not.toContain('Feuillet p22');
+
+      // Reprise faite : la passe d'après ne refait rien.
+      ocrSpy.mockClear();
+      await tropyService.sync(syncOptions);
+      expect(ocrSpy).not.toHaveBeenCalled();
+    });
+
+    it('une passe avec OCR qui voit le changement reprend les deux items aussitôt', async () => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+
+      const result = await tropyService.sync(syncOptions);
+
+      expect(ocrCalls()).toEqual([['p11.jpg', 'p12.jpg', 'p22.jpg'], ['p21.jpg']]);
+      expect(texts()[20]).not.toContain('Feuillet p22');
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+      expect(result.issues.map((issue) => issue.code)).not.toContain('pages-changed');
+    });
+
+    it.each([
+      ['ne rend rien de lisible', 'vide'],
+      ['échoue', 'erreur'],
+    ] as const)('un OCR qui %s sur un item marqué : l’ancienne transcription reste, la marque aussi', async (_label, mode) => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+      await tropyService.sync(noOcr);
+      const before = snapshot();
+
+      if (mode === 'vide') ocrSpy.mockResolvedValue({ text: '', confidence: 0, language: 'fra', pageCount: 0 });
+      else ocrSpy.mockRejectedValue(new Error('tesseract: image illisible'));
+      const result = await tropyService.sync(syncOptions);
+
+      expect(ocrCalls()).toHaveLength(2);
+      expect(snapshot().sources).toEqual(
+        before.sources.map((s) => expect.objectContaining({ id: s.id, transcription: s.transcription }))
+      );
+      expect(snapshot().chunks).toEqual(before.chunks);
+      expect(marks()).toEqual({ 10: 'pages', 20: 'pages', 30: null });
+      expect(result.issues).toContainEqual({ code: 'pages-changed', sources: 2 });
+    });
+
+    it('un seul des deux items OCRisé : seul lui est marqué', async () => {
+      const tpy = await ocrisedProject();
+      const id10 = snapshot().sources.find((s) => s.tropy_id === 10)?.id ?? '';
+      const manual = 'Transcription saisie par l’historienne. ' + OCR_TEXT;
+      expect((await tropyService.updateSourceTranscription(id10, manual, 'manual')).success).toBe(true);
+
+      movePhoto(tpy, 22, 10, [10]);
+      await tropyService.sync(noOcr);
+
+      expect(marks()).toEqual({ 10: null, 20: 'pages', 30: null });
+    });
+
+    // Témoins, verts avant comme après : une détection trop large referait
+    // l'OCR d'items intacts, des heures sur un gros corpus.
+    it.each(['manual', 'transkribus', 'imported'] as const)(
+      'une transcription %s dont les pages changent n’est ni marquée ni repassée à l’OCR',
+      async (kind) => {
+        const tpy = await ocrisedProject();
+        const id10 = snapshot().sources.find((s) => s.tropy_id === 10)?.id ?? '';
+        const own = `Transcription ${kind} de l’historienne. ` + OCR_TEXT;
+        expect((await tropyService.updateSourceTranscription(id10, own, kind)).success).toBe(true);
+
+        movePhoto(tpy, 22, 10, [10]);
+        await tropyService.sync(noOcr);
+        expect(marks()[10]).toBeNull();
+
+        await tropyService.sync(syncOptions);
+        expect(ocrReached(pages[11])).toBe(false);
+        expect(snapshot().sources.find((s) => s.tropy_id === 10)).toMatchObject({
+          transcription: own,
+          transcription_source: kind,
+        });
+      }
+    );
+
+    it('une source faite de notes Tropy dont les pages changent n’est ni marquée ni repassée à l’OCR', async () => {
+      const items = ocrItems();
+      items[0] = { ...items[0], notes: [{ text: NOTE_TEXT }] };
+      const tpy = await ocrisedProject(items);
+      expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription_source).toBe('tropy-notes');
+
+      movePhoto(tpy, 22, 10, [10]);
+      await tropyService.sync(noOcr);
+      expect(marks()[10]).toBeNull();
+
+      await tropyService.sync(syncOptions);
+      expect(ocrReached(pages[11])).toBe(false);
+      expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription_source).toBe('tropy-notes');
+    });
+
+    it('un item modifié dans Tropy sans changer de pages n’est ni marqué ni repassé à l’OCR', async () => {
+      await ocrisedProject();
+      const items = ocrItems();
+      items[0] = { ...items[0], tags: ['préfecture'], modified: '2026-06-01T08:00:00.000Z' };
+      makeTpy(tropyDir, spec({ items }));
+
+      await tropyService.sync(noOcr);
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+      await tropyService.sync(syncOptions);
+      expect(ocrSpy).not.toHaveBeenCalled();
+    });
+
+    it('des pages seulement réordonnées dans un item ne le marquent pas', async () => {
+      const tpy = await ocrisedProject();
+      const db = openTpyForWrite(tpy);
+      try {
+        db.prepare('UPDATE photos SET position = 1 - position WHERE item_id = 10').run();
+        db.prepare("UPDATE subjects SET modified = '2026-06-01T08:00:00.000Z' WHERE id = 10").run();
+      } finally {
+        db.close();
+      }
+
+      await tropyService.sync(noOcr);
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+      await tropyService.sync(syncOptions);
+      expect(ocrSpy).not.toHaveBeenCalled();
+    });
+  });
+
   // L06-12 (S08-1-10) : la table `transcriptions` de Tropy n'est pas lue, la
   // photo repart à l'OCR.
   it.fails('une photo transcrite dans Tropy ne repart pas à l’OCR (L06-12, S08-1-10)', async () => {

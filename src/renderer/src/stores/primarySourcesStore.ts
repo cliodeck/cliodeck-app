@@ -26,6 +26,11 @@ export interface PrimarySource {
   tags: string[];
   transcription?: string;
   transcriptionSource?: TranscriptionWriteSource | 'tropy-notes';
+  /**
+   * L'OCR de la source est à reprendre : 'poppler', il manquait Poppler pour
+   * ses PDF ; 'pages', ses pages ont changé dans Tropy depuis l'OCR (G3).
+   */
+  ocrPending?: 'poppler' | 'pages';
   photoCount: number;
   lastModified: string;
   indexedAt: string;
@@ -540,6 +545,7 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
           tags: [],
           transcription: s.transcription,
           transcriptionSource: s.transcriptionSource,
+          ocrPending: s.ocrPending,
           photoCount: 0,
           lastModified: s.lastModified,
           indexedAt: s.indexedAt,

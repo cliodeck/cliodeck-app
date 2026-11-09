@@ -80,6 +80,22 @@
   display: inline-block;
 }
 
+/* Pages changées dans Tropy, OCR à refaire (G3) */
+.primary-source-card .source-pending {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.primary-source-card .source-pending svg {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
 /* Status */
 .primary-source-card .source-status {
   flex-shrink: 0;

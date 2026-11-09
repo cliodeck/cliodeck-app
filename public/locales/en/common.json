@@ -1426,6 +1426,7 @@
     "collectionFilter": "Filter by list",
     "allCollections": "All lists",
     "ocrRerun": "Run OCR on this source",
+    "pagesChanged": "Pages changed in Tropy: the OCR transcription will be redone at the next “Run OCR”.",
     "ocrOverwriteConfirm": "Re-run OCR? The existing transcription of this source will be replaced.",
     "ocrNoPhotos": "No image found for this source (files moved or missing).",
     "ocrFailed": "OCR failed for this source.",
@@ -1473,7 +1474,8 @@
       "popplerMissingMac": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, install Poppler in Terminal: brew install poppler, then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
       "popplerMissingWindows": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, download Poppler for Windows (https://github.com/oschwartz10612/poppler-windows), add its “bin” folder to the PATH, restart ClioDeck, then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
       "popplerMissingLinux": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, install Poppler: apt-get install poppler-utils (or your distribution's equivalent), then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
-      "ocrLanguageUnavailable": "OCR in “{{language}}” could not start: its language model could not be loaded. It is downloaded the first time each language is used: check the Internet connection, then click “Run OCR” again. Once downloaded, it stays available offline. The sources were saved without OCR."
+      "ocrLanguageUnavailable": "OCR in “{{language}}” could not start: its language model could not be loaded. It is downloaded the first time each language is used: check the Internet connection, then click “Run OCR” again. Once downloaded, it stays available offline. The sources were saved without OCR.",
+      "pagesChanged": "Last synchronization: the pages of {{sources}} source(s) changed in Tropy (a photo added, removed or moved from one source to another). Their OCR transcription is kept, but it still reflects the old pages: click “Run OCR” to redo it, with no need to tick “Re-run OCR on every source”."
     }
   },
   "modes": {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Archive, FileText, Calendar, User, Building, ScanText, Loader2 } from 'lucide-react';
+import { Archive, FileText, Calendar, User, Building, ScanText, Loader2, AlertTriangle } from 'lucide-react';
 import { PrimarySource, usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { describeNotIndexed, describeNotSaved } from './sync-issues';
@@ -106,6 +106,15 @@ export const PrimarySourceCard: React.FC<PrimarySourceCardProps> = React.memo(({
 
         {source.collection && (
           <div className="source-collection">{source.collection}</div>
+        )}
+
+        {/* G3 : une page passée d'un item à l'autre dans Tropy. Le texte
+            reconnu porte encore les anciennes pages jusqu'au prochain OCR. */}
+        {source.ocrPending === 'pages' && (
+          <div className="source-pending">
+            <AlertTriangle size={12} strokeWidth={1.5} />
+            <span>{t('primarySources.pagesChanged')}</span>
+          </div>
         )}
       </div>
 
