@@ -281,7 +281,8 @@ class ZoteroService {
         project.zotero?.collectionKey || project.bibliographySource?.zoteroCollection || undefined;
 
       // `project.json` nomme le `.bib` : le projet l'a déjà eu. Sans nom, c'est la première synchronisation.
-      const local = await readLocalBibliography(bibtexPath, options.projectPath, Boolean(project.bibliographySource?.filePath));
+      const expected = Boolean(project.bibliographySource?.filePath);
+      const local = await readLocalBibliography(bibtexPath, options.projectPath, expected);
 
       const ds = this.createDataSource(options);
       try {
@@ -297,10 +298,17 @@ class ZoteroService {
           return { success: true, status: result.status, report: result.report, bibtexPath };
         }
 
-        // Un `.bib` attendu et absent a été refusé avant la lecture de Zotero. Celui d'un projet
-        // qui n'en nommait aucun naît ici, même sans rien de neuf dans Zotero, puisque
-        // `project.json` va le nommer : sinon la synchronisation suivante le dirait introuvable.
-        const mustWrite = result.changed || !existsSync(bibtexPath);
+        // Un `.bib` attendu et absent a été refusé avant la lecture de Zotero. Il a pu disparaître
+        // pendant cette lecture (une à deux minutes en mode API), renommé dans le Finder ou évincé
+        // par iCloud : le recréer perdrait ce qu'il portait hors de ses entrées, qu'il n'y a plus
+        // où reprendre, et en laisserait un second à côté de celui qui a été renommé. Rien n'est
+        // encore écrit : le refus dit vrai.
+        if (expected && !existsSync(bibtexPath)) throw new BibliographyMissingError(bibtexPath);
+
+        // Celui d'un projet qui n'en nommait aucun naît ici, même sans rien de neuf dans Zotero,
+        // puisque `project.json` va le nommer : sinon la synchronisation suivante le dirait
+        // introuvable.
+        const mustWrite = result.changed || (!expected && !existsSync(bibtexPath));
         if (mustWrite) {
           // Écriture atomique, après une copie de l'état d'avant : un fichier à moitié écrit
           // (coupure, OneDrive au mauvais moment) perdrait la bibliographie. `result.bibtex` n'a
@@ -383,10 +391,11 @@ class BibUnreadError extends Error {
 }
 
 /**
- * Une synchronisation refusée avant toute lecture de Zotero, parce que le `.bib` ou les
- * métadonnées sont mal lus, ou le `.bib` attendu absent : `error` vaut `bib-unread`,
- * `bib-unreadable`, `metadata-unreadable` ou `bib-missing`, et ces champs disent ce qui est en
- * cause. Le renderer en fait un message : le code ne s'affiche jamais tel quel.
+ * Une synchronisation refusée avant toute écriture, parce que le `.bib` ou les métadonnées sont
+ * mal lus, ou le `.bib` attendu absent : `error` vaut `bib-unread`, `bib-unreadable`,
+ * `metadata-unreadable` ou `bib-missing`, et ces champs disent ce qui est en cause. Tous sont
+ * relevés avant la lecture de Zotero, sauf un `.bib` attendu qui disparaît pendant cette lecture.
+ * Le renderer en fait un message : le code ne s'affiche jamais tel quel.
  */
 interface SyncRefusalDetails {
   /** Le fichier en cause, relatif au projet. */

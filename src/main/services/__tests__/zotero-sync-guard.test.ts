@@ -481,6 +481,42 @@ describe('zotero:synchronize — un .bib attendu mais absent n’est pas recré�
     expect(tree()).toEqual(before);
   });
 
+  /**
+   * Le `.bib` disparaît pendant la lecture de Zotero, après la garde du début : renommé dans le
+   * Finder, ou évincé par iCloud. La lecture dure une à deux minutes en mode API pour une grosse
+   * collection. Recréé, il perdait ce qu'il portait hors de ses entrées (il n'y a plus rien à
+   * reprendre), et laissait un second fichier à côté de celui que l'historien avait renommé.
+   */
+  const renamedDuringZoteroRead: Array<[string, () => void]> = [
+    ['rien de neuf dans Zotero', () => undefined],
+    ['une notice de plus dans Zotero', () => contents.COLL.push(notice('LEDU1990', 'Le carnet', 'Leduc'))],
+  ];
+  it.each(renamedDuringZoteroRead)('.bib renommé pendant la lecture de Zotero (%s) : refus « introuvable », rien n’est recréé', async (_, change) => {
+    makeProject(['@comment{groupe BibDesk}', '', GARDE, ''].join('\n'));
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    change();
+    openSource.mockImplementation(() => {
+      const source = fakeSource();
+      return {
+        ...source,
+        listItems: async (options?: { collectionKey?: string }) => {
+          if (fs.existsSync(bibPath())) fs.renameSync(bibPath(), elsewhere());
+          return source.listItems(options);
+        },
+      };
+    });
+    const before = tree();
+    const { [BIB]: renamed, ...others } = before;
+    const expected = { ...others, [path.basename(elsewhere())]: renamed };
+
+    const result = await synchronize(request());
+
+    expect(result).toMatchObject({ success: false, error: 'bib-missing', file: BIB });
+    expect(fs.existsSync(bibPath())).toBe(false);
+    expect(tree()).toEqual(expected);
+    expect(fs.readFileSync(elsewhere(), 'utf-8')).toContain('@comment{groupe BibDesk}');
+  });
+
   it('le .bib remis à sa place : la synchronisation suivante passe, et il garde ses entrées', async () => {
     await synchronizedProject();
     fs.renameSync(bibPath(), elsewhere());

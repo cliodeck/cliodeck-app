@@ -37,9 +37,10 @@ interface SyncReport {
 }
 
 /**
- * Refus du main avant toute lecture de Zotero : le `.bib` ou les métadonnées sont mal lus, et les
- * réécrire perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10) ; ou le `.bib` que `project.json`
- * nomme n'est plus là, et le recréer depuis Zotero perdrait ce qu'il avait en propre (H3).
+ * Refus du main avant toute écriture : le `.bib` ou les métadonnées sont mal lus, et les réécrire
+ * perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10) ; ou le `.bib` que `project.json` nomme n'est
+ * plus là, avant la lecture de Zotero ou pendant, et le recréer depuis Zotero perdrait ce qu'il
+ * avait en propre (H3).
  */
 type SyncRefusal = { success: false; file: string } & (
   | { error: 'bib-unread'; unreadKeys: string[]; unreadFromZotero?: string[] }
