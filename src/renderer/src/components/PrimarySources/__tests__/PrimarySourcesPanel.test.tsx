@@ -184,4 +184,14 @@ describe('PrimarySourcesPanel — des sources aux pages changées dans Tropy', (
       expect(strings.pagesChanged as string, lng).toContain(strings.runOCR);
     }
   });
+
+  // L'aide de la case disait « Décochée, ne traite que les sources sans
+  // transcription » : les sources à reprendre, qui en ont une, l'étaient aussi.
+  it('l’aide de la case « Relancer… » nomme les sources reprises sans elle, dans les trois langues', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const hint = locale(lng).primarySources.forceOCRHint as string;
+      expect(hint, lng).toContain('Poppler');
+      expect(hint, lng).toContain('Tropy');
+    }
+  });
 });

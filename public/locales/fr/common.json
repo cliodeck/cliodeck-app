@@ -1458,7 +1458,7 @@
     "transcriptionNotIndexedNoProvider": "Transcription enregistrée, pas encore indexée : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres). L'assistant ne la cite pas pour l'instant ; elle sera reprise à la prochaine synchronisation.",
     "transcriptionNotSaved": "La transcription n'a pas été enregistrée.",
     "transcriptionSourceGone": "La transcription n'a pas été enregistrée : cette source n'est plus dans la base du projet. Synchronisez le projet Tropy, puis réessayez.",
-    "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources qui n'ont pas encore de transcription — les transcriptions déjà acquises sont conservées.",
+    "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources sans transcription et celles dont l'OCR est à reprendre (PDF en attente de Poppler, pages modifiées dans Tropy) : les autres transcriptions sont conservées.",
     "ocrSummaryTitle": "Bilan de la passe",
     "ocrSummaryWritten": "{{count}} transcription(s) enregistrée(s)",
     "ocrSummaryPages": "{{count}} page(s) passée(s) à la reconnaissance",

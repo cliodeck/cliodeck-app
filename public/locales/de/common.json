@@ -1458,7 +1458,7 @@
     "transcriptionNotIndexedNoProvider": "Transkription gespeichert, noch nicht indexiert: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen). Der Assistent zitiert sie vorerst nicht; sie wird bei der nächsten Synchronisierung nachgeholt.",
     "transcriptionNotSaved": "Die Transkription wurde nicht gespeichert.",
     "transcriptionSourceGone": "Die Transkription wurde nicht gespeichert: Diese Quelle ist nicht mehr in der Projektdatenbank. Synchronisieren Sie das Tropy-Projekt und versuchen Sie es erneut.",
-    "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription — bereits vorhandene Transkriptionen bleiben erhalten.",
+    "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription und solche, deren OCR nachzuholen ist (PDFs, die auf Poppler warten, in Tropy geänderte Seiten): Die übrigen Transkriptionen bleiben erhalten.",
     "ocrSummaryTitle": "Bilanz des Durchlaufs",
     "ocrSummaryWritten": "{{count}} Transkription(en) gespeichert",
     "ocrSummaryPages": "{{count}} Seite(n) durch die Erkennung geschickt",

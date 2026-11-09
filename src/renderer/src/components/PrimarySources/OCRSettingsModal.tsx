@@ -30,8 +30,8 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
   const { ocrLanguage: selectedLanguage, setOCRLanguage: setSelectedLanguage } =
     usePrimarySourcesStore();
   // `forceReindex` côté synchro : relance la reconnaissance sur les sources
-  // DÉJÀ transcrites. Décochée, seules les sources sans transcription sont
-  // traitées.
+  // DÉJÀ transcrites. Décochée, seules les sources sans transcription, et
+  // celles dont l'OCR est à reprendre (Poppler, pages changées), sont traitées.
   const [forceOCR, setForceOCR] = useState(false);
   const [outcome, setOutcome] = useState<SyncOutcome | null>(null);
 
@@ -129,7 +129,7 @@ export const OCRSettingsModal: React.FC<OCRSettingsModalProps> = ({ isOpen, onCl
             <span className="form-hint">
               {t(
                 'primarySources.forceOCRHint',
-                'When unchecked, recognition only processes sources that have no transcription yet — transcriptions already obtained are kept.'
+                'When unchecked, recognition only processes sources with no transcription yet and those whose OCR is to be redone (PDFs waiting for Poppler, pages changed in Tropy): other transcriptions are kept.'
               )}
             </span>
           </div>

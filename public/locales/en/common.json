@@ -1458,7 +1458,7 @@
     "transcriptionNotIndexedNoProvider": "Transcription saved, not indexed yet: no semantic search model is available (check Settings). The assistant does not cite it for now; it will be picked up at the next synchronization.",
     "transcriptionNotSaved": "The transcription was not saved.",
     "transcriptionSourceGone": "The transcription was not saved: this source is no longer in the project database. Synchronize the Tropy project, then try again.",
-    "forceOCRHint": "When unchecked, recognition only processes sources that have no transcription yet — transcriptions already obtained are kept.",
+    "forceOCRHint": "When unchecked, recognition only processes sources with no transcription yet and those whose OCR is to be redone (PDFs waiting for Poppler, pages changed in Tropy): other transcriptions are kept.",
     "ocrSummaryTitle": "Run summary",
     "ocrSummaryWritten": "{{count}} transcription(s) saved",
     "ocrSummaryPages": "{{count}} page(s) sent through recognition",
