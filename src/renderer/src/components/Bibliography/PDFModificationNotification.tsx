@@ -163,8 +163,9 @@ export const usePDFModificationDetection = (
   /**
    * L'historien a répondu pour ces PDF (réindexés, ou ignorés) : ils quittent le bandeau, et le
    * projet retient le MD5 de chacun. Ils ne reviennent que si le fichier change encore. Refusée par
-   * le main (un autre projet ouvert, métadonnées illisibles), la réponse n'est pas retenue : le PDF
-   * reviendra à la vérification suivante.
+   * le main (un autre projet ouvert, métadonnées illisibles), ou acceptée sans être retenue (une
+   * pièce jointe que les métadonnées ne connaissent plus), la réponse ne vaut pas : le PDF reviendra
+   * à la vérification suivante.
    */
   const acknowledge = useCallback(
     async (answered: ModifiedPDF[]) => {
@@ -182,6 +183,9 @@ export const usePDFModificationDetection = (
       try {
         const result = await window.electron.pdf.rememberModifiedPDFs({ projectPath, pdfs });
         if (!result.success) console.warn('⚠️ PDF modifiés : réponse non retenue par le projet', result.error);
+        else if ((result.remembered ?? 0) < pdfs.length) {
+          console.warn(`⚠️ PDF modifiés : ${pdfs.length - (result.remembered ?? 0)} réponse(s) sur ${pdfs.length} non retenue(s) par le projet`);
+        }
       } catch (error) {
         console.error('Failed to remember modified PDFs:', error);
       }

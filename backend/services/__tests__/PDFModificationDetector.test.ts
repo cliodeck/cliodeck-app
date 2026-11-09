@@ -141,7 +141,10 @@ describe('PDFModificationDetector — ce que le projet a déjà signalé', () =>
     const cite = citation(file, [attachment({ downloaded: true, localPath: file })]);
     const detector = new PDFModificationDetector();
     const remembered = md5(ANNOTATED_BYTES);
-    const signaled = (_citation: Citation, attachmentKey: string) => (attachmentKey === 'ATT1' ? remembered : undefined);
+    const signaled = {
+      knows: () => true,
+      signaledMd5: (_citation: Citation, attachmentKey: string) => (attachmentKey === 'ATT1' ? remembered : undefined),
+    };
 
     expect((await detector.detectModifiedPDFs([cite], signaled)).modifiedPDFs).toEqual([]);
 
@@ -149,5 +152,17 @@ describe('PDFModificationDetector — ce que le projet a déjà signalé', () =>
     expect((await detector.detectModifiedPDFs([cite], signaled)).modifiedPDFs.map((pdf) => pdf.newMD5)).toEqual([
       md5(`${ANNOTATED_BYTES}, puis une seconde annotation`),
     ]);
+  });
+
+  it('une pièce jointe que le projet ne connaît pas : ni signalée, ni lue', async () => {
+    // Les références d'un autre projet : le projet ne pourrait pas retenir la réponse, et le PDF
+    // reviendrait à chaque vérification.
+    const file = write('ATT1.pdf', ANNOTATED_BYTES);
+    const cite = citation(file, [attachment({ downloaded: true, localPath: file })]);
+    const unknown = { knows: () => false, signaledMd5: () => undefined };
+
+    const result = await new PDFModificationDetector().detectModifiedPDFs([cite], unknown);
+
+    expect(result).toEqual({ modifiedPDFs: [], totalChecked: 0, totalModified: 0 });
   });
 });

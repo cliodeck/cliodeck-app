@@ -41,6 +41,7 @@ import { useBibliographyStore } from '../../../stores/bibliographyStore';
 import type { Citation } from '../../../stores/bibliographyStore';
 import { useDialogStore } from '../../../stores/dialogStore';
 import { useProjectStore } from '../../../stores/projectStore';
+import { useEditorStore } from '../../../stores/editorStore';
 
 const A = '/projets/memoire-a';
 const B = '/projets/these-b';
@@ -119,7 +120,8 @@ async function openB(citations: Citation[]) {
 
 beforeEach(() => {
   checkModifiedPDFs = vi.fn(async () => flat([]));
-  rememberModifiedPDFs = vi.fn(async () => ({ success: true }));
+  // Comme le main : il dit combien il a retenu.
+  rememberModifiedPDFs = vi.fn(async ({ pdfs }: { pdfs: unknown[] }) => ({ success: true, remembered: pdfs.length }));
   pdfIndex = vi.fn(async () => ({ success: true }));
   (window as unknown as { electron: unknown }).electron = {
     config: { get: vi.fn(async () => ({ mode: 'local', dataDirectory: '/zotero-simule' })) },
@@ -166,6 +168,48 @@ describe('Bandeau « PDF modifiés » : la réponse du main', () => {
       projectPath: A,
       pdfs: [{ citationId: 'a1', zoteroKey: 'Za1', attachmentKey: 'ATTa1', md5: modified(a1).newMD5 }],
     });
+  });
+
+  it('« Ignorer », accepté sans rien retenir : le hook ne le prend pas pour une réponse retenue', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a1 = withPdf(A, 'a1');
+    checkModifiedPDFs.mockResolvedValue(flat([modified(a1)]));
+    rememberModifiedPDFs.mockResolvedValueOnce({ success: true, remembered: 0 });
+    await mountIn(A, 'Mémoire A', [a1]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Ignorer'));
+    });
+
+    expect(warn).toHaveBeenCalledWith('⚠️ PDF modifiés : 1 réponse(s) sur 1 non retenue(s) par le projet');
+    warn.mockRestore();
+  });
+
+  it('« Ignorer » pendant une vérification : sa réponse, lue avant, ne remet pas le PDF au bandeau', async () => {
+    // Le main a lu la mémoire du projet avant que l'historien réponde : sa liste contient encore le
+    // PDF qu'il vient d'ignorer.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const a1 = withPdf(A, 'a1');
+    checkModifiedPDFs.mockResolvedValue(flat([modified(a1)]));
+    await mountIn(A, 'Mémoire A', [a1]);
+    expect(banner()).not.toBeNull();
+
+    const inFlight = deferred<unknown>();
+    checkModifiedPDFs.mockReturnValueOnce(inFlight.promise);
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60 * 1000);
+    });
+    expect(checkModifiedPDFs).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Ignorer'));
+    });
+    expect(banner()).toBeNull();
+    await act(async () => {
+      inFlight.resolve(flat([modified(a1)]));
+    });
+
+    expect(banner()).toBeNull();
   });
 });
 
@@ -215,16 +259,37 @@ describe('Bandeau « PDF modifiés » : « Tout ré-indexer »', () => {
 });
 
 describe('Bandeau « PDF modifiés » : un projet, une liste', () => {
-  it('bandeau affiché dans A, ouverture de B : il disparaît', async () => {
+  it('bandeau affiché dans A, ouverture de B : il disparaît avant que B ait répondu', async () => {
+    // La vérification de B reste en attente : seule la remise à zéro au changement de projet peut
+    // vider le bandeau. Une réponse vide de B l'aurait vidé de toute façon.
     const a1 = withPdf(A, 'a1');
-    checkModifiedPDFs.mockImplementation(async ({ projectPath }: { projectPath: string }) =>
-      projectPath === A ? flat([modified(a1)]) : flat([])
+    const answerOfB = deferred<unknown>();
+    checkModifiedPDFs.mockImplementation(({ projectPath }: { projectPath: string }) =>
+      projectPath === A ? Promise.resolve(flat([modified(a1)])) : answerOfB.promise
     );
     await mountIn(A, 'Mémoire A', [a1]);
     expect(banner()).not.toBeNull();
 
     await openB([withPdf(B, 'b1')]);
 
+    expect(checkModifiedPDFs).toHaveBeenLastCalledWith({ citations: [withPdf(B, 'b1')], projectPath: B });
+    expect(banner()).toBeNull();
+    await act(async () => {
+      answerOfB.resolve(flat([]));
+    });
+    expect(banner()).toBeNull();
+  });
+
+  it('bandeau affiché dans A, ouverture de B à la bibliographie vide : il disparaît', async () => {
+    // Rien à vérifier dans B : aucune réponse ne viendra vider le bandeau de A.
+    const a1 = withPdf(A, 'a1');
+    checkModifiedPDFs.mockResolvedValue(flat([modified(a1)]));
+    await mountIn(A, 'Mémoire A', [a1]);
+    expect(banner()).not.toBeNull();
+
+    await openB([]);
+
+    expect(checkModifiedPDFs).toHaveBeenCalledTimes(1);
     expect(banner()).toBeNull();
   });
 
@@ -253,6 +318,76 @@ describe('Bandeau « PDF modifiés » : un projet, une liste', () => {
 
     expect(checkModifiedPDFs).toHaveBeenCalledTimes(1);
     expect(checkModifiedPDFs).toHaveBeenCalledWith({ citations: [b1], projectPath: B });
+  });
+});
+
+describe('Bandeau « PDF modifiés » : B sans bibliographie, ouvert par le vrai projectStore', () => {
+  // La branche « sans bibliographie » de l'ouverture laissait les références de A dans le store. Le
+  // hook les vérifiait pour B, le main (qui ne regarde que les références reçues) signalait le PDF
+  // de A, « Tout ré-indexer » le mettait dans le corpus de B, et rien ne pouvait être retenu : B n'a
+  // pas de métadonnées. Rejoué dans l'app réelle par la revue.
+  const projectFile = (path: string, name: string, bib?: string) => ({
+    id: path,
+    name,
+    path,
+    type: 'article' as const,
+    createdAt: new Date('2026-01-01').toISOString(),
+    lastOpenedAt: new Date('2026-01-02').toISOString(),
+    ...(bib ? { bibliographySource: { type: 'file', filePath: bib } } : {}),
+  });
+
+  beforeEach(() => {
+    const projects: Record<string, ReturnType<typeof projectFile>> = {
+      [A]: projectFile(A, 'Mémoire A', 'a.bib'),
+      [B]: projectFile(B, 'Thèse B'),
+    };
+    const electron = (window as unknown as { electron: Record<string, unknown> }).electron;
+    Object.assign(electron, {
+      project: {
+        getConfig: vi.fn(async () => ({})),
+        load: vi.fn(async (p: string) => ({ success: true, project: projects[p] })),
+        getMetadata: vi.fn(async (p: string) => ({ success: true, project: projects[p] })),
+        getRecent: vi.fn(async () => []),
+        getChapters: vi.fn(async () => ({ success: true, chapters: [] })),
+        close: vi.fn(async () => undefined),
+      },
+      editor: { loadFile: vi.fn(async () => ({ success: true, content: '# Texte\n' })) },
+      fs: { writeFile: vi.fn(async () => undefined) },
+      bibliography: {
+        loadWithMetadata: vi.fn(async ({ projectPath }: { projectPath: string }) =>
+          projectPath === A
+            ? { success: true, citations: [withPdf(A, 'a1')], unreadKeys: [], metadataUnreadable: false }
+            : { success: false, error: 'inattendu', citations: [] }
+        ),
+        readingNotes: { list: vi.fn(async () => ({ success: true, notes: [] })) },
+      },
+    });
+    useEditorStore.setState({ filePath: null, content: '', isDirty: false, editorFacade: null, bufferDetached: false } as never);
+    useProjectStore.setState({ currentProject: null, chapters: [], currentChapterId: null, loadState: { kind: 'idle' }, recentProjects: [] } as never);
+    useBibliographyStore.setState({ citations: [], filteredCitations: [], bibliographyProblem: null } as never);
+    // Comme le main : il ne regarde que les références reçues, pas le projet qu'on lui nomme.
+    checkModifiedPDFs.mockImplementation(async ({ citations }: { citations: Citation[] }) =>
+      flat(citations.filter((c) => c.id === 'a1').map(modified))
+    );
+  });
+
+  it('A a un PDF modifié, B s’ouvre : ni vérification des références de A pour B, ni bandeau', async () => {
+    await act(async () => {
+      await useProjectStore.getState().loadProject(A);
+    });
+    await act(async () => {
+      render(<BibliographyPanel />);
+    });
+    expect(banner()?.textContent).toBe('1 PDF(s) modifié(s) détecté(s)');
+
+    await act(async () => {
+      await useProjectStore.getState().loadProject(B);
+    });
+
+    expect(useProjectStore.getState().currentProject?.path).toBe(B);
+    expect(checkModifiedPDFs.mock.calls.filter(([options]) => options.projectPath === B)).toEqual([]);
+    expect(banner()).toBeNull();
+    expect(screen.queryByText(withPdf(A, 'a1').file!)).toBeNull();
   });
 });
 

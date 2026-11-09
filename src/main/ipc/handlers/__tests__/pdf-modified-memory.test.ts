@@ -65,6 +65,7 @@ interface Response {
   error?: string;
   citations?: Array<Record<string, unknown>>;
   modifiedPDFs?: ModifiedPDF[];
+  remembered?: number;
 }
 
 async function call(channel: string, ...args: unknown[]): Promise<Response> {
@@ -98,8 +99,8 @@ async function loadCitations(): Promise<Array<Record<string, unknown>>> {
   return loaded.citations ?? [];
 }
 
-const check = async (citations: Array<Record<string, unknown>>) => {
-  const result = await call('pdf:check-modified-pdfs', { citations, projectPath: P });
+const check = async (citations: Array<Record<string, unknown>>, projectPath = P) => {
+  const result = await call('pdf:check-modified-pdfs', { citations, projectPath });
   expect(result.success).toBe(true);
   return result.modifiedPDFs ?? [];
 };
@@ -147,7 +148,7 @@ describe('PDF modifiés — la mémoire du projet', () => {
     const first = await check(citations);
     expect(first).toEqual([expect.objectContaining({ attachmentKey: 'ATT1', zoteroKey: 'Z1', newMD5: md5(ANNOTATED_BYTES) })]);
 
-    expect(await answer(first)).toMatchObject({ success: true });
+    expect(await answer(first)).toMatchObject({ success: true, remembered: 1 });
 
     // La liste du panneau, prise avant la réponse, comme celle relue du disque.
     expect(await check(citations)).toEqual([]);
@@ -185,6 +186,34 @@ describe('PDF modifiés — la mémoire du projet', () => {
     );
 
     expect(storedAttachment()).toMatchObject({ signaledMd5: md5(ANNOTATED_BYTES) });
+  });
+
+  it('les références d’un projet, vérifiées pour un autre qui ne les connaît pas : rien n’est signalé', async () => {
+    // Le panneau de B gardait les références de A (Q22, revue). Le main ne regardait que les
+    // références reçues : il signalait le PDF de A dans B, où rien ne pouvait le retenir.
+    const citationsOfA = await loadCitations();
+    const B = path.join(root, `projet-b-${Math.random().toString(36).slice(2, 8)}`);
+    fs.mkdirSync(B, { recursive: true });
+    fs.writeFileSync(path.join(B, 'project.json'), JSON.stringify({ name: 'B', type: 'article' }));
+    current = B;
+
+    expect(await check(citationsOfA, B)).toEqual([]);
+  });
+
+  it('une réponse que le projet ne peut retenir le dit : rien de retenu, aucun fichier écrit', async () => {
+    const modified = await check(await loadCitations());
+    const B = path.join(root, `projet-b-${Math.random().toString(36).slice(2, 8)}`);
+    fs.mkdirSync(B, { recursive: true });
+    current = B;
+
+    expect(await answer(modified, B)).toEqual({ success: true, remembered: 0 });
+    expect(fs.existsSync(BibliographyMetadataService.getMetadataPath(B))).toBe(false);
+  });
+
+  it('une pièce jointe que les métadonnées ne connaissent pas n’est pas comptée comme retenue', async () => {
+    const [modified] = await check(await loadCitations());
+
+    expect(await answer([modified, { ...modified, attachmentKey: 'INCONNUE' }])).toEqual({ success: true, remembered: 1 });
   });
 
   it('un autre projet ouvert entre-temps : refusé, rien n’est écrit', async () => {

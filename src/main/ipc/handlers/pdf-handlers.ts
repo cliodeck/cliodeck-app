@@ -261,9 +261,12 @@ export function setupPDFHandlers() {
       // Ce que le projet a déjà signalé, relu du disque : les références du panneau datent de leur
       // chargement, d'avant les dernières réponses de l'historien.
       const metadata = await BibliographyMetadataService.loadMetadata(options.projectPath);
-      const result = await detector.detectModifiedPDFs(options.citations as unknown as Citation[], (citation, attachmentKey) =>
-        BibliographyMetadataService.signaledMd5(metadata, citation, attachmentKey)
-      );
+      // Seules les pièces jointes que ce projet connaît se signalent : il ne pourrait pas retenir la
+      // réponse des autres, et le bandeau reviendrait sans fin (les références d'un autre projet).
+      const result = await detector.detectModifiedPDFs(options.citations as unknown as Citation[], {
+        knows: (citation, attachmentKey) => BibliographyMetadataService.knowsAttachment(metadata, citation, attachmentKey),
+        signaledMd5: (citation, attachmentKey) => BibliographyMetadataService.signaledMd5(metadata, citation, attachmentKey),
+      });
       console.log('📤 IPC Response: pdf:check-modified-pdfs', {
         totalChecked: result.totalChecked,
         totalModified: result.totalModified
@@ -286,7 +289,8 @@ export function setupPDFHandlers() {
       return errorResponse('project-changed');
     }
     try {
-      await BibliographyMetadataService.rememberSignaled(
+      // Combien ont été retenus : une pièce jointe que les métadonnées ne connaissent pas ne l'est pas.
+      const remembered = await BibliographyMetadataService.rememberSignaled(
         options.projectPath,
         options.pdfs.map((pdf) => ({
           citation: { id: pdf.citationId, zoteroKey: pdf.zoteroKey },
@@ -294,7 +298,7 @@ export function setupPDFHandlers() {
           md5: pdf.md5,
         }))
       );
-      return successResponse({});
+      return successResponse({ remembered });
     } catch (error: unknown) {
       logger.error('ipc', 'pdf:remember-modified-pdfs', { error: error instanceof Error ? error.message : String(error) });
       return error instanceof MetadataUnreadableError

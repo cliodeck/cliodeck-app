@@ -396,7 +396,9 @@ async function openProjectContents(
     // Still refresh indexed PDFs in case there are documents indexed without bibliography
     try {
       const { useBibliographyStore } = await import('./bibliographyStore');
-      useBibliographyStore.setState({ bibliographyProblem: null });
+      // Ni la liste du projet d'avant : le panneau de B montrait les références de A, et la
+      // vérification des PDF modifiés les prenait pour celles de B (Q22).
+      useBibliographyStore.setState({ bibliographyProblem: null, citations: [], filteredCitations: [] });
       await useBibliographyStore.getState().refreshIndexedPDFs();
     } catch (error) {
       console.error('❌ Failed to refresh indexed PDFs:', error);

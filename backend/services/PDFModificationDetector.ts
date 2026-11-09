@@ -31,10 +31,21 @@ export interface PDFModificationResult {
 }
 
 /**
- * Le MD5 auquel l'historien a déjà répondu pour cette pièce jointe (réindexé, ou ignoré), lu dans
- * les métadonnées du projet. Un PDF qui a toujours ce MD5 n'est plus signalé.
+ * Ce que le projet retient des PDF modifiés, par pièce jointe, lu dans ses métadonnées.
  */
-export type SignaledMd5Lookup = (citation: Citation, attachmentKey: string) => string | undefined;
+export interface SignaledMemory {
+  /**
+   * Le projet connaît-il cette pièce jointe ? Sinon il ne pourrait pas retenir la réponse de
+   * l'historien, et le PDF reviendrait à chaque vérification : il n'est pas signalé. C'est le cas
+   * des références d'un autre projet, vérifiées pour celui-ci.
+   */
+  knows(citation: Citation, attachmentKey: string): boolean;
+  /** Le MD5 auquel l'historien a déjà répondu (réindexé, ou ignoré) : un PDF qui l'a toujours n'est plus signalé. */
+  signaledMd5(citation: Citation, attachmentKey: string): string | undefined;
+}
+
+/** Sans mémoire : tout se signale. */
+const NO_MEMORY: SignaledMemory = { knows: () => true, signaledMd5: () => undefined };
 
 /**
  * Service for detecting modified PDFs by comparing MD5 hashes
@@ -47,13 +58,10 @@ export class PDFModificationDetector {
    * Check for modified PDFs in citations
    *
    * @param citations List of citations to check
-   * @param signaledMd5 ce que le projet a déjà signalé, par pièce jointe
+   * @param memory ce que le projet connaît et a déjà signalé, par pièce jointe
    * @returns List of modified PDFs with details
    */
-  async detectModifiedPDFs(
-    citations: Citation[],
-    signaledMd5: SignaledMd5Lookup = () => undefined
-  ): Promise<PDFModificationResult> {
+  async detectModifiedPDFs(citations: Citation[], memory: SignaledMemory = NO_MEMORY): Promise<PDFModificationResult> {
     const modifiedPDFs: ModifiedPDFInfo[] = [];
     let totalChecked = 0;
 
@@ -66,6 +74,8 @@ export class PDFModificationDetector {
       // Sans pièce jointe qui corresponde au fichier, ou sans MD5 (Zotero en mode local), rien à comparer.
       const attachment = this.attachmentOf(citation, file);
       if (!attachment?.md5) continue;
+      // Une réponse que le projet ne pourrait pas retenir : le PDF n'est pas lu.
+      if (!memory.knows(citation, attachment.key)) continue;
 
       try {
         // Absent : réindexer n'y peut rien, ce n'est pas un PDF modifié.
@@ -79,7 +89,7 @@ export class PDFModificationDetector {
         const currentMD5 = await this.calculateMD5Stream(file);
         if (currentMD5 === attachment.md5) continue;
         // Déjà signalé avec ce contenu, et l'historien a répondu : il ne revient que si le fichier change encore.
-        if (signaledMd5(citation, attachment.key) === currentMD5) continue;
+        if (memory.signaledMd5(citation, attachment.key) === currentMD5) continue;
 
         modifiedPDFs.push({
           citationId: citation.id,

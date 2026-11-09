@@ -149,7 +149,8 @@ const api = {
     /**
      * Les PDF modifiés auxquels l'historien a répondu (réindexés, ou ignorés) : le projet retient
      * leur MD5 et ne les signale plus tant que le fichier ne change pas. Refusé (`project-changed`)
-     * si `projectPath` n'est plus le projet ouvert.
+     * si `projectPath` n'est plus le projet ouvert. `remembered` : combien le projet en a retenu,
+     * moins que demandé quand ses métadonnées ne connaissent pas une pièce jointe.
      */
     rememberModifiedPDFs: (options: {
       projectPath: string;
@@ -159,6 +160,7 @@ const api = {
         success: boolean;
         error?: string;
         code?: string;
+        remembered?: number;
       }>,
     /** Un PDF indexé n'a presque pas de texte : image sans OCR (#132). */
     onLowText: (

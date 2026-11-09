@@ -254,6 +254,28 @@ export class BibliographyMetadataService {
     console.log(`✅ Updated metadata for citation: ${storageKey}`);
   }
 
+  /** La pièce jointe de cette référence, dans les métadonnées lues (`loadMetadata`). */
+  private static attachmentIn(
+    metadata: BibliographyMetadataFile | null,
+    citation: Pick<Citation, 'id' | 'zoteroKey'>,
+    attachmentKey: string
+  ): ZoteroAttachmentInfo | undefined {
+    const entry = metadata?.citations[this.storageKeyFor(citation)];
+    return entry?.zoteroAttachments?.find((att) => att.key === attachmentKey);
+  }
+
+  /**
+   * Les métadonnées lues connaissent-elles cette pièce jointe ? Seule une pièce jointe connue peut
+   * retenir un PDF déjà signalé (`rememberSignaled`).
+   */
+  static knowsAttachment(
+    metadata: BibliographyMetadataFile | null,
+    citation: Pick<Citation, 'id' | 'zoteroKey'>,
+    attachmentKey: string
+  ): boolean {
+    return this.attachmentIn(metadata, citation, attachmentKey) !== undefined;
+  }
+
   /**
    * Le MD5 déjà signalé du PDF de cette pièce jointe, dans les métadonnées lues (`loadMetadata`).
    */
@@ -262,28 +284,31 @@ export class BibliographyMetadataService {
     citation: Pick<Citation, 'id' | 'zoteroKey'>,
     attachmentKey: string
   ): string | undefined {
-    const entry = metadata?.citations[this.storageKeyFor(citation)];
-    return entry?.zoteroAttachments?.find((att) => att.key === attachmentKey)?.signaledMd5;
+    return this.attachmentIn(metadata, citation, attachmentKey)?.signaledMd5;
   }
 
   /**
    * Retient les PDF modifiés auxquels l'historien a répondu (réindexés, ou ignorés), chacun avec le
    * MD5 qu'il avait alors, sur sa pièce jointe (Q22) : le bandeau ne les signale plus tant que le
    * fichier ne change pas. Le MD5 de Zotero (`md5`) n'est pas touché. Une pièce jointe que le
-   * fichier ne connaît pas n'est pas créée ; sans fichier de métadonnées, rien n'est écrit.
+   * fichier ne connaît pas n'est pas créée ; sans fichier de métadonnées, rien n'est écrit. Rend le
+   * nombre de pièces jointes retenues : une réponse qui n'a rien retenu ne passe pas pour retenue.
    */
   static async rememberSignaled(
     projectPath: string,
     signaled: Array<{ citation: Pick<Citation, 'id' | 'zoteroKey'>; attachmentKey: string; md5: string }>
-  ): Promise<void> {
-    if (signaled.length === 0 || this.linkedOutside(projectPath) || !this.hasMetadata(projectPath)) return;
+  ): Promise<number> {
+    if (signaled.length === 0 || this.linkedOutside(projectPath) || !this.hasMetadata(projectPath)) return 0;
 
+    let remembered = 0;
     await this.updateMetadataFile(projectPath, (current) => {
+      remembered = 0;
       const citations = { ...current?.citations };
       for (const { citation, attachmentKey, md5 } of signaled) {
         const storageKey = this.storageKeyFor(citation);
         const entry = citations[storageKey];
         if (!entry?.zoteroAttachments?.some((att) => att.key === attachmentKey)) continue;
+        remembered++;
         citations[storageKey] = {
           ...entry,
           zoteroAttachments: entry.zoteroAttachments.map((att) =>
@@ -293,6 +318,7 @@ export class BibliographyMetadataService {
       }
       return citations;
     });
+    return remembered;
   }
 
   /**
