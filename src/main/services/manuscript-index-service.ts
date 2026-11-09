@@ -127,14 +127,24 @@ class ManuscriptIndexService {
    */
   configure(workspaceRoot: string | null): void {
     if (workspaceRoot === this.workspaceRoot) return;
-    this.detachStore();
+    this.forgetProject();
     this.workspaceRoot = workspaceRoot;
-    this.lastReport = null;
   }
 
   clear(): void {
-    this.detachStore();
+    this.forgetProject();
     this.workspaceRoot = null;
+  }
+
+  /**
+   * Quitter un projet : son store se détache, et la relance demandée pour lui
+   * est oubliée, sans quoi elle tournerait sur le suivant. Seul un changement
+   * de projet l'oublie : `purgeOutside` referme aussi le handle qu'il a ouvert,
+   * mais la relance qu'il trouve appartient au projet courant.
+   */
+  private forgetProject(): void {
+    this.detachStore();
+    this.rerun = null;
     this.lastReport = null;
   }
 
@@ -146,14 +156,12 @@ class ManuscriptIndexService {
    * pieds faisait écrire dans une base close. C'est le défaut que #38 avait
    * corrigé côté PDF (`drainInFlightIndexing`) et que ce service, écrit dans
    * le même cycle, rejouait. Le champ est vidé tout de suite pour que le
-   * projet suivant ouvre bien un nouveau handle. La relance demandée pour
-   * l'ancien projet est oubliée : elle tournerait sur le suivant.
+   * projet suivant ouvre bien un nouveau handle.
    */
   private detachStore(): void {
     const previous = this.store;
     const pending = this.running;
     this.store = null;
-    this.rerun = null;
     if (!previous) return;
     if (pending) {
       void pending

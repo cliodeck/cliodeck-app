@@ -225,6 +225,19 @@ function stoppedEmbedder(): EmbeddingProvider {
   };
 }
 
+/** Un fournisseur qui répond, mais avec un vecteur que `addChunk` refuse : l'échec arrive à l'écriture. */
+function nanEmbedder(): EmbeddingProvider {
+  return {
+    ...fakeEmbedder(),
+    embed: async (texts) =>
+      texts.map(() => {
+        const v = new Array<number>(DIMENSION).fill(0.1);
+        v[3] = NaN;
+        return v;
+      }),
+  };
+}
+
 /** Le contenu réel des tables, lu par une autre connexion : ce que la recherche verra. */
 function tables(): { notes: number; chunks: number; hash: string | null; text: string } {
   const db = new Database(path.join(vault, '.cliodeck', 'brain.db'), { readonly: true });
@@ -343,6 +356,48 @@ describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer — panne pendant l’in
     expect(store!.getNoteByPath('B.md')).toBeNull();
     expect(store!.searchLexical('Appel', 5)).toEqual([]);
   });
+
+  /**
+   * Tout ou rien : l'échec arrive APRÈS l'écriture de la nouvelle empreinte et l'effacement des
+   * anciens extraits, au premier `addChunk`. Sans transaction, la note passait à sa nouvelle
+   * empreinte sans aucun extrait : S02-1-3 par un autre chemin que la panne du fournisseur.
+   */
+  it.each([
+    {
+      cas: 'un vecteur non fini',
+      prepare: (): EmbeddingProvider => nanEmbedder(),
+      message: /non-finite/,
+    },
+    {
+      cas: 'une erreur SQLite à l’écriture d’un extrait',
+      prepare: (): EmbeddingProvider => {
+        const db = new Database(path.join(vault, '.cliodeck', 'brain.db'));
+        db.exec(`CREATE TRIGGER refuse_extrait BEFORE INSERT ON obsidian_chunks
+                 BEGIN SELECT RAISE(ABORT, 'écriture refusée'); END;`);
+        db.close();
+        return fakeEmbedder();
+      },
+      message: /écriture refusée/,
+    },
+  ])(
+    'note déjà indexée puis modifiée, $cas : empreinte et extraits restent ceux d’avant',
+    async ({ prepare, message }) => {
+      writeNote('A.md', '# Vichy\nLe régime de Vichy et la collaboration.');
+      const reader = new ObsidianVaultReader(vault);
+      openStore();
+      await new ObsidianVaultIndexer(reader, store!, fakeEmbedder()).indexAll();
+      const before = tables();
+      expect(before.chunks).toBeGreaterThan(0);
+
+      writeNote('A.md', '# Vichy\nLe régime de Vichy, la collaboration et la Milice.');
+      const report = await new ObsidianVaultIndexer(reader, store!, prepare()).indexAll();
+
+      expect(report.stats).toMatchObject({ indexedCount: 0, failedCount: 1 });
+      expect(report.failed[0].reason).toMatchObject({ kind: 'io_error', message: expect.stringMatching(message) });
+      expect(tables()).toEqual(before);
+      expect(store!.searchLexical('collaboration', 5)).toHaveLength(1);
+    }
+  );
 
   it('témoin : une note sans rien à découper reste indexée, sans appel au fournisseur ni réécriture', async () => {
     writeNote('A.md', '---\ntags: [brouillon]\n---\n');

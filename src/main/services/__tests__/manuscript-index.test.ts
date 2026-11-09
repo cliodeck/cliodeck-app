@@ -331,6 +331,32 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
       }
     });
 
+    it('la purge qui clôt l’ouverture du projet suivant ne fait pas perdre sa demande', async () => {
+      // `project:load` finit par `configure` puis `purgeOutside` (project-handlers). Celle-ci ouvre
+      // la base pour l'occasion et la referme : la relance demandée entre-temps doit survivre.
+      other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-b-'));
+      writeArticle(tmp, 'Le port de Vichy.');
+      writeArticle(other, 'Le port de Gdynia.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+
+      const first = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.configure(other);
+      const second = manuscriptIndexService.index(embedder);
+      manuscriptIndexService.configure(other);
+      expect(manuscriptIndexService.purgeOutside()).toBe(0);
+      embedder.release();
+      await Promise.all([first, second]);
+
+      const store = new ManuscriptStore({ dbPath: path.join(other, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical('Gdynia', 5)).toHaveLength(1);
+      } finally {
+        store.close();
+      }
+    });
+
     it('témoin : une passe qui jette laisse « (passe) » au compte rendu et rejette', async () => {
       writeArticle(tmp, 'Le port de Vichy.');
       manuscriptIndexService.configure(tmp);
