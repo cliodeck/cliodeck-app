@@ -273,7 +273,7 @@
     "reindexAll": "Tout ré-indexer",
     "noPDFsToReindex": "Aucun PDF à ré-indexer",
     "confirmReindexModified": "Ré-indexer {{count}} PDF(s) modifié(s) ?",
-    "reindexComplete": "{{count}} PDF(s) ré-indexé(s) avec succès",
+    "reindexComplete": "Ré-indexation terminée : {{indexed}} ré-indexé(s), {{errors}} erreur(s)",
     "reindexError": "Échec de la ré-indexation des PDFs",
     "cleanupOrphanPDFs": "Nettoyer les PDFs orphelins",
     "orphanPDFCleanup": "Nettoyage des PDFs orphelins",

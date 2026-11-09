@@ -1,20 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, RefreshCw, X } from 'lucide-react';
 import type { Citation } from '../../stores/bibliography/types';
+import { useProjectStore } from '../../stores/projectStore';
+import { stillIn } from '../../services/still-in-project';
 import './PDFModificationNotification.css';
 
-interface ModifiedPDF {
+/** Un PDF modifié tel que `pdf:check-modified-pdfs` le rapporte. */
+export interface ModifiedPDF {
   citationId: string;
+  zoteroKey?: string;
+  attachmentKey: string;
   citationTitle: string;
   filePath: string;
   reason: string; // 'md5-changed' | 'file-modified'
+  newMD5?: string;
 }
+
+/** Une pièce jointe d'une référence : la clé BibTeX seule peut être commune à plusieurs. */
+const modifiedPdfKey = (pdf: ModifiedPDF): string => `${pdf.zoteroKey ?? pdf.citationId}/${pdf.attachmentKey}`;
+
+/** Les vérifications suivant celle du montage. */
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 interface PDFModificationNotificationProps {
   modifiedPDFs: ModifiedPDF[];
   onReindexAll: () => void;
-  onReindexSingle: (citationId: string) => void;
+  onReindexSingle: (pdf: ModifiedPDF) => void;
   onDismiss: () => void;
 }
 
@@ -70,18 +82,19 @@ export const PDFModificationNotification: React.FC<PDFModificationNotificationPr
         </div>
       </div>
 
-      {expanded && (
+      {/* Un seul PDF : nommé d'emblée, il n'y a rien à déplier. */}
+      {(expanded || modifiedPDFs.length === 1) && (
         <div className="notification-details">
           <ul className="modified-pdfs-list">
             {modifiedPDFs.map((pdf) => (
-              <li key={pdf.citationId} className="modified-pdf-item">
+              <li key={modifiedPdfKey(pdf)} className="modified-pdf-item">
                 <div className="modified-pdf-info">
                   <div className="modified-pdf-title">{pdf.citationTitle}</div>
                   <div className="modified-pdf-path">{pdf.filePath}</div>
                 </div>
                 <button
                   className="notification-btn notification-btn-small"
-                  onClick={() => onReindexSingle(pdf.citationId)}
+                  onClick={() => onReindexSingle(pdf)}
                 >
                   <RefreshCw size={14} />
                   {t('bibliography.reindex')}
@@ -97,6 +110,12 @@ export const PDFModificationNotification: React.FC<PDFModificationNotificationPr
 
 /**
  * Hook to detect modified PDFs and show notification
+ *
+ * Au montage du panneau, à la fin de l'ouverture d'un projet, puis toutes les cinq minutes ; pas à
+ * chaque notice modifiée, qui faisait relire tous les PDF. Une vérification à la fois par projet. La
+ * liste vaut pour son projet : vidée quand un autre s'ouvre, et un résultat arrivé pour l'ancien est
+ * jeté. Pendant une ouverture, les références affichées sont encore celles du projet sortant : rien
+ * n'est vérifié avant sa fin.
  */
 export const usePDFModificationDetection = (
   citations: Citation[],
@@ -104,47 +123,97 @@ export const usePDFModificationDetection = (
 ): {
   modifiedPDFs: ModifiedPDF[];
   checkForModifications: () => Promise<void>;
+  acknowledge: (answered: ModifiedPDF[]) => Promise<void>;
   dismissNotification: () => void;
 } => {
   const [modifiedPDFs, setModifiedPDFs] = useState<ModifiedPDF[]>([]);
+  // Lues à chaque vérification, sans en dépendre.
+  const citationsRef = useRef(citations);
+  citationsRef.current = citations;
+  const hasCitations = citations.length > 0;
+  const opening = useProjectStore((state) => state.loadState.kind === 'loading');
+  /** Le projet de la vérification en cours. */
+  const checking = useRef<string | null>(null);
+  /** Les réponses de l'historien : une vérification partie avant l'une d'elles ne remet rien au bandeau. */
+  const answers = useRef(0);
 
-  const checkForModifications = async () => {
-    if (!projectPath || citations.length === 0) return;
-
+  const checkForModifications = useCallback(async () => {
+    const current = citationsRef.current;
+    if (!projectPath || current.length === 0 || checking.current === projectPath) return;
+    checking.current = projectPath;
+    const answersBefore = answers.current;
     try {
       // Call backend to check MD5 hashes
       const result = await window.electron.pdf.checkModifiedPDFs({
-        citations,
+        citations: current,
         projectPath,
       });
 
-      if (result.success && result.data?.modifiedPDFs && result.data.modifiedPDFs.length > 0) {
-        setModifiedPDFs(result.data.modifiedPDFs);
-      }
+      if (!(await stillIn(projectPath)) || answers.current !== answersBefore) return;
+      // Les champs sont à plat (`successResponse`) ; une liste vide vide le bandeau.
+      if (result.success) setModifiedPDFs(result.modifiedPDFs ?? []);
+      else console.error('Failed to check for modified PDFs:', result.error);
     } catch (error) {
       console.error('Failed to check for modified PDFs:', error);
+    } finally {
+      if (checking.current === projectPath) checking.current = null;
     }
-  };
+  }, [projectPath]);
 
-  const dismissNotification = () => {
+  /**
+   * L'historien a répondu pour ces PDF (réindexés, ou ignorés) : ils quittent le bandeau, et le
+   * projet retient le MD5 de chacun. Ils ne reviennent que si le fichier change encore. Refusée par
+   * le main (un autre projet ouvert, métadonnées illisibles), la réponse n'est pas retenue : le PDF
+   * reviendra à la vérification suivante.
+   */
+  const acknowledge = useCallback(
+    async (answered: ModifiedPDF[]) => {
+      if (answered.length === 0) return;
+      answers.current++;
+      const gone = new Set(answered.map(modifiedPdfKey));
+      setModifiedPDFs((list) => list.filter((pdf) => !gone.has(modifiedPdfKey(pdf))));
+
+      const pdfs = answered.flatMap((pdf) =>
+        pdf.newMD5
+          ? [{ citationId: pdf.citationId, zoteroKey: pdf.zoteroKey, attachmentKey: pdf.attachmentKey, md5: pdf.newMD5 }]
+          : []
+      );
+      if (!projectPath || pdfs.length === 0) return;
+      try {
+        const result = await window.electron.pdf.rememberModifiedPDFs({ projectPath, pdfs });
+        if (!result.success) console.warn('⚠️ PDF modifiés : réponse non retenue par le projet', result.error);
+      } catch (error) {
+        console.error('Failed to remember modified PDFs:', error);
+      }
+    },
+    [projectPath]
+  );
+
+  const dismissNotification = useCallback(() => {
+    void acknowledge(modifiedPDFs);
+  }, [acknowledge, modifiedPDFs]);
+
+  // La liste de A ne s'affiche pas dans B.
+  useEffect(() => {
     setModifiedPDFs([]);
-  };
+  }, [projectPath]);
 
   // Check on mount and periodically
   useEffect(() => {
-    checkForModifications();
+    if (opening || !hasCitations) return;
+    void checkForModifications();
 
-    // Check every 5 minutes
     const interval = setInterval(() => {
-      checkForModifications();
-    }, 5 * 60 * 1000);
+      void checkForModifications();
+    }, CHECK_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [citations, projectPath]);
+  }, [checkForModifications, opening, hasCitations]);
 
   return {
     modifiedPDFs,
     checkForModifications,
+    acknowledge,
     dismissNotification,
   };
 };

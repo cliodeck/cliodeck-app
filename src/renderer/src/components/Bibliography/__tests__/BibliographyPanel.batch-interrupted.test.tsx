@@ -11,7 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 const h = vi.hoisted(() => ({
-  modified: [] as Array<{ citationId: string; citationTitle: string; filePath: string; reason: string }>,
+  modified: [] as Array<{
+    citationId: string;
+    zoteroKey?: string;
+    attachmentKey: string;
+    citationTitle: string;
+    filePath: string;
+    reason: string;
+  }>,
 }));
 
 vi.mock('react-i18next', async () => {
@@ -39,7 +46,11 @@ vi.mock('../TagManager', () => ({ TagFilter: () => null }));
 vi.mock('../PDFModificationNotification', () => ({
   PDFModificationNotification: ({ modifiedPDFs, onReindexAll }: { modifiedPDFs: unknown[]; onReindexAll: () => void }) =>
     modifiedPDFs.length > 0 ? <button onClick={onReindexAll}>Tout ré-indexer</button> : null,
-  usePDFModificationDetection: () => ({ modifiedPDFs: h.modified, dismissNotification: () => undefined }),
+  usePDFModificationDetection: () => ({
+    modifiedPDFs: h.modified,
+    acknowledge: async () => undefined,
+    dismissNotification: () => undefined,
+  }),
 }));
 
 import { BibliographyPanel } from '../BibliographyPanel';
@@ -205,7 +216,14 @@ describe('« Indexer tous les PDFs » interrompu par l’ouverture de B', () => 
 describe('« Tout ré-indexer » interrompu par l’ouverture de B', () => {
   it('le PDF suivant ne part pas, rien n’est relu dans B, et l’alerte nomme A', async () => {
     const citations = [withPdf('a1'), withPdf('a2')];
-    h.modified = citations.map((c) => ({ citationId: c.id, citationTitle: c.title, filePath: c.file!, reason: 'md5-changed' }));
+    h.modified = citations.map((c) => ({
+      citationId: c.id,
+      zoteroKey: c.zoteroKey,
+      attachmentKey: c.zoteroAttachments![0].key,
+      citationTitle: c.title,
+      filePath: c.file!,
+      reason: 'md5-changed',
+    }));
     const first = deferred<unknown>();
     pdfIndex.mockReturnValueOnce(first.promise);
     await mountIn(citations);
@@ -224,7 +242,7 @@ describe('« Tout ré-indexer » interrompu par l’ouverture de B', () => {
     expect(pdfIndex).toHaveBeenCalledTimes(1);
     expect(getAll).not.toHaveBeenCalled();
     expect(dialogs().queue).toHaveLength(1);
-    expect(dialogs().alertMessage).not.toContain('ré-indexé(s) avec succès');
+    expect(dialogs().alertMessage).not.toContain('Ré-indexation terminée');
     expect(dialogs().alertMessage).toContain('« Mémoire A »');
     // Le main sait pour quel projet partait le PDF en vol.
     expect(pdfIndex).toHaveBeenCalledWith(`${A}/PDFs/a1.pdf`, undefined, expect.anything(), A);

@@ -23,7 +23,11 @@ import { BibImportSummaryModal } from './BibImportSummaryModal';
 import { BibliographyStats } from './BibliographyStats';
 import { TagFilter } from './TagManager';
 import { OrphanPDFModal } from './OrphanPDFModal';
-import { PDFModificationNotification, usePDFModificationDetection } from './PDFModificationNotification';
+import {
+  PDFModificationNotification,
+  usePDFModificationDetection,
+  type ModifiedPDF,
+} from './PDFModificationNotification';
 import './BibliographyPanel.css';
 
 /** Clés montrées dans le bandeau avant « … et N autre(s) ». */
@@ -102,7 +106,7 @@ export const BibliographyPanel: React.FC = () => {
   const bibliographyProblem = useBibliographyStore((state) => state.bibliographyProblem);
 
   // PDF Modification Detection
-  const { modifiedPDFs, dismissNotification } = usePDFModificationDetection(
+  const { modifiedPDFs, acknowledge, dismissNotification } = usePDFModificationDetection(
     citations,
     currentProject?.path
   );
@@ -455,15 +459,17 @@ export const BibliographyPanel: React.FC = () => {
     }
   };
 
-  const handleReindexModifiedPDFs = async (citationIds?: string[]) => {
+  const handleReindexModifiedPDFs = async (selected: ModifiedPDF[] = modifiedPDFs) => {
     if (!currentProject) {
       await useDialogStore.getState().showAlert(t('bibliography.noProjectOpen'));
       return;
     }
 
-    const toReindex = citationIds
-      ? citations.filter((c) => citationIds.includes(c.id) && c.file)
-      : modifiedPDFs.map((m) => citations.find((c) => c.id === m.citationId)).filter((c) => c && c.file);
+    // Chaque PDF du bandeau avec sa référence : la clé BibTeX seule peut être commune à plusieurs.
+    const toReindex = selected.flatMap((pdf) => {
+      const citation = citations.find((c) => c.id === pdf.citationId && c.zoteroKey === pdf.zoteroKey);
+      return citation && isPdfPath(citation.file) ? [{ pdf, citation, file: citation.file }] : [];
+    });
 
     if (toReindex.length === 0) {
       await useDialogStore.getState().showAlert(t('bibliography.noPDFsToReindex'));
@@ -477,22 +483,21 @@ export const BibliographyPanel: React.FC = () => {
 
     // Le projet du geste : un autre ouvert entre-temps ne reçoit ni les PDF de celui-ci, ni sa relecture.
     const { path: projectPath, name: projectName } = currentProject;
-    let done = 0;
+    const reindexed: ModifiedPDF[] = [];
     const errors: string[] = [];
     const interrupted = () =>
       alertBatchInterrupted('bibliography.reindexAll', projectName, {
-        done,
-        remaining: toReindex.length - done - errors.length,
+        done: reindexed.length,
+        remaining: toReindex.length - reindexed.length - errors.length,
         errors,
       });
 
     try {
       // Re-index each PDF
-      for (const citation of toReindex) {
-        if (!citation || !citation.file) continue;
+      for (const { pdf, citation, file } of toReindex) {
         if (!(await stillIn(projectPath))) return await interrupted();
         const result = await window.electron.pdf.index(
-          citation.file,
+          file,
           citation.key,
           {
             title: citation.title,
@@ -501,18 +506,23 @@ export const BibliographyPanel: React.FC = () => {
           },
           projectPath
         );
-        if (result?.success) done++;
+        if (result?.success) reindexed.push(pdf);
         else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${result?.error}`);
         if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return await interrupted();
       }
 
+      // Seuls les PDF réindexés quittent le bandeau, et le projet retient leur MD5 ; ceux en échec y restent.
+      await acknowledge(reindexed);
+
       // Refresh indexed PDFs
       await refreshIndexedPDFs();
 
-      // Dismiss notification
-      dismissNotification();
-
-      await useDialogStore.getState().showAlert(t('bibliography.reindexComplete', { count: toReindex.length }));
+      await useDialogStore.getState().showAlert(
+        withErrorDetails(
+          t('bibliography.reindexComplete', { indexed: reindexed.length, errors: errors.length }),
+          errors
+        )
+      );
     } catch (error) {
       console.error('Failed to re-index modified PDFs:', error);
       await useDialogStore.getState().showAlert(`${t('bibliography.reindexError')}: ${error}`);
@@ -729,7 +739,7 @@ export const BibliographyPanel: React.FC = () => {
       <PDFModificationNotification
         modifiedPDFs={modifiedPDFs}
         onReindexAll={() => handleReindexModifiedPDFs()}
-        onReindexSingle={(citationId) => handleReindexModifiedPDFs([citationId])}
+        onReindexSingle={(pdf) => handleReindexModifiedPDFs([pdf])}
         onDismiss={dismissNotification}
       />
     </div>
