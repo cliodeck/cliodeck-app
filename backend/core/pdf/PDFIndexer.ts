@@ -474,6 +474,14 @@ export class PDFIndexer {
       // démarrage préfère à la complète (S01-1-14). Synchrone : une autre indexation du même fichier
       // ne voit ce document qu'une fois complet, et la dernière à finir remplace l'autre, au lieu
       // de supprimer un document encore en cours (S01-1-13).
+      //
+      // Un document sans extrait n'est donc plus le reste d'une passe interrompue : le filtre de
+      // qualité a tout écarté (page trop courte), ou le PDF n'a pas de texte (#132). On le marque,
+      // pour que le renderer ne le repropose pas à chaque « Indexer tous les PDF » comme il
+      // repropose, une fois, les documents vides hérités, qui n'ont pas cette marque.
+      if (chunksWithEmbeddings.length === 0) {
+        document.metadata.noChunks = true;
+      }
       this.vectorStore.transaction(() => {
         this.vectorStore.saveDocument(document);
 

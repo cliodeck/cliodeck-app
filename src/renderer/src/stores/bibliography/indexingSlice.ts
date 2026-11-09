@@ -32,12 +32,21 @@ interface IndexedDocumentSummary {
   fileURL?: string;
   bibtexKey?: string;
   chunkCount?: number;
-  metadata?: { textDensity?: { lowText?: boolean } };
+  metadata?: { textDensity?: { lowText?: boolean }; noChunks?: boolean };
 }
 
-/** Indexé pour de bon : des extraits, ou un PDF sans couche de texte qui n'en aura jamais. */
-function isSearchable(doc: IndexedDocumentSummary): boolean {
-  return (doc.chunkCount ?? 0) > 0 || doc.metadata?.textDensity?.lowText === true;
+/**
+ * Indexé jusqu'au bout : des extraits, un PDF sans couche de texte qui n'en aura jamais (#132), ou
+ * une indexation complète dont le filtre de qualité a tout écarté (`noChunks`, marqué par
+ * l'indexeur). Les réindexer ne donnerait rien de plus. Seul le document vide hérité d'une passe
+ * interrompue, sans marque, ne compte pas.
+ */
+function isFullyIndexed(doc: IndexedDocumentSummary): boolean {
+  return (
+    (doc.chunkCount ?? 0) > 0 ||
+    doc.metadata?.textDensity?.lowText === true ||
+    doc.metadata?.noChunks === true
+  );
 }
 
 export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> = (set, get) => ({
@@ -386,11 +395,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         }
 
         result.documents.forEach((doc: IndexedDocumentSummary) => {
-          // Un document sans extrait n'est pas cherchable : une indexation interrompue d'avant
-          // l'écriture tout ou rien l'a laissé là. Compté indexé, il n'était plus jamais reproposé,
-          // ni par son chemin ni par sa clé (S03-1-0). Un PDF sans texte (`lowText`, #132) n'a pas
-          // d'extrait non plus, mais le réindexer ne donnerait rien de plus.
-          if (!isSearchable(doc)) return;
+          // Un document sans extrait ni marque est le reste d'une indexation interrompue d'avant
+          // l'écriture tout ou rien. Compté indexé, il n'était plus jamais reproposé, ni par son
+          // chemin ni par sa clé (S03-1-0). Un PDF sans texte (`lowText`, #132) ou marqué
+          // `noChunks` n'a pas d'extrait non plus, mais le réindexer ne donnerait rien de plus.
+          if (!isFullyIndexed(doc)) return;
           // Document stores file path as fileURL (from backend)
           if (doc.fileURL) {
             indexedPaths.add(doc.fileURL);

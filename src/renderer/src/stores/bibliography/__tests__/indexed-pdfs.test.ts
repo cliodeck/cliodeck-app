@@ -10,10 +10,13 @@
  * mais une base l'a peut-être gardé d'avant : le prochain lot doit le reprendre.
  *
  * Un PDF sans couche de texte (`lowText`, #132) n'a pas d'extrait non plus, et pourtant il est
- * indexé : le reproposer referait le même travail pour rien, à chaque lot.
+ * indexé : le reproposer referait le même travail pour rien, à chaque lot. De même d'un PDF de texte
+ * dont le filtre de qualité a écarté tous les extraits (une lettre d'une demi-page) : l'indexeur le
+ * marque (`noChunks`), car son indexation est allée au bout ; un document vide hérité n'a pas de
+ * marque.
  *
  * Le main est simulé : `pdf:get-all` rend ce que rend `VectorStore.getAllDocuments` (`chunkCount`,
- * métadonnées avec `textDensity`), `pdf:index` réussit.
+ * métadonnées avec `textDensity` et `noChunks`), `pdf:index` réussit.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBibliographyStore } from '../../bibliographyStore';
@@ -26,6 +29,8 @@ const EMPTY = '/projet/PDFs/Fickers_2020.pdf';
 const EMPTY_MOVED = '/projet/PDFs/Ranges/Hughes_2025.pdf';
 /** Un scan sans OCR : aucun extrait, et pourtant indexé. */
 const SCAN = '/projet/PDFs/Wang_2025.pdf';
+/** Indexé jusqu'au bout, mais aucun extrait n'a passé le filtre de qualité : marqué par l'indexeur. */
+const LETTER = '/projet/PDFs/Lettre_1932.pdf';
 /** Indexé pour de bon. */
 const INDEXED = '/projet/PDFs/Kansteiner_2022.pdf';
 
@@ -55,6 +60,13 @@ const documents = [
     metadata: { textDensity: { charsPerPage: 0, lowText: true } },
   },
   {
+    id: 'doc-lettre',
+    fileURL: LETTER,
+    bibtexKey: 'Lettre_1932',
+    chunkCount: 0,
+    metadata: { textDensity: { charsPerPage: 117, lowText: false }, noChunks: true },
+  },
+  {
     id: 'doc-kansteiner',
     fileURL: INDEXED,
     bibtexKey: 'Kansteiner_2022',
@@ -78,6 +90,7 @@ beforeEach(() => {
       citation('Fickers_2020', EMPTY),
       citation('Hughes_2025', EMPTY_MOVED),
       citation('Wang_2025', SCAN),
+      citation('Lettre_1932', LETTER),
       citation('Kansteiner_2022', INDEXED),
     ],
     indexedFilePaths: new Set<string>(),
@@ -114,18 +127,26 @@ describe('documents sans extrait', () => {
     expect(bib().isBibtexKeyIndexed('Kansteiner_2022')).toBe(true);
   });
 
-  it('« Indexer tous les PDF » repropose les documents vides, et eux seuls', async () => {
+  it('sans extrait, sans lowText, mais marqué noChunks par l’indexeur : compté indexé', async () => {
+    await bib().refreshIndexedPDFs();
+
+    expect(bib().isFileIndexed(LETTER)).toBe(true);
+    expect(bib().isBibtexKeyIndexed('Lettre_1932')).toBe(true);
+  });
+
+  it('« Indexer tous les PDF » repropose les documents vides hérités, et eux seuls', async () => {
     const result = await bib().indexAllPDFs('/projet');
 
     expect(indexPdf.mock.calls.map((call) => call[0]).sort()).toEqual([EMPTY, EMPTY_MOVED].sort());
     expect(result).toMatchObject({ indexed: 2, skipped: 0, errors: [] });
   });
 
-  it('l’action de la notice indexe un document vide, et répond « déjà indexé » pour le scan', async () => {
+  it('l’action de la notice indexe un document vide, et répond « déjà indexé » pour le scan et la lettre', async () => {
     await bib().refreshIndexedPDFs();
 
     expect(await bib().indexPDFFromCitation('Fickers_2020')).toEqual({ alreadyIndexed: false });
     expect(await bib().indexPDFFromCitation('Wang_2025')).toEqual({ alreadyIndexed: true });
+    expect(await bib().indexPDFFromCitation('Lettre_1932')).toEqual({ alreadyIndexed: true });
     expect(indexPdf.mock.calls.map((call) => call[0])).toEqual([EMPTY]);
   });
 });

@@ -23,6 +23,7 @@ import { VectorStore } from '../core/vector-store/VectorStore';
 import { EnhancedVectorStore } from '../core/vector-store/EnhancedVectorStore';
 import { PDFIndexer } from '../core/pdf/PDFIndexer';
 import type { RAGConfig } from '../types/config';
+import type { PDFMetadata } from '../types/pdf-document';
 
 const FILE = '/projet/PDFs/Kansteiner_2022.pdf';
 const META = { title: 'Digital Doping for Historians', author: 'Kansteiner, Wulf', year: '2022' };
@@ -267,6 +268,47 @@ describe.skipIf(!sqliteAvailable)('PDF : une indexation est tout ou rien', () =>
 
       expect(store.getDocument(document.id)?.metadata.textDensity).toEqual({ charsPerPage: 0, lowText: true });
       expect(store.getChunksForDocument(document.id)).toHaveLength(0);
+    });
+
+    /*
+     * Un PDF de texte peut lui aussi finir sans aucun extrait : le filtre de qualité écarte ce qui
+     * fait moins de 20 mots, une page d'inventaire par exemple. L'indexation est pourtant allée
+     * au bout, et la refaire ne donnerait rien de plus. Sans marque, le renderer le confondait avec
+     * le document vide qu'une indexation interrompue laissait avant l'écriture tout ou rien, et
+     * « Indexer tous les PDF » le reproposait à chaque lot, en le comptant « indexé » à chaque fois.
+     */
+    it('un PDF de texte dont aucun extrait ne passe le filtre est enregistré, marqué indexé jusqu’au bout', async () => {
+      // 16 mots, 119 caractères hors espaces : pas un PDF image (seuil à 100 par page).
+      const shortText = async () => ({
+        pages: [
+          {
+            pageNumber: 1,
+            text: "Archives nationales, fonds Moscovici, carton 12, dossier 3 : correspondance administrative, rapports d'inspection, coupures de presse.",
+          },
+        ],
+        metadata: {},
+        title: 'Inventaire',
+      });
+      // Réglages de l'app : découpage adaptatif, filtre de qualité.
+      const document = await new PDFIndexer(store, embed, 'cpuOptimized', undefined, true, {}, shortText).indexPDF(
+        '/projet/PDFs/Inventaire_1932.pdf',
+        'Inventaire_1932',
+        undefined,
+        { title: 'Inventaire', author: 'Anonyme', year: '1932' }
+      );
+
+      const saved = (store.getAllDocuments() as Array<{ id: string; chunkCount: number; metadata: PDFMetadata }>)
+        .find((doc) => doc.id === document.id);
+      expect(saved?.chunkCount).toBe(0);
+      expect(saved?.metadata.textDensity?.lowText).toBe(false);
+      expect(saved?.metadata.noChunks).toBe(true);
+    });
+
+    it('un PDF qui a ses extraits ne porte pas cette marque', async () => {
+      const document = await indexer().indexPDF(FILE, 'Kansteiner_2022', undefined, META);
+
+      expect(store.getChunksForDocument(document.id).length).toBeGreaterThan(0);
+      expect(store.getDocument(document.id)?.metadata.noChunks).toBeUndefined();
     });
   });
 });
