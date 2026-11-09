@@ -12,6 +12,7 @@
  * source Zotero (aucun appel à l'API, aucune base Zotero lue) et le projet courant du main.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -134,6 +135,28 @@ function makeProject(bib: string | Buffer): void {
   );
   fs.writeFileSync(bibPath(), bib);
   current = project;
+}
+
+/** Un projet neuf, tel que `createProject` l'écrit : `project.json` ne nomme encore aucun `.bib`. */
+function makeNewProject(): void {
+  project = path.join(root, `p-${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
+  fs.writeFileSync(
+    path.join(project, 'project.json'),
+    JSON.stringify({ name: 'Thèse', type: 'article', createdAt: '2026-01-01T00:00:00.000Z' }, null, 2)
+  );
+  current = project;
+}
+
+/** Chaque fichier du projet, sous-dossiers compris, par son empreinte. */
+function tree(dir = project, prefix = ''): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const relative = path.join(prefix, entry.name);
+    if (entry.isDirectory()) Object.assign(files, tree(path.join(dir, entry.name), relative));
+    else files[relative] = createHash('sha256').update(fs.readFileSync(path.join(dir, entry.name))).digest('hex');
+  }
+  return files;
 }
 
 const request = () => ({ mode: 'local', dataDirectory: '/zotero', collectionKey: 'COLL', expectedProjectPath: project });
@@ -412,11 +435,124 @@ describe('zotero:synchronize — des métadonnées illisibles arrêtent tout', (
   });
 
   it('même sans .bib encore écrit : les métadonnées ne sont pas remplacées', async () => {
-    makeProject('');
-    fs.rmSync(bibPath());
+    makeNewProject();
     fs.writeFileSync(metadataPath(), RATTACHEMENTS.slice(0, 40));
 
     await expectRefused({ error: 'metadata-unreadable' });
+  });
+});
+
+/**
+ * Un `.bib` que `project.json` nomme, mais qui n'est plus là, n'est pas une bibliographie vide (H3).
+ * La synchronisation le recréait depuis Zotero, sans ce que l'ancien avait en propre : entrées
+ * saisies à la main, champs ajoutés, blocs hors des entrées.
+ */
+describe('zotero:synchronize — un .bib attendu mais absent n’est pas recréé', () => {
+  const elsewhere = () => path.join(project, 'ma-biblio-ancienne.bib');
+
+  /** Un projet synchronisé : `project.json` nomme son `.bib`, et les métadonnées sont écrites. */
+  async function synchronizedProject(): Promise<void> {
+    makeProject(GARDE + '\n');
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    openSource.mockClear();
+  }
+
+  it('.bib renommé hors de ClioDeck : refus « introuvable », Zotero n’est pas lu, et aucun fichier du projet ne change', async () => {
+    await synchronizedProject();
+    fs.renameSync(bibPath(), elsewhere());
+    const before = tree();
+
+    const result = await synchronize(request());
+
+    expect(result).toMatchObject({ success: false, error: 'bib-missing', file: BIB });
+    expect(openSource).not.toHaveBeenCalled();
+    expect(tree()).toEqual(before);
+    expect(fs.existsSync(bibPath())).toBe(false);
+  });
+
+  it('.bib évincé par iCloud (il n’en reste que la trace .ma-biblio.bib.icloud) : même refus, rien n’est recréé', async () => {
+    await synchronizedProject();
+    fs.rmSync(bibPath());
+    fs.writeFileSync(path.join(project, `.${BIB}.icloud`), 'bplist00');
+    const before = tree();
+
+    expect(await synchronize(request())).toMatchObject({ success: false, error: 'bib-missing', file: BIB });
+    expect(openSource).not.toHaveBeenCalled();
+    expect(tree()).toEqual(before);
+  });
+
+  /**
+   * Le `.bib` disparaît pendant la lecture de Zotero, après la garde du début : renommé dans le
+   * Finder, ou évincé par iCloud. La lecture dure une à deux minutes en mode API pour une grosse
+   * collection. Recréé, il perdait ce qu'il portait hors de ses entrées (il n'y a plus rien à
+   * reprendre), et laissait un second fichier à côté de celui que l'historien avait renommé.
+   */
+  const renamedDuringZoteroRead: Array<[string, () => void]> = [
+    ['rien de neuf dans Zotero', () => undefined],
+    ['une notice de plus dans Zotero', () => contents.COLL.push(notice('LEDU1990', 'Le carnet', 'Leduc'))],
+  ];
+  it.each(renamedDuringZoteroRead)('.bib renommé pendant la lecture de Zotero (%s) : refus « introuvable », rien n’est recréé', async (_, change) => {
+    makeProject(['@comment{groupe BibDesk}', '', GARDE, ''].join('\n'));
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    change();
+    openSource.mockImplementation(() => {
+      const source = fakeSource();
+      return {
+        ...source,
+        listItems: async (options?: { collectionKey?: string }) => {
+          if (fs.existsSync(bibPath())) fs.renameSync(bibPath(), elsewhere());
+          return source.listItems(options);
+        },
+      };
+    });
+    const before = tree();
+    const { [BIB]: renamed, ...others } = before;
+    const expected = { ...others, [path.basename(elsewhere())]: renamed };
+
+    const result = await synchronize(request());
+
+    expect(result).toMatchObject({ success: false, error: 'bib-missing', file: BIB });
+    expect(fs.existsSync(bibPath())).toBe(false);
+    expect(tree()).toEqual(expected);
+    expect(fs.readFileSync(elsewhere(), 'utf-8')).toContain('@comment{groupe BibDesk}');
+  });
+
+  it('le .bib remis à sa place : la synchronisation suivante passe, et il garde ses entrées', async () => {
+    await synchronizedProject();
+    fs.renameSync(bibPath(), elsewhere());
+    expect(await synchronize(request())).toMatchObject({ success: false, error: 'bib-missing' });
+
+    fs.renameSync(elsewhere(), bibPath());
+    contents.COLL.push(notice('LEDU1990', 'Le carnet', 'Leduc'));
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    const written = fs.readFileSync(bibPath(), 'utf-8');
+    expect(written).toContain('Garde_2000');
+    expect(written).toContain('Leduc');
+  });
+
+  it('témoin : un projet neuf, sans .bib nommé, crée bibliography.bib à la première synchronisation', async () => {
+    makeNewProject();
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.readFileSync(path.join(project, 'bibliography.bib'), 'utf-8')).toContain('Martin');
+    expect(JSON.parse(fs.readFileSync(path.join(project, 'project.json'), 'utf-8')).bibliographySource).toEqual({
+      type: 'zotero',
+      filePath: 'bibliography.bib',
+      zoteroCollection: 'COLL',
+    });
+  });
+
+  // Rien à écrire depuis Zotero, et pourtant `project.json` va nommer `bibliography.bib` : le fichier
+  // naît quand même, vide, sans quoi la synchronisation suivante le dirait introuvable.
+  it('témoin : un projet neuf et une collection vide : bibliography.bib naît, et la synchronisation suivante passe', async () => {
+    makeNewProject();
+    contents = { COLL: [] };
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: true });
+    expect(fs.existsSync(path.join(project, 'bibliography.bib'))).toBe(true);
+
+    expect(await synchronize(request())).toMatchObject({ success: true, status: 'applied', written: false });
   });
 });
 

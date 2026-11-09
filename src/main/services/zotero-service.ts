@@ -25,7 +25,7 @@ import {
   MetadataUnreadableError,
   type BibliographyMetadataFile,
 } from '../../../backend/services/BibliographyMetadataService.js';
-import { readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
+import { BibliographyMissingError, readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
 import type { BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
 import { fromStoredPath } from '../../../backend/core/bibliography/stored-path.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
@@ -280,7 +280,9 @@ class ZoteroService {
       const savedCollectionKey =
         project.zotero?.collectionKey || project.bibliographySource?.zoteroCollection || undefined;
 
-      const local = await readLocalBibliography(bibtexPath, options.projectPath);
+      // `project.json` nomme le `.bib` : le projet l'a déjà eu. Sans nom, c'est la première synchronisation.
+      const expected = Boolean(project.bibliographySource?.filePath);
+      const local = await readLocalBibliography(bibtexPath, options.projectPath, expected);
 
       const ds = this.createDataSource(options);
       try {
@@ -296,7 +298,17 @@ class ZoteroService {
           return { success: true, status: result.status, report: result.report, bibtexPath };
         }
 
-        const mustWrite = result.changed || !existsSync(bibtexPath);
+        // Un `.bib` attendu et absent a été refusé avant la lecture de Zotero. Il a pu disparaître
+        // pendant cette lecture (une à deux minutes en mode API), renommé dans le Finder ou évincé
+        // par iCloud : le recréer perdrait ce qu'il portait hors de ses entrées, qu'il n'y a plus
+        // où reprendre, et en laisserait un second à côté de celui qui a été renommé. Rien n'est
+        // encore écrit : le refus dit vrai.
+        if (expected && !existsSync(bibtexPath)) throw new BibliographyMissingError(bibtexPath);
+
+        // Celui d'un projet qui n'en nommait aucun naît ici, même sans rien de neuf dans Zotero,
+        // puisque `project.json` va le nommer : sinon la synchronisation suivante le dirait
+        // introuvable.
+        const mustWrite = result.changed || (!expected && !existsSync(bibtexPath));
         if (mustWrite) {
           // Écriture atomique, après une copie de l'état d'avant : un fichier à moitié écrit
           // (coupure, OneDrive au mauvais moment) perdrait la bibliographie. `result.bibtex` n'a
@@ -379,14 +391,17 @@ class BibUnreadError extends Error {
 }
 
 /**
- * Une synchronisation refusée avant toute lecture de Zotero, parce que le `.bib` ou les
- * métadonnées sont mal lus : `error` vaut `bib-unread`, `bib-unreadable` ou `metadata-unreadable`,
- * et ces champs disent ce qui est en cause. Le renderer en fait un message : le code ne s'affiche
- * jamais tel quel.
+ * Une synchronisation refusée avant toute écriture, parce que le `.bib` ou les métadonnées sont
+ * mal lus, ou le `.bib` attendu absent : `error` vaut `bib-unread`, `bib-unreadable`,
+ * `metadata-unreadable` ou `bib-missing`, et ces champs disent ce qui est en cause. Tous sont
+ * relevés avant la lecture de Zotero, sauf un `.bib` attendu qui disparaît pendant cette lecture.
+ * Le renderer en fait un message : le code ne s'affiche jamais tel quel.
  */
 interface SyncRefusalDetails {
   /** Le fichier en cause, relatif au projet. */
   file?: string;
+  /** `bib-missing` : le chemin entier du `.bib`, que le panneau relit pour afficher son bandeau. */
+  bibtexPath?: string;
   unreadKeys?: string[];
   /** Parmi `unreadKeys`, les entrées venues de Zotero : à corriger sans les supprimer. */
   unreadFromZotero?: string[];
@@ -417,6 +432,9 @@ function syncRefusal(error: unknown): ({ success: false; error: string } & SyncR
   if (error instanceof MetadataUnreadableError) {
     return { success: false, error: 'metadata-unreadable', file: path.join('.cliodeck', path.basename(error.filePath)) };
   }
+  if (error instanceof BibliographyMissingError) {
+    return { success: false, error: 'bib-missing', file: path.basename(error.filePath), bibtexPath: error.filePath };
+  }
   return null;
 }
 
@@ -441,9 +459,16 @@ async function readProjectJson(projectJsonPath: string): Promise<ProjectJson> {
  * (S07-1-2). Celles qu'il lit, il les développe, et la réécriture écrit les
  * valeurs développées (L05-7). Des métadonnées illisibles, même sans `.bib`
  * encore écrit, de même (S07-1-10).
+ *
+ * Un fichier `expected` (nommé par `project.json`) mais absent arrête tout
+ * aussi, évincé par iCloud compris (il n'en reste que `.nom.icloud`) : le
+ * recréer depuis Zotero perdrait ce que l'ancien avait en propre, entrées hors
+ * Zotero et champs ajoutés à la main (H3). Il se retrouve, ou se recrée par un
+ * import. Seul un projet qui n'en nomme aucun part d'une bibliographie vide.
  */
-async function readLocalBibliography(bibtexPath: string, projectPath: string): Promise<Citation[]> {
+async function readLocalBibliography(bibtexPath: string, projectPath: string, expected: boolean): Promise<Citation[]> {
   const read = await readBibFile(bibtexPath);
+  if (read.kind === 'absent' && expected) throw new BibliographyMissingError(bibtexPath);
   if (read.kind === 'unreadable') throw new BibFileUnreadableError(bibtexPath, read.reason, read.message);
   if (read.kind === 'ok' && read.unreadKeys.length > 0) {
     throw new BibUnreadError(bibtexPath, read);

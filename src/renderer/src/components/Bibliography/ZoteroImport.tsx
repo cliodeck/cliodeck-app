@@ -37,16 +37,19 @@ interface SyncReport {
 }
 
 /**
- * Refus du main avant toute lecture de Zotero : le `.bib` ou les métadonnées sont mal lus, et les
- * réécrire perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10).
+ * Refus du main avant toute écriture : le `.bib` ou les métadonnées sont mal lus, et les réécrire
+ * perdrait ce qui ne s'est pas lu (S07-1-2, S07-1-10) ; ou le `.bib` que `project.json` nomme n'est
+ * plus là, avant la lecture de Zotero ou pendant, et le recréer depuis Zotero perdrait ce qu'il
+ * avait en propre (H3).
  */
 type SyncRefusal = { success: false; file: string } & (
   | { error: 'bib-unread'; unreadKeys: string[]; unreadFromZotero?: string[] }
   | { error: 'bib-unreadable'; reason: string; detail: string }
   | { error: 'metadata-unreadable' }
+  | { error: 'bib-missing'; bibtexPath?: string }
 );
 
-const REFUSALS = new Set(['bib-unread', 'bib-unreadable', 'metadata-unreadable']);
+const REFUSALS = new Set(['bib-unread', 'bib-unreadable', 'metadata-unreadable', 'bib-missing']);
 
 const isRefusal = (result: { success?: boolean; error?: string }): result is SyncRefusal =>
   result.success === false && REFUSALS.has(result.error ?? '');
@@ -304,6 +307,8 @@ export const ZoteroImport: React.FC = () => {
           ? t('bibliography.bibNotUtf8', { file: refusal.file })
           : t('bibliography.bibUnreadable', { file: refusal.file, error: refusal.detail })
       );
+    } else if (refusal.error === 'bib-missing') {
+      parts.push(t('bibliography.bibMissing', { file: refusal.file }));
     } else {
       parts.push(t('zotero.sync.metadataUnreadable', { file: refusal.file }));
     }
@@ -392,6 +397,16 @@ export const ZoteroImport: React.FC = () => {
         return;
       }
       if (isRefusal(result)) {
+        // Le `.bib` attendu n'est plus là : le panneau le relit, et montre le bandeau « introuvable »
+        // comme à l'ouverture du projet, plutôt que la liste d'un fichier disparu. La relecture
+        // lève, puisque le fichier manque : le bandeau le dit déjà.
+        if (result.error === 'bib-missing' && result.bibtexPath) {
+          await useBibliographyStore
+            .getState()
+            .loadBibliographyWithMetadata(result.bibtexPath, projectPath)
+            .catch(() => undefined);
+          if (!(await stillInProject())) return;
+        }
         await useDialogStore.getState().showAlert(describeRefusal(result));
         return;
       }

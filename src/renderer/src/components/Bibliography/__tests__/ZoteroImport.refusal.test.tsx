@@ -129,6 +129,24 @@ describe('synchronisation refusée : le message, pas le code', () => {
     expect(message).toContain('bibliography.bibUnreadable');
   });
 
+  // Le `.bib` que `project.json` nomme n'est plus là (H3) : le message est celui du bandeau du
+  // panneau, que le panneau relu affiche aussi.
+  it('.bib introuvable : le message dit « introuvable », et le panneau relit le fichier', async () => {
+    const message = await synchronizeWith({
+      success: false,
+      error: 'bib-missing',
+      file: 'ma-biblio.bib',
+      bibtexPath: `${A}/ma-biblio.bib`,
+    });
+
+    expect(message).toContain('zotero.sync.refused');
+    expect(message).toContain('bibliography.bibMissing');
+    expect(message).toContain('zotero.sync.fixThenRetry');
+    expect(message).not.toContain('bib-missing');
+    expect(message).not.toContain('zotero.sync.error');
+    expect(loadWithMetadata).toHaveBeenCalledWith(`${A}/ma-biblio.bib`, A);
+  });
+
   it('métadonnées illisibles', async () => {
     const message = await synchronizeWith({
       success: false,
