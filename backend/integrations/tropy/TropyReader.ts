@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import { openTropyDatabase } from './tropy-database';
 
 // MARK: - Types Tropy
 
@@ -170,8 +171,12 @@ export class TropyReader {
       throw new Error(`Invalid Tropy project path: ${projectPath}. Expected .tropy or .tpy`);
     }
 
-    // IMPORTANT: Mode lecture seule - ne jamais modifier le fichier .tpy
-    this.db = new Database(tpyPath, { readonly: true });
+    // IMPORTANT: Mode lecture seule - ne jamais modifier le fichier .tpy, ni
+    // rien laisser à côté (G2). Tropy fermé, une base en WAL se lit sur une
+    // copie en mémoire, tenue jusqu'à `closeProject` ; Tropy ouvert, sur la
+    // base elle-même, avec ce qu'il n'a pas encore reporté. Même règle que
+    // `withTropyDatabase` (`tropy-project-identity.ts`), par `openTropyDatabase`.
+    this.db = openTropyDatabase(tpyPath);
     this.tpyPath = tpyPath;
   }
 

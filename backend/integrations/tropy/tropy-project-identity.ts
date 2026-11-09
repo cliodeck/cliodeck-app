@@ -8,14 +8,15 @@
  * Tropy rattachait chacun de ses items à la source de même numéro du premier :
  * titre du rapport du préfet sur le texte OCR de la lettre de Blum.
  *
- * Lecture à part de `TropyReader`, qui n'est pas modifié : ouverture en
- * lecture seule, rien d'écrit, rien laissé à côté du .tpy, connexion fermée
- * quoi qu'il arrive.
+ * Lecture à part de `TropyReader`, avec la même ouverture (`openTropyDatabase`,
+ * G2) : lecture seule, rien d'écrit, rien laissé à côté du .tpy ; connexion
+ * fermée quoi qu'il arrive.
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { sameFile } from '../../core/vector-store/file-identity';
+import { openTropyDatabase } from './tropy-database';
 import type { PrimarySourcesVectorStore } from '../../core/vector-store/PrimarySourcesVectorStore';
 
 // MARK: - Types
@@ -61,40 +62,14 @@ function databasePath(projectPath: string): string {
   throw new Error(`Invalid Tropy project path: ${projectPath}. Expected .tropy or .tpy`);
 }
 
-/** En-tête SQLite en journal WAL (octets 18 et 19 de l'en-tête à 2). */
-function isWalDatabase(dbPath: string): boolean {
-  const header = Buffer.alloc(20);
-  const fd = fs.openSync(dbPath, 'r');
-  try {
-    const read = fs.readSync(fd, header, 0, header.length, 0);
-    return read === header.length && header.toString('latin1', 0, 16) === 'SQLite format 3\u0000' &&
-      (header[18] === 2 || header[19] === 2);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 /**
- * Ouvrir en lecture seule une base en WAL crée ses `-wal` et `-shm` quand ils
- * n'existent pas, et les laisse après la fermeture (mesuré avec
- * better-sqlite3 13). Tropy les supprime en fermant un projet : Tropy fermé,
- * tout le contenu est donc dans le fichier principal, et on en lit une copie
- * en mémoire, marquée « journal classique » (octets 18 et 19, 2 → 1) — le
- * fichier, lui, n'est pas touché. Tropy ouvert, ses `-wal` et `-shm` existent
- * déjà : on lit la base elle-même, avec ce qu'il n'a pas encore reporté.
+ * Lit le .tpy sans rien laisser à côté : Tropy fermé, une base en WAL se lit
+ * sur une copie en mémoire ; Tropy ouvert, sur la base elle-même, avec ce
+ * qu'il n'a pas encore reporté. La règle est dans `openTropyDatabase`
+ * (`tropy-database.ts`), la même que pour `TropyReader.openProject`.
  */
 function withTropyDatabase<T>(projectPath: string, read: (db: Database.Database) => T): T {
-  const dbPath = databasePath(projectPath);
-  const journalOpen = fs.existsSync(`${dbPath}-wal`) && fs.existsSync(`${dbPath}-shm`);
-  let db: Database.Database;
-  if (!journalOpen && isWalDatabase(dbPath)) {
-    const image = fs.readFileSync(dbPath);
-    image[18] = 1;
-    image[19] = 1;
-    db = new Database(image, { readonly: true });
-  } else {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  }
+  const db = openTropyDatabase(databasePath(projectPath));
   try {
     return read(db);
   } finally {

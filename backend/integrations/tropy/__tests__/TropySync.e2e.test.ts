@@ -18,6 +18,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -1307,6 +1308,147 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(after.sources).toHaveLength(1);
     expect(after.sources[0].transcription).toBe(OCR_TEXT);
     expect(after.chunks.length).toBeGreaterThan(0);
+  });
+
+  // G2 : `TropyReader` ouvrait le .tpy par `new Database(…, { readonly: true })`.
+  // Sur une base en WAL, Tropy fermé, SQLite créait `-wal` et `-shm` à côté
+  // et les y laissait : deux fichiers étrangers dans le dossier de l'historien.
+  describe('Tropy fermé, base en WAL : rien de créé ni laissé à côté du .tpy (G2)', () => {
+    function files(dir: string): string[] {
+      return (fs.readdirSync(dir, { recursive: true }) as string[]).sort();
+    }
+
+    function digest(file: string): string {
+      return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    }
+
+    it('un .tpy nu : ouverture, synchro et photos d’une source', async () => {
+      const tpy = makeTpy(tropyDir, spec({ wal: true }));
+      const before = files(tropyDir);
+      const bytes = digest(tpy);
+      expect(before.filter((f) => f.endsWith('-wal') || f.endsWith('-shm'))).toEqual([]);
+
+      expect((await tropyService.openProject(tpy)).success).toBe(true);
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+      expect(result.projectName).toBe('Grèves nantaises');
+      expect(result.newItems).toBe(2);
+      const ocred = snapshot().sources.find((s) => s.tropy_id === 10);
+      expect(ocred?.transcription).toBe(OCR_TEXT);
+      // L'OCR manuel relit le .tpy pour trouver les photos de la source.
+      expect(tropyService.getSourcePhotoPaths(ocred!.id)).toEqual([photoPath]);
+
+      expect(files(tropyDir)).toEqual(before);
+      expect(digest(tpy)).toBe(bytes);
+    });
+
+    it('un paquet .tropy : photo relative au dossier assets', async () => {
+      const pkg = makeTpy(tropyDir, {
+        projectId: 'projet-paquet',
+        name: 'Paquet',
+        packaged: true,
+        wal: true,
+        items: [{ id: 5, title: 'Pièce scannée', photos: [{ id: 6, path: 'scan.jpg' }] }],
+      });
+      const asset = path.join(pkg, 'assets', 'scan.jpg');
+      fs.writeFileSync(asset, 'jpeg factice');
+      const before = files(pkg);
+      const bytes = digest(tpyDatabasePath(pkg));
+
+      expect((await tropyService.openProject(pkg)).success).toBe(true);
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+      expect(result.newItems).toBe(1);
+      expect(ocrSpy).toHaveBeenCalledWith([asset], { language: 'fra' });
+
+      expect(files(pkg)).toEqual(before);
+      expect(digest(tpyDatabasePath(pkg))).toBe(bytes);
+    });
+  });
+
+  /**
+   * Tropy ouvert sur `tpy` : un item créé, encore dans le journal (WAL non
+   * reporté dans la base). À fermer par l'appelant.
+   */
+  function tropyHoldingNewItem(tpy: string): Database.Database {
+    const tropy = openTpyForWrite(tpy);
+    tropy.pragma('journal_mode = WAL');
+    tropy.pragma('wal_autocheckpoint = 0');
+    tropy.transaction(() => {
+      tropy
+        .prepare('INSERT INTO subjects (id, modified) VALUES (30, ?)')
+        .run('2026-06-01T08:00:00.000Z');
+      tropy.prepare('INSERT INTO items (id) VALUES (30)').run();
+      const { value_id } = tropy
+        .prepare('INSERT INTO metadata_values (datatype, text) VALUES (?, ?) RETURNING value_id')
+        .get('http://www.w3.org/2001/XMLSchema#string', 'Affiche du syndicat des dockers') as {
+        value_id: number;
+      };
+      tropy
+        .prepare('INSERT INTO metadata (id, property, value_id) VALUES (30, ?, ?)')
+        .run('http://purl.org/dc/elements/1.1/title', value_id);
+    })();
+    return tropy;
+  }
+
+  /** La synchro a-t-elle enregistré l'item que Tropy tient dans son journal ? */
+  function syncedNewItemTitle(): string | undefined {
+    const db = brainDb();
+    try {
+      const row = db.prepare('SELECT title FROM tropy_sources WHERE tropy_id = 30').get() as
+        | { title: string }
+        | undefined;
+      return row?.title;
+    } finally {
+      db.close();
+    }
+  }
+
+  // Témoin de G2 : Tropy ouvert, ses `-wal` et `-shm` existent et le journal
+  // tient ce qu'il n'a pas encore reporté dans la base. La synchro doit le voir.
+  it('Tropy ouvert : la synchro voit l’item qu’il n’a pas encore reporté dans la base (G2, témoin)', async () => {
+    const tpy = makeTpy(tropyDir, spec({ wal: true }));
+    const tropy = tropyHoldingNewItem(tpy);
+    try {
+      const dbFile = tpyDatabasePath(tpy);
+      expect(fs.existsSync(`${dbFile}-wal`) && fs.existsSync(`${dbFile}-shm`)).toBe(true);
+
+      expect((await tropyService.openProject(tpy)).success).toBe(true);
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+      expect(result.totalItems).toBe(3);
+      expect(result.newItems).toBe(3);
+      expect(syncedNewItemTitle()).toBe('Affiche du syndicat des dockers');
+    } finally {
+      tropy.close();
+    }
+  });
+
+  // Revue de G2 : SQLite range le journal à côté du fichier réel. Un .tpy lié
+  // par un lien symbolique, Tropy ouvert sur la cible, n'a ni `-wal` ni `-shm`
+  // à côté du lien : la synchro lisait une copie de la base sans le journal,
+  // et l'item créé dans Tropy attendait le prochain report.
+  it('un .tpy lié par un lien symbolique, Tropy ouvert sur la cible : la synchro voit l’item du journal (revue G2)', async () => {
+    const tpy = makeTpy(tropyDir, spec({ wal: true }));
+    const shortcuts = path.join(root, 'raccourcis');
+    fs.mkdirSync(shortcuts);
+    const link = path.join(shortcuts, 'greves.tpy');
+    fs.symlinkSync(tpy, link);
+    const listing = (dir: string): string[] => fs.readdirSync(dir).sort();
+    const tropy = tropyHoldingNewItem(tpy);
+    try {
+      const before = { tropy: listing(tropyDir), shortcuts: listing(shortcuts) };
+
+      expect((await tropyService.openProject(link)).success).toBe(true);
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+      expect(result.totalItems).toBe(3);
+      expect(syncedNewItemTitle()).toBe('Affiche du syndicat des dockers');
+
+      expect({ tropy: listing(tropyDir), shortcuts: listing(shortcuts) }).toEqual(before);
+    } finally {
+      tropy.close();
+    }
   });
 
   // L06-7 (S15-1-36) : l'import d'un dossier de transcriptions (modale
