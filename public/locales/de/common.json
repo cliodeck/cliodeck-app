@@ -1955,7 +1955,8 @@
       "suspiciousInstruction": "Verdächtige Anweisung",
       "externalUrl": "Externe URL",
       "unusualEncoding": "Ungewöhnliche Kodierung",
-      "injectionBlocked": "Injektion ausgeschlossen"
+      "injectionBlocked": "Injektion ausgeschlossen",
+      "navigationBlocked": "Öffnen ohne Klick abgelehnt"
     },
     "events": {
       "title": "Erfasste Ereignisse",

@@ -24,7 +24,7 @@
  * jailbreak their own assistant.
  */
 
-import type { SecurityEvent, SecuritySeverity } from './events.js';
+import type { SecurityEvent, SecurityLogEvent, SecuritySeverity } from './events.js';
 import type { SourceId } from '../types/source.js';
 
 export type InspectorMode = 'warn' | 'audit' | 'block';
@@ -236,7 +236,7 @@ export class SourceInspector {
  */
 export async function appendSecurityEvent(
   logPath: string,
-  event: SecurityEvent
+  event: SecurityLogEvent
 ): Promise<void> {
   const fs = await import('fs/promises');
   const path = await import('path');

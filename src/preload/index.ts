@@ -1410,5 +1410,54 @@ const api = {
 // Exposer l'API au renderer via window.electron
 contextBridge.exposeInMainWorld('electron', api);
 
+/**
+ * Liens web : un geste de l'historien, une ouverture.
+ *
+ * Electron ne dit pas si une navigation vient d'un geste. Le garde de navigation du main
+ * (`src/main/navigation-guard.ts`) refuse donc toute navigation externe — un meta refresh ou un
+ * `location` changé par la page ouvraient sinon une page dans le navigateur, sans aucun clic.
+ * Le geste s'établit ici, où l'on voit le DOM de la page : sur un vrai clic (`isTrusted` ; un
+ * `el.click()` de script ne compte pas), Cmd+clic, clic du milieu ou Entrée sur un lien web, le
+ * preload empêche la navigation et ouvre l'URL du lien par le canal `shell:open-external`. C'est le
+ * seul chemin d'ouverture d'un lien de la page : un composant n'a pas à ouvrir lui-même un `<a>`,
+ * il l'ouvrirait deux fois.
+ *
+ * Exporté pour les tests (jsdom ne sait pas fabriquer un événement « de confiance »).
+ */
+const EXTERNAL_LINK_PROTOCOLS = ['http:', 'https:', 'mailto:'];
+
+export function openActivatedLink(event: MouseEvent, open: (url: string) => void): void {
+  if (!event.isTrusted) return;
+  // `auxclick` : seul le clic du milieu ouvre un lien ; le clic droit ouvre le menu contextuel.
+  if (event.type === 'auxclick' && event.button !== 1) return;
+  const target = event.target;
+  const anchor = target instanceof Element ? target.closest('a[href]') : null;
+  // Dans un texte en cours d'édition, cliquer un lien place le curseur.
+  if (!(anchor instanceof HTMLAnchorElement) || anchor.isContentEditable) return;
+  let url: URL;
+  try {
+    url = new URL(anchor.href);
+  } catch {
+    return;
+  }
+  if (!EXTERNAL_LINK_PROTOCOLS.includes(url.protocol)) return;
+  // L'application servie par Vite (développement) est en http : ses propres liens restent internes.
+  if (url.protocol !== 'mailto:' && url.origin === window.location.origin) return;
+  event.preventDefault();
+  // Le second clic d'un double-clic n'ouvre pas un second onglet.
+  if (event.detail > 1) return;
+  open(anchor.href);
+}
+
+const openLinkExternally = (url: string): void => {
+  ipcRenderer.invoke('shell:open-external', url).catch((err: unknown) => {
+    console.warn('[Preload] shell:open-external a échoué :', err);
+  });
+};
+
+// En capture sur `window` : avant tout écouteur de la page, qui ne peut donc pas en priver le lien.
+window.addEventListener('click', (event) => openActivatedLink(event, openLinkExternally), true);
+window.addEventListener('auxclick', (event) => openActivatedLink(event, openLinkExternally), true);
+
 // Types pour TypeScript
 export type ElectronAPI = typeof api;

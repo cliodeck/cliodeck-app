@@ -1,7 +1,7 @@
 /**
  * Reader / aggregator for `security-events.jsonl` (fusion 2.8).
  *
- * The file is one JSONL line per `SecurityEvent` (see `events.ts` for
+ * The file is one JSONL line per `SecurityLogEvent` (see `events.ts` for
  * the discriminated union). Lines are appended best-effort and may be
  * truncated on crash, so the parser is **fail-soft**: malformed lines
  * are skipped silently, the rest are still surfaced. Aggregation runs
@@ -16,8 +16,8 @@
 
 import fs from 'fs/promises';
 import type {
-  SecurityEvent,
-  SecurityEventKind,
+  SecurityLogEvent,
+  SecurityLogEventKind,
   SecuritySeverity,
 } from './events.js';
 
@@ -25,9 +25,9 @@ export interface SecurityEventStats {
   /** Total non-malformed events parsed. */
   total: number;
   /** Counts by `kind` (every kind appears, zero when absent). */
-  byKind: Record<SecurityEventKind, number>;
+  byKind: Record<SecurityLogEventKind, number>;
   /** Counts by `severity`. Events without a severity field are ignored
-   *  here (only `external_url` lacks one); their total is exposed via
+   *  here (`external_url` and `external_navigation_blocked` lack one); their total is exposed via
    *  `total - sum(bySeverity)` if the caller wants it. */
   bySeverity: Record<SecuritySeverity, number>;
   /** Inclusive range of timestamps (ISO strings), undefined when empty. */
@@ -35,7 +35,7 @@ export interface SecurityEventStats {
   lastAt?: string;
   /** Most recent N events, newest first. Caller chooses N via the
    *  reader's `limit`; the aggregator just preserves the order. */
-  recent: SecurityEvent[];
+  recent: SecurityLogEvent[];
 }
 
 const DEFAULT_RECENT_LIMIT = 50;
@@ -49,7 +49,7 @@ const DEFAULT_RECENT_LIMIT = 50;
 export async function readSecurityEventsLog(
   logPath: string,
   opts: { limit?: number } = {}
-): Promise<SecurityEvent[]> {
+): Promise<SecurityLogEvent[]> {
   let raw: string;
   try {
     raw = await fs.readFile(logPath, 'utf8');
@@ -57,12 +57,12 @@ export async function readSecurityEventsLog(
     if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return [];
     throw e;
   }
-  const events: SecurityEvent[] = [];
+  const events: SecurityLogEvent[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const parsed = JSON.parse(trimmed) as SecurityEvent;
+      const parsed = JSON.parse(trimmed) as SecurityLogEvent;
       // Defensive: at least require the `kind` and `at` discriminants
       // so a stray JSON payload of the wrong shape doesn't poison
       // downstream aggregation.
@@ -91,15 +91,16 @@ export async function readSecurityEventsLog(
  * panel consumes. Pure function — exposed separately for testing.
  */
 export function aggregateSecurityEvents(
-  events: readonly SecurityEvent[],
+  events: readonly SecurityLogEvent[],
   opts: { recentLimit?: number } = {}
 ): SecurityEventStats {
   const recentLimit = opts.recentLimit ?? DEFAULT_RECENT_LIMIT;
-  const byKind: Record<SecurityEventKind, number> = {
+  const byKind: Record<SecurityLogEventKind, number> = {
     suspicious_instruction: 0,
     external_url: 0,
     unusual_encoding: 0,
     prompt_injection_blocked: 0,
+    external_navigation_blocked: 0,
   };
   const bySeverity: Record<SecuritySeverity, number> = {
     low: 0,

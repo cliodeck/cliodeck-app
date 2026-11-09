@@ -10,14 +10,35 @@
  * le document distant, la page de l'attaquant héritait des canaux IPC, dont
  * la lecture et l'écriture de fichiers.
  *
- * Règle : la fenêtre ne navigue QUE dans l'application. Un lien web part vers
- * le navigateur du système ; tout le reste est refusé.
+ * Règle : la fenêtre ne navigue QUE dans l'application. Toute autre
+ * navigation est refusée, y compris vers le web.
+ *
+ * Un lien web que l'historien active (clic, Cmd+clic, clic du milieu, Entrée)
+ * ne passe pas par ici : le preload l'ouvre lui-même par `shell:open-external`
+ * et empêche la navigation. Une navigation externe qui arrive au garde n'a
+ * donc pas eu de geste — meta refresh, `location` changé par la page,
+ * redirection, lien activé par un script. Electron ne dit pas si une
+ * navigation vient d'un geste : le garde l'ouvrait quand même, et une balise
+ * `<meta http-equiv="refresh">` suffisait à ouvrir une page dans le
+ * navigateur, sans aucun clic (mesuré par L08-1). Elle est refusée, et le
+ * refus inscrit au journal de sécurité du projet.
  */
-import { shell, type WebContents } from 'electron';
+import type { WebContents } from 'electron';
+import { workspaceFiles } from '../../backend/core/workspace/layout.js';
+import { workspaceLinkOutside } from '../../backend/core/workspace/link-guard.js';
+import { appendSecurityEvent } from '../../backend/security/source-inspector.js';
+import { projectManager } from './services/project-manager.js';
 
-/** Protocoles qu'on accepte de confier au navigateur du système. */
+/**
+ * Protocoles d'un lien web, que le preload confie au navigateur du système
+ * (même liste dans `src/preload/index.ts`).
+ */
 const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
+/**
+ * `external` : une navigation vers le web, refusée et inscrite au journal de
+ * sécurité ; `block` : tout autre protocole, refusé.
+ */
 export type NavigationDecision = 'allow' | 'external' | 'block';
 
 /**
@@ -49,6 +70,21 @@ export function classifyNavigation(target: string, appUrl: string): NavigationDe
 }
 
 /**
+ * Inscrit le refus au journal de sécurité du projet ouvert ; sans projet (ou
+ * avec un `.cliodeck` lié hors du projet), au journal du processus seulement.
+ */
+async function recordRefusedNavigation(url: string): Promise<void> {
+  console.warn('[NavigationGuard] navigation externe sans geste refusée:', url);
+  const root = projectManager.getCurrentProjectPath();
+  if (!root || (await workspaceLinkOutside(root))) return;
+  await appendSecurityEvent(workspaceFiles(root).securityEventsLog, {
+    kind: 'external_navigation_blocked',
+    url,
+    at: new Date().toISOString(),
+  });
+}
+
+/**
  * `WebContents` déjà gardés. Le filet global `web-contents-created` couvre
  * aussi la fenêtre principale : sans cette garde, un appel explicite en plus
  * posait deux fois les mêmes écouteurs, et un lien externe ouvrait DEUX
@@ -70,8 +106,8 @@ export function attachNavigationGuard(contents: WebContents, appUrl: string): vo
 
     event.preventDefault();
     if (decision === 'external') {
-      void shell.openExternal(target).catch((err) => {
-        console.warn('[NavigationGuard] openExternal failed:', err);
+      void recordRefusedNavigation(target).catch((err) => {
+        console.warn('[NavigationGuard] journal de sécurité indisponible:', err);
       });
       return;
     }
@@ -81,7 +117,8 @@ export function attachNavigationGuard(contents: WebContents, appUrl: string): vo
   // Frame principal.
   contents.on('will-navigate', handle);
 
-  // Sous-frames uniquement (aperçu de présentation en iframe).
+  // Sous-frames uniquement (aperçu de présentation en iframe) : même règle.
+  // Le preload n'y est pas injecté, un lien n'y a donc pas de geste.
   // `will-frame-navigate` couvre AUSSI le frame principal : sans ce filtre,
   // un lien externe était traité deux fois et `openExternal` ouvrait deux
   // onglets. Défaut invisible aux tests unitaires, relevé en pilotant l'app.
@@ -90,5 +127,6 @@ export function attachNavigationGuard(contents: WebContents, appUrl: string): vo
     handle(event, event.url);
   });
 
+  // Une redirection vers l'extérieur n'est jamais un geste.
   contents.on('will-redirect', handle);
 }
