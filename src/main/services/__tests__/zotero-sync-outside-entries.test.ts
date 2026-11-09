@@ -246,6 +246,67 @@ describe.each(CASES)('zotero:synchronize — $name : ce qui n’est pas une entr
   });
 });
 
+/**
+ * Une arobase hors des entrées : le parseur colle au type de l'entrée qui suit ce qui va de
+ * l'arobase à l'accolade de l'entrée (défaut antérieur), et la réécriture l'écrit avec l'entrée.
+ * Repris aussi en fin de fichier, ce texte s'y ajoutait à chaque synchronisation qui écrivait.
+ */
+describe('zotero:synchronize — une arobase hors des entrées', () => {
+  const ENTRIES = [
+    '@book{Garde2000,',
+    '  title = {Le temps des archives},',
+    '  year = {2000},',
+    '}',
+    '',
+    '% voir aussi @Garde2000 pour le contexte',
+    '@article{Leduc1990,',
+    '  title = {Le carnet},',
+    '  year = {1990},',
+    '}',
+    '',
+  ].join('\n');
+  const JABREF = '@Comment{jabref-meta: databaseType:biblatex;}';
+  const GROUPS = '@comment{BibDesk Static Groups{\n<plist version="1.0"><array></array></plist>\n}}';
+
+  async function synchronizeThrice(): Promise<string[]> {
+    const written: string[] = [];
+    for (const added of [null, notice('LEDU2022', 'Les carnets retrouvés', 'Leblanc'), notice('NEUF2023', 'Un troisième', 'Neuf')]) {
+      if (added) contents.COLL.push(added);
+      expect(await synchronize(request())).toMatchObject({ success: true, written: true });
+      written.push(fs.readFileSync(bibPath(), 'utf-8'));
+    }
+    return written;
+  }
+
+  it('dans un commentaire % entre deux entrées : trois synchronisations qui écrivent, rien ne s’ajoute en fin de fichier', async () => {
+    makeProject(`% Bibliographie de la thèse\n\n${ENTRIES}\n${JABREF}\n`);
+
+    const [first, , last] = await synchronizeThrice();
+
+    expect(occurrences(last, '@Garde2000 pour le contexte')).toBe(1);
+    expect(occurrences(last, '% voir aussi')).toBe(1);
+    expect(occurrences(last, JABREF)).toBe(1);
+    // Ce qui suit la dernière entrée ne change pas d'une synchronisation à l'autre.
+    expect(last.slice(last.indexOf('% voir aussi'))).toBe(first.slice(first.indexOf('% voir aussi')));
+    const citations = parse(last);
+    expect(citations.map((citation) => citation.id).sort()).toEqual(['Garde2000', 'Leblanc_2021', 'Leduc1990', 'Martin_2021', 'Neuf_2021']);
+    expect(auditParsedBib(last, citations).unreadKeys).toEqual([]);
+  });
+
+  it('une adresse dans l’en-tête, des groupes BibDesk en fin : l’en-tête et les groupes restent', async () => {
+    makeProject(`%% Tenu par jean.dupont@univ-paris.example\n\n${ENTRIES}\n${GROUPS}\n`);
+
+    const written = await synchronizeThrice();
+
+    for (const bib of written) {
+      expect(bib.startsWith('%% Tenu par jean.dupont\n')).toBe(true);
+      expect(occurrences(bib, GROUPS)).toBe(1);
+      expect(bib.endsWith(`${GROUPS}\n`)).toBe(true);
+    }
+    expect(written[2].slice(written[2].indexOf('% voir aussi'))).toBe(written[0].slice(written[0].indexOf('% voir aussi')));
+  });
+});
+
 describe('zotero:synchronize — témoin', () => {
   // Rien hors des entrées que des lignes vides : le fichier écrit est celui de l'exporteur, sans
   // un octet de plus, comme avant.
