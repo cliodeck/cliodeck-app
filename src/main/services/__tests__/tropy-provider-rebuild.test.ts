@@ -40,6 +40,8 @@ const saved = vi.hoisted(() => [] as Array<{ sourceId: string; dimension: number
 vi.mock('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js', () => ({
   PrimarySourcesVectorStore: class {
     getTropyProject = () => null;
+    // Des archives déjà indexées : sans extrait, la recherche n'embarque pas la question (E2).
+    getEmbeddingDimension = () => 768;
     getIndexStats = () => ({ hnswSize: 0, bm25Size: 0, hnswDimension: 0 });
     search = () => [];
     getSource = (id: string) => ({
@@ -192,10 +194,10 @@ describe('retirer le consentement aux embeddings cloud', () => {
     expect(response).toMatchObject({ success: false, written: true });
     calls.length = 0;
 
-    const results = await tropyService.search('grève du port');
+    // Des archives indexées et plus de fournisseur : la recherche le dit au lieu de rendre [] (E2).
+    await expect(tropyService.search('grève du port')).rejects.toThrow('embedding provider not configured');
     await tropyService.reindexSource('s1');
 
-    expect(results).toEqual([]);
     expect(calls).toEqual([]);
     expect(saved).toEqual([]);
   });

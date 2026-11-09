@@ -778,6 +778,12 @@ class TropyService {
    * Recherche dans les sources primaires
    * Accepte une query text et des options, génère l'embedding via OllamaClient
    * Utilise la recherche hybride (HNSW + BM25) pour de meilleurs résultats
+   *
+   * Une panne lève : `fanOutCorpora` la rapporte alors (bande « Certaines
+   * recherches ont échoué », consigne d'échec au modèle). Un `catch` qui rendait
+   * `[]` faisait passer Ollama arrêté, un index d'un autre modèle ou l'absence
+   * de fournisseur pour des archives sans rien de pertinent (E2). Seuls « aucun
+   * projet ouvert » et « aucun extrait embarqué » rendent `[]` en silence.
    */
   async search(
     query: string,
@@ -787,6 +793,15 @@ class TropyService {
 
     if (!this.vectorStore) {
       console.warn('⚠️ [TROPY-SERVICE] VectorStore not initialized');
+      return [];
+    }
+
+    // Aucun extrait embarqué — pas de projet Tropy lié, ou rien d'indexé
+    // encore : rien à trouver, donc rien à embarquer. Lu avant d'exiger un
+    // fournisseur, sinon un Ollama arrêté ferait passer pour en panne des
+    // archives que le projet n'a pas.
+    if (this.vectorStore.getEmbeddingDimension() === null) {
+      console.log('📜 [TROPY-SERVICE] No embedded chunk, nothing to search');
       return [];
     }
 
@@ -801,44 +816,34 @@ class TropyService {
     // publie plus — ce qui revenait à ne filtrer aucun extrait d'archive.
     const threshold = options?.threshold ?? configManager.getRAGConfig().similarityThreshold;
 
-    try {
-      if (!this.embedding) {
-        console.warn('⚠️ [TROPY-SERVICE] No embedding provider configured, cannot generate embedding');
-        return [];
-      }
+    // Expand query for multilingual search (FR + EN)
+    const expandedQuery = await this.expandQueryMultilingual(query);
+    console.log(`📜 [TROPY-SERVICE] Expanded query: "${expandedQuery}"`);
 
-      // Expand query for multilingual search (FR + EN)
-      const expandedQuery = await this.expandQueryMultilingual(query);
-      console.log(`📜 [TROPY-SERVICE] Expanded query: "${expandedQuery}"`);
+    // Generate embedding for the expanded query. Sans fournisseur, `embedOne` lève.
+    const queryEmbedding = await this.embedOne(expandedQuery);
+    console.log(`📜 [TROPY-SERVICE] Query embedding generated, dimension: ${queryEmbedding.length}`);
 
-      // Generate embedding for the expanded query.
-      const queryEmbedding = await this.embedOne(expandedQuery);
-      console.log(`📜 [TROPY-SERVICE] Query embedding generated, dimension: ${queryEmbedding.length}`);
+    // Search using hybrid search (HNSW + BM25) - pass both embedding and text
+    const results = this.vectorStore.search(queryEmbedding, topK * 2, expandedQuery);
 
-      // Search using hybrid search (HNSW + BM25) - pass both embedding and text
-      const results = this.vectorStore.search(queryEmbedding, topK * 2, expandedQuery);
+    // Seuil, avec le même repli que la bibliographie : des archives
+    // peuvent être dans une autre langue que la question, et trois extraits
+    // limites valent mieux qu'une réponse vide. Le repli gardait jusqu'ici
+    // `topK` extraits — de quoi remplir toutes les places avec du hors-sujet.
+    const enrichedResults = applyThreshold(results, threshold, CROSS_LANGUAGE_FALLBACK);
 
-      // Seuil, avec le même repli que la bibliographie : des archives
-      // peuvent être dans une autre langue que la question, et trois extraits
-      // limites valent mieux qu'une réponse vide. Le repli gardait jusqu'ici
-      // `topK` extraits — de quoi remplir toutes les places avec du hors-sujet.
-      const enrichedResults = applyThreshold(results, threshold, CROSS_LANGUAGE_FALLBACK);
+    console.log(`📜 [TROPY-SERVICE] Hybrid search found ${enrichedResults.length} results (threshold: ${threshold})`);
 
-      console.log(`📜 [TROPY-SERVICE] Hybrid search found ${enrichedResults.length} results (threshold: ${threshold})`);
-
-      // Debug: Show top result if any
-      if (enrichedResults.length > 0) {
-        const topResult = enrichedResults[0];
-        console.log(`📜 [TROPY-SERVICE] Top result: "${topResult.source?.title}" (relevance: ${topResult.similarity.toFixed(4)})`);
-      } else {
-        console.log(`📜 [TROPY-SERVICE] No results found. Total results before threshold: ${results.length}`);
-      }
-
-      return enrichedResults.slice(0, topK);
-    } catch (error) {
-      console.error('❌ [TROPY-SERVICE] Search failed:', error);
-      return [];
+    // Debug: Show top result if any
+    if (enrichedResults.length > 0) {
+      const topResult = enrichedResults[0];
+      console.log(`📜 [TROPY-SERVICE] Top result: "${topResult.source?.title}" (relevance: ${topResult.similarity.toFixed(4)})`);
+    } else {
+      console.log(`📜 [TROPY-SERVICE] No results found. Total results before threshold: ${results.length}`);
     }
+
+    return enrichedResults.slice(0, topK);
   }
 
   /**
