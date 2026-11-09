@@ -783,9 +783,10 @@ class TropyService {
    * le détail du message, bande d'échec, consigne d'échec au modèle). Un
    * `catch` qui rendait `[]` faisait passer Ollama arrêté, un index d'un autre
    * modèle ou l'absence de fournisseur pour des archives sans rien de
-   * pertinent (E2) : « Archives 0 », et aucune bande quand les archives
-   * étaient seules à tomber. Seuls « aucun projet ouvert » et « aucun extrait
-   * embarqué » rendent `[]` en silence.
+   * pertinent (E2) : « Archives 0 », et aucune bande d'échec quand les
+   * archives étaient seules à tomber — au pire « Aucune source pertinente
+   * trouvée. », quand aucun autre corpus ne trouvait rien. Seuls « aucun
+   * projet ouvert » et « aucun extrait embarqué » rendent `[]` en silence.
    */
   async search(
     query: string,

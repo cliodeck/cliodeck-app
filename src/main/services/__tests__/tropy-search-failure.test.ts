@@ -7,7 +7,9 @@
  * `fanOutCorpora` ne voyait jamais l'exception : les archives passaient pour
  * vides (« Archives 0 »). Quand elles étaient seules à tomber — index d'un
  * autre modèle —, ni bande d'échec ni consigne d'échec au modèle, et
- * l'assistant répondait comme si le fonds ne contenait rien. Quand toute la
+ * l'assistant répondait comme si le fonds ne contenait rien ; si aucun autre
+ * corpus ne trouvait rien, la bande disait même « Aucune source pertinente
+ * trouvée. ». Quand toute la
  * recherche par embeddings tombait, la bande « Certaines recherches ont
  * échoué » venait des autres corpus (bibliographie, vault), et les archives
  * y comptaient pour 0 ; elle dit désormais « La recherche de sources a
@@ -398,6 +400,22 @@ describe.skipIf(!sqliteAvailable)('au chat : la bande et la consigne d’échec'
     const { status, prompt } = await chatTurn();
 
     expect(status).toBe('partial');
+    expect(prompt).toContain('searches failed');
+  });
+
+  // Le pire cas d'avant le correctif : aucun autre corpus ne trouve rien, et
+  // la bande « Aucune source pertinente trouvée. » (`empty`) affirmait que les
+  // archives n'avaient rien, alors que leur recherche avait levé.
+  it('archives seules en panne, rien ailleurs : statut « partiel », jamais « aucune source pertinente »', async () => {
+    await linkAndIndex();
+    await openBibliography();
+    provider.mode = 'other-model';
+
+    const { status, corpora, prompt } = await chatTurn();
+
+    expect(status).toBe('partial');
+    expect(corpora.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
+    expect(corpora.secondary).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
     expect(prompt).toContain('searches failed');
   });
 
