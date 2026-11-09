@@ -609,6 +609,46 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     expect(notesTextOf(10)).toContain('salle Colbert');
   });
 
+  // Témoin du revers de G1, sans correctif en rc.6 : un manuscrit transcrit
+  // page à page, dont l'OCR ne tire rien de lisible, n'acquiert jamais de
+  // corps. Il repasse donc à l'OCR à chaque « Lancer l'OCR », comme un item
+  // sans note ; la règle de la somme l'écartait. Ses notes restent son texte.
+  it('des notes de page sous 500 caractères sur un manuscrit illisible : l’OCR repasse à chaque synchro, les notes restent le texte (G1)', async () => {
+    const half = Math.ceil(NOTE_TEXT.length / 2);
+    const pages = [NOTE_TEXT.slice(0, half), NOTE_TEXT.slice(half)];
+    const page2 = path.join(tropyDir, 'rapport-p2.jpg');
+    fs.writeFileSync(page2, 'jpeg factice');
+    const items = baseItems();
+    items[0] = {
+      ...items[0],
+      photos: [
+        { id: 11, path: photoPath, notes: [{ text: pages[0] }] },
+        { id: 12, path: page2, notes: [{ text: pages[1] }] },
+      ],
+    };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    // Sous les seuils de `performOCROnItem` (plus de 50 caractères et une
+    // confiance de plus de 30) : rien d'exploitable.
+    ocrSpy.mockResolvedValue({ text: 'xx ~~ ;; illisible', confidence: 12, language: 'fra', pageCount: 2 });
+
+    for (let pass = 0; pass < 3; pass++) {
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+    }
+
+    // Une reconnaissance par passe, toujours sur les deux pages de l'item 10.
+    expect(ocrSpy).toHaveBeenCalledTimes(3);
+    for (const call of ocrSpy.mock.calls) {
+      expect(call[0]).toEqual([photoPath, page2]);
+    }
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tropy-notes');
+    expect(s10?.transcription).toContain('salle Colbert');
+    // Aucun message sous la source : sa plus longue note est sous le seuil.
+    expect(tropyService.getSourceOCRReport(s10!.id)?.longestNoteLength).toBeLessThan(500);
+  });
+
   it('des annotations courtes qui dépassent ensemble 500 caractères ne retiennent pas l’OCR (G1)', async () => {
     const annotations = shortAnnotations();
     expect(annotations.map((a) => a.notes[0].text).join('\n\n').length).toBeGreaterThanOrEqual(500);

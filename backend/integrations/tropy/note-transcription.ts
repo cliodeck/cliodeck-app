@@ -15,7 +15,11 @@
  * l'OCR » sur un item qui n'avait jamais été transcrit. Revers assumé : une
  * transcription découpée en notes de page toutes sous le seuil repasse à
  * l'OCR ; la note n'est pas perdue, elle reste à côté du corps (`notes_text`).
- * Les deux cas sont fixés par `TropySync.e2e.test.ts`.
+ * Si l'OCR n'en tire aucun texte lisible (un manuscrit, par exemple), la
+ * source n'acquiert pas de corps : elle repasse à l'OCR à chaque « Lancer
+ * l'OCR », comme un item sans note, et ses notes restent son texte. Aucun
+ * message ne l'explique, puisque sa plus longue note est sous le seuil.
+ * Ces cas sont fixés par `TropySync.e2e.test.ts`.
  *
  * Pas de dépendance ici : le renderer importe ce module pour expliquer la
  * règle sur la source concernée, avec le même seuil. Il lit la longueur de
