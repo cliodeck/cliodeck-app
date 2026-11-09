@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import { BibTeXParser } from '../BibTeXParser';
 import { BibTeXExporter } from '../BibTeXExporter';
 import { auditParsedBib } from '../bibAudit';
+import { mergeCitationLists } from '../mergeCitations';
+import { ZoteroSyncResolver } from '../../../integrations/zotero/ZoteroSyncResolver';
 import { createCitation, type Citation } from '../../../types/citation';
 
 /**
@@ -199,5 +201,28 @@ describe('aller-retour : valeurs difficiles', () => {
     expect(written).toContain('note = {Réimpr.}');
     expect(written).toContain('abstract = {Autre résumé}');
     expect(written).not.toContain('note = {Long résumé}');
+  });
+
+  // Les deux chemins qui réécrivent le `.bib` du projet : la synchronisation (Zotero ne donne pas
+  // de résumé, `toCitation` ne lit pas `abstractNote`) et la fusion d'un import.
+  it('synchronisé puis réécrit, ou fusionné puis réécrit : résumé et note restent à leur place', async () => {
+    const bib = '@book{A_2000, title={T}, zoterokey={AAA}, note={Réimpr.}, Abstract={Long résumé}}';
+    const remote = createCitation({ id: 'A_2000', type: 'book', author: '', year: '', title: 'T corrigé', zoteroKey: 'AAA' });
+    const local = parse(bib);
+
+    const synced = await new ZoteroSyncResolver().resolveConflicts(
+      { added: [], modified: [{ local: local[0], remote, modifiedFields: ['title'] }], deleted: [], unchanged: [] },
+      local,
+      'remote'
+    );
+    const imported = parse('@book{B_2001, title={U}, abstract={Autre résumé}}');
+    const { merged } = mergeCitationLists(local, imported);
+
+    for (const written of [exportBib(synced.finalCitations), exportBib(merged)]) {
+      expect(written).toContain('abstract = {Long résumé}');
+      expect(written).toContain('note = {Réimpr.}');
+      expect(written).not.toContain('note = {Long résumé}');
+    }
+    expect(exportBib(merged)).toContain('abstract = {Autre résumé}');
   });
 });

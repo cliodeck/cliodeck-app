@@ -153,6 +153,13 @@
   border-top: 1px solid var(--border-color);
 }
 
+/* Résumé : une adresse ou un DOI sans espace revient à la ligne au lieu de
+   déborder de la fiche. */
+.citation-abstract {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Clé de citation : lisible, mais en retrait du reste de la fiche. */
 .citation-key {
   display: inline-flex;

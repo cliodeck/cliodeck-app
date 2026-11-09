@@ -311,6 +311,7 @@
     "projectTags": "Étiquettes du projet",
     "zoteroNotes": "Notes Zotero",
     "bibNote": "Note (BibTeX)",
+    "abstract": "Résumé",
     "createReadingNote": "Nouvelle note",
     "openReadingNote": "Note de lecture",
     "readingNoteError": "Note de lecture : {{error}}",
