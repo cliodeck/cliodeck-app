@@ -14,7 +14,7 @@ import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
-import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
+import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
 import { CitationList } from './CitationList';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { ZoteroImport } from './ZoteroImport';
@@ -506,13 +506,16 @@ export const BibliographyPanel: React.FC = () => {
           },
           projectPath
         );
-        if (result?.success) reindexed.push(pdf);
-        else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${result?.error}`);
+        if (result?.success) {
+          reindexed.push(pdf);
+          // Il quitte le bandeau et le projet retient son MD5 aussitôt, pas en fin de lot : un lot
+          // interrompu plus loin ne le fera pas réindexer une seconde fois. Tant que l'écran montre
+          // son projet seulement (le main refuse s'il a déjà basculé) : ailleurs, ce serait une
+          // réponse donnée dans l'autre. Ceux en échec restent au bandeau.
+          if (stillShown(projectPath)) await acknowledge([pdf]);
+        } else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${result?.error}`);
         if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return await interrupted();
       }
-
-      // Seuls les PDF réindexés quittent le bandeau, et le projet retient leur MD5 ; ceux en échec y restent.
-      await acknowledge(reindexed);
 
       // Refresh indexed PDFs
       await refreshIndexedPDFs();

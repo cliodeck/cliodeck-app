@@ -256,6 +256,45 @@ describe('Bandeau « PDF modifiés » : « Tout ré-indexer »', () => {
     expect(dialogs().alertMessage).toBe('Ré-indexation terminée : 1 ré-indexé(s), 0 erreur(s)');
     expect(banner()).toBeNull();
   });
+
+  it('interrompu par l’ouverture de B : le PDF réindexé avant est retenu par A, celui fini après ne l’est pas, et B garde son bandeau', async () => {
+    // Retenus seulement en fin de lot, les PDF réindexés avant l'interruption revenaient à la
+    // réouverture de A, et l'historien les réindexait une seconde fois. Celui qui finit après la
+    // bascule ne s'écrit pas : ni dans A, que le main n'a plus ouvert, ni comme une réponse donnée
+    // dans B, qui jetterait la vérification de B en cours.
+    const [a1, a2, b1] = [withPdf(A, 'a1'), withPdf(A, 'a2'), withPdf(B, 'b1')];
+    const answerOfB = deferred<unknown>();
+    checkModifiedPDFs.mockImplementation(({ projectPath }: { projectPath: string }) =>
+      projectPath === A ? Promise.resolve(flat([modified(a1), modified(a2)])) : answerOfB.promise
+    );
+    const second = deferred<unknown>();
+    pdfIndex.mockImplementation((file: string) => (file === a2.file ? second.promise : Promise.resolve({ success: true })));
+    await mountIn(A, 'Mémoire A', [a1, a2]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Tout ré-indexer'));
+    });
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+    expect(pdfIndex).toHaveBeenCalledTimes(2);
+    expect(rememberModifiedPDFs.mock.calls).toEqual([
+      [{ projectPath: A, pdfs: [{ citationId: 'a1', zoteroKey: 'Za1', attachmentKey: 'ATTa1', md5: modified(a1).newMD5 }] }],
+    ]);
+
+    await openB([b1]);
+    await act(async () => {
+      second.resolve({ success: true });
+    });
+    await act(async () => {
+      answerOfB.resolve(flat([modified(b1)]));
+    });
+
+    expect(rememberModifiedPDFs).toHaveBeenCalledTimes(1);
+    expect(dialogs().alertMessage).toContain('« Mémoire A »');
+    expect(banner()?.textContent).toBe('1 PDF(s) modifié(s) détecté(s)');
+    expect(screen.getByText(b1.file!)).not.toBeNull();
+  });
 });
 
 describe('Bandeau « PDF modifiés » : un projet, une liste', () => {
@@ -424,5 +463,28 @@ describe('Bandeau « PDF modifiés » : le rythme des vérifications', () => {
       vi.advanceTimersByTime(5 * 60 * 1000);
     });
     expect(checkModifiedPDFs).toHaveBeenCalledTimes(2);
+  });
+
+  it('quitter l’onglet puis y revenir pendant une vérification n’en lance pas une seconde, et le bandeau reçoit la première', async () => {
+    // La garde tenait par montage : revenir au panneau relançait la relecture de tous les PDF
+    // pendant que la première tournait encore.
+    const a1 = withPdf(A, 'a1');
+    const slow = deferred<unknown>();
+    checkModifiedPDFs.mockReturnValueOnce(slow.promise);
+    await mountIn(A, 'Mémoire A', [a1]);
+    expect(checkModifiedPDFs).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      cleanup();
+    });
+    await act(async () => {
+      render(<BibliographyPanel />);
+    });
+    expect(checkModifiedPDFs).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      slow.resolve(flat([modified(a1)]));
+    });
+    expect(banner()?.textContent).toBe('1 PDF(s) modifié(s) détecté(s)');
   });
 });

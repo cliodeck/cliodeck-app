@@ -23,6 +23,43 @@ const modifiedPdfKey = (pdf: ModifiedPDF): string => `${pdf.zoteroKey ?? pdf.cit
 /** Les vérifications suivant celle du montage. */
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
+type CheckResponse = Awaited<ReturnType<typeof window.electron.pdf.checkModifiedPDFs>>;
+
+/** Une vérification partie dans le main, avec le nombre de réponses de l'historien à son départ. */
+interface CheckInFlight {
+  projectPath: string;
+  answersAtStart: number;
+  response: Promise<CheckResponse>;
+}
+
+/**
+ * La vérification en cours, commune à tous les montages du panneau : quitter l'onglet Bibliographie
+ * puis y revenir la rejoint, au lieu de relire tous les PDF une seconde fois pendant qu'elle tourne.
+ */
+let inFlight: CheckInFlight | null = null;
+
+/**
+ * Les réponses de l'historien (réindexés, ou ignorés), tous montages confondus : une vérification
+ * partie avant l'une d'elles ne remet rien au bandeau.
+ */
+let answersGiven = 0;
+
+/** Celle en cours pour ce projet, ou une nouvelle. */
+function checkFor(projectPath: string, citations: Citation[]): CheckInFlight {
+  if (inFlight?.projectPath === projectPath) return inFlight;
+  const check: CheckInFlight = {
+    projectPath,
+    answersAtStart: answersGiven,
+    response: window.electron.pdf.checkModifiedPDFs({ citations, projectPath }),
+  };
+  inFlight = check;
+  const done = () => {
+    if (inFlight === check) inFlight = null;
+  };
+  check.response.then(done, done);
+  return check;
+}
+
 interface PDFModificationNotificationProps {
   modifiedPDFs: ModifiedPDF[];
   onReindexAll: () => void;
@@ -112,10 +149,10 @@ export const PDFModificationNotification: React.FC<PDFModificationNotificationPr
  * Hook to detect modified PDFs and show notification
  *
  * Au montage du panneau, à la fin de l'ouverture d'un projet, puis toutes les cinq minutes ; pas à
- * chaque notice modifiée, qui faisait relire tous les PDF. Une vérification à la fois par projet. La
- * liste vaut pour son projet : vidée quand un autre s'ouvre, et un résultat arrivé pour l'ancien est
- * jeté. Pendant une ouverture, les références affichées sont encore celles du projet sortant : rien
- * n'est vérifié avant sa fin.
+ * chaque notice modifiée, qui faisait relire tous les PDF. Une vérification à la fois par projet, y
+ * compris d'un montage à l'autre (`inFlight`). La liste vaut pour son projet : vidée quand un autre
+ * s'ouvre, et un résultat arrivé pour l'ancien est jeté. Pendant une ouverture, les références
+ * affichées sont encore celles du projet sortant : rien n'est vérifié avant sa fin.
  */
 export const usePDFModificationDetection = (
   citations: Citation[],
@@ -132,31 +169,21 @@ export const usePDFModificationDetection = (
   citationsRef.current = citations;
   const hasCitations = citations.length > 0;
   const opening = useProjectStore((state) => state.loadState.kind === 'loading');
-  /** Le projet de la vérification en cours. */
-  const checking = useRef<string | null>(null);
-  /** Les réponses de l'historien : une vérification partie avant l'une d'elles ne remet rien au bandeau. */
-  const answers = useRef(0);
 
   const checkForModifications = useCallback(async () => {
     const current = citationsRef.current;
-    if (!projectPath || current.length === 0 || checking.current === projectPath) return;
-    checking.current = projectPath;
-    const answersBefore = answers.current;
+    if (!projectPath || current.length === 0) return;
     try {
-      // Call backend to check MD5 hashes
-      const result = await window.electron.pdf.checkModifiedPDFs({
-        citations: current,
-        projectPath,
-      });
+      // Celle déjà en cours pour ce projet, s'il y en a une : sa réponse vaut pour ce montage aussi.
+      const check = checkFor(projectPath, current);
+      const result = await check.response;
 
-      if (!(await stillIn(projectPath)) || answers.current !== answersBefore) return;
+      if (!(await stillIn(projectPath)) || answersGiven !== check.answersAtStart) return;
       // Les champs sont à plat (`successResponse`) ; une liste vide vide le bandeau.
       if (result.success) setModifiedPDFs(result.modifiedPDFs ?? []);
       else console.error('Failed to check for modified PDFs:', result.error);
     } catch (error) {
       console.error('Failed to check for modified PDFs:', error);
-    } finally {
-      if (checking.current === projectPath) checking.current = null;
     }
   }, [projectPath]);
 
@@ -170,7 +197,7 @@ export const usePDFModificationDetection = (
   const acknowledge = useCallback(
     async (answered: ModifiedPDF[]) => {
       if (answered.length === 0) return;
-      answers.current++;
+      answersGiven++;
       const gone = new Set(answered.map(modifiedPdfKey));
       setModifiedPDFs((list) => list.filter((pdf) => !gone.has(modifiedPdfKey(pdf))));
 

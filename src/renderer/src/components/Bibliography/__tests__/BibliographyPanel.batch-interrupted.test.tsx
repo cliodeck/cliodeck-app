@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
     filePath: string;
     reason: string;
   }>,
+  // Les réponses que le panneau donne au bandeau : chacune serait retenue par le projet.
+  acknowledged: [] as unknown[][],
 }));
 
 vi.mock('react-i18next', async () => {
@@ -48,7 +50,9 @@ vi.mock('../PDFModificationNotification', () => ({
     modifiedPDFs.length > 0 ? <button onClick={onReindexAll}>Tout ré-indexer</button> : null,
   usePDFModificationDetection: () => ({
     modifiedPDFs: h.modified,
-    acknowledge: async () => undefined,
+    acknowledge: async (answered: unknown[]) => {
+      h.acknowledged.push(answered);
+    },
     dismissNotification: () => undefined,
   }),
 }));
@@ -119,6 +123,7 @@ const switchToB = () =>
 
 beforeEach(() => {
   h.modified = [];
+  h.acknowledged = [];
   downloadPDF = vi.fn(async (options: { attachmentKey: string; targetDirectory: string }) => ({
     success: true,
     filePath: `${options.targetDirectory}/PDFs/${options.attachmentKey}.pdf`,
@@ -246,6 +251,8 @@ describe('« Tout ré-indexer » interrompu par l’ouverture de B', () => {
     expect(dialogs().alertMessage).toContain('« Mémoire A »');
     // Le main sait pour quel projet partait le PDF en vol.
     expect(pdfIndex).toHaveBeenCalledWith(`${A}/PDFs/a1.pdf`, undefined, expect.anything(), A);
+    // Réindexé, mais fini après la bascule : ce n'est pas une réponse donnée dans B, ni une que A, fermé, pourrait retenir.
+    expect(h.acknowledged).toEqual([]);
   });
 });
 

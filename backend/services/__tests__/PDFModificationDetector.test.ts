@@ -99,6 +99,27 @@ describe('PDFModificationDetector — le PDF de la pièce jointe, et lui seul', 
     expect(result.modifiedPDFs).toEqual([]);
   });
 
+  it('un instantané HTML hérité, fichier de sa propre pièce jointe, n’est pas un « PDF modifié »', async () => {
+    // L'ancienne synchronisation rattachait l'instantané à la notice (CLAUDE.md §6) : sa pièce jointe
+    // le désigne (`localPath`), l'appariement ne l'écarte donc pas. Seule la garde `isPdfPath` le
+    // fait ; sans elle, il serait signalé dès que son MD5 diffère, et « Ré-indexer » échouerait.
+    const snapshot = write('13082.html', '<html>instantané de la page</html>');
+    const result = await new PDFModificationDetector().detectModifiedPDFs([
+      citation(snapshot, [
+        attachment({
+          key: '13082',
+          filename: '13082.html',
+          contentType: 'text/html',
+          downloaded: true,
+          localPath: snapshot,
+          md5: 'f'.repeat(32),
+        }),
+      ]),
+    ]);
+
+    expect(result).toEqual({ modifiedPDFs: [], totalChecked: 0, totalModified: 0 });
+  });
+
   it('un PDF qui ne correspond à aucune pièce jointe n’est comparé à aucune', async () => {
     const other = write('Un autre article.pdf', ANNOTATED_BYTES);
     const result = await new PDFModificationDetector().detectModifiedPDFs([citation(other, [attachment({})])]);
