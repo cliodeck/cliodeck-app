@@ -155,15 +155,16 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
 
   it('un échec après le remplacement garde le nouveau document, seul à porter les extraits', async () => {
     const first = await indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META);
-    // Les similarités se calculent après le remplacement des copies précédentes.
+    // Les similarités se calculent après le remplacement des copies précédentes. Le document est
+    // alors validé : la passe réussit (cf. PdfIndexingAtomic.test.ts).
     vi.spyOn(store, 'computeAndSaveSimilarities').mockImplementation(() => {
       throw new Error('disque plein');
     });
 
-    await expect(indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META)).rejects.toThrow('disque plein');
+    const second = await indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META);
 
     const ids = store.getDocumentIdsByFilePath(FILE);
-    expect(ids).toHaveLength(1);
+    expect(ids).toEqual([second.id]);
     expect(ids[0]).not.toBe(first.id);
     expect(store.getChunksForDocument(ids[0]).length).toBeGreaterThan(0);
   });

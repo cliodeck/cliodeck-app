@@ -529,16 +529,26 @@ export class PDFIndexer {
         }
       });
 
-      // 16. HNSW et BM25, hors transaction : un échec y laisse le document complet en base, et ces
-      // index périmés (cf. `addToSearchIndexes`).
-      if (isEnhancedStore) {
-        await (this.vectorStore as EnhancedVectorStore).addToSearchIndexes(chunksWithEmbeddings);
+      // Le document est validé : désormais, SQLite fait foi, et ce qui suit ne fait plus échouer la
+      // passe. Un échec rendu au main lui faisait sauter le rattachement aux collections Zotero
+      // (#130) et l'avertissement des PDF image (#132), pour un document complet en base que le lot
+      // suivant compte indexé sans le reproposer.
 
-        onProgress?.({
-          stage: 'embedding',
-          progress: 95,
-          message: 'Index HNSW et BM25 construits',
-        });
+      // 16. HNSW et BM25, hors transaction. En cas d'échec (index impossible à écrire : disque
+      // plein, renommage refusé), `addToSearchIndexes` marque ces index périmés : la reconstruction
+      // que `pdfService` planifie après chaque indexation y remettra ces extraits depuis SQLite, et
+      // dira à l'historien si elle échoue à son tour.
+      if (isEnhancedStore) {
+        try {
+          await (this.vectorStore as EnhancedVectorStore).addToSearchIndexes(chunksWithEmbeddings);
+          onProgress?.({
+            stage: 'embedding',
+            progress: 95,
+            message: 'Index HNSW et BM25 construits',
+          });
+        } catch (error) {
+          console.error('⚠️ [INDEXER] Index HNSW et BM25 non mis à jour, reconstruction demandée :', error);
+        }
       }
 
       // 17. Calculer les similarités avec les autres documents
@@ -553,10 +563,15 @@ export class PDFIndexer {
         ? (this.vectorStore as EnhancedVectorStore).getBaseStore()
         : (this.vectorStore as VectorStore);
 
-      const similaritiesCount = baseStore.computeAndSaveSimilarities(
-        documentId,
-        0.5 // Seuil de similarité
-      );
+      let similaritiesCount = 0;
+      try {
+        similaritiesCount = baseStore.computeAndSaveSimilarities(
+          documentId,
+          0.5 // Seuil de similarité
+        );
+      } catch (error) {
+        console.error('⚠️ [INDEXER] Similarités entre documents non calculées :', error);
+      }
 
       onProgress?.({
         stage: 'completed',

@@ -310,6 +310,22 @@ describe.skipIf(!sqliteAvailable)('PDF : une indexation est tout ou rien', () =>
       expect(store.getChunksForDocument(document.id).length).toBeGreaterThan(0);
       expect(store.getDocument(document.id)?.metadata.noChunks).toBeUndefined();
     });
+
+    /*
+     * Les similarités se calculent après la transaction : le document est déjà complet en base. Un
+     * échec à cette étape faisait échouer la passe, et le main sautait ce qui suit (collections
+     * Zotero, #130) pour un document que le lot suivant compte indexé sans le reproposer.
+     */
+    it('le calcul des similarités échoue après l’écriture : la passe réussit, le document reste complet', async () => {
+      vi.spyOn(base(store), 'computeAndSaveSimilarities').mockImplementation(() => {
+        throw diskFull();
+      });
+
+      const document = await indexer().indexPDF(FILE, 'Kansteiner_2022', undefined, META);
+
+      expect(store.getDocumentIdsByFilePath(FILE)).toEqual([document.id]);
+      expect(store.getChunksForDocument(document.id).length).toBeGreaterThan(0);
+    });
   });
 });
 
@@ -318,6 +334,10 @@ describe.skipIf(!sqliteAvailable)('PDF : une indexation est tout ou rien', () =>
  * écrire dans la même transaction, et qui ne savent pas retirer un vecteur. Si ces index ne les
  * prennent pas, la base garde le document complet : c'est la reconstruction, depuis SQLite, qui doit
  * les y mettre. De même pour les vecteurs d'une copie remplacée, que la recherche rendrait sinon.
+ *
+ * La passe réussit alors : un échec rendu au main lui faisait sauter le rattachement aux collections
+ * Zotero (#130) et l'avertissement des PDF image (#132), pour un document que le lot suivant compte
+ * indexé sans le reproposer (cf. src/main/services/__tests__/pdf-indexer-search-index-failure.test.ts).
  */
 describe.skipIf(!sqliteAvailable)('PDF : HNSW et BM25 après l’écriture', () => {
   let dir: string;
@@ -334,17 +354,31 @@ describe.skipIf(!sqliteAvailable)('PDF : HNSW et BM25 après l’écriture', () 
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('l’index ne s’écrit pas : le document reste, complet en base, et une reconstruction est demandée', async () => {
+  it('l’index ne s’écrit pas : la passe réussit, le document reste complet en base, et une reconstruction est demandée', async () => {
     // Une écriture de l'index rendue impossible, comme sur un disque réel.
     fs.mkdirSync(path.join(dir, '.cliodeck', 'hnsw.index.meta.json.tmp'), { recursive: true });
     const indexer = new PDFIndexer(store, embed, 'cpuOptimized', undefined, false, {}, extract);
 
-    await expect(indexer.indexPDF(FILE, 'Kansteiner_2022', undefined, META)).rejects.toThrow(/HNSW/);
+    const document = await indexer.indexPDF(FILE, 'Kansteiner_2022', undefined, META);
 
-    const ids = store.getDocumentIdsByFilePath(FILE);
-    expect(ids).toHaveLength(1);
-    expect(store.getChunksForDocument(ids[0]).length).toBeGreaterThan(0);
+    expect(store.getDocumentIdsByFilePath(FILE)).toEqual([document.id]);
+    expect(store.getChunksForDocument(document.id).length).toBeGreaterThan(0);
     expect(store.needsRebuild()).toBe(true);
+  });
+
+  it('un PDF image dont l’index ne s’écrit pas : la passe réussit, avec sa marque lowText (#132)', async () => {
+    fs.mkdirSync(path.join(dir, '.cliodeck', 'hnsw.index.meta.json.tmp'), { recursive: true });
+    const image = async () => ({
+      pages: Array.from({ length: 3 }, (_, i) => ({ pageNumber: i + 1, text: '' })),
+      metadata: {},
+      title: 'Scan',
+    });
+    const indexer = new PDFIndexer(store, embed, 'cpuOptimized', undefined, false, {}, image);
+
+    const document = await indexer.indexPDF('/projet/PDFs/Scan.pdf', 'Scan_1935', undefined, META);
+
+    expect(document.metadata.textDensity?.lowText).toBe(true);
+    expect(store.getDocumentIdsByFilePath('/projet/PDFs/Scan.pdf')).toEqual([document.id]);
   });
 
   it('une réindexation remplace l’ancienne copie dans la transaction, et demande une reconstruction pour ses vecteurs', async () => {

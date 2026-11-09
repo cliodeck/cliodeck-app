@@ -200,7 +200,8 @@ export class EnhancedVectorStore {
    * SQLite les reçoit avant, dans la transaction de l'indexation (`transaction`), avec leur
    * document : HNSW et BM25 ne savent pas s'y joindre. Si ces index ne les prennent pas tous, la
    * base les garde : ils sont marqués périmés, et la reconstruction que planifie toute indexation
-   * les y mettra depuis SQLite.
+   * les y mettra depuis SQLite. L'erreur est relancée ; `PDFIndexer` l'écrit au journal sans faire
+   * échouer la passe, dont le document est déjà complet en base.
    */
   async addToSearchIndexes(
     chunks: Array<{ chunk: DocumentChunk; embedding: Float32Array }>
