@@ -1,69 +1,5 @@
-/* Modal Overlay */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-  padding: 16px;
-}
-
-/* Base modal content */
-.modal-content {
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  max-height: calc(100vh - 32px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.modal-body {
-  padding: 16px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.close-button {
-  background: transparent;
-  border: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.close-button:hover {
-  background-color: var(--bg-card);
-  color: var(--text-primary);
-}
+/* Les classes communes des fenêtres (`.modal-overlay`, `.modal-content`…) sont
+   dans common/Modal.css, chargée au démarrage. */
 
 .ocr-settings-modal {
   width: 100%;
@@ -74,13 +10,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.modal-description {
-  margin-bottom: 20px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 /* Form Groups */
@@ -191,17 +120,11 @@
   color: var(--text-secondary);
 }
 
-/* Modal Footer */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.btn-cancel {
+/* Sous :where(.ocr-settings-modal) : la règle ne touche plus que cette fenêtre, et
+   garde sa spécificité, donc la fenêtre ne change pas d'allure. Sans portée, cette
+   feuille, chargée avec les Sources primaires, recolorait ensuite les .btn-primary
+   des autres fenêtres (le « Remplacer » de l'import BibTeX passait à l'orange). */
+:where(.ocr-settings-modal) .btn-cancel {
   padding: 8px 16px;
   background: transparent;
   border: 1px solid var(--border-color);
@@ -212,12 +135,12 @@
   transition: all 0.2s ease;
 }
 
-.btn-cancel:hover {
+:where(.ocr-settings-modal) .btn-cancel:hover {
   background: var(--bg-hover);
   border-color: var(--text-secondary);
 }
 
-.btn-primary {
+:where(.ocr-settings-modal) .btn-primary {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -232,11 +155,11 @@
   transition: all 0.2s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
+:where(.ocr-settings-modal) .btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
-.btn-primary:disabled {
+:where(.ocr-settings-modal) .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

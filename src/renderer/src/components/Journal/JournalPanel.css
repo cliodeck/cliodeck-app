@@ -461,18 +461,21 @@
   padding: 1rem;
 }
 
-.detail-section {
+/* Sous :where(.journal-panel) : propres au journal, sans changer leur spécificité. Sans
+   portée, ces règles, chargées avec le journal, resserraient ensuite les sections de la
+   Méthodologie. */
+:where(.journal-panel) .detail-section {
   margin-bottom: 1rem;
 }
 
-.detail-section h4 {
+:where(.journal-panel) .detail-section h4 {
   font-size: 0.85rem;
   font-weight: 500;
   margin: 0 0 0.5rem 0;
   color: var(--text-secondary);
 }
 
-.detail-section pre {
+:where(.journal-panel) .detail-section pre {
   background-color: var(--bg-app);
   padding: 0.75rem;
   border-radius: var(--radius-sm);
@@ -483,7 +486,7 @@
   border: 1px solid var(--border-color);
 }
 
-.detail-section.error pre {
+:where(.journal-panel) .detail-section.error pre {
   background-color: var(--color-danger-bg);
   color: var(--color-warning);
   border-color: var(--color-danger);

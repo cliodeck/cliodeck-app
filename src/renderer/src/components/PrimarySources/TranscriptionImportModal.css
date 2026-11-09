@@ -9,13 +9,6 @@
   gap: 8px;
 }
 
-.modal-description {
-  margin-bottom: 20px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 /* Import Mode Selector */
 .import-mode-selector {
   display: flex;
@@ -178,17 +171,9 @@
   line-height: 1.4;
 }
 
-/* Modal Footer */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.btn-cancel {
+/* Sous :where(…) : propres à cette fenêtre, sans changer leur spécificité (cf.
+   OCRSettingsModal.css). */
+:where(.transcription-import-modal) .btn-cancel {
   padding: 8px 16px;
   background: transparent;
   border: 1px solid var(--border-color);
@@ -199,12 +184,12 @@
   transition: all 0.2s ease;
 }
 
-.btn-cancel:hover {
+:where(.transcription-import-modal) .btn-cancel:hover {
   background: var(--bg-hover);
   border-color: var(--text-secondary);
 }
 
-.btn-primary {
+:where(.transcription-import-modal) .btn-primary {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -219,11 +204,11 @@
   transition: all 0.2s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
+:where(.transcription-import-modal) .btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
-.btn-primary:disabled {
+:where(.transcription-import-modal) .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

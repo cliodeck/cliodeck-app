@@ -1,0 +1,98 @@
+/* Fenêtres modales : les classes communes (`.modal-overlay`, `.modal-content`…).
+   Chargée au démarrage par `main.tsx`, après `index.css` et les feuilles des
+   composants. Ces règles n'étaient écrites que dans la feuille de l'OCR, chargée
+   avec le panneau Sources primaires : avant lui, le choix d'import d'un `.bib`
+   s'affichait rogné en bas de la colonne de gauche (H1). Une règle propre à une
+   fenêtre se pose sous la classe de sa fenêtre, jamais sans portée ailleurs qu'ici
+   (`modal-styles-scope.test.ts`). */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  padding: 16px;
+}
+
+.modal-content {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* 32 px de côté : la taille que lui donnait la feuille des statistiques de la
+   bibliographie, chargée au démarrage, avant que sa règle ne prenne sa portée. */
+.close-button {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-button:hover {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.modal-description {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}

@@ -24,18 +24,19 @@
   color: var(--color-danger);
 }
 
-.modal-info {
+/* Sous la fenêtre : sans portée, ces règles valaient pour toutes les fenêtres (H1). */
+.bib-import-mode-modal .modal-info {
   margin-bottom: 1rem;
   color: var(--text-secondary);
   font-size: 14px;
 }
 
-.modal-info strong {
+.bib-import-mode-modal .modal-info strong {
   color: var(--text-primary);
   font-weight: 600;
 }
 
-.modal-question {
+.bib-import-mode-modal .modal-question {
   margin-bottom: 1.5rem;
   font-size: 15px;
   font-weight: 500;
@@ -98,12 +99,6 @@
 .first-import p {
   margin-bottom: 24px;
   color: var(--text-secondary);
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
 }
 
 .btn-cancel {
