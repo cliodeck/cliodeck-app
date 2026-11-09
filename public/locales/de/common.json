@@ -311,6 +311,7 @@
     "projectTags": "Projekt-Schlagwörter",
     "zoteroNotes": "Zotero-Notizen",
     "bibNote": "Notiz (BibTeX)",
+    "abstract": "Zusammenfassung",
     "createReadingNote": "Neue Notiz",
     "openReadingNote": "Lesenotiz",
     "readingNoteError": "Lesenotiz: {{error}}",

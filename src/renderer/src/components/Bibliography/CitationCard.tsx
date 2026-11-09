@@ -28,6 +28,7 @@ import {
   readingNoteOf,
   sourceTagsOf,
 } from '../../stores/bibliography/referenceTags';
+import { abstractOf } from '../../stores/bibliography/citationAbstract';
 import './CitationCard.css';
 
 interface CitationCardProps {
@@ -87,6 +88,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
   const projectTags = projectTagsOf(citation, readingNotes);
   const hasReadingNote = !!readingNoteOf(citation, readingNotes);
   const allProjectTags = [...new Set(readingNotes.flatMap((note) => note.tags))].sort((a, b) => a.localeCompare(b));
+  const abstract = abstractOf(citation);
 
   const handleProjectTagsChange = async (tags: string[]) => {
     try {
@@ -333,6 +335,15 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
               <div className="detail-item">
                 <span className="detail-label">{t('bibliography.bibNote')}</span>
                 <span className="detail-value">{citation.notes}</span>
+              </div>
+            )}
+
+            {/* Le résumé du `.bib`, en entier et en texte. Après la note : un
+                long résumé ne repousse pas les détails courts. */}
+            {abstract && (
+              <div className="detail-item">
+                <span className="detail-label">{t('bibliography.abstract')}</span>
+                <span className="detail-value citation-abstract">{abstract}</span>
               </div>
             )}
 

@@ -6,6 +6,7 @@ import type {
   BibliographySliceCreator,
 } from './types';
 import { referenceTags } from './referenceTags';
+import { abstractOf } from './citationAbstract';
 import { mergeCitationLists } from '../../../../../backend/core/bibliography/mergeCitations';
 import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
 
@@ -300,7 +301,8 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
           citation.year.includes(query) ||
           tagsOf(citation).some(tag => tag.toLowerCase().includes(query)) ||
           (citation.keywords && citation.keywords.toLowerCase().includes(query)) ||
-          (citation.notes && citation.notes.toLowerCase().includes(query))
+          (citation.notes && citation.notes.toLowerCase().includes(query)) ||
+          (abstractOf(citation)?.toLowerCase().includes(query) ?? false)
       );
     }
 
