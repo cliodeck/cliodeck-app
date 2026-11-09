@@ -185,6 +185,34 @@ describe('PrimarySourcesPanel — des sources aux pages changées dans Tropy', (
     }
   });
 
+  // Revue de G3 (seconde passe) : une reprise sans toutes les images de
+  // l'item attend leur retour. Sans avis, « Lancer l'OCR » semblait ne rien
+  // faire, et le bandeau des pages changées y renvoyait sans fin.
+  it('des sources aux pages changées dont des images manquent sur le disque : le panneau le dit, sans alerte', async () => {
+    tropy.sync.mockResolvedValue({
+      success: true,
+      errors: [],
+      issues: [{ code: 'pages-images-missing', sources: 1 }],
+    });
+    const showAlert = vi.spyOn(useDialogStore.getState(), 'showAlert').mockResolvedValue(undefined);
+    render(<PrimarySourcesPanel />);
+
+    fireEvent.click(await screen.findByTitle('Synchroniser'));
+
+    expect(await screen.findByText(/1 source\(s\) aux pages modifiées.*introuvables sur le disque/)).toBeInTheDocument();
+    expect(showAlert).not.toHaveBeenCalled();
+  });
+
+  it('l’avis des images manquantes cite, dans les trois langues, « Lancer l’OCR » et le bouton de la carte', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const strings = locale(lng).primarySources;
+      const notice = strings.issues.pagesImagesMissing as string;
+      expect(notice, lng).toContain('{{sources}}');
+      expect(notice, lng).toContain(strings.runOCR);
+      expect(notice, lng).toContain(strings.ocrRerun);
+    }
+  });
+
   // L'aide de la case disait « Décochée, ne traite que les sources sans
   // transcription » : les sources à reprendre, qui en ont une, l'étaient aussi.
   it('l’aide de la case « Relancer… » nomme les sources reprises sans elle, dans les trois langues', () => {

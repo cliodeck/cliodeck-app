@@ -99,6 +99,17 @@ export type TropySyncIssue =
        */
       code: 'pages-changed';
       sources: number;
+    }
+  | {
+      /**
+       * Une passe d'OCR n'a pas repris `sources` sources aux pages changées
+       * (G3) : des images de leur item manquent sur le disque (disque externe
+       * débranché, fichiers déplacés). Le texte des seules présentes aurait
+       * perdu celui des absentes. Transcription et marque sont gardées ; la
+       * passe d'OCR suivante les reprend, les fichiers revenus.
+       */
+      code: 'pages-images-missing';
+      sources: number;
     };
 
 /** Ce qui a empêché l'OCR d'un item, et vaudra pour toute la passe. */
@@ -308,8 +319,10 @@ export class TropySync {
       // Poppler manque pour cette passe : une source qui l'attend n'en
       // obtiendrait que le texte de ses images, qu'elle a déjà.
       let popplerMissing = false;
-      // Les sources dont les pages ont changé et que l'OCR n'a pas reprises.
+      // Les sources dont les pages ont changé et que l'OCR n'a pas reprises :
+      // en attente d'une passe d'OCR, ou d'images absentes du disque.
       let pagesPending = 0;
+      let pagesImagesMissing = 0;
 
       // Les photos de chaque source avant la passe (G3). Un item réenregistré
       // s'attribue les photos qu'il a reçues : comparé à la base du moment,
@@ -351,7 +364,8 @@ export class TropySync {
           result.ocrPerformed += processResult.ocrCount;
           result.transcriptionsImported += processResult.transcriptionCount;
           if (processResult.transcriptionWritten) result.transcriptionsWritten++;
-          if (processResult.pagesPending) pagesPending++;
+          if (processResult.pagesImagesMissing) pagesImagesMissing++;
+          else if (processResult.pagesPending) pagesPending++;
 
           const blocked = processResult.ocrBlocked;
           if (blocked) {
@@ -369,7 +383,12 @@ export class TropySync {
 
       // Une transcription qui porte d'autres pages que les siennes se dit au
       // bilan, à chaque passe, jusqu'à ce qu'un OCR la refasse.
+      // Celle qu'une image absente a retenue le dit à part : « Lancer l'OCR »
+      // n'y fera rien tant que le fichier manque.
       if (pagesPending > 0) result.issues.push({ code: 'pages-changed', sources: pagesPending });
+      if (pagesImagesMissing > 0) {
+        result.issues.push({ code: 'pages-images-missing', sources: pagesImagesMissing });
+      }
 
       // Phase 2.5: Extract named entities (if enabled)
       if (options.extractEntities === true && options.llm) {
@@ -430,6 +449,8 @@ export class TropySync {
     ocrBlocked?: OcrBlocked;
     /** La source reste marquée : ses pages ont changé, son OCR est à refaire (G3). */
     pagesPending: boolean;
+    /** Elle l'est parce qu'une image de l'item manque sur le disque : la reprise l'attend. */
+    pagesImagesMissing: boolean;
   }> {
     const existingSource = vectorStore.getSourceByTropyId(item.id);
     let transcription = '';
@@ -472,12 +493,15 @@ export class TropySync {
         : '';
     // Un corps partiel — les images d'un item dont les PDF attendaient
     // Poppler — n'est pas acquis : il se garde, mais l'OCR suivant le reprend.
-    // Tenu pour acquis, il empêchait à jamais de reconnaître le PDF. Un corps
-    // aux pages changées ('pages', G3) est complet : un texte partiel ne le
-    // remplace pas.
+    // Tenu pour acquis, il empêchait à jamais de reconnaître le PDF. Il reste
+    // partiel quand ses pages changent ('pages', G3) : tenu alors pour
+    // complet, il retenait le nouveau texte partiel, aux bonnes pages, et la
+    // page partie restait sous lui jusqu'à l'installation de Poppler.
     const existingPending = existingSource?.ocrPending ?? null;
-    const acquiredBody = existingPending === 'poppler' ? '' : existingBody;
+    const existingPartial = existingSource?.ocrPartial === true;
+    const acquiredBody = existingPartial ? '' : existingBody;
     let ocrPending: OcrPending | null = null;
+    let ocrPartial = false;
 
     // G3 : l'OCR n'est rangé que par item. Une photo arrivée d'un autre item
     // ou partie vers lui laisse son texte dans la transcription de l'item
@@ -498,16 +522,17 @@ export class TropySync {
       !samePhotoIds(knownPhotos, item.photos);
     // Ce qui reste à reprendre si cette passe ne refait pas l'OCR. Des pages
     // changées l'emportent sur l'attente de Poppler : la carte le dit, et
-    // l'OCR qui les reprend refait tout l'item. Leur corps passe pour
-    // complet : sans Poppler, le texte des seules images d'un item qui a un
-    // PDF ne le remplace pas (L06-10), et la marque reste jusqu'à un OCR
-    // complet. Seul un corps que la base tient encore pour partiel
-    // ('poppler') cède à un nouveau texte partiel, qui reste 'poppler'.
+    // l'OCR qui les reprend refait tout l'item. Leur corps garde ce qu'il
+    // était (`existingPartial`). Complet, le texte des seules images d'un
+    // item qui a un PDF ne le remplace pas sans Poppler (L06-10), et la
+    // marque reste jusqu'à un OCR complet. Partiel, il cède à un nouveau texte
+    // partiel, qui redevient 'poppler'.
     const keptPending: OcrPending | null = pagesChanged
       ? 'pages'
       : existingPending === 'pages' && !hasPhotos
         ? null
         : existingPending;
+    const keptPartial = keptPending !== null && existingPartial;
 
     // 2. Chercher des transcriptions externes (Transkribus, etc.)
     if (options.transcriptionDirectory && (!notesAreTranscription || options.forceReindex)) {
@@ -531,9 +556,26 @@ export class TropySync {
     //    L'OCR repartait de zéro à chaque passe — des heures de calcul sur un
     //    corpus d'archives — pour un résultat que la décision d'écriture
     //    jetait ensuite. Une note-transcription (Q26) vaut transcription ici.
+    //
+    //    Une reprise de pages changées (G3) refait, sans « Relancer… », l'OCR
+    //    d'une transcription gardée : elle ne se fait qu'avec toutes les
+    //    images de l'item. `performOCROnItem` écarte en silence celles qui
+    //    manquent sur le disque (disque externe débranché, dossier renommé) :
+    //    le texte des seules présentes remplaçait la transcription, et celui
+    //    des absentes était perdu, même une fois revenues. Elle les attend,
+    //    marquée, et le bilan le dit. Une passe forcée fait avec ce qu'elle
+    //    trouve, comme avant.
+    const imagesMissing =
+      !transcription &&
+      options.performOCR &&
+      !options.forceReindex &&
+      keptPending === 'pages' &&
+      existingBody.length > 0 &&
+      this.hasMissingImage(item);
     if (
       !transcription &&
       options.performOCR &&
+      !imagesMissing &&
       (options.forceReindex ||
         // Une source en attente de Poppler se reprend quoi qu'en disent ses
         // notes : le texte de ses images est déjà là, il manque celui de ses
@@ -547,7 +589,9 @@ export class TropySync {
       // Poppler toujours absent : la reprendre referait l'OCR de ses images
       // pour le même texte partiel ('poppler'), ou pour un texte partiel
       // qu'une transcription complète ne cède pas ('pages' d'un item qui a
-      // un PDF). La première source reprise de la passe l'apprend.
+      // un PDF). Une source 'pages' au corps partiel, elle, se reprend : son
+      // nouveau texte partiel n'a plus la page partie. La première source
+      // reprise de la passe l'apprend.
       !(
         pass.popplerMissing &&
         (keptPending === 'poppler' ||
@@ -566,6 +610,7 @@ export class TropySync {
         ocrConfidence = ocrResult.confidence;
         ocrCount = ocrResult.pageCount;
         ocrPending = ocrResult.missingTool ?? null;
+        ocrPartial = !!ocrResult.missingTool;
       }
     }
 
@@ -582,6 +627,7 @@ export class TropySync {
       // Le corps gardé tel quel reste ce qu'il était : partiel, acquis, ou
       // fait sur d'autres pages que celles de l'item.
       ocrPending = keptPending;
+      ocrPartial = keptPartial;
     } else if (!transcription && notesText) {
       transcription = this.reader.extractItemText(item);
       transcriptionSource = 'tropy-notes';
@@ -666,7 +712,8 @@ export class TropySync {
     // La marque d'attente peut changer seule : la reprise, Poppler installé,
     // rend le même texte partiel quand le PDF est illisible ou a quitté le
     // disque. Ne pas l'écrire faisait refaire l'OCR de l'item à chaque passe.
-    const pendingChanged = !!existingSource && ocrPending !== existingPending;
+    const markChanged = ocrPending !== existingPending || ocrPartial !== existingPartial;
+    const pendingChanged = !!existingSource && markChanged;
 
     // La longueur de la plus longue note, que le rapport de la source relit
     // (G1). Absente sur une ligne écrite avant la colonne : on l'initialise
@@ -704,21 +751,22 @@ export class TropySync {
         // s'arrêtait avant (changement de projet, erreur sur cet item) : la
         // passe suivante, ses photos déjà retirées en base, ne voyait plus
         // rien changer, et son texte gardait la page partie. Un item qui n'a
-        // plus de photo dans Tropy, ou qui n'y est plus, n'est pas marqué.
+        // plus de photo dans Tropy, ou qui n'y est plus, n'est pas marqué. Un
+        // corps qui attendait Poppler le dit encore (`ocrPartial`).
         if (pass.itemsWithPhotos) {
           const received = sourceItem.photos.map((photo) => photo.id);
           for (const ownerId of vectorStore.getOtherPhotoOwners(sourceItem.id, received)) {
             const owner = vectorStore.getSource(ownerId);
             if (owner && isOcrBody(owner) && pass.itemsWithPhotos.has(owner.tropyId)) {
-              vectorStore.setOcrPending(ownerId, 'pages');
+              vectorStore.setOcrPending(ownerId, 'pages', owner.ocrPartial === true);
             }
           }
         }
 
         vectorStore.saveSource(sourceItem);
         // `saveSource` n'y touche pas : la marque change avec le corps, ici.
-        if (ocrPending !== existingPending) {
-          vectorStore.setOcrPending(sourceItem.id, ocrPending);
+        if (markChanged) {
+          vectorStore.setOcrPending(sourceItem.id, ocrPending, ocrPartial);
         }
 
         // Les chunks appartiennent au texte qu'ils découpent. La phase
@@ -732,6 +780,7 @@ export class TropySync {
       });
     }
 
+    const pagesPending = (saved ? ocrPending : existingPending) === 'pages';
     return {
       isNew: saved && isNew,
       isUpdated: saved && !isNew && isUpdated,
@@ -743,7 +792,8 @@ export class TropySync {
       transcriptionWritten:
         saved && transcription.length > 0 && (isNew || transcriptionChanged),
       ocrBlocked,
-      pagesPending: (saved ? ocrPending : existingPending) === 'pages',
+      pagesPending,
+      pagesImagesMissing: pagesPending && imagesMissing,
     };
   }
 
@@ -857,6 +907,14 @@ export class TropySync {
    */
   private hasPdfOnDisk(item: TropyItem): boolean {
     return item.photos.some((photo) => this.ocrPipeline.isPDF(photo.path) && fs.existsSync(photo.path));
+  }
+
+  /**
+   * Une image de l'item manque-t-elle sur le disque ? `performOCROnItem` les
+   * écarte sans rien dire : son texte n'aurait pas toutes les pages.
+   */
+  private hasMissingImage(item: TropyItem): boolean {
+    return item.photos.some((photo) => !fs.existsSync(photo.path));
   }
 
   /**
