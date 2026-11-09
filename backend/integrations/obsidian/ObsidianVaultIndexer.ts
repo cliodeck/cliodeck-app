@@ -10,6 +10,8 @@
  * Returns a typed `VaultScanReport` (step 2.1bis) — partial-success
  * first-class. An unreadable or malformed note doesn't fail the whole
  * indexing; it's recorded in `skipped` or `failed` with a typed reason.
+ * Une seule exception : si les tables du coffre disparaissent pendant la
+ * passe (« Détacher »), elle s'arrête au lieu de compter N échecs.
  *
  * Unchanged notes (same file hash) are skipped on incremental runs
  * (`{ force: false }` default), as long as their chunks are there. Pass
@@ -182,6 +184,10 @@ export class ObsidianVaultIndexer {
         });
         report.indexed.push({ ref, parsed });
       } catch (e) {
+        // Tables disparues : « Détacher » a effacé le coffre pendant l'appel au fournisseur. Ce
+        // n'est pas l'échec d'une note, la passe s'arrête : continuer enverrait au fournisseur,
+        // peut-être en ligne, toutes les notes d'un coffre que l'auteur vient de retirer.
+        if (!this.store.hasSchema()) throw e;
         const message = e instanceof Error ? e.message : String(e);
         report.failed.push({
           ref,

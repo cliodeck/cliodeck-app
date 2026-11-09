@@ -277,6 +277,20 @@ export class ObsidianVaultStore {
     );
   }
 
+  /**
+   * Vrai tant que les tables du coffre existent. `purgeObsidianData` (« Détacher ») les efface
+   * par une autre connexion : cette instance, ouverte avant, ne les recrée pas.
+   */
+  hasSchema(): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM sqlite_master
+         WHERE type = 'table' AND name IN ('obsidian_notes', 'obsidian_chunks', 'obsidian_chunks_fts')`
+      )
+      .get() as { n: number };
+    return row.n === 3;
+  }
+
   stats(): { noteCount: number; chunkCount: number } {
     const n = this.db.prepare('SELECT COUNT(*) AS c FROM obsidian_notes').get() as {
       c: number;

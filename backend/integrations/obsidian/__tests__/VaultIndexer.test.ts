@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sqliteAvailable } from '@backend/__tests__/helpers/native-guards';
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -51,6 +51,7 @@ beforeEach(async () => {
   vault = await mkVault();
 });
 afterEach(async () => {
+  vi.useRealTimers();
   store?.close();
   store = null;
   await fsp.rm(vault, { recursive: true, force: true });
@@ -399,6 +400,44 @@ describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer — panne pendant l’in
     }
   );
 
+  /**
+   * « Détacher » efface les tables du coffre pendant que la passe attend le fournisseur. Une erreur
+   * propre à une note reste un échec partiel, mais des tables disparues ne sont pas l'affaire d'une
+   * note : continuer enverrait au fournisseur, peut-être en ligne, toutes les notes d'un coffre que
+   * l'auteur vient de retirer, pour un rapport « N échecs ».
+   */
+  it.each([{ force: true }, { force: false }])(
+    'Détacher pendant une passe (force: $force) : la passe s’arrête après l’appel en cours',
+    async ({ force }) => {
+      const dbPath = path.join(vault, '.cliodeck', 'brain.db');
+      for (const nom of ['A', 'B', 'C', 'D', 'E', 'F']) writeNote(`${nom}.md`, `# ${nom}\nPremière version de ${nom}.`);
+      const reader = new ObsidianVaultReader(vault);
+      openStore();
+      await new ObsidianVaultIndexer(reader, store!, fakeEmbedder()).indexAll();
+      // Toutes modifiées : une passe non forcée les réembarque aussi.
+      for (const nom of ['A', 'B', 'C', 'D', 'E', 'F']) writeNote(`${nom}.md`, `# ${nom}\nSeconde version de ${nom}.`);
+
+      let calls = 0;
+      const embedder = fakeEmbedder();
+      const embed = embedder.embed;
+      embedder.embed = async (texts) => {
+        calls += 1;
+        if (calls === 1) ObsidianVaultStore.purgeObsidianData(dbPath);
+        return embed(texts);
+      };
+
+      await expect(new ObsidianVaultIndexer(reader, store!, embedder).indexAll({ force })).rejects.toThrow(
+        /no such table/
+      );
+      expect(calls).toBe(1);
+      // Rien de recréé : le coffre détaché ne laisse aucune table derrière la passe.
+      const db = new Database(dbPath, { readonly: true });
+      const restantes = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'obsidian_%'").all();
+      db.close();
+      expect(restantes).toEqual([]);
+    }
+  );
+
   it('témoin : une note sans rien à découper reste indexée, sans appel au fournisseur ni réécriture', async () => {
     writeNote('A.md', '---\ntags: [brouillon]\n---\n');
     const reader = new ObsidianVaultReader(vault);
@@ -411,10 +450,16 @@ describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer — panne pendant l’in
       return embed(texts);
     };
 
+    // Horloge figée, puis avancée d'une minute entre les deux passes : une réécriture de la note
+    // change `indexedAt` à coup sûr. Sur l'horloge réelle, les deux passes tombaient une fois sur
+    // deux dans la même milliseconde et la réécriture passait inaperçue.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T10:00:00.000Z') });
     const first = await new ObsidianVaultIndexer(reader, store!, embedder).indexAll();
     const indexedAt = store!.getNoteByPath('A.md')?.indexedAt;
+    vi.setSystemTime(new Date('2026-11-09T10:01:00.000Z'));
     const second = await new ObsidianVaultIndexer(reader, store!, embedder).indexAll();
 
+    expect(indexedAt).toBe('2026-11-09T10:00:00.000Z');
     expect(first.stats.indexedCount).toBe(1);
     expect(second.stats.indexedCount).toBe(1);
     expect(calls).toBe(0);
