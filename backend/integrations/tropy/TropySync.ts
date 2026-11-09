@@ -13,12 +13,13 @@ import {
   type TropyOCRPipelineOptions,
 } from './TropyOCRPipeline';
 import { PopplerNotFoundError } from './PDFConverter';
-import { isNoteTranscription } from './note-transcription';
+import { isNoteTranscription, longestNoteLength } from './note-transcription';
 import { transcriptionSourceOfFormat } from './transcription-provenance';
 import { assessTropyBinding } from './tropy-project-identity';
 import {
   PrimarySourcesVectorStore,
   PrimarySourceDocument,
+  type PrimarySourceRecord,
 } from '../../core/vector-store/PrimarySourcesVectorStore';
 import { NERService } from '../../core/ner/NERService';
 import type { LLMProvider } from '../../core/llm/providers/base';
@@ -401,8 +402,11 @@ export class TropySync {
 
     const notesText = notesOnlyText.trim();
     // Q26 : une note longue est une transcription faite à la main, une
-    // courte un commentaire, qui ne doit pas empêcher l'OCR.
-    const notesAreTranscription = isNoteTranscription(notesText.length);
+    // courte un commentaire, qui ne doit pas empêcher l'OCR. G1 : la plus
+    // longue note décide, pas la somme — quelques annotations courtes
+    // retenaient l'OCR ensemble.
+    const longestNote = longestNoteLength(item);
+    const notesAreTranscription = isNoteTranscription(longestNote);
 
     // Un corps obtenu par une passe précédente. Une source 'tropy-notes'
     // n'en a pas : son texte se recalcule à partir des notes de Tropy.
@@ -494,7 +498,7 @@ export class TropySync {
       : this.reader.getLastModifiedTime();
 
     // Construire la source primaire
-    const sourceItem: PrimarySourceItem = {
+    const sourceItem: PrimarySourceRecord = {
       id: existingSource?.id || randomUUID(),
       tropyId: item.id,
       title: item.title || `Source ${item.id}`,
@@ -509,6 +513,7 @@ export class TropySync {
       transcriptionSource,
       ocrConfidence,
       notesText,
+      longestNoteLength: longestNote,
       lastModified: itemModified,
       metadata: this.extractMetadata(item),
       archival: archivalFromTropyMetadata(this.extractMetadata(item), {
@@ -565,10 +570,15 @@ export class TropySync {
     // disque. Ne pas l'écrire faisait refaire l'OCR de l'item à chaque passe.
     const pendingChanged = !!existingSource && ocrPending !== existingPending;
 
-    // Initialiser `notes_text`, ou lever la seule marque d'attente, réécrit la
-    // ligne sans que rien n'ait changé pour l'historien : ce n'est pas une
-    // mise à jour.
-    let saved = isNew || isUpdated || notesUninitialized || pendingChanged;
+    // La longueur de la plus longue note, que le rapport de la source relit
+    // (G1). Absente sur une ligne écrite avant la colonne : on l'initialise
+    // sans réembarquer, elle n'entre pas dans les extraits.
+    const longestNoteChanged = !!existingSource && existingSource.longestNoteLength !== longestNote;
+
+    // Initialiser `notes_text` ou `longest_note_length`, ou lever la seule
+    // marque d'attente, réécrit la ligne sans que rien n'ait changé pour
+    // l'historien : ce n'est pas une mise à jour.
+    let saved = isNew || isUpdated || notesUninitialized || pendingChanged || longestNoteChanged;
     if (saved) {
       // La ligne et l'invalidation de ses extraits dans une même transaction :
       // une ligne nouvelle gardée sans elle passerait pour acquise à la passe

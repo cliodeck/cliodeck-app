@@ -46,8 +46,9 @@ function makeItem(overrides: Record<string, unknown> = {}) {
 
 /**
  * Source telle qu'elle a été enregistrée par une passe précédente. `notesText`
- * vaut '' : la passe a eu lieu après la migration et l'item n'avait pas de
- * note. Une base d'avant migration se simule par `notesText: undefined`.
+ * vaut '' et `longestNoteLength` 0 : la passe a eu lieu après les migrations
+ * et l'item n'avait pas de note. Une base d'avant migration se simule par
+ * `notesText: undefined` (ou `longestNoteLength: undefined`).
  */
 function storedSource(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -57,6 +58,7 @@ function storedSource(overrides: Partial<Record<string, unknown>> = {}) {
     lastModified: ITEM_MODIFIED,
     indexedAt: '2026-07-27T11:49:11.170Z',
     notesText: '',
+    longestNoteLength: 0,
     ...overrides,
   };
 }
@@ -67,7 +69,11 @@ function harness(options: {
   ocrConfidence?: number;
   /** Pages que le pipeline dit avoir passées à la reconnaissance. */
   ocrPages?: number;
-  /** Texte des notes Tropy de l'item (item, photos et sélections confondues). */
+  /**
+   * Texte des notes Tropy de l'item (item, photos et sélections confondues),
+   * rendu par le lecteur simulé et porté par l'item comme une seule note : la
+   * règle des notes-transcriptions lit la plus longue note sur l'item (G1).
+   */
   notes?: string;
   /** Un vrai magasin à la place de la doublure : ce qu'il a écrit, la passe suivante le relit. */
   store?: PrimarySourcesVectorStore;
@@ -105,6 +111,7 @@ function harness(options: {
     transaction: <T>(fn: () => T): T => fn(),
   };
 
+  const item = () => makeItem({ notes: notes ? [{ id: 1, html: notes, text: notes }] : [], ...options.item });
   const run = (opts: Record<string, unknown> = {}) =>
     (
       sync as unknown as {
@@ -119,7 +126,7 @@ function harness(options: {
           transcriptionWritten: boolean;
         }>;
       }
-    ).processItem(makeItem(options.item), vectorStore, {
+    ).processItem(item(), vectorStore, {
       performOCR: true,
       ocrLanguage: 'fra',
       forceReindex: false,
@@ -284,6 +291,7 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
         transcription: OCR_ACQUIRED,
         transcriptionSource: 'tesseract',
         notesText: SHORT_NOTE,
+        longestNoteLength: SHORT_NOTE.length,
       }),
       notes: SHORT_NOTE,
     });
@@ -302,6 +310,7 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
         transcription: `Titre\n\n${LONG_NOTE}`,
         transcriptionSource: 'tropy-notes',
         notesText: LONG_NOTE,
+        longestNoteLength: LONG_NOTE.length,
       }),
       notes: LONG_NOTE,
     });
@@ -343,6 +352,7 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
         transcription: `Titre\n\n${SHORT_NOTE}`,
         transcriptionSource: 'tropy-notes',
         notesText: SHORT_NOTE,
+        longestNoteLength: SHORT_NOTE.length,
       }),
       notes: SHORT_NOTE,
     });
@@ -359,6 +369,7 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
         transcription: `Titre\n\n${LONG_NOTE}`,
         transcriptionSource: 'tropy-notes',
         notesText: LONG_NOTE,
+        longestNoteLength: LONG_NOTE.length,
       }),
       notes: '',
     });
@@ -378,6 +389,7 @@ describe('TropySync — une note Tropy ne remplace pas une transcription', () =>
         transcription: `1980_01_08_141st_CoG_meeting_Minutes_FR\n\n${LONG_NOTE}`,
         transcriptionSource: 'tropy-notes',
         notesText: undefined,
+        longestNoteLength: undefined,
       }),
       notes: LONG_NOTE,
     });

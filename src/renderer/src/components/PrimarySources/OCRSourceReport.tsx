@@ -18,7 +18,8 @@ interface SourceOCRReport {
   minQualityScore: number | null;
   maxQualityScore: number | null;
   transcriptionLength: number;
-  notesLength: number;
+  /** Plus longue note Tropy de la source ; null tant que la synchro ne l'a pas relue. */
+  longestNoteLength: number | null;
 }
 
 interface OCRSourceReportProps {
@@ -71,10 +72,13 @@ export const OCRSourceReport: React.FC<OCRSourceReportProps> = ({ sourceId }) =>
   const hasOCR = report.ocrConfidence !== null;
   const hasQuality = report.avgQualityScore !== null;
 
-  // Décision Q26 : des notes longues tiennent lieu de transcription et
-  // l'OCR ne passe pas sans demande. L'historien doit savoir pourquoi.
+  // Décision Q26 : une note longue tient lieu de transcription et l'OCR ne
+  // passe pas sans demande. L'historien doit savoir pourquoi. Même grandeur
+  // que la synchro (G1) : la plus longue note, pas la somme des notes.
   const notesHoldOCR =
-    report.transcriptionSource === 'tropy-notes' && isNoteTranscription(report.notesLength);
+    report.transcriptionSource === 'tropy-notes' &&
+    report.longestNoteLength !== null &&
+    isNoteTranscription(report.longestNoteLength);
   const notesNotice = notesHoldOCR && (
     <div className="ocr-report-notice">
       <Info size={12} strokeWidth={1.5} />

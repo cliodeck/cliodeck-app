@@ -545,12 +545,45 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     }
   });
 
-  // Q26 : le seuil porte sur l'ensemble des notes de l'item (item, photos,
-  // sélections), pas sur chacune. Une transcription faite à la main dans
-  // Tropy se découpe d'ordinaire en une note par page : prise note à note,
-  // aucune page n'atteindrait le seuil et l'OCR repasserait sur un document
-  // déjà transcrit.
-  it('des notes de page, chacune sous 500 caractères, font ensemble une transcription (L06-2, Q26)', async () => {
+  // Décision G1 : le seuil des 500 caractères porte sur chaque note (de
+  // l'item, d'une photo ou d'une sélection), pas sur leur somme ; la plus
+  // longue décide. Sous la règle de la somme, quelques notes courtes
+  // (« voir carton 12 », « date douteuse ») retenaient l'OCR ensemble.
+
+  /** `notes_text` de la source d'un item Tropy. */
+  function notesTextOf(tropyId: number): string | null {
+    const db = brainDb();
+    try {
+      const row = db.prepare('SELECT notes_text FROM tropy_sources WHERE tropy_id = ?').get(tropyId) as
+        | { notes_text: string | null }
+        | undefined;
+      return row?.notes_text ?? null;
+    } finally {
+      db.close();
+    }
+  }
+
+  /** La longueur de la plus longue note, gardée pour le rapport de chaque source. */
+  function longestNotes(): Array<{ tropy_id: number; longest_note_length: number | null }> {
+    const db = brainDb();
+    try {
+      return db
+        .prepare('SELECT tropy_id, longest_note_length FROM tropy_sources ORDER BY tropy_id')
+        .all() as Array<{ tropy_id: number; longest_note_length: number | null }>;
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Vingt-quatre annotations de sélection : chacune un commentaire, plus de 500 caractères ensemble. */
+  function shortAnnotations() {
+    return Array.from({ length: 24 }, (_, i) => ({
+      id: 100 + i,
+      notes: [{ text: `Tampon de la préfecture, pièce ${i + 1}` }],
+    }));
+  }
+
+  it('des notes de page, chacune sous 500 caractères, ne retiennent pas l’OCR (G1)', async () => {
     const half = Math.ceil(NOTE_TEXT.length / 2);
     const pages = [NOTE_TEXT.slice(0, half), NOTE_TEXT.slice(half)];
     expect(Math.max(...pages.map((p) => p.trim().length))).toBeLessThan(500);
@@ -568,37 +601,181 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     await tropyService.openProject(tpy);
     await tropyService.sync(syncOptions);
 
-    expect(ocrReached(photoPath)).toBe(false);
+    expect(ocrReached(photoPath)).toBe(true);
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tesseract');
+    expect(s10?.transcription).toBe(OCR_TEXT);
+    // Les notes ne sont pas perdues : elles restent à côté du corps.
+    expect(notesTextOf(10)).toContain('salle Colbert');
+  });
+
+  // Témoin du revers de G1, sans correctif en rc.6 : un manuscrit transcrit
+  // page à page, dont l'OCR ne tire rien de lisible, n'acquiert jamais de
+  // corps. Il repasse donc à l'OCR à chaque « Lancer l'OCR », comme un item
+  // sans note ; la règle de la somme l'écartait. Ses notes restent son texte.
+  it('des notes de page sous 500 caractères sur un manuscrit illisible : l’OCR repasse à chaque synchro, les notes restent le texte (G1)', async () => {
+    const half = Math.ceil(NOTE_TEXT.length / 2);
+    const pages = [NOTE_TEXT.slice(0, half), NOTE_TEXT.slice(half)];
+    const page2 = path.join(tropyDir, 'rapport-p2.jpg');
+    fs.writeFileSync(page2, 'jpeg factice');
+    const items = baseItems();
+    items[0] = {
+      ...items[0],
+      photos: [
+        { id: 11, path: photoPath, notes: [{ text: pages[0] }] },
+        { id: 12, path: page2, notes: [{ text: pages[1] }] },
+      ],
+    };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    // Sous les seuils de `performOCROnItem` (plus de 50 caractères et une
+    // confiance de plus de 30) : rien d'exploitable.
+    ocrSpy.mockResolvedValue({ text: 'xx ~~ ;; illisible', confidence: 12, language: 'fra', pageCount: 2 });
+
+    for (let pass = 0; pass < 3; pass++) {
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+    }
+
+    // Une reconnaissance par passe, toujours sur les deux pages de l'item 10.
+    expect(ocrSpy).toHaveBeenCalledTimes(3);
+    for (const call of ocrSpy.mock.calls) {
+      expect(call[0]).toEqual([photoPath, page2]);
+    }
     const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
     expect(s10?.transcription_source).toBe('tropy-notes');
     expect(s10?.transcription).toContain('salle Colbert');
+    // Aucun message sous la source : sa plus longue note est sous le seuil.
+    expect(tropyService.getSourceOCRReport(s10!.id)?.longestNoteLength).toBeLessThan(500);
   });
 
-  // Revers assumé de la règle précédente : des annotations courtes de
-  // sélections, chacune un commentaire, comptent aussi ensemble. L'OCR ne
-  // passe alors que sous « Relancer l'OCR » — et la source le dit.
-  it('des annotations courtes qui dépassent ensemble 500 caractères attendent « Relancer l’OCR » (L06-2, Q26)', async () => {
-    const annotations = Array.from({ length: 24 }, (_, i) => ({
-      id: 100 + i,
-      notes: [{ text: `Tampon de la préfecture, pièce ${i + 1}` }],
-    }));
+  it('des annotations courtes qui dépassent ensemble 500 caractères ne retiennent pas l’OCR (G1)', async () => {
+    const annotations = shortAnnotations();
+    expect(annotations.map((a) => a.notes[0].text).join('\n\n').length).toBeGreaterThanOrEqual(500);
     const items = baseItems();
     items[0] = { ...items[0], photos: [{ id: 11, path: photoPath, selections: annotations }] };
     const tpy = makeTpy(tropyDir, spec({ items }));
     await tropyService.openProject(tpy);
     await tropyService.sync(syncOptions);
 
-    expect(ocrReached(photoPath)).toBe(false);
-    const first = snapshot().sources.find((s) => s.tropy_id === 10);
-    expect(first?.transcription_source).toBe('tropy-notes');
-    const report = tropyService.getSourceOCRReport(first!.id);
-    expect(report?.notesLength).toBeGreaterThanOrEqual(500);
+    expect(ocrReached(photoPath)).toBe(true);
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tesseract');
+    expect(s10?.transcription).toBe(OCR_TEXT);
+    expect(notesTextOf(10)).toContain('pièce 24');
+    // Le rapport de la source lit la plus longue note, pas leur somme.
+    const report = tropyService.getSourceOCRReport(s10!.id);
+    expect(report?.longestNoteLength).toBe('Tampon de la préfecture, pièce 24'.length);
+  });
 
-    await tropyService.sync({ ...syncOptions, forceReindex: true });
-    expect(ocrSpy).toHaveBeenCalledWith([photoPath], expect.anything());
-    const forced = snapshot().sources.find((s) => s.tropy_id === 10);
-    expect(forced?.transcription_source).toBe('tesseract');
-    expect(forced?.transcription).toBe(OCR_TEXT);
+  // Ce que fera la première synchro après G1 sur un projet existant : une
+  // source à notes courtes, tenue jusque-là pour transcrite, passe à l'OCR
+  // sans « Relancer l'OCR ». C'est voulu, mais c'est du calcul : le bilan le
+  // compte.
+  it('une source à notes courtes retenue par la règle de la somme passe à l’OCR à la synchro suivante, et le bilan le compte (G1)', async () => {
+    const items = baseItems();
+    items[0] = { ...items[0], photos: [{ id: 11, path: photoPath, selections: shortAnnotations() }] };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    // L'état que laissait la règle de la somme : les notes pour tout texte,
+    // pas d'OCR. Une passe sans OCR laisse le même.
+    await tropyService.sync({ ...syncOptions, performOCR: false });
+    expect(snapshot().sources.find((s) => s.tropy_id === 10)?.transcription_source).toBe('tropy-notes');
+    expect(ocrSpy).not.toHaveBeenCalled();
+
+    const result = await tropyService.sync(syncOptions);
+
+    expect(result.success).toBe(true);
+    // Un seul item passe à l'OCR, une page : l'item 20, transcrit dans une
+    // note de plus de 500 caractères, reste à ses notes.
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    expect(ocrSpy.mock.calls[0][0]).toEqual([photoPath]);
+    expect(result.ocrPerformed).toBe(1);
+    expect(result.transcriptionsWritten).toBe(1);
+    expect(result.updatedItems).toBe(1);
+    const after = snapshot().sources;
+    expect(after.find((s) => s.tropy_id === 10)?.transcription_source).toBe('tesseract');
+    expect(after.find((s) => s.tropy_id === 20)?.transcription_source).toBe('tropy-notes');
+  });
+
+  it('une note de 500 caractères ou plus retient l’OCR, même parmi des notes courtes : la plus longue décide (G1)', async () => {
+    const items = baseItems();
+    items[0] = {
+      ...items[0],
+      notes: [{ text: 'Voir aussi carton 12' }],
+      photos: [
+        {
+          id: 11,
+          path: photoPath,
+          notes: [{ text: 'Date douteuse' }],
+          selections: [{ id: 30, notes: [{ text: NOTE_TEXT }] }],
+        },
+      ],
+    };
+    const tpy = makeTpy(tropyDir, spec({ items }));
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    expect(ocrReached(photoPath)).toBe(false);
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tropy-notes');
+    expect(s10?.transcription).toContain('salle Colbert');
+  });
+
+  it('une note de 500 caractères ou plus ajoutée après l’OCR ne remplace pas la transcription (G1)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+
+    const items = baseItems();
+    items[0] = { ...items[0], notes: [{ text: NOTE_TEXT }], modified: '2026-06-01T08:00:00.000Z' };
+    makeTpy(tropyDir, spec({ items }));
+    await tropyService.sync(syncOptions);
+
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    const s10 = snapshot().sources.find((s) => s.tropy_id === 10);
+    expect(s10?.transcription_source).toBe('tesseract');
+    expect(s10?.transcription).toBe(OCR_TEXT);
+    expect(notesTextOf(10)).toBe(NOTE_TEXT);
+  });
+
+  it('une base d’avant la colonne longest_note_length la remplit à la synchro suivante, sans réembarquer (G1)', async () => {
+    const tpy = makeTpy(tropyDir, spec());
+    await tropyService.openProject(tpy);
+    await tropyService.sync(syncOptions);
+    await tropyService.close();
+
+    // Ramener brain.db au schéma d'avant G1, comme sur les postes des
+    // historiens avant la mise à jour.
+    const db = new Database(path.join(projectDir, '.cliodeck', 'brain.db'));
+    db.exec('ALTER TABLE tropy_sources DROP COLUMN longest_note_length');
+    db.close();
+    const before = snapshot();
+    const embeddedBefore = embedCalls.texts;
+
+    await tropyService.init(projectDir);
+    // Ligne d'avant la colonne : le rapport ne sait pas encore, et ne
+    // conclut rien.
+    const s20 = before.sources.find((s) => s.tropy_id === 20)!;
+    expect(tropyService.getSourceOCRReport(s20.id)?.longestNoteLength).toBeNull();
+
+    await tropyService.openProject(tpy);
+    const result = await tropyService.sync(syncOptions);
+    expect(result.success).toBe(true);
+    expect(result.updatedItems).toBe(0);
+
+    const after = snapshot();
+    expect(embedCalls.texts).toBe(embeddedBefore);
+    expect(ocrSpy).toHaveBeenCalledTimes(1);
+    expect(after.chunks).toEqual(before.chunks);
+    expect(after.sources.map((s) => [s.id, s.transcription, s.transcription_source])).toEqual(
+      before.sources.map((s) => [s.id, s.transcription, s.transcription_source])
+    );
+    expect(longestNotes()).toEqual([
+      { tropy_id: 10, longest_note_length: 0 },
+      { tropy_id: 20, longest_note_length: NOTE_TEXT.length },
+    ]);
+    expect(tropyService.getSourceOCRReport(s20.id)?.longestNoteLength).toBe(NOTE_TEXT.length);
   });
 
   // L06-5 (S02-1-10) : Tropy garde l'id d'une photo qu'il déplace d'un item à

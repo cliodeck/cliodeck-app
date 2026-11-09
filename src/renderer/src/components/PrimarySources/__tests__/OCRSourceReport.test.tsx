@@ -2,9 +2,11 @@
 /**
  * Rapport OCR d'une source : l'explication de la décision Q26.
  *
- * Des notes Tropy de 500 caractères ou plus tiennent lieu de transcription et
+ * Une note Tropy de 500 caractères ou plus tient lieu de transcription et
  * l'OCR ne passe pas sans « Relancer l'OCR sur toutes les sources ». L'auteur
  * a posé une condition : que l'historien le voie sur la source concernée.
+ * Depuis G1, le seuil porte sur chaque note : la plus longue décide, pas la
+ * somme.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
@@ -37,8 +39,8 @@ function stubReport(report: Record<string, unknown>): void {
 afterEach(cleanup);
 
 describe('OCRSourceReport — notes Tropy tenant lieu de transcription', () => {
-  it('explique pourquoi l’OCR n’a pas été lancé quand les notes atteignent le seuil', async () => {
-    stubReport({ transcriptionSource: 'tropy-notes', notesLength: NOTE_TRANSCRIPTION_MIN_CHARS });
+  it('explique pourquoi l’OCR n’a pas été lancé quand une note atteint le seuil', async () => {
+    stubReport({ transcriptionSource: 'tropy-notes', longestNoteLength: NOTE_TRANSCRIPTION_MIN_CHARS });
     render(<OCRSourceReport sourceId="s" />);
     expect(await screen.findByText('primarySources.notesHoldOCR')).toBeInTheDocument();
   });
@@ -46,7 +48,7 @@ describe('OCRSourceReport — notes Tropy tenant lieu de transcription', () => {
   it('l’explique aussi quand la source n’a pas encore d’extraits', async () => {
     stubReport({
       transcriptionSource: 'tropy-notes',
-      notesLength: 800,
+      longestNoteLength: 800,
       chunkCount: 0,
       avgQualityScore: null,
     });
@@ -55,14 +57,33 @@ describe('OCRSourceReport — notes Tropy tenant lieu de transcription', () => {
   });
 
   it('se tait pour une note courte, qui n’empêche pas l’OCR', async () => {
-    stubReport({ transcriptionSource: 'tropy-notes', notesLength: NOTE_TRANSCRIPTION_MIN_CHARS - 1 });
+    stubReport({ transcriptionSource: 'tropy-notes', longestNoteLength: NOTE_TRANSCRIPTION_MIN_CHARS - 1 });
+    render(<OCRSourceReport sourceId="s" />);
+    await screen.findByText('primarySources.ocrReport');
+    expect(screen.queryByText('primarySources.notesHoldOCR')).toBeNull();
+  });
+
+  // G1 : `notesLength`, la somme des notes, décidait du message ; la synchro
+  // décide maintenant sur la plus longue note, et le message doit suivre.
+  it('se tait pour plusieurs notes courtes dont la somme passe le seuil (G1)', async () => {
+    stubReport({ transcriptionSource: 'tropy-notes', notesLength: 900, longestNoteLength: 200 });
+    render(<OCRSourceReport sourceId="s" />);
+    await screen.findByText('primarySources.ocrReport');
+    expect(screen.queryByText('primarySources.notesHoldOCR')).toBeNull();
+  });
+
+  // Ligne écrite avant que la base garde la plus longue note : la synchro
+  // suivante la remplit. D'ici là, le rapport ne sait pas pourquoi l'OCR n'a
+  // pas eu lieu, et ne l'invente pas.
+  it('se tait tant que la longueur de la plus longue note n’est pas connue (G1)', async () => {
+    stubReport({ transcriptionSource: 'tropy-notes', notesLength: 900, longestNoteLength: null });
     render(<OCRSourceReport sourceId="s" />);
     await screen.findByText('primarySources.ocrReport');
     expect(screen.queryByText('primarySources.notesHoldOCR')).toBeNull();
   });
 
   it('se tait quand un corps existe : les notes sont à côté, l’OCR a eu lieu', async () => {
-    stubReport({ transcriptionSource: 'tesseract', ocrConfidence: 88, notesLength: 2000 });
+    stubReport({ transcriptionSource: 'tesseract', ocrConfidence: 88, longestNoteLength: 2000 });
     render(<OCRSourceReport sourceId="s" />);
     await screen.findByText('primarySources.ocrReport');
     expect(screen.queryByText('primarySources.notesHoldOCR')).toBeNull();
@@ -74,6 +95,15 @@ describe('OCRSourceReport — notes Tropy tenant lieu de transcription', () => {
       const message = JSON.parse(fs.readFileSync(file, 'utf-8')).primarySources.notesHoldOCR as string;
       expect(message).toContain('{{min}}');
       expect(message).not.toContain(String(NOTE_TRANSCRIPTION_MIN_CHARS));
+    }
+  });
+
+  it('les trois langues disent la règle note par note, sans « en tout » (G1)', () => {
+    const sum: Record<string, RegExp> = { fr: /en tout/i, en: /in all/i, de: /insgesamt/i };
+    for (const lng of ['fr', 'en', 'de']) {
+      const file = path.join(__dirname, '../../../../../../public/locales', lng, 'common.json');
+      const message = JSON.parse(fs.readFileSync(file, 'utf-8')).primarySources.notesHoldOCR as string;
+      expect(message, lng).not.toMatch(sum[lng]);
     }
   });
 
@@ -117,7 +147,7 @@ describe('OCRSourceReport — relu après une écriture sur la source sélection
       minQualityScore: null,
       maxQualityScore: null,
       transcriptionLength: 0,
-      notesLength: 0,
+      longestNoteLength: 0,
     };
     const electron = (window as unknown as { electron: Record<string, unknown> }).electron;
     electron.tropy = {
