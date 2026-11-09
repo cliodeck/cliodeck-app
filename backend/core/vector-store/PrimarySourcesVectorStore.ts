@@ -51,17 +51,53 @@ export interface PrimarySourceDocument {
    */
   longestNoteLength?: number;
   /**
-   * L'OCR de la source attend un outil : 'poppler', sa transcription ne porte
-   * que les images de l'item, sans ses PDF. Elle n'est pas acquise : la passe
-   * OCR suivante la reprend. Absent : rien en attente.
+   * L'OCR de la source est à reprendre. 'poppler' : sa transcription ne porte
+   * que les images de l'item, sans ses PDF ; elle n'est pas acquise. 'pages' :
+   * les pages de l'item ont changé dans Tropy depuis l'OCR (photo arrivée d'un
+   * autre item ou partie vers lui, G3) ; la transcription, complète, porte les
+   * anciennes. La passe OCR suivante, sans forcer, la reprend. Absent : rien
+   * en attente.
    */
-  ocrPending?: 'poppler';
+  ocrPending?: OcrPending;
+  /**
+   * La transcription ne porte que les images de l'item : ses PDF attendaient
+   * Poppler. Toujours vrai d'une source 'poppler' ; d'une source 'pages',
+   * quand elle attendait Poppler avant que ses pages ne changent. Un corps
+   * partiel n'est pas acquis : un nouveau texte partiel le remplace. Absent :
+   * corps complet, ou pas de corps.
+   */
+  ocrPartial?: boolean;
   language?: string;
   lastModified: string;
   indexedAt: string;
   metadata?: Record<string, string>;
   /** Structured archival metadata — cote, fonds, repository, producer, … */
   archival?: ArchivalMetadata;
+}
+
+/** Pourquoi l'OCR d'une source est à reprendre (`PrimarySourceDocument.ocrPending`). */
+export type OcrPending = 'poppler' | 'pages';
+
+/**
+ * `ocr_pending` d'une source 'pages' au corps partiel (`ocrPartial`) : elle
+ * attendait Poppler quand ses pages ont changé. Rangée 'pages', elle passait
+ * pour complète, et sa reprise sans Poppler jetait le nouveau texte partiel,
+ * aux bonnes pages (revue de G3). Elle ne sort pas du magasin.
+ */
+const OCR_PENDING_PAGES_PARTIAL = 'pages-poppler';
+
+/** La marque d'attente lue en base, telle que la synchro et le renderer la voient. */
+function ocrPendingOf(value: unknown): Pick<PrimarySourceDocument, 'ocrPending' | 'ocrPartial'> {
+  switch (value) {
+    case 'poppler':
+      return { ocrPending: 'poppler', ocrPartial: true };
+    case 'pages':
+      return { ocrPending: 'pages' };
+    case OCR_PENDING_PAGES_PARTIAL:
+      return { ocrPending: 'pages', ocrPartial: true };
+    default:
+      return {};
+  }
 }
 
 /**
@@ -465,7 +501,10 @@ export class PrimarySourcesVectorStore {
 
     // Soft migration: add ocr_pending column. 'poppler' : la transcription
     // (OCR) ne porte que les images de l'item, ses PDF attendent Poppler ; la
-    // passe OCR suivante la reprend (revue de L06-10). NULL : rien en attente.
+    // passe OCR suivante la reprend (revue de L06-10). 'pages' : les pages de
+    // l'item ont changé dans Tropy depuis l'OCR (G3) ; 'pages-poppler' : de
+    // même, sur une transcription qui attendait Poppler. NULL : rien en
+    // attente.
     try {
       const cols = this.db
         .prepare("PRAGMA table_info('tropy_sources')")
@@ -802,12 +841,15 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Note qu'une transcription d'OCR est partielle, faute d'un outil, ou
-   * qu'elle ne l'est plus. `saveSource` n'y touche pas : la synchro, seule à
-   * réécrire la ligne entière, l'appelle dans la même transaction.
+   * Note qu'une transcription d'OCR est à reprendre — partielle, faute d'un
+   * outil, ou faite sur des pages qui ont changé — ou qu'elle ne l'est plus.
+   * `saveSource` n'y touche pas : la synchro, seule à réécrire la ligne
+   * entière, l'appelle dans la même transaction. `partial` ne compte que pour
+   * 'pages' (`ocrPartial`) : une source 'poppler' est toujours partielle.
    */
-  setOcrPending(id: string, pending: 'poppler' | null): void {
-    this.db.prepare('UPDATE tropy_sources SET ocr_pending = ? WHERE id = ?').run(pending, id);
+  setOcrPending(id: string, pending: OcrPending | null, partial = false): void {
+    const value = pending === 'pages' && partial ? OCR_PENDING_PAGES_PARTIAL : pending;
+    this.db.prepare('UPDATE tropy_sources SET ocr_pending = ? WHERE id = ?').run(value, id);
   }
 
   /**
@@ -893,6 +935,42 @@ export class PrimarySourcesVectorStore {
         photo.transcription || null
       );
     }
+  }
+
+  /**
+   * Les identifiants Tropy des photos de chaque source, par source, en une
+   * requête. La synchro les relève avant sa passe pour voir quelles sources
+   * ont changé de pages (G3) : `saveSource` réattribue en cours de passe la
+   * photo qu'un item reçoit, et l'item qui l'a perdue, lu après, ne verrait
+   * plus rien changer.
+   */
+  getPhotoIdsBySource(): Map<string, Set<number>> {
+    const rows = this.db.prepare('SELECT id, source_id FROM tropy_photos').all() as Array<{
+      id: number;
+      source_id: string;
+    }>;
+    const bySource = new Map<string, Set<number>>();
+    for (const row of rows) {
+      const ids = bySource.get(row.source_id) ?? new Set<number>();
+      ids.add(row.id);
+      bySource.set(row.source_id, ids);
+    }
+    return bySource;
+  }
+
+  /**
+   * Les sources, autres que `sourceId`, auxquelles la base attribue encore
+   * une de ces photos : celles que `saveSource(sourceId)` leur retirera. La
+   * synchro les marque dans la même transaction (G3).
+   */
+  getOtherPhotoOwners(sourceId: string, photoIds: readonly number[]): string[] {
+    const ownerOf = this.db.prepare('SELECT source_id FROM tropy_photos WHERE id = ?');
+    const owners = new Set<string>();
+    for (const photoId of photoIds) {
+      const row = ownerOf.get(photoId) as { source_id: string } | undefined;
+      if (row && row.source_id !== sourceId) owners.add(row.source_id);
+    }
+    return [...owners];
   }
 
   /**
@@ -2119,7 +2197,7 @@ export class PrimarySourcesVectorStore {
       ocrConfidence: row.ocr_confidence ?? undefined,
       notesText: row.notes_text ?? undefined,
       longestNoteLength: row.longest_note_length ?? undefined,
-      ocrPending: row.ocr_pending === 'poppler' ? 'poppler' : undefined,
+      ...ocrPendingOf(row.ocr_pending),
     };
   }
 

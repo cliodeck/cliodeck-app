@@ -238,6 +238,29 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — sources', () =>
     expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
   });
 
+  // Revue de G3 : une source en attente de Poppler dont les pages changent
+  // passe à 'pages' sans cesser d'être partielle. Le renderer ne voit que
+  // 'pages' ; la synchro, elle, sait que son corps n'est pas acquis.
+  it('une source aux pages changées garde, en base, le caractère partiel de sa transcription', () => {
+    store.saveSource(source());
+
+    store.setOcrPending('src-1', 'poppler');
+    expect(store.getSource('src-1')).toMatchObject({ ocrPending: 'poppler', ocrPartial: true });
+    store.setOcrPending('src-1', 'pages', true);
+    expect(store.getSource('src-1')).toMatchObject({ ocrPending: 'pages', ocrPartial: true });
+    store.saveSource(source({ title: 'Titre corrigé' }));
+    expect(store.getSourceByTropyId(305)).toMatchObject({ ocrPending: 'pages', ocrPartial: true });
+
+    store.setOcrPending('src-1', 'pages');
+    expect(store.getSource('src-1')?.ocrPending).toBe('pages');
+    expect(store.getSource('src-1')?.ocrPartial).toBeUndefined();
+
+    store.setOcrPending('src-1', 'pages', true);
+    store.updateSource('src-1', { transcription: 'texte revu', transcriptionSource: 'manual' });
+    expect(store.getSource('src-1')?.ocrPending).toBeUndefined();
+    expect(store.getSource('src-1')?.ocrPartial).toBeUndefined();
+  });
+
   it('une base d’avant la colonne ocr_pending la reçoit, sans source à reprendre', () => {
     store.saveSource(source());
     store.close();

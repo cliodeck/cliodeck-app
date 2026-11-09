@@ -1426,6 +1426,7 @@
     "collectionFilter": "Filtrer par liste",
     "allCollections": "Toutes les listes",
     "ocrRerun": "Lancer l'OCR sur cette source",
+    "pagesChanged": "Pages modifiées dans Tropy : la transcription OCR sera refaite au prochain « Lancer l'OCR ».",
     "ocrOverwriteConfirm": "Relancer l'OCR ? La transcription existante de cette source sera remplacée.",
     "ocrNoPhotos": "Aucune image trouvée pour cette source (fichiers déplacés ou manquants).",
     "ocrFailed": "L'OCR a échoué pour cette source.",
@@ -1457,7 +1458,7 @@
     "transcriptionNotIndexedNoProvider": "Transcription enregistrée, pas encore indexée : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres). L'assistant ne la cite pas pour l'instant ; elle sera reprise à la prochaine synchronisation.",
     "transcriptionNotSaved": "La transcription n'a pas été enregistrée.",
     "transcriptionSourceGone": "La transcription n'a pas été enregistrée : cette source n'est plus dans la base du projet. Synchronisez le projet Tropy, puis réessayez.",
-    "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources qui n'ont pas encore de transcription — les transcriptions déjà acquises sont conservées.",
+    "forceOCRHint": "Décochée, la reconnaissance ne traite que les sources sans transcription et celles dont l'OCR est à reprendre (PDF en attente de Poppler, pages modifiées dans Tropy) : les autres transcriptions sont conservées.",
     "ocrSummaryTitle": "Bilan de la passe",
     "ocrSummaryWritten": "{{count}} transcription(s) enregistrée(s)",
     "ocrSummaryPages": "{{count}} page(s) passée(s) à la reconnaissance",
@@ -1473,7 +1474,9 @@
       "popplerMissingMac": "Poppler est introuvable : les PDF de vos archives n'ont pas pu passer à l'OCR. Les sources ont été enregistrées sans le texte de leurs PDF ; les transcriptions déjà complètes sont gardées. Pour y remédier, installez Poppler dans le Terminal : brew install poppler, puis cliquez de nouveau sur « Lancer l'OCR » : les PDF en attente seront reconnus, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources ».",
       "popplerMissingWindows": "Poppler est introuvable : les PDF de vos archives n'ont pas pu passer à l'OCR. Les sources ont été enregistrées sans le texte de leurs PDF ; les transcriptions déjà complètes sont gardées. Pour y remédier, téléchargez Poppler pour Windows (https://github.com/oschwartz10612/poppler-windows), ajoutez son dossier « bin » au PATH, redémarrez ClioDeck, puis cliquez de nouveau sur « Lancer l'OCR » : les PDF en attente seront reconnus, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources ».",
       "popplerMissingLinux": "Poppler est introuvable : les PDF de vos archives n'ont pas pu passer à l'OCR. Les sources ont été enregistrées sans le texte de leurs PDF ; les transcriptions déjà complètes sont gardées. Pour y remédier, installez Poppler : apt-get install poppler-utils (ou l'équivalent de votre distribution), puis cliquez de nouveau sur « Lancer l'OCR » : les PDF en attente seront reconnus, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources ».",
-      "ocrLanguageUnavailable": "L'OCR en « {{language}} » n'a pas pu démarrer : son modèle de langue n'a pas pu être chargé. Il se télécharge à la première utilisation de chaque langue : vérifiez la connexion à Internet, puis cliquez de nouveau sur « Lancer l'OCR ». Une fois téléchargé, il reste disponible hors ligne. Les sources ont été enregistrées sans OCR."
+      "ocrLanguageUnavailable": "L'OCR en « {{language}} » n'a pas pu démarrer : son modèle de langue n'a pas pu être chargé. Il se télécharge à la première utilisation de chaque langue : vérifiez la connexion à Internet, puis cliquez de nouveau sur « Lancer l'OCR ». Une fois téléchargé, il reste disponible hors ligne. Les sources ont été enregistrées sans OCR.",
+      "pagesChanged": "Dernière synchronisation : les pages de {{sources}} source(s) ont changé dans Tropy (photo ajoutée, retirée ou passée d'une source à l'autre). Leur transcription OCR est gardée, mais elle porte encore les anciennes pages : cliquez sur « Lancer l'OCR » pour la refaire, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources ».",
+      "pagesImagesMissing": "{{sources}} source(s) aux pages modifiées dans Tropy n'ont pas été reconnues de nouveau : certaines de leurs images sont introuvables sur le disque (disque externe débranché, fichiers déplacés ou supprimés). Leur transcription OCR est gardée, avec les anciennes pages. Rebranchez le disque ou remettez les fichiers là où Tropy les attend, puis cliquez de nouveau sur « Lancer l'OCR ». S'ils sont perdus pour de bon, « Lancer l'OCR sur cette source », sur la carte de la source, refait sa transcription avec les images qui restent."
     }
   },
   "modes": {

@@ -1426,6 +1426,7 @@
     "collectionFilter": "Nach Liste filtern",
     "allCollections": "Alle Listen",
     "ocrRerun": "OCR für diese Quelle ausführen",
+    "pagesChanged": "Seiten in Tropy geändert: Die OCR-Transkription wird beim nächsten „OCR starten“ neu erstellt.",
     "ocrOverwriteConfirm": "OCR erneut ausführen? Die vorhandene Transkription dieser Quelle wird ersetzt.",
     "ocrNoPhotos": "Kein Bild für diese Quelle gefunden (Dateien verschoben oder fehlend).",
     "ocrFailed": "OCR für diese Quelle fehlgeschlagen.",
@@ -1457,7 +1458,7 @@
     "transcriptionNotIndexedNoProvider": "Transkription gespeichert, noch nicht indexiert: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen). Der Assistent zitiert sie vorerst nicht; sie wird bei der nächsten Synchronisierung nachgeholt.",
     "transcriptionNotSaved": "Die Transkription wurde nicht gespeichert.",
     "transcriptionSourceGone": "Die Transkription wurde nicht gespeichert: Diese Quelle ist nicht mehr in der Projektdatenbank. Synchronisieren Sie das Tropy-Projekt und versuchen Sie es erneut.",
-    "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription — bereits vorhandene Transkriptionen bleiben erhalten.",
+    "forceOCRHint": "Ohne Häkchen verarbeitet die Erkennung nur Quellen ohne Transkription und solche, deren OCR nachzuholen ist (PDFs, die auf Poppler warten, in Tropy geänderte Seiten): Die übrigen Transkriptionen bleiben erhalten.",
     "ocrSummaryTitle": "Bilanz des Durchlaufs",
     "ocrSummaryWritten": "{{count}} Transkription(en) gespeichert",
     "ocrSummaryPages": "{{count}} Seite(n) durch die Erkennung geschickt",
@@ -1473,7 +1474,9 @@
       "popplerMissingMac": "Poppler wurde nicht gefunden: Die PDFs Ihrer Archive konnten nicht per OCR erkannt werden. Die Quellen wurden ohne den Text ihrer PDFs gespeichert; bereits vollständige Transkriptionen bleiben erhalten. Installieren Sie Poppler im Terminal: brew install poppler, und klicken Sie erneut auf „OCR starten“: Die ausstehenden PDFs werden dann erkannt, ohne dass Sie „OCR für alle Quellen erneut ausführen“ ankreuzen müssen.",
       "popplerMissingWindows": "Poppler wurde nicht gefunden: Die PDFs Ihrer Archive konnten nicht per OCR erkannt werden. Die Quellen wurden ohne den Text ihrer PDFs gespeichert; bereits vollständige Transkriptionen bleiben erhalten. Laden Sie Poppler für Windows herunter (https://github.com/oschwartz10612/poppler-windows), fügen Sie dessen Ordner „bin“ zum PATH hinzu, starten Sie ClioDeck neu und klicken Sie erneut auf „OCR starten“: Die ausstehenden PDFs werden dann erkannt, ohne dass Sie „OCR für alle Quellen erneut ausführen“ ankreuzen müssen.",
       "popplerMissingLinux": "Poppler wurde nicht gefunden: Die PDFs Ihrer Archive konnten nicht per OCR erkannt werden. Die Quellen wurden ohne den Text ihrer PDFs gespeichert; bereits vollständige Transkriptionen bleiben erhalten. Installieren Sie Poppler: apt-get install poppler-utils (oder das Gegenstück Ihrer Distribution), und klicken Sie erneut auf „OCR starten“: Die ausstehenden PDFs werden dann erkannt, ohne dass Sie „OCR für alle Quellen erneut ausführen“ ankreuzen müssen.",
-      "ocrLanguageUnavailable": "Die OCR auf „{{language}}“ konnte nicht starten: Das Sprachmodell ließ sich nicht laden. Es wird bei der ersten Verwendung jeder Sprache heruntergeladen: Prüfen Sie die Internetverbindung und klicken Sie erneut auf „OCR starten“. Einmal heruntergeladen, bleibt es offline verfügbar. Die Quellen wurden ohne OCR gespeichert."
+      "ocrLanguageUnavailable": "Die OCR auf „{{language}}“ konnte nicht starten: Das Sprachmodell ließ sich nicht laden. Es wird bei der ersten Verwendung jeder Sprache heruntergeladen: Prüfen Sie die Internetverbindung und klicken Sie erneut auf „OCR starten“. Einmal heruntergeladen, bleibt es offline verfügbar. Die Quellen wurden ohne OCR gespeichert.",
+      "pagesChanged": "Letzte Synchronisierung: Die Seiten von {{sources}} Quelle(n) haben sich in Tropy geändert (ein Foto hinzugefügt, entfernt oder in eine andere Quelle verschoben). Ihre OCR-Transkription bleibt erhalten, gibt aber noch die alten Seiten wieder: Klicken Sie auf „OCR starten“, um sie neu zu erstellen, ohne dass Sie „OCR für alle Quellen erneut ausführen“ ankreuzen müssen.",
+      "pagesImagesMissing": "{{sources}} Quelle(n), deren Seiten sich in Tropy geändert haben, wurden nicht erneut erkannt: Einige ihrer Bilder sind auf dem Datenträger nicht auffindbar (externes Laufwerk nicht angeschlossen, Dateien verschoben oder gelöscht). Ihre OCR-Transkription bleibt erhalten, mit den alten Seiten. Schließen Sie das Laufwerk wieder an oder legen Sie die Dateien wieder dorthin, wo Tropy sie erwartet, und klicken Sie dann erneut auf „OCR starten“. Sind sie endgültig verloren, erstellt „OCR für diese Quelle ausführen“ auf der Karte der Quelle ihre Transkription mit den verbleibenden Bildern neu."
     }
   },
   "modes": {

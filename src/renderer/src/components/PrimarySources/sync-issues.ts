@@ -51,6 +51,10 @@ export function describeSyncIssue(t: TFunction, issue: TropySyncIssue): string {
     }
     case 'ocr-language-unavailable':
       return t('primarySources.issues.ocrLanguageUnavailable', { language: ocrLanguageName(issue.language) });
+    case 'pages-changed':
+      return t('primarySources.issues.pagesChanged', { sources: issue.sources });
+    case 'pages-images-missing':
+      return t('primarySources.issues.pagesImagesMissing', { sources: issue.sources });
   }
 }
 
