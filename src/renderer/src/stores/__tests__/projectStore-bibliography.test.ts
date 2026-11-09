@@ -119,6 +119,36 @@ describe('ouvrir B après A', () => {
     expect(useBibliographyStore.getState().bibliographyProblem).toBeNull();
   });
 
+  it('B n’a pas de bibliographie configurée : ni la liste de A', async () => {
+    // La branche sans bibliographie ne remettait que le bandeau à zéro : le panneau de B montrait
+    // les références de A, et la vérification des PDF modifiés les prenait pour celles de B (Q22).
+    projects = { A: project('A', 'a.bib'), B: project('B') };
+    loadWithMetadata.mockResolvedValueOnce({ success: true, citations: [A1], unreadKeys: [], metadataUnreadable: false });
+
+    await open('A');
+    expect(useBibliographyStore.getState().citations.map((c) => c.id)).toEqual(['Alpha_2022']);
+    await open('B');
+
+    expect(loadWithMetadata).toHaveBeenCalledTimes(1);
+    expect(useBibliographyStore.getState().citations).toEqual([]);
+    expect(useBibliographyStore.getState().filteredCitations).toEqual([]);
+  });
+
+  it('B, créé après A, n’a pas encore de bibliographie : ni la liste de A', async () => {
+    projects = { A: project('A', 'a.bib') };
+    const electron = (window as unknown as { electron: { project: Record<string, unknown> } }).electron;
+    electron.project.create = vi.fn(async ({ name }: { name: string }) => ({ success: true, project: project(name) }));
+    loadWithMetadata.mockResolvedValueOnce({ success: true, citations: [A1], unreadKeys: [], metadataUnreadable: false });
+
+    await open('A');
+    expect(useBibliographyStore.getState().citations.map((c) => c.id)).toEqual(['Alpha_2022']);
+    expect(await useProjectStore.getState().createProject('B', 'article', '/tmp')).toBe(true);
+
+    expect(useProjectStore.getState().currentProject?.path).toBe('/tmp/B');
+    expect(useBibliographyStore.getState().citations).toEqual([]);
+    expect(useBibliographyStore.getState().filteredCitations).toEqual([]);
+  });
+
   it('des entrées non lues et des métadonnées illisibles : la liste s’affiche, le bandeau aussi', async () => {
     projects = { B: project('B', 'b.bib') };
     loadWithMetadata.mockResolvedValueOnce({

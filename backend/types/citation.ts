@@ -6,7 +6,14 @@ export interface ZoteroAttachmentInfo {
   /** Local path to the downloaded PDF, set after Zotero copy completes. */
   localPath?: string;
   dateModified?: string;
+  /** MD5 du fichier chez Zotero : jamais réécrit par ClioDeck. */
   md5?: string;
+  /**
+   * MD5 du PDF du projet que le bandeau « PDF modifiés » a signalé et auquel l'historien a répondu
+   * (réindexé, ou ignoré) : tant que le fichier garde ce MD5, il n'est plus signalé. Propre au
+   * projet, gardé dans `bibliography-metadata.json` par la synchronisation et les rattachements.
+   */
+  signaledMd5?: string;
 }
 
 /**

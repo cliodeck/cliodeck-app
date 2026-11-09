@@ -191,7 +191,8 @@ export class BibliographyMetadataService {
    * Ce que la synchronisation Zotero a lu, écrit sur le fichier tel qu'il est au moment d'écrire
    * (S07-1-6). Entrées, pièces jointes, tags, notes et dates viennent de la synchronisation, et une
    * entrée qu'elle a retirée part ; mais une pièce jointe que le fichier relu dit téléchargée garde
-   * son PDF : rattaché pendant que la synchronisation lisait Zotero, il était perdu.
+   * son PDF : rattaché pendant que la synchronisation lisait Zotero, il était perdu. Elle garde aussi
+   * le MD5 déjà signalé de son PDF (`signaledMd5`), que Zotero ne connaît pas.
    */
   static async saveFromSync(projectPath: string, citations: Citation[]): Promise<void> {
     if (this.linkedOutside(projectPath)) return;
@@ -212,7 +213,7 @@ export class BibliographyMetadataService {
             const download = onFile?.downloaded && onFile.localPath ? onFile : att;
             // Rangé relatif au projet (S07-2-1) ; un ancien chemin absolu l'est aussi, une fois retrouvé.
             const localPath = download.localPath && toStoredPath(fromStoredPath(download.localPath, projectPath), projectPath);
-            return { ...att, downloaded: download.downloaded, localPath };
+            return { ...att, downloaded: download.downloaded, localPath, signaledMd5: onFile?.signaledMd5 };
           }),
         };
       }
@@ -251,6 +252,73 @@ export class BibliographyMetadataService {
       return { ...current?.citations, [storageKey]: { ...entry, zoteroAttachments } };
     });
     console.log(`✅ Updated metadata for citation: ${storageKey}`);
+  }
+
+  /** La pièce jointe de cette référence, dans les métadonnées lues (`loadMetadata`). */
+  private static attachmentIn(
+    metadata: BibliographyMetadataFile | null,
+    citation: Pick<Citation, 'id' | 'zoteroKey'>,
+    attachmentKey: string
+  ): ZoteroAttachmentInfo | undefined {
+    const entry = metadata?.citations[this.storageKeyFor(citation)];
+    return entry?.zoteroAttachments?.find((att) => att.key === attachmentKey);
+  }
+
+  /**
+   * Les métadonnées lues connaissent-elles cette pièce jointe ? Seule une pièce jointe connue peut
+   * retenir un PDF déjà signalé (`rememberSignaled`).
+   */
+  static knowsAttachment(
+    metadata: BibliographyMetadataFile | null,
+    citation: Pick<Citation, 'id' | 'zoteroKey'>,
+    attachmentKey: string
+  ): boolean {
+    return this.attachmentIn(metadata, citation, attachmentKey) !== undefined;
+  }
+
+  /**
+   * Le MD5 déjà signalé du PDF de cette pièce jointe, dans les métadonnées lues (`loadMetadata`).
+   */
+  static signaledMd5(
+    metadata: BibliographyMetadataFile | null,
+    citation: Pick<Citation, 'id' | 'zoteroKey'>,
+    attachmentKey: string
+  ): string | undefined {
+    return this.attachmentIn(metadata, citation, attachmentKey)?.signaledMd5;
+  }
+
+  /**
+   * Retient les PDF modifiés auxquels l'historien a répondu (réindexés, ou ignorés), chacun avec le
+   * MD5 qu'il avait alors, sur sa pièce jointe (Q22) : le bandeau ne les signale plus tant que le
+   * fichier ne change pas. Le MD5 de Zotero (`md5`) n'est pas touché. Une pièce jointe que le
+   * fichier ne connaît pas n'est pas créée ; sans fichier de métadonnées, rien n'est écrit. Rend le
+   * nombre de pièces jointes retenues : une réponse qui n'a rien retenu ne passe pas pour retenue.
+   */
+  static async rememberSignaled(
+    projectPath: string,
+    signaled: Array<{ citation: Pick<Citation, 'id' | 'zoteroKey'>; attachmentKey: string; md5: string }>
+  ): Promise<number> {
+    if (signaled.length === 0 || this.linkedOutside(projectPath) || !this.hasMetadata(projectPath)) return 0;
+
+    let remembered = 0;
+    await this.updateMetadataFile(projectPath, (current) => {
+      remembered = 0;
+      const citations = { ...current?.citations };
+      for (const { citation, attachmentKey, md5 } of signaled) {
+        const storageKey = this.storageKeyFor(citation);
+        const entry = citations[storageKey];
+        if (!entry?.zoteroAttachments?.some((att) => att.key === attachmentKey)) continue;
+        remembered++;
+        citations[storageKey] = {
+          ...entry,
+          zoteroAttachments: entry.zoteroAttachments.map((att) =>
+            att.key === attachmentKey ? { ...att, signaledMd5: md5 } : att
+          ),
+        };
+      }
+      return citations;
+    });
+    return remembered;
   }
 
   /**

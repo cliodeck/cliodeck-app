@@ -621,6 +621,19 @@ export const PDFCheckModifiedSchema = z.object({
   projectPath: z.string().min(1, 'Project path is required'),
 });
 
+/** Les PDF modifiés auxquels l'historien a répondu : chacun par sa pièce jointe, avec le MD5 signalé. */
+export const PDFRememberModifiedSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  pdfs: z.array(
+    z.object({
+      citationId: z.string().min(1),
+      zoteroKey: z.string().min(1).optional(),
+      attachmentKey: z.string().min(1),
+      md5: z.string().regex(/^[0-9a-f]{32}$/, 'MD5 attendu'),
+    })
+  ),
+});
+
 // Word export schemas
 export const WordExportSchema = z.object({
   projectPath: z.string().min(1),

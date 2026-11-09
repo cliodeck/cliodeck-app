@@ -13,9 +13,15 @@ import {
   PDFExtractMetadataSchema,
   PDFIndexFullSchema,
   PDFCheckModifiedSchema,
+  PDFRememberModifiedSchema,
   StringIdSchema,
 } from '../utils/validation.js';
 import { PDFModificationDetector } from '../../../../backend/services/PDFModificationDetector.js';
+import {
+  BibliographyMetadataService,
+  MetadataUnreadableError,
+} from '../../../../backend/services/BibliographyMetadataService.js';
+import type { Citation } from '../../../../backend/types/citation.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { logger } from '../../utils/logger.js';
 
@@ -252,7 +258,15 @@ export function setupPDFHandlers() {
     });
     try {
       const detector = new PDFModificationDetector();
-      const result = await detector.detectModifiedPDFs(options.citations as any);
+      // Ce que le projet a déjà signalé, relu du disque : les références du panneau datent de leur
+      // chargement, d'avant les dernières réponses de l'historien.
+      const metadata = await BibliographyMetadataService.loadMetadata(options.projectPath);
+      // Seules les pièces jointes que ce projet connaît se signalent : il ne pourrait pas retenir la
+      // réponse des autres, et le bandeau reviendrait sans fin (les références d'un autre projet).
+      const result = await detector.detectModifiedPDFs(options.citations as unknown as Citation[], {
+        knows: (citation, attachmentKey) => BibliographyMetadataService.knowsAttachment(metadata, citation, attachmentKey),
+        signaledMd5: (citation, attachmentKey) => BibliographyMetadataService.signaledMd5(metadata, citation, attachmentKey),
+      });
       console.log('📤 IPC Response: pdf:check-modified-pdfs', {
         totalChecked: result.totalChecked,
         totalModified: result.totalModified
@@ -261,6 +275,35 @@ export function setupPDFHandlers() {
     } catch (error: unknown) {
       console.error('❌ pdf:check-modified-pdfs error:', error);
       return errorResponse(error);
+    }
+  });
+
+  // Les PDF modifiés auxquels l'historien a répondu (réindexés, ou ignorés) : le projet retient leur
+  // MD5, et le bandeau ne les signale plus tant que le fichier ne change pas (Q22). Pour le projet
+  // ouvert seulement : une réponse donnée dans A ne s'écrit pas dans B.
+  ipcMain.handle('pdf:remember-modified-pdfs', async (_event, rawOptions: unknown) => {
+    const options = validate(PDFRememberModifiedSchema, rawOptions);
+    const currentProject = projectManager.getCurrentProjectPath();
+    if (!currentProject || !sameFile(currentProject, options.projectPath)) {
+      logger.warn('ipc', 'pdf:remember-modified-pdfs:project-changed', { projectPath: options.projectPath, currentProject });
+      return errorResponse('project-changed');
+    }
+    try {
+      // Combien ont été retenus : une pièce jointe que les métadonnées ne connaissent pas ne l'est pas.
+      const remembered = await BibliographyMetadataService.rememberSignaled(
+        options.projectPath,
+        options.pdfs.map((pdf) => ({
+          citation: { id: pdf.citationId, zoteroKey: pdf.zoteroKey },
+          attachmentKey: pdf.attachmentKey,
+          md5: pdf.md5,
+        }))
+      );
+      return successResponse({ remembered });
+    } catch (error: unknown) {
+      logger.error('ipc', 'pdf:remember-modified-pdfs', { error: error instanceof Error ? error.message : String(error) });
+      return error instanceof MetadataUnreadableError
+        ? { ...errorResponse(error), code: error.code }
+        : errorResponse(error);
     }
   });
 

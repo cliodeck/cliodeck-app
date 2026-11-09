@@ -21,7 +21,11 @@ vi.mock('../OrphanPDFModal', () => ({ OrphanPDFModal: () => null }));
 vi.mock('../TagManager', () => ({ TagFilter: () => null }));
 vi.mock('../PDFModificationNotification', () => ({
   PDFModificationNotification: () => null,
-  usePDFModificationDetection: () => ({ modifiedPDFs: [], dismissNotification: () => undefined }),
+  usePDFModificationDetection: () => ({
+    modifiedPDFs: [],
+    acknowledge: async () => undefined,
+    dismissNotification: () => undefined,
+  }),
 }));
 
 import { BibliographyPanel } from '../BibliographyPanel';

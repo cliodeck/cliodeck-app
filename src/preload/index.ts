@@ -125,10 +125,43 @@ const api = {
     getStatistics: () => ipcRenderer.invoke('pdf:get-statistics'),
     purge: () => ipcRenderer.invoke('pdf:purge'),
     cleanOrphanedChunks: () => ipcRenderer.invoke('pdf:clean-orphaned-chunks'),
+    /** Champs à plat (`successResponse`), pas sous `data` : le bandeau lisait `data` et ne s'affichait jamais. */
     checkModifiedPDFs: (options: {
       citations: any[];
       projectPath: string;
-    }) => ipcRenderer.invoke('pdf:check-modified-pdfs', options),
+    }) =>
+      ipcRenderer.invoke('pdf:check-modified-pdfs', options) as Promise<{
+        success: boolean;
+        error?: string;
+        modifiedPDFs?: Array<{
+          citationId: string;
+          zoteroKey?: string;
+          attachmentKey: string;
+          citationTitle: string;
+          filePath: string;
+          reason: string;
+          oldMD5?: string;
+          newMD5?: string;
+        }>;
+        totalChecked?: number;
+        totalModified?: number;
+      }>,
+    /**
+     * Les PDF modifiés auxquels l'historien a répondu (réindexés, ou ignorés) : le projet retient
+     * leur MD5 et ne les signale plus tant que le fichier ne change pas. Refusé (`project-changed`)
+     * si `projectPath` n'est plus le projet ouvert. `remembered` : combien le projet en a retenu,
+     * moins que demandé quand ses métadonnées ne connaissent pas une pièce jointe.
+     */
+    rememberModifiedPDFs: (options: {
+      projectPath: string;
+      pdfs: Array<{ citationId: string; zoteroKey?: string; attachmentKey: string; md5: string }>;
+    }) =>
+      ipcRenderer.invoke('pdf:remember-modified-pdfs', options) as Promise<{
+        success: boolean;
+        error?: string;
+        code?: string;
+        remembered?: number;
+      }>,
     /** Un PDF indexé n'a presque pas de texte : image sans OCR (#132). */
     onLowText: (
       callback: (info: { title: string; fileName: string; pageCount: number; charsPerPage: number }) => void
