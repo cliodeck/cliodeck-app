@@ -779,11 +779,13 @@ class TropyService {
    * Accepte une query text et des options, génère l'embedding via OllamaClient
    * Utilise la recherche hybride (HNSW + BM25) pour de meilleurs résultats
    *
-   * Une panne lève : `fanOutCorpora` la rapporte alors (bande « Certaines
-   * recherches ont échoué », consigne d'échec au modèle). Un `catch` qui rendait
-   * `[]` faisait passer Ollama arrêté, un index d'un autre modèle ou l'absence
-   * de fournisseur pour des archives sans rien de pertinent (E2). Seuls « aucun
-   * projet ouvert » et « aucun extrait embarqué » rendent `[]` en silence.
+   * Une panne lève : `fanOutCorpora` la rapporte alors (« Archives échec » dans
+   * le détail du message, bande d'échec, consigne d'échec au modèle). Un
+   * `catch` qui rendait `[]` faisait passer Ollama arrêté, un index d'un autre
+   * modèle ou l'absence de fournisseur pour des archives sans rien de
+   * pertinent (E2) : « Archives 0 », et aucune bande quand les archives
+   * étaient seules à tomber. Seuls « aucun projet ouvert » et « aucun extrait
+   * embarqué » rendent `[]` en silence.
    */
   async search(
     query: string,

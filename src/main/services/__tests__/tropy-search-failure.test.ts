@@ -5,9 +5,13 @@
  * rendait `[]` : Ollama arrêté, index des archives calculé par un autre modèle
  * d'embeddings, aucun fournisseur — tout devenait « aucun extrait ».
  * `fanOutCorpora` ne voyait jamais l'exception : les archives passaient pour
- * vides, sans la bande « Certaines recherches ont échoué » ni la consigne
- * d'échec au modèle, et l'assistant répondait comme si le fonds ne contenait
- * rien.
+ * vides (« Archives 0 »). Quand elles étaient seules à tomber — index d'un
+ * autre modèle —, ni bande d'échec ni consigne d'échec au modèle, et
+ * l'assistant répondait comme si le fonds ne contenait rien. Quand toute la
+ * recherche par embeddings tombait, la bande « Certaines recherches ont
+ * échoué » venait des autres corpus (bibliographie, vault), et les archives
+ * y comptaient pour 0 ; elle dit désormais « La recherche de sources a
+ * échoué. ».
  *
  * Défaut inverse de P212-F, et c'est le risque de ce correctif : un projet
  * sans Tropy, ou un Tropy encore vide, n'a rien à trouver. Il reste silencieux
@@ -28,6 +32,7 @@ import type { WebContents } from 'electron';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import type { PDFDocument } from '../../../../backend/types/pdf-document';
+import type { RAGExplanation } from '../../../../backend/types/chat-source';
 
 vi.mock('electron', () => ({
   app: { commandLine: { hasSwitch: () => false }, getPath: () => os.tmpdir() },
@@ -201,7 +206,17 @@ const outcomeOf = async (q: Parameters<typeof retrievalService.search>[0]) => {
   return { result, map: Object.fromEntries(result.outcomes.map((o) => [o.source, o])) };
 };
 
-async function chatTurn(): Promise<{ status: unknown; prompt: string }> {
+type CorpusLine = NonNullable<RAGExplanation['search']['corpora']>[number];
+
+/**
+ * Un tour de chat : le statut de la bande, la ligne « Par corpus » des détails
+ * (un corpus par source) et le prompt reçu par le modèle.
+ */
+async function chatTurn(): Promise<{
+  status: RAGExplanation['search']['retrievalStatus'];
+  corpora: Partial<Record<CorpusLine['source'], CorpusLine>>;
+  prompt: string;
+}> {
   const sent: Array<{ channel: string; payload: unknown }> = [];
   const webContents = {
     isDestroyed: () => false,
@@ -222,10 +237,13 @@ async function chatTurn(): Promise<{ status: unknown; prompt: string }> {
     { timeout: 10_000 }
   );
   const explanation = sent.find((event) => event.channel === 'fusion:chat:explanation')?.payload as
-    | { explanation: { search: { retrievalStatus?: unknown } } }
+    | { explanation: RAGExplanation }
     | undefined;
   return {
     status: explanation?.explanation.search.retrievalStatus,
+    corpora: Object.fromEntries(
+      (explanation?.explanation.search.corpora ?? []).map((line) => [line.source, line])
+    ),
     prompt: provider.prompts[provider.prompts.length - 1].map((m) => m.content).join('\n'),
   };
 }
@@ -390,5 +408,34 @@ describe.skipIf(!sqliteAvailable)('au chat : la bande et la consigne d’échec'
 
     expect(status).toBeUndefined();
     expect(prompt).not.toContain('searches failed');
+  });
+
+  // Le contrôle à la main de la PR : quand les embeddings tombent, tous les
+  // corpus qui embarquent la question tombent avec eux. La bande dit alors
+  // « La recherche de sources a échoué. » (`failed`), pas « Certaines
+  // recherches ont échoué » : c'était la bande d'avant le correctif, avec
+  // « Archives 0 » dans le détail. Seule la ligne « Par corpus » nomme les archives.
+  it('embeddings en panne, archives indexées : statut « échec », les archives comptées en échec', async () => {
+    await linkAndIndex();
+    await openBibliography(DIMENSION);
+    provider.mode = 'down';
+
+    const { status, corpora, prompt } = await chatTurn();
+
+    expect(status).toBe('failed');
+    expect(corpora.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
+    expect(corpora.secondary).toMatchObject({ attempted: true, ok: false });
+    expect(prompt).toContain('searches failed');
+  });
+
+  it('projet sans Tropy, embeddings en panne : la bande vient des autres corpus, les archives restent à 0', async () => {
+    await openBibliography(DIMENSION);
+    provider.mode = 'down';
+
+    const { status, corpora } = await chatTurn();
+
+    expect(status).toBe('partial');
+    expect(corpora.primary).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
+    expect(corpora.secondary).toMatchObject({ attempted: true, ok: false });
   });
 });
