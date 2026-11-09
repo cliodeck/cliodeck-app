@@ -103,7 +103,7 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
   });
 
   /*
-   * Revue de L05-6. Le document de la tentative est enregistré avant les embeddings. Il restait
+   * Revue de L05-6. Le document de la tentative était enregistré avant les embeddings. Il restait
    * après l'échec, vide, à côté de l'ancien que « Ré-indexer » ne supprime plus : le panneau
    * listait la référence deux fois, et l'ouverture suivante copiait tout `brain.db` avant de
    * fondre ce doublon.
@@ -155,15 +155,16 @@ describe.skipIf(!sqliteAvailable)('PDF : un fichier, un document', () => {
 
   it('un échec après le remplacement garde le nouveau document, seul à porter les extraits', async () => {
     const first = await indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META);
-    // Les similarités se calculent après le remplacement des copies précédentes.
+    // Les similarités se calculent après le remplacement des copies précédentes. Le document est
+    // alors validé : la passe réussit (cf. PdfIndexingAtomic.test.ts).
     vi.spyOn(store, 'computeAndSaveSimilarities').mockImplementation(() => {
       throw new Error('disque plein');
     });
 
-    await expect(indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META)).rejects.toThrow('disque plein');
+    const second = await indexer(store).indexPDF(FILE, 'Kansteiner_2022', undefined, META);
 
     const ids = store.getDocumentIdsByFilePath(FILE);
-    expect(ids).toHaveLength(1);
+    expect(ids).toEqual([second.id]);
     expect(ids[0]).not.toBe(first.id);
     expect(store.getChunksForDocument(ids[0]).length).toBeGreaterThan(0);
   });

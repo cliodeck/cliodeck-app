@@ -288,6 +288,18 @@ export class VectorStore {
     console.log('✅ Migration de la base de données terminée');
   }
 
+  /**
+   * Exécute `fn` dans une transaction SQLite.
+   *
+   * L'indexation d'un PDF écrit document, citations et extraits tout ou rien : le document écrit
+   * avant ses embeddings restait seul quand l'indexation s'arrêtait en route, et le renderer le
+   * comptait « déjà indexé » sans qu'aucune recherche ne le trouve (S03-1-0). `fn` est synchrone,
+   * comme better-sqlite3 : aucune autre indexation ne s'intercale.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
   // MARK: - Document Operations
 
   saveDocument(document: PDFDocument): void {

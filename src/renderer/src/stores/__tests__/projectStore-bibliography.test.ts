@@ -158,9 +158,11 @@ describe('ouvrir B après A', () => {
         notes: [{ file: 'reading-notes/Alpha_2022.md', citekey: 'Alpha_2022', tags: ['etiquette-de-A'] }],
       })
       .mockResolvedValueOnce({ success: true, notes: [] });
+    // Un document indexé, avec ses extraits, comme le rend `VectorStore.getAllDocuments`.
+    const indexedInA = { fileURL: '/tmp/A/PDFs/a.pdf', bibtexKey: 'Alpha_2022', chunkCount: 4 };
     getAll
-      .mockResolvedValueOnce({ success: true, documents: [{ fileURL: '/tmp/A/PDFs/a.pdf', bibtexKey: 'Alpha_2022' }] })
-      .mockResolvedValueOnce({ success: true, documents: [{ fileURL: '/tmp/A/PDFs/a.pdf', bibtexKey: 'Alpha_2022' }] })
+      .mockResolvedValueOnce({ success: true, documents: [indexedInA] })
+      .mockResolvedValueOnce({ success: true, documents: [indexedInA] })
       .mockResolvedValue({ success: true, documents: [] });
     loadWithMetadata
       .mockResolvedValueOnce({ success: true, citations: [A1], unreadKeys: [], metadataUnreadable: false })

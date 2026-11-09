@@ -57,16 +57,18 @@ function seedChunks(count: number, documentId = 'doc1'): void {
   store.close();
 }
 
-/** Ce que fait `PDFIndexer` pour un PDF, sur le store ouvert. */
+/** Ce que fait `PDFIndexer` pour un PDF, sur le store ouvert : SQLite d'un bloc, puis HNSW et BM25. */
 async function indexDocument(store: EnhancedVectorStore, documentId: string, count: number): Promise<void> {
-  store.saveDocument(documentOf(documentId));
-  await store.addChunks(
-    Array.from({ length: count }, (_, i) => ({
-      chunk: chunkOf(documentId, i),
-      // Des vecteurs à eux, distincts de ceux du corpus déjà là.
-      embedding: embeddingOf(i + 100),
-    }))
-  );
+  const chunks = Array.from({ length: count }, (_, i) => ({
+    chunk: chunkOf(documentId, i),
+    // Des vecteurs à eux, distincts de ceux du corpus déjà là.
+    embedding: embeddingOf(i + 100),
+  }));
+  store.transaction(() => {
+    store.saveDocument(documentOf(documentId));
+    for (const { chunk, embedding } of chunks) store.saveChunk(chunk, embedding);
+  });
+  await store.addToSearchIndexes(chunks);
 }
 
 const hnswSize = async (store: EnhancedVectorStore) => (await store.getStats()).hnsw.currentSize;

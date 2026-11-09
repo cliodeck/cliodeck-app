@@ -1,6 +1,12 @@
 export interface PDFMetadata {
   /** Densité du texte extrait ; `lowText` = PDF très probablement image (#132). */
   textDensity?: { charsPerPage: number; lowText: boolean };
+  /**
+   * Indexation allée au bout sans retenir aucun extrait (texte trop court pour le filtre de
+   * qualité, par exemple). Distingue ce document du document vide qu'une indexation interrompue
+   * laissait avant l'écriture tout ou rien, qui n'a pas cette marque et doit être reproposé.
+   */
+  noChunks?: boolean;
   subject?: string;
   keywords?: string[];
   creator?: string;
