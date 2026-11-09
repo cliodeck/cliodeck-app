@@ -70,6 +70,7 @@ const KIND_KEYS: Record<string, string> = {
   external_url: 'security.kinds.externalUrl',
   unusual_encoding: 'security.kinds.unusualEncoding',
   prompt_injection_blocked: 'security.kinds.injectionBlocked',
+  external_navigation_blocked: 'security.kinds.navigationBlocked',
 };
 
 type Translate = (key: string, opts?: Record<string, unknown>) => string;

@@ -1955,7 +1955,8 @@
       "suspiciousInstruction": "Suspicious instruction",
       "externalUrl": "External URL",
       "unusualEncoding": "Unusual encoding",
-      "injectionBlocked": "Injection discarded"
+      "injectionBlocked": "Injection discarded",
+      "navigationBlocked": "Opening without a click refused"
     },
     "events": {
       "title": "Events recorded",

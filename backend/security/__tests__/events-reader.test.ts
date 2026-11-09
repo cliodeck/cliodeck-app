@@ -15,7 +15,7 @@ import {
   readSecurityEventsLog,
   aggregateSecurityEvents,
 } from '../events-reader.js';
-import type { SecurityEvent } from '../events.js';
+import type { SecurityEvent, SecurityLogEvent } from '../events.js';
 
 let tmpDir: string;
 let logPath: string;
@@ -28,6 +28,9 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+/** Le chunk d'un événement du journal ; un refus de navigation n'en a pas. */
+const chunkOf = (e: SecurityLogEvent): string | undefined => ('chunkId' in e ? e.chunkId : undefined);
 
 function writeEvents(events: SecurityEvent[]): void {
   fs.writeFileSync(
@@ -118,8 +121,8 @@ describe('readSecurityEventsLog', () => {
     writeEvents(many);
     const last3 = await readSecurityEventsLog(logPath, { limit: 3 });
     expect(last3).toHaveLength(3);
-    expect(last3[0].chunkId).toBe('c2');
-    expect(last3[2].chunkId).toBe('c4');
+    expect(chunkOf(last3[0])).toBe('c2');
+    expect(chunkOf(last3[2])).toBe('c4');
   });
 });
 
@@ -175,6 +178,8 @@ describe('aggregateSecurityEvents', () => {
       external_url: 1,
       unusual_encoding: 1,
       prompt_injection_blocked: 1,
+      // Chaque type figure, à zéro s'il est absent.
+      external_navigation_blocked: 0,
     });
   });
 
@@ -197,8 +202,8 @@ describe('aggregateSecurityEvents', () => {
   it('returns the most recent events first, capped by recentLimit', () => {
     const stats = aggregateSecurityEvents(events, { recentLimit: 2 });
     expect(stats.recent).toHaveLength(2);
-    expect(stats.recent[0].chunkId).toBe('c5'); // 10:00
-    expect(stats.recent[1].chunkId).toBe('c2'); // 09:00
+    expect(chunkOf(stats.recent[0])).toBe('c5'); // 10:00
+    expect(chunkOf(stats.recent[1])).toBe('c2'); // 09:00
   });
 
   it('returns zeros for an empty input', () => {
@@ -209,5 +214,18 @@ describe('aggregateSecurityEvents', () => {
     expect(stats.firstAt).toBeUndefined();
     expect(stats.lastAt).toBeUndefined();
     expect(stats.recent).toEqual([]);
+  });
+
+  it('compte un refus de navigation du garde, qui n’a ni extrait ni sévérité', async () => {
+    fs.writeFileSync(
+      logPath,
+      JSON.stringify({ kind: 'external_navigation_blocked', url: 'http://127.0.0.1:9/refresh', at: '2026-11-09T10:00:00Z' }) + '\n',
+      'utf8'
+    );
+    const stats = aggregateSecurityEvents(await readSecurityEventsLog(logPath));
+    expect(stats.total).toBe(1);
+    expect(stats.byKind.external_navigation_blocked).toBe(1);
+    expect(stats.bySeverity).toEqual({ low: 0, medium: 0, high: 0 });
+    expect(stats.recent[0]).toMatchObject({ url: 'http://127.0.0.1:9/refresh' });
   });
 });

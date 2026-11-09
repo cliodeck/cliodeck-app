@@ -50,3 +50,20 @@ export type SecurityEvent =
     };
 
 export type SecurityEventKind = SecurityEvent['kind'];
+
+/**
+ * Refus du garde de navigation du main : la fenêtre a tenté d'ouvrir une URL
+ * externe sans geste de l'historien (meta refresh, `location` changé,
+ * redirection, lien activé par un script). Rien n'a été ouvert. Ce n'est pas
+ * un événement d'extrait — ni source ni chunk —, il ne remonte pas au chat.
+ */
+export interface NavigationBlockedEvent {
+  kind: 'external_navigation_blocked';
+  url: string;
+  at: string;
+}
+
+/** Tout ce que reçoit `.cliodeck/security-events.jsonl`. */
+export type SecurityLogEvent = SecurityEvent | NavigationBlockedEvent;
+
+export type SecurityLogEventKind = SecurityLogEvent['kind'];

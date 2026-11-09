@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// (le preload pose ses écouteurs de liens sur `window` : il tourne toujours dans une page)
 /**
  * Le pont générique des commandes de menu (`window.electron.ipcRenderer`).
  *
