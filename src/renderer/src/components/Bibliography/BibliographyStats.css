@@ -48,7 +48,9 @@
   color: var(--text-primary);
 }
 
-.close-button {
+/* Sous l'en-tête des statistiques : sans portée, elle valait pour toutes les
+   croix de fermeture (H1). */
+.stats-header .close-button {
   background: none;
   border: none;
   font-size: 1.5rem;
@@ -64,7 +66,7 @@
   transition: all 0.2s;
 }
 
-.close-button:hover {
+.stats-header .close-button:hover {
   background-color: var(--hover-bg);
   color: var(--text-primary);
 }

@@ -9,13 +9,6 @@
   gap: 8px;
 }
 
-.modal-description {
-  margin-bottom: 20px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 /* Import Mode Selector */
 .import-mode-selector {
   display: flex;
@@ -176,16 +169,6 @@
 .import-result span {
   font-size: 12px;
   line-height: 1.4;
-}
-
-/* Modal Footer */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--border-color);
 }
 
 .btn-cancel {

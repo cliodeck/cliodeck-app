@@ -176,7 +176,7 @@
   flex-shrink: 0;
 }
 
-.modal-footer {
+.pdf-rename-modal .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
