@@ -151,6 +151,17 @@ export class ObsidianVaultStore {
 
   // MARK: - writes
 
+  /**
+   * Exécute `fn` dans une transaction SQLite (cf. `ManuscriptStore.transaction`).
+   *
+   * L'empreinte d'une note et ses extraits s'écrivent tout ou rien : écrire
+   * l'empreinte avant les embeddings laissait, Ollama arrêté, une note à
+   * jour sans aucun extrait, que la passe suivante tenait pour indexée.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
   upsertNote(note: ObsidianNoteRecord): void {
     const stmt = this.db.prepare(`
       INSERT INTO obsidian_notes (id, relative_path, vault_path, title, tags, frontmatter, wikilinks, file_hash, file_mtime, indexed_at)
@@ -257,6 +268,27 @@ export class ObsidianVaultStore {
       .prepare('SELECT * FROM obsidian_notes WHERE file_hash = ?')
       .get(fileHash) as RawNoteRow | undefined;
     return row ? rowToNote(row) : null;
+  }
+
+  noteHasChunks(noteId: string): boolean {
+    return (
+      this.db.prepare('SELECT 1 FROM obsidian_chunks WHERE note_id = ? LIMIT 1').get(noteId) !==
+      undefined
+    );
+  }
+
+  /**
+   * Vrai tant que les tables du coffre existent. `purgeObsidianData` (« Détacher ») les efface
+   * par une autre connexion : cette instance, ouverte avant, ne les recrée pas.
+   */
+  hasSchema(): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM sqlite_master
+         WHERE type = 'table' AND name IN ('obsidian_notes', 'obsidian_chunks', 'obsidian_chunks_fts')`
+      )
+      .get() as { n: number };
+    return row.n === 3;
   }
 
   stats(): { noteCount: number; chunkCount: number } {

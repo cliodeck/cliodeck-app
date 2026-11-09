@@ -108,6 +108,11 @@ class ManuscriptIndexService {
   /** Une seule passe à la fois : une sauvegarde rapide ne doit pas en lancer dix. */
   private running: Promise<ManuscriptIndexReport> | null = null;
   /**
+   * Demande arrivée pendant une passe : une passe de plus suit, une seule
+   * quel que soit le nombre de demandes (cf. reading-notes-index-service).
+   */
+  private rerun: EmbeddingProvider | null = null;
+  /**
    * Compte rendu de la dernière passe, pour la section des réglages : une
    * passe lancée après sauvegarde est silencieuse, et la réindexation
    * complète qui suit un changement de découpage (`CHUNKER_VERSION`) doit se
@@ -122,14 +127,24 @@ class ManuscriptIndexService {
    */
   configure(workspaceRoot: string | null): void {
     if (workspaceRoot === this.workspaceRoot) return;
-    this.detachStore();
+    this.forgetProject();
     this.workspaceRoot = workspaceRoot;
-    this.lastReport = null;
   }
 
   clear(): void {
-    this.detachStore();
+    this.forgetProject();
     this.workspaceRoot = null;
+  }
+
+  /**
+   * Quitter un projet : son store se détache, et la relance demandée pour lui
+   * est oubliée, sans quoi elle tournerait sur le suivant. Seul un changement
+   * de projet l'oublie : `purgeOutside` referme aussi le handle qu'il a ouvert,
+   * mais la relance qu'il trouve appartient au projet courant.
+   */
+  private forgetProject(): void {
+    this.detachStore();
+    this.rerun = null;
     this.lastReport = null;
   }
 
@@ -282,33 +297,55 @@ class ManuscriptIndexService {
 
   /**
    * Indexe le manuscrit du projet courant. Best-effort : ne jette jamais.
-   * Les appels concurrents partagent la passe en cours.
+   *
+   * Une demande arrivée pendant une passe n'est pas perdue : la passe en
+   * cours a peut-être déjà lu le chapitre que l'auteur vient de sauvegarder,
+   * donc une passe de plus suit. Sans quoi le paragraphe écrit pendant
+   * l'embedding restait hors de l'index jusqu'à la sauvegarde suivante. Tous
+   * les appelants reçoivent le rapport de la dernière passe.
    */
   async index(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
-    if (this.running) return this.running;
-    this.running = this.runIndex(embedder)
-      .then(
-        (report) => {
-          this.lastReport = report;
-          return report;
-        },
-        (error: unknown) => {
-          // `runIndex` ne jette pas en principe ; si une passe se perd quand
-          // même, la section des réglages ne doit pas continuer d'afficher
-          // la dernière passe réussie comme si rien ne s'était passé.
-          const failed = emptyReport();
-          failed.failures.push({
-            relativePath: '(passe)',
-            reason: error instanceof Error ? error.message : String(error),
-          });
-          this.lastReport = failed;
-          throw error;
-        }
-      )
-      .finally(() => {
-        this.running = null;
-      });
+    if (this.running) {
+      this.rerun = embedder;
+      return this.running;
+    }
+    const run = async (): Promise<ManuscriptIndexReport> => {
+      let pass = this.runPass(embedder);
+      for (;;) {
+        // Une passe en échec n'empêche pas de servir la demande arrivée entre-temps.
+        await pass.catch(() => undefined);
+        const next = this.rerun;
+        if (!next) return pass;
+        this.rerun = null;
+        pass = this.runPass(next);
+      }
+    };
+    this.running = run().finally(() => {
+      this.running = null;
+    });
     return this.running;
+  }
+
+  /** Une passe, dont le compte rendu devient `lastReport`. */
+  private runPass(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
+    return this.runIndex(embedder).then(
+      (report) => {
+        this.lastReport = report;
+        return report;
+      },
+      (error: unknown) => {
+        // `runIndex` ne jette pas en principe ; si une passe se perd quand
+        // même, la section des réglages ne doit pas continuer d'afficher
+        // la dernière passe réussie comme si rien ne s'était passé.
+        const failed = emptyReport();
+        failed.failures.push({
+          relativePath: '(passe)',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        this.lastReport = failed;
+        throw error;
+      }
+    );
   }
 
   private async runIndex(

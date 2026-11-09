@@ -8,7 +8,7 @@
  * l'incrémental, pas une assertion sur un log.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -45,6 +45,43 @@ function fakeEmbedder(): FakeEmbedder {
     },
   };
   return provider as unknown as FakeEmbedder;
+}
+
+interface HeldEmbedder extends FakeEmbedder {
+  /** Résolue quand la passe est entrée dans l'embedding : le fichier est déjà lu. */
+  entered: Promise<void>;
+  release: () => void;
+}
+
+/** Un fournisseur dont le premier appel attend `release()` : la passe reste en vol le temps voulu. */
+function heldEmbedder(): HeldEmbedder {
+  const provider = fakeEmbedder();
+  const embed = provider.embed.bind(provider);
+  let enter = (): void => undefined;
+  let release = (): void => undefined;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let held = true;
+  return Object.assign(provider, {
+    entered,
+    release,
+    async embed(texts: string[]): Promise<number[][]> {
+      if (held) {
+        held = false;
+        enter();
+        await released;
+      }
+      return embed(texts);
+    },
+  });
+}
+
+function writeArticle(root: string, body: string): void {
+  fs.writeFileSync(
+    path.join(root, 'project.json'),
+    JSON.stringify({ name: 'Article', path: root, type: 'article', createdAt: '', updatedAt: '' })
+  );
+  fs.writeFileSync(path.join(root, 'document.md'), `# Article\n\n${body}\n`);
 }
 
 function writeProject(
@@ -232,6 +269,162 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
     expect(report.indexed).toBe(0);
     expect(report.failures).toHaveLength(1);
     expect(report.failures[0].reason).toMatch(/embedding failed/i);
+  });
+
+  /**
+   * S02-2-3 : une sauvegarde arrivée pendant une passe rendait la passe en cours, qui avait déjà
+   * lu le fichier. Le nouveau paragraphe restait hors de l'index jusqu'à la sauvegarde suivante.
+   */
+  describe('demande pendant une passe', () => {
+    let other = '';
+
+    afterEach(() => {
+      if (other) fs.rmSync(other, { recursive: true, force: true });
+      other = '';
+    });
+
+    it('une sauvegarde pendant l’embedding est indexée : une passe de plus suit, une seule', async () => {
+      writeArticle(tmp, 'Le port de Vichy.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+
+      const first = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      writeArticle(tmp, 'Le port de Danzig.');
+      // Trois sauvegardes rapprochées : une passe de plus, pas trois.
+      const later = [1, 2, 3].map(() => manuscriptIndexService.index(embedder));
+      embedder.release();
+      const reports = await Promise.all([first, ...later]);
+
+      // La dernière passe est celle qui a embarqué la nouvelle version : aucune autre ne la suit.
+      for (const report of reports) expect(report).toMatchObject({ indexed: 1, failures: [] });
+      expect(manuscriptIndexService.stats()?.lastReport).toMatchObject({ indexed: 1 });
+      const store = new ManuscriptStore({ dbPath: path.join(tmp, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical('Danzig', 5)).toHaveLength(1);
+        expect(store.searchLexical('Vichy', 5)).toEqual([]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('une demande faite dans le projet suivant, pendant la passe du précédent, est servie', async () => {
+      other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-b-'));
+      writeArticle(tmp, 'Le port de Vichy.');
+      writeArticle(other, 'Le port de Gdynia.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+
+      const first = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.configure(other);
+      const second = manuscriptIndexService.index(embedder);
+      embedder.release();
+      await Promise.all([first, second]);
+
+      const store = new ManuscriptStore({ dbPath: path.join(other, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical('Gdynia', 5)).toHaveLength(1);
+        expect(store.searchLexical('Vichy', 5)).toEqual([]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('la purge qui clôt l’ouverture du projet suivant ne fait pas perdre sa demande', async () => {
+      // `project:load` finit par `configure` puis `purgeOutside` (project-handlers). Celle-ci ouvre
+      // la base pour l'occasion et la referme : la relance demandée entre-temps doit survivre.
+      other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-b-'));
+      writeArticle(tmp, 'Le port de Vichy.');
+      writeArticle(other, 'Le port de Gdynia.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+
+      const first = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.configure(other);
+      const second = manuscriptIndexService.index(embedder);
+      manuscriptIndexService.configure(other);
+      expect(manuscriptIndexService.purgeOutside()).toBe(0);
+      embedder.release();
+      await Promise.all([first, second]);
+
+      const store = new ManuscriptStore({ dbPath: path.join(other, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical('Gdynia', 5)).toHaveLength(1);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('témoin : une passe qui jette laisse « (passe) » au compte rendu et rejette', async () => {
+      writeArticle(tmp, 'Le port de Vichy.');
+      manuscriptIndexService.configure(tmp);
+      const listChapters = vi
+        .spyOn(ManuscriptStore.prototype, 'listChapters')
+        .mockImplementationOnce(() => {
+          throw new Error('database is locked');
+        });
+      try {
+        await expect(manuscriptIndexService.index(fakeEmbedder())).rejects.toThrow(/locked/);
+        expect(manuscriptIndexService.stats()?.lastReport?.failures).toEqual([
+          { relativePath: '(passe)', reason: 'database is locked' },
+        ]);
+      } finally {
+        listChapters.mockRestore();
+      }
+    });
+
+    it('une passe qui jette ne fait pas perdre la demande arrivée pendant', async () => {
+      writeArticle(tmp, 'Le port de Vichy.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+      const listChapters = vi
+        .spyOn(ManuscriptStore.prototype, 'listChapters')
+        .mockImplementationOnce(() => {
+          throw new Error('database is locked');
+        });
+      try {
+        const first = manuscriptIndexService.index(embedder);
+        await embedder.entered;
+        writeArticle(tmp, 'Le port de Danzig.');
+        const second = manuscriptIndexService.index(embedder);
+        embedder.release();
+
+        // Tous reçoivent la dernière passe, réussie.
+        for (const report of await Promise.all([first, second])) {
+          expect(report).toMatchObject({ indexed: 1, failures: [] });
+        }
+        expect(manuscriptIndexService.stats()?.lastReport).toMatchObject({ indexed: 1, failures: [] });
+      } finally {
+        listChapters.mockRestore();
+      }
+      const store = new ManuscriptStore({ dbPath: path.join(tmp, '.cliodeck', 'brain.db') });
+      try {
+        expect(store.searchLexical('Danzig', 5)).toHaveLength(1);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('une relance demandée dans un projet ne tourne pas dans le suivant', async () => {
+      other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-b-'));
+      writeArticle(tmp, 'Le port de Vichy.');
+      writeArticle(other, 'Le port de Gdynia.');
+      manuscriptIndexService.configure(tmp);
+      const embedder = heldEmbedder();
+
+      const first = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      const again = manuscriptIndexService.index(embedder);
+      manuscriptIndexService.configure(other);
+      embedder.release();
+      await Promise.all([first, again]);
+
+      // Personne n'a rien demandé dans B : ni lu, ni envoyé au fournisseur, ni base ouverte.
+      expect(embedder.texts.join('\n')).not.toContain('Gdynia');
+      expect(fs.existsSync(path.join(other, '.cliodeck', 'brain.db'))).toBe(false);
+    });
   });
 
   /**

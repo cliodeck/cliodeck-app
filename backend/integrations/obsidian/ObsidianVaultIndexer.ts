@@ -10,10 +10,13 @@
  * Returns a typed `VaultScanReport` (step 2.1bis) — partial-success
  * first-class. An unreadable or malformed note doesn't fail the whole
  * indexing; it's recorded in `skipped` or `failed` with a typed reason.
+ * Une seule exception : si les tables du coffre disparaissent pendant la
+ * passe (« Détacher »), elle s'arrête au lieu de compter N échecs.
  *
  * Unchanged notes (same file hash) are skipped on incremental runs
- * (`{ force: false }` default). Pass `force: true` to reindex
- * everything (e.g., after switching embedding models).
+ * (`{ force: false }` default), as long as their chunks are there. Pass
+ * `force: true` to reindex everything (e.g., after switching embedding
+ * models).
  */
 
 import crypto from 'crypto';
@@ -121,9 +124,17 @@ export class ObsidianVaultIndexer {
         const existing = this.store.getNoteByHash(hash);
         if (existing && existing.relativePath === entry.relativePath) {
           // Unchanged: count as indexed but skip the re-embedding cost.
+          // Sauf une note sans aucun extrait alors qu'elle a de quoi en
+          // avoir : l'ancien ordre d'écriture en laissait une à chaque panne
+          // d'Ollama (S02-1-3), elle se répare ici.
           const parsed = this.parser.parse(entry.relativePath, content);
-          report.indexed.push({ ref, parsed });
-          continue;
+          if (
+            this.store.noteHasChunks(existing.id) ||
+            this.chunkNote(existing.id, parsed).length === 0
+          ) {
+            report.indexed.push({ ref, parsed });
+            continue;
+          }
         }
       }
 
@@ -155,29 +166,34 @@ export class ObsidianVaultIndexer {
         indexedAt: new Date().toISOString(),
       };
 
-      this.store.upsertNote(note);
-      this.store.deleteNoteChunks(noteId);
-
+      // Embarquer d'abord, écrire ensuite, tout ou rien : une panne du
+      // fournisseur ou une erreur SQLite laisse la note à son empreinte
+      // d'avant, avec ses anciens extraits, et la passe continue. Écrire
+      // l'empreinte en premier la faisait passer pour indexée sans extrait.
       const chunks = this.chunkNote(noteId, parsed);
-      if (chunks.length === 0) {
-        report.indexed.push({ ref, parsed });
-        continue;
-      }
-
+      let embedded = false;
       try {
-        const embedded = await this.embedBatched(chunks);
-        for (const { chunk, embedding } of embedded) {
-          this.store.addChunk(chunk, embedding);
-        }
+        const rows = await this.embedBatched(chunks);
+        embedded = true;
+        this.store.transaction(() => {
+          this.store.upsertNote(note);
+          this.store.deleteNoteChunks(noteId);
+          for (const { chunk, embedding } of rows) {
+            this.store.addChunk(chunk, embedding);
+          }
+        });
         report.indexed.push({ ref, parsed });
       } catch (e) {
+        // Tables disparues : « Détacher » a effacé le coffre pendant l'appel au fournisseur. Ce
+        // n'est pas l'échec d'une note, la passe s'arrête : continuer enverrait au fournisseur,
+        // peut-être en ligne, toutes les notes d'un coffre que l'auteur vient de retirer.
+        if (!this.store.hasSchema()) throw e;
+        const message = e instanceof Error ? e.message : String(e);
         report.failed.push({
           ref,
           reason: {
             kind: 'io_error',
-            message: `Embedding failed: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
+            message: embedded ? message : `Embedding failed: ${message}`,
           },
         });
       }
