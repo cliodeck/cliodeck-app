@@ -925,6 +925,21 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
+   * Les sources, autres que `sourceId`, auxquelles la base attribue encore
+   * une de ces photos : celles que `saveSource(sourceId)` leur retirera. La
+   * synchro les marque dans la même transaction (G3).
+   */
+  getOtherPhotoOwners(sourceId: string, photoIds: readonly number[]): string[] {
+    const ownerOf = this.db.prepare('SELECT source_id FROM tropy_photos WHERE id = ?');
+    const owners = new Set<string>();
+    for (const photoId of photoIds) {
+      const row = ownerOf.get(photoId) as { source_id: string } | undefined;
+      if (row && row.source_id !== sourceId) owners.add(row.source_id);
+    }
+    return [...owners];
+  }
+
+  /**
    * Récupère les photos d'une source
    */
   getSourcePhotos(sourceId: string): PrimarySourcePhoto[] {

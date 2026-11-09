@@ -160,6 +160,15 @@ function samePhotoIds(before: ReadonlySet<number> | undefined, photos: ReadonlyA
   return now.size === known.size && [...now].every((id) => known.has(id));
 }
 
+/**
+ * Une transcription venue de l'OCR, et non vide : la seule que des pages
+ * changées font refaire (G3). Une transcription saisie, importée, Transkribus
+ * ou faite de notes n'est jamais marquée.
+ */
+function isOcrBody(source: PrimarySourceDocument): boolean {
+  return source.transcriptionSource === 'tesseract' && (source.transcription ?? '').trim().length > 0;
+}
+
 // MARK: - TropySync
 
 /**
@@ -306,6 +315,9 @@ export class TropySync {
       // s'attribue les photos qu'il a reçues : comparé à la base du moment,
       // l'item qui les a perdues, traité après lui, ne verrait rien changer.
       const photosBefore = vectorStore.getPhotoIdsBySource();
+      // Les items qui ont encore une photo dans Tropy : un autre (fusionné,
+      // vidé) ne se reconnaîtra plus, aucune reprise ne lui est promise.
+      const itemsWithPhotos = new Set(items.filter((item) => item.photos.length > 0).map((item) => item.id));
 
       // Phase 2: Traitement des items
       onProgress?.({ phase: 'processing', current: 0, total: items.length });
@@ -325,7 +337,7 @@ export class TropySync {
             item,
             vectorStore,
             ocrUnavailable ? { ...options, performOCR: false } : options,
-            { popplerMissing, photosBefore }
+            { popplerMissing, photosBefore, itemsWithPhotos }
           );
 
           if (processResult.isNew) {
@@ -399,11 +411,13 @@ export class TropySync {
     options: TropySyncOptions,
     /**
      * Ce que la passe sait déjà : Poppler manque ; les photos de chaque source
-     * avant elle (sans ce relevé, rien n'est comparé).
+     * avant elle, et les items qui ont encore une photo dans Tropy (sans ces
+     * relevés, aucune page n'est comparée ni aucune source marquée).
      */
     pass: {
       popplerMissing: boolean;
       photosBefore?: ReadonlyMap<string, ReadonlySet<number>>;
+      itemsWithPhotos?: ReadonlySet<number>;
     } = { popplerMissing: false }
   ): Promise<{
     isNew: boolean;
@@ -469,19 +483,31 @@ export class TropySync {
     // ou partie vers lui laisse son texte dans la transcription de l'item
     // qu'elle a quitté. Les pages de l'item ont-elles changé depuis la passe
     // précédente ? Un ensemble, pas une liste : réordonner ne change rien.
-    // Seul un texte venu de l'OCR se refait ; une transcription saisie,
-    // importée ou faite de notes n'est jamais marquée.
+    // Seul un texte venu de l'OCR se refait (`isOcrBody`). Un item qui n'a
+    // plus aucune photo (fusionné dans un autre, dans Tropy) ne se
+    // reconnaîtra plus : il n'est pas marqué, et une marque posée tombe, sans
+    // quoi sa carte et le bilan promettraient pour toujours une reprise
+    // impossible.
+    const hasPhotos = item.photos.length > 0;
     const knownPhotos = existingSource ? pass.photosBefore?.get(existingSource.id) : undefined;
     const pagesChanged =
       !!existingSource &&
-      existingSource.transcriptionSource === 'tesseract' &&
-      existingBody.length > 0 &&
+      isOcrBody(existingSource) &&
+      hasPhotos &&
       !!pass.photosBefore &&
       !samePhotoIds(knownPhotos, item.photos);
     // Ce qui reste à reprendre si cette passe ne refait pas l'OCR. Des pages
-    // changées l'emportent sur l'attente de Poppler : remettre chaque page à
-    // sa place n'attend pas Poppler.
-    const keptPending: OcrPending | null = pagesChanged ? 'pages' : existingPending;
+    // changées l'emportent sur l'attente de Poppler : la carte le dit, et
+    // l'OCR qui les reprend refait tout l'item. Leur corps passe pour
+    // complet : sans Poppler, le texte des seules images d'un item qui a un
+    // PDF ne le remplace pas (L06-10), et la marque reste jusqu'à un OCR
+    // complet. Seul un corps que la base tient encore pour partiel
+    // ('poppler') cède à un nouveau texte partiel, qui reste 'poppler'.
+    const keptPending: OcrPending | null = pagesChanged
+      ? 'pages'
+      : existingPending === 'pages' && !hasPhotos
+        ? null
+        : existingPending;
 
     // 2. Chercher des transcriptions externes (Transkribus, etc.)
     if (options.transcriptionDirectory && (!notesAreTranscription || options.forceReindex)) {
@@ -519,8 +545,14 @@ export class TropySync {
         keptPending === 'pages' ||
         (acquiredBody.length === 0 && !notesAreTranscription)) &&
       // Poppler toujours absent : la reprendre referait l'OCR de ses images
-      // pour le même texte partiel.
-      !(keptPending === 'poppler' && pass.popplerMissing)
+      // pour le même texte partiel ('poppler'), ou pour un texte partiel
+      // qu'une transcription complète ne cède pas ('pages' d'un item qui a
+      // un PDF). La première source reprise de la passe l'apprend.
+      !(
+        pass.popplerMissing &&
+        (keptPending === 'poppler' ||
+          (keptPending === 'pages' && acquiredBody.length > 0 && this.hasPdfOnDisk(item)))
+      )
     ) {
       console.log(`🔍 [TROPY-SYNC] OCR needed for item ${item.id} "${item.title}" - photos: ${item.photos.map(p => p.filename).join(', ')}`);
       const { result: ocrResult, blocked } = await this.performOCROnItem(item, options.ocrLanguage);
@@ -665,6 +697,24 @@ export class TropySync {
           return false;
         }
 
+        // G3 : une photo que cet item a reçue, la base l'attribue encore à
+        // l'item qui l'a perdue, et `saveSource` va la lui retirer. La marque
+        // de cet item se pose ici, dans la même transaction. Posée seulement
+        // quand la passe arrivait à lui, elle manquait dès que la passe
+        // s'arrêtait avant (changement de projet, erreur sur cet item) : la
+        // passe suivante, ses photos déjà retirées en base, ne voyait plus
+        // rien changer, et son texte gardait la page partie. Un item qui n'a
+        // plus de photo dans Tropy, ou qui n'y est plus, n'est pas marqué.
+        if (pass.itemsWithPhotos) {
+          const received = sourceItem.photos.map((photo) => photo.id);
+          for (const ownerId of vectorStore.getOtherPhotoOwners(sourceItem.id, received)) {
+            const owner = vectorStore.getSource(ownerId);
+            if (owner && isOcrBody(owner) && pass.itemsWithPhotos.has(owner.tropyId)) {
+              vectorStore.setOcrPending(ownerId, 'pages');
+            }
+          }
+        }
+
         vectorStore.saveSource(sourceItem);
         // `saveSource` n'y touche pas : la marque change avec le corps, ici.
         if (ocrPending !== existingPending) {
@@ -799,6 +849,14 @@ export class TropySync {
     }
 
     return { result: null };
+  }
+
+  /**
+   * L'item a-t-il, sur le disque, un PDF que l'OCR ne lit qu'avec Poppler ?
+   * La même règle que `performOCROnItem`, qui écarte les fichiers absents.
+   */
+  private hasPdfOnDisk(item: TropyItem): boolean {
+    return item.photos.some((photo) => this.ocrPipeline.isPDF(photo.path) && fs.existsSync(photo.path));
   }
 
   /**

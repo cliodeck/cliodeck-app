@@ -31,8 +31,9 @@ import {
   type TpySpec,
 } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
-import { OcrEngineUnavailableError, TropyOCRPipeline } from '../TropyOCRPipeline';
+import { OcrEngineStoppedError, OcrEngineUnavailableError, TropyOCRPipeline } from '../TropyOCRPipeline';
 import { PDFConverter, PopplerNotFoundError } from '../PDFConverter';
+import { PrimarySourcesVectorStore } from '../../../core/vector-store/PrimarySourcesVectorStore';
 
 // Un userData par test, sous la racine temporaire : le dossier des modèles de
 // Tesseract y est créé quand le vrai pipeline tourne.
@@ -869,18 +870,21 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
       return `Feuillet ${page} : ${sentences[['p11', 'p12', 'p21', 'p22', 'p31'].indexOf(page)]}`;
     };
 
+    /** La reconnaissance simulée : le texte de chaque page reçue. */
+    const recognisePages = async (files: string[]) => ({
+      text: files.map(pageText).join('\n\n'),
+      confidence: 88.5,
+      language: 'fra',
+      pageCount: files.length,
+    });
+
     beforeEach(() => {
       pages = {};
       for (const id of [11, 12, 21, 22, 31]) {
         pages[id] = path.join(tropyDir, `p${id}.jpg`);
         fs.writeFileSync(pages[id], 'jpeg factice');
       }
-      ocrSpy.mockImplementation(async (files: string[]) => ({
-        text: files.map(pageText).join('\n\n'),
-        confidence: 88.5,
-        language: 'fra',
-        pageCount: files.length,
-      }));
+      ocrSpy.mockImplementation(recognisePages);
     });
 
     function ocrItems(): TpyItemSpec[] {
@@ -922,7 +926,8 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     }
 
     /** Les fichiers passés à la reconnaissance, appel par appel. */
-    const ocrCalls = () => ocrSpy.mock.calls.map((call: unknown[]) => (call[0] as string[]).map((f) => path.basename(f)));
+    const ocrCalls = (): string[][] =>
+      ocrSpy.mock.calls.map((call: unknown[]) => (call[0] as string[]).map((f) => path.basename(f)));
 
     it('vers l’item traité le premier, synchro sans OCR : les deux sources sont marquées, leurs transcriptions intactes', async () => {
       const tpy = await ocrisedProject();
@@ -1031,6 +1036,120 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
       await tropyService.sync(noOcr);
 
       expect(marks()).toEqual({ 10: null, 20: 'pages', 30: null });
+    });
+
+    // Revue de G3. L'item qui reçoit la page la retire en base, en
+    // s'enregistrant, à l'item qui l'a perdue. Celui-ci n'était marqué que
+    // lorsque la passe arrivait à lui : une passe arrêtée avant, ou une erreur
+    // sur lui, et la passe suivante, ses photos déjà à jour en base, ne
+    // voyait plus rien changer. Son texte gardait la page partie, sans marque,
+    // pour toujours.
+    it('une passe d’OCR arrêtée entre l’item qui reçoit la page et celui qui la perd : ce dernier reste marqué, la passe suivante le reprend', async () => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+      // L'item 10, lu le premier, est reconnu et enregistré ; le moteur
+      // s'arrête sous l'item 20 (changement de projet).
+      ocrSpy.mockImplementationOnce(recognisePages).mockRejectedValueOnce(new OcrEngineStoppedError());
+      const stopped = await tropyService.sync(syncOptions);
+      expect(stopped.success).toBe(false);
+      expect(marks()).toEqual({ 10: null, 20: 'pages', 30: null });
+
+      const next = await tropyService.sync(noOcr);
+      expect(marks()).toEqual({ 10: null, 20: 'pages', 30: null });
+      expect(next.issues).toContainEqual({ code: 'pages-changed', sources: 1 });
+
+      ocrSpy.mockClear();
+      await tropyService.sync(syncOptions);
+      expect(ocrCalls()).toEqual([['p21.jpg']]);
+      expect(texts()[20]).toContain('Feuillet p21');
+      expect(texts()[20]).not.toContain('Feuillet p22');
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+    });
+
+    it('une erreur sur l’item qui perd la page, dans la synchro qui voit le déplacement : il est marqué quand même', async () => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+      const read = PrimarySourcesVectorStore.prototype.getSourceByTropyId;
+      let failed = false;
+      const failOnce = vi
+        .spyOn(PrimarySourcesVectorStore.prototype, 'getSourceByTropyId')
+        .mockImplementation(function (this: PrimarySourcesVectorStore, tropyId: number) {
+          if (tropyId === 20 && !failed) {
+            failed = true;
+            throw new Error('database is locked');
+          }
+          return read.call(this, tropyId);
+        });
+
+      const result = await tropyService.sync(noOcr);
+      failOnce.mockRestore();
+
+      expect(result.errors).toEqual([expect.stringContaining('Item 20')]);
+      expect(marks()).toEqual({ 10: 'pages', 20: 'pages', 30: null });
+      const next = await tropyService.sync(noOcr);
+      expect(next.issues).toContainEqual({ code: 'pages-changed', sources: 2 });
+
+      await tropyService.sync(syncOptions);
+      expect(ocrCalls()).toEqual([['p11.jpg', 'p12.jpg', 'p22.jpg'], ['p21.jpg']]);
+      expect(texts()[20]).not.toContain('Feuillet p22');
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+    });
+
+    /**
+     * Ce que fait Tropy quand on fusionne deux items : les photos de l'item
+     * absorbé passent à l'autre, et l'item absorbé va à la corbeille (raison
+     * 'merge'), que `TropyReader` ne filtre pas encore (L06-12) : il est lu
+     * sans photo.
+     */
+    function mergeItems(tpy: string, absorbed: number, into: number): void {
+      const db = openTpyForWrite(tpy);
+      try {
+        db.prepare('UPDATE photos SET item_id = ?, position = position + 10 WHERE item_id = ?').run(into, absorbed);
+        db.prepare("INSERT INTO trash (id, reason) VALUES (?, 'merge')").run(absorbed);
+        db.prepare("UPDATE subjects SET modified = '2026-06-02T08:00:00.000Z' WHERE id = ?").run(into);
+      } finally {
+        db.close();
+      }
+    }
+
+    // Revue de G3. Un item sans photo ne se reconnaît plus : marqué, il le
+    // restait pour toujours, sa carte promettant une reprise qui ne venait
+    // pas, et le bilan de chaque synchro le comptait.
+    it.each([
+      [20, 10],
+      [10, 20],
+    ] as const)('l’item %i fusionné dans l’item %i : seul ce dernier est marqué, et la passe d’OCR lève tout', async (absorbed, into) => {
+      const tpy = await ocrisedProject();
+      mergeItems(tpy, absorbed, into);
+
+      const merged = await tropyService.sync(noOcr);
+      expect(marks()).toEqual({ [absorbed]: null, [into]: 'pages', 30: null });
+      expect(merged.issues).toContainEqual({ code: 'pages-changed', sources: 1 });
+
+      const resumed = await tropyService.sync(syncOptions);
+      // Un seul item reconnu, avec toutes les pages (dans l'ordre de Tropy).
+      expect(ocrCalls().map((files) => [...files].sort())).toEqual([['p11.jpg', 'p12.jpg', 'p21.jpg', 'p22.jpg']]);
+      expect(marks()).toEqual({ 10: null, 20: null, 30: null });
+      expect(resumed.issues.map((issue) => issue.code)).not.toContain('pages-changed');
+
+      ocrSpy.mockClear();
+      const after = await tropyService.sync(syncOptions);
+      expect(ocrSpy).not.toHaveBeenCalled();
+      expect(after.issues.map((issue) => issue.code)).not.toContain('pages-changed');
+    });
+
+    it('un item marqué qui perd ensuite sa dernière page (fusionné dans un autre) perd sa marque', async () => {
+      const tpy = await ocrisedProject();
+      movePhoto(tpy, 22, 10, [10]);
+      await tropyService.sync(noOcr);
+      expect(marks()).toEqual({ 10: 'pages', 20: 'pages', 30: null });
+
+      mergeItems(tpy, 20, 10);
+      const merged = await tropyService.sync(noOcr);
+
+      expect(marks()).toEqual({ 10: 'pages', 20: null, 30: null });
+      expect(merged.issues).toContainEqual({ code: 'pages-changed', sources: 1 });
+      expect(tropyService.getAllSources().find((s) => s.tropyId === 20)?.ocrPending).toBeUndefined();
     });
 
     // Témoins, verts avant comme après : une détection trop large referait
@@ -1356,6 +1475,72 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
       poppler = true;
       await tropyService.sync(syncOptions);
       expect(snapshot().sources.every((s) => s.transcription?.includes('TEXTE DU PDF'))).toBe(true);
+    });
+
+    // Revue de G3. Un item mixte dont les pages ont changé garde, tant que
+    // Poppler manque, sa transcription complète : le texte de ses seules
+    // images ne la remplace pas (L06-10), et sa marque reste. Chaque passe
+    // refaisait pourtant l'OCR de ses images, pour un texte aussitôt jeté.
+    it('Poppler toujours absent : la passe ne refait pas l’OCR des images d’un item mixte aux pages changées, pour un texte qu’elle jetterait', async () => {
+      const file = (name: string) => {
+        const p = path.join(tropyDir, name);
+        fs.writeFileSync(p, name.endsWith('.pdf') ? '%PDF factice' : 'jpeg factice');
+        return p;
+      };
+      // Un texte par fichier : on voit quelle page porte chaque transcription.
+      vi.spyOn(TropyOCRPipeline.prototype, 'performOCR').mockImplementation(async (f: string) => {
+        ocrFiles.push(path.basename(f));
+        if (f.endsWith('.pdf') && !poppler) throw new PopplerNotFoundError();
+        return { text: `${path.basename(f)} : ${OCR_TEXT}`, confidence: 90, language: 'fra', pageCount: 1 };
+      });
+      const items: TpyItemSpec[] = [
+        { id: 10, title: 'Rapport du préfet', photos: [{ id: 11, path: file('rapport.jpg') }] },
+        ...[2, 3].map((n) => ({
+          id: n * 10,
+          title: `Dossier ${n}`,
+          photos: [
+            { id: n * 10 + 1, path: file(`dossier-${n}-a.jpg`) },
+            { id: n * 10 + 2, path: file(`dossier-${n}-b.jpg`) },
+            { id: n * 10 + 3, path: file(`dossier-${n}.pdf`) },
+          ],
+        })),
+      ];
+      const tpy = makeTpy(tropyDir, spec({ items }));
+      await tropyService.openProject(tpy);
+      await tropyService.sync(syncOptions);
+      const complete = snapshot().sources.map((s) => s.transcription);
+      expect(complete[1]).toContain('dossier-2.pdf');
+
+      // La page « b » de chaque dossier passe au rapport, et Poppler manque.
+      movePhoto(tpy, 22, 10, [10]);
+      movePhoto(tpy, 32, 10, [10]);
+      poppler = false;
+      const images = () => ocrFiles.filter((f) => f.endsWith('.jpg'));
+
+      ocrFiles = [];
+      const first = await tropyService.sync(syncOptions);
+      // Le rapport, sans PDF, est reconnu ; le dossier 2 apprend à la passe
+      // que Poppler manque ; le dossier 3 n'est pas repris pour rien.
+      expect(images()).toEqual(['rapport.jpg', 'dossier-2-b.jpg', 'dossier-3-b.jpg', 'dossier-2-a.jpg']);
+      expect(pendingMarks()).toEqual([null, 'pages', 'pages']);
+      expect(first.issues).toEqual(
+        expect.arrayContaining([{ code: 'poppler-missing' }, { code: 'pages-changed', sources: 2 }])
+      );
+      expect(snapshot().sources.map((s) => s.transcription).slice(1)).toEqual(complete.slice(1));
+
+      ocrFiles = [];
+      await tropyService.sync(syncOptions);
+      expect(images()).toEqual(['dossier-2-a.jpg']);
+
+      // Poppler installé : les deux dossiers sont reconnus de nouveau, sans
+      // la page partie.
+      poppler = true;
+      await tropyService.sync(syncOptions);
+      const after = snapshot().sources.map((s) => s.transcription ?? '');
+      expect(after[1]).toContain('dossier-2.pdf');
+      expect(after[1]).not.toContain('dossier-2-b.jpg');
+      expect(after[2]).not.toContain('dossier-3-b.jpg');
+      expect(pendingMarks()).toEqual([null, null, null]);
     });
 
     // « Relancer l'OCR sur toutes les sources » sans Poppler remplaçait une
