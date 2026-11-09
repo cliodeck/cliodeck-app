@@ -27,8 +27,10 @@ export interface BibAudit {
   unreadFromZotero: string[];
   /**
    * Le fichier définit des `@string`. Pour information : le parseur les développe, et une
-   * réécriture écrit les valeurs développées, sans les définitions. Une définition qu'il n'a pas
-   * lue (entre parenthèses, accolade non refermée) est dans `unreadKeys`, sous le nom `string`.
+   * réécriture écrit les valeurs développées. La synchronisation et « Fusionner » gardent la
+   * définition, reprise avec ce qui n'est pas une entrée (H2, `keepOutsideEntries`), mais plus
+   * rien ne la cite. Une définition qu'il n'a pas lue (entre parenthèses, accolade non refermée)
+   * est dans `unreadKeys`, sous le nom `string`.
    */
   hasStringMacros: boolean;
 }

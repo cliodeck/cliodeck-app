@@ -219,6 +219,27 @@ describe('keepOutsideEntries — ce qui changerait la relecture n’est pas repr
     expectSameReading(kept, rewritten);
     warn.mockRestore();
   });
+
+  // Ce qui séparait deux entrées et ce qui suivait la dernière se jugent à part : une entrée cachée
+  // dans un commentaire entre deux entrées ne fait pas perdre les groupes de la fin, qui n'y sont
+  // pour rien. L'audit ne la signale pas : la synchronisation et la fusion écrivent ce fichier.
+  it.each([
+    ['groupes BibDesk', `@comment{@article{Cache_1990, title={Dans un commentaire}}}`, GROUPS],
+    ['réglages JabRef', `@comment{@article{Cache_1990,\n  title = {Dans un commentaire},\n}}`, '@Comment{jabref-meta: databaseType:biblatex;}\n'],
+  ])('une entrée dans un @comment entre deux entrées, des %s en fin : l’en-tête et la fin restent, une fois', (_name, hidden, tail) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `% En-tête\n\n${GARDE}\n\n${hidden}\n\n${GARDE.replace('Garde_2000', 'Autre')}\n\n${tail}`;
+    const rewritten = rewrite(previous);
+    expect(auditParsedBib(previous, parse(previous)).unreadKeys).toEqual([]);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(kept).toBe(`% En-tête\n\n${rewritten.trimEnd()}\n\n${tail}`);
+    expectSameReading(kept, rewritten);
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
 
 /**
@@ -277,5 +298,21 @@ describe('keepOutsideEntries — une arobase hors des entrées', () => {
     const kept = expectSettled(previous);
 
     expect(kept).toBe(`%% Tenu par jean.dupont\n\n${rewritten.trimEnd()}\n\n${GROUPS}`);
+  });
+
+  // Le fichier composé doit se redécouper à l'identique. Ici, l'en-tête ouvre un @comment qu'il
+  // ne referme pas, et une adresse suit, dans un bloc entre deux entrées : composé sans ce
+  // contrôle, l'en-tête restait à la première réécriture et partait à la deuxième (trouvé par un
+  // fuzz de la revue). Avec lui, le fichier ne change plus dès la première.
+  it('un @comment non refermé en tête, une adresse dans un bloc entre deux entrées : la réécriture suivante rend le même fichier', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = '@comment{à finir\n@book{K1,\n  title = {T1},\n}\n@comment{Notices de paul@archives.fr}\n@book{K2,\n  title = {T2},\n}\n';
+
+    const kept = expectSettled(previous);
+
+    expect(count(kept, '@comment{Notices de paul@archives.fr}')).toBe(1);
+    expect(kept).not.toContain('@comment{à finir');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

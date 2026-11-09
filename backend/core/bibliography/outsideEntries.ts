@@ -110,30 +110,63 @@ function parserStart(bib: string, resume: number, at: number): number {
   return first === -1 ? at : Math.min(first, at);
 }
 
-/** Ce que `bib` porte hors de ses entrées : ce qui précède la première, ce qui suit chacune. */
+/**
+ * Ce que `bib` porte hors de ses entrées : ce qui précède la première (`top`), ce qui sépare deux
+ * entrées (`between`), ce qui suit la dernière (`tail`, où BibDesk et JabRef écrivent leurs
+ * groupes). Les trois se jugent à part : l'une qui change la relecture n'emporte pas les autres.
+ */
 interface Outside {
   top: string[];
-  bottom: string[];
+  between: string[];
+  tail: string[];
+}
+
+type Part = keyof Outside;
+
+/** Ce que dit le journal d'une partie qui n'est pas reprise. */
+const PART_LABELS: Record<Part, string> = {
+  top: 'ce qui précédait la première entrée',
+  between: 'ce qui séparait deux entrées',
+  tail: 'ce qui suivait la dernière entrée',
+};
+
+/**
+ * Les parties gardées, de la plus complète à la moins complète ; à nombre égal, la fin d'abord
+ * (les groupes), puis la tête (en-tête, `@preamble`).
+ */
+const ATTEMPTS: Part[][] = [
+  ['top', 'between', 'tail'],
+  ['top', 'tail'],
+  ['between', 'tail'],
+  ['top', 'between'],
+  ['tail'],
+  ['top'],
+  ['between'],
+];
+
+/** Chaque texte, sans les lignes vides de son début ni celles de sa fin ; rien de ce qui est blanc. */
+function trimmed(texts: string[]): string[] {
+  return texts
+    .filter((text) => !BLANK.test(text))
+    .map((text) => text.replace(LEADING_BLANK_LINES, '').replace(TRAILING_BLANK_LINES, ''));
 }
 
 function outsideOf(bib: string): Outside {
   const spans = entrySpans(bib);
+  // La tête garde les lignes vides de son début : seul son raccord aux entrées est refait.
   const head = spans.length === 0 ? bib : bib.slice(0, spans[0].start);
+  const top = BLANK.test(head) ? [] : [head.replace(TRAILING_BLANK_LINES, '')];
+  if (spans.length === 0) return { top, between: [], tail: [] };
   // Ce qui suit chaque entrée, jusqu'à la suivante ou à la fin du fichier.
   const after = spans.map((span, i) => bib.slice(span.end, i + 1 < spans.length ? spans[i + 1].start : bib.length));
-  return {
-    top: BLANK.test(head) ? [] : [head.replace(TRAILING_BLANK_LINES, '')],
-    bottom: after
-      .filter((text) => !BLANK.test(text))
-      .map((text) => text.replace(LEADING_BLANK_LINES, '').replace(TRAILING_BLANK_LINES, '')),
-  };
+  return { top, between: trimmed(after.slice(0, -1)), tail: trimmed(after.slice(-1)) };
 }
 
-/** `rewritten` entre `top` et `bottom`, une ligne vide entre chaque morceau. */
-function compose({ top, bottom }: Outside, rewritten: string): string {
-  if (top.length === 0 && bottom.length === 0) return rewritten;
+/** `rewritten` entre `top` d'une part, `between` et `tail` de l'autre, une ligne vide entre chaque morceau. */
+function compose({ top, between, tail }: Outside, rewritten: string): string {
+  if (top.length === 0 && between.length === 0 && tail.length === 0) return rewritten;
   const entries = BLANK.test(rewritten) ? [] : [rewritten.replace(TRAILING_BLANK_LINES, '')];
-  return [...top, ...entries, ...bottom].join('\n\n') + '\n';
+  return [...top, ...entries, ...between, ...tail].join('\n\n') + '\n';
 }
 
 /** Ce que le parseur lit d'un texte, et les entrées qu'il n'en lit pas. */
@@ -150,24 +183,26 @@ function readingOf(bib: string): string {
  * lues) : le parseur cherche des entrées jusque dans un `@comment`, et une entrée écrite dans un
  * commentaire se doublerait à chaque réécriture. Il doit aussi se redécouper à l'identique : la
  * réécriture suivante rend alors le même fichier, au lieu d'y ajouter quelque chose. Sinon, on
- * essaie la fin seule, puis la tête seule — un en-tête qui change la relecture n'emporte pas les
- * groupes de la fin —, et en dernier `rewritten` seul, comme avant. La copie de sécurité garde le
- * fichier d'avant.
+ * retire la tête, ce qui séparait deux entrées ou ce qui suivait la dernière, une partie puis deux
+ * (`ATTEMPTS`) : une entrée cachée dans un commentaire entre deux entrées n'emporte pas les
+ * groupes de la fin, qui n'y sont pour rien. En dernier, `rewritten` seul, comme avant. La copie de
+ * sécurité garde le fichier d'avant.
  */
 export function keepOutsideEntries(previous: string, rewritten: string): string {
-  const { top, bottom } = outsideOf(previous);
-  if (top.length === 0 && bottom.length === 0) return rewritten;
-
-  const candidates: Outside[] = [{ top, bottom }];
-  if (top.length > 0 && bottom.length > 0) candidates.push({ top: [], bottom }, { top, bottom: [] });
+  const outside = outsideOf(previous);
+  const present = (Object.keys(PART_LABELS) as Part[]).filter((part) => outside[part].length > 0);
+  if (present.length === 0) return rewritten;
 
   const expected = readingOf(rewritten);
-  for (const kept of candidates) {
+  // Une tentative qui nomme une partie vide redit une tentative plus courte : on la saute.
+  for (const parts of ATTEMPTS.filter((attempt) => attempt.every((part) => present.includes(part)))) {
+    const kept: Outside = { top: [], between: [], tail: [] };
+    for (const part of parts) kept[part] = outside[part];
     const composed = compose(kept, rewritten);
     if (compose(outsideOf(composed), rewritten) !== composed || readingOf(composed) !== expected) continue;
-    if (kept !== candidates[0]) {
-      const lost = kept.top.length === 0 ? 'l’en-tête' : 'ce qui suivait ses entrées ou les séparait';
-      console.warn(`⚠️ Ce que le .bib portait hors de ses entrées change leur relecture : ${lost} n’est pas repris (la copie de sécurité le garde).`);
+    const lost = present.filter((part) => !parts.includes(part));
+    if (lost.length > 0) {
+      console.warn(`⚠️ Ce que le .bib portait hors de ses entrées change leur relecture ; non repris : ${lost.map((part) => PART_LABELS[part]).join(', ')} (la copie de sécurité le garde).`);
     }
     return composed;
   }
