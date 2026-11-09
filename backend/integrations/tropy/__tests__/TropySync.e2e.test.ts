@@ -1366,29 +1366,50 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
     });
   });
 
+  /**
+   * Tropy ouvert sur `tpy` : un item créé, encore dans le journal (WAL non
+   * reporté dans la base). À fermer par l'appelant.
+   */
+  function tropyHoldingNewItem(tpy: string): Database.Database {
+    const tropy = openTpyForWrite(tpy);
+    tropy.pragma('journal_mode = WAL');
+    tropy.pragma('wal_autocheckpoint = 0');
+    tropy.transaction(() => {
+      tropy
+        .prepare('INSERT INTO subjects (id, modified) VALUES (30, ?)')
+        .run('2026-06-01T08:00:00.000Z');
+      tropy.prepare('INSERT INTO items (id) VALUES (30)').run();
+      const { value_id } = tropy
+        .prepare('INSERT INTO metadata_values (datatype, text) VALUES (?, ?) RETURNING value_id')
+        .get('http://www.w3.org/2001/XMLSchema#string', 'Affiche du syndicat des dockers') as {
+        value_id: number;
+      };
+      tropy
+        .prepare('INSERT INTO metadata (id, property, value_id) VALUES (30, ?, ?)')
+        .run('http://purl.org/dc/elements/1.1/title', value_id);
+    })();
+    return tropy;
+  }
+
+  /** La synchro a-t-elle enregistré l'item que Tropy tient dans son journal ? */
+  function syncedNewItemTitle(): string | undefined {
+    const db = brainDb();
+    try {
+      const row = db.prepare('SELECT title FROM tropy_sources WHERE tropy_id = 30').get() as
+        | { title: string }
+        | undefined;
+      return row?.title;
+    } finally {
+      db.close();
+    }
+  }
+
   // Témoin de G2 : Tropy ouvert, ses `-wal` et `-shm` existent et le journal
   // tient ce qu'il n'a pas encore reporté dans la base. La synchro doit le voir.
   it('Tropy ouvert : la synchro voit l’item qu’il n’a pas encore reporté dans la base (G2, témoin)', async () => {
     const tpy = makeTpy(tropyDir, spec({ wal: true }));
-    const tropy = openTpyForWrite(tpy);
+    const tropy = tropyHoldingNewItem(tpy);
     try {
-      tropy.pragma('journal_mode = WAL');
-      tropy.pragma('wal_autocheckpoint = 0');
-      // Un item créé dans Tropy, encore dans le journal.
-      tropy.transaction(() => {
-        tropy
-          .prepare('INSERT INTO subjects (id, modified) VALUES (30, ?)')
-          .run('2026-06-01T08:00:00.000Z');
-        tropy.prepare('INSERT INTO items (id) VALUES (30)').run();
-        const { value_id } = tropy
-          .prepare('INSERT INTO metadata_values (datatype, text) VALUES (?, ?) RETURNING value_id')
-          .get('http://www.w3.org/2001/XMLSchema#string', 'Affiche du syndicat des dockers') as {
-          value_id: number;
-        };
-        tropy
-          .prepare('INSERT INTO metadata (id, property, value_id) VALUES (30, ?, ?)')
-          .run('http://purl.org/dc/elements/1.1/title', value_id);
-      })();
       const dbFile = tpyDatabasePath(tpy);
       expect(fs.existsSync(`${dbFile}-wal`) && fs.existsSync(`${dbFile}-shm`)).toBe(true);
 
@@ -1397,16 +1418,34 @@ describe.skipIf(!sqliteAvailable)('TropySync de bout en bout (vrai .tpy, vrai br
       expect(result.success).toBe(true);
       expect(result.totalItems).toBe(3);
       expect(result.newItems).toBe(3);
+      expect(syncedNewItemTitle()).toBe('Affiche du syndicat des dockers');
+    } finally {
+      tropy.close();
+    }
+  });
 
-      const db = brainDb();
-      try {
-        const row = db.prepare('SELECT title FROM tropy_sources WHERE tropy_id = 30').get() as
-          | { title: string }
-          | undefined;
-        expect(row?.title).toBe('Affiche du syndicat des dockers');
-      } finally {
-        db.close();
-      }
+  // Revue de G2 : SQLite range le journal à côté du fichier réel. Un .tpy lié
+  // par un lien symbolique, Tropy ouvert sur la cible, n'a ni `-wal` ni `-shm`
+  // à côté du lien : la synchro lisait une copie de la base sans le journal,
+  // et l'item créé dans Tropy attendait le prochain report.
+  it('un .tpy lié par un lien symbolique, Tropy ouvert sur la cible : la synchro voit l’item du journal (revue G2)', async () => {
+    const tpy = makeTpy(tropyDir, spec({ wal: true }));
+    const shortcuts = path.join(root, 'raccourcis');
+    fs.mkdirSync(shortcuts);
+    const link = path.join(shortcuts, 'greves.tpy');
+    fs.symlinkSync(tpy, link);
+    const listing = (dir: string): string[] => fs.readdirSync(dir).sort();
+    const tropy = tropyHoldingNewItem(tpy);
+    try {
+      const before = { tropy: listing(tropyDir), shortcuts: listing(shortcuts) };
+
+      expect((await tropyService.openProject(link)).success).toBe(true);
+      const result = await tropyService.sync(syncOptions);
+      expect(result.success).toBe(true);
+      expect(result.totalItems).toBe(3);
+      expect(syncedNewItemTitle()).toBe('Affiche du syndicat des dockers');
+
+      expect({ tropy: listing(tropyDir), shortcuts: listing(shortcuts) }).toEqual(before);
     } finally {
       tropy.close();
     }

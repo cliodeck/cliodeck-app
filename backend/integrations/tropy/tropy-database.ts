@@ -26,23 +26,34 @@ function isWalDatabase(dbPath: string): boolean {
 /**
  * Ouvrir en lecture seule une base en WAL crée ses `-wal` et `-shm` quand ils
  * n'existent pas, et les laisse après la fermeture (mesuré avec
- * better-sqlite3 13). Tropy les supprime en fermant un projet : Tropy fermé,
+ * better-sqlite3 13). Tropy les supprime en fermant un projet : sans `-wal`,
  * tout le contenu est donc dans le fichier principal, et on en lit une copie
  * en mémoire, marquée « journal classique » (octets 18 et 19, 2 → 1) — le
- * fichier, lui, n'est pas touché. Tropy ouvert, ses `-wal` et `-shm` existent
- * déjà : on lit la base elle-même, avec ce qu'il n'a pas encore reporté. Une
- * base qui n'est pas en WAL se lit elle-même aussi.
+ * fichier, lui, n'est pas touché. Avec un `-wal`, Tropy est ouvert (ses
+ * `-wal` et `-shm` existent) ou a laissé un journal : on lit la base
+ * elle-même, avec ce qu'il n'a pas encore reporté. Une base qui n'est pas en
+ * WAL se lit elle-même aussi.
+ *
+ * Le journal se cherche à côté du fichier réel, liens symboliques résolus :
+ * c'est là que SQLite le range. Un `-shm` seul ne compte pas (aucune écriture
+ * n'y attend) ; un `-wal` resté sans `-shm` — état anormal : copie partielle,
+ * outil de synchronisation qui écarte le `-shm` — se lit, et SQLite recrée
+ * alors un `-shm`, que Tropy retire en fermant le projet. Rien d'autre n'est
+ * jamais créé : aucun `-wal`.
  *
  * La copie tient la base entière en mémoire tant que la connexion reste
- * ouverte : toute la synchro, OCR compris, pour `TropyReader`.
+ * ouverte : toute la synchro, OCR compris, pour `TropyReader`. Elle passe par
+ * `fs.readFileSync`, qui refuse un fichier de plus de 2 Gio
+ * (`ERR_FS_FILE_TOO_LARGE`) : une base en WAL de cette taille, Tropy fermé,
+ * ne s'ouvre pas.
  *
  * `dbPath` est le fichier SQLite (le `project.tpy` d'un paquet `.tropy`).
  * Rend une connexion ouverte, que l'appelant ferme.
  */
 export function openTropyDatabase(dbPath: string): Database.Database {
-  const journalOpen = fs.existsSync(`${dbPath}-wal`) && fs.existsSync(`${dbPath}-shm`);
-  if (!journalOpen && isWalDatabase(dbPath)) {
-    const image = fs.readFileSync(dbPath);
+  const realPath = fs.realpathSync(dbPath);
+  if (!fs.existsSync(`${realPath}-wal`) && isWalDatabase(realPath)) {
+    const image = fs.readFileSync(realPath);
     image[18] = 1;
     image[19] = 1;
     return new Database(image, { readonly: true });
