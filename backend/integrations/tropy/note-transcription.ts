@@ -6,23 +6,52 @@
  * l'auteur). En dessous du seuil, la note est un commentaire et l'OCR passe ;
  * au-delà, c'est une transcription et l'OCR ne passe que sous « Relancer
  * l'OCR » (`forceReindex`). Dans les deux cas, une note ne remplace jamais une
- * transcription existante (tesseract, manual, transkribus).
+ * transcription existante (tesseract, manual, transkribus, imported).
  *
- * Le seuil porte sur l'ensemble des notes de l'item — item, photos et
- * sélections, jointes comme dans `notes_text` —, pas sur chacune : une
- * transcription faite à la main se découpe d'ordinaire en une note par page,
- * dont aucune n'atteindrait le seuil, et l'OCR repasserait sur un document
- * déjà transcrit. Revers assumé : une trentaine d'annotations courtes de
- * sélections comptent aussi ensemble ; l'OCR attend alors « Relancer l'OCR »,
- * et le rapport de la source le dit (`OCRSourceReport`). Les deux cas sont
- * fixés par `TropySync.e2e.test.ts`.
+ * Le seuil porte sur chaque note — de l'item, d'une photo ou d'une
+ * sélection —, pas sur leur somme : la plus longue décide (décision G1 de
+ * l'auteur, « OK pour note par note »). La somme faisait de quelques
+ * annotations courtes une transcription, et l'OCR attendait « Relancer
+ * l'OCR » sur un item qui n'avait jamais été transcrit. Revers assumé : une
+ * transcription découpée en notes de page toutes sous le seuil repasse à
+ * l'OCR ; la note n'est pas perdue, elle reste à côté du corps (`notes_text`).
+ * Les deux cas sont fixés par `TropySync.e2e.test.ts`.
  *
  * Pas de dépendance ici : le renderer importe ce module pour expliquer la
- * règle sur la source concernée, avec le même seuil.
+ * règle sur la source concernée, avec le même seuil. Il lit la longueur de
+ * la plus longue note dans le rapport de la source (`longest_note_length`) :
+ * `notes_text` joint les notes, on ne les retrouve pas en le redécoupant.
  */
 export const NOTE_TRANSCRIPTION_MIN_CHARS = 500;
 
-/** `notesLength` : longueur du texte de toutes les notes de l'item, photos et sélections comprises. */
-export function isNoteTranscription(notesLength: number): boolean {
-  return notesLength >= NOTE_TRANSCRIPTION_MIN_CHARS;
+interface NoteLike {
+  text: string;
+}
+
+/** Ce que la règle lit d'un item Tropy (`TropyItem`) : ses notes, celles de ses photos et de leurs sélections. */
+export interface ItemNotes {
+  notes: readonly NoteLike[];
+  photos: ReadonlyArray<{
+    notes: readonly NoteLike[];
+    selections: ReadonlyArray<{ notes: readonly NoteLike[] }>;
+  }>;
+}
+
+/** Longueur de la plus longue note de l'item, rognée ; 0 sans note. */
+export function longestNoteLength(item: ItemNotes): number {
+  const lengthOf = (notes: readonly NoteLike[]): number =>
+    notes.reduce((longest, note) => Math.max(longest, note.text ? note.text.trim().length : 0), 0);
+  let longest = lengthOf(item.notes);
+  for (const photo of item.photos) {
+    longest = Math.max(longest, lengthOf(photo.notes));
+    for (const selection of photo.selections) {
+      longest = Math.max(longest, lengthOf(selection.notes));
+    }
+  }
+  return longest;
+}
+
+/** `longestNote` : longueur de la plus longue note de l'item (`longestNoteLength`). */
+export function isNoteTranscription(longestNote: number): boolean {
+  return longestNote >= NOTE_TRANSCRIPTION_MIN_CHARS;
 }

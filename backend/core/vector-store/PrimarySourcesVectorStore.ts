@@ -44,6 +44,13 @@ export interface PrimarySourceDocument {
    */
   notesText?: string;
   /**
+   * Longueur de la plus longue note Tropy de l'item, rognée (décision G1 :
+   * c'est elle qui décide si les notes tiennent lieu de transcription).
+   * `undefined` : ligne écrite avant la colonne `longest_note_length` (la
+   * synchro l'initialise sans réembarquer) ; 0 : pas de note.
+   */
+  longestNoteLength?: number;
+  /**
    * L'OCR de la source attend un outil : 'poppler', sa transcription ne porte
    * que les images de l'item, sans ses PDF. Elle n'est pas acquise : la passe
    * OCR suivante la reprend. Absent : rien en attente.
@@ -56,6 +63,12 @@ export interface PrimarySourceDocument {
   /** Structured archival metadata — cote, fonds, repository, producer, … */
   archival?: ArchivalMetadata;
 }
+
+/**
+ * Ce que `saveSource` enregistre : la source lue dans Tropy, plus la longueur
+ * de sa plus longue note, que le rapport de la source relit (G1).
+ */
+export type PrimarySourceRecord = PrimarySourceItem & Pick<PrimarySourceDocument, 'longestNoteLength'>;
 
 export interface PrimarySourceChunk {
   id: string;
@@ -465,6 +478,22 @@ export class PrimarySourcesVectorStore {
       console.warn('⚠️ ocr_pending migration check failed:', err);
     }
 
+    // Soft migration: add longest_note_length column. La plus longue note de
+    // l'item décide si ses notes tiennent lieu de transcription (G1) ; le
+    // rapport de la source le relit, `notes_text` joignant les notes. NULL sur
+    // les lignes existantes : la synchro suivante l'initialise sans réembarquer.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'longest_note_length')) {
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN longest_note_length INTEGER');
+        console.log('🗄️ Migrated tropy_sources: added longest_note_length column');
+      }
+    } catch (err) {
+      console.warn('⚠️ longest_note_length migration check failed:', err);
+    }
+
     // Table des photos associées aux sources
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tropy_photos (
@@ -641,11 +670,11 @@ export class PrimarySourcesVectorStore {
    * transcription et sa date ; la passe suivante ne voyait plus rien à
    * changer et les extraits de l'ancien texte restaient pour de bon (L06-5).
    */
-  saveSource(source: PrimarySourceItem): string {
+  saveSource(source: PrimarySourceRecord): string {
     return this.db.transaction(() => this.writeSource(source))();
   }
 
-  private writeSource(source: PrimarySourceItem): string {
+  private writeSource(source: PrimarySourceRecord): string {
     const id = source.id || randomUUID();
     const now = new Date().toISOString();
 
@@ -653,8 +682,8 @@ export class PrimarySourcesVectorStore {
       INSERT INTO tropy_sources
       (id, tropy_id, title, date, creator, archive, collection, type,
        transcription, transcription_source, language, last_modified, indexed_at, metadata, archival_metadata, ocr_confidence,
-       notes_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       notes_text, longest_note_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         tropy_id = excluded.tropy_id,
         title = excluded.title,
@@ -671,7 +700,8 @@ export class PrimarySourcesVectorStore {
         metadata = excluded.metadata,
         archival_metadata = excluded.archival_metadata,
         ocr_confidence = excluded.ocr_confidence,
-        notes_text = excluded.notes_text
+        notes_text = excluded.notes_text,
+        longest_note_length = excluded.longest_note_length
     `);
 
     stmt.run(
@@ -692,7 +722,8 @@ export class PrimarySourcesVectorStore {
       source.archival ? JSON.stringify(source.archival) : null,
       source.ocrConfidence ?? null,
       // '' se garde tel quel : il dit « pas de note », NULL « pas encore lu ».
-      source.notesText ?? null
+      source.notesText ?? null,
+      source.longestNoteLength ?? null
     );
 
     // Sauvegarder les photos
@@ -2087,6 +2118,7 @@ export class PrimarySourcesVectorStore {
       archival: row.archival_metadata ? JSON.parse(row.archival_metadata) : undefined,
       ocrConfidence: row.ocr_confidence ?? undefined,
       notesText: row.notes_text ?? undefined,
+      longestNoteLength: row.longest_note_length ?? undefined,
       ocrPending: row.ocr_pending === 'poppler' ? 'poppler' : undefined,
     };
   }
@@ -2113,7 +2145,8 @@ export class PrimarySourcesVectorStore {
     minQualityScore: number | null;
     maxQualityScore: number | null;
     transcriptionLength: number;
-    notesLength: number;
+    /** Plus longue note Tropy de la source (G1) ; null : pas encore relue par la synchro. */
+    longestNoteLength: number | null;
   } | null {
     const source = this.getSource(sourceId);
     if (!source) return null;
@@ -2137,7 +2170,7 @@ export class PrimarySourcesVectorStore {
       minQualityScore: row.min_quality,
       maxQualityScore: row.max_quality,
       transcriptionLength: source.transcription?.length ?? 0,
-      notesLength: source.notesText?.length ?? 0,
+      longestNoteLength: source.longestNoteLength ?? null,
     };
   }
 
