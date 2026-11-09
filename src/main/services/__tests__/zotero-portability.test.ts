@@ -140,10 +140,8 @@ async function attach(project: string, citation: Citation, localPath: string): P
 async function downloadedThenSynchronized(): Promise<string> {
   const project = path.join(root, 'These');
   fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
-  fs.writeFileSync(
-    path.join(project, 'project.json'),
-    JSON.stringify({ name: 'Thèse', type: 'article', bibliographySource: { type: 'zotero', filePath: 'bibliography.bib', zoteroCollection: 'THESE' } })
-  );
+  // Un projet neuf : la première synchronisation crée son `.bib` et le nomme dans `project.json`.
+  fs.writeFileSync(path.join(project, 'project.json'), JSON.stringify({ name: 'Thèse', type: 'article' }));
   h.projectPath = project;
 
   expect(await synchronize(project)).toMatchObject({ success: true, status: 'applied', written: true });

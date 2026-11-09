@@ -129,10 +129,8 @@ const synchronize = () =>
 async function makeProject(): Promise<void> {
   project = path.join(root, `p-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(path.join(project, '.cliodeck'), { recursive: true });
-  fs.writeFileSync(
-    path.join(project, 'project.json'),
-    JSON.stringify({ name: 'Thèse', type: 'article', bibliographySource: { type: 'zotero', filePath: 'bibliography.bib', zoteroCollection: 'COLL' } })
-  );
+  // Un projet neuf : la première synchronisation crée son `.bib` et le nomme dans `project.json`.
+  fs.writeFileSync(path.join(project, 'project.json'), JSON.stringify({ name: 'Thèse', type: 'article' }));
   const { reading, release } = holdZotero([X]);
   const done = synchronize();
   await reading;
