@@ -36,7 +36,11 @@
   font-size: var(--font-size-lg);
 }
 
-.close-btn {
+/* .close-btn, .progress-bar et .btn-cancel sous :where(.pdf-export-modal) : propres
+   aux fenêtres d'export PDF et Word, sans changer leur spécificité. Sans portée, cette
+   feuille, chargée à la demande, retouchait ensuite les fenêtres qui portent ces
+   classes (la croix de la Méthodologie, l'« Annuler » de l'import BibTeX). */
+:where(.pdf-export-modal) .close-btn {
   background: transparent;
   border: none;
   color: var(--text-tertiary);
@@ -49,12 +53,12 @@
   transition: all var(--transition-normal);
 }
 
-.close-btn:hover:not(:disabled) {
+:where(.pdf-export-modal) .close-btn:hover:not(:disabled) {
   background-color: var(--bg-card);
   color: var(--text-primary);
 }
 
-.close-btn:disabled {
+:where(.pdf-export-modal) .close-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -168,7 +172,7 @@
   margin-bottom: var(--spacing-sm);
 }
 
-.progress-bar {
+:where(.pdf-export-modal) .progress-bar {
   height: 100%;
   background-color: var(--color-accent);
   transition: width var(--transition-slow) ease;
@@ -228,12 +232,12 @@
   gap: var(--spacing-sm);
 }
 
-.btn-cancel {
+:where(.pdf-export-modal) .btn-cancel {
   background-color: var(--bg-panel);
   color: var(--text-secondary);
 }
 
-.btn-cancel:hover:not(:disabled) {
+:where(.pdf-export-modal) .btn-cancel:hover:not(:disabled) {
   background-color: var(--bg-card-hover);
 }
 
@@ -248,7 +252,7 @@
 }
 
 .btn-export:disabled,
-.btn-cancel:disabled {
+:where(.pdf-export-modal) .btn-cancel:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

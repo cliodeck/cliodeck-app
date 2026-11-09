@@ -14,7 +14,11 @@
   border-bottom: 1px solid var(--border-color);
 }
 
-.stat-item {
+/* Sous :where(.primary-source-stats) : la règle ne touche plus que ce panneau, sans
+   changer sa spécificité. Sans portée, elle passait ensuite en capitales de 10 px les
+   étiquettes du récapitulatif d'un import BibTeX, et grossissait les chiffres de la
+   barre de statistiques de l'éditeur. */
+:where(.primary-source-stats) .stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -22,13 +26,13 @@
   color: var(--color-warning);
 }
 
-.stat-item .stat-value {
+:where(.primary-source-stats) .stat-item .stat-value {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.stat-item .stat-label {
+:where(.primary-source-stats) .stat-item .stat-label {
   font-size: 10px;
   color: var(--text-tertiary);
   text-transform: uppercase;

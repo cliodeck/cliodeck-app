@@ -35,7 +35,9 @@
   font-size: var(--font-size-lg);
 }
 
-.close-btn {
+/* Sous :where(.presentation-export-modal) : propres à cette fenêtre, sans changer leur
+   spécificité (cf. PDFExportModal.css). */
+:where(.presentation-export-modal) .close-btn {
   background: transparent;
   border: none;
   color: var(--text-tertiary);
@@ -48,12 +50,12 @@
   transition: all var(--transition-normal);
 }
 
-.close-btn:hover {
+:where(.presentation-export-modal) .close-btn:hover {
   background-color: var(--bg-card);
   color: var(--text-primary);
 }
 
-.close-btn:disabled {
+:where(.presentation-export-modal) .close-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -145,7 +147,7 @@
   margin-bottom: var(--spacing-sm);
 }
 
-.progress-bar {
+:where(.presentation-export-modal) .progress-bar {
   height: 100%;
   background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
   border-radius: var(--radius-sm);
@@ -201,16 +203,16 @@
   gap: var(--spacing-sm);
 }
 
-.btn-cancel {
+:where(.presentation-export-modal) .btn-cancel {
   background-color: var(--bg-panel);
   color: var(--text-secondary);
 }
 
-.btn-cancel:hover {
+:where(.presentation-export-modal) .btn-cancel:hover {
   background-color: var(--bg-card-hover);
 }
 
-.btn-cancel:disabled {
+:where(.presentation-export-modal) .btn-cancel:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

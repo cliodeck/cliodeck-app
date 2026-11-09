@@ -14,7 +14,7 @@
 }
 
 /* Règles scopées sous .document-stats : d'autres panneaux (PDFIndexPanel,
-   PrimarySourceStats…) définissent un .stat-item global en colonne qui
+   BibImportSummaryModal…) définissent un .stat-item global en colonne qui
    écraserait ces règles à spécificité égale — c'était la cause de la barre
    illisible (items sur deux lignes rognés dans 28 px). */
 .document-stats .stat-item {

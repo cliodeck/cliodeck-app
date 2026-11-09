@@ -50,7 +50,11 @@
   font-weight: 600;
 }
 
-.close-btn {
+/* .close-btn et .detail-section sous :where(.methodology-modal) : propres à cette
+   fenêtre, sans changer leur spécificité. Sans portée, cette feuille, chargée à la
+   demande, retouchait ensuite la croix des autres fenêtres (choix d'un PDF, exports,
+   « Signaler un problème ») et les sections du journal. */
+:where(.methodology-modal) .close-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -60,7 +64,7 @@
   transition: background-color var(--transition-normal);
 }
 
-.close-btn:hover {
+:where(.methodology-modal) .close-btn:hover {
   background-color: var(--bg-card-hover);
 }
 
@@ -251,11 +255,11 @@
   line-height: 1.6;
 }
 
-.detail-section {
+:where(.methodology-modal) .detail-section {
   margin-bottom: 2rem;
 }
 
-.detail-section h3 {
+:where(.methodology-modal) .detail-section h3 {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -264,13 +268,13 @@
   margin-bottom: 0.75rem;
 }
 
-.detail-section ul {
+:where(.methodology-modal) .detail-section ul {
   margin: 0;
   padding-left: 1.5rem;
   color: var(--text-secondary);
 }
 
-.detail-section li {
+:where(.methodology-modal) .detail-section li {
   margin-bottom: 0.5rem;
   line-height: 1.5;
 }

@@ -33,6 +33,10 @@ const entry = (id: string, title: string, author: string, year: string) =>
 interface Layout {
   projectJson: string;
   importBib: string;
+  /** Une autre référence : un second « Fusionner » donne un récapitulatif de même forme que le premier. */
+  importBib2: string;
+  /** Un projet dont le `.bib` ne se lit pas : l'import ouvre la variante « premier import ». */
+  badProjectJson: string;
   tpy: string;
 }
 
@@ -60,6 +64,25 @@ function makeLayout(): Layout {
   );
   const importBib = join(root, 'import.bib');
   writeFileSync(importBib, entry('leroy2018', 'Lire les registres', 'Leroy, Paul', '2018'));
+  const importBib2 = join(root, 'import-2.bib');
+  writeFileSync(importBib2, entry('morel2021', 'Les grèves de 1955', 'Morel, Jeanne', '2021'));
+  // Pas en UTF-8 : zéro référence lue, et le bandeau ; l'import passe alors par « Remplacer ».
+  const bad = join(root, 'Illisible');
+  mkdirSync(bad);
+  const badProjectJson = join(bad, 'project.json');
+  writeFileSync(
+    badProjectJson,
+    JSON.stringify({
+      id: '00000000-0000-4000-8000-0000000000d2',
+      name: 'Illisible',
+      type: 'article',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      bibliographySource: { type: 'file', filePath: 'refs.bib' },
+    }),
+  );
+  writeFileSync(join(bad, 'document.md'), '# Illisible\n\nUn autre paragraphe.\n');
+  writeFileSync(join(bad, 'refs.bib'), Buffer.from('@book{a,\n  title = {Histoire de l\u00e9t\u00e9},\n}\n', 'latin1'));
   const tropyDir = join(root, 'tropy');
   mkdirSync(tropyDir);
   const photo = join(tropyDir, 'rapport.jpg');
@@ -69,7 +92,7 @@ function makeLayout(): Layout {
     name: 'Grèves nantaises',
     items: [{ id: 10, title: 'Rapport du commissaire central', photos: [{ id: 11, path: photo }] }],
   });
-  return { projectJson, importBib, tpy };
+  return { projectJson, importBib, importBib2, badProjectJson, tpy };
 }
 
 /** Un faux Ollama sur un port local : rien ne part vers un vrai serveur. */
@@ -99,9 +122,9 @@ async function openProject(app: ElectronApplication, window: Page, layout: Layou
 }
 
 /** « Importer fichier BibTeX », le fichier choisi : une bibliographie déjà là passe par le choix. */
-async function openImportChoice(app: ElectronApplication, window: Page, layout: Layout): Promise<void> {
+async function openImportChoice(app: ElectronApplication, window: Page, layout: Layout, file = layout.importBib): Promise<void> {
   await window.locator('#left-tab-bibliography').click();
-  await choose(app, layout.importBib);
+  await choose(app, file);
   await window.locator('button[title="Importer fichier BibTeX"]').click();
   await expect(window.locator('.bib-import-mode-modal')).toBeVisible({ timeout: 10_000 });
 }
@@ -109,6 +132,12 @@ async function openImportChoice(app: ElectronApplication, window: Page, layout: 
 async function closeTop(window: Page, selector: string): Promise<void> {
   await window.keyboard.press('Escape');
   await expect(window.locator(selector)).toHaveCount(0, { timeout: 10_000 });
+}
+
+/** Le panneau Sources primaires, chargé à la demande, apporte ses feuilles de style. */
+async function openPrimarySources(window: Page): Promise<void> {
+  await window.locator('#left-tab-primary-sources').click();
+  await expect(window.locator('.primary-sources-panel')).toBeVisible({ timeout: 15_000 });
 }
 
 async function openMethodology(page: Page): Promise<void> {
@@ -147,6 +176,31 @@ function geometry(page: Page, box: string): Promise<Geometry> {
       bodyPadding: padding(content.querySelector(':scope > .modal-body')),
     };
   }, box);
+}
+
+/**
+ * Le style calculé de chaque élément sous `selector`, repéré par sa place et ses classes : ce
+ * qu'on en voit, sans le texte (un compteur qui passe de 3 à 4 ne change rien ici).
+ */
+function styleOf(page: Page, selector: string): Promise<Record<string, Record<string, string>>> {
+  return page.evaluate((sel) => {
+    const props = [
+      'display', 'flex-direction', 'align-items', 'gap', 'padding', 'margin', 'font-size', 'font-weight',
+      'text-transform', 'letter-spacing', 'color', 'background-color', 'border', 'border-radius', 'min-width',
+    ];
+    const out: Record<string, Record<string, string>> = {};
+    const walk = (el: Element, key: string): void => {
+      const cs = getComputedStyle(el);
+      out[key] = Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+      Array.from(el.children).forEach((child, i) => {
+        const cls = (child.getAttribute('class') ?? '').trim().split(/\s+/).filter(Boolean).join('.');
+        walk(child, `${key} > ${child.tagName.toLowerCase()}${cls ? `.${cls}` : ''}:${i}`);
+      });
+    };
+    const root = document.querySelector(sel);
+    if (root) walk(root, sel);
+    return out;
+  }, selector);
 }
 
 /** Au centre, sur un voile qui couvre toute la fenêtre de l'app, lisible en entier. */
@@ -250,6 +304,67 @@ test.describe('Fenêtres modales : la même allure dans tous les ordres', () => 
       await window.mouse.wheel(0, 600);
       await expect.poll(() => content.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBeGreaterThan(0);
       await closeTop(window, '.methodology-modal');
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('le récapitulatif d’un « Fusionner » et la barre de statistiques ont la même allure avant et après les Sources primaires', async () => {
+    test.setTimeout(120_000);
+    const layout = makeLayout();
+    const started = await start();
+    if (!started) return;
+    const { app, window } = started;
+    try {
+      await openProject(app, window, layout);
+      await expect(window.locator('.document-stats .stat-item').first()).toBeVisible({ timeout: 10_000 });
+      const statsBefore = await styleOf(window, '.document-stats');
+
+      await openImportChoice(app, window, layout);
+      await window.locator('.import-option-btn.merge-btn').click();
+      await expect(window.locator('.bib-import-summary-modal')).toBeVisible({ timeout: 10_000 });
+      const before = await styleOf(window, '.bib-import-summary-modal');
+      expect(Object.keys(before).some((k) => k.includes('.stat-label'))).toBe(true);
+      await closeTop(window, '.bib-import-summary-modal');
+
+      // Leur feuille posait `.stat-item .stat-label` (capitales de 10 px), `.stat-item .stat-value`
+      // (20 px) et `.btn-primary` (orange de l'OCR) sans portée : tout ce qui portait ces classes
+      // changeait d'allure, jusqu'aux chiffres de la barre de l'éditeur, grossis et rognés.
+      await openPrimarySources(window);
+      expect(await styleOf(window, '.document-stats')).toEqual(statsBefore);
+
+      await openImportChoice(app, window, layout, layout.importBib2);
+      await window.locator('.import-option-btn.merge-btn').click();
+      await expect(window.locator('.bib-import-summary-modal')).toBeVisible({ timeout: 10_000 });
+      expect(await styleOf(window, '.bib-import-summary-modal')).toEqual(before);
+      await closeTop(window, '.bib-import-summary-modal');
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('variante « premier import » : « Remplacer » et « Annuler » ont la même allure avant et après les Sources primaires', async () => {
+    test.setTimeout(120_000);
+    const layout = makeLayout();
+    const started = await start();
+    if (!started) return;
+    const { app, window } = started;
+    try {
+      await window.locator('#left-tab-projects').click();
+      await choose(app, layout.badProjectJson);
+      await window.locator('button[title="Ouvrir un projet"]').first().click();
+      await expect(window.locator('.codemirror-editor .cm-content')).toContainText('Un autre paragraphe', { timeout: 20_000 });
+
+      await openImportChoice(app, window, layout);
+      await expect(window.locator('.bib-import-mode-modal .modal-actions .btn-primary')).toBeVisible();
+      const before = await styleOf(window, '.bib-import-mode-modal');
+      await closeTop(window, '.bib-import-mode-modal');
+
+      await openPrimarySources(window);
+      await openImportChoice(app, window, layout);
+      await expect(window.locator('.bib-import-mode-modal .modal-actions .btn-primary')).toBeVisible();
+      expect(await styleOf(window, '.bib-import-mode-modal')).toEqual(before);
+      await closeTop(window, '.bib-import-mode-modal');
     } finally {
       await app.close();
     }
