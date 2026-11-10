@@ -224,6 +224,47 @@ describe('changer seulement la génération (A3)', () => {
     expect(state.indexers).toHaveLength(1);
   });
 
+  it('pendant une indexation : décocher le raisonnement puis changer de modèle de chat ne l’attendent pas et n’y touchent pas (S16-2-1)', async () => {
+    // Le scénario du défaut : un gros PDF s'indexe, et l'historien règle le chat dans son panneau.
+    // `config:set('llm')` appelait `init`, qui attendait l'indexation 30 s puis fermait le magasin sous elle.
+    let finish = (_value: { id: string }): void => undefined;
+    state.indexers[0].indexPDF.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const embedding = state.indexers[0].embeddingProvider as FakeEmbedding;
+    const init = vi.spyOn(pdfService, 'init');
+    const job = pdfService.indexPDF('/projet/gros.pdf');
+
+    // Les deux réglages répondent avant la fin de l'indexation : rien ne l'a attendue.
+    await expect(handlers.get('config:set')?.({}, 'llm', { ...state.llm, ollamaThink: false })).resolves.toEqual({
+      success: true,
+    });
+    await expect(
+      handlers.get('config:set')?.({}, 'llm', { ...state.llm, ollamaChatModel: 'qwen3:8b' })
+    ).resolves.toEqual({ success: true });
+
+    expect(init).not.toHaveBeenCalled();
+    expect(state.store.close).not.toHaveBeenCalled();
+    expect(state.indexers).toHaveLength(1);
+    expect(embedding.dispose).not.toHaveBeenCalled();
+
+    finish({ id: 'gros' });
+    await expect(job).resolves.toEqual({ id: 'gros' });
+  });
+
+  it('réenregistrer la même configuration ne refait aucun fournisseur', async () => {
+    const builtBefore = state.built;
+
+    await expect(handlers.get('config:set')?.({}, 'llm', { ...state.llm })).resolves.toEqual({ success: true });
+
+    expect(state.built).toBe(builtBefore);
+    expect(state.store.close).not.toHaveBeenCalled();
+    expect(state.indexers).toHaveLength(1);
+  });
+
   it('les embeddings changent par config:set : magasin gardé, indexeur refait', async () => {
     await handlers.get('config:set')?.({}, 'llm', { ...state.llm, ollamaEmbeddingModel: 'bge-m3' });
 

@@ -62,7 +62,13 @@ vi.mock('../pdf/PdfVectorStore.js', () => ({
 vi.mock('../pdf/PdfIndexer.js', () => ({
   PdfIndexer: class {
     vectorStore: unknown;
-    indexPDF = vi.fn(async () => ({ id: 'doc' }));
+    // Comme le vrai : un indexeur dont le magasin est fermé écrit sur une base fermée.
+    indexPDF = vi.fn(async () => {
+      if ((this.vectorStore as { closed?: boolean }).closed) {
+        throw new TypeError('The database connection is not open');
+      }
+      return { id: 'doc' };
+    });
     constructor(deps: { vectorStore: unknown }) {
       this.vectorStore = deps.vectorStore;
       state.indexers.push(this);
@@ -296,5 +302,56 @@ describe('la reconstruction programmée et la fermeture', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * `init` n'était pas transactionnel (S03-1-19) : le nouveau magasin était publié avant l'attente de son
+ * index, avec l'ancien indexeur, branché sur le magasin fermé. Garde-fous : le magasin ne s'installe
+ * qu'une fois prêt (#273), et un échec remet tout à null (#222, cas « le nouveau magasin ne s'ouvre
+ * pas » plus haut).
+ */
+describe('pendant l’ouverture de B (S03-1-19)', () => {
+  it('une indexation dit « not initialized », jamais « database connection is not open »', async () => {
+    await pdfService.init('/projet-a');
+    let finishB!: () => void;
+    state.create.mockImplementationOnce(() => ({
+      store: openStore(),
+      useEnhanced: true,
+      initPromise: new Promise<void>((resolve) => {
+        finishB = resolve;
+      }),
+    }));
+    const openingB = pdfService.init('/projet-b');
+    await new Promise((r) => setImmediate(r));
+
+    await expect(pdfService.indexPDF('/projet-b/a.pdf')).rejects.toThrow(/not initialized/);
+    await expect(pdfService.getAllDocuments()).rejects.toThrow(/not initialized/);
+
+    finishB();
+    await openingB;
+    await expect(pdfService.indexPDF('/projet-b/a.pdf')).resolves.toEqual({ id: 'doc' });
+    expect(state.indexers.at(-1)?.vectorStore).toBe(state.stores[1]);
+  });
+});
+
+/**
+ * La fiche voulait qu'un registre qui ne se construit plus laisse A « utilisable ». La règle de L04-2
+ * l'emporte : un registre en échec libère tout, l'indexeur compris (il tiendrait un fournisseur
+ * libéré). A reste ouvert et lisible ; seule l'indexation refuse, en disant pourquoi.
+ */
+describe('A ouvert, puis une configuration qui ne se construit plus', () => {
+  it('les lectures restent, l’indexation dit pourquoi elle refuse', async () => {
+    await pdfService.init('/projet');
+    state.llm = { backend: 'claude', claudeModel: 'claude-sonnet-4-6' };
+
+    await expect(pdfService.refreshProviders({ embeddingChanged: true })).rejects.toThrow(/claudeAPIKey/);
+
+    expect(state.stores[0].closed).toBe(false);
+    expect(pdfService.getCurrentProjectPath()).toBe('/projet');
+    await expect(pdfService.getAllDocuments()).resolves.toEqual([]);
+    await expect(pdfService.indexPDF('/projet/a.pdf')).rejects.toThrow(
+      /Fournisseur d'embeddings indisponible : Anthropic backend selected but no claudeAPIKey/
+    );
   });
 });
