@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, RefreshCw, Trash2, Play } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { refusedAsProjectChanged } from '../../services/still-in-project';
 
 interface ClientInstance {
   name: string;
@@ -134,7 +135,10 @@ export const MCPClientsSection: React.FC = () => {
         setShowForm(false);
         await refresh();
       } else {
-        setError(res.error ?? t('mcp.errors.addFailed'));
+        // Un autre projet ouvert pendant l'ajout : une phrase, jamais le code du refus.
+        setError(
+          refusedAsProjectChanged(res) ? t('hints.reasons.projectChanged') : (res.error ?? t('mcp.errors.addFailed'))
+        );
       }
     } finally {
       setBusy(false);
@@ -149,7 +153,10 @@ export const MCPClientsSection: React.FC = () => {
       try {
         const res = await a.remove(name);
         if (res.success) await refresh();
-        else setError(res.error ?? t('mcp.errors.removeFailed'));
+        else
+          setError(
+            refusedAsProjectChanged(res) ? t('hints.reasons.projectChanged') : (res.error ?? t('mcp.errors.removeFailed'))
+          );
       } finally {
         setBusy(false);
       }

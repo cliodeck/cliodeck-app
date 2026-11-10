@@ -6,7 +6,7 @@
  * Ces tests exercent le service réel sur un workspace temporaire, en
  * remplaçant seulement la décision d'approbation.
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -80,6 +80,35 @@ describe('loadProject — garde d’approbation des serveurs MCP', () => {
     await mcpClientsService.loadProject(root);
 
     expect(seen).toEqual(['europeana', 'helper']);
+  });
+
+  it('A attend son approbation, B s’ouvre, puis A est approuvé : rien de A ne démarre, ni dans B', async () => {
+    // Commandes absentes : lancées par erreur, elles échoueraient vite, sans réseau.
+    root = await makeWorkspace([{ name: 'serveur-de-A', transport: 'stdio', command: '/nonexistent/mcp-a' }]);
+    const rootB = await makeWorkspace([{ name: 'serveur-de-B', transport: 'stdio', command: '/nonexistent/mcp-b' }]);
+    const events: string[] = [];
+    const unsubscribe = mcpClientsService.subscribe((e) => events.push(e.name));
+    let approveA!: () => void;
+    const asked: string[] = [];
+    mcpClientsService.approvalGate = (client) => {
+      asked.push(client.name);
+      if (client.name !== 'serveur-de-A') return Promise.resolve('approved');
+      return new Promise((resolve) => (approveA = () => resolve('approved')));
+    };
+
+    try {
+      const loadingA = mcpClientsService.loadProject(root);
+      await vi.waitFor(() => expect(asked).toEqual(['serveur-de-A']));
+      await mcpClientsService.loadProject(rootB);
+      approveA();
+      await loadingA;
+
+      expect(mcpClientsService.list().map((c) => c.name)).toEqual(['serveur-de-B']);
+      expect(events).not.toContain('serveur-de-A');
+    } finally {
+      unsubscribe();
+      await fs.rm(rootB, { recursive: true, force: true });
+    }
   });
 
   it('ne démarre que les serveurs approuvés, pas les autres', async () => {
