@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'os';
 import path from 'path';
 import { symlinkAvailable } from '../../../__tests__/helpers/native-guards';
-import { fileIdentity, groupByFile, isInside, isInsideAsync, mayBeSameFile, sameFile } from '../file-identity';
+import { fileIdentity, groupByFile, isInside, isInsideAsync, mayBeSameFile, sameFile, sameFileKey } from '../file-identity';
 
 /** Disque insensible à la casse : un seul fichier, enregistré sous cette casse-là. */
 const ON_DISK = '/projet/PDFs/Hughes‐Warrington_-_2025_-_ETHICS_FOR_ARTIFICIAL_HISTORIANS.pdf';
@@ -88,6 +88,14 @@ describe('sameFile, sans disque', () => {
 
   it.skipIf(process.platform === 'win32')('POSIX : une barre oblique inverse fait partie du nom', () => {
     expect(sameFile('/projet/a\\b.md', '/projet/a/b.md', noDisk)).toBe(false);
+  });
+
+  it('sameFileKey est ce que sameFile compare : relevée une fois, elle se compare sans le disque', () => {
+    const ailleurs = ON_DISK.replace('ETHICS_FOR_ARTIFICIAL_HISTORIANS', 'Ethics_for_artificial_historians');
+    expect(sameFileKey(ailleurs, caseInsensitiveDisk)).toBe(sameFileKey(ON_DISK, caseInsensitiveDisk));
+    expect(sameFileKey('/projet/annot\u00e9.pdf', noDisk)).toBe(sameFileKey('/projet/annote\u0301.pdf', noDisk));
+    expect(sameFileKey('C:\\Projet\\01.md', noDisk)).toBe(sameFileKey('c:/projet/01.md', noDisk));
+    expect(sameFileKey('/projet/A.pdf', noDisk)).not.toBe(sameFileKey('/projet/B.pdf', noDisk));
   });
 });
 
