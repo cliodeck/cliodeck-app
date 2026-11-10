@@ -303,6 +303,86 @@ describe('la reconstruction programmée et la fermeture', () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * Toute indexation programme une reconstruction quand elle finit. Celle qui finit pendant la
+   * fermeture, attendue par elle, la programmait après l'annulation du minuteur : elle partait sur le
+   * magasin de B. Celle qui survit au délai de la fermeture la programmait une fois B installé.
+   */
+  function holdIndexing(): { finish: () => void } {
+    const indexer = state.indexers.at(-1)!;
+    const held = { finish: () => undefined as void };
+    indexer.indexPDF.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          held.finish = () => resolve({ id: 'doc' });
+        })
+    );
+    return held;
+  }
+
+  const callsOn = (store: FakeStore): number => state.maybeRebuild.mock.calls.filter(([s]) => s === store).length;
+
+  it('une indexation qui finit pendant la fermeture ne programme rien sur le magasin suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      held.finish();
+      await indexing;
+      await closing;
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ouvrir B sans fermer A d’abord : le minuteur de A ne part ni sur A fermé ni sur B', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pdfService.deleteDocument('doc');
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeA)).toBe(1);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('une indexation qui survit au délai de la fermeture ne programme rien sur le magasin suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      // La fermeture n'attend pas plus de 30 s : elle ferme A, l'indexation court toujours.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await closing;
+      await pdfService.init('/projet-b');
+      held.finish();
+      await indexing;
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**
