@@ -14,6 +14,7 @@ import {
 } from '../../stores/ragQueryStore';
 import { useWorkspaceModeStore } from '../../stores/workspaceModeStore';
 import { useModeStore } from '../../stores/modeStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { CollectionMultiSelect } from './CollectionMultiSelect';
 import { DocumentMultiSelect } from './DocumentMultiSelect';
 import {
@@ -326,19 +327,23 @@ export const RAGSettingsPanel: React.FC = () => {
     loadAvailableDocuments();
   };
 
+  // Le projet ouvert : ses listes sont vidées quand l'écran passe à un autre (registre du projet),
+  // et le panneau resté ouvert les relit pour lui (S15-1-10).
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
+
   // Load collections when panel opens (if not already loaded)
   useEffect(() => {
     if (isSettingsPanelOpen && availableCollections.length === 0 && !isLoadingCollections) {
       loadAvailableCollections();
     }
-  }, [isSettingsPanelOpen]);
+  }, [isSettingsPanelOpen, projectPath]);
 
   // Issue #16: Load documents when panel opens (if not already loaded)
   useEffect(() => {
     if (isSettingsPanelOpen && availableDocuments.length === 0 && !isLoadingDocuments) {
       loadAvailableDocuments();
     }
-  }, [isSettingsPanelOpen]);
+  }, [isSettingsPanelOpen, projectPath]);
 
   return (
     <div className="rag-settings-panel">

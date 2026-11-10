@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useChatStore } from '../chatStore';
+import { projectLifecycle } from '../../lifecycle/projectLifecycle';
 
 beforeEach(() => {
   useChatStore.getState().reset();
@@ -88,5 +89,39 @@ describe('chatStore.appendThinking', () => {
     const m = useChatStore.getState().messages.find((x) => x.id === aId);
     expect(m?.thinking).toBe('Je réfléchis.');
     expect(m?.content).toBe('Réponse.');
+  });
+});
+
+/**
+ * La conversation appartient au projet où elle a eu lieu (S16-1-22, décision Q11) : ouvrir un autre
+ * projet la vide à l'écran, sans quoi elle repartait en historique dans les tours du suivant, et ses
+ * sources s'ouvraient dans ses fichiers. Les réglages du chat, eux, restent.
+ */
+describe('chatStore — changement de projet', () => {
+  it('après enter(B) : messages vides, tour en cours oublié, réglages conservés', () => {
+    projectLifecycle.enter('/projets/A');
+    const s = useChatStore.getState();
+    s.setChatSettings({ modeId: 'free-mode', retrieval: { topK: 7 } });
+    s.appendUser('Qui était le préfet en 1934 ?');
+    s.beginAssistant('session-de-A');
+
+    projectLifecycle.beginTransition();
+    projectLifecycle.enter('/projets/B');
+
+    const after = useChatStore.getState();
+    expect(after.messages).toEqual([]);
+    expect(after.sessionId).toBeNull();
+    expect(after.pendingAssistantId).toBeNull();
+    expect(after.chatSettings).toEqual({ modeId: 'free-mode', retrieval: { topK: 7 } });
+  });
+
+  it('le même projet rouvert garde la conversation', () => {
+    projectLifecycle.enter('/projets/A');
+    useChatStore.getState().appendUser('Une question');
+
+    projectLifecycle.beginTransition();
+    projectLifecycle.enter('/projets/A');
+
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['Une question']);
   });
 });

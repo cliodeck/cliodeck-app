@@ -9,14 +9,16 @@
  * se lit), et une lecture lancée pour A qui répond après le passage à B ne
  * réécrit rien.
  *
- * Vrais panneau et store ; le main est simulé par projet : chaque appel répond
- * ce que le main servait au moment où il l'a reçu.
+ * Vrais panneau, store et registre du projet (qui vide le store depuis L03-4) ;
+ * le main est simulé par projet : chaque appel répond ce que le main servait au
+ * moment où il l'a reçu.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PrimarySourcesPanel } from '../PrimarySourcesPanel';
 import { usePrimarySourcesStore } from '../../../stores/primarySourcesStore';
 import { useProjectStore } from '../../../stores/projectStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 type MainProject = 'A' | 'B';
 type Channel = 'getProjectInfo' | 'getAllSources' | 'getStatistics';
@@ -90,12 +92,17 @@ const answered = (channel: Channel, p: MainProject, since = 0) =>
 
 const INITIAL_STORE = usePrimarySourcesStore.getState();
 
+/** Le projet à l'écran, comme le pose `projectStore` : le registre d'abord, puis le store. */
+function show(p: MainProject | null): void {
+  projectLifecycle.enter(p ? project(p).path : null);
+  useProjectStore.setState({ currentProject: p ? project(p) : null });
+}
+
 /** Le main bascule sur B, puis le renderer, comme `project:load` puis `projectStore`. */
 async function switchTo(p: MainProject): Promise<void> {
+  projectLifecycle.beginTransition();
   served = p;
-  await act(async () => {
-    useProjectStore.setState({ currentProject: project(p) });
-  });
+  await act(async () => show(p));
 }
 
 beforeEach(() => {
@@ -112,13 +119,13 @@ beforeEach(() => {
     getOCRLanguages: vi.fn(async () => ({ success: true, languages: [] })),
     onSyncProgress: vi.fn(() => () => undefined),
   };
-  useProjectStore.setState({ currentProject: project('A') });
+  show('A');
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  useProjectStore.setState({ currentProject: null });
+  show(null);
   usePrimarySourcesStore.setState(INITIAL_STORE, true);
 });
 
@@ -199,7 +206,7 @@ describe('PrimarySourcesPanel — changement de projet ClioDeck', () => {
   it('un projet lié à Tropy en cours de session : quitter l’onglet et y revenir garde aussi la recherche et le filtre', async () => {
     // B s'ouvre sans Tropy : la lecture de son projet Tropy répond info:null.
     served = 'B';
-    useProjectStore.setState({ currentProject: project('B') });
+    show('B');
     const first = render(<PrimarySourcesPanel />);
     expect(await screen.findByText('No Tropy Project')).toBeInTheDocument();
 

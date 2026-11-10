@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { create, type StoreApi } from 'zustand';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // ============================================================================
 // Types & Interfaces
@@ -135,12 +136,8 @@ interface JournalState {
   loadAllProjectData: () => Promise<void>;
 }
 
-// ============================================================================
-// Store Implementation
-// ============================================================================
-
-export const useJournalStore = create<JournalState>((set, get) => ({
-  // Initial state
+/** Ce qui appartient au projet ouvert : vidé quand l'écran passe à un autre (S17-1-9). */
+const EMPTY_PROJECT_JOURNAL = {
   sessions: [],
   selectedSession: null,
   events: [],
@@ -152,15 +149,44 @@ export const useJournalStore = create<JournalState>((set, get) => ({
   allChatMessages: [],
   loading: false,
   error: null,
+  filters: {},
+} satisfies Partial<JournalState>;
+
+/** Les lectures qui allument l'indicateur de chargement : seule la dernière partie l'éteint. */
+let loadingReads = 0;
+
+/**
+ * Une lecture du journal, partie dans le projet à l'écran. Rend la question à poser après chaque
+ * attente : son projet a-t-il quitté l'écran ? Sa réponse ne s'inscrit alors pas, ni dans l'autre
+ * projet, ni dans celui d'avant revenu après un échec (le main a pu la servir pendant la tentative).
+ */
+function beginRead(set: StoreApi<JournalState>['setState'], showsLoading: boolean): () => boolean {
+  const read = showsLoading ? ++loadingReads : 0;
+  const handle = projectLifecycle.capture();
+  return () => {
+    if (handle?.isCurrent()) return false;
+    if (showsLoading && read === loadingReads) set({ loading: false });
+    return true;
+  };
+}
+
+// ============================================================================
+// Store Implementation
+// ============================================================================
+
+export const useJournalStore = create<JournalState>((set, get) => ({
+  // Initial state
+  ...EMPTY_PROJECT_JOURNAL,
   hideEmptySessions: true,  // Hide empty sessions by default
   viewScope: 'session',
-  filters: {},
 
   // Load all sessions
   loadSessions: async () => {
+    const stale = beginRead(set, true);
     set({ loading: true, error: null });
     try {
       const result = await window.electron.history.getSessions();
+      if (stale()) return;
       if (result.success) {
         // Parse dates
         const sessions = result.sessions.map((s: RawSession): Session => ({
@@ -173,6 +199,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         set({ error: result.error, loading: false });
       }
     } catch (error) {
+      if (stale()) return;
       set({ error: errMsg(error), loading: false });
     }
   },
@@ -220,9 +247,11 @@ export const useJournalStore = create<JournalState>((set, get) => ({
 
   // Load events for a session
   loadEvents: async (sessionId: string) => {
+    const stale = beginRead(set, true);
     set({ loading: true });
     try {
       const result = await window.electron.history.getEvents(sessionId);
+      if (stale()) return;
       if (result.success) {
         // Parse dates
         const events = result.events.map(
@@ -236,14 +265,17 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         set({ error: result.error, loading: false });
       }
     } catch (error) {
+      if (stale()) return;
       set({ error: errMsg(error), loading: false });
     }
   },
 
   // Load AI operations for a session
   loadAIOperations: async (sessionId: string) => {
+    const stale = beginRead(set, false);
     try {
       const result = await window.electron.history.getAIOperations(sessionId);
+      if (stale()) return;
       if (result.success) {
         // Parse dates
         const operations = result.operations.map(
@@ -261,8 +293,10 @@ export const useJournalStore = create<JournalState>((set, get) => ({
 
   // Load chat history for a session
   loadChatHistory: async (sessionId: string) => {
+    const stale = beginRead(set, false);
     try {
       const result = await window.electron.history.getChatHistory(sessionId);
+      if (stale()) return;
       if (result.success) {
         // Parse dates
         const messages = result.messages.map(
@@ -280,8 +314,10 @@ export const useJournalStore = create<JournalState>((set, get) => ({
 
   // Load statistics
   loadStatistics: async () => {
+    const stale = beginRead(set, false);
     try {
       const result = await window.electron.history.getStatistics();
+      if (stale()) return;
       if (result.success) {
         set({ statistics: result.statistics });
       }
@@ -325,9 +361,11 @@ export const useJournalStore = create<JournalState>((set, get) => ({
 
   // Search events with filters
   searchEvents: async () => {
+    const stale = beginRead(set, true);
     set({ loading: true });
     try {
       const result = await window.electron.history.searchEvents(get().filters);
+      if (stale()) return;
       if (result.success) {
         // Parse dates
         const events = result.events.map(
@@ -341,6 +379,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         set({ error: result.error, loading: false });
       }
     } catch (error) {
+      if (stale()) return;
       set({ error: errMsg(error), loading: false });
     }
   },
@@ -365,6 +404,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
 
   // Load all project data (all sessions aggregated)
   loadAllProjectData: async () => {
+    const stale = beginRead(set, true);
     set({ loading: true });
     try {
       const [eventsResult, aiOpsResult, chatResult] = await Promise.all([
@@ -372,6 +412,7 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         window.electron.history.getAllAIOperations(),
         window.electron.history.getAllChatMessages(),
       ]);
+      if (stale()) return;
 
       const allEvents: HistoryEvent[] = eventsResult.success
         ? eventsResult.events.map((e: RawHistoryEvent) => ({
@@ -401,7 +442,12 @@ export const useJournalStore = create<JournalState>((set, get) => ({
         loading: false,
       });
     } catch (error) {
+      if (stale()) return;
       set({ error: errMsg(error), loading: false });
     }
   },
 }));
+
+// Les sessions, la session sélectionnée et ce qu'elle montre appartiennent au projet : le panneau du
+// projet suivant les affichait sous son nom (S17-1-9). Les préférences d'affichage restent.
+projectLifecycle.onReset('journal', () => useJournalStore.setState({ ...EMPTY_PROJECT_JOURNAL }));

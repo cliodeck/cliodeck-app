@@ -26,7 +26,9 @@ export const SECTION_NAMES: readonly SectionName[] = ['rag', 'llm', 'editor', 'z
 /**
  * Sections écrites mais non appliquées au projet ouvert : le prochain Enregistrer retente, même sans
  * rien à écrire. Hors du montage : la modale démonte le panneau à la fermeture, et les services,
- * eux, restent à l'arrêt. Une relance de trop après un changement de projet est sans conséquence.
+ * eux, restent à l'arrêt. Une relance de trop après un changement de projet est sans conséquence :
+ * hors du registre du projet (L03-4), elle refait aussi les fournisseurs du projet suivant s'ils
+ * manquent à son tour.
  */
 export const notApplied = new Set<SectionName>();
 

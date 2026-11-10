@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { TropySyncIssue } from '@backend/integrations/tropy/TropySync';
 import { transcriptionSourceOfFormat } from '@backend/integrations/tropy/transcription-provenance';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types
 
@@ -149,19 +150,11 @@ interface PrimarySourcesState {
   availableOCRLanguages: Array<{ code: string; name: string }>;
 
   /**
-   * Le projet ClioDeck dont le store tient l'état. Seul le panneau, qui sait
-   * quel projet est ouvert, l'écrit ; `reset` n'y touche pas.
-   */
-  loadedFor: string | null;
-
-  /**
    * Rend l'état initial : rien du projet ClioDeck précédent ne reste (S18-1-30),
    * et une lecture lancée avant ne réécrit plus rien. Ne touche ni aux opérations
    * en vol (`isSyncing`, OCR), que leur propre fin referme, ni aux réglages de
-   * l'application (langue OCR, langues disponibles), ni à `loadedFor` : vidé
-   * pour un projet sans Tropy ou après une purge, l'état reste celui du projet
-   * ouvert, et le panneau ne doit pas, à son retour, y voir un autre projet et
-   * vider la recherche et le filtre choisis depuis.
+   * l'application (langue OCR, langues disponibles). Appelé au changement de
+   * projet (registre du projet), pour un projet sans Tropy et après une purge.
    */
   reset: () => void;
 
@@ -261,7 +254,6 @@ let generation = 0;
 export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => ({
   // Initial state
   ...EMPTY_PROJECT_STATE,
-  loadedFor: null,
   transcriptionRevision: 0,
   isSyncing: false,
   syncProgress: null,
@@ -694,3 +686,8 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     }
   },
 }));
+
+// Le projet Tropy lié, ses sources et les filtres appartiennent au projet ClioDeck : vidés à chaque
+// changement de projet, panneau monté ou non (S18-1-30, A36). Le panneau le découvrait à son
+// montage ; il n'a plus qu'à lire le projet entrant.
+projectLifecycle.onReset('primarySources', () => usePrimarySourcesStore.getState().reset());

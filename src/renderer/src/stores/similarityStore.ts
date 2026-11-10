@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand';
 import { logger } from '../utils/logger';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types
 
@@ -119,6 +120,9 @@ const DEFAULT_PROGRESS: AnalysisProgress = {
   percentage: 0,
 };
 
+/** Les analyses lancées : seule la dernière met fin à l'attente quand son projet a quitté l'écran. */
+let analyses = 0;
+
 // MARK: - Store
 
 export const useSimilarityStore = create<SimilarityState>((set, get) => ({
@@ -135,6 +139,16 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
   analyze: async (text: string) => {
     logger.store('Similarity', 'Starting analysis', { textLength: text.length });
     const { options } = get();
+    // L'analyse vaut pour le projet où elle est partie : ni sa progression, ni ses résultats, ni son
+    // échec ne s'affichent dans un autre (S18-1-25). Si elle est la dernière partie, elle met
+    // seulement fin à l'attente, pour le projet d'avant revenu après un échec.
+    const analysis = ++analyses;
+    const handle = projectLifecycle.capture();
+    const stale = (): boolean => {
+      if (handle?.isCurrent()) return false;
+      if (analysis === analyses) set({ isAnalyzing: false, progress: DEFAULT_PROGRESS });
+      return true;
+    };
 
     set({
       isAnalyzing: true,
@@ -145,6 +159,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
     try {
       // Setup progress listener
       const removeListener = window.electron.similarity.onProgress((progress) => {
+        if (!handle?.isCurrent()) return;
         logger.store('Similarity', 'Progress update', progress);
         set({ progress });
       });
@@ -156,6 +171,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
 
       // Remove listener
       removeListener();
+      if (stale()) return;
 
       if (result.success && result.results) {
         // Convert array to Map
@@ -186,6 +202,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
       }
     } catch (error) {
       logger.error('Similarity', error);
+      if (stale()) return;
       set({
         isAnalyzing: false,
         error:
@@ -254,8 +271,11 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
 
   loadCachedResults: async () => {
     logger.store('Similarity', 'Loading cached results');
+    const handle = projectLifecycle.capture();
     try {
       const result = await window.electron.similarity.getAllResults();
+      // Le cache d'un projet qui n'est plus à l'écran : ses segments et ses clés n'ont rien à faire ici.
+      if (!handle?.isCurrent()) return;
 
       if (result.success && result.results) {
         const resultsMap = new Map<string, SimilarityResult>();
@@ -280,6 +300,26 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
     set({ error });
   },
 }));
+
+// Le filtre de collections désigne des clés Zotero du projet, et les résultats ses segments et ses
+// références : dans un autre projet, le filtre ne laissait passer aucune recommandation, sans être
+// visible, et « Insérer la citation » y mettait les clés du précédent (S18-1-25). Une analyse en vol
+// appartient au projet quitté : elle s'arrête. Les autres options ne dépendent pas du projet.
+projectLifecycle.onReset('similarity', () => {
+  if (useSimilarityStore.getState().isAnalyzing) {
+    void Promise.resolve()
+      .then(() => window.electron.similarity.cancel())
+      .catch((error: unknown) => logger.error('Similarity', 'Cancel on project change failed', error));
+  }
+  useSimilarityStore.setState((state) => ({
+    results: new Map(),
+    selectedSegmentId: null,
+    isAnalyzing: false,
+    progress: DEFAULT_PROGRESS,
+    error: null,
+    options: { ...state.options, collectionFilter: null },
+  }));
+});
 
 // MARK: - Selectors
 

@@ -71,18 +71,8 @@ export const PrimarySourcesPanel: React.FC = () => {
 
   // Load project info and sources when project changes
   useEffect(() => {
-    // Un autre projet que celui dont le store tient l'état : rien de l'ancien
-    // ne doit s'afficher pendant la lecture, ni être réécrit par une lecture
-    // lancée pour lui (S18-1-30). La remise à zéro précède donc la lecture.
-    // Le panneau est démonté pendant un changement de projet fait depuis
-    // l'onglet Projets : c'est à son montage qu'il le découvre.
-    const projectPath = currentProject?.path ?? null;
-    const store = usePrimarySourcesStore.getState();
-    if (store.loadedFor !== projectPath) {
-      store.reset();
-      usePrimarySourcesStore.setState({ loadedFor: projectPath });
-    }
-
+    // Rien du projet d'avant n'est plus dans le store, ni ne s'y réécrira (S18-1-30) : le registre
+    // du projet l'a vidé au changement, panneau monté ou non (`primarySourcesStore`).
     const loadData = async () => {
       if (currentProject) {
         // D'abord récupérer les infos du projet Tropy (restaure tpyPath et projectInfo)

@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { X, Settings, Trash2, RefreshCw, AlertTriangle, Search } from 'lucide-react';
 import { useSimilarityStore, useAllSegments, useHasResults, useTotalRecommendations } from '../../stores/similarityStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { SimilarityProgress } from './SimilarityProgress';
 import { SimilarityResults } from './SimilarityResults';
 import { SimilarityOptions } from './SimilarityOptions';
@@ -36,12 +37,14 @@ export const SimilarityPanel: React.FC = () => {
 
   const [showOptions, setShowOptions] = React.useState(false);
 
-  // Load cached results on mount
+  // Le cache du projet ouvert : à l'ouverture du panneau, et quand l'écran passe à un autre projet,
+  // dont le registre a vidé les résultats (S18-1-25).
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   useEffect(() => {
     if (isPanelOpen) {
       loadCachedResults();
     }
-  }, [isPanelOpen, loadCachedResults]);
+  }, [isPanelOpen, loadCachedResults, projectPath]);
 
   // Don't render if panel is closed
   if (!isPanelOpen) {

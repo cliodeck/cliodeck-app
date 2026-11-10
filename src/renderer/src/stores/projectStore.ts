@@ -12,6 +12,7 @@ import { useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
 import { openFailureKey } from '../components/Project/open-failure';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types
 
@@ -29,6 +30,8 @@ export interface Project {
   // `bibliographySource` by `project-manager.ts` at load time. Optional
   // because older / freshly-created projects may not have one yet.
   bibliography?: string;
+  /** Le `.bib` du projet, relatif à son dossier, tel que `project.json` le range. */
+  bibliographySource?: { filePath?: string };
 }
 
 /**
@@ -257,6 +260,18 @@ async function reopenAfterFailedSwitch(
   await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
+/**
+ * Le main a refusé le projet demandé, et celui d'avant est revenu (`restoredPath`). Ses stores n'ont
+ * rien perdu, mais le main a fermé puis rouvert ses services, et oublié sa bibliographie : le
+ * renderer la lui renvoie. Une réponse partie pour lui pendant la tentative, que le registre a
+ * ignorée, ne revient pas d'elle-même : son panneau garde ce qu'il montrait avant elle.
+ */
+async function restorePreviousProject(previous: Project | null, shown: () => Project | null): Promise<void> {
+  projectLifecycle.abortTransition();
+  // Fermé d'office pendant la demande (`project:closed`) : il n'est plus à l'écran, rien à lui rendre.
+  if (previous && shown()?.path === previous.path) await loadProjectBibliography(previous);
+}
+
 let documentNotOpenedNotice: string | null = null;
 let stopWatchingEditor: (() => void) | null = null;
 let ideasNotWrittenNotice: string | null = null;
@@ -318,68 +333,18 @@ function dismissDocumentNotOpened(): void {
 interface ProjectFromMain extends Omit<Project, 'createdAt' | 'lastOpenedAt'> {
   createdAt: string;
   lastOpenedAt?: string;
-  bibliographySource?: { filePath?: string };
   book?: Partial<BookSettings>;
 }
 
 /**
- * Pose le projet entrant, puis ses chapitres, sa bibliographie et son document.
- * Commun à l'ouverture et à la création : la création s'arrêtait au premier point,
- * et l'auteur tapait dans un éditeur sans document ou dans celui du projet d'avant.
- * L'éditeur est détaché quand elle arrive, et n'en sort qu'ici.
+ * Charge la bibliographie du projet, dans le panneau et dans le main : le main n'en connaît que ce
+ * que le renderer lui fait lire (`bibliography:load-with-metadata`), et s'en sert pour l'aperçu des
+ * citations et les exports. À l'ouverture, et au retour du projet d'avant après un échec : le main a
+ * alors fermé puis rouvert ses services, et oublié sa bibliographie.
  */
-async function openProjectContents(
-  project: ProjectFromMain,
-  set: StoreApi<ProjectState>['setState'],
-  detached: DetachedEditor
+async function loadProjectBibliography(
+  project: Pick<Project, 'path' | 'bibliography' | 'bibliographySource'>
 ): Promise<void> {
-  dismissDocumentNotOpened();
-  dismissConfigIssue();
-  if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
-  ideasNotWrittenNotice = null;
-  // Le main a basculé : ce qui ne s'est pas écrit du sortant n'a plus où aller, et l'auteur le
-  // sait. La sortie n'a pas à le lui redemander, y compris si le Brainstorm n'est pas ouvert et
-  // que rien ne recharge la liste. Rouvrir ce même projet, au contraire, le réécrit.
-  if (useIdeaStore.getState().loadedFor !== project.path) useIdeaStore.getState().abandonUnwrittenIdeas();
-  set({
-    currentProject: {
-      ...project,
-      createdAt: new Date(project.createdAt),
-      lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
-    },
-    // Rien du projet d'avant : un navigateur composerait ses chemins sous le nouveau.
-    chapters: [],
-    unattachedFiles: [],
-    currentChapterId: null,
-    bookSettings: { ...DEFAULT_BOOK_SETTINGS },
-  });
-
-  // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
-  // JAMAIS empêcher l'ouverture du projet — un manuscrit ne devient pas
-  // inaccessible à cause d'une liste accessoire.
-  let firstChapterPath: string | null = null;
-  if (project.type === 'book') {
-    set({ bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...(project.book ?? {}) } });
-    try {
-      const chaptersResult = await window.electron.project.getChapters(project.path);
-      if (chaptersResult.success) {
-        set({
-          chapters: chaptersResult.chapters,
-          unattachedFiles: chaptersResult.unattached ?? [],
-        });
-        const first = chaptersResult.chapters.find(
-          (c: ResolvedChapter) => !c.missing
-        );
-        if (first) {
-          firstChapterPath = `${project.path}/${first.filePath}`;
-          set({ currentChapterId: first.id });
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
-    }
-  }
-
   // Load bibliography if configured
   console.log('🔍 Project data received:', {
     hasBibliography: !!project.bibliography,
@@ -420,14 +385,80 @@ async function openProjectContents(
     // Still refresh indexed PDFs in case there are documents indexed without bibliography
     try {
       const { useBibliographyStore } = await import('./bibliographyStore');
-      // Ni la liste du projet d'avant : le panneau de B montrait les références de A, et la
-      // vérification des PDF modifiés les prenait pour celles de B (Q22).
+      // Le registre a vidé la liste du projet d'avant ; pas celle du même projet rouvert, dont le
+      // `.bib` a pu sortir de `project.json` depuis (Q22).
       useBibliographyStore.setState({ bibliographyProblem: null, citations: [], filteredCitations: [] });
       await useBibliographyStore.getState().refreshIndexedPDFs();
     } catch (error) {
       console.error('❌ Failed to refresh indexed PDFs:', error);
     }
   }
+}
+
+/**
+ * Pose le projet entrant, puis ses chapitres, sa bibliographie et son document.
+ * Commun à l'ouverture et à la création : la création s'arrêtait au premier point,
+ * et l'auteur tapait dans un éditeur sans document ou dans celui du projet d'avant.
+ * L'éditeur est détaché quand elle arrive, et n'en sort qu'ici.
+ */
+async function openProjectContents(
+  project: ProjectFromMain,
+  set: StoreApi<ProjectState>['setState'],
+  detached: DetachedEditor
+): Promise<void> {
+  dismissDocumentNotOpened();
+  dismissConfigIssue();
+  if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
+  ideasNotWrittenNotice = null;
+  // Le main a basculé : ce qui ne s'est pas écrit du sortant n'a plus où aller, et l'auteur le
+  // sait. La sortie n'a pas à le lui redemander, y compris si le Brainstorm n'est pas ouvert et
+  // que rien ne recharge la liste. Rouvrir ce même projet, au contraire, le réécrit.
+  if (useIdeaStore.getState().loadedFor !== project.path) useIdeaStore.getState().abandonUnwrittenIdeas();
+  // Les stores du projet d'avant se vident avant que l'écran ne montre celui-ci, et avant que sa
+  // bibliographie ne se charge. Le même dossier rouvert ne perd rien. Le main rend le dossier sous la
+  // graphie demandée : rouvert sous une autre (lien, casse), le même projet serait vidé, sans dommage,
+  // puisque sa bibliographie se recharge juste après et le reste à l'ouverture de chaque panneau.
+  projectLifecycle.enter(project.path);
+  set({
+    currentProject: {
+      ...project,
+      createdAt: new Date(project.createdAt),
+      lastOpenedAt: new Date(project.lastOpenedAt || project.createdAt),
+    },
+    // Rien du projet d'avant : un navigateur composerait ses chemins sous le nouveau.
+    chapters: [],
+    unattachedFiles: [],
+    currentChapterId: null,
+    bookSettings: { ...DEFAULT_BOOK_SETTINGS },
+  });
+
+  // Chapitres des projets « livre ». Best-effort : un échec ici ne doit
+  // JAMAIS empêcher l'ouverture du projet — un manuscrit ne devient pas
+  // inaccessible à cause d'une liste accessoire.
+  let firstChapterPath: string | null = null;
+  if (project.type === 'book') {
+    set({ bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...(project.book ?? {}) } });
+    try {
+      const chaptersResult = await window.electron.project.getChapters(project.path);
+      if (chaptersResult.success) {
+        set({
+          chapters: chaptersResult.chapters,
+          unattachedFiles: chaptersResult.unattached ?? [],
+        });
+        const first = chaptersResult.chapters.find(
+          (c: ResolvedChapter) => !c.missing
+        );
+        if (first) {
+          firstChapterPath = `${project.path}/${first.filePath}`;
+          set({ currentChapterId: first.id });
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Chapitres indisponibles (projet ouvert malgré tout):', error);
+    }
+  }
+
+  await loadProjectBibliography(project);
 
   // Ouvrir le document principal. Pour un livre, c'est le PREMIER
   // chapitre du manifeste : un livre n'a pas de `document.md` et
@@ -518,6 +549,8 @@ function enterNoProject(set: StoreApi<ProjectState>['setState']): void {
   dismissConfigIssue();
   // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
   useRebuildStore.getState().resetProgress();
+  // Rien du projet fermé ne reste dans les stores : bibliographie, conversation, sélections…
+  projectLifecycle.enter(null);
   set({
     currentProject: null,
     chapters: [],
@@ -659,9 +692,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return;
     if (switchInProgress(get())) return;
     const loadStateBefore = get().loadState;
-    const hadProject = get().currentProject !== null;
+    const previous = get().currentProject;
+    const hadProject = previous !== null;
     set({ loadState: { kind: 'loading', path: projectPath } });
     let detached: DetachedEditor | null = null;
+    // La demande est partie au main ; il a dit non, et le projet d'avant est encore le sien, ou aucun.
+    let asked = false;
+    let refused = false;
     try {
       await assertProjectReadable(projectPath);
       detached = await detachOutgoingEditor();
@@ -675,10 +712,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // un changement refusé laisse le sortant à l'écran, et son message avec.
       useRebuildStore.getState().resetProgress();
 
+      // Plus aucune réponse partie pour le projet à l'écran ne s'inscrit : le main peut basculer.
+      projectLifecycle.beginTransition();
+      asked = true;
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
 
       if (!result.success || !result.project) {
+        refused = true;
         throw projectRefusal(result, projectPath, previousClosedBy(result, hadProject));
       }
 
@@ -709,6 +750,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
       // A ne revient pas : l'écran le suit, et passe à l'accueil (Q10).
       if (previousClosed) enterNoProject(set);
+      else if (refused) await restorePreviousProject(previous, () => get().currentProject);
+      // Sans réponse du main, A reste à l'écran ; passé à B, l'écran l'a suivi et ceci ne fait rien.
+      else if (asked) projectLifecycle.abortTransition();
       set({
         loadState: {
           kind: 'failed',
@@ -725,9 +769,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return false;
     if (switchInProgress(get())) return false;
     const loadStateBefore = get().loadState;
-    const hadProject = get().currentProject !== null;
+    const previous = get().currentProject;
+    const hadProject = previous !== null;
     set({ loadState: { kind: 'loading', path } });
     let detached: DetachedEditor | null = null;
+    // Comme à l'ouverture : la demande est partie, et le main a dit non.
+    let asked = false;
+    let refused = false;
     try {
       // Même coupure que loadProject : créer un projet bascule aussi le main.
       detached = await detachOutgoingEditor();
@@ -739,9 +787,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Comme à l'ouverture : après les refus, avant la demande au main.
       useRebuildStore.getState().resetProgress();
 
+      projectLifecycle.beginTransition();
+      asked = true;
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
+        refused = true;
         throw new ProjectOpenError(
           result.code,
           result.error || 'Failed to create project',
@@ -767,6 +818,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const previousClosed = error instanceof ProjectOpenError && error.previousClosed;
       if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
       if (previousClosed) enterNoProject(set);
+      else if (refused) await restorePreviousProject(previous, () => get().currentProject);
+      else if (asked) projectLifecycle.abortTransition();
       set({
         loadState: {
           kind: 'failed',
@@ -818,6 +871,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
 
+    // Plus aucune réponse partie pour ce projet ne s'inscrit ; `enterNoProject` vide ensuite ses stores.
+    projectLifecycle.beginTransition();
     try {
       // Close backend resources (PDF Service, vector store, etc.)
       await window.electron.project.close();

@@ -30,6 +30,12 @@ interface ProposalsBridge {
 
 let warned = false;
 
+/**
+ * Hors du registre du projet (L03-4) : chaque proposition reçoit une décision, `expired` quand sa vue
+ * est détruite, et la bascule de projet détache l'éditeur avant tout changement d'écran. Rien n'y
+ * reste d'un projet à l'autre ; les vider à l'entrée du suivant perdrait ces dernières décisions,
+ * dont un brouillon attend son retour en file.
+ */
 const decisionListeners = new Map<string, Set<(decision: ProposalDecision) => void>>();
 
 /**

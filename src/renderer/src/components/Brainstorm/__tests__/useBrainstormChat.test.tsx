@@ -12,6 +12,7 @@ import { useBrainstormChat } from '../useBrainstormChat';
 import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 import { useChatStore } from '../../../stores/chatStore';
 import { useNotificationStore } from '../../../stores/notificationStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 type StartOpts = Record<string, unknown> | undefined;
 type ChunkEnvelope = {
@@ -197,5 +198,91 @@ describe('useBrainstormChat — des cases cochées dont aucune ne sera consulté
       await result.current.send('bonjour');
     });
     expect(start).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Ouvrir un autre projet pendant une génération annule le tour, et la conversation affichée est
+ * vidée (Q11). L'envoi parti dans A ne doit rien afficher dans B : ni la réponse, ni même son
+ * attente. Vu dans l'app (L03-3b) : la question posée dans un projet restait affichée dans le suivant.
+ */
+describe('useBrainstormChat — un envoi parti avant la bascule', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: undefined });
+    projectLifecycle.enter('/projets/A');
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('chat.start répond après le passage à B : rien ne s’affiche dans B, et la session est annulée', async () => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; sessionId?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const cancel = (window as unknown as { electron: { fusion: { chat: { cancel: ReturnType<typeof vi.fn> } } } })
+      .electron.fusion.chat.cancel;
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['Qui était le préfet en 1934 ?']);
+
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.enter('/projets/B');
+    });
+    await act(async () => {
+      answer({ success: true, sessionId: 's1' });
+      await sending;
+    });
+    act(() => {
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était…' } });
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', done: true, finishReason: 'cancelled' } });
+    });
+
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(result.current.isStreaming).toBe(false);
+    expect(cancel).toHaveBeenCalledWith('s1');
+  });
+
+  it('chat.start échoue après le passage à B : aucun message d’erreur dans B', async () => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; error?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.enter('/projets/B');
+    });
+    await act(async () => {
+      answer({ success: false, error: 'project-closed' });
+      await sending;
+    });
+
+    expect(useChatStore.getState().messages).toEqual([]);
+  });
+
+  it('témoin : chat.start répond dans le même projet, la réponse s’affiche', async () => {
+    installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+    act(() => {
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était…', done: true, finishReason: 'stop' } });
+    });
+
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual([
+      'Qui était le préfet en 1934 ?',
+      'Le préfet était…',
+    ]);
   });
 });

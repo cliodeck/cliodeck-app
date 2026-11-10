@@ -432,10 +432,12 @@ test('aucun curseur connu : la proposition va en fin de document, et un clic au 
     if (!title) throw new Error('Pas de première ligne');
     await window.mouse.click(title.x + 1, title.y + title.height / 2);
 
-    // Depuis Explorer : le panneau du chat reste à l'écran, et le mode bascule.
+    // Depuis Explorer : le panneau du chat reste à l'écran, et le mode bascule. La conversation du
+    // premier projet a été vidée à l'ouverture de celui-ci (Q11, L03-4) : la question se repose ici.
     await toMode(window, 'Explorer');
     await window.locator('.right-panel #right-tab-chat').click();
-    await expect(sendToWriteButton(window)).toBeVisible();
+    await expect(sendToWriteButton(window)).toHaveCount(0);
+    await askChat(window, '.right-panel');
     await sendToWriteButton(window).click();
 
     await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
