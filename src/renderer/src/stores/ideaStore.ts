@@ -502,9 +502,11 @@ export function hasUnwrittenIdeas(): boolean {
  *
  * Ce qu'une sauvegarde de A avait à écrire l'est déjà : la bascule attend les idées avant de partir
  * (`detachOutgoingEditor`), la fermeture aussi. Ce qui n'a pas pu s'écrire reste, hors de vue, tant
- * qu'aucun autre projet ne prend la place : fermé sans pouvoir l'écrire, rouvrir ce projet l'écrit
- * (`ideas.closeSaveFailed` le promet), et la sortie le dit encore. Sans projet à l'écran, rien ne
- * l'affiche. Un autre projet l'abandonne, et `openProjectContents` l'a oublié juste avant.
+ * qu'aucun autre projet ne prend la place : fermé sans pouvoir l'écrire, par l'auteur ou d'office
+ * (`project:closed`, où le main a fermé A avant toute écriture), rouvrir ce projet l'écrit
+ * (`ideas.closeSaveFailed` le promet, dans les deux cas), et la sortie le dit encore. Sans projet à
+ * l'écran, rien ne l'affiche. Un autre projet l'abandonne, et `openProjectContents` l'a oublié juste
+ * avant.
  */
 projectLifecycle.onReset('ideas', ({ to }) => {
   lastLoad++;

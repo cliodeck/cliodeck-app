@@ -97,12 +97,14 @@ export const IdeasPanel: React.FC = () => {
           wikilinks: string[];
           notePath: string;
         }>;
+        // La liste de maintenant, pas celle du clic : elle a pu changer pendant l'attente. Lue une
+        // fois, avant d'ajouter : le titre est le nom du fichier, et deux notes homonymes de deux
+        // dossiers du vault entrent toutes les deux, comme avant. Seul ce que la liste avait déjà
+        // est écarté, pas ce que ce même import vient d'y mettre.
+        const present = useIdeaStore.getState().ideas;
         for (const note of imported) {
-          // Check if idea with same title already exists (avoid duplicates). La liste de
-          // maintenant, pas celle du clic : elle a pu changer pendant l'attente.
-          const existing = useIdeaStore
-            .getState()
-            .ideas.find((i) => i.title === note.title && i.origin.type === 'obsidian');
+          // Check if idea with same title already exists (avoid duplicates).
+          const existing = present.find((i) => i.title === note.title && i.origin.type === 'obsidian');
           if (existing) continue;
           addIdea({
             title: note.title,

@@ -8,7 +8,7 @@ import {
 } from '@backend/types/book';
 import i18n from '../i18n';
 import { useDialogStore } from './dialogStore';
-import { useIdeaStore } from './ideaStore';
+import { hasUnwrittenIdeas, useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
 import { openFailureKey } from '../components/Project/open-failure';
@@ -316,6 +316,22 @@ let documentNotOpenedNotice: string | null = null;
 let stopWatchingEditor: (() => void) | null = null;
 let ideasNotWrittenNotice: string | null = null;
 let configIssueNotice: string | null = null;
+
+/**
+ * Le projet a quitté l'écran avec des idées qui ne sont pas sur le disque : elles attendent, hors de
+ * vue, que l'auteur rouvre ce projet, qui les écrit, ou en ouvre un autre, qui les abandonne
+ * (`openProjectContents`, qui retire aussi ce message). Dit une seule fois, et le message reste.
+ */
+function noticeIdeasNotWritten(details: string | undefined): void {
+  if (ideasNotWrittenNotice !== null) return;
+  ideasNotWrittenNotice = useNotificationStore.getState().notify({
+    level: 'error',
+    title: i18n.t('ideas.closeSaveFailedTitle'),
+    message: i18n.t('ideas.closeSaveFailed'),
+    details,
+    duration: 0,
+  });
+}
 
 function dismissConfigIssue(): void {
   if (configIssueNotice) useNotificationStore.getState().dismiss(configIssueNotice);
@@ -674,7 +690,8 @@ async function leaveEditorBeforeClose(closedByMainMeanwhile: () => boolean): Pro
 /**
  * Le main a fermé le projet de lui-même (`project:closed`) : il ne se rechargeait plus. L'écran
  * passe à l'état sans projet, l'éditeur repart d'un tampon sans titre, et l'auteur le sait. Le texte
- * qui n'était pas écrit n'a plus où aller : il reste dans le tampon, pour « Enregistrer sous ».
+ * qui n'était pas écrit n'a plus où aller : il reste dans le tampon, pour « Enregistrer sous ». Les
+ * idées non écrites attendent ce projet, hors de vue, et l'auteur le sait aussi.
  */
 async function closedByMain(
   closed: { path: string; code: string; error: string },
@@ -684,6 +701,13 @@ async function closedByMain(
   console.warn('⚠️ Projet fermé par le processus principal :', closed);
   if (get().currentProject?.path !== closed.path) return;
   enterNoProject(set);
+  // Une idée que le main n'a pas laissé écrire (tapée sans quitter le champ, ou une écriture déjà
+  // en échec) : la remise à zéro la garde, hors de vue, pour ce projet. Le main l'a fermé, le
+  // validateur refuse tout ce qui y va, et un autre projet n'a pas à la recevoir. Le projet peut
+  // revenir (disque rebranché, partage retrouvé) : rouvert, il l'écrit. L'auteur l'apprend ici,
+  // comme après une fermeture qu'il a demandée, et non à la sortie, qui le redira.
+  const ideas = useIdeaStore.getState();
+  if (ideas.loadedFor === closed.path && hasUnwrittenIdeas()) noticeIdeasNotWritten(ideas.saveError ?? undefined);
   // Un changement de projet en cours, ou une fermeture demandée par l'auteur, garde la main : sa fin
   // posera l'état, et l'éditeur, détaché pour lui, en sortira par elle. Pour une fermeture, poser
   // `idle` ici laisserait passer une ouverture que la suite de la fermeture refermerait.
@@ -913,15 +937,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
     const ideasError = await flushCurrentProjectIdeas();
-    if (ideasError) {
-      ideasNotWrittenNotice = useNotificationStore.getState().notify({
-        level: 'error',
-        title: i18n.t('ideas.closeSaveFailedTitle'),
-        message: i18n.t('ideas.closeSaveFailed'),
-        details: ideasError,
-        duration: 0,
-      });
-    }
+    if (ideasError) noticeIdeasNotWritten(ideasError);
 
     // Plus aucune réponse partie pour ce projet ne s'inscrit ; `enterNoProject` vide ensuite ses stores.
     projectLifecycle.beginTransition();

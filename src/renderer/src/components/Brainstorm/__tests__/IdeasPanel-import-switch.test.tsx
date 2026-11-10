@@ -256,6 +256,41 @@ describe('sans bascule', () => {
     expect(titles()).toEqual(['Idée de A', NOTE]);
   });
 
+  it('deux notes homonymes de deux dossiers du vault, dans un même import, entrent toutes les deux', async () => {
+    // Le titre d'une note importée est son nom de fichier : `Archives/Index.md` et `Lectures/Index.md`
+    // portent le même. Le dédoublonnage écarte ce que la liste avait déjà avant cet import, pas une
+    // note que ce même import vient d'ajouter.
+    importAsIdeas.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answerImport = () =>
+            resolve({
+              success: true,
+              ideas: [
+                { title: 'Index', content: 'Index du dossier Archives.', tags: [], wikilinks: [], notePath: 'Archives/Index.md' },
+                { title: 'Index', content: 'Index du dossier Lectures.', tags: [], wikilinks: [], notePath: 'Lectures/Index.md' },
+              ],
+            });
+        })
+    );
+    await importStartedInA();
+
+    await vaultAnswers();
+    await store().flushIdeas();
+
+    expect(store().ideas.map((i) => [i.title, i.content])).toEqual([
+      ['Idée de A', ''],
+      ['Index', 'Index du dossier Archives.'],
+      ['Index', 'Index du dossier Lectures.'],
+    ]);
+    const onDisk = JSON.parse(fs.readFileSync(ideasA, 'utf8')) as { ideas: Idea[] };
+    expect(onDisk.ideas.map((i) => i.origin)).toEqual([
+      { type: 'manual' },
+      { type: 'obsidian', notePath: 'Archives/Index.md' },
+      { type: 'obsidian', notePath: 'Lectures/Index.md' },
+    ]);
+  });
+
   it('la liste du projet n’est pas chargée : rien n’est ajouté, et l’auteur le sait', async () => {
     const aBefore = fs.readFileSync(ideasA);
     showProject(dirA);
