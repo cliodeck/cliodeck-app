@@ -51,6 +51,8 @@ describe('le dossier du projet a disparu : rien n’est recréé', () => {
     expect(existsSync(project)).toBe(false);
   });
 
+  // Le rattachement seul. L'interface télécharge toujours avant de rattacher : le parcours entier,
+  // téléchargement compris, est jugé dans `src/main/services/__tests__/zotero-download-root.test.ts`.
   it('rattacher un PDF téléchargé : refusé par son code, aucun .cliodeck', async () => {
     await expect(
       BibliographyMetadataService.patchAttachment(project, citation, 'ATT1', path.join(project, 'PDFs', 'b.pdf'))

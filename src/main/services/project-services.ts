@@ -78,6 +78,18 @@ async function startService(service: string, start: () => unknown): Promise<void
 const linkedOutside = (ctx: Context): boolean => ctx.loaded.configIssue?.kind === 'linked_outside';
 
 /**
+ * Rouvrir le projet ouvert ne relit que son manifeste (le style CSL), sauf si l'état de son
+ * `config.json` a changé depuis l'ouverture de ses services. Les bandeaux de `configIssue` disent
+ * « … puis rouvrez le projet » : un `.cliodeck` lié dehors n'ouvre que les modes, et un `config.json`
+ * illisible fige le mode d'inspection des sources sur le plus strict (`refreshInspectorMode`, lu à
+ * l'ouverture du service PDF). Relu seul, le projet réparé gardait ses services d'avant (le journal
+ * d'usage IA fermé, la recherche PDF « not initialized ») jusqu'au redémarrage, sans bandeau.
+ */
+export function servicesNeedReopen(opened: LoadedProject, reloaded: LoadedProject): boolean {
+  return (opened.configIssue?.kind ?? null) !== (reloaded.configIssue?.kind ?? null);
+}
+
+/**
  * Le suivi de reconstruction ne parle qu'au projet de son ouverture : celle de A, finie après la
  * bascule, publierait son échec sur l'écran de B.
  */

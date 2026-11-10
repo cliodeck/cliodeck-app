@@ -25,6 +25,8 @@ import {
 interface Loaded {
   success: boolean;
   project?: { name: string };
+  /** Comme `ProjectManager.loadProject` : ce qui manque à `.cliodeck` (lié dehors, illisible…). */
+  configIssue?: { kind: string };
   code?: string;
   fileName?: string;
   error?: string;
@@ -61,6 +63,8 @@ interface FakeProject {
   hold?: Promise<void>;
   /** Appelé au début de `loadProject` : le volume qui tombe pendant le chargement. */
   onLoad?: () => void;
+  /** `configIssue` que rend `loadProject` : `.cliodeck` lié dehors, par exemple. */
+  issue?: string;
 }
 
 type FakeManager = ProjectManagerPort<Loaded> & {
@@ -121,7 +125,8 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
         }
         current = path.dirname(projectFile);
         events.push(`load:${label(current)}`);
-        return { success: true, project: { name: label(current) } };
+        const issue = project.issue;
+        return { success: true, project: { name: label(current) }, ...(issue ? { configIssue: { kind: issue } } : {}) };
       } finally {
         loadsInFlight -= 1;
         loadsSettled.push(projectFile);
@@ -554,6 +559,87 @@ describe('projectLifecycle — ouverture', () => {
       expect(lc.current()).toBe(handle);
       expect(handle?.signal.aborted).toBe(false);
       expect(handle?.isCurrent()).toBe(true);
+    });
+
+    /** Ce qui décide des services a changé : `.cliodeck` lié dehors, puis remis en place. */
+    const issueChanged = (opened: Loaded, reloaded: Loaded): boolean =>
+      (opened.configIssue?.kind ?? null) !== (reloaded.configIssue?.kind ?? null);
+
+    it('ce qui décide des services a changé (reopenWhen) : tout se ferme et se rouvre', async () => {
+      const file = path.join(root, 'Projet', 'project.json');
+      mkdirSync(path.dirname(file));
+      const events: string[] = [];
+      const projects: Record<string, FakeProject> = { [file]: { issue: 'linked_outside' } };
+      const manager = fakeManager(events, projects);
+      const lc = createProjectLifecycle<Loaded, OpenRequest>({
+        manager,
+        services: [fakeService(events, 'history'), fakeService(events, 'pdf')],
+        reopenWhen: issueChanged,
+      });
+      await lc.open(file, request);
+      const handle = lc.current();
+      events.length = 0;
+      // L'auteur suit le bandeau : il remet un vrai `.cliodeck`, puis rouvre le projet.
+      delete projects[file].issue;
+
+      const result = await lc.open(file, request);
+
+      expect(result).toEqual({ success: true, project: { name: 'Projet' }, warnings: [] });
+      expect(events).toEqual([
+        'load:Projet',
+        'abort:pdf',
+        'abort:history',
+        'close:pdf',
+        'close:history',
+        'manager:close',
+        'load:Projet',
+        'open:history:Projet',
+        'open:pdf:Projet',
+      ]);
+      expect(handle?.isCurrent()).toBe(false);
+      expect(lc.current()?.isCurrent()).toBe(true);
+    });
+
+    it('reopenWhen compare à la dernière relecture : rouvrir encore, sans changement, ne relit que le manifeste', async () => {
+      const file = path.join(root, 'Projet', 'project.json');
+      mkdirSync(path.dirname(file));
+      const events: string[] = [];
+      const projects: Record<string, FakeProject> = { [file]: {} };
+      const manager = fakeManager(events, projects);
+      const lc = createProjectLifecycle<Loaded, OpenRequest>({
+        manager,
+        services: [fakeService(events, 'history')],
+        reopenWhen: issueChanged,
+      });
+      await lc.open(file, request);
+      // `config.json` devient illisible, puis le reste : une seule réouverture complète.
+      projects[file].issue = 'invalid_json';
+      await lc.open(file, request);
+      const handle = lc.current();
+      events.length = 0;
+
+      await lc.open(file, request);
+
+      expect(events).toEqual(['load:Projet']);
+      expect(lc.current()).toBe(handle);
+    });
+
+    it('témoin : reopenWhen qui répond non, le manifeste seul est relu', async () => {
+      const file = path.join(root, 'Projet', 'project.json');
+      mkdirSync(path.dirname(file));
+      const events: string[] = [];
+      const manager = fakeManager(events, { [file]: { issue: 'invalid_json' } });
+      const lc = createProjectLifecycle<Loaded, OpenRequest>({
+        manager,
+        services: [fakeService(events, 'history')],
+        reopenWhen: issueChanged,
+      });
+      await lc.open(file, request);
+      events.length = 0;
+
+      await lc.open(file, request);
+
+      expect(events).toEqual(['load:Projet']);
     });
   });
 });

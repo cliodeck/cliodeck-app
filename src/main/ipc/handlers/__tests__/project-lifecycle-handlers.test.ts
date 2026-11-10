@@ -418,6 +418,48 @@ describe('project:close — fermer ferme vraiment', () => {
 });
 
 describe('fermeture d’office', () => {
+  /**
+   * Par les vrais handlers et le vrai gestionnaire : le chargement de B ne répond pas à temps, C
+   * s'ouvre, puis B finit, fait basculer le gestionnaire, et C ne se recharge plus. La séquence ferme
+   * tout ; sans le relais branché, l'écran garderait C et le validateur refuserait ses écritures.
+   */
+  it('une vraie fermeture d’office par la séquence atteint le renderer (project:closed)', async () => {
+    h.handlers.clear();
+    // Assez long pour qu'un chargement réel de C finisse à temps sous charge ; B, lui, est retenu.
+    setupProjectHandlers({ timeouts: { managerMs: 1_000 } });
+    const fileA = makeProject('A');
+    const fileB = makeProject('B');
+    const fileC = makeProject('C');
+    await call('project:load', fileA);
+    let releaseB!: () => void;
+    const heldB = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+    let refuseC = false;
+    const load = projectManager.loadProject.bind(projectManager);
+    vi.spyOn(projectManager, 'loadProject').mockImplementation(async (file: string) => {
+      if (file === fileB) await heldB;
+      if (refuseC && file === fileC) {
+        return { success: false, code: 'manifest_unwritable' as const, fileName: 'project.json', error: 'EROFS' };
+      }
+      return load(file);
+    });
+
+    const late = await call<Reply>('project:load', fileB);
+    expect(late).toMatchObject({ success: false, code: 'project_unavailable', restoredPath: null });
+    await expect(call<Reply>('project:load', fileC)).resolves.toMatchObject({ success: true });
+    h.windowSends.length = 0;
+
+    refuseC = true;
+    releaseB();
+
+    await until(() => h.windowSends.some(([channel]) => channel === 'project:closed'), 5_000);
+    expect(h.windowSends).toEqual([
+      ['project:closed', { path: path.dirname(fileC), code: 'manifest_unwritable', error: 'EROFS' }],
+    ]);
+    expect(projectManager.getCurrentProjectPath()).toBeNull();
+  });
+
   it('le renderer l’apprend : project:closed, avec le chemin et le code à traduire', async () => {
     const { relayUnrequestedClose } = await import('../project-handlers.js');
 

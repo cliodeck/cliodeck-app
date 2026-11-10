@@ -546,8 +546,12 @@ async function confirmCloseUnsaved(error: unknown): Promise<boolean> {
  * puis l'éditeur s'en détache, en lecture seule, le temps de la fermeture, qui peut attendre une
  * indexation en vol. Une frappe pendant ce temps n'aurait plus nulle part où s'écrire.
  *
- * Rend null si l'auteur garde le projet ; `detached` dit si l'éditeur a quitté un document. Un
- * tampon sans titre n'appartient à aucun projet : il reste tel quel.
+ * Rend null si la fermeture n'a pas lieu : l'auteur garde le projet, le verrou est posé (ce qui lui
+ * est dit), ou le détachement a été chassé (il tape encore pendant l'écriture, ou une autre demande
+ * a pris le pas), comme pour un changement de projet (`detachOutgoingEditor`). Fermer quand même
+ * laisserait l'éditeur sur un document du projet fermé, modifiable, que le validateur refuserait
+ * d'écrire. `detached` dit si l'éditeur a quitté un document. Un tampon sans titre n'appartient à
+ * aucun projet : il reste tel quel.
  */
 async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
   const { useEditorStore } = await import('./editorStore');
@@ -578,7 +582,8 @@ async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
     await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
     return null;
   }
-  return { detached: outcome.status === 'replaced' };
+  if (outcome.status !== 'replaced') return null;
+  return { detached: true };
 }
 
 /**

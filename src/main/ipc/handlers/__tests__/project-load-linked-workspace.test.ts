@@ -8,7 +8,7 @@
  * est remplacé (il construit des fournisseurs) : le parcours e2e juge le sien dans l'app réelle.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -52,6 +52,8 @@ vi.mock('../../../services/retrieval-service.js', () => ({ retrievalService: { c
 
 import { setupProjectHandlers } from '../project-handlers.js';
 import { modeService } from '../../../services/mode-service.js';
+import { usageJournalService } from '../../../services/usage-journal-service.js';
+import { historyService } from '../../../services/history-service.js';
 
 let workDir: string;
 let projectDir: string;
@@ -105,6 +107,7 @@ beforeEach(async () => {
   writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({ name: 'Thèse', type: 'article' }));
   writeFileSync(path.join(projectDir, 'document.md'), '# Thèse\n');
   h.pdfInit.mockClear();
+  h.pdfClose.mockClear();
   h.handlers.clear();
   setupProjectHandlers();
 });
@@ -274,6 +277,77 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
 
     expect(result.configIssue).toBeUndefined();
     expect(h.pdfInit).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Les bandeaux de `configIssue` disent « … puis rouvrez le projet ». Rouvrir le projet ouvert ne
+ * relit que son manifeste (le style CSL) : sans plus, ses services restaient ceux de l'ouverture
+ * d'avant. Un `.cliodeck` lié dehors n'ouvre que les modes ; remis en place, le projet rouvert
+ * gardait l'historique, le journal d'usage IA et le PDF fermés jusqu'au redémarrage, sans bandeau.
+ */
+describe.skipIf(!symlinkAvailable || !sqliteAvailable)('rouvrir le même projet après avoir suivi le bandeau', () => {
+  const projectFile = (): string => path.join(projectDir, 'project.json');
+
+  it('.cliodeck lié dehors, puis remis en place : la réouverture ouvre tous les services', async () => {
+    const link = path.join(projectDir, '.cliodeck');
+    symlinkSync(outside, link);
+    try {
+      const first = await call<LoadResult>('project:load', projectFile());
+      expect(first.configIssue?.kind).toBe('linked_outside');
+      expect(usageJournalService.getStore()).toBeNull();
+
+      unlinkSync(link);
+      mkdirSync(link);
+      writeFileSync(path.join(link, 'config.json'), VALID_CONFIG);
+      const second = await call<LoadResult>('project:load', projectFile());
+
+      expect(second.success).toBe(true);
+      expect(second.configIssue).toBeUndefined();
+      expect(usageJournalService.getStore()).not.toBeNull();
+      expect(historyService.getHistoryManager()).not.toBeNull();
+      expect(h.pdfInit).toHaveBeenCalledTimes(1);
+      expect(readdirSync(link)).toContain('journal.db');
+    } finally {
+      await call('project:close');
+    }
+  });
+
+  it('config.json illisible, puis corrigé : le service PDF se rouvre et relit la configuration', async () => {
+    mkdirSync(path.join(projectDir, '.cliodeck'));
+    const config = path.join(projectDir, '.cliodeck', 'config.json');
+    writeFileSync(config, '{ "schema_version": 2, }');
+    try {
+      const first = await call<LoadResult>('project:load', projectFile());
+      expect(first.configIssue?.kind).toBe('invalid_json');
+      expect(h.pdfInit).toHaveBeenCalledTimes(1);
+
+      writeFileSync(config, VALID_CONFIG);
+      const second = await call<LoadResult>('project:load', projectFile());
+
+      expect(second.configIssue).toBeUndefined();
+      expect(h.pdfInit).toHaveBeenCalledTimes(2);
+      expect(h.pdfClose).toHaveBeenCalledTimes(1);
+    } finally {
+      await call('project:close');
+    }
+  });
+
+  it('témoin : rien n’a changé (le style CSL), le manifeste seul est relu, aucun service n’est rouvert', async () => {
+    mkdirSync(path.join(projectDir, '.cliodeck'));
+    writeFileSync(path.join(projectDir, '.cliodeck', 'config.json'), VALID_CONFIG);
+    try {
+      await call<LoadResult>('project:load', projectFile());
+      h.pdfClose.mockClear();
+
+      const again = await call<LoadResult>('project:load', projectFile());
+
+      expect(again.success).toBe(true);
+      expect(h.pdfInit).toHaveBeenCalledTimes(1);
+      expect(h.pdfClose).not.toHaveBeenCalled();
+    } finally {
+      await call('project:close');
+    }
   });
 });
 

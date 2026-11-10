@@ -57,7 +57,12 @@ interface RecipesApi {
   save(
     fileName: string,
     yaml: string
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    /** `project_root_missing` : le dossier du projet a disparu, rien n'a été écrit. */
+    code?: string;
+  }>;
 }
 
 function api(): RecipesApi | null {
@@ -194,14 +199,15 @@ export const RecipeEditor: React.FC<Props> = ({ scope, fileName, onClose, onSave
         setSavedYaml(rawYaml);
         onSaved?.();
       } else {
-        setSaveError(res.error ?? 'Save failed');
+        // Le dossier du projet a disparu : le refus se traduit, jamais son code brut.
+        setSaveError(res.code === 'project_root_missing' ? t('project.rootMissing') : (res.error ?? 'Save failed'));
       }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [readOnly, fileName, rawYaml, onSaved]);
+  }, [readOnly, fileName, rawYaml, onSaved, t]);
 
   // Form field handlers
   const updateField = <K extends keyof Recipe>(key: K, value: Recipe[K]) => {

@@ -1034,6 +1034,30 @@ describe('projectStore — fermer, et ce que le main a fermé', () => {
     expect(useEditorStore.getState().filePath).toBeNull();
   });
 
+  it('l’auteur tape sans cesse pendant l’écriture (détachement chassé) : la fermeture n’a pas lieu, rien ne se perd', async () => {
+    // Chaque écriture voit arriver une nouvelle frappe : le document n'est jamais à jour sur le disque.
+    let keystrokes = 0;
+    useEditorStore.setState({
+      editorFacade: { getValue: () => `# Demo\nfrappe ${keystrokes}\n` } as unknown as EditorFacade,
+    });
+    const save = (window as unknown as { electron: { editor: { saveFile: ReturnType<typeof vi.fn> } } }).electron.editor
+      .saveFile;
+    save.mockImplementation(async () => {
+      keystrokes += 1;
+      return { success: true };
+    });
+
+    await useProjectStore.getState().closeProject();
+
+    // Avant : le main fermait le projet, et l'éditeur restait sur son document, modifiable, sans
+    // plus nulle part où l'écrire.
+    expect(stub.project.close).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject?.id).toBe('p1');
+    expect(useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+    expect(useEditorStore.getState().bufferDetached).toBe(false);
+    expect(useProjectStore.getState().loadState.kind).toBe('ready');
+  });
+
   it('project.load échoue et A ne revient pas (restoredPath null) : l’état sans projet', async () => {
     stub.project.load.mockResolvedValue({ success: false, code: 'project_unavailable', error: 'timeout', restoredPath: null });
 

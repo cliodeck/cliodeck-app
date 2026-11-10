@@ -13,12 +13,14 @@ import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import {
   createProjectLifecycle,
   type ProjectLifecycle,
+  type ProjectLifecycleTimeouts,
   type ProjectOpenResult,
   type UnrequestedClose,
 } from '../../services/project-lifecycle.js';
 import {
   projectServices,
   ProjectServiceError,
+  servicesNeedReopen,
   type LoadedProject,
   type ProjectOpenRequest,
 } from '../../services/project-services.js';
@@ -84,14 +86,24 @@ function logOpenResult(channel: 'project:create' | 'project:load', result: Proje
   console.log(`📤 IPC Response: ${channel} success`, result.warnings.length ? { warnings: result.warnings } : '');
 }
 
-export function setupProjectHandlers() {
+export interface ProjectHandlersOptions {
+  /**
+   * Les délais de la séquence. L'app garde ceux par défaut ; un test les raccourcit pour provoquer,
+   * par les vrais handlers, un chargement en retard et la fermeture d'office qui peut le suivre.
+   */
+  timeouts?: Partial<ProjectLifecycleTimeouts>;
+}
+
+export function setupProjectHandlers(options: ProjectHandlersOptions = {}) {
   const lifecycle: ProjectLifecycle<LoadedProject, ProjectOpenRequest> = createProjectLifecycle<
     LoadedProject,
     ProjectOpenRequest
   >({
     manager: projectManager,
     services: projectServices(),
+    timeouts: options.timeouts,
     onUnrequestedClose: relayUnrequestedClose,
+    reopenWhen: servicesNeedReopen,
   });
 
   ipcMain.handle('project:get-recent', () => {

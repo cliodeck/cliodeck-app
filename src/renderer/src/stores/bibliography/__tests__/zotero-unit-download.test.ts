@@ -26,6 +26,7 @@ import { useProjectStore } from '../../projectStore';
 import { AttachmentNotSavedError } from '../zoteroSlice';
 import type { Citation } from '../types';
 import { BibliographyMetadataService, MetadataUnreadableError } from '../../../../../../backend/services/BibliographyMetadataService';
+import i18n from '../../../i18n';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-telechargement-unitaire-'));
 let project = '';
@@ -321,5 +322,46 @@ describe('« Télécharger tous les PDFs manquants » : un rattachement refusé'
     expect(pdfIndex.mock.calls.map((call) => call[0])).toEqual([pdfOf('GC9BPFL6'), pdfOf('ZZZZZZZ1')]);
     expect(inStore(X.id)?.file).toBeUndefined();
     expect(await onDisk('YKEY2023')).toEqual([expect.objectContaining({ downloaded: true })]);
+  });
+});
+
+/**
+ * Le dossier du projet a disparu (parent renommé, volume débranché) : le main refuse le
+ * téléchargement par son code, avant tout transfert (L03-3). L'auteur lit sa traduction, jamais le
+ * code, et rien n'est rattaché ni indexé.
+ */
+describe('le dossier du projet a disparu : le téléchargement est refusé, et l’auteur le lit', () => {
+  const refuseDownload = () =>
+    (window as unknown as { electron: { zotero: { downloadPDF: ReturnType<typeof vi.fn> } } }).electron.zotero.downloadPDF.mockResolvedValue(
+      { success: false, error: 'project_root_missing', code: 'project_root_missing' }
+    );
+
+  it('à l’unité : l’erreur porte la traduction, rien n’est rattaché ni indexé', async () => {
+    refuseDownload();
+
+    const error = await bib()
+      .downloadAndIndexZoteroPDF(X.id, 'QQBJJVQY', project)
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(i18n.t('project.rootMissing'));
+    expect((error as Error).message).not.toContain('project_root_missing');
+    expect(updateAttachment).not.toHaveBeenCalled();
+    expect(pdfIndex).not.toHaveBeenCalled();
+  });
+
+  it('dans le lot : chaque erreur porte la traduction', async () => {
+    refuseDownload();
+
+    const result = await bib().downloadAllMissingPDFs(project);
+
+    expect(result.downloaded).toBe(0);
+    expect(result.errors).toHaveLength(3);
+    expect(result.errors[0]).toBe(`${X.title}: ${i18n.t('project.rootMissing')}`);
+    expect(result.errors.join('\n')).not.toContain('project_root_missing');
+    expect(updateAttachment).not.toHaveBeenCalled();
   });
 });
