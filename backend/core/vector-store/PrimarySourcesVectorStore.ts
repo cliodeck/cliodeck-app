@@ -154,6 +154,10 @@ export class PrimarySourcesVectorStore {
   private hnswLabelMap: Map<number, string> = new Map(); // HNSW label -> chunk ID
   private hnswCurrentSize: number = 0;
   private hnswInitialized: boolean = false;
+  /** Les vecteurs écrits pendant `rebuildIndexesInSlices`, à rejouer dans le nouvel index. */
+  private addedDuringRebuild: Array<{ chunkId: string; embedding: Float32Array }> | null = null;
+  /** Fermé : une reconstruction par tranches en cours s'arrête sans rien remplacer. */
+  private closed = false;
 
   // BM25 Index for keyword-based search
   private bm25Index: any;
@@ -1099,6 +1103,7 @@ export class PrimarySourcesVectorStore {
     this.hnswIndex!.addPoint(embeddingArray, label);
     this.hnswLabelMap.set(label, chunkId);
     this.hnswCurrentSize++;
+    this.addedDuringRebuild?.push({ chunkId, embedding });
   }
 
   /**
@@ -1164,7 +1169,13 @@ export class PrimarySourcesVectorStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    let replaced = new Set<string>();
     this.db.transaction(() => {
+      replaced = new Set(
+        (this.db.prepare('SELECT id FROM tropy_chunks WHERE source_id = ?').all(sourceId) as Array<{ id: string }>).map(
+          (row) => row.id
+        )
+      );
       this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
       for (const { chunk, embedding } of items) {
         insert.run(
@@ -1180,9 +1191,28 @@ export class PrimarySourcesVectorStore {
       }
     })();
 
+    this.forgetIndexedChunks(replaced);
     for (const { chunk, embedding } of items) {
       this.addToHNSWIndex(chunk.id, embedding);
       this.addToBM25Index(chunk);
+    }
+  }
+
+  /**
+   * Retire des index en mémoire des extraits qui ne sont plus en base. BM25
+   * servait encore leur texte (un ancien titre, une transcription corrigée), et
+   * leurs vecteurs, comptés par la recherche, y déclenchaient une
+   * reconstruction complète d'un bloc, une centaine de secondes sur 40 000
+   * extraits (H7). Leurs points restent dans le graphe HNSW, que la recherche
+   * ignore, jusqu'à la prochaine reconstruction.
+   */
+  private forgetIndexedChunks(chunkIds: ReadonlySet<string>): void {
+    if (chunkIds.size === 0) return;
+    for (const [label, chunkId] of this.hnswLabelMap) {
+      if (chunkIds.has(chunkId)) this.hnswLabelMap.delete(label);
+    }
+    for (const [docIndex, chunk] of this.bm25ChunkMap) {
+      if (chunkIds.has(chunk.id)) this.bm25ChunkMap.delete(docIndex);
     }
   }
 
@@ -1273,9 +1303,11 @@ export class PrimarySourcesVectorStore {
     const dbChunkCount = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL').get() as any).count;
     console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize}, BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings=${dbChunkCount}`);
 
-    // Check if indexes are out of sync with database
+    // Check if indexes are out of sync with database. Les vecteurs vivants
+    // (`hnswLabelMap`), pas tous les points du graphe : un extrait remplacé y
+    // laisse le sien jusqu'à la reconstruction (`forgetIndexedChunks`, H7).
     const needsRebuild = this.hnswCurrentSize === 0 ||
-      (dbChunkCount > 0 && Math.abs(this.hnswCurrentSize - dbChunkCount) > dbChunkCount * 0.1); // More than 10% difference
+      (dbChunkCount > 0 && Math.abs(this.hnswLabelMap.size - dbChunkCount) > dbChunkCount * 0.1); // More than 10% difference
 
     if (needsRebuild) {
       console.log('📜 Primary sources: Indexes out of sync, rebuilding...');
@@ -1597,6 +1629,60 @@ export class PrimarySourcesVectorStore {
 
     const duration = Date.now() - startTime;
     console.log(`✅ Primary sources: Indexes rebuilt in ${duration}ms (${chunks.length} chunks)`);
+  }
+
+  /**
+   * `rebuildAllIndexes` sans geler le processus principal (H7). Sur 40 650
+   * extraits, la reconstruction d'un bloc dure une centaine de secondes, pendant
+   * lesquelles ni l'éditeur ni le chat ne reçoivent de réponse. Ici, le nouvel
+   * index HNSW se construit à côté, par tranches de `sliceSize` vecteurs, et
+   * l'ancien sert les recherches entre deux ; les vecteurs écrits entre-temps
+   * y sont rejoués, puis il le remplace. BM25, quelques secondes, se refait
+   * d'un bloc à la fin, comme à l'ouverture du magasin.
+   *
+   * Rend faux, sans rien remplacer, si le magasin a été fermé en route.
+   */
+  async rebuildIndexesInSlices(sliceSize = 256): Promise<boolean> {
+    const startTime = Date.now();
+    const chunks = this.getAllChunksWithEmbeddings();
+    const dimension = chunks.find((c) => c.embedding.length > 0)?.embedding.length ?? this.hnswDimension;
+    const index = new HierarchicalNSW('cosine', dimension);
+    index.initIndex(this.hnswMaxElements, this.hnswM, this.hnswEfConstruction);
+    const labelMap = new Map<number, string>();
+    const add = (chunkId: string, embedding: Float32Array): void => {
+      if (embedding.length !== dimension || labelMap.size >= this.hnswMaxElements) return;
+      index.addPoint(Array.from(embedding), labelMap.size);
+      labelMap.set(labelMap.size, chunkId);
+    };
+
+    const writtenMeanwhile: Array<{ chunkId: string; embedding: Float32Array }> = [];
+    this.addedDuringRebuild = writtenMeanwhile;
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        add(chunks[i].chunk.id, chunks[i].embedding);
+        if ((i + 1) % sliceSize === 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          if (this.closed) return false;
+        }
+      }
+      if (this.closed) return false;
+      const included = new Set(labelMap.values());
+      for (const { chunkId, embedding } of writtenMeanwhile) {
+        if (!included.has(chunkId)) add(chunkId, embedding);
+      }
+    } finally {
+      if (this.addedDuringRebuild === writtenMeanwhile) this.addedDuringRebuild = null;
+    }
+
+    this.hnswIndex = index;
+    this.hnswLabelMap = labelMap;
+    this.hnswCurrentSize = labelMap.size;
+    this.hnswDimension = dimension;
+    this.hnswInitialized = true;
+    this.rebuildBM25Index();
+    this.saveHNSWIndex();
+    console.log(`✅ Primary sources: Indexes rebuilt in slices in ${Date.now() - startTime}ms (${labelMap.size} chunks)`);
+    return true;
   }
 
   private cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -2348,6 +2434,7 @@ export class PrimarySourcesVectorStore {
    * Ferme la connexion à la base de données
    */
   close(): void {
+    this.closed = true;
     // Save HNSW index before closing
     this.saveHNSWIndex();
     this.db.close();
