@@ -102,6 +102,8 @@ export const SEARCH_DRAIN_MS = 5_000;
  */
 interface SearchCapture {
   readonly store: VectorStore | EnhancedVectorStore;
+  /** Le numéro du magasin à l'entrée de la recherche (`storeGeneration`). */
+  readonly generation: number;
   /** Lève `ProjectChangedError` si le magasin a été rendu depuis l'entrée de la recherche. */
   assertCurrent(): void;
 }
@@ -436,9 +438,10 @@ class RetrievalService {
    * Recherches en vol (S04-1-14). Une recherche prend le magasin, puis attend l'embedding de sa
    * requête : la fermeture du projet passait pendant ce temps, et la recherche lisait ensuite un
    * magasin fermé (« The database connection is not open »). Une fermeture les attend donc
-   * (`drainSearches`), comme `pdfService` attend ses indexations.
+   * (`drainSearches`), comme `pdfService` attend ses indexations. Chacune avec le numéro du magasin
+   * qu'elle a pris : une fermeture n'attend que celles du magasin qu'elle rend.
    */
-  private inFlightSearches = new Set<Promise<unknown>>();
+  private inFlightSearches = new Map<Promise<unknown>, number>();
   /**
    * Change chaque fois que le magasin est rendu (`drainSearches`, `clear`, `configure`) : une
    * recherche restée au-delà du délai s'arrête à sa prochaine attente, sans lire un magasin fermé ni
@@ -554,18 +557,27 @@ class RetrievalService {
    * recherche n'y entre, et celles en vol finissent, au plus `timeoutMs`. Au-delà, la fermeture a lieu
    * quand même (pas d'attente sans sortie) : celles qui restent s'arrêtent à leur prochaine attente sur
    * `project-changed`, sans lire le magasin fermé. Ne lève pas.
+   *
+   * Seules celles du magasin courant sont attendues. Une recherche d'un magasin déjà rendu (restée
+   * au-delà du délai d'une fermeture précédente, sur un embedding qui ne revient pas : la requête n'a
+   * pas de délai) ne lit plus aucun magasin : l'attendre retardait chaque bascule de 5 s jusqu'au
+   * redémarrage.
    */
   async drainSearches(timeoutMs = SEARCH_DRAIN_MS): Promise<void> {
     this.vectorStore = null;
-    if (this.inFlightSearches.size > 0) {
+    const generation = this.storeGeneration;
+    const pending = [...this.inFlightSearches]
+      .filter(([, searchGeneration]) => searchGeneration === generation)
+      .map(([run]) => run);
+    if (pending.length > 0) {
       console.log(
-        `⏳ ${this.inFlightSearches.size} recherche(s) en vol — attente avant fermeture du vector store`
+        `⏳ ${pending.length} recherche(s) en vol — attente avant fermeture du vector store`
       );
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<'timeout'>((resolve) => {
         timer = setTimeout(() => resolve('timeout'), timeoutMs);
       });
-      const drained = Promise.allSettled([...this.inFlightSearches]).then(() => 'drained' as const);
+      const drained = Promise.allSettled(pending).then(() => 'drained' as const);
       const outcome = await Promise.race([drained, timeout]);
       if (timer) clearTimeout(timer);
       if (outcome === 'timeout') {
@@ -737,6 +749,7 @@ class RetrievalService {
     const generation = this.storeGeneration;
     return {
       store,
+      generation,
       assertCurrent: () => {
         if (this.storeGeneration !== generation) throw new ProjectChangedError();
       },
@@ -858,7 +871,7 @@ class RetrievalService {
     const captured = this.captureStore(this.ensureReady());
     // Suivie jusqu'à sa fin : une fermeture du magasin l'attend (`drainSearches`).
     const run = this.runSearch(q, captured);
-    this.inFlightSearches.add(run);
+    this.inFlightSearches.set(run, captured.generation);
     void run
       .catch(() => undefined)
       .finally(() => {

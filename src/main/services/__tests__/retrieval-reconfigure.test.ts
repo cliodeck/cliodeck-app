@@ -129,6 +129,18 @@ const titles = (hits: Array<{ document?: { title?: string } }>): Array<string | 
 /** Ce que le main a écrit en avertissement : c'est là que la bibliographie disait son échec. */
 const warnings = (): string => warn.mock.calls.flat().map(String).join('\n');
 
+/** Combien de fois une fermeture a dû attendre une recherche jusqu'au bout de son délai. */
+const drainTimeouts = (): number =>
+  warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('Recherche(s) toujours en vol')).length;
+
+/** Le résultat d'une recherche, ou son erreur, sans rejet non attendu. */
+function settle<T>(searching: Promise<T>): Promise<{ hits: T | null; error: unknown }> {
+  return searching.then(
+    (hits) => ({ hits, error: null as unknown }),
+    (error: unknown) => ({ hits: null, error })
+  );
+}
+
 beforeEach(async () => {
   projectA = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-recherche-a-'));
   projectB = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-recherche-b-'));
@@ -194,6 +206,73 @@ describe.skipIf(!sqliteAvailable)('une recherche et la fermeture de son magasin 
     expect(warnings()).not.toContain('database connection is not open');
     // Une recherche dans B répond avec les PDF de B.
     expect(titles(await pdfService.search(quickQuery(), { sourceType: 'secondary' }))).toEqual(['Document de B']);
+  });
+
+  /**
+   * Dans la séquence, une attente sépare `store.close()` de `retrievalService.clear()` : le service PDF
+   * libère ses registres. Une recherche dont l'embedding revient dans cette fenêtre ne lit pas le
+   * magasin fermé : `drainSearches` a rendu le magasin, délai dépassé ou non, sans attendre `clear()`.
+   */
+  it('une recherche dont l’embedding revient entre la fermeture du magasin et `clear()` s’arrête sur `project-changed`', async () => {
+    const slow = holdNextSlowQuery();
+    const outcome = settle(pdfService.search(slowQuery(), { sourceType: 'secondary' }));
+    await slow.started;
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const closing = pdfService.close();
+    await vi.advanceTimersByTimeAsync(SEARCH_DRAIN_MS);
+    await closing;
+    vi.useRealTimers();
+
+    // Magasin fermé, `clear()` pas encore passé : l'embedding revient maintenant.
+    slow.release();
+    const { hits, error } = await outcome;
+    retrievalService.clear();
+
+    expect(hits).toBeNull();
+    expect(error).toMatchObject({ code: 'project-changed' });
+    expect(warnings()).not.toContain('database connection is not open');
+  });
+
+  /**
+   * Un embedding qui ne revient jamais (Ollama figé : la requête n'a pas de délai) laisse sa recherche
+   * en vol après le délai de la fermeture. Son magasin rendu, elle ne peut plus rien lire : les
+   * fermetures suivantes ne l'attendent plus, sinon chaque bascule coûtait 5 s jusqu'au redémarrage.
+   */
+  it('une recherche perdue au-delà du délai ne retarde pas la fermeture du projet suivant', async () => {
+    const lost = holdNextSlowQuery();
+    const lostOutcome = settle(pdfService.search(slowQuery(), { sourceType: 'secondary' }));
+    await lost.started;
+
+    try {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const closingA = closeProject();
+      await vi.advanceTimersByTimeAsync(SEARCH_DRAIN_MS);
+      await closingA;
+      vi.useRealTimers();
+      expect(drainTimeouts()).toBe(1);
+
+      await pdfService.init(projectB);
+      seed('Document de B');
+      expect(titles(await pdfService.search(quickQuery(), { sourceType: 'secondary' }))).toEqual(['Document de B']);
+
+      // B n'a aucune recherche en vol : sa fermeture n'attend rien.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const closingB = closeProject();
+      await vi.advanceTimersByTimeAsync(SEARCH_DRAIN_MS);
+      await closingB;
+      vi.useRealTimers();
+      expect(drainTimeouts()).toBe(1);
+    } finally {
+      // Revenue enfin (même si le test échoue : sinon elle resterait en vol pour les suivants).
+      lost.release();
+    }
+
+    // La recherche perdue ne répond avec aucun projet.
+    const { hits, error } = await lostOutcome;
+    expect(hits).toBeNull();
+    expect(error).toMatchObject({ code: 'project-changed' });
+    expect(warnings()).not.toContain('database connection is not open');
   });
 
   it('une recherche lancée pendant la fermeture, ou après, échoue proprement', async () => {
