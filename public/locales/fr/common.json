@@ -1477,6 +1477,13 @@
       "ocrLanguageUnavailable": "L'OCR en « {{language}} » n'a pas pu démarrer : son modèle de langue n'a pas pu être chargé. Il se télécharge à la première utilisation de chaque langue : vérifiez la connexion à Internet, puis cliquez de nouveau sur « Lancer l'OCR ». Une fois téléchargé, il reste disponible hors ligne. Les sources ont été enregistrées sans OCR.",
       "pagesChanged": "Dernière synchronisation : les pages de {{sources}} source(s) ont changé dans Tropy (photo ajoutée, retirée ou passée d'une source à l'autre). Leur transcription OCR est gardée, mais elle porte encore les anciennes pages : cliquez sur « Lancer l'OCR » pour la refaire, sans qu'il faille cocher « Relancer l'OCR sur toutes les sources ».",
       "pagesImagesMissing": "{{sources}} source(s) aux pages modifiées dans Tropy n'ont pas été reconnues de nouveau : certaines de leurs images sont introuvables sur le disque (disque externe débranché, fichiers déplacés ou supprimés). Leur transcription OCR est gardée, avec les anciennes pages. Rebranchez le disque ou remettez les fichiers là où Tropy les attend, puis cliquez de nouveau sur « Lancer l'OCR ». S'ils sont perdus pour de bon, « Lancer l'OCR sur cette source », sur la carte de la source, refait sa transcription avec les images qui restent."
+    },
+    "reindexAll": {
+      "running": "Réindexation complète des sources primaires (une seule fois, après une mise à jour de ClioDeck) : {{done}} / {{total}} source(s), environ {{chunks}} extrait(s) à refaire. L'assistant consulte les anciens extraits en attendant.",
+      "waitingForSync": "En pause pendant la synchronisation : elle reprendra ensuite.",
+      "stoppedNoProvider": "Réindexation complète des sources primaires interrompue : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres). {{remaining}} source(s) gardent leurs anciens extraits, que l'assistant consulte toujours. Elle reprendra à la prochaine ouverture du projet, là où elle s'est arrêtée.",
+      "stoppedFailed": "Réindexation complète des sources primaires interrompue : le modèle de recherche sémantique n'a pas répondu (vérifiez dans les Paramètres qu'il est disponible). {{remaining}} source(s) gardent leurs anciens extraits, que l'assistant consulte toujours. Elle reprendra à la prochaine ouverture du projet, là où elle s'est arrêtée.",
+      "done": "Réindexation complète des sources primaires terminée : {{total}} source(s) refaite(s)."
     }
   },
   "modes": {
@@ -1906,7 +1913,10 @@
     "notModified": "Non modifié",
     "notModifiedTooltip": "Ce document n'a pas été modifié depuis son ouverture.",
     "untitled": "Sans titre",
-    "fileOutsideProjectTooltip": "Hors du projet : {{path}}"
+    "fileOutsideProjectTooltip": "Hors du projet : {{path}}",
+    "tropyReindex": "Réindexation {{done}}/{{total}}",
+    "tropyReindexStopped": "Réindexation interrompue",
+    "tropyReindexDone": "Réindexation terminée"
   },
   "security": {
     "revokeTitle": "Révocation des clés",

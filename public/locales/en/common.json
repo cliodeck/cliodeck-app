@@ -1477,6 +1477,13 @@
       "ocrLanguageUnavailable": "OCR in “{{language}}” could not start: its language model could not be loaded. It is downloaded the first time each language is used: check the Internet connection, then click “Run OCR” again. Once downloaded, it stays available offline. The sources were saved without OCR.",
       "pagesChanged": "Last synchronization: the pages of {{sources}} source(s) changed in Tropy (a photo added, removed or moved from one source to another). Their OCR transcription is kept, but it still reflects the old pages: click “Run OCR” to redo it, with no need to tick “Re-run OCR on every source”.",
       "pagesImagesMissing": "{{sources}} source(s) whose pages changed in Tropy were not recognised again: some of their images cannot be found on disk (external drive unplugged, files moved or deleted). Their OCR transcription is kept, with the old pages. Plug the drive back in or put the files back where Tropy expects them, then click “Run OCR” again. If they are gone for good, “Run OCR on this source”, on the source's card, redoes its transcription with the images that remain."
+    },
+    "reindexAll": {
+      "running": "Full reindexing of primary sources (once only, after a ClioDeck update): {{done}} / {{total}} source(s), about {{chunks}} extract(s) to redo. The assistant uses the old extracts in the meantime.",
+      "waitingForSync": "Paused during the synchronization: it will resume afterwards.",
+      "stoppedNoProvider": "Full reindexing of primary sources interrupted: no semantic search model is available (check Settings). {{remaining}} source(s) keep their old extracts, which the assistant still uses. It will resume the next time the project is opened, where it stopped.",
+      "stoppedFailed": "Full reindexing of primary sources interrupted: the semantic search model did not respond (check in Settings that it is available). {{remaining}} source(s) keep their old extracts, which the assistant still uses. It will resume the next time the project is opened, where it stopped.",
+      "done": "Full reindexing of primary sources finished: {{total}} source(s) redone."
     }
   },
   "modes": {
@@ -1906,7 +1913,10 @@
     "notModified": "Not modified",
     "notModifiedTooltip": "This document has not been changed since it was opened.",
     "untitled": "Untitled",
-    "fileOutsideProjectTooltip": "Outside the project: {{path}}"
+    "fileOutsideProjectTooltip": "Outside the project: {{path}}",
+    "tropyReindex": "Reindexing {{done}}/{{total}}",
+    "tropyReindexStopped": "Reindexing interrupted",
+    "tropyReindexDone": "Reindexing finished"
   },
   "security": {
     "revokeTitle": "Key revocation",

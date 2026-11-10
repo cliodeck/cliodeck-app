@@ -6,6 +6,8 @@ import { currentRelativePath } from '../../stores/manuscriptStore';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useUsageJournalStore } from '../../stores/usageJournalStore';
+import { useTropyReindexStatus } from '../../stores/tropyReindexStore';
+import { describeReindexStatus } from '../PrimarySources/reindex-status';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -19,7 +21,7 @@ interface VaultStatus {
 }
 
 export const StatusBar: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { currentProject } = useProjectStore();
   const [mcpClients, setMcpClients] = useState<MCPClientSummary[]>([]);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
@@ -45,6 +47,10 @@ export const StatusBar: React.FC = () => {
   // Tropy sync status from primary sources store
   const isSyncing = usePrimarySourcesStore((s) => s.isSyncing);
   const syncProgress = usePrimarySourcesStore((s) => s.syncProgress);
+
+  // Réindexation complète des sources primaires (H7) : des heures possibles,
+  // à voir même le panneau Sources primaires fermé.
+  const reindex = useTropyReindexStatus();
 
   // Usage journal: substantial sessions of the day not yet covered by a
   // decision. Shared store with the Cmd/Ctrl+J modal, so annotating there
@@ -213,6 +219,21 @@ export const StatusBar: React.FC = () => {
             <span className="status-bar__spinner" />
             {t('statusBar.syncing', { defaultValue: 'Sync' })}{' '}
             {syncProgress ? `${syncProgress.current}/${syncProgress.total}` : '...'}
+          </span>
+        )}
+
+        {/* Réindexation complète des sources primaires : le détail en infobulle */}
+        {reindex.phase !== 'idle' && (
+          <span
+            className={`status-bar__item ${reindex.phase === 'stopped' ? 'status-bar__item--warning' : 'status-bar__item--active'}`}
+            title={describeReindexStatus(t, reindex, i18n.language) ?? undefined}
+          >
+            {reindex.phase === 'running' && !reindex.waitingForSync && <span className="status-bar__spinner" />}
+            {reindex.phase === 'running'
+              ? t('statusBar.tropyReindex', { done: reindex.done, total: reindex.total })
+              : reindex.phase === 'stopped'
+                ? t('statusBar.tropyReindexStopped')
+                : t('statusBar.tropyReindexDone')}
           </span>
         )}
 

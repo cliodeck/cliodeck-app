@@ -23,6 +23,7 @@ import { OCRCorpusReport } from './OCRCorpusReport';
 import { OCRSettingsModal } from './OCRSettingsModal';
 import { TranscriptionImportModal } from './TranscriptionImportModal';
 import { describeSyncIssue, isSyncRefusal } from './sync-issues';
+import { TropyReindexNotice } from './TropyReindexNotice';
 import './PrimarySourcesPanel.css';
 
 export const PrimarySourcesPanel: React.FC = () => {
@@ -288,6 +289,9 @@ export const PrimarySourcesPanel: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* Réindexation complète des extraits d'avant (H7), tant qu'elle dure. */}
+        <TropyReindexNotice />
 
         {projectInfo &&
           pendingIndexing.map((issue) => (

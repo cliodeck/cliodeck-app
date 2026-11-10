@@ -138,6 +138,17 @@
   color: var(--color-warning);
 }
 
+/* Réindexation complète (H7) : un travail en cours, pas un avertissement ; son arrêt en est un. */
+.reindex-notice--running,
+.reindex-notice--done {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.reindex-notice--running svg,
+.reindex-notice--done svg {
+  color: var(--color-accent);
+}
+
 .tropy-project-info .project-name {
   font-weight: 500;
   color: var(--text-primary);
