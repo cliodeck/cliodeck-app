@@ -379,8 +379,10 @@ export const ProjectPanel: React.FC = () => {
                   </div>
                 </CollapsibleSection>
 
+                {/* Remontée à chaque projet : une présentation sans `reveal-config.json` part des
+                    valeurs par défaut, et une lecture du projet quitté ne s'y affiche pas (S17-1-15). */}
                 <CollapsibleSection title={t('project.appearance')} defaultExpanded={true}>
-                  <RevealJsConfig projectPath={currentProject.path} />
+                  <RevealJsConfig key={currentProject.path} projectPath={currentProject.path} />
                 </CollapsibleSection>
               </>
             )}
@@ -400,8 +402,10 @@ export const ProjectPanel: React.FC = () => {
                 message « Enregistré » ou refus) ne s'affiche dans le suivant. */}
             <ZoteroProjectSettings key={currentProject.path} projectPath={currentProject.path} />
 
-            {/* Database Actions - project-specific */}
-            <ActionsSection />
+            {/* Database Actions - project-specific. Remontée à chaque projet : compte, chemin de la
+                base et boutons de purge sont lus pour lui (S17-1-8). Sa clé n'est pas celle de sa
+                voisine : deux enfants de même clé, React laisse l'ancien monté à chaque passage. */}
+            <ActionsSection key={`actions:${currentProject.path}`} />
 
             {/* L'entretien de démarrage n'était joué qu'une fois, juste après
                 la création du projet : un utilisateur qui l'avait passé ne

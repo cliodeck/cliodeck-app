@@ -16,6 +16,7 @@ import React, { Suspense, lazy, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Network, BarChart3 } from 'lucide-react';
 import { PanelLoadingFallback } from '../common/PanelLoadingFallback';
+import { useProjectStore } from '../../stores/projectStore';
 import './ExplorePanel.css';
 
 const CorpusExplorerPanel = lazy(() =>
@@ -29,6 +30,10 @@ type ExploreTab = 'corpus' | 'textometrics';
 export const ExplorePanel: React.FC = () => {
   const { t } = useTranslation('common');
   const [tab, setTab] = useState<ExploreTab>('corpus');
+  // Remonté à chaque projet : thèmes, frise, filtres et nœud sélectionné de l'explorateur sont
+  // ceux du projet ouvert, jamais du précédent (S13-1-29). Le même dossier rouvert garde les
+  // siens ; sans projet, la clé est vide, un chemin de projet ne l'est jamais.
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? '');
 
   const tabs: { id: ExploreTab; icon: React.ReactNode; label: string }[] = [
     { id: 'corpus', icon: <Network size={16} />, label: t('explore.tabs.corpus') },
@@ -60,7 +65,7 @@ export const ExplorePanel: React.FC = () => {
 
       <div className="explore-panel__body" role="tabpanel">
         <Suspense fallback={<PanelLoadingFallback />}>
-          {tab === 'corpus' && <CorpusExplorerPanel />}
+          {tab === 'corpus' && <CorpusExplorerPanel key={projectPath} />}
           {tab === 'textometrics' && <TextometricsPanel />}
         </Suspense>
       </div>
