@@ -78,6 +78,14 @@ export function setupTropyHandlers() {
   );
 
   /**
+   * Où en est la réindexation complète des sources primaires (H7) : un panneau
+   * ouvert après son départ ne reçoit pas les événements déjà envoyés.
+   */
+  ipcMain.handle('tropy:get-reindex-status', () => {
+    return { success: true, status: tropyService.getReindexStatus() };
+  });
+
+  /**
    * Vérifie si une synchronisation est nécessaire
    */
   ipcMain.handle('tropy:check-sync-needed', async () => {

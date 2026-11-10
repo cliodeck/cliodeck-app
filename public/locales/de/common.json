@@ -1477,6 +1477,16 @@
       "ocrLanguageUnavailable": "Die OCR auf „{{language}}“ konnte nicht starten: Das Sprachmodell ließ sich nicht laden. Es wird bei der ersten Verwendung jeder Sprache heruntergeladen: Prüfen Sie die Internetverbindung und klicken Sie erneut auf „OCR starten“. Einmal heruntergeladen, bleibt es offline verfügbar. Die Quellen wurden ohne OCR gespeichert.",
       "pagesChanged": "Letzte Synchronisierung: Die Seiten von {{sources}} Quelle(n) haben sich in Tropy geändert (ein Foto hinzugefügt, entfernt oder in eine andere Quelle verschoben). Ihre OCR-Transkription bleibt erhalten, gibt aber noch die alten Seiten wieder: Klicken Sie auf „OCR starten“, um sie neu zu erstellen, ohne dass Sie „OCR für alle Quellen erneut ausführen“ ankreuzen müssen.",
       "pagesImagesMissing": "{{sources}} Quelle(n), deren Seiten sich in Tropy geändert haben, wurden nicht erneut erkannt: Einige ihrer Bilder sind auf dem Datenträger nicht auffindbar (externes Laufwerk nicht angeschlossen, Dateien verschoben oder gelöscht). Ihre OCR-Transkription bleibt erhalten, mit den alten Seiten. Schließen Sie das Laufwerk wieder an oder legen Sie die Dateien wieder dorthin, wo Tropy sie erwartet, und klicken Sie dann erneut auf „OCR starten“. Sind sie endgültig verloren, erstellt „OCR für diese Quelle ausführen“ auf der Karte der Quelle ihre Transkription mit den verbleibenden Bildern neu."
+    },
+    "reindexAll": {
+      "running": "Vollständige Neuindexierung der Primärquellen (einmalig, nach einem Update von ClioDeck): {{done}} / {{total}} Quelle(n), etwa {{chunks}} Auszüge neu zu erstellen. Der Assistent nutzt bis dahin die alten Auszüge.",
+      "waitingForSync": "Während der Synchronisierung angehalten: Sie wird danach fortgesetzt.",
+      "stoppedNoProvider": "Vollständige Neuindexierung der Primärquellen unterbrochen: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen). {{remaining}} Quelle(n) behalten ihre alten Auszüge, die der Assistent weiterhin nutzt. Sie wird beim nächsten Öffnen des Projekts dort fortgesetzt, wo sie stehen geblieben ist.",
+      "stoppedFailed": "Vollständige Neuindexierung der Primärquellen unterbrochen: Das Modell der semantischen Suche hat nicht geantwortet (prüfen Sie in den Einstellungen, ob es verfügbar ist). {{remaining}} Quelle(n) behalten ihre alten Auszüge, die der Assistent weiterhin nutzt. Sie wird beim nächsten Öffnen des Projekts dort fortgesetzt, wo sie stehen geblieben ist.",
+      "done": "Vollständige Neuindexierung der Primärquellen abgeschlossen: {{total}} Quelle(n) neu erstellt.",
+      "finishing": "Vollständige Neuindexierung der Primärquellen (einmalig, nach einem Update von ClioDeck): {{total}} / {{total}} Quelle(n) neu erstellt. Letzter Schritt: Der Suchindex wird neu aufgebaut; der Assistent nutzt bereits die neuen Auszüge.",
+      "rebuildingIndex": "Der Suchindex der Primärquellen wurde beim letzten Schließen von ClioDeck nicht gespeichert: Er wird neu aufgebaut, {{missing}} Auszüge sind wieder aufzunehmen. Bis dahin findet die semantische Suche sie nicht; der Assistent findet sie nur über ihre Wörter.",
+      "indexRebuilt": "Suchindex der Primärquellen neu aufgebaut: Die semantische Suche findet wieder alle Auszüge."
     }
   },
   "modes": {
@@ -1906,7 +1916,12 @@
     "notModified": "Nicht geändert",
     "notModifiedTooltip": "Dieses Dokument wurde seit dem Öffnen nicht geändert.",
     "untitled": "Unbenannt",
-    "fileOutsideProjectTooltip": "Außerhalb des Projekts: {{path}}"
+    "fileOutsideProjectTooltip": "Außerhalb des Projekts: {{path}}",
+    "tropyReindex": "Neuindexierung {{done}}/{{total}}",
+    "tropyReindexStopped": "Neuindexierung unterbrochen",
+    "tropyReindexDone": "Neuindexierung abgeschlossen",
+    "tropyIndexRebuilding": "Index wird neu aufgebaut",
+    "tropyIndexRebuilt": "Index neu aufgebaut"
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",

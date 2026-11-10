@@ -7,9 +7,10 @@ import { assessTropyBinding, readTropyProjectIdentity } from '../../../backend/i
 import { TropyWatcher } from '../../../backend/integrations/tropy/TropyWatcher.js';
 import { TropyOCRPipeline, OCRResult, TranscriptionFormat, SUPPORTED_OCR_LANGUAGES } from '../../../backend/integrations/tropy/TropyOCRPipeline.js';
 import { PopplerNotFoundError } from '../../../backend/integrations/tropy/PDFConverter.js';
-import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
+import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics, TROPY_CHUNKS_VERSION } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
+import type { TropyReindexStatus } from '../../../backend/types/tropy-reindex.js';
 
 // Chunking optimization modules
 import { DocumentChunker, CHUNKING_CONFIGS } from '../../../backend/core/chunking/DocumentChunker.js';
@@ -22,7 +23,7 @@ import { configManager } from './config-manager.js';
 import { expandQueryToText } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { applyThreshold, CROSS_LANGUAGE_FALLBACK } from '../../../backend/core/rag/relevance.js';
 import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
-import { runBatch } from '../../../backend/core/usage-journal/context.js';
+import { runBatch, runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
 import type {
   EmbeddingProvider,
   LLMProvider,
@@ -70,6 +71,9 @@ type IndexableSource = Pick<
  */
 type IndexOutcome = { status: 'written'; chunks: number } | { status: 'superseded' };
 
+/** Pause avant le second essai d'une source de la réindexation complète (H7). */
+const FULL_REINDEX_RETRY_DELAY_MS = 2_000;
+
 /**
  * Les modèles de langue de Tesseract, téléchargés une fois par langue. Sous
  * userData : le dossier courant, où tesseract.js les rangeait sans consigne,
@@ -110,6 +114,19 @@ class TropyService {
   private embedding: EmbeddingProvider | null = null;
 
   /**
+   * La réindexation complète des extraits d'avant (H7) : son état, tel que le
+   * renderer le lit, et ses passes en cours — celle du projet ouvert, et celle
+   * d'un projet quitté qui finit de s'arrêter.
+   */
+  private reindexStatus: TropyReindexStatus = { phase: 'idle' };
+  private reindexRuns = new Set<Promise<void>>();
+  /** Les synchros en cours : la réindexation complète leur cède le magasin. */
+  private syncsRunning = 0;
+  private syncWaiters: Array<() => void> = [];
+  /** La source que la réindexation complète embarque : une synchro attend qu'elle soit écrite. */
+  private reindexStep: Promise<unknown> = Promise.resolve();
+
+  /**
    * Initialise le service Tropy pour un projet
    */
   async init(projectPath: string): Promise<void> {
@@ -130,6 +147,8 @@ class TropyService {
 
     this.projectPath = projectPath;
     this.vectorStore = new PrimarySourcesVectorStore(projectPath);
+    // La réindexation du projet quitté ne parle plus au renderer (`reportReindex`).
+    this.reindexStatus = { phase: 'idle' };
     this.tropySync = new TropySync(ocrOptions());
     this.watcher = new TropyWatcher();
     this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
@@ -178,6 +197,9 @@ class TropyService {
         this.startWatching();
       }
     }
+
+    // En arrière-plan : ni l'ouverture du projet, ni l'éditeur, ni le chat ne l'attendent.
+    this.startFullReindex();
   }
 
   /**
@@ -191,6 +213,7 @@ class TropyService {
     await this.disposePreviousRegistry();
 
     this.vectorStore = null;
+    this.reindexStatus = { phase: 'idle' };
     this.tropySync = null;
     this.watcher = null;
     this.ocrPipeline = null;
@@ -356,6 +379,28 @@ class TropyService {
       };
     }
 
+    // La réindexation complète cède le magasin à la synchro (H7) : elle se met
+    // en pause après la source qu'elle embarque, et reprend quand la dernière
+    // synchro a fini. L'historien qui synchronise n'attend pas une passe de
+    // plusieurs heures.
+    this.syncsRunning += 1;
+    try {
+      return await this.runSync(this.tropySync, this.vectorStore, this.currentTPYPath, options);
+    } finally {
+      this.syncsRunning -= 1;
+      if (this.syncsRunning === 0) {
+        for (const resume of this.syncWaiters.splice(0)) resume();
+      }
+    }
+  }
+
+  /** La synchro elle-même : métadonnées et OCR, puis embarquement des sources sans extrait. */
+  private async runSync(
+    tropySync: TropySync,
+    vectorStore: PrimarySourcesVectorStore,
+    tpyPath: string,
+    options: TropySyncOptions
+  ): Promise<TropySyncResult> {
     // Notifier la progression via IPC
     const onProgress = (progress: TropySyncProgress) => {
       BrowserWindow.getAllWindows().forEach((win) => {
@@ -372,9 +417,9 @@ class TropyService {
       extractEntities: options.extractEntities === true,
     };
 
-    const result = await this.tropySync.sync(
-      this.currentTPYPath,
-      this.vectorStore,
+    const result = await tropySync.sync(
+      tpyPath,
+      vectorStore,
       syncOptions,
       onProgress
     );
@@ -382,6 +427,9 @@ class TropyService {
     // Phase 2: Générer les embeddings pour les sources avec du texte
     // Always try to generate embeddings - the method will skip sources that already have chunks
     if (result.success) {
+      // Pas deux embarquements à la fois sur le magasin : la source que la
+      // réindexation complète embarquait s'écrit d'abord (H7).
+      await this.reindexStep.catch(() => undefined);
       try {
         console.log('📐 [TROPY-SERVICE] Starting embedding generation...');
         // Scope de batch : agrège les embeddings par chunk en un seul
@@ -1249,6 +1297,225 @@ class TropyService {
         error: error instanceof Error ? error.message : String(error),
         code: 'embedding-failed',
       };
+    }
+  }
+
+  // MARK: - Réindexation complète
+
+  /** Où en est la réindexation complète du projet ouvert, pour un panneau qui s'ouvre. */
+  getReindexStatus(): TropyReindexStatus {
+    return this.reindexStatus;
+  }
+
+  /**
+   * Se résout quand les réindexations complètes lancées jusqu'ici sont finies
+   * ou arrêtées, y compris celle d'un projet quitté.
+   */
+  async whenFullReindexSettled(): Promise<void> {
+    await Promise.all([...this.reindexRuns]);
+  }
+
+  /** La dimension du fournisseur d'embeddings, s'il y en a un et qu'il la connaît. */
+  private embeddingDimension(): number | undefined {
+    const dimension = this.embedding?.dimension;
+    return dimension && dimension > 0 ? dimension : undefined;
+  }
+
+  private startFullReindex(): void {
+    const store = this.vectorStore;
+    const projectPath = this.projectPath;
+    if (!store || !projectPath) return;
+    const run: Promise<void> = this.reindexOutdatedChunks(store, projectPath).finally(() => {
+      this.reindexRuns.delete(run);
+    });
+    this.reindexRuns.add(run);
+  }
+
+  /**
+   * Dit au renderer où en est la réindexation de `store`, tant qu'il est le
+   * magasin du projet ouvert : celle d'un projet quitté se tait.
+   */
+  private reportReindex(store: PrimarySourcesVectorStore, status: TropyReindexStatus): void {
+    if (this.vectorStore !== store) return;
+    // Déjà dit : la reconstruction de départ et la première source disent le même état.
+    if (JSON.stringify(status) === JSON.stringify(this.reindexStatus)) return;
+    this.reindexStatus = status;
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('tropy:reindex-progress', status);
+    });
+  }
+
+  /**
+   * Refait une fois les extraits écrits avant `TROPY_CHUNKS_VERSION` (H7) : une
+   * source renommée dans Tropy avant L06-2 gardait son ancien titre dans ses
+   * extraits, et plus rien ne le voyait.
+   *
+   * Source par source, par le chemin de la synchro (`indexSourceChunks`) : les
+   * extraits d'une source sont remplacés d'un bloc, jamais retirés avant que
+   * les nouveaux soient prêts, et le RAG garde toutes les sources pendant la
+   * passe. La marque d'une source tombe avec l'écriture de ses nouveaux
+   * extraits (`replaceSourceChunks`) : une interruption (projet fermé ou
+   * changé, fournisseur absent ou en panne) laisse les suivantes marquées, et
+   * la passe reprend à la prochaine ouverture, là où elle en était. Seuls les
+   * extraits et leurs vecteurs changent : transcriptions, notes et métadonnées
+   * ne sont jamais réécrites.
+   *
+   * Elle cède le magasin à une synchronisation (`sync`) : la source en cours
+   * s'écrit, puis la passe attend la fin de la synchro et reprend. Une source
+   * dont l'embarquement échoue deux fois de suite l'arrête : un Ollama arrêté
+   * ferait échouer toutes les suivantes. HNSW et BM25, alimentés au fil de la
+   * passe, sont reconstruits une fois à la fin, par tranches, sans les points
+   * des anciens extraits (`rebuildIndexesInSlices`).
+   *
+   * Chaque passe commence par contrôler l'index HNSW relu du disque, même sans
+   * source à refaire (`checkHnswIndex`). Il ne s'écrit qu'à la fermeture du
+   * magasin et en fin de reconstruction, et l'app quittée (`app.exit()`) ou
+   * plantée en pleine passe laissait celui d'avant : les sources refaites
+   * échappaient à la recherche dense, toutes et pour de bon si la sortie
+   * tombait pendant la reconstruction finale. En retard, il est reconstruit par
+   * tranches avant la suite, à la dimension du fournisseur d'embeddings : après
+   * un changement de modèle, la base mêle deux dimensions jusqu'à la fin de la
+   * passe. Plus aucune source à refaire, cette reconstruction est dite à
+   * l'écran si des extraits manquent à l'index, puis sa fin.
+   *
+   * Au journal d'usage IA, un lot d'embeddings par source, inscrit dès qu'elle
+   * est finie, et lié au projet de la passe : une passe interrompue laisse la
+   * trace de ce qu'elle a fait, et un changement de projet n'inscrit rien dans
+   * le journal du suivant (`recordBatch` de `usage-journal-service`).
+   */
+  private async reindexOutdatedChunks(store: PrimarySourcesVectorStore, projectPath: string): Promise<void> {
+    try {
+      const outdated = store.listOutdatedChunkSources();
+      const total = outdated.length;
+      const chunks = outdated.reduce((sum, source) => sum + source.chunks, 0);
+
+      // Contrôlé avant la première attente : la reconstruction en cours retient
+      // la recherche du chat d'en lancer une autre. À la dimension du
+      // fournisseur d'embeddings, celle des questions du chat : après un
+      // changement de modèle, l'index relu peut être de l'ancienne alors que
+      // des extraits sont déjà refaits à la nouvelle (app quittée en pleine
+      // passe).
+      const index = store.checkHnswIndex(this.embeddingDimension());
+      if (index.needsRebuild) {
+        console.log(
+          `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches, dimension ${index.dimension}`
+        );
+        // Plus aucune source à refaire, mais des extraits manquent à l'index
+        // (app quittée pendant la reconstruction finale, ou après une
+        // transcription) : la recherche par le sens ne les trouve pas avant la
+        // fin, une centaine de secondes sur 40 000 extraits. Dit à l'écran,
+        // comme sa fin. Des points inutiles seuls ne changent rien à la
+        // recherche : leur compactage se tait.
+        const announced = total === 0 && index.missing > 0;
+        if (total > 0) {
+          this.reportReindex(store, { phase: 'running', done: 0, total, chunks, waitingForSync: false });
+        } else if (announced) {
+          this.reportReindex(store, { phase: 'rebuilding-index', missing: index.missing });
+        }
+        const rebuild = store.rebuildIndexesInSlices(undefined, index.dimension);
+        this.reindexStep = rebuild;
+        if (!(await rebuild) || this.vectorStore !== store) return;
+        if (announced) {
+          this.reportReindex(store, { phase: 'index-rebuilt' });
+          // Dit une fois, comme la fin d'une passe.
+          this.reindexStatus = { phase: 'idle' };
+        }
+      }
+
+      if (total === 0) return;
+      console.log(
+        `🔁 [TROPY-SERVICE] Réindexation complète : ${total} source(s), ${chunks} extrait(s) d'avant la version ${TROPY_CHUNKS_VERSION}`
+      );
+
+      let done = 0;
+      let written = 0;
+      let stopped: 'no-embedding-provider' | 'embedding-failed' | null = null;
+      // Une seconde chance par source : sur des heures de requêtes, une coupure
+      // passagère (connexion réinitialisée, délai) ne doit pas arrêter la passe
+      // jusqu'à la prochaine ouverture. Un fournisseur en panne échoue deux fois.
+      let retried = false;
+      for (let i = 0; i < outdated.length; ) {
+        const { id } = outdated[i];
+        while (this.syncsRunning > 0 && this.vectorStore === store) {
+          this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: true });
+          await new Promise<void>((resume) => this.syncWaiters.push(resume));
+        }
+        // Projet fermé ou changé : la suite reprendra à sa prochaine ouverture.
+        if (this.vectorStore !== store) return;
+        if (!this.embedding) {
+          stopped = 'no-embedding-provider';
+          break;
+        }
+        this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: false });
+
+        // Refaite ou vidée depuis par la synchro ou une transcription : plus rien à faire ici.
+        const source = store.getSource(id);
+        if (source && store.hasOutdatedChunks(id)) {
+          if (!source.transcription?.trim()) {
+            // Comme la synchro : sans transcription, rien à embarquer.
+            store.markChunksCurrent(id);
+          } else {
+            const step = runWithJournalContext({ workspaceRoot: projectPath }, () =>
+              runBatch('tropy', () => this.indexSourceChunks(source))
+            );
+            this.reindexStep = step;
+            try {
+              if ((await step).status === 'written') written += 1;
+            } catch (error) {
+              // Son magasin fermé pendant l'embarquement : ce n'est pas une panne.
+              if (this.vectorStore !== store) return;
+              if (!retried) {
+                retried = true;
+                console.warn(`⚠️ [TROPY-SERVICE] Réindexation complète : source ${id} en échec, nouvel essai`, error);
+                await new Promise((resolve) => setTimeout(resolve, FULL_REINDEX_RETRY_DELAY_MS));
+                continue;
+              }
+              console.error(`❌ [TROPY-SERVICE] Réindexation complète arrêtée à la source ${id}:`, error);
+              stopped = 'embedding-failed';
+              break;
+            }
+          }
+        }
+        retried = false;
+        done += 1;
+        i += 1;
+      }
+
+      if (this.vectorStore !== store) return;
+      if (stopped) {
+        // Dit avant la reconstruction : la passe est arrêtée, et la
+        // reconstruction ne change rien à ce qui reste à faire.
+        const remaining = store.listOutdatedChunkSources().length;
+        this.reportReindex(store, { phase: 'stopped', reason: stopped, total, remaining });
+        console.warn(`⚠️ [TROPY-SERVICE] Réindexation complète arrêtée (${stopped}) : ${remaining} source(s) restent à refaire`);
+      } else if (written > 0) {
+        // Toutes les sources sont faites : pendant la reconstruction finale,
+        // une centaine de secondes sur 40 000 extraits, l'écran ne dit pas
+        // qu'il en reste une.
+        this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: false });
+      }
+      if (written > 0) {
+        // Par tranches : d'un bloc, une centaine de secondes de gel du processus
+        // principal sur 40 000 extraits (mesuré). Une synchro attend la fin pour
+        // embarquer, comme elle attend une source en cours.
+        const rebuild = store.rebuildIndexesInSlices();
+        this.reindexStep = rebuild;
+        // Magasin fermé en route (app quittée, projet changé) : le contrôle de
+        // l'index, à la prochaine ouverture, la refera.
+        if (!(await rebuild) || this.vectorStore !== store) return;
+      }
+      if (!stopped) {
+        this.reportReindex(store, { phase: 'done', total });
+        // Dit une fois : un panneau ouvert plus tard n'a plus rien à annoncer.
+        this.reindexStatus = { phase: 'idle' };
+        console.log(`✅ [TROPY-SERVICE] Réindexation complète finie : ${total} source(s)`);
+      }
+    } catch (error: unknown) {
+      // Jamais une raison de faire tomber le main. Les sources gardent leur
+      // marque ; le message en cours ne doit pas rester figé.
+      if (this.vectorStore !== store) return;
+      console.warn('⚠️ [TROPY-SERVICE] Réindexation complète interrompue:', error);
+      this.reportReindex(store, { phase: 'idle' });
     }
   }
 

@@ -101,6 +101,42 @@ function ocrPendingOf(value: unknown): Pick<PrimarySourceDocument, 'ocrPending' 
 }
 
 /**
+ * Version des extraits d'une source, écrite avec eux (`replaceSourceChunks`,
+ * colonne `chunks_version`). Une source dont les extraits portent une version
+ * inférieure, ou aucune, est « à réindexer » : `tropyService` les refait une
+ * fois, en arrière-plan, à l'ouverture du projet (H7). À incrémenter à chaque
+ * changement de ce que contiennent les extraits : découpage, en-tête, notes
+ * (`indexableText` et `prepareSourceChunks` de `tropy-service`).
+ *
+ *  (aucune) — extraits écrits avant la marque. Leur en-tête est celui du
+ *      premier embarquement : une source renommée dans Tropy avant L06-2 y
+ *      garde son ancien titre ;
+ *  1 — en-tête relu à chaque synchronisation (L06-2), extraits refaits une
+ *      fois (H7).
+ */
+export const TROPY_CHUNKS_VERSION = 1;
+
+/**
+ * Ce que le magasin écrit dans ses index pendant une `rebuildIndexesInSlices`, dans l'ordre, pour
+ * le rejouer dans l'index qu'elle construit : les vecteurs ajoutés, et les extraits remplacés
+ * (`forgetIndexedChunks`), qu'elle a pu lire avant leur remplacement.
+ */
+type RebuildLogEntry =
+  | { kind: 'add'; chunkId: string; embedding: Float32Array }
+  | { kind: 'forget'; chunkIds: ReadonlySet<string> };
+
+/**
+ * Porte la capacité du graphe à `needed` points au moins, en la doublant. Pendant la réindexation
+ * complète (H7), le graphe garde les points des anciens extraits jusqu'à la reconstruction finale :
+ * 2N points pour N extraits. Plein, il abandonnait en silence les vecteurs suivants, dès 50 000
+ * extraits. Seule la mémoire change, pas le format du fichier.
+ */
+function ensureHnswCapacity(index: HierarchicalNSW, needed: number): void {
+  const capacity = index.getMaxElements();
+  if (needed > capacity) index.resizeIndex(Math.max(needed, capacity * 2));
+}
+
+/**
  * Ce que `saveSource` enregistre : la source lue dans Tropy, plus la longueur
  * de sa plus longue note, que le rapport de la source relit (G1).
  */
@@ -154,6 +190,14 @@ export class PrimarySourcesVectorStore {
   private hnswLabelMap: Map<number, string> = new Map(); // HNSW label -> chunk ID
   private hnswCurrentSize: number = 0;
   private hnswInitialized: boolean = false;
+  /**
+   * Un journal par `rebuildIndexesInSlices` en cours : ce qui s'écrit dans les index d'ici son
+   * remplacement, à rejouer dans le nouvel index. Non vide, il retient aussi la recherche de
+   * reconstruire d'un bloc (`search`).
+   */
+  private rebuildLogs = new Set<RebuildLogEntry[]>();
+  /** Fermé : une reconstruction par tranches en cours s'arrête sans rien remplacer. */
+  private closed = false;
 
   // BM25 Index for keyword-based search
   private bm25Index: any;
@@ -269,17 +313,26 @@ export class PrimarySourcesVectorStore {
    */
   private loadHNSWIndex(): void {
     try {
+      // À la dimension du fichier, lue dans ses métadonnées, pas à celle de la première ligne de la
+      // base. Après un changement de modèle d'embeddings, la base mêle deux dimensions jusqu'à la
+      // fin de la réindexation complète (H7) : un index relu à une autre dimension que la sienne
+      // levait au premier ajout, extraits déjà écrits en base. Le format ne change pas.
+      const metadataPath = this.hnswIndexPath + '.meta.json';
+      const metadata = existsSync(metadataPath) ? JSON.parse(readFileSync(metadataPath, 'utf-8')) : null;
+      if (metadata?.dimension) this.hnswDimension = metadata.dimension;
+
       this.hnswIndex = new HierarchicalNSW('cosine', this.hnswDimension);
       this.hnswIndex.readIndexSync(this.hnswIndexPath);
       this.hnswCurrentSize = this.hnswIndex.getCurrentCount();
-
-      // Load metadata
-      const metadataPath = this.hnswIndexPath + '.meta.json';
-      if (existsSync(metadataPath)) {
-        const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
-        this.hnswLabelMap = new Map(metadata.labelMap || []);
-        this.hnswDimension = metadata.dimension || this.hnswDimension;
+      // hnswlib relit un index écrit vide avec une capacité nulle : `close()`
+      // en écrit un pour tout projet fermé sans extrait, et le premier ajout
+      // levait alors, après l'écriture des extraits en base (trouvé par H7).
+      // Le format du fichier ne change pas : seule la capacité en mémoire.
+      if (this.hnswIndex.getMaxElements() < this.hnswMaxElements) {
+        this.hnswIndex.resizeIndex(this.hnswMaxElements);
       }
+
+      if (metadata) this.hnswLabelMap = new Map(metadata.labelMap || []);
 
       this.hnswInitialized = true;
       console.log(`✅ Primary sources: Loaded HNSW index with ${this.hnswCurrentSize} vectors`);
@@ -531,6 +584,21 @@ export class PrimarySourcesVectorStore {
       }
     } catch (err) {
       console.warn('⚠️ longest_note_length migration check failed:', err);
+    }
+
+    // Soft migration: add chunks_version column (`TROPY_CHUNKS_VERSION`, H7).
+    // NULL sur les lignes existantes : leurs extraits sont d'avant la marque,
+    // et la réindexation complète qui suit l'ouverture du projet les refait.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'chunks_version')) {
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN chunks_version INTEGER');
+        console.log('🗄️ Migrated tropy_sources: added chunks_version column');
+      }
+    } catch (err) {
+      console.warn('⚠️ chunks_version migration check failed:', err);
     }
 
     // Table des photos associées aux sources
@@ -1075,11 +1143,6 @@ export class PrimarySourcesVectorStore {
       this.initNewHNSWIndex();
     }
 
-    if (this.hnswCurrentSize >= this.hnswMaxElements) {
-      console.warn('⚠️ Primary sources: HNSW index full');
-      return;
-    }
-
     // Check embedding dimension - reinitialize index if dimension changed
     if (embedding.length !== this.hnswDimension) {
       console.log(`📏 Primary sources: Embedding dimension changed (${this.hnswDimension} -> ${embedding.length}), reinitializing HNSW index`);
@@ -1087,11 +1150,15 @@ export class PrimarySourcesVectorStore {
       this.initNewHNSWIndex();
     }
 
+    // Plein : la capacité grandit, plutôt que d'abandonner le vecteur en silence (H7).
+    ensureHnswCapacity(this.hnswIndex!, this.hnswCurrentSize + 1);
+
     const label = this.hnswCurrentSize;
     const embeddingArray = Array.from(embedding);
     this.hnswIndex!.addPoint(embeddingArray, label);
     this.hnswLabelMap.set(label, chunkId);
     this.hnswCurrentSize++;
+    for (const log of this.rebuildLogs) log.push({ kind: 'add', chunkId, embedding });
   }
 
   /**
@@ -1141,6 +1208,11 @@ export class PrimarySourcesVectorStore {
    * reprend que les sources sans extrait, ne complétait jamais le trou
    * (S08-1-30). `items` vide retire les extraits.
    *
+   * La version des extraits (`TROPY_CHUNKS_VERSION`) s'écrit dans la même
+   * transaction : la marque « à réindexer » d'une source ne tombe qu'avec
+   * l'écriture de ses nouveaux extraits, et une passe interrompue laisse les
+   * autres marquées (H7).
+   *
    * INSERT simple, jamais `INSERT OR REPLACE` : les ids sont neufs, et un
    * conflit avec l'extrait d'une autre source doit échouer, pas le lui voler.
    * HNSW et BM25 ne sont alimentés qu'après la validation : une annulation ne
@@ -1157,8 +1229,15 @@ export class PrimarySourcesVectorStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    let replaced = new Set<string>();
     this.db.transaction(() => {
+      replaced = new Set(
+        (this.db.prepare('SELECT id FROM tropy_chunks WHERE source_id = ?').all(sourceId) as Array<{ id: string }>).map(
+          (row) => row.id
+        )
+      );
       this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
+      this.markChunksCurrent(sourceId);
       for (const { chunk, embedding } of items) {
         insert.run(
           chunk.id,
@@ -1173,10 +1252,133 @@ export class PrimarySourcesVectorStore {
       }
     })();
 
+    this.forgetIndexedChunks(replaced);
     for (const { chunk, embedding } of items) {
       this.addToHNSWIndex(chunk.id, embedding);
       this.addToBM25Index(chunk);
     }
+  }
+
+  /**
+   * Retire des index en mémoire des extraits qui ne sont plus en base. BM25
+   * servait encore leur texte (un ancien titre, une transcription corrigée), et
+   * leurs vecteurs, comptés par la recherche, y déclenchaient une
+   * reconstruction complète d'un bloc, une centaine de secondes sur 40 000
+   * extraits (H7). Leurs points restent dans le graphe HNSW, que la recherche
+   * ignore, jusqu'à la prochaine reconstruction.
+   */
+  private forgetIndexedChunks(chunkIds: ReadonlySet<string>): void {
+    if (chunkIds.size === 0) return;
+    for (const [label, chunkId] of this.hnswLabelMap) {
+      if (chunkIds.has(chunkId)) this.hnswLabelMap.delete(label);
+    }
+    for (const [docIndex, chunk] of this.bm25ChunkMap) {
+      if (chunkIds.has(chunk.id)) this.bm25ChunkMap.delete(docIndex);
+    }
+    // Une reconstruction en cours a pu les lire avant leur remplacement.
+    for (const log of this.rebuildLogs) log.push({ kind: 'forget', chunkIds });
+  }
+
+  /**
+   * L'index HNSW en mémoire sert-il les extraits de la base ? (revue de H7)
+   *
+   * Les extraits s'écrivent en base au fil de l'eau, mais l'index ne s'écrit sur disque qu'à la
+   * fermeture du magasin (`close`), après l'embarquement d'une synchro et en fin de
+   * reconstruction. Or `before-quit` sort par `app.exit()` sans fermer le magasin : après une
+   * sortie ou un plantage, l'index relu est celui d'avant. Ses étiquettes pointent vers des
+   * extraits supprimés, les extraits écrits depuis n'y sont pas, et ils échappent à la recherche
+   * dense. Le contrôle de `search` compare deux nombres, et ne voit rien quand il y en a autant.
+   *
+   * `missing` : les extraits embarqués (à la dimension de l'index) qui n'ont pas de point dans le
+   * graphe. `stale` : les points qui ne servent aucun extrait en base (extraits remplacés ou
+   * retirés, que le graphe garde jusqu'à la reconstruction). À reconstruire dès qu'un extrait
+   * manque, ou quand les points inutiles passent 10 % des points utiles. Une quinzaine de
+   * millisecondes sur 40 650 extraits (mesuré) : les seuls identifiants sont lus.
+   *
+   * `dimension` : celle du fournisseur d'embeddings, à laquelle le chat interroge l'index. Après un
+   * changement de modèle, l'index relu peut être de l'ancienne dimension alors que des extraits
+   * sont déjà refaits à la nouvelle (app quittée en pleine passe) : il ne sert alors aucun d'eux, et
+   * il est à refaire à la nouvelle. Sans aucun extrait à cette dimension, l'index garde la sienne et
+   * se contrôle à elle. `dimension` en retour : celle à laquelle le reconstruire.
+   */
+  checkHnswIndex(dimension = this.hnswDimension): {
+    missing: number;
+    stale: number;
+    needsRebuild: boolean;
+    dimension: number;
+  } {
+    let target = dimension;
+    let inBase = this.embeddedChunkIds(target);
+    if (inBase.size === 0 && target !== this.hnswDimension) {
+      target = this.hnswDimension;
+      inBase = this.embeddedChunkIds(target);
+    }
+    // Un index d'une autre dimension ne sert aucun extrait de celle-ci.
+    const served = new Set<string>();
+    if (target === this.hnswDimension) {
+      for (const chunkId of this.hnswLabelMap.values()) {
+        if (inBase.has(chunkId)) served.add(chunkId);
+      }
+    }
+    const missing = inBase.size - served.size;
+    const stale = Math.max(0, this.hnswCurrentSize - served.size);
+    return { missing, stale, needsRebuild: missing > 0 || stale > served.size * 0.1, dimension: target };
+  }
+
+  /** Les extraits embarqués à `dimension` : un vecteur de float32, 4 octets par composante. */
+  private embeddedChunkIds(dimension: number): Set<string> {
+    return new Set(
+      this.db
+        .prepare('SELECT id FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?')
+        .pluck()
+        .all(dimension * 4) as string[]
+    );
+  }
+
+  /**
+   * Les sources dont les extraits sont d'une version antérieure à
+   * `TROPY_CHUNKS_VERSION`, avec leur nombre d'extraits, dans l'ordre des
+   * titres : ce que la réindexation complète doit refaire (H7). Une source
+   * sans extrait n'y est pas : la synchro l'embarque, à la version courante.
+   */
+  listOutdatedChunkSources(): Array<{ id: string; chunks: number }> {
+    return this.db
+      .prepare(
+        `SELECT s.id AS id, COUNT(c.id) AS chunks
+         FROM tropy_sources s JOIN tropy_chunks c ON c.source_id = s.id
+         WHERE s.chunks_version IS NULL OR s.chunks_version < ?
+         GROUP BY s.id
+         ORDER BY s.title, s.id`
+      )
+      .all(TROPY_CHUNKS_VERSION) as Array<{ id: string; chunks: number }>;
+  }
+
+  /**
+   * Vrai si la source a des extraits d'une version antérieure : elle reste à
+   * réindexer. Une autre écriture (synchro, transcription) a pu les refaire ou
+   * les retirer depuis que la passe a dressé sa liste.
+   */
+  hasOutdatedChunks(sourceId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM tropy_sources s
+         WHERE s.id = ? AND (s.chunks_version IS NULL OR s.chunks_version < ?)
+           AND EXISTS (SELECT 1 FROM tropy_chunks c WHERE c.source_id = s.id)`
+      )
+      .get(sourceId, TROPY_CHUNKS_VERSION);
+    return row !== undefined;
+  }
+
+  /**
+   * Les extraits de la source sont de la version courante. `replaceSourceChunks`
+   * l'écrit avec eux ; la réindexation complète, seule, pour une source qui n'a
+   * rien à embarquer (pas de transcription) : ses extraits sont gardés tels
+   * quels, et elle n'est plus à réindexer.
+   */
+  markChunksCurrent(sourceId: string): void {
+    this.db
+      .prepare('UPDATE tropy_sources SET chunks_version = ? WHERE id = ?')
+      .run(TROPY_CHUNKS_VERSION, sourceId);
   }
 
   /**
@@ -1262,28 +1464,41 @@ export class PrimarySourcesVectorStore {
   search(queryEmbedding: Float32Array, topK: number = 10, query?: string): PrimarySourceSearchResult[] {
     const startTime = Date.now();
 
-    // DEBUG: Log index state at search time
-    const dbChunkCount = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL').get() as any).count;
-    console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize}, BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings=${dbChunkCount}`);
+    // Les extraits à la dimension de la question, celle du fournisseur d'embeddings : après un
+    // changement de modèle, la base en mêle deux jusqu'à la fin de la réindexation complète (H7),
+    // et l'index n'en sert qu'une.
+    const dimension = queryEmbedding.length;
+    const dbChunkCount = (
+      this.db
+        .prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?')
+        .get(dimension * 4) as { count: number }
+    ).count;
+    const sameDimension = this.hnswDimension === dimension;
+    console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize} (dimension ${this.hnswDimension}), BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings of dimension ${dimension}=${dbChunkCount}`);
 
-    // Check if indexes are out of sync with database
-    const needsRebuild = this.hnswCurrentSize === 0 ||
-      (dbChunkCount > 0 && Math.abs(this.hnswCurrentSize - dbChunkCount) > dbChunkCount * 0.1); // More than 10% difference
-
-    if (needsRebuild) {
-      console.log('📜 Primary sources: Indexes out of sync, rebuilding...');
-      this.rebuildAllIndexes();
-
-      if (this.hnswCurrentSize === 0) {
-        console.log('⚠️ [DEBUG] After rebuild: still 0 chunks. DB has ' + dbChunkCount + ' chunks with embeddings');
-        return [];
-      }
+    // Check if indexes are out of sync with database. Les vecteurs vivants
+    // (`hnswLabelMap`), pas tous les points du graphe : un extrait remplacé y
+    // laisse le sien jusqu'à la reconstruction (`forgetIndexedChunks`, H7).
+    // Reconstruit par tranches, en arrière-plan, jamais d'un bloc : une
+    // centaine de secondes de gel du processus principal sur 40 000 extraits,
+    // à chaque question tant que l'écart demeure. L'index courant sert en
+    // attendant ; une reconstruction déjà en cours n'en lance pas une autre.
+    const liveVectors = sameDimension ? this.hnswLabelMap.size : 0;
+    const outOfSync = dbChunkCount > 0 && Math.abs(liveVectors - dbChunkCount) > dbChunkCount * 0.1; // More than 10% difference
+    if (outOfSync && this.rebuildLogs.size === 0) {
+      console.log('📜 Primary sources: Indexes out of sync, rebuilding in slices...');
+      this.rebuildIndexesInSlices(undefined, dimension).catch((error: unknown) => {
+        console.warn('⚠️ Primary sources: rebuild in slices failed:', error);
+      });
     }
 
     const candidateSize = Math.max(topK * 5, 50);
 
-    // 1. Dense retrieval (HNSW)
-    const denseResults = this.searchHNSW(queryEmbedding, candidateSize);
+    // 1. Dense retrieval (HNSW). Un index d'une autre dimension ne peut servir la question : en
+    // reconstruction vers la sienne, il ne rend rien d'ici là. Sans aucun extrait à la dimension
+    // de la question (tout le corpus embarqué avec un autre modèle), la recherche lève, comme
+    // avant : le corpus est dit en panne, pas vide.
+    const denseResults = sameDimension || dbChunkCount === 0 ? this.searchHNSW(queryEmbedding, candidateSize) : [];
 
     // 2. Sparse retrieval (BM25) - only if query text is provided
     let sparseResults: Array<{ chunk: PrimarySourceChunk; score: number }> = [];
@@ -1566,10 +1781,12 @@ export class PrimarySourcesVectorStore {
       this.initNewHNSWIndex();
     }
 
-    // Add to HNSW
+    // Add to HNSW. Une seule dimension : un extrait d'une autre réinitialisait
+    // l'index (`addToHNSWIndex`), et une base qui en mêle deux, après un
+    // changement de modèle d'embeddings, n'en gardait que la dernière série.
     let addedCount = 0;
     for (const { chunk, embedding } of chunks) {
-      if (embedding.length > 0) {
+      if (embedding.length === this.hnswDimension) {
         this.addToHNSWIndex(chunk.id, embedding);
         addedCount++;
       }
@@ -1590,6 +1807,89 @@ export class PrimarySourcesVectorStore {
 
     const duration = Date.now() - startTime;
     console.log(`✅ Primary sources: Indexes rebuilt in ${duration}ms (${chunks.length} chunks)`);
+  }
+
+  /**
+   * `rebuildAllIndexes` sans geler le processus principal (H7). Sur 40 650
+   * extraits, la reconstruction d'un bloc dure une centaine de secondes, pendant
+   * lesquelles ni l'éditeur ni le chat ne reçoivent de réponse. Ici, le nouvel
+   * index HNSW se construit à côté, par tranches de `sliceSize` vecteurs, et
+   * l'ancien sert les recherches entre deux ; ce qui s'écrit entre-temps dans
+   * les index (vecteurs ajoutés, extraits remplacés) y est rejoué dans l'ordre,
+   * puis il le remplace. BM25, quelques secondes, se refait d'un bloc à la fin,
+   * comme à l'ouverture du magasin.
+   *
+   * En cours dès l'appel : la recherche n'en lance pas d'autre d'ici le
+   * remplacement. La base n'est lue qu'au tour suivant de la boucle
+   * d'événements, une demi-seconde sur 40 650 extraits : à l'ouverture d'un
+   * projet, l'appelant ne l'attend pas.
+   *
+   * À `dimension`, par défaut celle de l'index courant, que le dernier vecteur
+   * ajouté a fixée ; les extraits d'une autre dimension n'y entrent pas. Après
+   * un changement de modèle d'embeddings, la base en mêle deux jusqu'à la fin
+   * de la réindexation complète, et la première ligne lue, qui décidait
+   * jusqu'ici, est le plus souvent de l'ancienne.
+   *
+   * Rend faux, sans rien remplacer, si le magasin a été fermé en route.
+   */
+  async rebuildIndexesInSlices(sliceSize = 256, dimension = this.hnswDimension): Promise<boolean> {
+    const startTime = Date.now();
+    const log: RebuildLogEntry[] = [];
+    this.rebuildLogs.add(log);
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (this.closed) return false;
+      const chunks = this.getAllChunksWithEmbeddings();
+      const index = new HierarchicalNSW('cosine', dimension);
+      index.initIndex(Math.max(this.hnswMaxElements, chunks.length), this.hnswM, this.hnswEfConstruction);
+      const labelMap = new Map<number, string>();
+      const labelOf = new Map<string, number>();
+      let points = 0;
+      const add = (chunkId: string, embedding: Float32Array): void => {
+        if (embedding.length !== dimension || labelOf.has(chunkId)) return;
+        ensureHnswCapacity(index, points + 1);
+        index.addPoint(Array.from(embedding), points);
+        labelMap.set(points, chunkId);
+        labelOf.set(chunkId, points);
+        points += 1;
+      };
+
+      for (let i = 0; i < chunks.length; i++) {
+        add(chunks[i].chunk.id, chunks[i].embedding);
+        if ((i + 1) % sliceSize === 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          if (this.closed) return false;
+        }
+      }
+      if (this.closed) return false;
+      // Ce qui s'est écrit pendant ce temps, dans l'ordre. Un extrait remplacé
+      // garde son point dans le nouveau graphe, sans étiquette, jusqu'à la
+      // prochaine reconstruction : la recherche l'ignore.
+      for (const entry of log) {
+        if (entry.kind === 'add') {
+          add(entry.chunkId, entry.embedding);
+          continue;
+        }
+        for (const chunkId of entry.chunkIds) {
+          const label = labelOf.get(chunkId);
+          if (label === undefined) continue;
+          labelMap.delete(label);
+          labelOf.delete(chunkId);
+        }
+      }
+
+      this.hnswIndex = index;
+      this.hnswLabelMap = labelMap;
+      this.hnswCurrentSize = points;
+      this.hnswDimension = dimension;
+      this.hnswInitialized = true;
+    } finally {
+      this.rebuildLogs.delete(log);
+    }
+    this.rebuildBM25Index();
+    this.saveHNSWIndex();
+    console.log(`✅ Primary sources: Indexes rebuilt in slices in ${Date.now() - startTime}ms (${this.hnswLabelMap.size} chunks)`);
+    return true;
   }
 
   private cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -2341,6 +2641,7 @@ export class PrimarySourcesVectorStore {
    * Ferme la connexion à la base de données
    */
   close(): void {
+    this.closed = true;
     // Save HNSW index before closing
     this.saveHNSWIndex();
     this.db.close();

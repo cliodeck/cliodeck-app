@@ -300,8 +300,10 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — extraits rempla
     store.replaceSourceChunks('src-1', [chunk('neuf-0', 'texte revu', 0), chunk('neuf-1', 'suite du texte revu', 1)]);
 
     expect(store.getChunks('src-1').map((c) => c.id)).toEqual(['neuf-0', 'neuf-1']);
+    // Le graphe HNSW garde le point de l'ancien extrait jusqu'à la reconstruction ;
+    // BM25 ne sert plus son texte (H7).
     expect(store.getIndexStats().hnswSize).toBe(before.hnswSize + 2);
-    expect(store.getIndexStats().bm25Size).toBe(before.bm25Size + 2);
+    expect(store.getIndexStats().bm25Size).toBe(before.bm25Size - 1 + 2);
   });
 
   it('une écriture refusée en chemin laisse l’ancien jeu, en base comme en mémoire', () => {

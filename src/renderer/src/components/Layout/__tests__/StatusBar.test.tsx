@@ -18,6 +18,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params && typeof params.path === 'string' ? `${key} ${params.path}` : key,
+    i18n: { language: 'fr' },
   }),
   initReactI18next: { type: '3rdParty', init: () => undefined },
 }));
@@ -25,6 +26,7 @@ vi.mock('react-i18next', () => ({
 import { StatusBar } from '../StatusBar';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
+import { REINDEX_DONE_NOTICE_MS, useTropyReindexStore } from '../../../stores/tropyReindexStore';
 
 async function mountWith(state: { filePath: string | null; isDirty: boolean }): Promise<void> {
   useEditorStore.setState({ ...state, lastSavedAt: null });
@@ -151,5 +153,78 @@ describe('StatusBar : le fichier ouvert est nommé (G7)', () => {
     await mountWith({ filePath: null, isDirty: false });
 
     expect(fileLabel()).toBeNull();
+  });
+});
+
+/** L'élément de la réindexation complète des sources primaires, s'il y en a un. */
+const reindexLabel = (): HTMLElement | null =>
+  screen.queryByText(/^statusBar\.tropy(Reindex|IndexRebuil)/)?.closest('.status-bar__item') ?? null;
+
+describe('StatusBar : la réindexation complète des sources primaires se voit, panneau fermé (H7)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    act(() => useTropyReindexStore.getState().clear());
+  });
+
+  it('en cours : les sources faites sur le total, le message entier en infobulle', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+    act(() =>
+      useTropyReindexStore
+        .getState()
+        .receive({ phase: 'running', done: 12, total: 345, chunks: 4000, waitingForSync: false })
+    );
+
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyReindex');
+    expect(reindexLabel()).toHaveAttribute('title', 'primarySources.reindexAll.running');
+    expect(reindexLabel()).toHaveClass('status-bar__item--active');
+  });
+
+  it('arrêtée : dite en avertissement, avec sa cause en infobulle', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+    act(() =>
+      useTropyReindexStore
+        .getState()
+        .receive({ phase: 'stopped', reason: 'no-embedding-provider', total: 345, remaining: 333 })
+    );
+
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyReindexStopped');
+    expect(reindexLabel()).toHaveAttribute('title', 'primarySources.reindexAll.stoppedNoProvider');
+    expect(reindexLabel()).toHaveClass('status-bar__item--warning');
+  });
+
+  it('finie : dite un moment, puis effacée', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await mountWith({ filePath: null, isDirty: false });
+    act(() => useTropyReindexStore.getState().receive({ phase: 'done', total: 345 }));
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyReindexDone');
+
+    act(() => {
+      vi.advanceTimersByTime(REINDEX_DONE_NOTICE_MS);
+    });
+
+    expect(reindexLabel()).toBeNull();
+  });
+
+  it('l’index de recherche relu incomplet, à l’ouverture : sa reconstruction se voit, puis sa fin, qui s’efface', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await mountWith({ filePath: null, isDirty: false });
+    act(() => useTropyReindexStore.getState().receive({ phase: 'rebuilding-index', missing: 40648 }));
+
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyIndexRebuilding');
+    expect(reindexLabel()).toHaveAttribute('title', 'primarySources.reindexAll.rebuildingIndex');
+    expect(reindexLabel()).toHaveClass('status-bar__item--active');
+
+    act(() => useTropyReindexStore.getState().receive({ phase: 'index-rebuilt' }));
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyIndexRebuilt');
+    act(() => {
+      vi.advanceTimersByTime(REINDEX_DONE_NOTICE_MS);
+    });
+    expect(reindexLabel()).toBeNull();
+  });
+
+  it('témoin : rien en cours, rien d’affiché', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+
+    expect(reindexLabel()).toBeNull();
   });
 });

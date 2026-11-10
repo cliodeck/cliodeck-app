@@ -21,6 +21,18 @@ const ALLOWED_SEND_CHANNELS: string[] = [
   'language-changed',
 ];
 
+/**
+ * Même forme que `TropyReindexStatus` (backend/types/tropy-reindex.ts) : le
+ * preload ne compile que ce qui est sous src/.
+ */
+type TropyReindexStatusShape =
+  | { phase: 'idle' }
+  | { phase: 'running'; done: number; total: number; chunks: number; waitingForSync: boolean }
+  | { phase: 'stopped'; reason: 'no-embedding-provider' | 'embedding-failed'; total: number; remaining: number }
+  | { phase: 'done'; total: number }
+  | { phase: 'rebuilding-index'; missing: number }
+  | { phase: 'index-rebuilt' };
+
 // API exposée au renderer process
 const api = {
   // Projects
@@ -936,6 +948,9 @@ const api = {
       forceReindex?: boolean;
     }) => ipcRenderer.invoke('tropy:sync', options),
     checkSyncNeeded: () => ipcRenderer.invoke('tropy:check-sync-needed'),
+    // Réindexation complète des extraits d'avant (H7).
+    getReindexStatus: (): Promise<{ success: boolean; status?: TropyReindexStatusShape }> =>
+      ipcRenderer.invoke('tropy:get-reindex-status'),
 
     // File Watching
     // Sans chemin : le main surveille le projet Tropy lié au projet courant (S18-1-30).
@@ -992,6 +1007,11 @@ const api = {
       const listener = (_event: any, progress: any) => callback(progress);
       ipcRenderer.on('tropy:sync-progress', listener);
       return () => ipcRenderer.removeListener('tropy:sync-progress', listener);
+    },
+    onReindexProgress: (callback: (status: TropyReindexStatusShape) => void) => {
+      const listener = (_event: unknown, status: TropyReindexStatusShape) => callback(status);
+      ipcRenderer.on('tropy:reindex-progress', listener);
+      return () => ipcRenderer.removeListener('tropy:reindex-progress', listener);
     },
   },
 
