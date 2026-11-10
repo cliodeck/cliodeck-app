@@ -29,6 +29,8 @@ const bench = vi.hoisted(() => ({
   /** Réponse au dialogue natif de consentement : 1 accepte, 0 annule. */
   dialogResponse: 0,
   dialogCalls: [] as Array<{ message: string; detail: string }>,
+  /** Le faux modèle sait appeler des outils : le catalogue MCP part avec le tour. */
+  tools: false,
 }));
 
 vi.mock('electron', () => ({
@@ -53,7 +55,7 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
       return {
         getLLM: () => ({
           id: 'fake', name: 'Fake', model: 'fake-model',
-          capabilities: { chat: true, streaming: true, tools: false },
+          capabilities: { chat: true, streaming: true, tools: bench.tools },
           getStatus: () => ({ state: 'ready' }),
           chat: (messages: ChatMessage[], opts: ChatOptions) => {
             bench.seenOpts.push(opts);
@@ -77,6 +79,10 @@ import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
 import type { ReadingNoteMappedSearchResult } from '../retrieval-service.js';
 import { cloudConsent } from '../../../../backend/security/cloud-consent.js';
+import { historyService } from '../history-service.js';
+import { mcpClientsService } from '../mcp-clients-service.js';
+import { HistoryManager } from '../../../../backend/core/history/HistoryManager.js';
+import { getJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -145,6 +151,7 @@ afterEach(() => {
   bench.window = null;
   bench.dialogResponse = 0;
   bench.dialogCalls.length = 0;
+  bench.tools = false;
 });
 
 describe('banc du pump de chat', () => {
@@ -328,5 +335,181 @@ describe('consentement distant : modèle Ollama hébergé (L04-1)', () => {
     expect(bench.dialogCalls).toHaveLength(1);
     expect(searched().includeReadingNotes).toBe(false);
     expect(prompted()).not.toContain(NOTE);
+  });
+});
+
+/**
+ * Un tour s'écrit dans le projet qui l'a lancé (L03-6, décision Q11). Ouvrir B pendant une
+ * génération de A annule le tour ; sa réponse partielle va au journal de recherche de A, encore
+ * ouvert pendant le drain des opérations (`project-services.ts`). A déjà fermé (drain dépassé) :
+ * rien ne s'écrit nulle part, le journal de B n'étant jamais celui du tour.
+ *
+ * Vrais journaux de recherche (SQLite) sur deux projets temporaires, vrai registre des opérations,
+ * vrai drain : la bascule est celle de la séquence, réduite aux services en jeu.
+ */
+describe('bascule de projet pendant un tour (L03-6)', () => {
+  let A = '';
+  let B = '';
+
+  beforeEach(async () => {
+    A = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-tour-A-'));
+    B = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-tour-B-'));
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(A);
+    await historyService.init(A);
+  });
+
+  afterEach(() => {
+    historyService.close();
+    fs.rmSync(A, { recursive: true, force: true });
+    fs.rmSync(B, { recursive: true, force: true });
+  });
+
+  /**
+   * La fermeture de A puis l'ouverture de B, pour ce qui compte ici (project-services.ts) : les
+   * opérations du projet s'annulent, la séquence attend leur fin au plus `drainMs`, puis ferme le
+   * journal de A et ouvre celui de B. Vrai si le drain a fini à temps.
+   */
+  async function openB(drainMs: number): Promise<boolean> {
+    operations.cancelScope('project', 'project-closed');
+    const drained = await operations.drain('project', drainMs);
+    historyService.close();
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(B);
+    await historyService.init(B);
+    return drained;
+  }
+
+  /**
+   * Les messages du journal de recherche d'un projet, lus par une connexion à part. Triés : la
+   * question et la réponse s'écrivent dans la même milliseconde, et le journal les rend par date.
+   */
+  function exchanges(project: string): Array<[string, string]> {
+    const reader = new HistoryManager(project);
+    try {
+      return reader
+        .getAllChatMessages()
+        .map((m): [string, string] => [m.role, m.content])
+        .sort(([a], [b]) => (a === b ? 0 : a === 'user' ? -1 : 1));
+    } finally {
+      reader.close();
+    }
+  }
+
+  const deltas = (sent: Sent[]): string => chunks(sent).map((e) => e.chunk.delta).join('');
+
+  it('le tour est annulé, et sa réponse partielle va au journal de A, rien à celui de B (Q11)', async () => {
+    bench.provider = async function* (messages, opts) {
+      yield { delta: 'Réponse ', done: false };
+      yield { delta: 'partielle', done: false };
+      yield* waitForAbort(messages, opts);
+    };
+    const { sessionId, sent } = startTurn();
+    await vi.waitFor(() => expect(deltas(sent)).toBe('Réponse partielle'), WAIT);
+
+    expect(await openB(5_000)).toBe(true);
+
+    expect(bench.seenOpts[0].signal?.aborted).toBe(true);
+    expect(terminal(sent)?.chunk.finishReason).toBe('cancelled');
+    expect(operations.find(sessionId)).toBeNull();
+    expect(exchanges(A)).toEqual([
+      ['user', 'question'],
+      ['assistant', 'Réponse partielle'],
+    ]);
+    expect(exchanges(B)).toEqual([]);
+  });
+
+  it('le journal de A déjà fermé quand le tour finit (drain dépassé) : rien nulle part, et un avertissement', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let release: () => void = () => undefined;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    // Un modèle sourd au signal : le tour survit au drain.
+    bench.provider = async function* () {
+      yield { delta: 'Réponse ', done: false };
+      await released;
+      yield { delta: 'tardive', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const { sessionId, sent } = startTurn();
+    await vi.waitFor(() => expect(deltas(sent)).toBe('Réponse '), WAIT);
+
+    expect(await openB(20)).toBe(false);
+    release();
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+
+    expect(exchanges(B)).toEqual([]);
+    expect(exchanges(A)).toEqual([]);
+    expect(warn.mock.calls.flat().map(String).join('\n')).toContain(A);
+  });
+
+  /** Un serveur MCP prêt, qui offre un outil ; rend l'espion de ses appels. */
+  function offerTool() {
+    bench.tools = true;
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      {
+        name: 'srv',
+        state: 'ready',
+        generation: 1,
+        tools: [{ name: 'lookup', description: 'cherche', inputSchema: { type: 'object', properties: {} } }],
+      },
+    ]);
+    return vi.spyOn(mcpClientsService, 'callTool').mockResolvedValue({ ok: true, result: 'réponse du serveur' });
+  }
+
+  /** Le modèle demande l'outil ; `between` tombe entre la demande et la fin de son message. */
+  function askForTool(between: () => void): void {
+    let call = 0;
+    bench.provider = async function* (_messages, opts) {
+      call += 1;
+      if (call === 1) {
+        yield { delta: '', done: false, toolCall: { id: 't1', name: 'srv__lookup', arguments: '{}' } };
+        between();
+        yield { delta: '', done: true, finishReason: 'tool_call' };
+        return;
+      }
+      yield { delta: '', done: true, finishReason: opts.signal?.aborted ? 'cancelled' : 'stop' };
+    };
+  }
+
+  const toolDone = (sent: Sent[]) =>
+    sent
+      .filter((e) => e.channel === 'fusion:chat:tool-call')
+      .map((e) => e.payload as { status: string; ok?: boolean; errorMessage?: string })
+      .find((p) => p.status === 'done');
+
+  it('un appel d’outil après la bascule rend project_changed, sans atteindre les clients MCP', async () => {
+    const callTool = offerTool();
+    askForTool(() => operations.cancelScope('project', 'project-closed'));
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(toolDone(sent)).toMatchObject({ ok: false });
+    expect(toolDone(sent)?.errorMessage).toBeTruthy();
+  });
+
+  it('témoin : sans bascule, l’appel d’outil part au client MCP', async () => {
+    const callTool = offerTool();
+    askForTool(() => undefined);
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(callTool).toHaveBeenCalledWith('srv', 'lookup', {});
+    expect(toolDone(sent)).toMatchObject({ ok: true });
+  });
+
+  it('le fournisseur appelé par le tour voit la racine du projet du tour (journal d’usage)', async () => {
+    const seen: Array<string | undefined> = [];
+    bench.provider = async function* () {
+      seen.push(getJournalContext()?.workspaceRoot);
+      yield { delta: 'ok', done: false };
+      seen.push(getJournalContext()?.workspaceRoot);
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(seen).toEqual([A, A]);
   });
 });
