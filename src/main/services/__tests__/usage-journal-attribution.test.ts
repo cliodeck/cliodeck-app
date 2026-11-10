@@ -236,9 +236,11 @@ describe('journal d’usage : un lot d’embeddings reste dans son projet (H7, S
 });
 
 /**
- * Sans contexte qui porte la racine du projet : la génération de diapositives, l'analyse de
- * similarité, l'indexation du vault Obsidian ou la synchro Tropy n'en posaient pas. La racine
- * d'un appel ou d'un lot est celle du journal ouvert quand il commence, pas quand il finit.
+ * Sans contexte qui porte la racine du projet : la génération de diapositives n'en pose pas, et
+ * l'analyse de similarité, l'indexation du vault Obsidian ou la synchro Tropy n'en posaient pas.
+ * La racine d'un appel ou d'un lot est celle du journal ouvert quand il commence, pas quand il
+ * finit. Une opération en plusieurs appels doit poser la sienne à son entrée : voir
+ * `usage-journal-indexing-passes.test.ts` et `similarity-journal.test.ts`.
  */
 describe('journal d’usage : sans racine posée par l’appelant, le projet est celui du début (S10-1-33)', () => {
   it('un appel démarré dans A et fini après l’ouverture de B n’entre pas dans le journal de B', async () => {
