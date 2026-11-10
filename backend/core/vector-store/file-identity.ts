@@ -148,6 +148,18 @@ async function realLocationAsync(filePath: string): Promise<string | null> {
 }
 
 /**
+ * Ce que compare `sameFile` : deux chemins désignent le même fichier quand leurs clés sont
+ * égales. Relevée une fois, quand le disque vient de répondre, la clé se compare ensuite sans
+ * y retoucher : pour un dossier dont le volume peut cesser de répondre, où un appel synchrone
+ * gèlerait le main (le gestionnaire de projet, `project-lifecycle.ts`).
+ */
+export function sameFileKey(filePath: string, realpath: RealpathFn = realpathSync.native): string {
+  const api = pathApi(filePath);
+  const real = (realLocation(filePath, realpath) ?? api.resolve(filePath)).normalize('NFC');
+  return api === path.win32 ? real.toLowerCase() : real;
+}
+
+/**
  * Ces deux chemins désignent-ils le même fichier ? Le disque tranche la casse et les
  * liens ; pour ce qui n'existe pas encore, seule la forme Unicode est pardonnée (et la
  * casse sous Windows, qui ne la distingue jamais).
@@ -157,12 +169,7 @@ export function sameFile(
   b: string,
   realpath: RealpathFn = realpathSync.native
 ): boolean {
-  const key = (filePath: string): string => {
-    const api = pathApi(filePath);
-    const real = (realLocation(filePath, realpath) ?? api.resolve(filePath)).normalize('NFC');
-    return api === path.win32 ? real.toLowerCase() : real;
-  };
-  return key(a) === key(b);
+  return sameFileKey(a, realpath) === sameFileKey(b, realpath);
 }
 
 /** Comparaison par segments de deux chemins réels. */

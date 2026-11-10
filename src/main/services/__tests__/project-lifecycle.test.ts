@@ -7,10 +7,11 @@
  * le résultat, jamais un délai réel.
  */
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi, type MockInstance } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, type EncodingOption, type PathLike } from 'fs';
 import os from 'os';
 import path from 'path';
 import { ProjectChangedError, type ProjectHandle } from '../../../../backend/types/project-handle.js';
+import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import type { ProjectManager } from '../project-manager.js';
 import {
   createProjectLifecycle,
@@ -18,6 +19,7 @@ import {
   type ProjectLifecycleOptions,
   type ProjectManagerPort,
   type ProjectServiceMode,
+  type UnrequestedClose,
 } from '../project-lifecycle.js';
 
 interface Loaded {
@@ -57,12 +59,16 @@ interface FakeProject {
    * travail qui dure. Comme `ProjectManager.loadProject`, il ne bascule qu'à la fin.
    */
   hold?: Promise<void>;
+  /** Appelé au début de `loadProject` : le volume qui tombe pendant le chargement. */
+  onLoad?: () => void;
 }
 
 type FakeManager = ProjectManagerPort<Loaded> & {
   current: () => string | null;
   metadataCalls: string[];
   loadCalls: string[];
+  /** Les `loadProject` qui ont fini, réussis ou non, dans l'ordre. */
+  loadsSettled: string[];
   /** Le plus grand nombre de `loadProject` qui ont couru ensemble. */
   maxLoadsInFlight: () => number;
   /** La prochaine fermeture attend `gate` avant de rien changer. */
@@ -73,6 +79,7 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
   let current: string | null = null;
   const metadataCalls: string[] = [];
   const loadCalls: string[] = [];
+  const loadsSettled: string[] = [];
   let loadsInFlight = 0;
   let maxLoadsInFlight = 0;
   let nextCloseGate: Promise<void> | null = null;
@@ -84,6 +91,7 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
     current: () => current,
     metadataCalls,
     loadCalls,
+    loadsSettled,
     maxLoadsInFlight: () => maxLoadsInFlight,
     holdNextClose: (gate) => {
       nextCloseGate = gate;
@@ -100,6 +108,7 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
       loadCalls.push(projectFile);
       loadsInFlight += 1;
       maxLoadsInFlight = Math.max(maxLoadsInFlight, loadsInFlight);
+      projects[projectFile]?.onLoad?.();
       try {
         const hold = projects[projectFile]?.hold;
         if (hold) await hold;
@@ -115,6 +124,7 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
         return { success: true, project: { name: label(current) } };
       } finally {
         loadsInFlight -= 1;
+        loadsSettled.push(projectFile);
       }
     },
     getCurrentProjectPath: () => current,
@@ -165,9 +175,49 @@ function fakeService(
 function lifecycle(
   manager: FakeManager,
   services: ProjectBoundService<Loaded, OpenRequest>[],
-  timeouts?: ProjectLifecycleOptions<Loaded, OpenRequest>['timeouts']
+  timeouts?: ProjectLifecycleOptions<Loaded, OpenRequest>['timeouts'],
+  onUnrequestedClose?: (closed: UnrequestedClose) => void
 ) {
-  return createProjectLifecycle<Loaded, OpenRequest>({ manager, services, timeouts });
+  return createProjectLifecycle<Loaded, OpenRequest>({ manager, services, timeouts, onUnrequestedClose });
+}
+
+/** Suit une promesse sans l'attendre : sous faux minuteurs, dit si elle a fini sans avancer l'horloge. */
+function watch<T>(promise: Promise<T>): { promise: Promise<T>; settled: () => boolean } {
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    }
+  );
+  return { promise, settled: () => settled };
+}
+
+/**
+ * Un volume qui ne répond plus (NAS injoignable, montage NFS dur) : un `realpath` synchrone dessous
+ * gèlerait le main, et aucune borne de la séquence ne tomberait pendant ce temps. Chacun est donc
+ * compté, puis échoue ; un test exige qu'il n'y en ait aucun.
+ */
+function deadVolume(prefix: string): { kill: () => void; syncCalls: string[] } {
+  let dead = false;
+  const syncCalls: string[] = [];
+  const original = realpathSync.native;
+  const realpathOrHang = (target: PathLike, options?: EncodingOption): string => {
+    if (dead && String(target).startsWith(prefix)) {
+      syncCalls.push(String(target));
+      throw Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    }
+    return original(target, options);
+  };
+  vi.spyOn(realpathSync, 'native').mockImplementation(realpathOrHang as typeof realpathSync.native);
+  return {
+    kill: () => {
+      dead = true;
+    },
+    syncCalls,
+  };
 }
 
 const request: OpenRequest = { tag: 'ipc' };
@@ -548,6 +598,20 @@ describe('projectLifecycle — fermeture', () => {
     expect(manager.current()).toBeNull();
   });
 
+  it('ni close() ni une bascule demandée n’appellent onUnrequestedClose : leur réponse suffit', async () => {
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {}, [B]: {}, [C]: { unwritable: true } });
+    const unrequested = vi.fn<(closed: UnrequestedClose) => void>();
+    const lc = lifecycle(manager, [fakeService(events, 'history')], undefined, unrequested);
+    await lc.open(A, request);
+    await lc.open(B, request);
+    await lc.open(C, request);
+    await lc.close();
+
+    expect(lc.current()).toBeNull();
+    expect(unrequested).not.toHaveBeenCalled();
+  });
+
   it('assertCurrent lève ProjectChangedError (« project-changed ») après une bascule', async () => {
     const events: string[] = [];
     const manager = fakeManager(events, { [A]: {}, [B]: {} });
@@ -744,6 +808,87 @@ describe('projectLifecycle — gestionnaire en retard', () => {
     expect(lc.current()?.path).toBe('/projets/B');
   });
 
+  describe.skipIf(!symlinkAvailable)('sur le disque : une autre graphie du même dossier', () => {
+    let root: string;
+
+    beforeEach(() => {
+      root = mkdtempSync(path.join(os.tmpdir(), 'cliodeck-lifecycle-'));
+    });
+
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+
+    /** Un dossier de projet et un lien vers lui : deux graphies, un seul dossier sur le disque. */
+    function projectWithLink(name: string): { realFile: string; linkFile: string; linkDir: string } {
+      const real = path.join(root, name);
+      mkdirSync(real);
+      const linkDir = path.join(root, `lien-${name}`);
+      symlinkSync(real, linkDir);
+      return { realFile: path.join(real, 'project.json'), linkFile: path.join(linkDir, 'project.json'), linkDir };
+    }
+
+    it('un nouvel essai sur B par un lien, son chargement en cours : refusé, sans second loadProject', async () => {
+      const { realFile, linkFile } = projectWithLink('B');
+      const events: string[] = [];
+      const held = deferred();
+      const manager = fakeManager(events, {
+        [A]: {},
+        [realFile]: { hold: held.promise },
+        [linkFile]: { hold: held.promise },
+        [C]: {},
+      });
+      const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+      await lc.open(A, request);
+      await expect(lc.open(realFile, request)).resolves.toMatchObject({ code: 'project_unavailable' });
+      await expect(lc.open(C, request)).resolves.toMatchObject({ success: true });
+      const handleOfC = lc.current();
+
+      // Même `.cliodeck`, autre chaîne : deux migrations du même dossier en même temps, jamais. Et le
+      // refus se sait avant de rien fermer : C reste ouvert.
+      const retry = await lc.open(linkFile, request);
+
+      expect(retry).toEqual({
+        success: false,
+        code: 'project_unavailable',
+        error: 'timeout',
+        restoredPath: '/projets/C',
+      });
+      // Aucun chargement par le lien : C, autre dossier, a pu se charger pendant celui de B.
+      expect(manager.loadCalls).toEqual([A, realFile, C]);
+      expect(lc.current()).toBe(handleOfC);
+      held.resolve();
+      await vi.waitFor(() => expect(manager.loadCalls).toEqual([A, realFile, C, C]));
+      await vi.waitFor(() => expect(manager.current()).toBe('/projets/C'));
+    });
+
+    it('la remise d’accord reconnaît le projet ouvert sous une autre graphie : aucun rechargement', async () => {
+      const { realFile, linkFile, linkDir } = projectWithLink('P');
+      const X = '/projets/X/project.json';
+      const events: string[] = [];
+      const heldX = deferred();
+      // X ne répond pas à temps, puis finit en échec : le gestionnaire reste où il est.
+      const manager = fakeManager(events, {
+        [X]: { hold: heldX.promise, unwritable: true },
+        [realFile]: {},
+        [linkFile]: {},
+      });
+      const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+      await expect(lc.open(X, request)).resolves.toMatchObject({ code: 'project_unavailable' });
+      await expect(lc.open(realFile, request)).resolves.toMatchObject({ success: true });
+      // Le style CSL : le projet se rouvre par le lien, et le gestionnaire garde cette graphie.
+      await expect(lc.open(linkFile, request)).resolves.toMatchObject({ success: true });
+      expect(manager.current()).toBe(linkDir);
+
+      heldX.resolve();
+      await vi.waitFor(() => expect(manager.loadsSettled).toContain(X));
+      // Mise en file après la remise d'accord que la fin de X a lancée.
+      await lc.close();
+
+      expect(manager.loadCalls).toEqual([X, realFile, linkFile]);
+    });
+  });
+
   it('un chargement qui finit pendant l’attente du suivant : aucun chevauchement', async () => {
     vi.useFakeTimers();
     const events: string[] = [];
@@ -790,7 +935,8 @@ describe('projectLifecycle — gestionnaire en retard', () => {
     const held = deferred();
     const projects: Record<string, FakeProject> = { [A]: {}, [B]: { hold: held.promise }, [C]: {} };
     const manager = fakeManager(events, projects);
-    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    const unrequested = vi.fn<(closed: UnrequestedClose) => void>();
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 }, unrequested);
     await lc.open(A, request);
     await lc.open(B, request);
     await lc.open(C, request);
@@ -805,5 +951,152 @@ describe('projectLifecycle — gestionnaire en retard', () => {
     expect(handleOfC?.signal.aborted).toBe(true);
     expect(events.slice(-3)).toEqual(['abort:history', 'close:history', 'manager:close']);
     expect(logged(consoleError)).toContain('/projets/C');
+    // Personne ne l'a demandé : le renderer, qui croit C ouvert, l'apprend par là.
+    expect(unrequested.mock.calls).toEqual([[{ path: '/projets/C', code: 'manifest_unwritable', error: 'EROFS' }]]);
+  });
+
+  it('un rechargement de remise d’accord sans réponse à temps ferme tout, une seule fois', async () => {
+    const events: string[] = [];
+    const heldB = deferred();
+    const heldC = deferred();
+    const projects: Record<string, FakeProject> = { [A]: {}, [B]: { hold: heldB.promise }, [C]: {} };
+    const manager = fakeManager(events, projects);
+    const unrequested = vi.fn<(closed: UnrequestedClose) => void>(() => {
+      // Le relais vers le renderer peut échouer (fenêtre fermée) : la séquence n'en dépend pas.
+      throw new Error('fenêtre détruite');
+    });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 }, unrequested);
+    await lc.open(A, request);
+    await lc.open(B, request);
+    await lc.open(C, request);
+    const handleOfC = lc.current();
+    // Le volume de C se dégrade : son rechargement sera lent, puis refusé.
+    projects[C] = { hold: heldC.promise, unwritable: true };
+
+    heldB.resolve();
+
+    // B finit, le gestionnaire bascule sur B ; le rechargement de C ne répond pas à temps : tout se
+    // ferme, plutôt que de laisser le main sur B pendant que le handle et les services sont sur C.
+    await vi.waitFor(() => expect(lc.current()).toBeNull());
+    expect(manager.current()).toBeNull();
+    expect(handleOfC?.signal.aborted).toBe(true);
+    expect(unrequested.mock.calls).toEqual([[{ path: '/projets/C', code: 'project_unavailable', error: 'timeout' }]]);
+
+    // Le rechargement en retard finit en échec : rien ne le relance.
+    heldC.resolve();
+    await vi.waitFor(() => expect(manager.loadsSettled.filter((file) => file === C)).toHaveLength(2));
+    // Mise en file après la remise d'accord que cette fin a lancée : elle a donc fini.
+    projects[C] = {};
+    await expect(lc.open(A, request)).resolves.toMatchObject({ success: true });
+    expect(manager.loadCalls).toEqual([A, B, C, C, A]);
+    expect(unrequested).toHaveBeenCalledTimes(1);
+    expect(logged(consoleError)).toContain('fenêtre détruite');
+  });
+
+  it('un nouvel essai sur B, encore en chargement, laisse C ouvert et intact', async () => {
+    const events: string[] = [];
+    const held = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: held.promise }, [C]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+    await lc.open(B, request);
+    await expect(lc.open(C, request)).resolves.toMatchObject({ success: true });
+    const handleOfC = lc.current();
+    events.length = 0;
+
+    const retry = await lc.open(B, request);
+
+    // Refusé comme un préflight, avant de rien fermer : le refus se savait d'avance.
+    expect(retry).toEqual({
+      success: false,
+      code: 'project_unavailable',
+      error: 'timeout',
+      restoredPath: '/projets/C',
+    });
+    expect(events).toEqual([]);
+    expect(manager.loadCalls).toEqual([A, B, C]);
+    // Pas même relu : son volume ne répond peut-être plus.
+    expect(manager.metadataCalls).toEqual([A, B, C]);
+    expect(lc.current()).toBe(handleOfC);
+    expect(handleOfC?.isCurrent()).toBe(true);
+    expect(manager.current()).toBe('/projets/C');
+
+    held.resolve();
+    await vi.waitFor(() => expect(manager.loadCalls).toEqual([A, B, C, C]));
+    await vi.waitFor(() => expect(manager.current()).toBe('/projets/C'));
+    expect(lc.current()).toBe(handleOfC);
+  });
+
+  it('un chargement sans fin n’est attendu qu’une fois : ni bascule ni fermeture ne le réattendent', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const D = '/projets/D/project.json';
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: never() }, [C]: {}, [D]: {} });
+    // Les délais par défaut : 30 s pour le gestionnaire.
+    const lc = lifecycle(manager, [fakeService(events, 'history')]);
+    await lc.open(A, request);
+    const openingB = lc.open(B, request);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(openingB).resolves.toMatchObject({ code: 'project_unavailable' });
+
+    // Une fermeture ne l'attend pas : si B finit après elle, la remise d'accord referme.
+    const firstClose = watch(lc.close());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(firstClose.settled()).toBe(true);
+
+    // La première ouverture qui suit l'attend, une fois, au plus 30 s…
+    const openingC = watch(lc.open(C, request));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(openingC.settled()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(openingC.promise).resolves.toMatchObject({ success: true });
+
+    // … puis plus jamais : ni la bascule suivante, ni la fermeture, sans avancer l'horloge.
+    const openingD = watch(lc.open(D, request));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(openingD.settled()).toBe(true);
+    await expect(openingD.promise).resolves.toMatchObject({ success: true });
+    const closing = watch(lc.close());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closing.settled()).toBe(true);
+    expect(manager.current()).toBeNull();
+  });
+
+  it('volume perdu pendant un chargement : ouvrir un autre projet, ou réessayer, n’y touche plus', async () => {
+    const events: string[] = [];
+    const NAS_B = '/NAS/B/project.json';
+    const volume = deadVolume('/NAS');
+    // Le préflight a lu le manifeste ; le volume tombe pendant le chargement, qui ne finit jamais.
+    const manager = fakeManager(events, { [A]: {}, [NAS_B]: { hold: never(), onLoad: volume.kill }, [C]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+    await expect(lc.open(NAS_B, request)).resolves.toMatchObject({ code: 'project_unavailable' });
+
+    // C s'ouvre sans un seul appel synchrone au volume perdu : un seul gèlerait le main, hors de
+    // toute borne de la séquence.
+    await expect(lc.open(C, request)).resolves.toMatchObject({ success: true });
+    expect(volume.syncCalls).toEqual([]);
+
+    // Réessayer B : refusé sans relire son manifeste ni toucher au volume, et C reste ouvert.
+    await expect(lc.open(NAS_B, request)).resolves.toMatchObject({
+      code: 'project_unavailable',
+      restoredPath: '/projets/C',
+    });
+    expect(volume.syncCalls).toEqual([]);
+    expect(lc.current()?.path).toBe('/projets/C');
+  });
+
+  it('le volume du projet ouvert tombe : en ouvrir un autre n’y touche pas', async () => {
+    const events: string[] = [];
+    const NAS_A = '/NAS/A/project.json';
+    const volume = deadVolume('/NAS');
+    const manager = fakeManager(events, { [NAS_A]: {}, [C]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')]);
+    await lc.open(NAS_A, request);
+    volume.kill();
+
+    await expect(lc.open(C, request)).resolves.toMatchObject({ success: true });
+
+    expect(volume.syncCalls).toEqual([]);
   });
 });
