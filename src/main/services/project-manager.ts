@@ -319,6 +319,15 @@ export class ProjectManager {
   }
 
   /**
+   * Plus aucun projet courant (L03-3). Sans elle, un projet fermé restait celui du main : le
+   * validateur de chemins autorisait encore ses fichiers, et le corpus manuscrit le visait (S11-1-20).
+   */
+  close(): void {
+    this.currentProject = null;
+    this.currentProjectPath = null;
+  }
+
+  /**
    * Reads project metadata without setting it as the current project.
    * Used for displaying recent projects list without affecting the active project.
    */
@@ -454,10 +463,8 @@ export class ProjectManager {
     // Add to recent projects
     configManager.addRecentProject(projectFile);
 
-    // Store as current project
-    this.currentProject = project;
-    this.currentProjectPath = projectPath;
-
+    // Créé, pas ouvert : `project:create` l'ouvre ensuite par la séquence de `project-lifecycle`,
+    // services compris, comme une ouverture. Jusque-là, le projet courant reste celui d'avant.
     console.log('✅ Project created:', projectPath);
     return { success: true as const, path: projectFile, project, ...(configIssue ? { configIssue } : {}) };
   }

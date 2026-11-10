@@ -1,18 +1,27 @@
 /**
  * Project management IPC handlers
+ *
+ * Créer, ouvrir et fermer un projet passent par une seule séquence (`project-lifecycle`, L03-3) :
+ * une file, et la même table de services (`project-services`). Aucun handler n'appelle plus
+ * `projectManager.loadProject` lui-même.
  */
-import { ipcMain } from 'electron';
+import path from 'path';
+import { ipcMain, BrowserWindow, type WebContents } from 'electron';
 import { configManager } from '../../services/config-manager.js';
 import { projectManager } from '../../services/project-manager.js';
-import { historyService } from '../../services/history-service.js';
-import { modeService } from '../../services/mode-service.js';
-import { pdfService } from '../../services/pdf-service.js';
-import { tropyService } from '../../services/tropy-service.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
-import { usageJournalService } from '../../services/usage-journal-service.js';
-import { indexReadingNotesInBackground } from '../../services/reading-notes-indexing.js';
-import { manuscriptIndexService } from '../../services/manuscript-index-service.js';
-import { retrievalService } from '../../services/retrieval-service.js';
+import {
+  createProjectLifecycle,
+  type ProjectLifecycle,
+  type ProjectOpenResult,
+  type UnrequestedClose,
+} from '../../services/project-lifecycle.js';
+import {
+  projectServices,
+  ProjectServiceError,
+  type LoadedProject,
+  type ProjectOpenRequest,
+} from '../../services/project-services.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -29,48 +38,8 @@ import {
 } from '../utils/validation.js';
 
 /**
- * `.cliodeck` ou l'un de ses fichiers lié hors du projet (D18) : aucun service n'ouvre sa base,
- * son index ou son journal à travers le lien, et ceux du projet précédent se ferment, sans quoi
- * la recherche répondrait avec son corpus. Le texte, lui, reste éditable : `configIssue` le dit.
- */
-async function closeWorkspaceServices(): Promise<void> {
-  historyService.close();
-  usageJournalService.close();
-  await pdfService.close();
-  await tropyService.close();
-  retrievalService.clear();
-  manuscriptIndexService.clear();
-}
-
-/**
- * Un service du projet n'a pas démarré. `project.json` n'y est pour rien : la réponse le dit par
- * son code, et le journal du processus principal nomme le service, dont la cause technique ne va
- * pas dans l'alerte.
- */
-class ProjectServiceError extends Error {
-  readonly service: string;
-  readonly cause: unknown;
-
-  constructor(service: string, cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
-    this.name = 'ProjectServiceError';
-    this.service = service;
-    this.cause = cause;
-  }
-}
-
-async function startService(service: string, start: () => unknown): Promise<void> {
-  try {
-    await start();
-  } catch (error: unknown) {
-    throw new ProjectServiceError(service, error);
-  }
-}
-
-/**
- * La réponse d'un échec de `project:create` ou de `project:load`. Un service en panne a son code,
- * à la création comme à l'ouverture : le projet créé est sur le disque, et « vérifiez que le dossier
- * est accessible en écriture » enverrait l'auteur chercher ailleurs.
+ * La réponse d'une exception levée hors de la séquence. Un service en panne n'arrive plus ici : la
+ * séquence répond `services_failed`, et son journal nomme le service.
  */
 function projectFailure(channel: 'project:create' | 'project:load', error: unknown) {
   if (error instanceof ProjectServiceError) {
@@ -81,7 +50,50 @@ function projectFailure(channel: 'project:create' | 'project:load', error: unkno
   return errorResponse(error);
 }
 
+/**
+ * La séquence a fermé le projet d'elle-même : le renderer le croit encore ouvert, et le validateur
+ * refuserait ses enregistrements sans rien dire. Il l'apprend par `project:closed`, avec le code
+ * qu'il traduit.
+ */
+export function relayUnrequestedClose(closed: UnrequestedClose): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue;
+    win.webContents.send('project:closed', { path: closed.path, code: closed.code, error: closed.error });
+  }
+}
+
+/** Le suivi de reconstruction de l'index, vers la fenêtre qui a demandé l'ouverture, tant qu'elle vit. */
+function openRequestFrom(sender: WebContents): ProjectOpenRequest {
+  return {
+    onRebuildProgress: (progress) => {
+      if (!sender.isDestroyed()) sender.send('project:rebuild-progress', progress);
+    },
+  };
+}
+
+function logOpenResult(channel: 'project:create' | 'project:load', result: ProjectOpenResult<LoadedProject>): void {
+  // Un refus porte `restoredPath` : le projet ouvert après lui.
+  if ('restoredPath' in result) {
+    console.log(`📤 IPC Response: ${channel} failed`, {
+      code: result.code,
+      error: result.error,
+      restoredPath: result.restoredPath,
+    });
+    return;
+  }
+  console.log(`📤 IPC Response: ${channel} success`, result.warnings.length ? { warnings: result.warnings } : '');
+}
+
 export function setupProjectHandlers() {
+  const lifecycle: ProjectLifecycle<LoadedProject, ProjectOpenRequest> = createProjectLifecycle<
+    LoadedProject,
+    ProjectOpenRequest
+  >({
+    manager: projectManager,
+    services: projectServices(),
+    onUnrequestedClose: relayUnrequestedClose,
+  });
+
   ipcMain.handle('project:get-recent', () => {
     console.log('📞 IPC Call: project:get-recent');
     const result = configManager.getRecentProjects();
@@ -101,45 +113,24 @@ export function setupProjectHandlers() {
     console.log('📞 IPC Call: project:create', data);
     try {
       const validatedData = validate(ProjectCreateSchema, data);
-      const result = await projectManager.createProject(validatedData);
-
-      // Initialize services if project created successfully
-      if (result.success && result.configIssue?.kind === 'linked_outside') {
-        console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
-        // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`), comme à l'ouverture.
-        const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) await startService('modeService', () => modeService.init(projectPath));
-        await startService('closeWorkspaceServices', closeWorkspaceServices);
-      } else if (result.success) {
-        const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) {
-          console.log('🔧 Initializing services for new project:', projectPath);
-          await startService('historyService', () => historyService.init(projectPath));
-          await startService('modeService', () => modeService.init(projectPath));
-
-          // Initialize PDF service with rebuild progress callback
-          await startService('pdfService', () =>
-            pdfService.init(projectPath, (progress) => {
-              event.sender.send('project:rebuild-progress', progress);
-            })
-          );
-
-          // Initialize Tropy service
-          await startService('tropyService', () => tropyService.init(projectPath));
-
-          // Initialize MCP clients (fire-and-forget so a dead server
-          // doesn't block project loading).
-          void mcpClientsService
-            .loadProject(projectPath)
-            .catch((e) =>
-              console.warn('[mcp-clients] loadProject failed:', e)
-            );
-
-          console.log('✅ All services initialized successfully');
-        }
+      // Écrit sans devenir le projet courant : un refus (`project_exists`…) arrive avant toute
+      // fermeture, et le projet ouvert reste tel quel.
+      const created = await projectManager.createProject(validatedData);
+      if (!created.success) {
+        console.log('📤 IPC Response: project:create', created);
+        return created;
       }
 
-      console.log('📤 IPC Response: project:create', result);
+      // Puis il s'ouvre comme tout projet : journal d'usage compris (S11-1-4).
+      const result = await lifecycle.open(created.path, openRequestFrom(event.sender));
+      logOpenResult('project:create', result);
+      if (result.success && result.configIssue?.kind !== 'linked_outside') {
+        // Comme avant pour un projet créé : un `config.json` neuf, aucun serveur à approuver. Sans
+        // attente, pour qu'un serveur mort ne retienne pas l'ouverture (A10 : seule la création).
+        void mcpClientsService
+          .loadProject(path.dirname(created.path))
+          .catch((e) => console.warn('[mcp-clients] loadProject failed:', e));
+      }
       return result;
     } catch (error: unknown) {
       return projectFailure('project:create', error);
@@ -166,50 +157,10 @@ export function setupProjectHandlers() {
     const path = validate(StringPathSchema, rawPath);
     console.log('📞 IPC Call: project:load', { path });
     try {
-      const result = await projectManager.loadProject(path);
-
-      // Initialize services if project loaded successfully
-      if (result.success && result.configIssue?.kind === 'linked_outside') {
-        console.warn('⚠️ .cliodeck lié hors du projet, services non ouverts :', result.configIssue.path);
-        // Les modes du projet vivent hors de `.cliodeck` (`cliodeck-data/modes`).
-        const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) await startService('modeService', () => modeService.init(projectPath));
-        await startService('closeWorkspaceServices', closeWorkspaceServices);
-      } else if (result.success) {
-        const projectPath = projectManager.getCurrentProjectPath();
-        if (projectPath) {
-          console.log('🔧 Initializing services for project:', projectPath);
-
-          // Initialize independent services in parallel
-          await Promise.all([
-            startService('historyService', () => historyService.init(projectPath)),
-            startService('modeService', () => modeService.init(projectPath)),
-            startService('usageJournalService', () => usageJournalService.init(projectPath)),
-            startService('tropyService', () => tropyService.init(projectPath)),
-          ]);
-
-          // Initialize PDF service (depends on config, must run after)
-          await startService('pdfService', () =>
-            pdfService.init(projectPath, (progress) => {
-              event.sender.send('project:rebuild-progress', progress);
-            })
-          );
-
-          // Une note éditée hors de ClioDeck (Obsidian) entre deux sessions.
-          await startService('readingNotes', () => indexReadingNotesInBackground('ouverture du projet'));
-
-          // Un chapitre indexé puis devenu lien sortant : ses extraits partent avant la
-          // première question, sans attendre une sauvegarde.
-          await startService('manuscriptIndexService', () => {
-            manuscriptIndexService.configure(projectPath);
-            manuscriptIndexService.purgeOutside();
-          });
-
-          console.log('✅ All services initialized successfully');
-        }
-      }
-
-      console.log('📤 IPC Response: project:load', result.success ? 'success' : 'failed');
+      // Le projet d'avant se ferme, services compris, avant que B s'ouvre ; en cas d'échec, il revient
+      // (`restoredPath`), ou plus aucun projet n'est ouvert (null).
+      const result = await lifecycle.open(path, openRequestFrom(event.sender));
+      logOpenResult('project:load', result);
       return result;
     } catch (error: unknown) {
       return projectFailure('project:load', error);
@@ -219,21 +170,9 @@ export function setupProjectHandlers() {
   ipcMain.handle('project:close', async () => {
     console.log('📞 IPC Call: project:close');
     try {
-      // Close Mode Service (reset active mode)
-      modeService.close();
-
-      // Close History Service (ends session and closes DB)
-      historyService.close();
-
-      // Close Usage Journal Service (flush buffer, close DB)
-      usageJournalService.close();
-
-      // Close PDF Service and free resources
-      pdfService.close();
-
-      // Close Tropy Service and free resources
-      await tropyService.close();
-
+      // Ne répond qu'une fois tout fermé : les indexations en vol ont fini d'écrire, et le main n'a
+      // plus de projet courant (S01-1-9, S11-1-20).
+      await lifecycle.close();
       console.log('📤 IPC Response: project:close - success');
       return successResponse();
     } catch (error: unknown) {

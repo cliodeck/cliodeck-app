@@ -42,9 +42,9 @@ vi.mock('../../../services/config-manager.js', () => ({
 vi.mock('../../../services/pdf-service.js', () => ({
   pdfService: { init: h.pdfInit, close: h.pdfClose, getCurrentProjectPath: () => null },
 }));
-// La création les charge sans attendre ; l'ouverture n'y touche pas.
+// La création les charge sans attendre ; l'ouverture n'y touche pas ; la fermeture les décharge.
 vi.mock('../../../services/mcp-clients-service.js', () => ({
-  mcpClientsService: { loadProject: vi.fn(async () => undefined) },
+  mcpClientsService: { loadProject: vi.fn(async () => undefined), unload: vi.fn(async () => undefined) },
 }));
 // Elle tire tout le service de recherche ; sans fournisseur d'embeddings elle ne fait rien.
 vi.mock('../../../services/reading-notes-indexing.js', () => ({ indexReadingNotesInBackground: vi.fn() }));
@@ -261,7 +261,7 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
 
     expect(result.success).toBe(true);
     expect(result.configIssue).toBeUndefined();
-    expect(h.pdfInit).toHaveBeenCalledWith(projectDir, expect.any(Function));
+    expect(h.pdfInit).toHaveBeenCalledWith(projectDir, expect.any(Function), expect.objectContaining({ path: projectDir }));
     expect(readdirSync(path.join(projectDir, '.cliodeck'))).toContain('brain.db');
   });
 
@@ -290,9 +290,10 @@ describe.skipIf(!sqliteAvailable)('project:load — un service du projet ne dém
     error?: string;
   }
 
+  // La séquence nomme le service en panne dans le journal du processus principal (L03-3).
   const loggedLoadErrors = (spy: ReturnType<typeof vi.spyOn>): string[] =>
     spy.mock.calls
-      .filter((args: unknown[]) => args[0] === '❌ project:load error:')
+      .filter((args: unknown[]) => String(args[0]).startsWith('[project-lifecycle] service '))
       .map((args: unknown[]) => args.map((part) => (part instanceof Error ? part.message : String(part))).join(' '));
 
   it('pdfService.init rejette : services_failed, et le journal nomme pdfService', async () => {
@@ -353,7 +354,7 @@ describe.skipIf(!sqliteAvailable)('project:create — un service du projet ne d�
 
   const loggedCreateErrors = (spy: ReturnType<typeof vi.spyOn>): string[] =>
     spy.mock.calls
-      .filter((args: unknown[]) => args[0] === '❌ project:create error:')
+      .filter((args: unknown[]) => String(args[0]).startsWith('[project-lifecycle] service '))
       .map((args: unknown[]) => args.map((part) => (part instanceof Error ? part.message : String(part))).join(' '));
 
   it('pdfService.init rejette après la création : services_failed, le journal nomme pdfService, le projet existe', async () => {
@@ -381,5 +382,27 @@ describe.skipIf(!sqliteAvailable)('project:create — un service du projet ne d�
 
     expect(result.success).toBe(true);
     expect(result.code).toBeUndefined();
+  });
+});
+
+/**
+ * Le journal d'usage IA d'un projet créé (S11-1-4). `project:create` n'ouvrait pas son journal : les
+ * événements du nouveau projet partaient dans le `journal.db` du précédent, ou nulle part. Le vrai
+ * service, sur un vrai disque.
+ */
+describe.skipIf(!sqliteAvailable)('project:create — le journal d’usage du projet créé', () => {
+  it('s’ouvre sur le projet créé : son journal.db existe, et le service l’a en main', async () => {
+    const { usageJournalService } = await import('../../../services/usage-journal-service.js');
+
+    try {
+      const result = await call<LoadResult>('project:create', { name: 'Neuve', type: 'article', path: workDir });
+
+      expect(result.success).toBe(true);
+      expect(usageJournalService.getStore()).not.toBeNull();
+      expect(lstatSync(path.join(workDir, 'Neuve', '.cliodeck', 'journal.db')).isFile()).toBe(true);
+    } finally {
+      await call('project:close');
+    }
+    expect(usageJournalService.getStore()).toBeNull();
   });
 });

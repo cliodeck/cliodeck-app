@@ -112,6 +112,15 @@ const api = {
       ipcRenderer.on('project:rebuild-progress', listener);
       return () => ipcRenderer.removeListener('project:rebuild-progress', listener);
     },
+    /**
+     * Le main a fermé le projet de lui-même (L03-3) : il ne se rechargeait plus. `code` se traduit
+     * comme un refus d'ouverture ; `error` ne va qu'au journal.
+     */
+    onClosed: (callback: (closed: { path: string; code: string; error: string }) => void) => {
+      const listener = (_event: unknown, closed: Parameters<typeof callback>[0]) => callback(closed);
+      ipcRenderer.on('project:closed', listener);
+      return () => ipcRenderer.removeListener('project:closed', listener);
+    },
   },
 
   // PDF & Documents

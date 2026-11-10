@@ -11,6 +11,7 @@ import { useDialogStore } from './dialogStore';
 import { useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
+import { openFailureKey } from '../components/Project/open-failure';
 
 // MARK: - Types
 
@@ -112,21 +113,42 @@ export class NotAProjectError extends Error {
  */
 export class ProjectOpenError extends Error {
   readonly code: string | undefined;
+  /**
+   * Le projet ouvert avant la demande n'a pas pu revenir (`restoredPath: null`) : plus aucun projet
+   * n'est ouvert, et « Rien n'a été modifié » serait faux.
+   */
+  readonly previousClosed: boolean;
 
-  constructor(code: string | undefined, message: string) {
+  constructor(code: string | undefined, message: string, previousClosed = false) {
     super(message);
     this.name = 'ProjectOpenError';
     this.code = code;
+    this.previousClosed = previousClosed;
   }
 }
 
-/** L'erreur d'un refus du main, à `project:get-metadata` comme à `project:load`. */
-function projectRefusal(response: { code?: string; fileName?: string; error?: string }, projectPath: string): Error {
+/**
+ * L'erreur d'un refus du main, à `project:get-metadata` comme à `project:load`. `previousClosed` :
+ * voir `ProjectOpenError`.
+ */
+function projectRefusal(
+  response: { code?: string; fileName?: string; error?: string },
+  projectPath: string,
+  previousClosed = false
+): Error {
   const message = response.error || 'Failed to load project';
   const notAProject = response.code === 'not_a_project' || response.code === 'manifest_invalid';
   return notAProject
     ? new NotAProjectError(response.fileName ?? projectPath, message)
-    : new ProjectOpenError(response.code, message);
+    : new ProjectOpenError(response.code, message, previousClosed);
+}
+
+/**
+ * La séquence du main a refermé le projet d'avant sans pouvoir le rouvrir : sa réponse le dit par
+ * `restoredPath: null`. Un projet était à l'écran, et il n'y est plus côté main.
+ */
+function previousClosedBy(response: { restoredPath?: string | null }, hadProject: boolean): boolean {
+  return hadProject && response.restoredPath === null;
 }
 
 /**
@@ -216,12 +238,14 @@ async function detachOutgoingEditor(): Promise<DetachedEditor | null> {
  */
 async function reopenAfterFailedSwitch(
   detached: DetachedEditor,
-  set: StoreApi<ProjectState>['setState']
+  set: StoreApi<ProjectState>['setState'],
+  previousClosed = false
 ): Promise<void> {
   useRebuildStore.getState().resetProgress();
   const { useEditorStore } = await import('./editorStore');
   const { replaceBuffer } = useEditorStore.getState();
-  if (detached.from) {
+  // Le projet d'avant n'est pas revenu : son document n'a plus où se relire.
+  if (detached.from && !previousClosed) {
     try {
       const outcome = await replaceBuffer({ kind: 'open', filePath: detached.from }, 'project-restore');
       if (outcome.status === 'replaced') return;
@@ -486,6 +510,108 @@ async function refusedBySwitchLock(): Promise<boolean> {
 }
 
 /**
+ * Plus aucun projet à l'écran : ni ses chapitres, ni ses messages, ni le suivi de son index. Après
+ * une fermeture, ou quand le main a fermé le projet de lui-même.
+ */
+function enterNoProject(set: StoreApi<ProjectState>['setState']): void {
+  dismissDocumentNotOpened();
+  dismissConfigIssue();
+  // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
+  useRebuildStore.getState().resetProgress();
+  set({
+    currentProject: null,
+    chapters: [],
+    unattachedFiles: [],
+    currentChapterId: null,
+    bookSettings: { ...DEFAULT_BOOK_SETTINGS },
+  });
+}
+
+/**
+ * L'écriture du document sortant a échoué : fermer quand même perd ce qui n'est pas écrit.
+ * L'auteur décide, la cause sous les yeux.
+ */
+async function confirmCloseUnsaved(error: unknown): Promise<boolean> {
+  console.error('❌ Sauvegarde du document sortant impossible à la fermeture:', error);
+  const reason = error instanceof Error ? error.message : String(error);
+  return useDialogStore
+    .getState()
+    .showConfirm(i18n.t('project.closeUnsavedConfirm', { reason }), i18n.t('project.closeUnsavedConfirmTitle'), {
+      danger: true,
+    });
+}
+
+/**
+ * Avant de fermer : le document ouvert s'écrit tant que son projet est encore le projet courant,
+ * puis l'éditeur s'en détache, en lecture seule, le temps de la fermeture, qui peut attendre une
+ * indexation en vol. Une frappe pendant ce temps n'aurait plus nulle part où s'écrire.
+ *
+ * Rend null si l'auteur garde le projet ; `detached` dit si l'éditeur a quitté un document. Un
+ * tampon sans titre n'appartient à aucun projet : il reste tel quel.
+ */
+async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
+  const { useEditorStore } = await import('./editorStore');
+  if (!useEditorStore.getState().filePath) return { detached: false };
+
+  let discardOutgoing = false;
+  try {
+    await saveOutgoingEditorIfDirty();
+  } catch (error) {
+    if (!(await confirmCloseUnsaved(error))) return null;
+    discardOutgoing = true;
+  }
+
+  const detach = () =>
+    useEditorStore
+      .getState()
+      .replaceBuffer(discardOutgoing ? { kind: 'detach', discardOutgoing: true } : { kind: 'detach' }, 'project-close');
+  let outcome;
+  try {
+    outcome = await detach();
+  } catch (error) {
+    // Une frappe arrivée après l'écriture, qui ne s'écrit pas à son tour : la même question.
+    if (!(await confirmCloseUnsaved(error))) return null;
+    discardOutgoing = true;
+    outcome = await detach();
+  }
+  if (outcome.status === 'locked') {
+    await useDialogStore.getState().showAlert(i18n.t(outcome.lock));
+    return null;
+  }
+  return { detached: outcome.status === 'replaced' };
+}
+
+/**
+ * Le main a fermé le projet de lui-même (`project:closed`) : il ne se rechargeait plus. L'écran
+ * passe à l'état sans projet, l'éditeur repart d'un tampon sans titre, et l'auteur le sait. Le texte
+ * qui n'était pas écrit n'a plus où aller : il reste dans le tampon, pour « Enregistrer sous ».
+ */
+async function closedByMain(
+  closed: { path: string; code: string; error: string },
+  get: StoreApi<ProjectState>['getState'],
+  set: StoreApi<ProjectState>['setState']
+): Promise<void> {
+  console.warn('⚠️ Projet fermé par le processus principal :', closed);
+  if (get().currentProject?.path !== closed.path) return;
+  enterNoProject(set);
+  // Un changement de projet en cours garde la main : sa réponse posera l'état, et l'éditeur, détaché
+  // pour lui, en sortira par elle.
+  const switching = switchInProgress(get());
+  if (!switching) set({ loadState: { kind: 'idle' } });
+  const { useEditorStore, needsFlush } = await import('./editorStore');
+  const editor = useEditorStore.getState();
+  if (!switching && editor.filePath && !editor.bufferDetached) {
+    const live = editor.getLiveContent();
+    const unsaved = needsFlush({ filePath: editor.filePath, isDirty: editor.isDirty, live, mirror: editor.content });
+    await editor.replaceBuffer(
+      unsaved ? { kind: 'untitled', discardOutgoing: true, text: live } : { kind: 'untitled', discardOutgoing: true },
+      'project-close'
+    );
+  }
+  await useDialogStore.getState().showAlert(i18n.t(openFailureKey(closed.code, true) ?? 'project.openFailed'));
+}
+
+/**
  * Un seul changement de projet à la fois : la règle du voile du panneau, que le dialogue
  * d'ouverture, sans fenêtre parente, laisse passer. Le main ne sait pas en mener deux
  * (services initialisés en parallèle), et le perdant, dont il refuse alors la lecture,
@@ -510,6 +636,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return;
     if (switchInProgress(get())) return;
     const loadStateBefore = get().loadState;
+    const hadProject = get().currentProject !== null;
     set({ loadState: { kind: 'loading', path: projectPath } });
     let detached: DetachedEditor | null = null;
     try {
@@ -529,7 +656,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.electron.project.load(projectPath);
 
       if (!result.success || !result.project) {
-        throw projectRefusal(result, projectPath);
+        throw projectRefusal(result, projectPath, previousClosedBy(result, hadProject));
       }
 
       const project = result.project;
@@ -555,7 +682,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       notifyConfigIssue(result.configIssue);
     } catch (error) {
       console.error('Failed to load project:', error);
-      if (detached) await reopenAfterFailedSwitch(detached, set);
+      const previousClosed = error instanceof ProjectOpenError && error.previousClosed;
+      if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
+      // A ne revient pas : l'écran le suit, et passe à l'accueil (Q10).
+      if (previousClosed) enterNoProject(set);
       set({
         loadState: {
           kind: 'failed',
@@ -572,6 +702,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return false;
     if (switchInProgress(get())) return false;
     const loadStateBefore = get().loadState;
+    const hadProject = get().currentProject !== null;
     set({ loadState: { kind: 'loading', path } });
     let detached: DetachedEditor | null = null;
     try {
@@ -588,7 +719,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
-        throw new ProjectOpenError(result.code, result.error || 'Failed to create project');
+        throw new ProjectOpenError(
+          result.code,
+          result.error || 'Failed to create project',
+          previousClosedBy(result, hadProject)
+        );
       }
 
       await openProjectContents(result.project, set, detached);
@@ -606,7 +741,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return true;
     } catch (error) {
       console.error('Failed to create project:', error);
-      if (detached) await reopenAfterFailedSwitch(detached, set);
+      const previousClosed = error instanceof ProjectOpenError && error.previousClosed;
+      if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
+      if (previousClosed) enterNoProject(set);
       set({
         loadState: {
           kind: 'failed',
@@ -621,14 +758,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   closeProject: async () => {
     if (await refusedBySwitchLock()) return;
+    // Un changement de projet en cours : la règle du voile du panneau, que le menu ne voit pas.
+    if (switchInProgress(get())) return;
+    const loadStateBefore = get().loadState;
+    // Fermer peut attendre une indexation en vol : sans cet état, le bouton paraîtrait mort. Aucun
+    // projet n'est attendu au bout (`stillIn` le voit).
+    set({ loadState: { kind: 'loading', path: '' } });
 
-    // Fermer le projet abandonne le document courant : on le sauvegarde
-    // tant que le backend du projet est encore ouvert. Best-effort ici (la
-    // fermeture doit rester possible), mais l'échec est signalé.
-    try {
-      await saveOutgoingEditorIfDirty();
-    } catch (error) {
-      console.error('❌ Sauvegarde du document sortant impossible à la fermeture:', error);
+    // Fermer le projet abandonne le document courant : il s'écrit tant que le main autorise encore
+    // son projet. Si l'écriture échoue, l'auteur choisit, au lieu de tout perdre sans le savoir.
+    const left = await leaveEditorBeforeClose();
+    if (!left) {
+      set({ loadState: loadStateBefore });
+      return;
     }
     const ideasError = await flushCurrentProjectIdeas();
     if (ideasError) {
@@ -650,18 +792,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     // Clear frontend state
-    dismissDocumentNotOpened();
-    dismissConfigIssue();
-    // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
-    useRebuildStore.getState().resetProgress();
-    set({
-      currentProject: null,
-      chapters: [],
-      unattachedFiles: [],
-      currentChapterId: null,
-      bookSettings: { ...DEFAULT_BOOK_SETTINGS },
-      loadState: { kind: 'idle' },
-    });
+    enterNoProject(set);
+    set({ loadState: { kind: 'idle' } });
+    // Le validateur refuse désormais toute écriture dans le projet fermé : l'éditeur repart d'un
+    // tampon sans titre, vide (`createNewFile`, qu'un tampon détaché refuse).
+    if (left.detached) {
+      const { useEditorStore } = await import('./editorStore');
+      await useEditorStore.getState().replaceBuffer({ kind: 'untitled' }, 'project-close');
+    }
   },
 
   patchCurrentProject: (patch) => {
@@ -807,3 +945,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 }));
+
+// Le main a fermé le projet de lui-même : l'écran le suit (L03-3).
+if (typeof window !== 'undefined') {
+  window.electron?.project?.onClosed?.((closed) => {
+    void closedByMain(closed, useProjectStore.getState, useProjectStore.setState).catch((error: unknown) => {
+      console.error('❌ Fermeture d’office mal suivie :', error);
+    });
+  });
+}

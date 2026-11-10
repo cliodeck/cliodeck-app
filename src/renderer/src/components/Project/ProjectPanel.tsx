@@ -15,6 +15,7 @@ import './ProjectPanel.css';
 import { backdropClose } from '../../utils/backdropClose';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { createProjectErrorMessage } from './create-project-error';
+import { openFailureKey } from './open-failure';
 import {
   appendToContext,
   contextFailureText,
@@ -34,19 +35,6 @@ const WordExportModal = lazy(() =>
 const ReportIssueModal = lazy(() =>
   import('../Report/ReportIssueModal').then((m) => ({ default: m.ReportIssueModal })),
 );
-
-/**
- * Le message de chaque refus d'ouverture. « project.json est peut-être illisible ou endommagé » ne
- * vaut que pour un manifeste qui se lit mal : il couvrait tout, et l'auteur cherchait à réparer un
- * fichier intact quand un service n'avait pas démarré (BT1-5). Sans code connu, rien n'est supposé.
- */
-const OPEN_FAILURE_KEYS: Readonly<Record<string, string>> = {
-  manifest_unreadable: 'project.openError',
-  manifest_unwritable: 'project.openNotWritable',
-  project_unavailable: 'project.openUnavailable',
-  project_file_missing: 'project.openUnavailable',
-  services_failed: 'project.servicesFailed',
-};
 
 export const ProjectPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -151,7 +139,7 @@ export const ProjectPanel: React.FC = () => {
   /** Le refus d'une ouverture, dans les mots de l'auteur : le fichier choisi nommé, jamais un code. */
   const openFailureMessage = (error: unknown): string => {
     if (error instanceof NotAProjectError) return t('project.notAProject', { file: error.fileName });
-    const key = error instanceof ProjectOpenError && error.code ? OPEN_FAILURE_KEYS[error.code] : undefined;
+    const key = error instanceof ProjectOpenError ? openFailureKey(error.code, error.previousClosed) : undefined;
     return t(key ?? openErrorKey(error, 'project.openFailed'));
   };
 
@@ -259,7 +247,10 @@ export const ProjectPanel: React.FC = () => {
       {isLoading && (
         <div className="project-loading-overlay">
           <div className="project-loading-spinner" />
-          <div className="project-loading-text">{t('project.loading')}</div>
+          {/* Fermer attend aussi (une indexation en vol) : aucun projet n'est alors attendu au bout. */}
+          <div className="project-loading-text">
+            {loadState.kind === 'loading' && loadState.path === '' ? t('project.closing') : t('project.loading')}
+          </div>
         </div>
       )}
       <div className="project-content">

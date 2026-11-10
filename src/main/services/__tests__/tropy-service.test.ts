@@ -117,3 +117,37 @@ describe('tropyService : un dossier de modèles à soi (L06-10, S08-1-29)', () =
     expect(created.pipelines.map((p) => p.options)).toEqual([{ cachePath }]);
   });
 });
+
+/**
+ * Détacher avant d'attendre (L03-3). La synchro de A qui lève en se libérant (son `.tpy` refermé par
+ * `reader.closeProject`) faisait échouer l'ouverture de B, et laissait le magasin de A ouvert et
+ * référencé. Et une ouverture abandonnée par la séquence s'installait après coup sur le projet suivant.
+ */
+describe('tropyService : la libération de A ne retient pas B (L03-3)', () => {
+  it('la synchro de A lève à sa libération : B s’ouvre quand même', async () => {
+    await tropyService.init('/projets/A');
+    created.syncs[0].dispose.mockRejectedValueOnce(new Error('SQLITE_BUSY: .tpy'));
+
+    await expect(tropyService.init('/projets/B')).resolves.toBeUndefined();
+
+    expect(created.syncs).toHaveLength(2);
+  });
+
+  it('une ouverture dont le handle n’est plus courant ne s’installe pas', async () => {
+    await tropyService.init('/projets/A');
+    const handle = {
+      path: '/projets/B',
+      epoch: 2,
+      signal: AbortSignal.abort(),
+      isCurrent: () => false,
+      assertCurrent: () => {
+        throw new Error('project-changed');
+      },
+    };
+
+    await expect(tropyService.init('/projets/B', handle)).rejects.toThrow('project-changed');
+
+    // Rien de B : ni synchro, ni pipeline.
+    expect(created.syncs).toHaveLength(1);
+  });
+});

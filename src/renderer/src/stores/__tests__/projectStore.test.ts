@@ -935,3 +935,166 @@ describe('configIssue : le projet s’ouvre, et l’auteur sait ce qui manque', 
     expect(newerSchema).not.toContain('Corrigez');
   });
 });
+
+/**
+ * La fermeture passe par la séquence du main (L03-3) : elle peut attendre une indexation en vol, le
+ * validateur refuse ensuite toute écriture dans le projet fermé, et le main peut fermer le projet de
+ * lui-même. L'écran doit suivre, sans rien perdre en silence.
+ */
+describe('projectStore — fermer, et ce que le main a fermé', () => {
+  let saveResult: { success: boolean; error?: string };
+
+  beforeEach(async () => {
+    saveResult = { success: true };
+    (window as unknown as { electron: unknown }).electron = {
+      ...stub,
+      editor: {
+        loadFile: vi.fn().mockResolvedValue({ success: true, content: '# Demo\n' }),
+        saveFile: vi.fn(async () => saveResult),
+      },
+    };
+    stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+    await useProjectStore.getState().loadProject('/tmp/p1/project.json');
+  });
+
+  afterEach(() => {
+    while (useDialogStore.getState().alertOpen) useDialogStore.getState().closeAlert();
+    if (useDialogStore.getState().confirmOpen) useDialogStore.getState().resolveConfirm(false);
+  });
+
+  /** Une frappe que la synchronisation n'a pas encore poussée : le document est à écrire. */
+  function typeUnsaved(text: string): void {
+    useEditorStore.setState({ editorFacade: { getValue: () => text } as unknown as EditorFacade });
+  }
+
+  it('closeProject vide l’éditeur après la fermeture : plus rien ne s’écrit dans le projet fermé', async () => {
+    expect(useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+
+    await useProjectStore.getState().closeProject();
+
+    expect(stub.project.close).toHaveBeenCalled();
+    expect(useEditorStore.getState().filePath).toBeNull();
+    expect(useEditorStore.getState().content).toBe('');
+    expect(useEditorStore.getState().bufferDetached).toBe(false);
+  });
+
+  it('closeProject pose loading pendant l’attente du main', async () => {
+    let finish!: () => void;
+    stub.project.close.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+
+    const closing = Promise.resolve(useProjectStore.getState().closeProject());
+    await vi.waitFor(() => expect(stub.project.close).toHaveBeenCalled());
+    expect(useProjectStore.getState().loadState.kind).toBe('loading');
+    finish();
+    await closing;
+
+    expect(useProjectStore.getState().loadState).toEqual({ kind: 'idle' });
+  });
+
+  it('closeProject respecte un changement de projet en cours : rien n’est demandé au main', async () => {
+    useProjectStore.setState({ loadState: { kind: 'loading', path: '/tmp/p2' } });
+
+    await useProjectStore.getState().closeProject();
+
+    expect(stub.project.close).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject?.id).toBe('p1');
+  });
+
+  it('l’écriture sortante échoue : la fermeture demande confirmation, et un refus garde le projet', async () => {
+    saveResult = { success: false, error: 'disque plein' };
+    typeUnsaved('# Demo\nune phrase\n');
+
+    const closing = Promise.resolve(useProjectStore.getState().closeProject());
+    await vi.waitFor(() => expect(useDialogStore.getState().confirmOpen).toBe(true));
+    expect(useDialogStore.getState().confirmMessage).toContain('disque plein');
+    useDialogStore.getState().resolveConfirm(false);
+    await closing;
+
+    expect(stub.project.close).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().currentProject?.id).toBe('p1');
+    expect(useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+    expect(useProjectStore.getState().loadState.kind).toBe('ready');
+  });
+
+  it('l’écriture sortante échoue et l’auteur confirme : fermé, sans nouvel essai d’écriture', async () => {
+    saveResult = { success: false, error: 'disque plein' };
+    typeUnsaved('# Demo\nune phrase\n');
+    const save = (window as unknown as { electron: { editor: { saveFile: ReturnType<typeof vi.fn> } } }).electron.editor
+      .saveFile;
+
+    const closing = Promise.resolve(useProjectStore.getState().closeProject());
+    await vi.waitFor(() => expect(useDialogStore.getState().confirmOpen).toBe(true));
+    const writesBeforeAnswer = save.mock.calls.length;
+    useDialogStore.getState().resolveConfirm(true);
+    await closing;
+
+    expect(stub.project.close).toHaveBeenCalled();
+    expect(save.mock.calls.length).toBe(writesBeforeAnswer);
+    expect(useProjectStore.getState().currentProject).toBeNull();
+    expect(useEditorStore.getState().filePath).toBeNull();
+  });
+
+  it('project.load échoue et A ne revient pas (restoredPath null) : l’état sans projet', async () => {
+    stub.project.load.mockResolvedValue({ success: false, code: 'project_unavailable', error: 'timeout', restoredPath: null });
+
+    await expect(useProjectStore.getState().loadProject('/tmp/p2/project.json')).rejects.toThrow();
+
+    expect(useProjectStore.getState().currentProject).toBeNull();
+    expect(useEditorStore.getState().filePath).toBeNull();
+    expect(useEditorStore.getState().bufferDetached).toBe(false);
+  });
+
+  it('témoin : project.load échoue et A revient (restoredPath) : A reste à l’écran, son document rouvert', async () => {
+    stub.project.load.mockResolvedValue({
+      success: false,
+      code: 'services_failed',
+      error: 'registre',
+      restoredPath: '/tmp/p1',
+    });
+
+    await expect(useProjectStore.getState().loadProject('/tmp/p2/project.json')).rejects.toThrow();
+
+    expect(useProjectStore.getState().currentProject?.id).toBe('p1');
+    expect(useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+  });
+});
+
+/**
+ * La séquence du main peut fermer le projet d'elle-même (un chargement en retard l'a fait basculer,
+ * et le projet ne s'y recharge pas). Sans relais, l'écran gardait un projet que le main avait fermé,
+ * et le validateur refusait ses enregistrements sans rien dire.
+ */
+describe('projectStore — project:closed, la fermeture d’office', () => {
+  it('le renderer passe à l’état sans projet, vide l’éditeur et le dit', async () => {
+    let onClosed: ((closed: { path: string; code: string; error: string }) => void) | null = null;
+    const electron = {
+      ...stub,
+      project: {
+        ...stub.project,
+        onClosed: (cb: typeof onClosed) => {
+          onClosed = cb;
+          return () => undefined;
+        },
+        onRebuildProgress: () => () => undefined,
+      },
+      editor: { loadFile: vi.fn().mockResolvedValue({ success: true, content: '# Demo\n' }), saveFile: vi.fn() },
+    };
+    (window as unknown as { electron: unknown }).electron = electron;
+    vi.resetModules();
+    const fresh = await import('../projectStore');
+    const freshEditor = await import('../editorStore');
+    const freshDialogs = await import('../dialogStore');
+    stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+    await fresh.useProjectStore.getState().loadProject('/tmp/p1/project.json');
+    expect(freshEditor.useEditorStore.getState().filePath).toBe('/tmp/p1/document.md');
+
+    expect(onClosed).not.toBeNull();
+    onClosed!({ path: '/tmp/p1', code: 'project_unavailable', error: 'timeout' });
+
+    await vi.waitFor(() => expect(fresh.useProjectStore.getState().currentProject).toBeNull());
+    await vi.waitFor(() => expect(freshEditor.useEditorStore.getState().filePath).toBeNull());
+    await vi.waitFor(() => expect(freshDialogs.useDialogStore.getState().alertOpen).toBe(true));
+    expect(freshDialogs.useDialogStore.getState().alertMessage).toBe(i18n.t('project.openUnavailableClosed'));
+    freshDialogs.useDialogStore.getState().closeAlert();
+  });
+});

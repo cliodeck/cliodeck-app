@@ -21,14 +21,25 @@ class HistoryService {
       return;
     }
 
-    // Close existing history manager if changing projects
-    if (this.historyManager) {
+    // Détaché avant d'être fermé, et ses erreurs gardées pour lui : un `close()` qui lève (la fin de
+    // session sur la base précédente) rendait toute ouverture suivante impossible, et un échec de
+    // `new HistoryManager` gardait l'instance fermée de A sous son chemin, que le retour sur A
+    // prenait pour une base ouverte (S13-1-20). Rien n'est installé avant que B soit ouvert.
+    const previous = this.historyManager;
+    this.historyManager = null;
+    this.currentProjectPath = null;
+    if (previous) {
       console.log('📝 Closing previous HistoryManager');
-      this.historyManager.close();
+      try {
+        previous.close();
+      } catch (error: unknown) {
+        console.error('❌ Fermeture du journal de recherche précédent impossible :', error);
+      }
     }
 
     // Create new history manager
-    this.historyManager = new HistoryManager(projectPath);
+    const manager = new HistoryManager(projectPath);
+    this.historyManager = manager;
     this.currentProjectPath = projectPath;
 
     // Auto-start session with metadata
@@ -39,7 +50,7 @@ class HistoryService {
       timestamp: new Date().toISOString(),
     };
 
-    this.historyManager.startSession(metadata);
+    manager.startSession(metadata);
     console.log('✅ HistoryService initialized and session started');
   }
 
@@ -55,18 +66,23 @@ class HistoryService {
    * Ends current session and closes database
    */
   close(): void {
-    if (this.historyManager) {
-      const sessionId = this.historyManager.getCurrentSessionId();
-      if (sessionId) {
-        console.log('📝 Ending session before closing HistoryService');
-        this.historyManager.endSession(sessionId);
+    // Détaché d'abord, comme dans `init` : une fin de session qui lève ne laisse pas au service une
+    // base à moitié fermée.
+    const manager = this.historyManager;
+    this.historyManager = null;
+    this.currentProjectPath = null;
+    if (manager) {
+      try {
+        const sessionId = manager.getCurrentSessionId();
+        if (sessionId) {
+          console.log('📝 Ending session before closing HistoryService');
+          manager.endSession(sessionId);
+        }
+      } finally {
+        manager.close();
       }
-
-      this.historyManager.close();
-      this.historyManager = null;
     }
 
-    this.currentProjectPath = null;
     console.log('✅ HistoryService closed');
   }
 

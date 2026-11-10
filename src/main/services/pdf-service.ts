@@ -16,6 +16,7 @@ import { type TopicAnalysisResult, type TopicAnalysisOptions } from '../../../ba
 import { TextometricsService, type CorpusTextStatistics } from '../../../backend/core/analysis/TextometricsService.js';
 import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/pdf-document.js';
 import type { RebuildProgressEvent } from '../../../backend/types/rebuild-progress.js';
+import { ProjectChangedError, type ProjectHandle } from '../../../backend/types/project-handle.js';
 import type { RAGConfig } from '../../../backend/types/config.js';
 import { configManager } from './config-manager.js';
 import { retrievalService, type SourceType } from './retrieval-service.js';
@@ -95,23 +96,34 @@ class PDFService {
    */
   async init(
     projectPath: string,
-    onRebuildProgress?: (progress: RebuildProgressEvent) => void
+    onRebuildProgress?: (progress: RebuildProgressEvent) => void,
+    handle?: ProjectHandle
   ) {
     if (!projectPath) {
       throw new Error('PDF Service requires a project path');
     }
 
-    // Fermer la base précédente si elle existe — après avoir laissé les
-    // indexations en vol se terminer (ou expirer).
-    if (this.vectorStore) {
-      await this.drainInFlightIndexing();
-      this.vectorStore.close();
-    }
-    // Plus rien ne pointe sur le magasin fermé : si l'ouverture du nouveau échoue, les lectures disent
-    // « not initialized » et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    // Fermer la base précédente si elle existe — après avoir laissé les indexations en vol se
+    // terminer (ou expirer). Détachée AVANT l'attente : un `close()` qui reprend pendant ce temps
+    // ne la retrouve plus, et ne ferme pas une seconde fois ce qu'on ferme ici (S01-1-9). Plus rien
+    // ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent « not initialized »
+    // et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    const previous = this.vectorStore;
     this.vectorStore = null;
     this.pdfIndexer = null;
+    if (previous) {
+      await this.drainInFlightIndexing();
+      previous.close();
+    }
 
+    // Une ouverture abandonnée par la séquence (délai tombé, autre service en panne) continue
+    // pendant qu'un autre projet s'ouvre sur ce même service : après chaque attente, elle s'arrête
+    // si son projet n'est plus le courant, et n'installe rien.
+    const abandoned = (): boolean => handle !== undefined && !handle.isCurrent();
+    if (abandoned()) throw new ProjectChangedError();
+
+    // Le magasin de cet appel, fermé par lui s'il ne s'installe pas.
+    let store: VectorStore | EnhancedVectorStore | null = null;
     try {
       const config = configManager.getLLMConfig();
       const ragConfig = configManager.getRAGConfig();
@@ -121,20 +133,21 @@ class PDFService {
       // pair (the latter held a *third* OllamaClient internally — that's
       // gone now too). Ne lève pas : un registre invalide laisse le projet s'ouvrir sans fournisseurs.
       await this.rebuildLLMRegistry();
+      if (abandoned()) throw new ProjectChangedError();
 
-      // Initialiser VectorStore (Enhanced ou Standard selon config)
-      const { store, initPromise: vsInitPromise } = PdfVectorStore.create(
-        projectPath,
-        ragConfig,
-        { onRebuildProgress }
-      );
-      this.vectorStore = store;
+      // Initialiser VectorStore (Enhanced ou Standard selon config). Il ne s'installe qu'une fois
+      // prêt : pendant la reconstruction de son index, le service n'a pas de magasin.
+      const created = PdfVectorStore.create(projectPath, ragConfig, { onRebuildProgress });
+      store = created.store;
 
-      if (vsInitPromise) {
-        await vsInitPromise;
+      if (created.initPromise) {
+        await created.initPromise;
       }
+      if (abandoned()) throw new ProjectChangedError();
 
       await this.removeDuplicateDocuments(store, projectPath);
+      if (abandoned()) throw new ProjectChangedError();
+      this.vectorStore = store;
 
       // Post-init: configure search modes on the enhanced store. Any
       // rebuild is deferred until after warmup (see below) so we don't
@@ -174,21 +187,32 @@ class PDFService {
       // Warmup embedding model (Phase 6), then trigger any pending
       // HNSW/BM25 rebuild. Serialized to avoid the warmup embedding
       // call racing with a batched rebuild that also hits the embedder.
-      const storeForRebuild = this.vectorStore;
+      // Le projet quitté entre-temps : sa reconstruction n'a plus lieu d'être, et son échec
+      // s'afficherait sur l'écran du suivant.
+      const storeForRebuild = store;
       void this.warmupEmbeddingModel().then(() => {
-        if (storeForRebuild) {
-          return PdfVectorStore.maybeRebuild(storeForRebuild);
-        }
-        return undefined;
+        if (abandoned()) return undefined;
+        return PdfVectorStore.maybeRebuild(storeForRebuild);
       });
     } catch (error: unknown) {
+      // Abandonnée, quelle que soit l'erreur : le service appartient déjà au projet suivant. Seul le
+      // magasin de cet appel se ferme, sans rien toucher d'autre.
+      const installed = store !== null && this.vectorStore === store;
+      if (abandoned() && !installed) {
+        console.warn(`⚠️ [PDF-SERVICE] ouverture de ${projectPath} abandonnée : son projet n'est plus le courant`);
+        try {
+          store?.close();
+        } catch {
+          // déjà fermé
+        }
+        throw error;
+      }
       console.error('❌ Failed to initialize PDF Service:', error);
       // Le magasin ouvert par cet init (initialisation rejetée après l'ouverture) n'est plus
       // référencé par personne : le fermer, sinon sa connexion sur brain.db reste ouverte à jamais.
-      const opened = this.vectorStore;
       this.vectorStore = null;
       try {
-        opened?.close();
+        store?.close();
       } catch {
         // déjà fermé
       }
@@ -952,26 +976,29 @@ class PDFService {
    * Ferme le PDF Service et libère les ressources
    */
   async close() {
-    if (this.vectorStore) {
+    // Tout est détaché avant la moindre attente, comme dans `init` : un `init` qui reprend pendant
+    // le drain ne retrouve ni ce magasin ni ces registres, et ne ferme pas une seconde fois ce
+    // qu'on ferme ici ; une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    const store = this.vectorStore;
+    const registries = [this.registry, this.llmRegistry];
+    this.vectorStore = null;
+    this.pdfIndexer = null;
+    this.currentProjectPath = null;
+    this.registry = null;
+    this.llmRegistry = null;
+    this.llm = null;
+    this.embedding = null;
+    if (store) {
       console.log('🔒 Closing PDF Service vector store...');
       await this.drainInFlightIndexing();
-      this.vectorStore.close();
-      this.vectorStore = null;
+      store.close();
     }
 
     // Libérer les ressources des registres typés (HTTP agents, native handles).
-    if (this.registry || this.llmRegistry) {
+    if (registries.some((r) => r !== null)) {
       console.log('🔒 Disposing LLM provider registry...');
-      const previous = [this.registry, this.llmRegistry];
-      this.registry = null;
-      this.llmRegistry = null;
-      this.llm = null;
-      this.embedding = null;
-      await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
+      await Promise.all(registries.map((r) => r?.dispose().catch(() => undefined)));
     }
-
-    this.pdfIndexer = null;
-    this.currentProjectPath = null;
 
     console.log('✅ PDF Service closed');
   }

@@ -333,6 +333,9 @@
     "createServicesFailed": "The project “{{name}}” was created in {{folder}}, but it could not be prepared: one of ClioDeck's services (for example the research journal, primary sources or the PDF index) did not start. Open it with “Open a project”. If this happens again, restarting ClioDeck may be enough.",
     "openError": "This project could not be opened. Its project.json file may be unreadable or damaged.",
     "openUnavailable": "This project could not be opened: its folder or its project.json file cannot be found or accessed (disk disconnected, folder moved or renamed, read permission removed). Nothing was changed.",
+    "openUnavailableClosed": "The project could not be opened, or reopened: its folder or its project.json file cannot be found or accessed (disk disconnected, folder moved or renamed, read permission removed). No project is open any more: reopen the one you want from “Recent projects” once its folder is accessible again.",
+    "closeUnsavedConfirmTitle": "Your document is not saved",
+    "closeUnsavedConfirm": "Your latest changes to the open document could not be saved. If you close the project now, they will be lost.\n\nCancel: keep the project open, where they are still on screen.\nConfirm: close the project without saving them.\n\nReason: {{reason}}",
     "rootMissing": "The project folder cannot be found (disk disconnected, folder moved or renamed): nothing was written. Reconnect the disk, or reopen the project from its new location.",
     "openNotWritable": "This project could not be opened: its project.json file could not be written. It has not been changed. Check that this file and the project folder are writable.",
     "servicesFailed": "This project could not be prepared: one of ClioDeck's services (for example the research journal, primary sources or the PDF index) did not start. Its project.json file is not the cause. If this happens again, restarting ClioDeck may be enough.",
@@ -407,6 +410,7 @@
     "zoteroCollectionKeyHelp": "The key of a specific collection within the group (optional)",
     "zoteroNotSaved": "Not saved: this project's project.json file could not be written. It has not been changed. Check that it is readable and accessible.",
     "loading": "Opening project...",
+    "closing": "Closing project...",
     "chaptersInNavigator_one": "{{count}} chapter — see the chapter navigator",
     "chaptersInNavigator_other": "{{count}} chapters — see the chapter navigator",
     "reopenOnboarding": "Replay the setup assistant"
