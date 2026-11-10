@@ -87,6 +87,9 @@ function countSourceFamilies(
 /**
  * Les réponses en attente de l'éditeur, hors du composant : le mode Écriture monte une autre
  * instance de ce chat. Un second clic pendant l'attente ne fait pas une seconde proposition.
+ * Hors du registre du projet (L03-4) : un identifiant de message ne sert qu'une fois dans la
+ * session de l'app, et chaque envoi retire le sien en finissant ; rien n'y retient rien d'un projet
+ * dans un autre.
  */
 const sendingToWrite = new Set<string>();
 

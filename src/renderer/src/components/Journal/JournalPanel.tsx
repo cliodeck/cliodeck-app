@@ -49,6 +49,9 @@ export const JournalPanel: React.FC = () => {
   // backend is ready.
   const currentProjectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   useEffect(() => {
+    // La session sélectionnée du projet d'avant n'est plus là (le registre a vidé le store) : ses
+    // onglets n'ont plus rien à montrer, et la liste des sessions est ce qui reste (S17-1-9).
+    setViewMode('sessions');
     if (!currentProjectPath) return;
     clearError();
     loadSessions();

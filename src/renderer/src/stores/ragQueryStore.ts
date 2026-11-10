@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { isCloudProvider } from './cloudConsentStore';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 import type { WorkspaceMode } from './workspaceModeStore';
 
 // MARK: - Types
@@ -550,6 +551,12 @@ export function getResolvedSourceType(
   return { sourceType: 'vault', includeVault: true, includeManuscript: m, includeReadingNotes: r, isEmpty: false };
 }
 
+/**
+ * Le dernier chargement parti de chaque liste. Une réponse dont le projet n'est plus à l'écran ne
+ * s'inscrit pas ; elle n'éteint l'indicateur de chargement que si aucun autre n'est parti depuis.
+ */
+const listRequests = { documents: 0, collections: 0 };
+
 // MARK: - Store
 
 export const useRAGQueryStore = create<RAGQueryState>()(
@@ -697,11 +704,20 @@ export const useRAGQueryStore = create<RAGQueryState>()(
       },
 
       loadAvailableCollections: async () => {
+        const request = ++listRequests.collections;
+        const handle = projectLifecycle.capture();
+        // Les collections d'un autre projet : rien à montrer ici (S15-1-10).
+        const stale = (): boolean => {
+          if (handle?.isCurrent()) return false;
+          if (request === listRequests.collections) set({ isLoadingCollections: false });
+          return true;
+        };
         set({ isLoadingCollections: true });
 
         try {
           console.log('🔄 Loading available Zotero collections...');
           const result = await window.electron.corpus.getCollections();
+          if (stale()) return;
 
           if (result.success && result.collections) {
             // La synchro sauvegarde TOUTES les collections de la
@@ -711,6 +727,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
             // indexés ici (#2). On scope à la collection mémorisée et ses
             // descendantes ; sans association, liste complète.
             const scoped = await scopeToProjectCollection(result.collections);
+            if (stale()) return;
             const sortedCollections = sortCollectionsHierarchically(scoped);
 
             set({
@@ -728,6 +745,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           }
         } catch (error) {
           console.warn('⚠️  Could not load collections:', error);
+          if (stale()) return;
           set({
             availableCollections: [],
             isLoadingCollections: false,
@@ -743,11 +761,20 @@ export const useRAGQueryStore = create<RAGQueryState>()(
 
       // Issue #16: Load available documents from VectorStore
       loadAvailableDocuments: async () => {
+        const request = ++listRequests.documents;
+        const handle = projectLifecycle.capture();
+        // Les documents d'un autre brain.db : leurs identifiants ne désignent rien ici (S15-1-10).
+        const stale = (): boolean => {
+          if (handle?.isCurrent()) return false;
+          if (request === listRequests.documents) set({ isLoadingDocuments: false });
+          return true;
+        };
         set({ isLoadingDocuments: true });
 
         try {
           console.log('🔄 Loading available documents...');
           const result = await window.electron.pdf.getAll();
+          if (stale()) return;
 
           if (result.success && result.documents) {
             // Regroupement par entrée bibliographique (bibtexKey) : une
@@ -801,6 +828,7 @@ export const useRAGQueryStore = create<RAGQueryState>()(
           }
         } catch (error) {
           console.warn('⚠️  Could not load documents:', error);
+          if (stale()) return;
           set({
             availableDocuments: [],
             isLoadingDocuments: false,
@@ -867,6 +895,20 @@ export const useRAGQueryStore = create<RAGQueryState>()(
     }
   )
 );
+
+// La sélection de documents et de collections désigne des identifiants du brain.db du projet : dans
+// un autre, elle ne filtrerait plus rien, et le manuscrit serait écarté pour motif « portée »
+// (S15-1-10). Les listes proposées par le panneau sont aussi celles du projet. Les autres réglages du
+// chat ne dépendent pas de lui, et restent.
+projectLifecycle.onReset('ragQuery', () => {
+  useRAGQueryStore.setState((state) => ({
+    params: { ...state.params, selectedDocumentIds: [], selectedCollectionKeys: [] },
+    availableDocuments: [],
+    availableCollections: [],
+    isLoadingDocuments: false,
+    isLoadingCollections: false,
+  }));
+});
 
 // Initialize from config on first load
 if (typeof window !== 'undefined') {

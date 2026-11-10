@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 /**
  * Store du **journal d'usage IA** — distinct du `journalStore` (journal de
@@ -203,3 +204,8 @@ export const useUsageJournalStore = create<UsageJournalState>((set, get) => ({
     }
   },
 }));
+
+// Le résumé du jour et les adjudications sont lus dans le `journal.db` du projet ouvert.
+projectLifecycle.onReset('usageJournal', () =>
+  useUsageJournalStore.setState({ today: null, adjudications: null, loading: false, error: null, errorCode: null })
+);

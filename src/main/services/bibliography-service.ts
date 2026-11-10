@@ -198,9 +198,10 @@ class BibliographyService {
   }
 
   /**
-   * La bibliographie du projet ouvert ne s'est pas chargée : plus aucune référence, comme le
-   * panneau. Ces citations résolvent les exports PDF et Word et l'aperçu ; garder celles du
-   * projet d'avant les imprimerait dans celui-ci, sans un mot.
+   * Plus aucune référence, comme le panneau : la bibliographie du projet ouvert ne s'est pas
+   * chargée, ou le projet se ferme (service `bibliography` de `project-services`, L03-4). Ces
+   * citations résolvent les exports PDF et Word et l'aperçu ; garder celles du projet d'avant les
+   * imprimerait dans le suivant, sans un mot.
    */
   forget(): void {
     this.citations = [];

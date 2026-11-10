@@ -20,6 +20,7 @@ import { create } from 'zustand';
 import type { RAGExplanation as RAGExplanationBackend } from '../../../../backend/types/chat-source';
 import type { SecurityEvent } from '../../../../backend/security/events';
 import { useModeStore } from './modeStore';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types (brainstorm, canonical)
 
@@ -361,3 +362,8 @@ export const useChatStore = create<State>((set) => ({
     }));
   },
 }));
+
+// La conversation appartient au projet où elle a eu lieu (S16-1-22, Q11) : ouvrir un autre projet la
+// vide à l'écran, sans quoi elle repartait en historique dans ses tours. Le main a déjà annulé le
+// tour en cours, dont la réponse partielle reste au journal du projet quitté. Les réglages restent.
+projectLifecycle.onReset('chat', () => useChatStore.getState().reset());

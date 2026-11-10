@@ -178,6 +178,8 @@ import { usageJournalService } from '../../../services/usage-journal-service.js'
 import { mcpClientsService } from '../../../services/mcp-clients-service.js';
 import { retrievalService } from '../../../services/retrieval-service.js';
 import { operations } from '../../../services/cancellable-operation.js';
+import { projectServices } from '../../../services/project-services.js';
+import { bibliographyService } from '../../../services/bibliography-service.js';
 
 let workDir: string;
 let sends: Array<[string, unknown]>;
@@ -361,6 +363,91 @@ describe('un tour de chat pendant la bascule (A17, Q11)', () => {
     expect(h.events.indexOf('chat:journal')).toBeGreaterThan(-1);
     expect(h.events.indexOf('chat:journal')).toBeLessThan(h.events.indexOf('close:history'));
     expect(h.events.indexOf('chat:journal')).toBeLessThan(h.events.indexOf('close:usage'));
+  });
+});
+
+/**
+ * La bibliographie du main est celle que le renderer lui fait lire à l'ouverture d'un projet
+ * (`bibliography:load-with-metadata`). L'aperçu des citations et les exports PDF et Word la
+ * consultent. Elle survivait au changement de projet : un projet sans `.bib` résolvait les clés
+ * avec celle du précédent (S07-1-31).
+ */
+describe('la bibliographie du main suit le projet (S07-1-31)', () => {
+  const BIB = '@book{Dupont_1990,\n  author = {Dupont, Jean},\n  title = {Le préfet et la grève},\n  year = {1990}\n}\n';
+
+  /** A, avec son `.bib` lu comme à l'ouverture côté renderer. */
+  async function openAWithBibliography(): Promise<string> {
+    const fileA = makeProject('A');
+    const bibA = path.join(path.dirname(fileA), 'a.bib');
+    writeFileSync(bibA, BIB);
+    await call('project:load', fileA);
+    await bibliographyService.loadFromFile(bibA);
+    expect(bibliographyService.getByCitationKey('Dupont_1990')?.title).toBe('Le préfet et la grève');
+    return fileA;
+  }
+
+  it('ouvrir B après A : plus aucune clé de A ne se résout', async () => {
+    await openAWithBibliography();
+
+    await call('project:load', makeProject('B'));
+
+    expect(bibliographyService.getCitations()).toEqual([]);
+    expect(bibliographyService.getByCitationKey('Dupont_1990')).toBeUndefined();
+    expect(bibliographyService.getCitationByKey('Dupont_1990')).toBeUndefined();
+  });
+
+  it('fermer le projet : plus aucune clé ne se résout', async () => {
+    await openAWithBibliography();
+
+    await call('project:close');
+
+    expect(bibliographyService.getByCitationKey('Dupont_1990')).toBeUndefined();
+  });
+
+  it('le même projet rouvert (style CSL) garde sa bibliographie : ses services ne se ferment pas', async () => {
+    const fileA = await openAWithBibliography();
+
+    await call('project:load', fileA);
+
+    expect(bibliographyService.getByCitationKey('Dupont_1990')?.title).toBe('Le préfet et la grève');
+  });
+
+  it('B échoue et A revient : ses services se sont fermés, sa bibliographie aussi (le renderer la renvoie)', async () => {
+    const fileA = await openAWithBibliography();
+    const fileB = makeProject('B');
+    // B ne s'ouvre pas : un service requis échoue, et la séquence rouvre A.
+    const { tropyService } = await import('../../../services/tropy-service.js');
+    vi.mocked(tropyService.init).mockImplementationOnce(async () => {
+      throw new Error('panne');
+    });
+
+    const refused = await call<Reply>('project:load', fileB);
+
+    expect(refused).toMatchObject({ success: false, restoredPath: path.dirname(fileA) });
+    // Le renderer, qui sait que A revient (`restoredPath`), la lui fait relire : `projectStore`.
+    expect(bibliographyService.getCitations()).toEqual([]);
+  });
+
+  it('« Nouveau projet » au nom de A, refusé : le main garde la bibliographie de A, et la réponse ne porte pas restoredPath', async () => {
+    await openAWithBibliography();
+
+    const refused = await call<Reply>('project:create', { name: 'A', type: 'article', path: workDir });
+
+    expect(refused).toMatchObject({ success: false, error: 'project_exists' });
+    // Le renderer ne relit rien sans `restoredPath` : `projectStore`, `restorePreviousProject`.
+    expect(refused).not.toHaveProperty('restoredPath');
+    expect(bibliographyService.getByCitationKey('Dupont_1990')?.title).toBe('Le préfet et la grève');
+  });
+
+  it('la table : les journaux s’ouvrent en premier, les opérations en dernier, la bibliographie entre les deux', () => {
+    const names = projectServices().map((service) => service.name);
+
+    expect(names.slice(0, 2)).toEqual(['historyService', 'usageJournalService']);
+    expect(names.at(-1)).toBe('operations');
+    expect(names).toContain('bibliography');
+    // Fermée après les opérations (un tour de chat qui finit), avant les journaux.
+    expect(names.indexOf('bibliography')).toBeLessThan(names.indexOf('operations'));
+    expect(names.indexOf('bibliography')).toBeGreaterThan(names.indexOf('usageJournalService'));
   });
 });
 

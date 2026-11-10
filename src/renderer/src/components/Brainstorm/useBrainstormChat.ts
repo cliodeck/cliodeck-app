@@ -21,6 +21,7 @@ import {
 import { useMcpToolsList } from './useMcpToolsList';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { projectLifecycle } from '../../lifecycle/projectLifecycle';
 import type { RAGExplanation } from '../../../../../backend/types/chat-source';
 
 interface ToolCallEnv {
@@ -231,6 +232,8 @@ export function useBrainstormChat(): UseBrainstormChat {
         return;
       }
       const chat = api();
+      // Le projet où la question est posée : sa réponse n'a rien à faire dans un autre (Q11).
+      const handle = projectLifecycle.capture();
       // Capture user message, then prep the assistant placeholder before
       // firing IPC — chunks may land before the IPC promise resolves.
       const priorMessages = useChatStore.getState().messages;
@@ -312,6 +315,19 @@ export function useBrainstormChat(): UseBrainstormChat {
         );
       }
       const res = await chat.start(payload, startOpts);
+      // Un autre projet à l'écran depuis : sa conversation a été vidée, et ce tour n'y apparaît pas,
+      // ni réponse, ni attente, ni échec. Le main l'annule à la bascule ; s'il est parti après, on
+      // l'arrête ici. Sans projet au départ, l'ouverture d'un projet compte aussi.
+      const switched = handle ? !handle.isCurrent() : projectLifecycle.capture() !== null;
+      if (switched) {
+        if (res.success && res.sessionId) {
+          pendingSources.current.delete(res.sessionId);
+          pendingToolCalls.current.delete(res.sessionId);
+          pendingExplanation.current.delete(res.sessionId);
+          void chat.cancel(res.sessionId);
+        }
+        return;
+      }
       if (!res.success || !res.sessionId) {
         // eslint-disable-next-line no-console
         console.error('[brainstorm] start failed', res.error);

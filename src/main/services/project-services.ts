@@ -24,6 +24,7 @@ import { pdfService } from './pdf-service.js';
 import { manuscriptIndexService } from './manuscript-index-service.js';
 import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import { mcpClientsService } from './mcp-clients-service.js';
+import { bibliographyService } from './bibliography-service.js';
 import { operations } from './cancellable-operation.js';
 
 /** Ce que rend `ProjectManager.loadProject` : la séquence le passe à chaque service. */
@@ -166,6 +167,15 @@ export function projectServices(): Service[] {
       name: 'readingNotes',
       mode: 'background',
       open: unlessLinked('readingNotes', () => indexReadingNotesInBackground('ouverture du projet')),
+    },
+    {
+      // Ce que le renderer lui fait lire à l'ouverture (`bibliography:load-with-metadata`), pour
+      // l'aperçu des citations et les exports. Oubliée à la bascule et à la fermeture : un projet sans
+      // `.bib` résolvait ses clés avec celle du précédent (S07-1-31). Le renderer la renvoie quand le
+      // projet d'avant revient après un échec, ses services ayant été fermés puis rouverts.
+      name: 'bibliography',
+      mode: 'required',
+      close: () => bibliographyService.forget(),
     },
     {
       // Déchargés à la bascule et à la fermeture ; jamais chargés ici (A10).

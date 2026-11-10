@@ -12,6 +12,7 @@ import { useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
 import { openFailureKey } from '../components/Project/open-failure';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types
 
@@ -29,6 +30,8 @@ export interface Project {
   // `bibliographySource` by `project-manager.ts` at load time. Optional
   // because older / freshly-created projects may not have one yet.
   bibliography?: string;
+  /** Le `.bib` du projet, relatif à son dossier, tel que `project.json` le range. */
+  bibliographySource?: { filePath?: string };
 }
 
 /**
@@ -257,6 +260,58 @@ async function reopenAfterFailedSwitch(
   await replaceBuffer({ kind: 'untitled', text: detached.untitledText }, 'project-restore');
 }
 
+/**
+ * Le main a refusé le projet demandé, et le projet d'avant est encore à l'écran. Ses stores n'ont
+ * rien perdu. Une réponse partie pour lui pendant la tentative, que le registre a ignorée, ne revient
+ * pas d'elle-même : son panneau garde ce qu'il montrait avant elle.
+ *
+ * `restoredByMain` : la réponse porte `restoredPath`, la séquence d'ouverture du main est donc passée.
+ * Elle a pu fermer puis rouvrir les services du projet d'avant, et lui faire oublier sa bibliographie :
+ * le renderer la lui renvoie. Sans `restoredPath` (« Nouveau projet » au nom déjà pris), le main a
+ * refusé avant toute fermeture : il n'a rien oublié, et rien n'est relu.
+ */
+async function restorePreviousProject(
+  previous: Project | null,
+  shown: () => Project | null,
+  restoredByMain: boolean
+): Promise<void> {
+  projectLifecycle.abortTransition();
+  // Fermé d'office pendant la demande (`project:closed`) : il n'est plus à l'écran, rien à lui rendre.
+  if (!previous || !restoredByMain || shown()?.path !== previous.path) return;
+  await resendBibliographyToMain(previous, shown);
+}
+
+/**
+ * Renvoie au main la bibliographie du projet revenu. Le `.bib` se lit dans `project.json`, relu à
+ * l'instant : `currentProject` est la copie prise à l'ouverture, et un `.bib` reçu depuis (import,
+ * synchronisation Zotero), que le main a écrit dans le manifeste, n'y figure pas.
+ *
+ * Aucun `.bib` connu, ou un manifeste illisible sans `.bib` à l'ouverture : la liste à l'écran
+ * reste telle quelle. La vider effacerait des références que le panneau montrait, sans rien rendre
+ * au main.
+ */
+async function resendBibliographyToMain(previous: Project, shown: () => Project | null): Promise<void> {
+  let declared: BibliographyDeclaration = previous;
+  try {
+    const metadata = await window.electron.project.getMetadata(`${previous.path}/project.json`);
+    if (metadata?.success && metadata.project) {
+      declared = {
+        path: previous.path,
+        bibliography: metadata.project.bibliography,
+        bibliographySource: metadata.project.bibliographySource,
+      };
+    } else {
+      console.warn('⚠️ project.json du projet revenu illisible, bibliographie de son ouverture :', metadata?.error);
+    }
+  } catch (error) {
+    console.warn('⚠️ project.json du projet revenu illisible, bibliographie de son ouverture :', error);
+  }
+  // Fermé d'office pendant la relecture : il n'est plus à l'écran.
+  if (shown()?.path !== previous.path) return;
+  const bibliographyPath = bibliographyFileOf(declared);
+  if (bibliographyPath) await loadBibliographyFile(bibliographyPath, previous.path);
+}
+
 let documentNotOpenedNotice: string | null = null;
 let stopWatchingEditor: (() => void) | null = null;
 let ideasNotWrittenNotice: string | null = null;
@@ -318,8 +373,72 @@ function dismissDocumentNotOpened(): void {
 interface ProjectFromMain extends Omit<Project, 'createdAt' | 'lastOpenedAt'> {
   createdAt: string;
   lastOpenedAt?: string;
-  bibliographySource?: { filePath?: string };
   book?: Partial<BookSettings>;
+}
+
+type BibliographyDeclaration = Pick<Project, 'path' | 'bibliography' | 'bibliographySource'>;
+
+/**
+ * Le `.bib` que déclare le projet : `bibliographySource` (relatif à son dossier), sinon l'ancien
+ * champ `bibliography` (absolu). Null s'il n'en déclare aucun.
+ */
+function bibliographyFileOf(project: BibliographyDeclaration): string | null {
+  if (project.bibliographySource?.filePath) return `${project.path}/${project.bibliographySource.filePath}`;
+  return project.bibliography || null;
+}
+
+/**
+ * Lit le `.bib` du projet dans le panneau et dans le main, rattachements Zotero compris. Le bandeau
+ * d'un `.bib` illisible vaut pour son projet : chaque lecture repart sans lui.
+ */
+async function loadBibliographyFile(bibliographyPath: string, projectPath: string): Promise<void> {
+  try {
+    const { useBibliographyStore } = await import('./bibliographyStore');
+    useBibliographyStore.setState({ bibliographyProblem: null });
+    console.log('📚 Loading bibliography from:', bibliographyPath);
+    // Use loadBibliographyWithMetadata to restore zoteroAttachments from metadata file
+    await useBibliographyStore.getState().loadBibliographyWithMetadata(bibliographyPath, projectPath);
+    console.log('✅ Bibliography loaded for project (with metadata)');
+    // Refresh indexed PDFs to update the Chat panel state
+    await useBibliographyStore.getState().refreshIndexedPDFs();
+    console.log('✅ Indexed PDFs refreshed');
+  } catch (error) {
+    console.error('❌ Failed to load project bibliography:', error);
+  }
+}
+
+/**
+ * Charge la bibliographie du projet à son ouverture, dans le panneau et dans le main : le main n'en
+ * connaît que ce que le renderer lui fait lire (`bibliography:load-with-metadata`), et s'en sert pour
+ * l'aperçu des citations et les exports. Au retour du projet d'avant après un échec, c'est
+ * `resendBibliographyToMain`.
+ */
+async function loadProjectBibliography(project: BibliographyDeclaration): Promise<void> {
+  // Load bibliography if configured
+  console.log('🔍 Project data received:', {
+    hasBibliography: !!project.bibliography,
+    bibliographyPath: project.bibliography,
+    hasBibliographySource: !!project.bibliographySource
+  });
+
+  // Try loading from bibliographySource first (new system), fallback to bibliography (old system)
+  const bibliographyPath = bibliographyFileOf(project);
+
+  if (bibliographyPath) {
+    await loadBibliographyFile(bibliographyPath, project.path);
+  } else {
+    console.log('ℹ️ No bibliography to load');
+    // Still refresh indexed PDFs in case there are documents indexed without bibliography
+    try {
+      const { useBibliographyStore } = await import('./bibliographyStore');
+      // Le registre a vidé la liste du projet d'avant ; pas celle du même projet rouvert, dont le
+      // `.bib` a pu sortir de `project.json` depuis (Q22).
+      useBibliographyStore.setState({ bibliographyProblem: null, citations: [], filteredCitations: [] });
+      await useBibliographyStore.getState().refreshIndexedPDFs();
+    } catch (error) {
+      console.error('❌ Failed to refresh indexed PDFs:', error);
+    }
+  }
 }
 
 /**
@@ -341,6 +460,11 @@ async function openProjectContents(
   // sait. La sortie n'a pas à le lui redemander, y compris si le Brainstorm n'est pas ouvert et
   // que rien ne recharge la liste. Rouvrir ce même projet, au contraire, le réécrit.
   if (useIdeaStore.getState().loadedFor !== project.path) useIdeaStore.getState().abandonUnwrittenIdeas();
+  // Les stores du projet d'avant se vident avant que l'écran ne montre celui-ci, et avant que sa
+  // bibliographie ne se charge. Le même dossier rouvert ne perd rien. Le main rend le dossier sous la
+  // graphie demandée : rouvert sous une autre (lien, casse), le même projet serait vidé, sans dommage,
+  // puisque sa bibliographie se recharge juste après et le reste à l'ouverture de chaque panneau.
+  projectLifecycle.enter(project.path);
   set({
     currentProject: {
       ...project,
@@ -380,54 +504,7 @@ async function openProjectContents(
     }
   }
 
-  // Load bibliography if configured
-  console.log('🔍 Project data received:', {
-    hasBibliography: !!project.bibliography,
-    bibliographyPath: project.bibliography,
-    hasBibliographySource: !!project.bibliographySource
-  });
-
-  // Try loading from bibliographySource first (new system), fallback to bibliography (old system)
-  let bibliographyPath: string | null = null;
-
-  if (project.bibliographySource?.filePath) {
-    // New system: construct path from project directory + relative file path
-    bibliographyPath = `${project.path}/${project.bibliographySource.filePath}`;
-    console.log('📚 Using bibliographySource:', project.bibliographySource);
-  } else if (project.bibliography) {
-    // Old system: use absolute path directly
-    bibliographyPath = project.bibliography;
-    console.log('📚 Using legacy bibliography path');
-  }
-
-  // Le bandeau d'un `.bib` illisible vaut pour son projet : chaque ouverture repart sans lui.
-  if (bibliographyPath) {
-    try {
-      const { useBibliographyStore } = await import('./bibliographyStore');
-      useBibliographyStore.setState({ bibliographyProblem: null });
-      console.log('📚 Loading bibliography from:', bibliographyPath);
-      // Use loadBibliographyWithMetadata to restore zoteroAttachments from metadata file
-      await useBibliographyStore.getState().loadBibliographyWithMetadata(bibliographyPath, project.path);
-      console.log('✅ Bibliography loaded for project (with metadata)');
-      // Refresh indexed PDFs to update the Chat panel state
-      await useBibliographyStore.getState().refreshIndexedPDFs();
-      console.log('✅ Indexed PDFs refreshed');
-    } catch (error) {
-      console.error('❌ Failed to load project bibliography:', error);
-    }
-  } else {
-    console.log('ℹ️ No bibliography to load');
-    // Still refresh indexed PDFs in case there are documents indexed without bibliography
-    try {
-      const { useBibliographyStore } = await import('./bibliographyStore');
-      // Ni la liste du projet d'avant : le panneau de B montrait les références de A, et la
-      // vérification des PDF modifiés les prenait pour celles de B (Q22).
-      useBibliographyStore.setState({ bibliographyProblem: null, citations: [], filteredCitations: [] });
-      await useBibliographyStore.getState().refreshIndexedPDFs();
-    } catch (error) {
-      console.error('❌ Failed to refresh indexed PDFs:', error);
-    }
-  }
+  await loadProjectBibliography(project);
 
   // Ouvrir le document principal. Pour un livre, c'est le PREMIER
   // chapitre du manifeste : un livre n'a pas de `document.md` et
@@ -518,6 +595,8 @@ function enterNoProject(set: StoreApi<ProjectState>['setState']): void {
   dismissConfigIssue();
   // Après la fermeture du main : un échec publié juste avant elle arrive avant sa réponse.
   useRebuildStore.getState().resetProgress();
+  // Rien du projet fermé ne reste dans les stores : bibliographie, conversation, sélections…
+  projectLifecycle.enter(null);
   set({
     currentProject: null,
     chapters: [],
@@ -659,9 +738,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return;
     if (switchInProgress(get())) return;
     const loadStateBefore = get().loadState;
-    const hadProject = get().currentProject !== null;
+    const previous = get().currentProject;
+    const hadProject = previous !== null;
     set({ loadState: { kind: 'loading', path: projectPath } });
     let detached: DetachedEditor | null = null;
+    // La demande est partie au main ; il a dit non, et le projet d'avant est encore le sien, ou aucun.
+    let asked = false;
+    let refused = false;
+    // Le refus vient de la séquence d'ouverture du main, qui a pu fermer et rouvrir le projet d'avant.
+    let restoredByMain = false;
     try {
       await assertProjectReadable(projectPath);
       detached = await detachOutgoingEditor();
@@ -675,10 +760,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // un changement refusé laisse le sortant à l'écran, et son message avec.
       useRebuildStore.getState().resetProgress();
 
+      // Plus aucune réponse partie pour le projet à l'écran ne s'inscrit : le main peut basculer.
+      projectLifecycle.beginTransition();
+      asked = true;
       // Call IPC to load project
       const result = await window.electron.project.load(projectPath);
 
       if (!result.success || !result.project) {
+        refused = true;
+        restoredByMain = typeof result.restoredPath === 'string';
         throw projectRefusal(result, projectPath, previousClosedBy(result, hadProject));
       }
 
@@ -709,6 +799,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
       // A ne revient pas : l'écran le suit, et passe à l'accueil (Q10).
       if (previousClosed) enterNoProject(set);
+      else if (refused) await restorePreviousProject(previous, () => get().currentProject, restoredByMain);
+      // Sans réponse du main, A reste à l'écran ; passé à B, l'écran l'a suivi et ceci ne fait rien.
+      else if (asked) projectLifecycle.abortTransition();
       set({
         loadState: {
           kind: 'failed',
@@ -725,9 +818,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (await refusedBySwitchLock()) return false;
     if (switchInProgress(get())) return false;
     const loadStateBefore = get().loadState;
-    const hadProject = get().currentProject !== null;
+    const previous = get().currentProject;
+    const hadProject = previous !== null;
     set({ loadState: { kind: 'loading', path } });
     let detached: DetachedEditor | null = null;
+    // Comme à l'ouverture : la demande est partie, et le main a dit non. Un nom déjà pris est refusé
+    // avant la séquence d'ouverture, sans `restoredPath` : rien du projet d'avant n'a été fermé.
+    let asked = false;
+    let refused = false;
+    let restoredByMain = false;
     try {
       // Même coupure que loadProject : créer un projet bascule aussi le main.
       detached = await detachOutgoingEditor();
@@ -739,9 +838,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Comme à l'ouverture : après les refus, avant la demande au main.
       useRebuildStore.getState().resetProgress();
 
+      projectLifecycle.beginTransition();
+      asked = true;
       const result = await window.electron.project.create({ name, type, path });
 
       if (!result.success || !result.project) {
+        refused = true;
+        restoredByMain = typeof result.restoredPath === 'string';
         throw new ProjectOpenError(
           result.code,
           result.error || 'Failed to create project',
@@ -767,6 +870,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const previousClosed = error instanceof ProjectOpenError && error.previousClosed;
       if (detached) await reopenAfterFailedSwitch(detached, set, previousClosed);
       if (previousClosed) enterNoProject(set);
+      else if (refused) await restorePreviousProject(previous, () => get().currentProject, restoredByMain);
+      else if (asked) projectLifecycle.abortTransition();
       set({
         loadState: {
           kind: 'failed',
@@ -818,6 +923,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
 
+    // Plus aucune réponse partie pour ce projet ne s'inscrit ; `enterNoProject` vide ensuite ses stores.
+    projectLifecycle.beginTransition();
     try {
       // Close backend resources (PDF Service, vector store, etc.)
       await window.electron.project.close();

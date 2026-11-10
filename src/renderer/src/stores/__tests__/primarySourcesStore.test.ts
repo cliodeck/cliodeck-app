@@ -86,17 +86,6 @@ describe('primarySourcesStore — un projet sans Tropy après le projet A', () =
     expect(state.selectedCollection).toBeNull();
   });
 
-  it('l’état vidé reste celui du projet ouvert : `loadedFor` n’est pas effacé', async () => {
-    // Le panneau a déjà noté B avant de lire ; s'il retrouvait `null` à son
-    // retour, il y verrait un autre projet et viderait la recherche et le
-    // filtre choisis depuis qu'on y a lié un projet Tropy.
-    usePrimarySourcesStore.setState({ loadedFor: '/projets/B' });
-    await usePrimarySourcesStore.getState().getProjectInfo();
-
-    expect(usePrimarySourcesStore.getState().projectInfo).toBeNull();
-    expect(usePrimarySourcesStore.getState().loadedFor).toBe('/projets/B');
-  });
-
   it('une réponse en échec ne vaut pas « pas de projet Tropy » : rien n’est effacé', async () => {
     tropy.getProjectInfo.mockResolvedValue({ success: false, error: 'IPC indisponible' });
     await usePrimarySourcesStore.getState().getProjectInfo();

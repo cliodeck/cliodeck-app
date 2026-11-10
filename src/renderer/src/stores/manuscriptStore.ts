@@ -5,6 +5,7 @@ import { parseOutline, type OutlineHeading } from '@/editor/outline';
 import { useEditorStore } from './editorStore';
 import { useProjectStore } from './projectStore';
 import { logger } from '../utils/logger';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 /**
  * Vue d'ensemble du manuscrit (plan chapitres, Phase 3).
@@ -226,3 +227,6 @@ export const useManuscriptStore = create<ManuscriptState>((set, get) => ({
 
   clear: () => set({ info: {}, refreshing: false }),
 }));
+
+// Le plan et les statistiques des chapitres du projet quitté.
+projectLifecycle.onReset('manuscript', () => useManuscriptStore.getState().clear());

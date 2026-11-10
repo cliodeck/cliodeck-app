@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { BookOpen, Heading, Layers, Pilcrow, Scroll, Type, X } from 'lucide-react';
 import { useSimilarityStore, type Granularity, type SourceType } from '../../stores/similarityStore';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { CollectionMultiSelect } from '../Chat/CollectionMultiSelect';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import './SimilarityOptions.css';
@@ -28,12 +29,15 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
   // options.collectionFilter depuis toujours, seul ce contrôle manquait.
   // Même source que l'assistant IA (liste scopée au projet, cf. #2).
   const { availableCollections, loadAvailableCollections } = useRAGQueryStore();
+  // Le registre du projet vide la liste quand l'écran passe à un autre projet : ouvertes, les
+  // options la relisent pour lui (S18-1-25).
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   useEffect(() => {
     if (availableCollections.length === 0) {
       void loadAvailableCollections();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chargement unique à l'ouverture
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- à l'ouverture, puis à chaque projet
+  }, [projectPath]);
 
   const handleGranularityChange = (granularity: Granularity) => {
     setOptions({ granularity });
