@@ -552,8 +552,12 @@ async function confirmCloseUnsaved(error: unknown): Promise<boolean> {
  * laisserait l'éditeur sur un document du projet fermé, modifiable, que le validateur refuserait
  * d'écrire. `detached` dit si l'éditeur a quitté un document. Un tampon sans titre n'appartient à
  * aucun projet : il reste tel quel.
+ *
+ * `closedByMainMeanwhile` dit si le main a fermé le projet de lui-même pendant l'attente
+ * (`project:closed`). L'écriture qui échoue alors ne pose aucune question : il n'y a plus de projet
+ * à garder ouvert, et l'appelant met le texte à l'abri dans un tampon sans titre.
  */
-async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
+async function leaveEditorBeforeClose(closedByMainMeanwhile: () => boolean): Promise<{ detached: boolean } | null> {
   const { useEditorStore } = await import('./editorStore');
   if (!useEditorStore.getState().filePath) return { detached: false };
 
@@ -561,6 +565,7 @@ async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
   try {
     await saveOutgoingEditorIfDirty();
   } catch (error) {
+    if (closedByMainMeanwhile()) return null;
     if (!(await confirmCloseUnsaved(error))) return null;
     discardOutgoing = true;
   }
@@ -574,6 +579,7 @@ async function leaveEditorBeforeClose(): Promise<{ detached: boolean } | null> {
     outcome = await detach();
   } catch (error) {
     // Une frappe arrivée après l'écriture, qui ne s'écrit pas à son tour : la même question.
+    if (closedByMainMeanwhile()) return null;
     if (!(await confirmCloseUnsaved(error))) return null;
     discardOutgoing = true;
     outcome = await detach();
@@ -599,21 +605,33 @@ async function closedByMain(
   console.warn('⚠️ Projet fermé par le processus principal :', closed);
   if (get().currentProject?.path !== closed.path) return;
   enterNoProject(set);
-  // Un changement de projet en cours garde la main : sa réponse posera l'état, et l'éditeur, détaché
-  // pour lui, en sortira par elle.
+  // Un changement de projet en cours, ou une fermeture demandée par l'auteur, garde la main : sa fin
+  // posera l'état, et l'éditeur, détaché pour lui, en sortira par elle. Pour une fermeture, poser
+  // `idle` ici laisserait passer une ouverture que la suite de la fermeture refermerait.
   const switching = switchInProgress(get());
-  if (!switching) set({ loadState: { kind: 'idle' } });
-  const { useEditorStore, needsFlush } = await import('./editorStore');
-  const editor = useEditorStore.getState();
-  if (!switching && editor.filePath && !editor.bufferDetached) {
-    const live = editor.getLiveContent();
-    const unsaved = needsFlush({ filePath: editor.filePath, isDirty: editor.isDirty, live, mirror: editor.content });
-    await editor.replaceBuffer(
-      unsaved ? { kind: 'untitled', discardOutgoing: true, text: live } : { kind: 'untitled', discardOutgoing: true },
-      'project-close'
-    );
+  if (!switching) {
+    set({ loadState: { kind: 'idle' } });
+    await keepEditorTextOutOfClosedProject();
   }
   await useDialogStore.getState().showAlert(i18n.t(openFailureKey(closed.code, true) ?? 'project.openFailed'));
+}
+
+/**
+ * Le projet du document ouvert est fermé, et le validateur refuse toute écriture dans son dossier :
+ * l'éditeur repart d'un tampon sans titre, qui garde le texte non écrit pour « Enregistrer sous ».
+ * Un tampon détaché appartient au changement de projet qui l'a détaché, un tampon sans titre à
+ * aucun projet : ni l'un ni l'autre ne bouge.
+ */
+async function keepEditorTextOutOfClosedProject(): Promise<void> {
+  const { useEditorStore, needsFlush } = await import('./editorStore');
+  const editor = useEditorStore.getState();
+  if (!editor.filePath || editor.bufferDetached) return;
+  const live = editor.getLiveContent();
+  const unsaved = needsFlush({ filePath: editor.filePath, isDirty: editor.isDirty, live, mirror: editor.content });
+  await editor.replaceBuffer(
+    unsaved ? { kind: 'untitled', discardOutgoing: true, text: live } : { kind: 'untitled', discardOutgoing: true },
+    'project-close'
+  );
 }
 
 /**
@@ -766,14 +784,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Un changement de projet en cours : la règle du voile du panneau, que le menu ne voit pas.
     if (switchInProgress(get())) return;
     const loadStateBefore = get().loadState;
+    // Le main peut fermer le projet de lui-même pendant l'attente (`project:closed`) : `closedByMain`
+    // vide alors le projet à l'écran, et laisse le reste à cette fermeture.
+    const hadProject = get().currentProject !== null;
+    const closedByMainMeanwhile = () => hadProject && get().currentProject === null;
     // Fermer peut attendre une indexation en vol : sans cet état, le bouton paraîtrait mort. Aucun
     // projet n'est attendu au bout (`stillIn` le voit).
     set({ loadState: { kind: 'loading', path: '' } });
 
     // Fermer le projet abandonne le document courant : il s'écrit tant que le main autorise encore
     // son projet. Si l'écriture échoue, l'auteur choisit, au lieu de tout perdre sans le savoir.
-    const left = await leaveEditorBeforeClose();
+    const left = await leaveEditorBeforeClose(closedByMainMeanwhile);
     if (!left) {
+      // Plus aucun projet à garder ouvert : remettre l'état d'avant laisserait `ready` sans projet,
+      // et l'éditeur sur un document que le main refuse d'écrire. L'état sans projet, et le texte
+      // non écrit à l'abri dans un tampon sans titre, comme pour toute fermeture d'office.
+      if (closedByMainMeanwhile()) {
+        set({ loadState: { kind: 'idle' } });
+        await keepEditorTextOutOfClosedProject();
+        return;
+      }
       set({ loadState: loadStateBefore });
       return;
     }

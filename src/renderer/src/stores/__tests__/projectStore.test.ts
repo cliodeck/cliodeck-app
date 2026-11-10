@@ -1121,4 +1121,126 @@ describe('projectStore — project:closed, la fermeture d’office', () => {
     expect(freshDialogs.useDialogStore.getState().alertMessage).toBe(i18n.t('project.openUnavailableClosed'));
     freshDialogs.useDialogStore.getState().closeAlert();
   });
+
+  /**
+   * Le main ferme le projet de lui-même pendant que `closeProject` écrit le document sortant :
+   * `closedByMain` voit une fermeture en cours et lui laisse l'écran. Avant, si cette écriture
+   * n'aboutissait pas, `closeProject` remettait l'état d'avant (`ready`) : plus aucun projet, mais
+   * un éditeur toujours sur le document du projet fermé, modifiable, dont le main refusait chaque
+   * écriture.
+   */
+  describe('pendant la fermeture demandée par l’auteur', () => {
+    const closedEvent = { path: '/tmp/p1', code: 'project_unavailable', error: 'timeout' };
+
+    async function openWithMainClosingDuringSave(save: (onClosed: () => void) => Promise<unknown>) {
+      let onClosed: ((closed: typeof closedEvent) => void) | null = null;
+      const saveFile = vi.fn(() => save(() => onClosed?.(closedEvent)));
+      const electron = {
+        ...stub,
+        project: {
+          ...stub.project,
+          onClosed: (cb: typeof onClosed) => {
+            onClosed = cb;
+            return () => undefined;
+          },
+          onRebuildProgress: () => () => undefined,
+        },
+        editor: { loadFile: vi.fn().mockResolvedValue({ success: true, content: '# Demo\n' }), saveFile },
+      };
+      (window as unknown as { electron: unknown }).electron = electron;
+      vi.resetModules();
+      const projects = (await import('../projectStore')).useProjectStore;
+      const editor = (await import('../editorStore')).useEditorStore;
+      const dialogs = (await import('../dialogStore')).useDialogStore;
+      stub.project.load.mockResolvedValue({ success: true, project: fakeProject });
+      await projects.getState().loadProject('/tmp/p1/project.json');
+      expect(editor.getState().filePath).toBe('/tmp/p1/document.md');
+      return { projects, editor, dialogs, saveFile, closeByMain: () => onClosed?.(closedEvent) };
+    }
+
+    /** L'alerte de la fermeture d'office, lue puis fermée ; la fermeture demandée finit ensuite seule. */
+    async function closeAndDismissAlert(
+      projects: Awaited<ReturnType<typeof openWithMainClosingDuringSave>>['projects'],
+      dialogs: Awaited<ReturnType<typeof openWithMainClosingDuringSave>>['dialogs']
+    ) {
+      const closing = Promise.resolve(projects.getState().closeProject());
+      await vi.waitFor(() => expect(dialogs.getState().alertOpen).toBe(true));
+      expect(dialogs.getState().alertMessage).toBe(i18n.t('project.openUnavailableClosed'));
+      dialogs.getState().closeAlert();
+      try {
+        // Avant le correctif : une confirmation « garder le projet ouvert » pour un projet déjà
+        // fermé, puis `ready` sans projet. La fermeture ne finissait pas ici.
+        await vi.waitFor(() => expect(projects.getState().loadState).toEqual({ kind: 'idle' }));
+        expect(dialogs.getState().confirmOpen).toBe(false);
+        await closing;
+      } finally {
+        if (dialogs.getState().confirmOpen) dialogs.getState().resolveConfirm(false);
+      }
+    }
+
+    it('l’écriture sortante échoue : aucune question, l’état sans projet, et le texte reste dans un tampon sans titre', async () => {
+      const { projects, editor, dialogs } = await openWithMainClosingDuringSave(async (closeByMain) => {
+        closeByMain();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { success: false, error: 'Write access denied: outside allowed directories' };
+      });
+      editor.setState({ editorFacade: { getValue: () => '# Demo\nune phrase\n' } as unknown as EditorFacade });
+
+      await closeAndDismissAlert(projects, dialogs);
+
+      expect(projects.getState().currentProject).toBeNull();
+      expect(editor.getState().filePath).toBeNull();
+      expect(editor.getState().bufferDetached).toBe(false);
+      expect(editor.getState().content).toBe('# Demo\nune phrase\n');
+      expect(editor.getState().isDirty).toBe(true);
+      // Le main a déjà fermé : rien de plus à lui demander.
+      expect(stub.project.close).not.toHaveBeenCalled();
+    });
+
+    it('l’auteur tape encore pendant l’écriture (détachement chassé) : même état final, rien ne se perd', async () => {
+      let keystrokes = 0;
+      const { projects, editor, dialogs, saveFile } = await openWithMainClosingDuringSave(async (closeByMain) => {
+        if (keystrokes === 0) closeByMain();
+        keystrokes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { success: true };
+      });
+      editor.setState({
+        editorFacade: { getValue: () => `# Demo\nfrappe ${keystrokes}\n` } as unknown as EditorFacade,
+      });
+
+      await closeAndDismissAlert(projects, dialogs);
+
+      expect(saveFile).toHaveBeenCalled();
+      expect(projects.getState().currentProject).toBeNull();
+      expect(editor.getState().filePath).toBeNull();
+      expect(editor.getState().bufferDetached).toBe(false);
+      expect(editor.getState().content).toBe(`# Demo\nfrappe ${keystrokes}\n`);
+    });
+
+    it('la question était posée quand le main ferme : « garder le projet » met le texte à l’abri, sans projet', async () => {
+      const { projects, editor, dialogs, closeByMain } = await openWithMainClosingDuringSave(async () => ({
+        success: false,
+        error: 'disque plein',
+      }));
+      editor.setState({ editorFacade: { getValue: () => '# Demo\nune phrase\n' } as unknown as EditorFacade });
+
+      const closing = Promise.resolve(projects.getState().closeProject());
+      await vi.waitFor(() => expect(dialogs.getState().confirmOpen).toBe(true));
+      closeByMain();
+      await vi.waitFor(() => expect(projects.getState().currentProject).toBeNull());
+      dialogs.getState().resolveConfirm(false);
+      // Les dialogues font la queue : l'alerte de la fermeture d'office vient après la réponse.
+      await vi.waitFor(() => expect(dialogs.getState().alertOpen).toBe(true));
+      dialogs.getState().closeAlert();
+      await closing;
+
+      expect(projects.getState().currentProject).toBeNull();
+      expect(projects.getState().loadState).toEqual({ kind: 'idle' });
+      expect(editor.getState().filePath).toBeNull();
+      expect(editor.getState().bufferDetached).toBe(false);
+      expect(editor.getState().content).toBe('# Demo\nune phrase\n');
+      expect(stub.project.close).not.toHaveBeenCalled();
+    });
+  });
 });
