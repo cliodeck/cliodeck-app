@@ -9,11 +9,12 @@
  * Une proposition ne fait pas sortir le brouillon de la file : seule son
  * acceptation le fait.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, Check, GripVertical, Inbox, Trash2, X } from 'lucide-react';
-import { useDraftsStore, draftTitle, type BrainstormDraft } from '../../stores/draftsStore';
+import { useDraftsStore, draftTitle, draftsForProject, type BrainstormDraft } from '../../stores/draftsStore';
 import { useEditorStore } from '../../stores/editorStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { noDocumentForProposal, notifyDraftKept } from '../../services/send-draft-to-write';
 import { onceProposalDecided } from './proposals-ipc';
@@ -97,7 +98,11 @@ const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
 
 export const DraftsPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const drafts = useDraftsStore((s) => s.drafts);
+  // Ceux du projet ouvert, et ceux d'avant la règle, sans projet (Q12) : une réponse faite des
+  // sources de A n'a pas à être proposée dans le manuscrit de B.
+  const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
+  const queue = useDraftsStore((s) => s.drafts);
+  const drafts = useMemo(() => draftsForProject(queue, projectPath), [queue, projectPath]);
   const closePanel = useDraftsStore((s) => s.closePanel);
   const clear = useDraftsStore((s) => s.clear);
 
@@ -108,7 +113,7 @@ export const DraftsPanel: React.FC = () => {
         .getState()
         .showConfirm(t('drafts.clearConfirm', { count: drafts.length }), undefined, { danger: true })
     ) {
-      clear();
+      clear(projectPath);
     }
   };
 

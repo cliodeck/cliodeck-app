@@ -5,8 +5,9 @@
  *
  * - `project` : son état vient du projet ouvert. Il inscrit sa remise à zéro, ou une autre
  *   séquence la fait (`resetBy`), à un autre moment que l'entrée dans le projet, et dit pourquoi.
+ * - `filtered` : son état mêle plusieurs projets et survit à la bascule ; ses lecteurs ne montrent
+ *   que ce qui revient au projet ouvert, par le sélecteur nommé (`selector`), et rien ne le vide.
  * - `global` : préférence de l'auteur, réglage de l'application, état d'interface, ou aucun état.
- * - `pending` : lié au projet, mais sa remise à zéro relève d'une autre PR.
  *
  * Les remises à zéro hors de `stores/` sont listées à part (amendement A36) : toute inscription au
  * registre dans le renderer doit figurer dans l'une ou l'autre liste.
@@ -18,8 +19,8 @@ import path from 'path';
 type Scope =
   | { scope: 'project'; why: string }
   | { scope: 'project'; why: string; resetBy: { file: string; call: string } }
-  | { scope: 'global'; why: string }
-  | { scope: 'pending'; pr: 'L03-5'; why: string };
+  | { scope: 'filtered'; why: string; selector: string }
+  | { scope: 'global'; why: string };
 
 const RENDERER = path.resolve(__dirname, '../..');
 const STORES = path.join(RENDERER, 'stores');
@@ -79,11 +80,14 @@ const INVENTORY: Record<string, Scope> = {
     resetBy: { file: 'tropyReindexStore.ts', call: 'store.clear()' },
   },
   'ideaStore.ts': {
-    scope: 'pending',
-    pr: 'L03-5',
-    why: 'les idées restent dans le store au changement de projet (seul le panneau les cache par loadedFor)',
+    scope: 'project',
+    why: 'idées du projet, sélection, état de son fichier ; un chargement en vol devient caduc (S16-1-18)',
   },
-  'draftsStore.ts': { scope: 'pending', pr: 'L03-5', why: 'brouillons filtrés par projet (Q12)' },
+  'draftsStore.ts': {
+    scope: 'filtered',
+    why: 'brouillons de tous les projets, persistés ; chacun porte le sien, ceux d’avant sans projet se voient partout (Q12)',
+    selector: 'draftsForProject',
+  },
   'modeStore.ts': {
     scope: 'global',
     why: 'mode actif : préférence de l’auteur, persistée ; la liste, modes du projet compris, se relit au montage du sélecteur',
@@ -138,8 +142,12 @@ describe('inventaire des stores : projet ou global', () => {
     } else if (entry.scope === 'project') {
       // Un store lié au projet inscrit sa remise à zéro.
       expect(text).toContain(REGISTERS);
+    } else if (entry.scope === 'filtered') {
+      // Filtré, pas vidé : il fournit son sélecteur, et une remise à zéro perdrait ce qu'il garde.
+      expect(text).toContain(`export function ${entry.selector}(`);
+      expect(text).not.toContain(REGISTERS);
     } else {
-      // Un store global ou en attente qui s'inscrirait serait mal classé.
+      // Un store global qui s'inscrirait serait mal classé.
       expect(text).not.toContain(REGISTERS);
     }
   });

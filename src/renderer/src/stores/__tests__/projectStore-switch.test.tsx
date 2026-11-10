@@ -644,6 +644,56 @@ describe('les idées du projet qu’on quitte', () => {
     expect(await contentOnDisk(dirA)).toBe('Tapé pendant la première écriture.');
   });
 
+  it('une sauvegarde de A en file s’écrit dans A avant la remise à zéro, qui ne l’annule pas ; B n’en reçoit rien', async () => {
+    const bBefore = await readFile(ideasOf(dirB), 'utf8');
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async (filePath: string, content: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return write(filePath, content);
+    };
+    const inFlight = ideaStore().saveIdeas(dirA);
+    await settle(10);
+    ideaStore().updateIdea('i1', { content: 'En file pendant la première écriture.' });
+    const queued = ideaStore().saveIdeas(dirA);
+
+    // Brainstorm fermé dans B : rien ne recharge la liste.
+    await openProjectB();
+    await Promise.all([inFlight, queued]);
+
+    expect(await contentOnDisk(dirA)).toBe('En file pendant la première écriture.');
+    expect(ideaStore().loadedFor).toBeNull();
+    expect(ideaStore().ideas).toEqual([]);
+    writesTo = [];
+    await ideaStore().flushIdeas();
+    await ideaStore().saveIdeas(dirA);
+    await ideaStore().saveIdeas(dirB);
+    expect(writesTo.filter((filePath) => filePath.endsWith('ideas.json'))).toEqual([]);
+    expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
+    expect(await contentOnDisk(dirA)).toBe('En file pendant la première écriture.');
+  });
+
+  it('le même projet rouvert (récents) garde ses idées non écrites, et les écrit une fois le disque revenu', async () => {
+    const write = window.electron.fs.writeFile;
+    (window.electron.fs as { writeFile: unknown }).writeFile = async () => {
+      throw new Error('ENOSPC: no space left on device, write');
+    };
+    const reopening = project().loadProject(path.join(dirA, 'project.json'));
+    await eventually(() => expect(dialogs().confirmOpen).toBe(true));
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+      await reopening;
+    });
+
+    expect(project().currentProject?.path).toBe(dirA);
+    expect(ideaStore().loadedFor).toBe(dirA);
+    expect(ideaStore().ideas[0].content).toBe(typedWithoutBlur);
+    expect(hasUnwrittenIdeas()).toBe(true);
+
+    (window.electron.fs as { writeFile: unknown }).writeFile = write;
+    await ideaStore().loadIdeas(dirA);
+    expect(await contentOnDisk(dirA)).toBe(typedWithoutBlur);
+  });
+
   describe('si elle ne s’écrit pas : la question est posée, et elle parle des idées', () => {
     const asked = () => dialogs().confirmMessage;
 
@@ -706,6 +756,31 @@ describe('les idées du projet qu’on quitte', () => {
       expect(ideaStore().saveError).toBeNull();
       expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
       expect(await contentOnDisk(dirA)).toBe('');
+    });
+
+    it('changer quand même : ce qui ne s’est pas écrit ne réapparaît pas dans B, Brainstorm ouvert ou non', async () => {
+      const bBefore = await readFile(ideasOf(dirB), 'utf8');
+      const { switching } = await askingForB();
+
+      await act(async () => {
+        dialogs().resolveConfirm(true);
+        await switching;
+      });
+
+      // Brainstorm fermé : la liste ne garde rien de A, ni son projet.
+      expect(ideaStore().ideas).toEqual([]);
+      expect(ideaStore().selectedId).toBeNull();
+      expect(ideaStore().loadedFor).toBeNull();
+      expect(ideaStore().saveError).toBeNull();
+
+      await act(async () => {
+        render(createElement(BrainstormPanel));
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'ideas.tabIdeas' }));
+      expect(await screen.findByText('Idée de B', undefined, { timeout: 5000 })).toBeInTheDocument();
+      expect(screen.queryByText('Idée de A')).toBeNull();
+      expect(ideaStore().ideas.map((idea) => idea.content)).not.toContain(typedWithoutBlur);
+      expect(await readFile(ideasOf(dirB), 'utf8')).toBe(bBefore);
     });
 
     it('changer quand même, mais le main refuse : rien n’est perdu, et la panne se dit encore', async () => {

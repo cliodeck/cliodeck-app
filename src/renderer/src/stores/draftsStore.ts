@@ -10,7 +10,9 @@
  *
  * Persisté (localStorage) : la file et l'état ouvert/fermé du panneau
  * survivent au changement de mode d'espace de travail et au redémarrage
- * (signal d'acceptation de l'issue). La file est commune à tous les projets.
+ * (signal d'acceptation de l'issue). La file est une pour tous les projets,
+ * mais chaque brouillon porte le sien et ne se montre que dans lui
+ * (`draftsForProject`, décision Q12) : rien ne la vide quand on en change.
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -22,6 +24,13 @@ export interface BrainstormDraft {
   createdAt: string;
   /** Modèle + tâche d'origine — transmis à la proposition à l'insertion. */
   source?: { model?: string; task?: string };
+  /**
+   * Le projet de la réponse : le brouillon ne se montre que dans lui. Absent pour un brouillon d'avant
+   * cette règle, ou mis de côté sans projet ouvert : il se montre partout, jusqu'à ce qu'il soit
+   * inséré ou jeté. Un chemin de dossier comparé tel quel, le renderer ne voyant pas le disque : un
+   * projet déplacé ou renommé ne retrouve plus les siens, qui restent dans la file (et le stockage).
+   */
+  projectPath?: string;
 }
 
 interface DraftsState {
@@ -33,9 +42,14 @@ interface DraftsState {
    */
   proposedIds: string[];
 
-  enqueue: (draft: Omit<BrainstormDraft, 'id' | 'createdAt'>) => void;
+  /**
+   * `projectPath` : le projet de la réponse, lu avant toute attente (une bascule a pu montrer un autre
+   * projet depuis) ; null sans projet ouvert.
+   */
+  enqueue: (draft: Omit<BrainstormDraft, 'id' | 'createdAt' | 'projectPath'> & { projectPath: string | null }) => void;
   remove: (id: string) => void;
-  clear: () => void;
+  /** Jette ce que ce projet montre (`draftsForProject`) : les brouillons des autres projets restent. */
+  clear: (projectPath: string | null) => void;
   setProposed: (id: string, proposed: boolean) => void;
   openPanel: () => void;
   closePanel: () => void;
@@ -49,11 +63,12 @@ export const useDraftsStore = create<DraftsState>()(
       isPanelOpen: false,
       proposedIds: [],
 
-      enqueue: (draft) =>
+      enqueue: ({ projectPath, ...draft }) =>
         set((state) => ({
           drafts: [
             {
               ...draft,
+              ...(projectPath === null ? {} : { projectPath }),
               id: crypto.randomUUID(),
               createdAt: new Date().toISOString(),
             },
@@ -64,7 +79,8 @@ export const useDraftsStore = create<DraftsState>()(
       remove: (id) =>
         set((state) => ({ drafts: state.drafts.filter((d) => d.id !== id) })),
 
-      clear: () => set({ drafts: [] }),
+      clear: (projectPath) =>
+        set((state) => ({ drafts: state.drafts.filter((d) => !shownIn(d, projectPath)) })),
 
       setProposed: (id, proposed) =>
         set((state) => ({
@@ -83,6 +99,18 @@ export const useDraftsStore = create<DraftsState>()(
     }
   )
 );
+
+function shownIn(draft: BrainstormDraft, projectPath: string | null): boolean {
+  return !draft.projectPath || draft.projectPath === projectPath;
+}
+
+/**
+ * Les brouillons que montre ce projet : les siens, et ceux sans projet (Q12). Sans projet ouvert,
+ * ces derniers seuls. Le panneau, son compteur et « Vider la file » passent par lui.
+ */
+export function draftsForProject(drafts: readonly BrainstormDraft[], projectPath: string | null): BrainstormDraft[] {
+  return drafts.filter((draft) => shownIn(draft, projectPath));
+}
 
 /** Première ligne non vide, tronquée — le « titre » d'un brouillon. */
 export function draftTitle(draft: BrainstormDraft): string {

@@ -1884,6 +1884,7 @@
     "importObsidian": "Aus Obsidian-Vault importieren",
     "importFailed": "Vault-Import nicht möglich",
     "importNoVault": "Mit diesem Projekt ist kein Vault verknüpft: Verknüpfen Sie einen in den Einstellungen.",
+    "importNotLoaded": "Die Ideen dieses Projekts sind noch nicht geladen: Es wurde nichts importiert. Starten Sie den Import erneut, sobald die Liste angezeigt wird.",
     "relatedIdeas": "Verwandte Ideen",
     "removeLink": "Verknüpfung entfernen"
   },

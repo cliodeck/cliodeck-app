@@ -20,6 +20,7 @@ type BibliographyStoreModule = typeof import('../bibliographyStore');
 type ChatStoreModule = typeof import('../chatStore');
 type RagStoreModule = typeof import('../ragQueryStore');
 type LifecycleModule = typeof import('../../lifecycle/projectLifecycle');
+type IdeaStoreModule = typeof import('../ideaStore');
 
 const project = (name: string, bib?: string) => ({
   id: name,
@@ -40,12 +41,16 @@ let loadResults: Record<string, unknown>;
 let loadWithMetadata: ReturnType<typeof vi.fn>;
 let listNotes: ReturnType<typeof vi.fn>;
 let onClosed: ((closed: { path: string; code: string; error: string }) => void) | null;
+/** Les `ideas.json` sur le disque, et les écritures demandées au main. */
+let ideasFiles: Record<string, string>;
+let writeFile: ReturnType<typeof vi.fn>;
 
 let projects$: ProjectStoreModule;
 let bibliography$: BibliographyStoreModule;
 let chat$: ChatStoreModule;
 let rag$: RagStoreModule;
 let lifecycle$: LifecycleModule;
+let ideas$: IdeaStoreModule;
 
 const byPath = (p: string) => projects[p.replace(/^\/tmp\//, '').replace(/\/project\.json$/, '')];
 
@@ -56,6 +61,8 @@ beforeEach(async () => {
   onClosed = null;
   loadWithMetadata = vi.fn(async () => ({ success: true, citations: [CITATION_A], unreadKeys: [], metadataUnreadable: false }));
   listNotes = vi.fn(async () => ({ success: true, notes: [NOTE_A] }));
+  ideasFiles = {};
+  writeFile = vi.fn(async () => undefined);
   (window as unknown as { electron: unknown }).electron = {
     project: {
       load: vi.fn(async (p: string) => loadResults[p] ?? { success: true, project: byPath(p) }),
@@ -71,7 +78,13 @@ beforeEach(async () => {
       onRebuildProgress: () => () => undefined,
     },
     editor: { loadFile: vi.fn(async () => ({ success: true, content: '# Texte\n' })), saveFile: vi.fn() },
-    fs: { writeFile: vi.fn(async () => undefined) },
+    fs: {
+      writeFile,
+      exists: vi.fn(async () => true),
+      readUserFile: vi.fn(async (p: string) =>
+        p in ideasFiles ? { kind: 'ok', content: ideasFiles[p] } : { kind: 'absent' }
+      ),
+    },
     pdf: { getAll: vi.fn(async () => ({ success: true, documents: [] })) },
     config: { getAll: vi.fn(async () => ({ llm: {}, rag: {} })) },
     bibliography: { loadWithMetadata, readingNotes: { list: listNotes } },
@@ -86,6 +99,7 @@ beforeEach(async () => {
   chat$ = await import('../chatStore');
   rag$ = await import('../ragQueryStore');
   lifecycle$ = await import('../../lifecycle/projectLifecycle');
+  ideas$ = await import('../ideaStore');
 });
 
 afterEach(() => {
@@ -302,5 +316,168 @@ describe('le même projet, ou le projet d’avant qui revient', () => {
     expect(loadWithMetadata).not.toHaveBeenCalled();
     expect(bibliography().searchQuery).toBe('préfet');
     expect(lifecycle$.projectLifecycle.capture()?.path).toBe('/tmp/A');
+  });
+});
+
+describe('les idées du Brainstorm (L03-5)', () => {
+  const ideas = () => ideas$.useIdeaStore.getState();
+  const ideasWrites = () => writeFile.mock.calls.filter(([filePath]) => String(filePath).endsWith('ideas.json'));
+
+  beforeEach(async () => {
+    ideasFiles['/tmp/A/.cliodeck/ideas.json'] = JSON.stringify({
+      ideas: [{ id: 'i1', title: 'Idée de A', content: '', tags: [], links: [], origin: { type: 'manual' } }],
+    });
+    projects.A = project('A');
+    projects.B = project('B');
+    await open('A');
+    await ideas().loadIdeas('/tmp/A');
+    expect(ideas().loadedFor).toBe('/tmp/A');
+  });
+
+  it('project:closed (fermeture d’office) : la liste de A part, sans rien écrire nulle part', async () => {
+    onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+    await vi.waitFor(() => expect(store().currentProject).toBeNull());
+
+    expect(ideas().ideas).toEqual([]);
+    expect(ideas().loadedFor).toBeNull();
+    await ideas().flushIdeas();
+    await open('B');
+    expect(ideasWrites()).toEqual([]);
+  });
+
+  describe('project:closed avec une idée non écrite : rien ne s’écrit, l’idée attend A, hors de vue, et l’auteur le sait', () => {
+    const TYPED = 'Tapé, jamais quitté le champ.';
+    let notifications$: typeof import('../notificationStore');
+    let i18n$: typeof import('../../i18n');
+    const notices = () =>
+      notifications$.useNotificationStore
+        .getState()
+        .notifications.filter((n) => n.title === i18n$.default.t('ideas.closeSaveFailedTitle'));
+
+    beforeEach(async () => {
+      // Les mêmes modules que `projectStore`, rechargés avec lui.
+      notifications$ = await import('../notificationStore');
+      i18n$ = await import('../../i18n');
+      ideas().updateIdea('i1', { content: TYPED });
+
+      onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+      await vi.waitFor(() => expect(store().currentProject).toBeNull());
+    });
+
+    it('juste après la fermeture, avant tout autre projet : l’idée reste pour A, rien ne s’écrit, le message est là', () => {
+      // Le main a fermé A avant toute écriture : elle ne peut aller nulle part. Vider la liste la
+      // perdrait, alors que A peut revenir (disque rebranché) ; sans projet, rien ne l’affiche.
+      expect(ideas().ideas.map((idea) => idea.content)).toEqual([TYPED]);
+      expect(ideas().loadedFor).toBe('/tmp/A');
+      expect(ideas$.hasUnwrittenIdeas()).toBe(true);
+      expect(ideasWrites()).toEqual([]);
+      // Comme après une fermeture demandée (`closeProject`) : la sortie redemandera, mais l’auteur
+      // l’a appris au moment où c’est arrivé, avec ce qu’il peut y faire.
+      expect(notices()).toHaveLength(1);
+      expect(notices()[0].level).toBe('error');
+      expect(notices()[0].message).toBe(i18n$.default.t('ideas.closeSaveFailed'));
+      expect(notices()[0].duration).toBe(0);
+    });
+
+    it('A rouvert : l’idée s’écrit dans A, et le message part', async () => {
+      await open('A');
+      await ideas().loadIdeas('/tmp/A');
+
+      expect(ideasWrites().map(([filePath]) => filePath)).toEqual(['/tmp/A/.cliodeck/ideas.json']);
+      expect(String(ideasWrites()[0][1])).toContain(TYPED);
+      expect(ideas$.hasUnwrittenIdeas()).toBe(false);
+      expect(notices()).toEqual([]);
+    });
+
+    it('B ouvert à la place : l’idée est abandonnée, rien ne s’écrit ni dans A ni dans B, B ne la reçoit pas, et la sortie ne redemande rien', async () => {
+      await open('B');
+
+      expect(ideas().ideas).toEqual([]);
+      expect(ideas().loadedFor).toBeNull();
+      expect(ideas$.hasUnwrittenIdeas()).toBe(false);
+      expect(notices()).toEqual([]);
+      await ideas().flushIdeas();
+      expect(ideasWrites()).toEqual([]);
+    });
+  });
+
+  /**
+   * Une sauvegarde déjà partie au main quand il ferme A : il a validé le chemin, puis attend
+   * l'écriture (`fs:write-file`), et la fermeture passe entre les deux, sur un disque lent. Au moment
+   * de `project:closed`, rien ne dit encore si elle aboutira : le message est posé, comme pour une
+   * idée non écrite. Il ne doit pas survivre à une écriture qui aboutit : il dirait le contraire du
+   * disque, et la sortie, qui n'a plus rien à écrire, ne le redirait pas.
+   */
+  describe('project:closed pendant une écriture des idées déjà partie au main', () => {
+    const TYPED = 'Tapé, champ quitté : la sauvegarde part.';
+    let notifications$: typeof import('../notificationStore');
+    let i18n$: typeof import('../../i18n');
+    let finishWrite: (error?: Error) => void;
+    let saving: Promise<void>;
+    const notices = () =>
+      notifications$.useNotificationStore
+        .getState()
+        .notifications.filter((n) => n.title === i18n$.default.t('ideas.closeSaveFailedTitle'));
+
+    beforeEach(async () => {
+      notifications$ = await import('../notificationStore');
+      i18n$ = await import('../../i18n');
+      writeFile.mockImplementation(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            finishWrite = (error) => (error ? reject(error) : resolve());
+          })
+      );
+      ideas().updateIdea('i1', { content: TYPED });
+      saving = ideas().saveIdeas('/tmp/A');
+      await vi.waitFor(() => expect(ideasWrites()).toHaveLength(1));
+
+      onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+      await vi.waitFor(() => expect(store().currentProject).toBeNull());
+      // Pas encore sur le disque : le message dit vrai à cet instant.
+      expect(notices()).toHaveLength(1);
+    });
+
+    it('l’écriture aboutit : le message part avec elle, et la sortie n’a plus rien à dire', async () => {
+      finishWrite();
+      await saving;
+
+      await vi.waitFor(() => expect(notices()).toEqual([]));
+      expect(ideas$.hasUnwrittenIdeas()).toBe(false);
+      expect(ideas().saveError).toBeNull();
+      expect(ideasWrites().map(([filePath]) => filePath)).toEqual(['/tmp/A/.cliodeck/ideas.json']);
+      expect(String(ideasWrites()[0][1])).toContain(TYPED);
+    });
+
+    it('l’écriture échoue : le message reste, et l’idée attend toujours A', async () => {
+      finishWrite(new Error('EIO: i/o error, write'));
+      await saving;
+      // Ce qui suit la fin de la file a eu son tour : la décision est prise.
+      await ideas$.ideasSettled();
+
+      expect(ideas().saveError).toContain('EIO');
+      expect(ideas$.hasUnwrittenIdeas()).toBe(true);
+      expect(ideas().loadedFor).toBe('/tmp/A');
+      expect(notices()).toHaveLength(1);
+    });
+  });
+
+  it('fermeture d’office pendant une fermeture qui a déjà dit l’échec des idées : un seul message', async () => {
+    writeFile.mockRejectedValue(new Error('ENOSPC: no space left on device, write'));
+    ideas().updateIdea('i1', { content: 'Ne s’écrit pas.' });
+    // Le main ferme A de lui-même pendant qu’il ferme les ressources de la fermeture demandée.
+    (window as unknown as { electron: { project: { close: ReturnType<typeof vi.fn> } } }).electron.project.close.mockImplementation(
+      async () => {
+        onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+      }
+    );
+    const notifications$ = await import('../notificationStore');
+    const i18n$ = await import('../../i18n');
+
+    await store().closeProject();
+
+    expect(store().currentProject).toBeNull();
+    const titles = notifications$.useNotificationStore.getState().notifications.map((n) => n.title);
+    expect(titles.filter((title) => title === i18n$.default.t('ideas.closeSaveFailedTitle'))).toHaveLength(1);
   });
 });

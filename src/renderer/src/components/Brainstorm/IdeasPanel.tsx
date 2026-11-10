@@ -21,6 +21,7 @@ import {
 import { useIdeaStore, type Idea, type IdeaLink } from '../../stores/ideaStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { projectLifecycle } from '../../lifecycle/projectLifecycle';
 import './IdeasPanel.css';
 
 export const IdeasPanel: React.FC = () => {
@@ -64,13 +65,31 @@ export const IdeasPanel: React.FC = () => {
   const handleImportObsidian = async () => {
     const fusion = window.electron.fusion;
     if (!fusion) return;
+    // Le projet du clic. Sans projet à l'écran, ou pendant un changement de projet, rien ne
+    // recevrait les notes : rien n'est demandé.
+    const handle = projectLifecycle.capture();
+    if (!handle) return;
     setImporting(true);
     try {
       const result = await fusion.vault.importAsIdeas({ maxFiles: 200 });
       // Une bascule pendant l'attente : ces notes n'ont pas à rejoindre la liste du projet suivant,
-      // et la sortie les y écrirait, sans que l'auteur ait rien fait dans ce projet.
-      if ((useProjectStore.getState().currentProject?.path ?? null) !== projectPath) return;
+      // et la sortie les y écrirait, sans que l'auteur ait rien fait dans ce projet. Aller-retour
+      // compris : le même chemin après l'attente ne dit pas que l'écran ne l'a pas quitté, et les
+      // notes rejoindraient une liste rechargée depuis.
+      if (!handle.isCurrent()) return;
       if (result.success && result.ideas) {
+        // Une liste qui n'est pas celle de ce projet refuserait de s'écrire : les notes y
+        // resteraient, à l'écran et nulle part ailleurs. Le panneau ne se montre qu'une fois la
+        // liste chargée : la recharger d'ici ferait un second chargeur, pour un cas qu'on ne voit
+        // pas. Rien n'est ajouté, l'auteur le sait, et les notes sont toujours dans le vault.
+        if (useIdeaStore.getState().loadedFor !== handle.path) {
+          useNotificationStore.getState().notify({
+            level: 'error',
+            title: t('ideas.importFailed'),
+            message: t('ideas.importNotLoaded'),
+          });
+          return;
+        }
         const imported = result.ideas as Array<{
           title: string;
           content: string;
@@ -78,9 +97,14 @@ export const IdeasPanel: React.FC = () => {
           wikilinks: string[];
           notePath: string;
         }>;
+        // La liste de maintenant, pas celle du clic : elle a pu changer pendant l'attente. Lue une
+        // fois, avant d'ajouter : le titre est le nom du fichier, et deux notes homonymes de deux
+        // dossiers du vault entrent toutes les deux, comme avant. Seul ce que la liste avait déjà
+        // est écarté, pas ce que ce même import vient d'y mettre.
+        const present = useIdeaStore.getState().ideas;
         for (const note of imported) {
-          // Check if idea with same title already exists (avoid duplicates)
-          const existing = ideas.find((i) => i.title === note.title && i.origin.type === 'obsidian');
+          // Check if idea with same title already exists (avoid duplicates).
+          const existing = present.find((i) => i.title === note.title && i.origin.type === 'obsidian');
           if (existing) continue;
           addIdea({
             title: note.title,
@@ -94,7 +118,7 @@ export const IdeasPanel: React.FC = () => {
             origin: { type: 'obsidian', notePath: note.notePath },
           });
         }
-        if (projectPath) saveIdeas(projectPath);
+        saveIdeas(handle.path);
       } else if (!result.success) {
         // Sans cela, le bouton ne fait rien : l'auteur ne sait ni pourquoi, ni quoi faire.
         useNotificationStore.getState().notify({

@@ -19,6 +19,7 @@
 
 import { create } from 'zustand';
 import i18n from '../i18n';
+import { projectLifecycle } from '../lifecycle/projectLifecycle';
 
 // MARK: - Types
 
@@ -318,6 +319,14 @@ function enqueue(job: () => Promise<void>): Promise<void> {
   return done;
 }
 
+/**
+ * Ce qui est déjà dans la file a abouti ou échoué : une écriture partie au main a sa réponse, et
+ * `hasUnwrittenIdeas` dit le disque. Ne rejette jamais.
+ */
+export function ideasSettled(): Promise<void> {
+  return queueTail;
+}
+
 // MARK: - Store
 
 export const useIdeaStore = create<IdeaState>()((set, get) => ({
@@ -338,11 +347,15 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
       // Le panneau se démonte sans blur, et relire ferait disparaître ce qui n'est pas écrit.
       // Si l'écriture échoue, la liste à l'écran reste la seule copie : elle reste à l'écran.
       if (sameProject && hasUnwrittenIdeas() && !(await writeCurrentIdeas(projectPath))) {
-        set({ isLoading: load !== lastLoad });
+        if (load === lastLoad) set({ isLoading: false });
         return;
       }
 
       const loaded = await readIdeasFile(projectPath);
+      // Dépassé pendant la lecture, par un autre chargement ou par la remise à zéro du projet : sa
+      // réponse n'est plus celle de l'écran. Sans ce garde, Brainstorm fermé dans B, la liste de A
+      // revenait avec `loadedFor` A.
+      if (load !== lastLoad) return;
       const ideas = loaded.kind === 'ready' ? loaded.ideas : [];
       // Lire n'écrit rien : même normalisée, la liste chargée n'est pas à réécrire.
       writtenIdeas = serializeIdeas(ideas);
@@ -352,7 +365,7 @@ export const useIdeaStore = create<IdeaState>()((set, get) => ({
         persistence: persistenceAfter(loaded),
         loadedFor: projectPath,
         saveError: null,
-        isLoading: load !== lastLoad,
+        isLoading: false,
       });
     });
   },
@@ -488,6 +501,38 @@ export function hasUnwrittenIdeas(): boolean {
   const { ideas, loadedFor, persistence } = useIdeaStore.getState();
   return loadedFor !== null && persistence.kind !== 'blocked' && serializeIdeas(ideas) !== writtenIdeas;
 }
+
+/**
+ * L'écran passe à un autre projet, ou à aucun (L03-4). La liste, sa sélection et l'état de son
+ * fichier sont ceux du projet quitté : Brainstorm fermé, rien ne les rechargeait, et les idées
+ * liées d'une source du chat étaient celles de A. Un chargement encore en vol devient caduc par le
+ * jeton : il le relit après sa lecture. Et sans liste chargée, aucune sauvegarde ne part.
+ *
+ * Ce qu'une sauvegarde de A avait à écrire l'est déjà : la bascule attend les idées avant de partir
+ * (`detachOutgoingEditor`), la fermeture aussi. Ce qui n'a pas pu s'écrire reste, hors de vue, tant
+ * qu'aucun autre projet ne prend la place : fermé sans pouvoir l'écrire, par l'auteur ou d'office
+ * (`project:closed`, où le main a fermé A avant toute écriture), rouvrir ce projet l'écrit
+ * (`ideas.closeSaveFailed` le promet, dans les deux cas), et la sortie le dit encore. Sans projet à
+ * l'écran, rien ne l'affiche. Un autre projet l'abandonne, et `openProjectContents` l'a oublié juste
+ * avant.
+ */
+projectLifecycle.onReset('ideas', ({ to }) => {
+  lastLoad++;
+  if (hasUnwrittenIdeas() && (to === null || to === useIdeaStore.getState().loadedFor)) {
+    useIdeaStore.setState({ isLoading: false });
+    return;
+  }
+  writtenIdeas = null;
+  noFileFor = null;
+  useIdeaStore.setState({
+    ideas: [],
+    selectedId: null,
+    loadedFor: null,
+    persistence: { kind: 'ready' },
+    saveError: null,
+    isLoading: false,
+  });
+});
 
 /**
  * Le fichier est-il revenu depuis le chargement ? L'auteur a pu réparer celui qu'on avait mis de

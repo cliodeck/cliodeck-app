@@ -93,6 +93,14 @@ function countSourceFamilies(
  */
 const sendingToWrite = new Set<string>();
 
+/**
+ * Le projet d'une réponse : celui à l'écran au clic, puisque le chat est vidé quand l'écran en
+ * change (L03-4). Null sans projet ouvert : son brouillon se montrera partout (Q12).
+ */
+function answerProject(): string | null {
+  return useProjectStore.getState().currentProject?.path ?? null;
+}
+
 export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
@@ -268,10 +276,11 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
 
   // Mise en brouillon (#7, A13 option c) : l'alternative SANS engagement à
   // sendToWrite — la réponse attend dans la file du mode Écriture au lieu
-  // d'être proposée immédiatement.
+  // d'être proposée immédiatement. Le brouillon porte le projet de la réponse
+  // (Q12), lu au clic comme sa source.
   const sendToDrafts = useCallback(
-    (m: BrainstormMessage, source = draftSource()): void => {
-      useDraftsStore.getState().enqueue({ content: messageToDraft(m), source });
+    (m: BrainstormMessage, source = draftSource(), projectPath = answerProject()): void => {
+      useDraftsStore.getState().enqueue({ content: messageToDraft(m), source, projectPath });
       setDraftedId(m.id);
     },
     [draftSource]
@@ -281,18 +290,21 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   // (fusion 2.6, A13 option a). Passer en Écriture peut démonter ce composant :
   // la source se lit avant l'attente, et le repli ne dépend que du store. Un
   // éditeur qui ne monte pas n'efface pas la réponse : elle part au brouillon.
+  // Le projet aussi se lit avant : une bascule pendant l'attente montrerait B,
+  // et la réponse de A y serait proposée.
   const sendToWrite = useCallback(
     async (m: BrainstormMessage): Promise<void> => {
       if (sendingToWrite.has(m.id)) return;
       sendingToWrite.add(m.id);
       const source = draftSource();
+      const projectPath = answerProject();
       const outcome = await sendDraftToWrite(messageToDraft(m), source);
       sendingToWrite.delete(m.id);
       if (outcome === 'proposed') {
         setSentToWriteId(m.id);
         return;
       }
-      sendToDrafts(m, source);
+      sendToDrafts(m, source, projectPath);
       notifyDraftKept(t);
     },
     [draftSource, sendToDrafts, t]

@@ -14,6 +14,7 @@ import os from 'os';
 import path from 'path';
 
 import { hasUnwrittenIdeas, useIdeaStore, type Idea } from '../ideaStore';
+import { projectLifecycle } from '../../lifecycle/projectLifecycle';
 
 // Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
 vi.setConfig({ testTimeout: 30_000 });
@@ -1358,6 +1359,71 @@ describe('une bascule de projet ne croise jamais deux listes', () => {
     expect(titlesOnDisk(ideasA)).toEqual(['Idée de A']);
     expect(titlesOnDisk(ideasB)).toEqual(['Idée de B']);
     expect(store().isLoading).toBe(false);
+  });
+});
+
+describe('la remise à zéro du projet rend caduc un chargement en vol (L03-5)', () => {
+  /** Ce que fait `projectStore` : la demande part au main, puis l'écran passe au projet rendu. */
+  function screenSwitchesTo(dir: string | null, { mainToo = true } = {}): void {
+    projectLifecycle.beginTransition();
+    if (mainToo) h.mainCurrent = dir;
+    projectLifecycle.enter(dir);
+  }
+
+  beforeEach(() => {
+    projectLifecycle.enter(dirA);
+    fs.writeFileSync(ideasA, ideasFile(['Idée de A']));
+  });
+
+  it('Brainstorm fermé dans B : la réponse de A ne pose ni sa liste ni son projet', async () => {
+    let release: () => void = () => undefined;
+    let readDone = false;
+    afterRead = () =>
+      new Promise<void>((resolve) => {
+        readDone = true;
+        release = resolve;
+      });
+
+    const loadingA = store().loadIdeas(dirA);
+    await vi.waitFor(() => expect(readDone).toBe(true), { timeout: 5000 });
+    screenSwitchesTo(dirB);
+    release();
+    await loadingA;
+
+    expect(store().loadedFor).toBeNull();
+    expect(titles()).toEqual([]);
+    expect(store().isLoading).toBe(false);
+    expect(hasUnwrittenIdeas()).toBe(false);
+  });
+
+  it('un chargement de A qui attend son tour derrière une écriture ne lit plus rien', async () => {
+    await store().loadIdeas(dirA);
+    let release: () => void = () => undefined;
+    holdWrites = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    newIdea('Febvre');
+    const writing = store().saveIdeas(dirA);
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 5000 });
+    const reads: string[] = [];
+    const read = window.electron.fs.readUserFile;
+    (window.electron.fs as { readUserFile: unknown }).readUserFile = (filePath: string) => {
+      reads.push(filePath);
+      return read(filePath);
+    };
+
+    const reloading = store().loadIdeas(dirA);
+    store().abandonUnwrittenIdeas();
+    // L'écriture de A est déjà partie au main, qui la sert avant de basculer.
+    screenSwitchesTo(dirB, { mainToo: false });
+    release();
+    await Promise.all([writing, reloading]);
+    mainSwitchesTo(dirB);
+
+    expect(reads).toEqual([]);
+    expect(store().loadedFor).toBeNull();
+    expect(titles()).toEqual([]);
+    expect(titlesOnDisk(ideasA)).toEqual(['Idée de A', 'Febvre']);
   });
 });
 
