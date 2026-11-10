@@ -22,7 +22,7 @@ import { AssistantChat } from '../AssistantChat';
 import { CodeMirrorEditor } from '../../Editor/CodeMirrorEditor';
 import { resetEditorStates } from '../../Editor/editor-state-memory';
 import { useChatStore } from '../../../stores/chatStore';
-import { useDraftsStore } from '../../../stores/draftsStore';
+import { draftsForProject, useDraftsStore } from '../../../stores/draftsStore';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useNotificationStore } from '../../../stores/notificationStore';
 import { useProjectStore } from '../../../stores/projectStore';
@@ -213,6 +213,53 @@ describe('quand on ne peut pas proposer', () => {
     expect(queued()).toHaveLength(1);
     expect(screen.getByText('drafts.enqueued')).toBeTruthy();
     expect(notices()).toContain('editor.proposalUnavailable');
+  });
+});
+
+describe('le projet du brouillon : celui de la réponse (S16-2-5, Q12)', () => {
+  const B = '/p/autre';
+  const enqueueButton = () => screen.getByText('drafts.enqueue');
+
+  it('l’éditeur ne répond pas, et B s’ouvre pendant l’attente : le brouillon reste à A, et B ne le voit pas', async () => {
+    await mount(<NoEditor />);
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+
+    // La bascule vers B pendant l'attente de l'éditeur, comme `openProjectContents`.
+    act(() => {
+      useProjectStore.setState((s) => ({ currentProject: s.currentProject && { ...s.currentProject, path: B } }));
+    });
+    await wait(5100);
+
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0].projectPath).toBe('/p/article');
+    expect(draftsForProject(queued(), B)).toEqual([]);
+    expect(draftsForProject(queued(), '/p/article')).toHaveLength(1);
+  });
+
+  it('« Mettre en brouillon » dans A : le brouillon est à A', async () => {
+    await mount(<AssistantChat variant="full" />);
+
+    await act(async () => {
+      fireEvent.click(enqueueButton());
+    });
+
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0].projectPath).toBe('/p/article');
+  });
+
+  it('sans projet ouvert : le brouillon n’en porte aucun, et se voit partout', async () => {
+    useProjectStore.setState({ currentProject: null, loadState: { kind: 'idle' } });
+    await mount(<AssistantChat variant="full" />);
+
+    await act(async () => {
+      fireEvent.click(enqueueButton());
+    });
+
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0]).not.toHaveProperty('projectPath');
+    expect(draftsForProject(queued(), B)).toHaveLength(1);
   });
 });
 
