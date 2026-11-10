@@ -79,9 +79,8 @@ const INVENTORY: Record<string, Scope> = {
     resetBy: { file: 'tropyReindexStore.ts', call: 'store.clear()' },
   },
   'ideaStore.ts': {
-    scope: 'pending',
-    pr: 'L03-5',
-    why: 'les idées restent dans le store au changement de projet (seul le panneau les cache par loadedFor)',
+    scope: 'project',
+    why: 'idées du projet, sélection, état de son fichier ; un chargement en vol devient caduc (S16-1-18)',
   },
   'draftsStore.ts': { scope: 'pending', pr: 'L03-5', why: 'brouillons filtrés par projet (Q12)' },
   'modeStore.ts': {

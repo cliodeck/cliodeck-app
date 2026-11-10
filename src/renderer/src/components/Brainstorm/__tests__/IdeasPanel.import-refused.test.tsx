@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { IdeasPanel } from '../IdeasPanel';
 import { useNotificationStore } from '../../../stores/notificationStore';
 import { useProjectStore } from '../../../stores/projectStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 const toasts = () => useNotificationStore.getState().notifications;
 
@@ -17,6 +18,8 @@ function openPanel(result: unknown): void {
     ...w.electron,
     fusion: { vault: { importAsIdeas: vi.fn().mockResolvedValue(result) } },
   };
+  // Comme `projectStore` : l'import part du projet à l'écran, celui du registre.
+  projectLifecycle.enter('/tmp/danzig');
   useProjectStore.setState({
     currentProject: {
       id: 'p1',

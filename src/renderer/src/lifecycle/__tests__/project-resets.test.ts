@@ -17,9 +17,48 @@ import { useUsageJournalStore, type TodayView } from '../../stores/usageJournalS
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { useSlidesStore } from '../../stores/slidesStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
+import { hasUnwrittenIdeas, useIdeaStore, type Idea } from '../../stores/ideaStore';
 import { editorStates } from '../../components/Editor/editor-state-memory';
 
 const CITATION_A = { id: 'Dupont_1990', type: 'book', author: 'Dupont', year: '1990', title: 'Le préfet et la grève' };
+const IDEA_A: Idea = {
+  id: 'idee-greve',
+  title: 'La grève de 1934',
+  content: 'Le préfet temporise.',
+  tags: ['grève'],
+  links: [],
+  origin: { type: 'manual' },
+  createdAt: '2026-11-01T10:00:00.000Z',
+  updatedAt: '2026-11-01T10:00:00.000Z',
+};
+
+/**
+ * Les idées de A telles que le panneau les a chargées : une liste, une sélection, une mise de côté.
+ * `written` : le disque a tout ; sinon, une frappe qu'il n'a pas reçue.
+ */
+function ideasOfA({ written }: { written: boolean }): void {
+  useIdeaStore.setState({
+    ideas: [IDEA_A],
+    selectedId: IDEA_A.id,
+    loadedFor: '/projets/A',
+    persistence: { kind: 'quarantined', backupPath: '/projets/A/.cliodeck/ideas.json.illisible-1' },
+    saveError: 'ENOSPC: no space left on device, write',
+    isLoading: true,
+  });
+  useIdeaStore.getState().abandonUnwrittenIdeas();
+  if (!written) useIdeaStore.getState().updateIdea(IDEA_A.id, { content: 'Tapé, jamais écrit.' });
+}
+
+function expectNoIdeas(): void {
+  const state = useIdeaStore.getState();
+  expect(state.ideas).toEqual([]);
+  expect(state.selectedId).toBeNull();
+  expect(state.loadedFor).toBeNull();
+  expect(state.persistence).toEqual({ kind: 'ready' });
+  expect(state.saveError).toBeNull();
+  expect(state.isLoading).toBe(false);
+  expect(hasUnwrittenIdeas()).toBe(false);
+}
 
 function switchTo(path: string | null): void {
   projectLifecycle.beginTransition();
@@ -107,6 +146,70 @@ describe('journal d’usage IA, plan du manuscrit, présentations', () => {
 
     expect(useSlidesStore.getState().isPanelOpen).toBe(false);
     expect(useSlidesStore.getState().isPreviewOpen).toBe(false);
+  });
+});
+
+describe('idées du Brainstorm (L03-5)', () => {
+  const titleAndContent = () => useIdeaStore.getState().ideas.map((idea) => [idea.title, idea.content]);
+
+  it('la liste de A, sa sélection, sa mise de côté et son échec d’écriture disparaissent, Brainstorm ouvert ou non', () => {
+    ideasOfA({ written: true });
+
+    switchTo('/projets/B');
+
+    expectNoIdeas();
+  });
+
+  it('une liste de A que le disque n’a pas reçue ne passe pas dans B', () => {
+    ideasOfA({ written: false });
+    expect(hasUnwrittenIdeas()).toBe(true);
+
+    switchTo('/projets/B');
+
+    expectNoIdeas();
+  });
+
+  it('fermé sans pouvoir les écrire : elles attendent hors de vue le retour de A, qui les écrira', () => {
+    ideasOfA({ written: false });
+
+    switchTo(null);
+
+    expect(titleAndContent()).toEqual([['La grève de 1934', 'Tapé, jamais écrit.']]);
+    expect(useIdeaStore.getState().loadedFor).toBe('/projets/A');
+    expect(useIdeaStore.getState().isLoading).toBe(false);
+
+    switchTo('/projets/A');
+
+    expect(titleAndContent()).toEqual([['La grève de 1934', 'Tapé, jamais écrit.']]);
+    expect(hasUnwrittenIdeas()).toBe(true);
+  });
+
+  it('fermé sans pouvoir les écrire, puis un autre projet : elles ne l’y suivent pas', () => {
+    ideasOfA({ written: false });
+    switchTo(null);
+
+    switchTo('/projets/B');
+
+    expectNoIdeas();
+  });
+
+  it('fermé, tout écrit : rien ne reste', () => {
+    ideasOfA({ written: true });
+
+    switchTo(null);
+
+    expectNoIdeas();
+  });
+
+  it('le même projet rouvert ne perd rien, pas même ce qui n’est pas écrit', () => {
+    ideasOfA({ written: false });
+
+    switchTo('/projets/A');
+
+    expect(titleAndContent()).toEqual([['La grève de 1934', 'Tapé, jamais écrit.']]);
+    expect(useIdeaStore.getState().selectedId).toBe(IDEA_A.id);
+    expect(useIdeaStore.getState().loadedFor).toBe('/projets/A');
+    expect(hasUnwrittenIdeas()).toBe(true);
   });
 });
 

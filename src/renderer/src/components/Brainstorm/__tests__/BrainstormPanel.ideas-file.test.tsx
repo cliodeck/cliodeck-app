@@ -15,6 +15,7 @@ import path from 'path';
 import { BrainstormPanel } from '../BrainstormPanel';
 import { hasUnwrittenIdeas, useIdeaStore, type Idea } from '../../../stores/ideaStore';
 import { useProjectStore } from '../../../stores/projectStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 // Vrai disque et plusieurs allers-retours par test : à 24 `yes` sur 14 cœurs, l'un d'eux dépassait les 5 s par défaut.
 vi.setConfig({ testTimeout: 30_000 });
@@ -449,8 +450,17 @@ describe('un import Obsidian qui répond après une bascule', () => {
       });
   });
 
-  async function importStartedIn(dir: string): Promise<void> {
+  /** L'import part du projet à l'écran, celui du registre : il change comme le fait `projectStore`. */
+  function showProject(dir: string): void {
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.enter(dir);
+    });
     openProject(dir);
+  }
+
+  async function importStartedIn(dir: string): Promise<void> {
+    showProject(dir);
     render(<BrainstormPanel />);
     await settled();
     await clickTab('ideas.tabIdeas');
@@ -463,7 +473,7 @@ describe('un import Obsidian qui répond après une bascule', () => {
     fs.writeFileSync(ideasB, onDiskB);
     await importStartedIn(dirA);
 
-    openProject(dirB);
+    showProject(dirB);
     await settled();
     expect(screen.getByText('De B')).toBeInTheDocument();
 

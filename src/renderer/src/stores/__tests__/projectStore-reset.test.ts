@@ -20,6 +20,7 @@ type BibliographyStoreModule = typeof import('../bibliographyStore');
 type ChatStoreModule = typeof import('../chatStore');
 type RagStoreModule = typeof import('../ragQueryStore');
 type LifecycleModule = typeof import('../../lifecycle/projectLifecycle');
+type IdeaStoreModule = typeof import('../ideaStore');
 
 const project = (name: string, bib?: string) => ({
   id: name,
@@ -40,12 +41,16 @@ let loadResults: Record<string, unknown>;
 let loadWithMetadata: ReturnType<typeof vi.fn>;
 let listNotes: ReturnType<typeof vi.fn>;
 let onClosed: ((closed: { path: string; code: string; error: string }) => void) | null;
+/** Les `ideas.json` sur le disque, et les écritures demandées au main. */
+let ideasFiles: Record<string, string>;
+let writeFile: ReturnType<typeof vi.fn>;
 
 let projects$: ProjectStoreModule;
 let bibliography$: BibliographyStoreModule;
 let chat$: ChatStoreModule;
 let rag$: RagStoreModule;
 let lifecycle$: LifecycleModule;
+let ideas$: IdeaStoreModule;
 
 const byPath = (p: string) => projects[p.replace(/^\/tmp\//, '').replace(/\/project\.json$/, '')];
 
@@ -56,6 +61,8 @@ beforeEach(async () => {
   onClosed = null;
   loadWithMetadata = vi.fn(async () => ({ success: true, citations: [CITATION_A], unreadKeys: [], metadataUnreadable: false }));
   listNotes = vi.fn(async () => ({ success: true, notes: [NOTE_A] }));
+  ideasFiles = {};
+  writeFile = vi.fn(async () => undefined);
   (window as unknown as { electron: unknown }).electron = {
     project: {
       load: vi.fn(async (p: string) => loadResults[p] ?? { success: true, project: byPath(p) }),
@@ -71,7 +78,13 @@ beforeEach(async () => {
       onRebuildProgress: () => () => undefined,
     },
     editor: { loadFile: vi.fn(async () => ({ success: true, content: '# Texte\n' })), saveFile: vi.fn() },
-    fs: { writeFile: vi.fn(async () => undefined) },
+    fs: {
+      writeFile,
+      exists: vi.fn(async () => true),
+      readUserFile: vi.fn(async (p: string) =>
+        p in ideasFiles ? { kind: 'ok', content: ideasFiles[p] } : { kind: 'absent' }
+      ),
+    },
     pdf: { getAll: vi.fn(async () => ({ success: true, documents: [] })) },
     config: { getAll: vi.fn(async () => ({ llm: {}, rag: {} })) },
     bibliography: { loadWithMetadata, readingNotes: { list: listNotes } },
@@ -86,6 +99,7 @@ beforeEach(async () => {
   chat$ = await import('../chatStore');
   rag$ = await import('../ragQueryStore');
   lifecycle$ = await import('../../lifecycle/projectLifecycle');
+  ideas$ = await import('../ideaStore');
 });
 
 afterEach(() => {
@@ -302,5 +316,45 @@ describe('le même projet, ou le projet d’avant qui revient', () => {
     expect(loadWithMetadata).not.toHaveBeenCalled();
     expect(bibliography().searchQuery).toBe('préfet');
     expect(lifecycle$.projectLifecycle.capture()?.path).toBe('/tmp/A');
+  });
+});
+
+describe('les idées du Brainstorm (L03-5)', () => {
+  const ideas = () => ideas$.useIdeaStore.getState();
+  const ideasWrites = () => writeFile.mock.calls.filter(([filePath]) => String(filePath).endsWith('ideas.json'));
+
+  beforeEach(async () => {
+    ideasFiles['/tmp/A/.cliodeck/ideas.json'] = JSON.stringify({
+      ideas: [{ id: 'i1', title: 'Idée de A', content: '', tags: [], links: [], origin: { type: 'manual' } }],
+    });
+    projects.A = project('A');
+    projects.B = project('B');
+    await open('A');
+    await ideas().loadIdeas('/tmp/A');
+    expect(ideas().loadedFor).toBe('/tmp/A');
+  });
+
+  it('project:closed (fermeture d’office) : la liste de A part, sans rien écrire nulle part', async () => {
+    onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+    await vi.waitFor(() => expect(store().currentProject).toBeNull());
+
+    expect(ideas().ideas).toEqual([]);
+    expect(ideas().loadedFor).toBeNull();
+    await ideas().flushIdeas();
+    await open('B');
+    expect(ideasWrites()).toEqual([]);
+  });
+
+  it('project:closed avec une idée non écrite : rien ne s’écrit, ni dans A ni dans B, et B ne la reçoit pas', async () => {
+    ideas().updateIdea('i1', { content: 'Tapé, jamais quitté le champ.' });
+
+    onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+    await vi.waitFor(() => expect(store().currentProject).toBeNull());
+    await open('B');
+
+    expect(ideas().ideas).toEqual([]);
+    expect(ideas().loadedFor).toBeNull();
+    await ideas().flushIdeas();
+    expect(ideasWrites()).toEqual([]);
   });
 });
