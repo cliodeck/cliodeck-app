@@ -18,11 +18,13 @@
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
+import { sameFile } from '../../../backend/core/vector-store/file-identity.js';
 import { UsageJournalStore } from '../../../backend/core/usage-journal/UsageJournalStore.js';
 import {
   getJournalContext,
   setBatchSink,
   setInferenceSink,
+  setWorkspaceRootSource,
   type BatchAccumulator,
   type JournalContext,
 } from '../../../backend/core/usage-journal/context.js';
@@ -91,6 +93,8 @@ class UsageJournalService {
       this.session = null;
       setInferenceSink((input) => this.record(input));
       setBatchSink((acc, ctx) => this.recordBatch(acc, ctx));
+      // Le décorateur et `runBatch` lisent la racine au début de l'appel ou du lot.
+      setWorkspaceRootSource(() => this.workspaceRoot ?? undefined);
       console.log('🧾 Usage journal initialized:', dbPath);
     } catch (err) {
       // Best-effort : l'app fonctionne sans journal.
@@ -102,6 +106,7 @@ class UsageJournalService {
   close(): void {
     setInferenceSink(undefined);
     setBatchSink(undefined);
+    setWorkspaceRootSource(undefined);
     this.flush();
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -182,6 +187,11 @@ class UsageJournalService {
     if (!this.store) return;
     try {
       const ctx = getJournalContext();
+      const root = input.workspaceRoot ?? ctx?.workspaceRoot;
+      if (!this.belongsHere(root)) {
+        console.warn(`🧾 Usage journal: ${input.kind} of another project (${root}) not recorded here`);
+        return;
+      }
       const event = this.enrich(input, ctx);
       this.buffer.push(event);
       this.scheduleFlush();
@@ -255,23 +265,27 @@ class UsageJournalService {
   }
 
   /**
-   * Sink des scopes d'indexation en masse : un seul `embedding_batch` par scope.
+   * L'événement est-il de ce projet ? Un appel ou un lot lancé dans un projet
+   * quitté finit parfois après l'ouverture du suivant : la réindexation des
+   * sources primaires (H7), un tour de chat, une indexation (S10-1-33). Il
+   * n'entre pas dans ce journal, qui se copie et se publie seul (ADR 0007) :
+   * mieux vaut un événement perdu, et dit, qu'un événement attribué au mauvais
+   * projet. Le même dossier par un lien ou une autre casse reste ce projet.
    *
-   * Un lot lié à un autre projet que celui de ce journal n'y entre pas : la
-   * réindexation complète des sources primaires d'un projet quitté (H7) finit
-   * la source qu'elle embarquait après l'ouverture du suivant, et ses
-   * embeddings allaient dans le journal de celui-ci. `journal.db` se copie et
-   * se publie seul (ADR 0007).
+   * La racine est celle de l'opération qui a lancé l'appel, sinon celle du
+   * journal ouvert quand l'appel ou le lot a commencé (`originWorkspaceRoot`).
+   * Sans racine connue (appel lancé sans journal ouvert), l'événement reste ici.
+   */
+  private belongsHere(root: string | undefined): boolean {
+    if (!root || !this.workspaceRoot || root === this.workspaceRoot) return true;
+    return sameFile(root, this.workspaceRoot);
+  }
+
+  /**
+   * Sink des scopes d'indexation en masse : un seul `embedding_batch` par scope.
+   * Le projet du lot est contrôlé par `record`, comme celui d'un appel isolé.
    */
   private recordBatch(acc: BatchAccumulator, ctx: JournalContext): void {
-    if (
-      ctx.workspaceRoot &&
-      this.workspaceRoot &&
-      path.resolve(ctx.workspaceRoot) !== path.resolve(this.workspaceRoot)
-    ) {
-      console.warn(`🧾 Usage journal: batch of another project (${ctx.workspaceRoot}) not recorded here`);
-      return;
-    }
     this.record({
       kind: 'embedding_batch',
       provider: acc.provider ?? 'unknown',
@@ -283,7 +297,7 @@ class UsageJournalService {
       status: acc.anyError ? 'error' : 'ok',
       corpus: ctx.corpus ?? acc.corpus,
       recipeId: ctx.recipeId,
-      workspaceRoot: ctx.workspaceRoot,
+      workspaceRoot: acc.workspaceRoot ?? ctx.workspaceRoot,
       mode: ctx.mode,
       isLocal: acc.isLocal,
     });

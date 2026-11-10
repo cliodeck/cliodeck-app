@@ -17,6 +17,7 @@ import { validate, StringIdSchema } from '../utils/validation.js';
 import { configManager } from '../../services/config-manager.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { cloudConsentRefusal } from '../utils/cloud-consent-gate.js';
+import { runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 
 // MARK: - Validation Schemas
 
@@ -77,15 +78,21 @@ export function setupSimilarityHandlers() {
       registry = createRegistryFromClioDeckConfig(cfg);
       similarityService.setLLMProvider(registry.getLLM());
 
-      // Run analysis with progress reporting
-      const results = await similarityService.analyzeDocument(
-        validatedData.text,
-        validatedData.options,
-        (progress) => {
-          if (window) {
-            window.webContents.send('similarity:progress', progress);
+      // Run analysis with progress reporting. L'analyse va segment après
+      // segment (recherche, puis reclassement) et ne s'arrête pas à
+      // l'ouverture d'un autre projet : ses appels au modèle portent le
+      // projet lu en tête du handler, avant l'attente du consentement, et le
+      // journal d'usage du suivant les écarte (S10-1-33).
+      const results = await runWithJournalContext({ workspaceRoot: projectPath }, () =>
+        similarityService.analyzeDocument(
+          validatedData.text,
+          validatedData.options,
+          (progress) => {
+            if (window) {
+              window.webContents.send('similarity:progress', progress);
+            }
           }
-        }
+        )
       );
 
       console.log('📤 IPC Response: similarity:analyze', {

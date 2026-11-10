@@ -43,6 +43,7 @@ import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { parseOutline } from '../../editor/outline.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
+import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
 import { projectManager } from './project-manager.js';
 import { configManager } from './config-manager.js';
 
@@ -348,12 +349,25 @@ class ManuscriptIndexService {
     );
   }
 
-  private async runIndex(
-    embedder: EmbeddingProvider
+  /**
+   * Une passe sur le projet configuré à son début. Elle ne s'arrête pas à
+   * l'ouverture d'un autre projet : ses appels au fournisseur, un par lot
+   * d'extraits et chapitre après chapitre, portent la racine de ce projet,
+   * et le journal d'usage du suivant les écarte (S10-1-33). Sans elle, un
+   * appel lancé après la bascule prenait la racine du journal ouvert.
+   */
+  private runIndex(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
+    const workspaceRoot = this.workspaceRoot;
+    const pass = (): Promise<ManuscriptIndexReport> => this.indexProject(embedder, workspaceRoot);
+    return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
+  }
+
+  private async indexProject(
+    embedder: EmbeddingProvider,
+    workspaceRoot: string | null
   ): Promise<ManuscriptIndexReport> {
     const started = Date.now();
     const report = emptyReport();
-    const workspaceRoot = this.workspaceRoot;
 
     if (!workspaceRoot || !this.isEnabled()) {
       report.durationMs = Date.now() - started;

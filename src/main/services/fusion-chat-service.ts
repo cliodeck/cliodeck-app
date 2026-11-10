@@ -54,6 +54,8 @@ import {
 import { modeService } from './mode-service.js';
 import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.js';
 import { historyService } from './history-service.js';
+import type { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
+import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
 import { inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
@@ -550,6 +552,13 @@ class FusionChatService {
       safeSend('fusion:chat:chunk', envelope);
     };
 
+    // Le projet du tour et son journal de recherche, lus à l'entrée et jamais relus : après une
+    // attente, les singletons sont peut-être ceux du projet suivant. Ouvrir B pendant le tour de A
+    // l'annule (`project-closed`), et sa réponse partielle va au journal de A (Q11), pas à celui
+    // de B (S02-1-14).
+    const projectPath = projectManager.getCurrentProjectPath();
+    const history = historyService.getHistoryManager();
+
     // --- Délai d'inactivité (curseur « Timeout » du panneau) -------------
     // Il ne borne pas la durée d'un tour : une réponse qui continue
     // d'arriver n'est jamais coupée. Il interrompt un tour dont plus rien ne
@@ -644,7 +653,6 @@ class FusionChatService {
     }
 
     let messages = args.messages;
-    const projectPath = projectManager.getCurrentProjectPath();
     const freeMode = isFreeMode(args.systemPrompt);
     const promptLang = resolvePromptLanguage(
       args.systemPrompt?.language,
@@ -755,6 +763,15 @@ class FusionChatService {
 
     const toolHandler: ChatEngineToolHandler = {
       async call(name, toolArgs) {
+        // Le projet du tour est fermé : les clients MCP, déchargés à la bascule, sont peut-être déjà
+        // ceux du projet suivant. Une annulation de l'auteur ou un délai gardent l'appel, comme avant :
+        // le projet est toujours le même, et le moteur s'arrête de lui-même.
+        if (op.signal.aborted && op.cancelReason === 'project-closed') {
+          return {
+            ok: false,
+            error: { code: 'project_changed', message: `Project closed during the turn: ${name} not called` },
+          };
+        }
         const clientName = toolScope.get(name);
         if (!clientName) {
           return {
@@ -1063,7 +1080,9 @@ class FusionChatService {
 
     try {
       watchdog.touch();
-      await runChatTurn<BrainstormSource>({
+      // Le journal d'usage reçoit les appels du tour à leur fin : la racine du projet du tour les
+      // suit, et un appel fini après l'ouverture d'un autre projet n'entre pas dans son journal.
+      await runWithJournalContext({ workspaceRoot: projectPath ?? undefined }, () => runChatTurn<BrainstormSource>({
         provider: llm,
         messages,
         signal: op.signal,
@@ -1143,7 +1162,7 @@ class FusionChatService {
             });
           },
         },
-      });
+      }));
     } finally {
       watchdog.disarm();
       await registry.dispose().catch(() => undefined);
@@ -1152,7 +1171,7 @@ class FusionChatService {
         sources: recordedSources.length,
         assistantChars: assistantText.length,
       });
-      this.recordJournalEntry({
+      this.recordJournalEntry(history, {
         userMessage: args.messages[args.messages.length - 1],
         assistantText,
         thinkingText,
@@ -1174,8 +1193,12 @@ class FusionChatService {
    * Ported from legacy chat-service.logMessagesToHistory (step 5 deletion).
    * Fail-soft: the chat round-trip must not crash because the journal
    * manager is unavailable or the project was closed mid-turn.
+   *
+   * `hm` est le journal du projet du tour, pris à son entrée. Jamais celui du projet courant : le
+   * tour a pu finir après l'ouverture d'un autre (S02-1-14). Fermé entre-temps (la fermeture du
+   * projet n'a pas attendu la fin du tour), l'échange ne s'écrit nulle part, et on le dit.
    */
-  private recordJournalEntry(entry: {
+  private recordJournalEntry(hm: HistoryManager | null, entry: {
     userMessage: ChatMessage | undefined;
     assistantText: string;
     /** Raisonnement d'un modèle pensant : conservé avec la réponse, à part. */
@@ -1190,8 +1213,13 @@ class FusionChatService {
     retrieval?: TurnRetrievalRecord;
   }): void {
     try {
-      const hm = historyService.getHistoryManager();
       if (!hm) return;
+      if (!hm.isDatabaseOpen()) {
+        console.warn(
+          `[fusion-chat] journal de recherche de ${hm.projectPath} fermé avant la fin du tour : échange non enregistré`
+        );
+        return;
+      }
       const userText =
         typeof entry.userMessage?.content === 'string'
           ? entry.userMessage.content

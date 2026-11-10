@@ -43,6 +43,7 @@ import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-g
 import { isInside } from '../../../backend/core/vector-store/file-identity.js';
 import { readReadingNote, READING_NOTES_DIR } from '../../../backend/core/bibliography/readingNotes.js';
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
+import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
 import { clioDeckConfigToRegistryConfig } from '../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { classifyEmbeddingTarget } from '../../../backend/security/cloud-consent.js';
 import { configManager } from './config-manager.js';
@@ -293,7 +294,21 @@ export class ReadingNotesIndexService {
    * illisible garde ses anciens extraits, dans l'ancienne dimension ; elle
    * figure dans les échecs.
    */
-  private async runIndex(embedder: EmbeddingProvider, force: boolean): Promise<ReadingNotesIndexReport> {
+  private runIndex(embedder: EmbeddingProvider, force: boolean): Promise<ReadingNotesIndexReport> {
+    // La passe est celle du projet configuré à son début. Elle ne s'arrête pas à l'ouverture d'un
+    // autre projet : ses appels au fournisseur, note après note, portent la racine de ce projet, et
+    // le journal d'usage du suivant les écarte (S10-1-33). Sans elle, un appel lancé après la
+    // bascule prenait la racine du journal ouvert.
+    const workspaceRoot = this.workspaceRoot;
+    const pass = (): Promise<ReadingNotesIndexReport> => this.indexProject(embedder, force, workspaceRoot);
+    return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
+  }
+
+  private async indexProject(
+    embedder: EmbeddingProvider,
+    force: boolean,
+    workspaceRoot: string | null
+  ): Promise<ReadingNotesIndexReport> {
     const started = Date.now();
     const report: ReadingNotesIndexReport = {
       indexed: 0,
@@ -304,7 +319,6 @@ export class ReadingNotesIndexService {
       durationMs: 0,
     };
     const done = (): ReadingNotesIndexReport => ({ ...report, durationMs: Date.now() - started });
-    const workspaceRoot = this.workspaceRoot;
     if (!workspaceRoot || !this.isEnabled()) return done();
 
     // Vérifié à chaque passe, relances comprises : le réglage a pu changer.
