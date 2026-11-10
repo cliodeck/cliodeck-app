@@ -464,6 +464,13 @@ export class VectorStore {
            SELECT ?, collection_key FROM pdf_document_collections WHERE document_id IN (${placeholders})`
         )
         .run(keepId, ...ids);
+      // Les thèmes où figurent les copies, lus avant de les déplacer : une copie qui part par
+      // cascade retire un document de son thème, dont il faudra recompter la taille.
+      const touchedTopics = this.db
+        .prepare(
+          `SELECT DISTINCT analysis_id, topic_id FROM pdf_topic_assignments WHERE document_id IN (${placeholders})`
+        )
+        .all(...ids) as Array<{ analysis_id: string; topic_id: number }>;
       // Une seule place par analyse pour le document gardé, comme le rend le calcul : dans un
       // thème ou parmi les aberrants. S'il en a déjà une, ses copies y partent par cascade ;
       // sinon une copie lui cède la sienne, une affectation plutôt qu'un aberrant (les
@@ -481,6 +488,21 @@ export class VectorStore {
           .run(keepId, ...ids, keepId, keepId);
       }
       this.db.prepare(`DELETE FROM pdf_documents WHERE id IN (${placeholders})`).run(...ids);
+      // La carte d'un thème annonce `size` documents et en liste les affectations : deux copies du
+      // même thème fondues en une, et elle en annonçait un de trop (S13-2-2). Le calcul pose
+      // `size` = nombre de documents affectés ; on le recompte pour les thèmes touchés, et, comme à
+      // l'enregistrement, un thème qui n'a plus aucun document n'est plus affiché.
+      const recount = this.db.prepare(
+        `UPDATE pdf_topics SET size = (
+           SELECT COUNT(*) FROM pdf_topic_assignments a
+           WHERE a.analysis_id = pdf_topics.analysis_id AND a.topic_id = pdf_topics.topic_id
+         ) WHERE analysis_id = ? AND topic_id = ?`
+      );
+      const dropEmpty = this.db.prepare('DELETE FROM pdf_topics WHERE analysis_id = ? AND topic_id = ? AND size = 0');
+      for (const { analysis_id, topic_id } of touchedTopics) {
+        recount.run(analysis_id, topic_id);
+        dropEmpty.run(analysis_id, topic_id);
+      }
     })();
   }
 
@@ -1074,6 +1096,16 @@ export class VectorStore {
       );
       const assignments = Object.entries(result.topicAssignments).filter(([docId]) => present.has(docId));
       const outliers = result.outliers.filter((docId) => present.has(docId));
+      // Aucun de ses documents n'est là : ce n'est plus une analyse amputée, c'est celle d'un autre
+      // corpus (projet changé pendant le calcul, S03-1-21, que L03-7 ferme en amont). L'enregistrer
+      // remplacerait l'analyse courante par une analyse vide ; on lève, la transaction s'annule, et
+      // la précédente reste courante.
+      const computed = Object.keys(result.topicAssignments).length + result.outliers.length;
+      if (computed > 0 && assignments.length + outliers.length === 0) {
+        throw new Error(
+          `Topic analysis not saved: none of its ${computed} documents is still in this corpus`
+        );
+      }
       const shrunk = new Set(
         Object.entries(result.topicAssignments)
           .filter(([docId]) => !present.has(docId))

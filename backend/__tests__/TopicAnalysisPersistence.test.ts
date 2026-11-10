@@ -171,6 +171,23 @@ describe.skipIf(!sqliteAvailable)('analyses de thèmes et enfants de pdf_documen
       expect(timelineCount()).toBe(2);
     });
 
+    it('aucun document du résultat n’est encore là : rien n’est enregistré, la précédente reste courante', () => {
+      // La route réelle : un autre projet ouvert pendant le calcul (S03-1-21, L03-7). Le résultat
+      // du projet A arrive dans le brain.db de B, où aucun de ses documents n'existe.
+      for (const id of ['b1', 'b2', 'b3']) store.saveDocument(doc(id));
+      store.saveTopicAnalysis(analysis({ 0: ['b1', 'b2', 'b3'] }, [], 'B'));
+
+      const fromA = analysis({ 0: ['a1', 'a2'], 1: ['a3', 'a4'] }, ['a5'], 'A');
+      expect(() => store.saveTopicAnalysis(fromA)).toThrow(/none of its 5 documents/);
+
+      expect(loaded().topics.map((t) => t.label)).toEqual(['B 0']);
+      expect(loaded().topicAssignments).toEqual({ b1: 0, b2: 0, b3: 0 });
+      expect(loaded().statistics.totalDocuments).toBe(3);
+      expect(query<{ n: number }>('SELECT COUNT(*) AS n FROM pdf_topic_analyses')[0].n).toBe(1);
+      expect(query<{ n: number }>('SELECT COUNT(*) AS n FROM pdf_topics')[0].n).toBe(1);
+      expect(timelineCount()).toBe(3);
+    });
+
     it('une erreur au milieu de l’écriture laisse la précédente courante : tout ou rien', () => {
       for (const id of ['a', 'b', 'c']) store.saveDocument(doc(id));
       store.saveTopicAnalysis(analysis({ 0: ['a', 'b', 'c'] }, [], 'ancien'));
@@ -246,6 +263,53 @@ describe.skipIf(!sqliteAvailable)('analyses de thèmes et enfants de pdf_documen
       const rows = query<{ topic_id: number }>('SELECT topic_id FROM pdf_topic_assignments WHERE document_id = ?', 'a2');
       expect(rows).toHaveLength(1);
       expect(loaded().topicAssignments.a2).toBe(rows[0].topic_id);
+      // Quelle copie l'emporte dépend de MIN(id) ; dans les deux cas, chaque thème affiché annonce
+      // autant de documents qu'il en liste, et aucun n'est vide.
+      for (const topic of topicsShown()) {
+        expect(topic.size).toBe(topic.documents.length);
+        expect(topic.size).toBeGreaterThan(0);
+      }
+    });
+
+    it('deux copies dans le même thème : la taille du thème suit sa liste', () => {
+      for (const id of ['a', 'a-copie', 'b']) store.saveDocument(doc(id));
+      store.saveTopicAnalysis(analysis({ 0: ['a', 'a-copie', 'b'] }));
+      store.saveDocument(doc('a2'));
+
+      store.mergeDocumentsInto('a2', ['a', 'a-copie']);
+
+      expect(topicsShown()).toEqual([{ id: 0, size: 2, documents: ['a2', 'b'] }]);
+      expect(timelineCount()).toBe(2);
+    });
+
+    it('deux copies dans deux thèmes : chaque thème garde une taille égale à sa liste', () => {
+      for (const id of ['a', 'a-copie', 'b', 'c']) store.saveDocument(doc(id));
+      store.saveTopicAnalysis(analysis({ 0: ['a', 'b'], 1: ['a-copie', 'c'] }));
+      store.saveDocument(doc('a2'));
+
+      store.mergeDocumentsInto('a2', ['a', 'a-copie']);
+
+      const shown = topicsShown();
+      expect(shown).toHaveLength(2);
+      for (const topic of shown) expect(topic.size).toBe(topic.documents.length);
+      expect(shown.reduce((n, t) => n + t.size, 0)).toBe(3);
+      expect(timelineCount()).toBe(3);
+    });
+
+    it('les tailles des analyses précédentes suivent aussi', () => {
+      for (const id of ['a', 'a-copie', 'b']) store.saveDocument(doc(id));
+      store.saveTopicAnalysis(analysis({ 0: ['a', 'a-copie', 'b'] }, [], 'ancien'));
+      store.saveTopicAnalysis(analysis({ 0: ['a', 'b'] }, ['a-copie'], 'nouveau'));
+      store.saveDocument(doc('a2'));
+
+      store.mergeDocumentsInto('a2', ['a', 'a-copie']);
+
+      expect(
+        query<{ label: string; size: number }>('SELECT label, size FROM pdf_topics ORDER BY label')
+      ).toEqual([
+        { label: 'ancien 0', size: 2 },
+        { label: 'nouveau 0', size: 2 },
+      ]);
     });
 
     it('une copie affectée et une copie aberrante : le document gardé est affecté, jamais les deux', () => {
@@ -267,6 +331,9 @@ describe.skipIf(!sqliteAvailable)('analyses de thèmes et enfants de pdf_documen
 
       expect(loaded().topicAssignments).toEqual({ a: 0, b: 0 });
       expect(query<{ n: number }>('SELECT COUNT(*) AS n FROM pdf_topic_assignments WHERE document_id = ?', 'a')[0].n).toBe(1);
+      // Le thème 1 ne contenait que la copie : vidé, il n'est plus affiché (ni carte « 0 documents »,
+      // ni entrée de filtre qui ne montrerait rien), comme à l'enregistrement.
+      expect(topicsShown()).toEqual([{ id: 0, size: 2, documents: ['a', 'b'] }]);
     });
 
     it('« Ré-indexer » de bout en bout : le PDF réindexé reste dans son thème et dans la frise', async () => {

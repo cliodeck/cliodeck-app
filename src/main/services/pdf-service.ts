@@ -927,7 +927,11 @@ class PDFService {
     // NOTE: Le service reste en cours d'exécution pour de futures analyses
     // Il sera arrêté automatiquement quand l'application se ferme
 
-    return result;
+    // L'analyse enregistrée, pas le résultat brut : un document retiré pendant le calcul en est
+    // écarté, ses thèmes recomptés. Renvoyer le brut montrait d'autres cartes et d'autres exports
+    // que la frise (relue dans brain.db) et que la réouverture du projet.
+    const saved: TopicAnalysisResult | null = this.vectorStore!.loadLatestTopicAnalysis();
+    return saved ?? result;
   }
 
   /**
