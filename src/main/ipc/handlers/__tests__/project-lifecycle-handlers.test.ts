@@ -108,6 +108,7 @@ vi.mock('../../../services/retrieval-service.js', () => ({
     clear: vi.fn(() => {
       h.events.push('close:retrieval');
     }),
+    drainSearches: vi.fn(async () => undefined),
   },
 }));
 vi.mock('../../../services/manuscript-index-service.js', () => ({

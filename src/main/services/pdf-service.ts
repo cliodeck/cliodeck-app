@@ -103,16 +103,16 @@ class PDFService {
       throw new Error('PDF Service requires a project path');
     }
 
-    // Fermer la base précédente si elle existe — après avoir laissé les indexations en vol se
-    // terminer (ou expirer). Détachée AVANT l'attente : un `close()` qui reprend pendant ce temps
-    // ne la retrouve plus, et ne ferme pas une seconde fois ce qu'on ferme ici (S01-1-9). Plus rien
-    // ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent « not initialized »
-    // et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    // Fermer la base précédente si elle existe — après avoir laissé les indexations et les
+    // recherches en vol se terminer (ou expirer). Détachée AVANT l'attente : un `close()` qui reprend
+    // pendant ce temps ne la retrouve plus, et ne ferme pas une seconde fois ce qu'on ferme ici
+    // (S01-1-9). Plus rien ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent
+    // « not initialized » et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
     const previous = this.vectorStore;
     this.vectorStore = null;
     this.pdfIndexer = null;
     if (previous) {
-      await this.drainInFlightIndexing();
+      await this.drainBeforeClose();
       previous.close();
     }
 
@@ -521,6 +521,15 @@ class PDFService {
         `⚠️ Indexation(s) PDF toujours en vol après ${timeoutMs}ms — fermeture du store malgré tout`
       );
     }
+  }
+
+  /**
+   * Avant toute fermeture du magasin : les indexations (30 s au plus) et les recherches (5 s au plus)
+   * en vol finissent d'abord (S04-1-14). En même temps, pour tenir dans le délai de fermeture de la
+   * séquence (35 s).
+   */
+  private async drainBeforeClose(): Promise<void> {
+    await Promise.all([this.drainInFlightIndexing(), retrievalService.drainSearches()]);
   }
 
   /**
@@ -1006,9 +1015,15 @@ class PDFService {
     this.llmRegistry = null;
     this.llm = null;
     this.embedding = null;
+    // La reconstruction programmée partirait après la fermeture, sur `this.vectorStore` : le magasin
+    // du projet ouvert entre-temps.
+    if (this.rebuildTimer) {
+      clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = null;
+    }
     if (store) {
       console.log('🔒 Closing PDF Service vector store...');
-      await this.drainInFlightIndexing();
+      await this.drainBeforeClose();
       store.close();
     }
 

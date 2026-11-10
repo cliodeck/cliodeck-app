@@ -57,7 +57,7 @@ vi.mock('../pdf/PdfIndexer.js', () => ({
 }));
 vi.mock('../pdf-extract-isolated.js', () => ({ extractPdfIsolated: vi.fn() }));
 vi.mock('../retrieval-service.js', () => ({
-  retrievalService: { configure: vi.fn(), clear: vi.fn() },
+  retrievalService: { configure: vi.fn(), clear: vi.fn(), drainSearches: vi.fn(async () => undefined) },
 }));
 vi.mock('../topic-modeling-service.js', () => ({
   topicModelingService: {

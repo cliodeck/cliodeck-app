@@ -24,7 +24,9 @@ vi.mock('../config-manager.js', () => ({
     get: () => state.rag,
   },
 }));
-vi.mock('../retrieval-service.js', () => ({ retrievalService: { configure: vi.fn() } }));
+vi.mock('../retrieval-service.js', () => ({
+  retrievalService: { configure: vi.fn(), drainSearches: vi.fn(async () => undefined) },
+}));
 vi.mock('../pdf-extract-isolated.js', () => ({ extractPdfIsolated: vi.fn() }));
 vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', () => ({
   createRegistryFromClioDeckConfig: state.buildRegistry,

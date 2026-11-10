@@ -17,6 +17,7 @@ interface FakeStore {
   close: () => void;
   countDuplicateDocuments: () => number;
   getAllDocuments: () => Promise<unknown[]>;
+  deleteDocument: () => boolean;
 }
 
 const state = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const state = vi.hoisted(() => ({
   indexers: [] as Array<{ vectorStore: unknown; indexPDF: ReturnType<typeof vi.fn> }>,
   create: vi.fn(),
   clearRetrieval: vi.fn(),
+  maybeRebuild: vi.fn(async (_store: unknown) => undefined),
 }));
 
 vi.mock('../config-manager.js', () => ({
@@ -54,7 +56,7 @@ vi.mock('../pdf/PdfVectorStore.js', () => ({
   PdfVectorStore: {
     create: state.create,
     configureEnhanced: vi.fn(),
-    maybeRebuild: async () => undefined,
+    maybeRebuild: state.maybeRebuild,
   },
 }));
 vi.mock('../pdf/PdfIndexer.js', () => ({
@@ -69,7 +71,7 @@ vi.mock('../pdf/PdfIndexer.js', () => ({
 }));
 vi.mock('../pdf-extract-isolated.js', () => ({ extractPdfIsolated: vi.fn() }));
 vi.mock('../retrieval-service.js', () => ({
-  retrievalService: { configure: vi.fn(), clear: state.clearRetrieval },
+  retrievalService: { configure: vi.fn(), clear: state.clearRetrieval, drainSearches: vi.fn(async () => undefined) },
 }));
 
 const { pdfService } = await import('../pdf-service.js');
@@ -86,6 +88,7 @@ function openStore(): FakeStore {
       if (store.closed) throw new TypeError('The database connection is not open');
       return [];
     },
+    deleteDocument: () => true,
   };
   state.stores.push(store);
   return store;
@@ -97,6 +100,7 @@ beforeEach(async () => {
   state.stores.length = 0;
   state.indexers.length = 0;
   state.clearRetrieval.mockClear();
+  state.maybeRebuild.mockClear();
   state.create.mockReset();
   state.create.mockImplementation(() => ({ store: openStore(), useEnhanced: true, initPromise: undefined }));
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -266,5 +270,31 @@ describe('une ouverture abandonnée qui échoue ensuite', () => {
     expect(pdfService.getVectorStore()).toBe(storeA);
     expect(pdfService.getCurrentProjectPath()).toBe('/projet-a');
     expect(state.clearRetrieval).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Supprimer un document programme une reconstruction de l'index deux secondes plus tard. Le minuteur
+ * survivait à la fermeture : il partait ensuite sur `this.vectorStore`, le magasin du projet ouvert
+ * entre-temps.
+ */
+describe('la reconstruction programmée et la fermeture', () => {
+  it('fermer l’annule : elle ne part pas sur le magasin du projet suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pdfService.deleteDocument('doc');
+      await pdfService.close();
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      const callsOn = (store: FakeStore): number => state.maybeRebuild.mock.calls.filter(([s]) => s === store).length;
+      // Une pour chacun : celle que l'ouverture lance d'elle-même, après le préchauffage.
+      expect(callsOn(storeA)).toBe(1);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

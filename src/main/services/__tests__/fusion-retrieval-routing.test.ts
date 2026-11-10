@@ -141,13 +141,14 @@ describe('RetrievalService.search — branch dispatch', () => {
   let originalVault: PrivateBranches['searchVault'];
 
   beforeEach(async () => {
-    // Silence the "not configured" guard — we don't need a real store.
+    // Silence the "not configured" guard — we don't need a real store. Comme
+    // le vrai, il rend le magasin du service : la recherche le capture.
     ensureReadySpy = vi
       .spyOn(
-        retrievalService as unknown as { ensureReady: () => void },
+        retrievalService as unknown as { ensureReady: () => unknown },
         'ensureReady'
       )
-      .mockImplementation(() => undefined);
+      .mockImplementation(() => (retrievalService as unknown as { vectorStore: unknown }).vectorStore);
 
     // `search` reads topK / similarityThreshold from the user config. We
     // don't init electron-store in unit tests, so stub getRAGConfig.
