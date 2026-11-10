@@ -53,7 +53,8 @@ vi.mock('../config-manager.js', () => ({
  * `ok` : répond ; `fail-on` : tout texte qui contient `failOn` échoue, comme un Ollama qui tombe
  * en arrivant à cette source ; `fail-once-on` : seul le premier de ces textes échoue, comme une
  * connexion réinitialisée ; `absent` : le registre ne se construit pas, aucun fournisseur ;
- * `gate` : le 1er texte attend qu'on ouvre `gate`, comme un Ollama lent.
+ * `gate` : le 1er texte qui contient `gateOn` (le 1er tout court si vide) attend qu'on ouvre `gate`,
+ * comme un Ollama lent.
  */
 type ProviderMode = 'ok' | 'fail-on' | 'fail-once-on' | 'absent' | 'gate';
 const provider = vi.hoisted(() => ({
@@ -62,6 +63,8 @@ const provider = vi.hoisted(() => ({
   failures: 0,
   texts: [] as string[],
   gate: null as Promise<void> | null,
+  gateOn: '',
+  gated: false,
   reached: null as (() => void) | null,
 }));
 
@@ -95,7 +98,8 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
         embed: async (texts: string[]) => {
           for (const text of texts) {
             provider.texts.push(text);
-            if (provider.mode === 'gate' && provider.texts.length === 1 && provider.gate) {
+            if (provider.mode === 'gate' && provider.gate && !provider.gated && text.includes(provider.gateOn)) {
+              provider.gated = true;
               provider.reached?.();
               await provider.gate;
             }
@@ -118,6 +122,7 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
 });
 
 const { tropyService } = await import('../tropy-service.js');
+const { usageJournalService } = await import('../usage-journal-service.js');
 const { setBatchSink, setInferenceSink } = await import('../../../../backend/core/usage-journal/context.js');
 const { PrimarySourcesVectorStore, TROPY_CHUNKS_VERSION } = await import(
   '../../../../backend/core/vector-store/PrimarySourcesVectorStore.js'
@@ -275,10 +280,15 @@ async function setProvider(mode: ProviderMode, failOn = ''): Promise<void> {
   provider.failOn = failOn;
   provider.failures = 0;
   provider.texts = [];
+  provider.gateOn = '';
+  provider.gated = false;
 }
 
-/** Arrête le 1er texte embarqué jusqu'à `open()` ; `reached` se résout quand l'embarquement y est. */
-function gateFirstEmbed(): { reached: Promise<void>; open: () => void } {
+/**
+ * Arrête le 1er texte embarqué qui contient `containing` (le 1er tout court par défaut) jusqu'à
+ * `open()` ; `reached` se résout quand l'embarquement y est.
+ */
+function gateFirstEmbed(containing = ''): { reached: Promise<void>; open: () => void } {
   let open!: () => void;
   provider.gate = new Promise<void>((resolve) => {
     open = resolve;
@@ -287,7 +297,59 @@ function gateFirstEmbed(): { reached: Promise<void>; open: () => void } {
     provider.reached = resolve;
   });
   void setProvider('gate');
+  provider.gateOn = containing;
   return { reached, open };
+}
+
+/**
+ * L'app quittée en pleine passe : `before-quit` sort par `app.exit()` sans fermer le magasin. Les
+ * transactions faites restent en base ; l'index HNSW, qui ne s'écrit qu'à la fermeture et en fin
+ * de reconstruction, n'est pas écrit. `release` laisse finir l'embarquement en cours, qui trouve son
+ * magasin fermé, comme dans un processus arrêté.
+ */
+async function quitWithoutClosing(release: () => void): Promise<void> {
+  const save = vi.spyOn(PrimarySourcesVectorStore.prototype, 'saveHNSWIndex').mockImplementation(() => undefined);
+  try {
+    await tropyService.close();
+    release();
+    await tropyService.whenFullReindexSettled();
+  } finally {
+    save.mockRestore();
+  }
+}
+
+/**
+ * L'index HNSW tel qu'un projet ouvert et refermé de longue date le laisse : compact, une étiquette
+ * par extrait en base. `linkSyncAndClose` en laisse sur les extraits que la synchro puis l'écriture
+ * des corps ont retirés, et le contrôle des 10 % de `search` reconstruisait alors tout d'un bloc :
+ * le test passait pour une autre raison que celle qu'il vérifie.
+ */
+function compactIndex(): void {
+  const store = new PrimarySourcesVectorStore(projectDir);
+  try {
+    store.rebuildAllIndexes();
+  } finally {
+    store.close();
+  }
+}
+
+/** La recherche dense seule (`searchWithEmbedding`), avec le vecteur d'un extrait : il doit s'y trouver. */
+function denseIds(content: string): string[] {
+  return tropyService.searchWithEmbedding(new Float32Array(hashedVector(content)), 3).map((r) => r.chunk.id);
+}
+
+/** Les lots d'embeddings écrits dans le journal d'usage IA (`journal.db`) d'un projet. */
+function journalBatches(dir: string): Array<{ corpus: string | null; chunk_count: number | null; workspace: string }> {
+  const file = path.join(dir, '.cliodeck', 'journal.db');
+  if (!fs.existsSync(file)) return [];
+  const db = new Database(file, { readonly: true });
+  try {
+    return db
+      .prepare("SELECT corpus, chunk_count, workspace FROM inference_events WHERE kind = 'embedding_batch'")
+      .all() as Array<{ corpus: string | null; chunk_count: number | null; workspace: string }>;
+  } finally {
+    db.close();
+  }
 }
 
 /** Les états de la réindexation complète envoyés au renderer depuis `since`. */
@@ -334,6 +396,8 @@ beforeEach(() => {
   provider.failOn = '';
   provider.texts = [];
   provider.gate = null;
+  provider.gateOn = '';
+  provider.gated = false;
   provider.reached = null;
 });
 
@@ -397,7 +461,9 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : les extraits d’av
 
     const running = reindexEvents().filter((e) => e.phase === 'running');
     expect(running[0]).toEqual({ phase: 'running', done: 0, total: 3, chunks: totalChunks, waitingForSync: false });
-    expect(running.map((e) => e.done)).toEqual([0, 1, 2]);
+    // 3 / 3 pendant la reconstruction finale des index (une centaine de secondes sur 40 000
+    // extraits) : « 2 / 3 » laissait croire qu'il restait une source.
+    expect(running.map((e) => e.done)).toEqual([0, 1, 2, 3]);
     // Fini : le main n'a plus rien à annoncer à un panneau ouvert plus tard.
     expect(tropyService.getReindexStatus()).toEqual({ phase: 'idle' });
   });
@@ -577,6 +643,115 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : une interruption ne
     expect(reindexEvents(since)).toEqual([]);
     expect(tropyService.getReindexStatus()).toEqual({ phase: 'idle' });
   });
+
+  it('projet changé pendant la passe : le journal d’usage IA de chaque projet ne reçoit que ses propres embeddings', async () => {
+    const projectB = path.join(root, 'projet-B');
+    fs.mkdirSync(projectB);
+    await linkSyncAndClose();
+    makeBaseFromBefore();
+
+    // L'arrêté est refait, puis la passe s'arrête sur la lettre ; l'historien ouvre B.
+    usageJournalService.init(projectDir);
+    const gate = gateFirstEmbed(LETTRE_X);
+    try {
+      await tropyService.init(projectDir);
+      await gate.reached;
+      // `project:load` : le journal de B d'abord, puis Tropy.
+      usageJournalService.init(projectB);
+      await tropyService.init(projectB);
+      gate.open();
+      await tropyService.whenFullReindexSettled();
+    } finally {
+      usageJournalService.close();
+    }
+
+    // `journal.db` se copie et se publie seul (ADR 0007) : rien de A dans celui de B.
+    expect(journalBatches(projectB).filter((e) => e.corpus === 'tropy')).toEqual([]);
+    // Et l'arrêté, fini avant le changement de projet, est dans celui de A.
+    expect(journalBatches(projectDir)).toEqual([
+      { corpus: 'tropy', chunk_count: chunks(sourceId(ARRETE)).length, workspace: projectDir },
+    ]);
+  });
+
+  it('l’app quittée en pleine passe, sans fermer le magasin : à la relance, les sources déjà refaites sont trouvées par la recherche dense pendant la suite de la passe', async () => {
+    await linkSyncAndClose();
+    compactIndex();
+    makeBaseFromBefore();
+    const arrete = sourceId(ARRETE);
+    const before = chunks(arrete);
+    // D'un bloc, la reconstruction gèle le processus principal une centaine de secondes sur
+    // 40 000 extraits : la recherche ne doit pas la lancer d'elle-même.
+    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+
+    // Première session : l'arrêté est refait, puis l'app est quittée pendant la lettre.
+    const first = gateFirstEmbed(LETTRE_X);
+    await tropyService.init(projectDir);
+    await first.reached;
+    const redone = chunks(arrete);
+    expectRedone(before, redone);
+    await quitWithoutClosing(first.open);
+
+    // Relance : la passe reprend à la lettre, et s'y arrête un moment.
+    const resumed = gateFirstEmbed();
+    await tropyService.init(projectDir);
+    try {
+      await resumed.reached;
+      for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
+      expect(blockingRebuild).not.toHaveBeenCalled();
+    } finally {
+      resumed.open();
+    }
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'done' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
+  });
+
+  it('l’app quittée pendant la reconstruction finale : à la relance, l’index est refait sans geler l’app ni rien réembarquer, et la recherche dense trouve toutes les sources', async () => {
+    await linkSyncAndClose();
+    compactIndex();
+    makeBaseFromBefore();
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+
+    // La reconstruction de fin de passe, toutes les sources refaites, ne finit pas : l'app est
+    // quittée pendant. Une reconstruction lancée avant, elle, se fait.
+    const hang = { release: null as ((completed: boolean) => void) | null };
+    const original = PrimarySourcesVectorStore.prototype.rebuildIndexesInSlices;
+    const finalRebuild = vi
+      .spyOn(PrimarySourcesVectorStore.prototype, 'rebuildIndexesInSlices')
+      .mockImplementation(function (this: InstanceType<typeof PrimarySourcesVectorStore>, sliceSize?: number) {
+        if (this.listOutdatedChunkSources().length > 0) return original.call(this, sliceSize);
+        return new Promise<boolean>((resolve) => {
+          hang.release = resolve;
+        });
+      });
+    let statusDuringFinalRebuild: unknown = null;
+    let redone: Array<{ id: string; content: string }> = [];
+    try {
+      await tropyService.init(projectDir);
+      await vi.waitFor(() => expect(hang.release).not.toBeNull(), WAIT);
+      statusDuringFinalRebuild = tropyService.getReindexStatus();
+      redone = ids.flatMap((id) => chunks(id));
+    } finally {
+      finalRebuild.mockRestore();
+      // Même en échec : une passe suspendue ferait attendre les tests suivants.
+      await quitWithoutClosing(() => hang.release?.(false));
+    }
+    // Toutes les sources sont faites : l'écran ne dit pas qu'il en reste une.
+    expect(statusDuringFinalRebuild).toMatchObject({ phase: 'running', done: 3, total: 3 });
+    expect(redone.length).toBeGreaterThan(0);
+
+    // Relance : plus aucune source marquée.
+    await setProvider('ok');
+    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+    const since = sent.length;
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
+    expect(blockingRebuild).not.toHaveBeenCalled();
+    expect(provider.texts).toEqual([]);
+    expect(reindexEvents(since)).toEqual([]);
+  });
 });
 
 // MARK: - Pendant la passe
@@ -610,10 +785,9 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : le reste de l’app
     expect(rapport.every((r) => !r.chunk.content.includes(RAPPORT_ANCIEN))).toBe(true);
   });
 
-  it('le journal d’usage IA reçoit la passe en un seul lot d’embeddings, pas un événement par extrait', async () => {
+  it('le journal d’usage IA reçoit un lot d’embeddings par source, pas un événement par extrait', async () => {
     await linkSyncAndClose();
     makeBaseFromBefore();
-    const totalChunks = query<{ n: number }>('SELECT COUNT(*) AS n FROM tropy_chunks')[0].n;
     const inferences: Array<{ kind: string }> = [];
     const batches: Array<{ corpus: string; chunkCount: number }> = [];
     setInferenceSink((input) => inferences.push(input));
@@ -627,9 +801,15 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : le reste de l’app
       setBatchSink(undefined);
     }
 
-    // AnalyseDDF : 40 648 extraits. Un événement chacun noierait le journal de l'historien.
+    // AnalyseDDF : 40 648 extraits. Un événement chacun noierait le journal de l'historien. Un lot
+    // par source s'inscrit au fil de la passe : une passe de plusieurs heures, souvent
+    // interrompue, laisse la trace de ce qu'elle a fait.
     expect(inferences.filter((e) => e.kind === 'embedding')).toEqual([]);
-    expect(batches).toEqual([{ corpus: 'tropy', chunkCount: totalChunks }]);
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    expect(batches).toEqual(ids.map((id) => ({ corpus: 'tropy', chunkCount: chunks(id).length })));
+    expect(batches.reduce((sum, b) => sum + b.chunkCount, 0)).toBe(
+      query<{ n: number }>('SELECT COUNT(*) AS n FROM tropy_chunks')[0].n
+    );
   });
 
   it('une synchro lancée pendant la passe : la réindexation lui cède le magasin, puis reprend, sans deux embarquements à la fois', async () => {

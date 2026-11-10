@@ -254,8 +254,24 @@ class UsageJournalService {
     }
   }
 
-  /** Sink des scopes d'indexation en masse : un seul `embedding_batch` par scope. */
+  /**
+   * Sink des scopes d'indexation en masse : un seul `embedding_batch` par scope.
+   *
+   * Un lot lié à un autre projet que celui de ce journal n'y entre pas : la
+   * réindexation complète des sources primaires d'un projet quitté (H7) finit
+   * la source qu'elle embarquait après l'ouverture du suivant, et ses
+   * embeddings allaient dans le journal de celui-ci. `journal.db` se copie et
+   * se publie seul (ADR 0007).
+   */
   private recordBatch(acc: BatchAccumulator, ctx: JournalContext): void {
+    if (
+      ctx.workspaceRoot &&
+      this.workspaceRoot &&
+      path.resolve(ctx.workspaceRoot) !== path.resolve(this.workspaceRoot)
+    ) {
+      console.warn(`🧾 Usage journal: batch of another project (${ctx.workspaceRoot}) not recorded here`);
+      return;
+    }
     this.record({
       kind: 'embedding_batch',
       provider: acc.provider ?? 'unknown',
