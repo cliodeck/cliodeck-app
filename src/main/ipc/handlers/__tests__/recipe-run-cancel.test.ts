@@ -3,8 +3,13 @@
  * fenêtre a lancée, et elle seule. L'identifiant vient du renderer, avec la demande d'exécution :
  * sans lui, une annulation arrivée tard couperait la passe suivante.
  *
- * Les vrais handlers, le vrai runner, un vrai dossier ; seul le modèle est simulé, et il ne rend
- * la main que si on l'interrompt ou qu'on le relâche.
+ * Une passe est une opération de portée projet du registre `operations` (L03-6) : ouvrir un autre
+ * projet l'arrête aussi (`cancelScope('project', 'project-closed')`), au lieu de la laisser
+ * interroger les services du projet suivant.
+ *
+ * Les vrais handlers, le vrai runner, le vrai registre des opérations, un vrai dossier ; seul le
+ * modèle est simulé, et il ne rend la main que si on l'interrompt ou qu'on le relâche. Le registre
+ * est celui du processus : chaque test arrête et attend ses passes, aucune ne fuit dans le suivant.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
@@ -68,6 +73,7 @@ vi.mock('../../../services/mcp-clients-service.js', () => ({
 vi.mock('../../../services/pdf-service.js', () => ({ pdfService: {} }));
 
 import { setupFusionHandlers } from '../fusion-handlers.js';
+import { operations } from '../../../services/cancellable-operation.js';
 
 interface RunResponse {
   success: boolean;
@@ -86,7 +92,8 @@ function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return Promise.resolve(fn(event, ...args) as T);
 }
 
-const run = (runId: string) => invoke<RunResponse>('fusion:recipes:run', 'user', 'pense.yaml', {}, runId);
+const run = (runId: string, fileName = 'pense.yaml') =>
+  invoke<RunResponse>('fusion:recipes:run', 'user', fileName, {}, runId);
 const cancel = (runId: unknown) => invoke<{ success: boolean }>('fusion:recipes:cancel', runId);
 
 async function modelCalled(count: number): Promise<void> {
@@ -116,10 +123,21 @@ beforeEach(() => {
     path.join(dir, 'pense.yaml'),
     'name: pense\nversion: 0.1.0\ndescription: essai\nsteps:\n  - id: pense\n    kind: brainstorm\n    with:\n      prompt: Des pistes\n'
   );
+  fs.writeFileSync(
+    path.join(dir, 'deux.yaml'),
+    'name: deux\nversion: 0.1.0\ndescription: essai\nsteps:\n' +
+      '  - id: pense\n    kind: brainstorm\n    with:\n      prompt: Des pistes\n' +
+      '  - id: suite\n    kind: brainstorm\n    with:\n      prompt: La suite\n'
+  );
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Rien ne fuit dans le test suivant : les passes encore inscrites s'arrêtent, et on attend leur
+  // fin (leur journal de passe s'écrit dans le dossier qu'on va supprimer).
+  operations.cancelKind('recipe', 'user');
   for (const call of h.calls) call.answer('fin du test');
+  await Promise.all(operations.active().map((op) => op.finished));
+  expect(operations.active()).toEqual([]);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -175,10 +193,27 @@ describe('fusion:recipes:cancel (D20)', () => {
 
     const res = await run('double');
 
-    expect(res.success).toBe(false);
+    // Le message d'avant le registre : le renderer l'affiche tel quel.
+    expect(res).toMatchObject({ success: false, error: 'recipe runId already running' });
     expect(h.calls).toHaveLength(1);
     h.calls[0].answer('fin');
     expect((await first).ok).toBe(true);
+  });
+
+  it('ouvrir un autre projet arrête la passe : l’étape suivante ne part pas', async () => {
+    const running = run('bascule', 'deux.yaml');
+    await modelCalled(1);
+
+    operations.cancelScope('project', 'project-closed');
+
+    expect(h.calls[0].signal?.aborted).toBe(true);
+    const res = await running;
+    expect(res).toMatchObject({ success: true, ok: false, cancelled: true });
+    expect(h.calls).toHaveLength(1);
+    const logs = runLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].trim().split('\n').at(-1)).toContain('"run_cancelled"');
+    expect(operations.find('bascule')).toBeNull();
   });
 
   it('un identifiant malformé est refusé', async () => {

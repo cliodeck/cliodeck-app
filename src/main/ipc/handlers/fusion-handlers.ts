@@ -78,6 +78,11 @@ import { parseRecipe, type Recipe } from '../../../../backend/recipes/schema.js'
 import { RecipeRunner, recipeCallsLLM } from '../../../../backend/recipes/runner.js';
 import { cloudConsentRefusal } from '../utils/cloud-consent-gate.js';
 import { recipeStepHandlers } from '../../services/recipe-step-handlers.js';
+import {
+  operations,
+  OperationBusyError,
+  type CancellableOperation,
+} from '../../services/cancellable-operation.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import { BrowserWindow } from 'electron';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
@@ -186,13 +191,6 @@ export function setupFusionHandlers(): void {
   });
 
   // MARK: - recipes
-
-  /**
-   * Les passes en cours, par identifiant : fermer la fenêtre d'une recette l'annule (D20).
-   * L'identifiant vient du renderer avec la demande, pour qu'une annulation tardive ne
-   * vise jamais la passe suivante.
-   */
-  const recipeRuns = new Map<string, AbortController>();
 
   ipcMain.handle('fusion:recipes:list', async () => {
     try {
@@ -338,14 +336,22 @@ export function setupFusionHandlers(): void {
       if (typeof runId !== 'string' || !RUN_ID_PATTERN.test(runId)) {
         return errorResponse('invalid recipe runId');
       }
-      if (recipeRuns.has(runId)) return errorResponse('recipe runId already running');
-      // Inscrite avant le premier `await` : une annulation partie juste après la demande la trouve.
-      const controller = new AbortController();
-      recipeRuns.set(runId, controller);
+      // Une passe est une opération de portée projet, par l'identifiant que le renderer a choisi
+      // avec la demande : fermer sa fenêtre l'annule (D20), et une annulation tardive ne vise
+      // jamais la passe suivante ; ouvrir un autre projet l'annule aussi, au lieu de la laisser
+      // interroger les services du suivant (L03-6). Inscrite avant le premier `await` : une
+      // annulation partie juste après la demande la trouve.
+      let op: CancellableOperation;
       try {
-        return await runRecipe(event, root, rawScope, rawFileName, inputs, runId, controller.signal);
+        op = operations.begin('recipe', { runId });
+      } catch (e) {
+        if (e instanceof OperationBusyError) return errorResponse('recipe runId already running');
+        throw e;
+      }
+      try {
+        return await runRecipe(event, root, rawScope, rawFileName, inputs, runId, op.signal);
       } finally {
-        recipeRuns.delete(runId);
+        op.finish();
       }
     }
   );
@@ -353,7 +359,8 @@ export function setupFusionHandlers(): void {
   ipcMain.handle('fusion:recipes:cancel', (_event, rawRunId: unknown) => {
     if (typeof rawRunId !== 'string') return errorResponse('invalid recipe runId');
     // Rien à attendre : la passe rend la main d'elle-même, et une passe déjà finie n'est plus là.
-    recipeRuns.get(rawRunId)?.abort();
+    // Seulement une recette : un tour de chat ne s'arrête pas par ce canal.
+    if (operations.find(rawRunId)?.kind === 'recipe') operations.cancel(rawRunId, 'user');
     return successResponse({});
   });
 
