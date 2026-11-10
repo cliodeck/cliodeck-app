@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MCPClientManager } from '../manager.js';
 import type {
   MCPClientConfig,
@@ -16,13 +16,26 @@ interface FakeOptions {
     name: string,
     args: Record<string, unknown>
   ) => Promise<{ ok: boolean; result?: unknown; error?: MCPClientError }>;
+  /** Comme le transport stdio du SDK : fermer le handle appelle son onclose, donc onCrash. */
+  closeCrashes?: boolean;
+  /** Un serveur qui ne ferme jamais : close() ne rend pas la main. */
+  closeHangs?: boolean;
 }
 
 function makeFake(opts: FakeOptions = {}): {
   handle: MCPClientHandle;
   triggerCrash: (err: MCPClientError) => void;
+  isClosed: () => boolean;
 } {
   let crashCb: (err: MCPClientError) => void = () => undefined;
+  // Comme `fireCrash` de la vraie fabrique : un handle ne signale sa mort qu'une fois.
+  let crashed = false;
+  const fireCrash = (err: MCPClientError): void => {
+    if (crashed) return;
+    crashed = true;
+    crashCb(err);
+  };
+  let closed = false;
   const handle: MCPClientHandle = {
     async connect() {
       if (opts.connectThrows) throw new Error(opts.connectThrows);
@@ -36,14 +49,32 @@ function makeFake(opts: FakeOptions = {}): {
       return { ok: true, result: { echoed: { name, args } } };
     },
     async close() {
-      // no-op
+      closed = true;
+      if (opts.closeCrashes) {
+        fireCrash({ code: 'transport_closed', message: 'stdio transport closed', at: 'close' });
+      }
+      if (opts.closeHangs) await new Promise<never>(() => undefined);
     },
     onCrash(cb) {
       crashCb = cb;
     },
   };
-  return { handle, triggerCrash: (err) => crashCb(err) };
+  return { handle, triggerCrash: fireCrash, isClosed: () => closed };
 }
+
+/** Fabrique qui garde chaque faux handle créé, pour compter les lancements et les handles ouverts. */
+function recordingFactory(opts: FakeOptions | ((call: number) => FakeOptions) = {}) {
+  const fakes: Array<ReturnType<typeof makeFake>> = [];
+  const factory = (): MCPClientHandle => {
+    const fake = makeFake(typeof opts === 'function' ? opts(fakes.length + 1) : opts);
+    fakes.push(fake);
+    return fake.handle;
+  };
+  const open = (): number => fakes.filter((f) => !f.isClosed()).length;
+  return { factory, fakes, open };
+}
+
+const CRASH: MCPClientError = { code: 'subprocess_exit', message: 'exit 1', at: 't' };
 
 const cfg = (name: string): MCPClientConfig => ({
   name,
@@ -214,47 +245,32 @@ describe('MCPClientManager (4.4)', () => {
     expect(mgr.get('alive')?.state).toBe('stopped');
   });
 
-  it('resets the retry budget on each successful ready transition', async () => {
+  it('après 60 s de stabilité, un nouvel incident a de nouveau sa reprise silencieuse', async () => {
     vi.useFakeTimers();
-    const crashCallbacks: Array<(err: MCPClientError) => void> = [];
-    let factoryCalls = 0;
-
-    const factory = () => {
-      factoryCalls += 1;
-      const fake = makeFake({ tools: [{ name: 't' }] });
-      crashCallbacks.push((err) => fake.triggerCrash(err));
-      return fake.handle;
-    };
-    const mgr = new MCPClientManager({
-      factory,
-      retryDelayMs: 5,
-    });
+    const { factory, fakes } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5 });
     mgr.register(cfg('resilient'));
     await mgr.start('resilient');
-    expect(mgr.get('resilient')?.state).toBe('ready');
-    expect(factoryCalls).toBe(1);
 
-    // First incident: crash → silent retry → ready again.
-    crashCallbacks[0]({
-      code: 'subprocess_exit',
-      message: 'exit 1',
-      at: 't0',
-    });
+    // Premier incident : crash, reprise silencieuse, de nouveau prêt.
+    fakes[0].triggerCrash(CRASH);
     await vi.runAllTimersAsync();
     expect(mgr.get('resilient')?.state).toBe('ready');
-    expect(factoryCalls).toBe(2);
+    expect(fakes).toHaveLength(2);
 
-    // Second independent incident: the earlier successful ready should have
-    // reset the retry budget → we get another silent retry back to ready,
-    // NOT a bounce to 'failed'.
-    crashCallbacks[1]({
-      code: 'subprocess_exit',
-      message: 'exit 2',
-      at: 't1',
-    });
+    // Resté prêt une minute : l'incident suivant est indépendant, il a sa propre reprise.
+    await vi.advanceTimersByTimeAsync(60_000);
+    fakes[1].triggerCrash(CRASH);
     await vi.runAllTimersAsync();
     expect(mgr.get('resilient')?.state).toBe('ready');
-    expect(factoryCalls).toBe(3);
+    expect(fakes).toHaveLength(3);
+
+    // La fenêtre se compte depuis le dernier passage à prêt : un crash aussitôt après est le
+    // même incident, il n'a plus de reprise.
+    fakes[2].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+    expect(mgr.get('resilient')?.state).toBe('failed');
+    expect(fakes).toHaveLength(3);
 
     vi.useRealTimers();
   });
@@ -265,5 +281,198 @@ describe('MCPClientManager (4.4)', () => {
     });
     mgr.register(cfg('dup'));
     expect(() => mgr.register(cfg('dup'))).toThrow(/already registered/);
+  });
+});
+
+/**
+ * Le SDK appelle onclose même pour une fermeture voulue : `stop()` passait par onCrash, qui
+ * programmait la « reprise silencieuse » 500 ms plus tard. Un serveur retiré redevenait prêt,
+ * ses outils repartaient au modèle (S09-1-0) ; « Redémarrer » laissait un second processus, et
+ * un échec de listTools laissait le premier tourner (S09-1-1).
+ */
+describe('MCPClientManager : arrêté veut dire arrêté, un seul handle par client', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stop : la fermeture déclenche le crash, comme le SDK, et le client reste arrêté', async () => {
+    vi.useFakeTimers();
+    const events: MCPClientEvent[] = [];
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }], closeCrashes: true });
+    const mgr = new MCPClientManager({ factory, onEvent: (e) => events.push(e) });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    const before = events.length;
+
+    await mgr.stop('gallica');
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')?.state).toBe('stopped');
+    expect(mgr.listReady()).toEqual([]);
+    expect(fakes).toHaveLength(1);
+    expect(open()).toBe(0);
+    // Une fermeture voulue n'est pas un incident : rien d'autre que le passage à « stopped ».
+    expect(events.slice(before).map((e) => (e.kind === 'state_changed' ? e.to : e.kind))).toEqual(['stopped']);
+  });
+
+  it('stopAll : idem pour chaque client, aucun ne revient', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }], closeCrashes: true });
+    const mgr = new MCPClientManager({ factory });
+    mgr.register(cfg('a'));
+    mgr.register(cfg('b'));
+    await mgr.startAll();
+
+    await mgr.stopAll();
+    await vi.runAllTimersAsync();
+
+    expect(mgr.listAll().map((c) => c.state)).toEqual(['stopped', 'stopped']);
+    expect(fakes).toHaveLength(2);
+    expect(open()).toBe(0);
+  });
+
+  it('« Redémarrer » (stop puis start) : un seul handle ouvert à la fin', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }], closeCrashes: true });
+    const mgr = new MCPClientManager({ factory });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+
+    await mgr.stop('gallica');
+    await mgr.start('gallica');
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')?.state).toBe('ready');
+    expect(fakes).toHaveLength(2);
+    expect(open()).toBe(1);
+  });
+
+  it('listTools refusé (-32601) : échec, et le handle est fermé', async () => {
+    const { factory, fakes, open } = recordingFactory({ listToolsThrows: 'MCP error -32601: Method not found' });
+    const mgr = new MCPClientManager({ factory });
+    mgr.register(cfg('sans-outils'));
+
+    const instance = await mgr.start('sans-outils');
+
+    expect(instance.state).toBe('failed');
+    expect(instance.lastError?.code).toBe('list_tools_error');
+    expect(fakes).toHaveLength(1);
+    expect(open()).toBe(0);
+  });
+
+  it('crash tardif d’un handle remplacé : le handle courant reste ouvert, aucune reprise', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5 });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.stop('gallica');
+    await mgr.start('gallica');
+
+    // L'ancien processus finit de mourir après le redémarrage.
+    fakes[0].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')?.state).toBe('ready');
+    expect(fakes).toHaveLength(2);
+    expect(fakes[1].isClosed()).toBe(false);
+  });
+
+  it('startAll ne relance pas un client déjà prêt', async () => {
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+
+    await mgr.startAll();
+
+    expect(mgr.get('gallica')?.state).toBe('ready');
+    expect(fakes).toHaveLength(1);
+    expect(open()).toBe(1);
+  });
+
+  it('un serveur qui meurt juste après sa poignée de main finit en échec après une seule reprise', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5 });
+    mgr.register(cfg('instable'));
+    await mgr.start('instable');
+
+    fakes[0].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+    expect(mgr.get('instable')?.state).toBe('ready');
+
+    fakes[1].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('instable')?.state).toBe('failed');
+    expect(fakes).toHaveLength(2);
+    expect(open()).toBe(0);
+
+    // État terminal, pas une impasse : « Redémarrer » repart avec un budget neuf.
+    await mgr.stop('instable');
+    expect((await mgr.start('instable')).state).toBe('ready');
+    expect(fakes).toHaveLength(3);
+  });
+
+  it('crash pendant la poignée de main : la reprise prend la main, pas de « ready » entre-temps', async () => {
+    vi.useFakeTimers();
+    const events: MCPClientEvent[] = [];
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({
+      factory: () => {
+        const handle = factory();
+        // Le premier serveur signale une erreur de transport pendant tools/list, puis répond quand même.
+        if (fakes.length === 1) {
+          const [first] = fakes;
+          const listTools = handle.listTools;
+          handle.listTools = async () => {
+            first.triggerCrash(CRASH);
+            return listTools();
+          };
+        }
+        return handle;
+      },
+      retryDelayMs: 5,
+      onEvent: (e) => events.push(e),
+    });
+    mgr.register(cfg('bavard'));
+
+    await mgr.start('bavard');
+    await vi.runAllTimersAsync();
+
+    const states = events.flatMap((e) => (e.kind === 'state_changed' ? [e.to] : []));
+    expect(states).toEqual(['spawning', 'handshaking', 'degraded', 'spawning', 'handshaking', 'ready']);
+    expect(fakes).toHaveLength(2);
+    expect(open()).toBe(1);
+  });
+
+  it('un serveur qui ne ferme pas ne retient ni stop, ni stopAll, ni la reprise', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes } = recordingFactory({ tools: [{ name: 't' }], closeHangs: true });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5, closeTimeoutMs: 1_000 });
+    mgr.register(cfg('a'));
+    mgr.register(cfg('b'));
+    await mgr.startAll();
+
+    // Reprise après crash : l'ancien handle ne ferme pas, le nouveau part quand même.
+    fakes[0].triggerCrash(CRASH);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(mgr.get('a')?.state).toBe('ready');
+    expect(fakes).toHaveLength(3);
+
+    let stopped = false;
+    void mgr.stop('b').then(() => {
+      stopped = true;
+    });
+    let allStopped = false;
+    void mgr.stopAll().then(() => {
+      allStopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    expect(stopped).toBe(true);
+    expect(allStopped).toBe(true);
+    expect(mgr.listAll().map((c) => c.state)).toEqual(['stopped', 'stopped']);
   });
 });
