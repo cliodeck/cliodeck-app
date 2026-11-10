@@ -23,6 +23,7 @@ import { installMain, ipc, main } from '../../../services/__tests__/helpers/real
 import { ProjectPanel } from '../ProjectPanel';
 import { useBibliographyStore } from '../../../stores/bibliographyStore';
 import { useDialogStore } from '../../../stores/dialogStore';
+import { usePrimarySourcesStore, type PrimarySource } from '../../../stores/primarySourcesStore';
 import { useProjectStore } from '../../../stores/projectStore';
 import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
@@ -77,6 +78,15 @@ const dialogs = () => useDialogStore.getState();
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 const brainDb = (dir: string) => path.join(dir, '.cliodeck', 'brain.db');
 const revealConfig = (dir: string) => path.join(dir, 'reveal-config.json');
+const primarySource = (n: number): PrimarySource => ({
+  id: `source-${n}`,
+  tropyId: n,
+  title: `Lettre ${n}`,
+  tags: [],
+  photoCount: 1,
+  lastModified: '2026-11-01T00:00:00.000Z',
+  indexedAt: '2026-11-01T00:00:00.000Z',
+});
 
 function served(): MainStats {
   const current = main.projectPath ? stats.get(main.projectPath) : undefined;
@@ -201,6 +211,7 @@ afterEach(() => {
   while (dialogs().alertOpen) dialogs().closeAlert();
   useProjectStore.setState({ currentProject: null });
   useBibliographyStore.setState({ indexedFilePaths: new Set() });
+  usePrimarySourcesStore.getState().reset();
   main.projectPath = null;
   vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
@@ -321,6 +332,25 @@ describe('section « Actions » : les statistiques du projet ouvert (S17-1-8)', 
 
     await waitFor(() => expect(actionsShown().documents).toBe(2));
     expect(screen.getByRole('button', { name: 'actions.purgeDatabase.button' })).not.toBeDisabled();
+  });
+
+  it('des sources primaires synchronisées dans le projet ouvert : le compte suit, et la purge devient possible', async () => {
+    stats.set(dirB, { pdf: { totalDocuments: 0, totalChunks: 0 }, tropy: { sourceCount: 0, chunkCount: 0 } });
+    show(dirB, 'article');
+    await renderPanel();
+    await openActions();
+    await waitFor(() => expect(actionsShown().paths).toEqual([brainDb(dirB), brainDb(dirB)]));
+    expect(actionsShown().sources).toBe(0);
+    expect(screen.getByRole('button', { name: 'Purge Primary Sources' })).toBeDisabled();
+
+    // La synchronisation Tropy remplit le store des sources primaires ; le main les a déjà.
+    stats.set(dirB, { pdf: { totalDocuments: 0, totalChunks: 0 }, tropy: { sourceCount: 2, chunkCount: 6 } });
+    await act(async () => {
+      usePrimarySourcesStore.setState({ sources: [primarySource(1), primarySource(2)] });
+    });
+
+    await waitFor(() => expect(actionsShown().sources).toBe(2));
+    expect(screen.getByRole('button', { name: 'Purge Primary Sources' })).not.toBeDisabled();
   });
 });
 
