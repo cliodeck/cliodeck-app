@@ -23,6 +23,7 @@ import {
 } from '../../../../backend/services/BibliographyMetadataService.js';
 import type { Citation } from '../../../../backend/types/citation.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
+import { runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import { logger } from '../../utils/logger.js';
 
 export function setupPDFHandlers() {
@@ -64,12 +65,18 @@ export function setupPDFHandlers() {
 
       const window = BrowserWindow.fromWebContents(event.sender);
 
-      const document = await pdfService.indexPDF(filePath, bibtexKey, (progress) => {
-        // Send progress updates to renderer
-        if (window) {
-          window.webContents.send('pdf:indexing-progress', progress);
-        }
-      }, bibliographyMetadata);
+      // Les journaux du projet de l'indexation, pris avant la longue attente : finie après
+      // l'ouverture d'un autre projet, elle ne s'inscrit pas dans les siens (S03-1-20). Le lot
+      // d'embeddings (`runBatch`) hérite de la racine du projet et le journal d'usage l'écarte.
+      const hm = historyService.getHistoryManager();
+      const document = await runWithJournalContext({ workspaceRoot: projectPath }, () =>
+        pdfService.indexPDF(filePath, bibtexKey, (progress) => {
+          // Send progress updates to renderer
+          if (window) {
+            window.webContents.send('pdf:indexing-progress', progress);
+          }
+        }, bibliographyMetadata)
+      );
 
       const durationMs = elapsed();
 
@@ -86,9 +93,10 @@ export function setupPDFHandlers() {
         });
       }
 
-      // Log PDF operation to history
-      const hm = historyService.getHistoryManager();
-      if (hm) {
+      // Log PDF operation to history — celui du projet, fermé peut-être entre-temps.
+      if (hm && !hm.isDatabaseOpen()) {
+        logger.warn('ipc', 'pdf:index:history-closed', { projectPath, filePath });
+      } else if (hm) {
         hm.logPDFOperation({
           operationType: 'import',
           documentId: document.id,
