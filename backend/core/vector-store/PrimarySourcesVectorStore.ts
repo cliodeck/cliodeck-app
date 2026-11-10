@@ -101,6 +101,22 @@ function ocrPendingOf(value: unknown): Pick<PrimarySourceDocument, 'ocrPending' 
 }
 
 /**
+ * Version des extraits d'une source, écrite avec eux (`replaceSourceChunks`,
+ * colonne `chunks_version`). Une source dont les extraits portent une version
+ * inférieure, ou aucune, est « à réindexer » : `tropyService` les refait une
+ * fois, en arrière-plan, à l'ouverture du projet (H7). À incrémenter à chaque
+ * changement de ce que contiennent les extraits : découpage, en-tête, notes
+ * (`indexableText` et `prepareSourceChunks` de `tropy-service`).
+ *
+ *  (aucune) — extraits écrits avant la marque. Leur en-tête est celui du
+ *      premier embarquement : une source renommée dans Tropy avant L06-2 y
+ *      garde son ancien titre ;
+ *  1 — en-tête relu à chaque synchronisation (L06-2), extraits refaits une
+ *      fois (H7).
+ */
+export const TROPY_CHUNKS_VERSION = 1;
+
+/**
  * Ce que `saveSource` enregistre : la source lue dans Tropy, plus la longueur
  * de sa plus longue note, que le rapport de la source relit (G1).
  */
@@ -542,6 +558,21 @@ export class PrimarySourcesVectorStore {
       }
     } catch (err) {
       console.warn('⚠️ longest_note_length migration check failed:', err);
+    }
+
+    // Soft migration: add chunks_version column (`TROPY_CHUNKS_VERSION`, H7).
+    // NULL sur les lignes existantes : leurs extraits sont d'avant la marque,
+    // et la réindexation complète qui suit l'ouverture du projet les refait.
+    try {
+      const cols = this.db
+        .prepare("PRAGMA table_info('tropy_sources')")
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'chunks_version')) {
+        this.db.exec('ALTER TABLE tropy_sources ADD COLUMN chunks_version INTEGER');
+        console.log('🗄️ Migrated tropy_sources: added chunks_version column');
+      }
+    } catch (err) {
+      console.warn('⚠️ chunks_version migration check failed:', err);
     }
 
     // Table des photos associées aux sources
@@ -1153,6 +1184,11 @@ export class PrimarySourcesVectorStore {
    * reprend que les sources sans extrait, ne complétait jamais le trou
    * (S08-1-30). `items` vide retire les extraits.
    *
+   * La version des extraits (`TROPY_CHUNKS_VERSION`) s'écrit dans la même
+   * transaction : la marque « à réindexer » d'une source ne tombe qu'avec
+   * l'écriture de ses nouveaux extraits, et une passe interrompue laisse les
+   * autres marquées (H7).
+   *
    * INSERT simple, jamais `INSERT OR REPLACE` : les ids sont neufs, et un
    * conflit avec l'extrait d'une autre source doit échouer, pas le lui voler.
    * HNSW et BM25 ne sont alimentés qu'après la validation : une annulation ne
@@ -1177,6 +1213,7 @@ export class PrimarySourcesVectorStore {
         )
       );
       this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
+      this.markChunksCurrent(sourceId);
       for (const { chunk, embedding } of items) {
         insert.run(
           chunk.id,
@@ -1214,6 +1251,52 @@ export class PrimarySourcesVectorStore {
     for (const [docIndex, chunk] of this.bm25ChunkMap) {
       if (chunkIds.has(chunk.id)) this.bm25ChunkMap.delete(docIndex);
     }
+  }
+
+  /**
+   * Les sources dont les extraits sont d'une version antérieure à
+   * `TROPY_CHUNKS_VERSION`, avec leur nombre d'extraits, dans l'ordre des
+   * titres : ce que la réindexation complète doit refaire (H7). Une source
+   * sans extrait n'y est pas : la synchro l'embarque, à la version courante.
+   */
+  listOutdatedChunkSources(): Array<{ id: string; chunks: number }> {
+    return this.db
+      .prepare(
+        `SELECT s.id AS id, COUNT(c.id) AS chunks
+         FROM tropy_sources s JOIN tropy_chunks c ON c.source_id = s.id
+         WHERE s.chunks_version IS NULL OR s.chunks_version < ?
+         GROUP BY s.id
+         ORDER BY s.title, s.id`
+      )
+      .all(TROPY_CHUNKS_VERSION) as Array<{ id: string; chunks: number }>;
+  }
+
+  /**
+   * Vrai si la source a des extraits d'une version antérieure : elle reste à
+   * réindexer. Une autre écriture (synchro, transcription) a pu les refaire ou
+   * les retirer depuis que la passe a dressé sa liste.
+   */
+  hasOutdatedChunks(sourceId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM tropy_sources s
+         WHERE s.id = ? AND (s.chunks_version IS NULL OR s.chunks_version < ?)
+           AND EXISTS (SELECT 1 FROM tropy_chunks c WHERE c.source_id = s.id)`
+      )
+      .get(sourceId, TROPY_CHUNKS_VERSION);
+    return row !== undefined;
+  }
+
+  /**
+   * Les extraits de la source sont de la version courante. `replaceSourceChunks`
+   * l'écrit avec eux ; la réindexation complète, seule, pour une source qui n'a
+   * rien à embarquer (pas de transcription) : ses extraits sont gardés tels
+   * quels, et elle n'est plus à réindexer.
+   */
+  markChunksCurrent(sourceId: string): void {
+    this.db
+      .prepare('UPDATE tropy_sources SET chunks_version = ? WHERE id = ?')
+      .run(TROPY_CHUNKS_VERSION, sourceId);
   }
 
   /**
