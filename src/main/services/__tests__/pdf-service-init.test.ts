@@ -383,6 +383,62 @@ describe('la reconstruction programmée et la fermeture', () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * La même, alors que B vient de demander sa propre reconstruction. Programmée, la demande de A
+   * remplaçait le minuteur de B (`clearTimeout`) puis ne partait pas (son magasin n'est plus
+   * installé) : la reconstruction de B était perdue en silence.
+   */
+  it('une indexation de A qui finit après le délai ne remplace pas la reconstruction demandée par B', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await closing;
+      await pdfService.init('/projet-b');
+      // B supprime un document, puis l'indexation de A finit.
+      await pdfService.deleteDocument('doc-b');
+      held.finish();
+      await indexing;
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(callsOn(storeA)).toBe(1);
+      // Celle que l'ouverture lance d'elle-même, puis celle de la suppression dans B.
+      expect(callsOn(storeB)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Le cas où elle doit partir. Les gardes ci-dessus l'empêchent pour un magasin rendu ; dans un même
+   * projet, une suppression ou une indexation la déclenche toujours deux secondes plus tard, sinon les
+   * vecteurs des documents retirés restent dans HNSW.
+   */
+  it('dans un même projet, une suppression puis une indexation la déclenchent chacune', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const [storeA] = state.stores;
+      await vi.advanceTimersByTimeAsync(0);
+      // Celle que l'ouverture lance d'elle-même.
+      expect(callsOn(storeA)).toBe(1);
+
+      await pdfService.deleteDocument('doc');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callsOn(storeA)).toBe(2);
+
+      await pdfService.indexPDF('/projet-a/a.pdf');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callsOn(storeA)).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**
