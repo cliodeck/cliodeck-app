@@ -2,56 +2,86 @@ import React, { useState, useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollapsibleSection } from '../common/CollapsibleSection';
+import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import './ConfigPanel.css';
 
+interface PdfStats {
+  totalDocuments: number;
+  totalChunks: number;
+  databasePath: string;
+}
+
+interface PrimaryStats {
+  sourceCount: number;
+  chunkCount: number;
+  databasePath: string;
+}
+
 export const ActionsSection: React.FC = () => {
   const { t } = useTranslation('common');
-  const [stats, setStats] = useState({ totalDocuments: 0, totalChunks: 0, databasePath: '' });
-  const [primaryStats, setPrimaryStats] = useState({ sourceCount: 0, chunkCount: 0, databasePath: '' });
+  const [stats, setStats] = useState<PdfStats>({ totalDocuments: 0, totalChunks: 0, databasePath: '' });
+  const [primaryStats, setPrimaryStats] = useState<PrimaryStats>({ sourceCount: 0, chunkCount: 0, databasePath: '' });
   const [isPurging, setIsPurging] = useState(false);
   const [isPurgingPrimary, setIsPurgingPrimary] = useState(false);
+  // Pas seulement au montage (S17-1-8) : relues quand des PDF s'indexent, ou que les sources
+  // primaires changent. Un autre projet remonte la section (clé posée par ProjectPanel).
+  const indexedPdfCount = useBibliographyStore((s) => s.indexedFilePaths.size);
+  const primarySourceCount = usePrimarySourcesStore((s) => s.sources.length);
 
   useEffect(() => {
     loadStats();
-    loadPrimaryStats();
-  }, []);
+  }, [indexedPdfCount]);
 
-  const loadStats = async () => {
+  useEffect(() => {
+    loadPrimaryStats();
+  }, [primarySourceCount]);
+
+  /** Rend ce que le main a répondu, aussi affiché ; null s'il n'a rien pu dire. */
+  const loadStats = async (): Promise<PdfStats | null> => {
     try {
       const result = await window.electron.pdf.getStatistics();
       if (result.success && result.statistics) {
-        setStats({
+        const read: PdfStats = {
           totalDocuments: result.statistics.totalDocuments || 0,
           totalChunks: result.statistics.totalChunks || 0,
           databasePath: result.statistics.databasePath || '',
-        });
+        };
+        setStats(read);
+        return read;
       }
     } catch (error) {
       console.error('Failed to load stats:', error);
     }
+    return null;
   };
 
-  const loadPrimaryStats = async () => {
+  /** Rend ce que le main a répondu, aussi affiché ; null s'il n'a rien pu dire. */
+  const loadPrimaryStats = async (): Promise<PrimaryStats | null> => {
     try {
       const result = await window.electron.tropy.getStatistics();
       if (result.success && result.statistics) {
-        setPrimaryStats({
+        const read: PrimaryStats = {
           sourceCount: result.statistics.sourceCount || 0,
           chunkCount: result.statistics.chunkCount || 0,
           databasePath: result.databasePath || '',
-        });
+        };
+        setPrimaryStats(read);
+        return read;
       }
     } catch (error) {
       console.error('Failed to load primary sources stats:', error);
     }
+    return null;
   };
 
   const handlePurgeDatabase = async () => {
+    // Relues juste avant : la confirmation cite ce que la base contient, pas ce qui était affiché.
+    const current = (await loadStats()) ?? stats;
     const confirmMessage = t('actions.purgeDatabase.confirmMessage', {
-      totalDocuments: stats.totalDocuments,
-      totalChunks: stats.totalChunks
+      totalDocuments: current.totalDocuments,
+      totalChunks: current.totalChunks
     });
 
     if (!await useDialogStore.getState().showConfirm(confirmMessage, undefined, { danger: true })) {
@@ -87,9 +117,10 @@ export const ActionsSection: React.FC = () => {
   };
 
   const handlePurgePrimaryDatabase = async () => {
+    const current = (await loadPrimaryStats()) ?? primaryStats;
     const confirmMessage = t('actions.purgePrimaryDatabase.confirmMessage', {
-      sourceCount: primaryStats.sourceCount,
-      chunkCount: primaryStats.chunkCount
+      sourceCount: current.sourceCount,
+      chunkCount: current.chunkCount
     });
 
     if (!await useDialogStore.getState().showConfirm(confirmMessage, undefined, { danger: true })) {
