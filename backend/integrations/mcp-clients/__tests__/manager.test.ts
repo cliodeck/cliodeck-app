@@ -20,6 +20,8 @@ interface FakeOptions {
   closeCrashes?: boolean;
   /** Un serveur qui ne ferme jamais : close() ne rend pas la main. */
   closeHangs?: boolean;
+  /** Un serveur lent à fermer : close() rend la main après ce délai. */
+  closeDelayMs?: number;
 }
 
 function makeFake(opts: FakeOptions = {}): {
@@ -54,6 +56,7 @@ function makeFake(opts: FakeOptions = {}): {
         fireCrash({ code: 'transport_closed', message: 'stdio transport closed', at: 'close' });
       }
       if (opts.closeHangs) await new Promise<never>(() => undefined);
+      if (opts.closeDelayMs) await new Promise((resolve) => setTimeout(resolve, opts.closeDelayMs));
     },
     onCrash(cb) {
       crashCb = cb;
@@ -340,6 +343,31 @@ describe('MCPClientManager : arrêté veut dire arrêté, un seul handle par cli
 
     await mgr.stop('gallica');
     await mgr.start('gallica');
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')?.state).toBe('ready');
+    expect(fakes).toHaveLength(2);
+    expect(open()).toBe(1);
+  });
+
+  it('« Redémarrer » pendant que la reprise ferme l’ancien handle : un seul handle ouvert', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }], closeDelayMs: 300 });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5 });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+
+    // Le serveur plante ; la reprise part et attend la fermeture de l'ancien handle.
+    fakes[0].triggerCrash(CRASH);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(mgr.get('gallica')?.state).toBe('spawning');
+    expect(fakes[0].isClosed()).toBe(true);
+    expect(fakes).toHaveLength(1);
+
+    // L'historien clique sur « Redémarrer » pendant cette attente.
+    await mgr.stop('gallica');
+    await mgr.start('gallica');
+    // La reprise, relayée, finit d'attendre la fermeture : elle ne lance pas un second processus.
     await vi.runAllTimersAsync();
 
     expect(mgr.get('gallica')?.state).toBe('ready');

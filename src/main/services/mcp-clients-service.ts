@@ -301,8 +301,13 @@ class MCPClientsService {
       migrateClientEnvSecrets(client);
       cfg.mcpClients = [...existing, client];
     });
-    // Ouvert pendant l'écriture : rien ne démarre dans un manager abandonné.
-    if (this.manager !== manager) throw projectChanged();
+    // Écrit : l'ajout est fait, dans le config.json de CE projet. Si un autre projet s'est ouvert
+    // pendant l'écriture, pas de refus (il dirait que rien n'a été écrit), mais rien n'est inscrit
+    // ni démarré dans le manager abandonné : le serveur démarrera avec les autres serveurs déclarés,
+    // au prochain chargement de ce projet.
+    if (this.manager !== manager) {
+      return { name: client.name, state: 'unconfigured', tools: [], generation: 0 };
+    }
     manager.register(toManagerConfig(client));
     return manager.start(client.name);
   }

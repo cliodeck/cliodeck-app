@@ -347,6 +347,39 @@ describe('un autre projet ouvert pendant une opération MCP (S09-1-19)', () => {
     expect(readFileSync(configA, 'utf8')).toBe(beforeA);
   });
 
+  it('addClient : B ouvert une fois l’ajout écrit dans A — pas de refus, rien de démarré', async () => {
+    const beforeB = readFileSync(configB, 'utf8');
+    const events: MCPClientEvent[] = [];
+    const unsubscribe = mcpClientsService.subscribe((e) => events.push(e));
+    // Le mutateur lit `env` (migration des secrets) après sa garde : B s'ouvre là, juste avant
+    // l'écriture du config.json de A. Non énumérable, la propriété n'est pas écrite.
+    let loadingB: Promise<void> | null = null;
+    const client = { ...CLIENT };
+    Object.defineProperty(client, 'env', {
+      enumerable: false,
+      get() {
+        loadingB ??= mcpClientsService.loadProject(rootB);
+        return undefined;
+      },
+    });
+
+    try {
+      const instance = await mcpClientsService.addClient(client);
+      await loadingB;
+
+      // Le serveur EST inscrit dans A : dire « rien n'y a été écrit » serait faux.
+      expect(loadingB).not.toBeNull();
+      expect(instance).toMatchObject({ name: 'fantome', state: 'unconfigured' });
+      expect(JSON.parse(readFileSync(configA, 'utf8')).mcpClients).toContainEqual(CLIENT);
+      // Rien n'est démarré, ni dans le manager abandonné ni dans celui de B.
+      expect(events.filter((e) => e.name === 'fantome')).toEqual([]);
+      expect(mcpClientsService.list()).toEqual([]);
+      expect(readFileSync(configB, 'utf8')).toBe(beforeB);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('removeClient : refusé (project-changed), le serveur reste dans le config.json de A', async () => {
     const beforeA = readFileSync(configA, 'utf8');
 
