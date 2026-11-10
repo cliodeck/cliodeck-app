@@ -3,12 +3,13 @@
  * projet, jusqu'à son dernier appel (S10-1-33, L03-6, revue).
  *
  * Le décorateur des fournisseurs lit la racine au début de chaque appel. Sans contexte posé par
- * l'opération, c'est celle du journal ouvert à cet instant. Or l'indexation du manuscrit (un
- * chapitre après l'autre) et celle des notes de lecture (une note après l'autre) ne s'arrêtent pas
- * à l'ouverture d'un autre projet : leurs appels lancés après `init(B)` prenaient la racine de B,
- * et leurs événements `embedding` entraient dans le `journal.db` de B, qui se publie seul
- * (ADR 0007). Le cas est courant : une montée de `CHUNKER_VERSION` réembarque tout le livre à la
- * première sauvegarde, et les notes s'indexent en fond à l'ouverture du projet.
+ * l'opération, c'est celle du journal ouvert à cet instant. Or l'indexation du manuscrit et celle
+ * des notes de lecture embarquent un chapitre ou une note en plusieurs lots de 16 extraits : les
+ * lots lancés après `init(B)` prenaient la racine de B, et leurs événements `embedding` entraient
+ * dans le `journal.db` de B, qui se publie seul (ADR 0007). Le cas est courant : une montée de
+ * `CHUNKER_VERSION` réembarque tout le livre à la première sauvegarde, et les notes s'indexent en
+ * fond à l'ouverture du projet. Depuis L03-7, la passe s'arrête au premier chapitre ou à la
+ * première note qui finit après la bascule, mais les lots de celui-ci partent encore.
  *
  * Vrais services d'indexation, vrai `brain.db`, vrais `instrumentEmbedding`, `context.ts` et
  * service du journal ; seul le magasin du journal d'usage est remplacé par un faux qui garde les
@@ -95,7 +96,11 @@ function heldEmbedder(): HeldEmbedder {
   };
 }
 
-/** Un livre de deux chapitres : deux appels au fournisseur, un par chapitre. */
+/** Dix-sept sections, dix-sept extraits : deux lots, donc deux appels au fournisseur. */
+const seventeenSections = (subject: string): string =>
+  Array.from({ length: 17 }, (_, i) => `## Section ${i + 1}\n\n${subject}, paragraphe ${i + 1}.\n`).join('\n');
+
+/** Un livre de deux chapitres : deux appels pour le premier, un pour le second. */
 function writeBook(root: string): void {
   fs.mkdirSync(path.join(root, 'chapters'), { recursive: true });
   fs.writeFileSync(
@@ -113,17 +118,17 @@ function writeBook(root: string): void {
       ],
     })
   );
-  fs.writeFileSync(path.join(root, 'chapters', '01.md'), '# Un\n\nLe port de Danzig est disputé depuis 1919.\n');
+  fs.writeFileSync(path.join(root, 'chapters', '01.md'), `# Un\n\n${seventeenSections('Le port de Danzig est disputé depuis 1919')}`);
   fs.writeFileSync(path.join(root, 'chapters', '02.md'), '# Deux\n\nLes élections de 1932 marquent une rupture.\n');
 }
 
-/** Deux notes de lecture : deux appels au fournisseur, un par note. */
+/** Deux notes de lecture : deux appels pour la première, un pour la seconde. */
 function writeReadingNotes(root: string): void {
   const dir = path.join(root, 'reading-notes');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'a.md'),
-    '---\ncitekey: Braudel_1949\ntitle: La Méditerranée\n---\n\nUne note sur la Méditerranée.\n'
+    `---\ncitekey: Braudel_1949\ntitle: La Méditerranée\n---\n\n${seventeenSections('Une note sur la Méditerranée')}`
   );
   fs.writeFileSync(
     path.join(dir, 'b.md'),
@@ -168,7 +173,7 @@ function readingNotesService(): ReadingNotesIndexService {
 }
 
 describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation du manuscrit reste dans son projet (S10-1-33)', () => {
-  it('le chapitre embarqué après l’ouverture de B n’entre pas dans le journal de B', async () => {
+  it('le lot du chapitre embarqué après l’ouverture de B n’entre pas dans le journal de B', async () => {
     writeBook(A);
     const { embedder, entered, release, calls } = heldEmbedder();
     usageJournalService.init(A);
@@ -177,7 +182,7 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation du manuscr
     await entered;
 
     // Ouverture de B, comme `project:load` : journal de A fermé, celui de B ouvert, service
-    // reconfiguré. La passe de A continue avec son second chapitre.
+    // reconfiguré. La passe de A finit son premier chapitre, puis s'arrête (L03-7).
     usageJournalService.close();
     usageJournalService.init(B);
     manuscriptIndexService.configure(B);
@@ -185,14 +190,14 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation du manuscr
     const report = await pending;
     usageJournalService.close();
 
-    // Les deux chapitres sont bien passés par le fournisseur : le second après `init(B)`.
-    expect(report.indexed).toBe(2);
+    // Le second lot du premier chapitre est bien passé par le fournisseur, après `init(B)`.
+    expect(report.abandoned).toBe('project-changed');
     expect(calls()).toBe(2);
     expect(eventsOf(B)).toEqual([]);
     expect(warnings()).toContain(A);
   });
 
-  it('témoin : sans bascule, les deux appels entrent dans le journal de A, sous sa racine', async () => {
+  it('témoin : sans bascule, les trois appels entrent dans le journal de A, sous sa racine', async () => {
     writeBook(A);
     const { embedder, release } = heldEmbedder();
     release();
@@ -205,12 +210,13 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation du manuscr
     expect(eventsOf(A).map((e) => [e.kind, e.workspace])).toEqual([
       ['embedding', A],
       ['embedding', A],
+      ['embedding', A],
     ]);
   });
 });
 
 describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation des notes de lecture reste dans son projet (S10-1-33)', () => {
-  it('la note embarquée après l’ouverture de B n’entre pas dans le journal de B', async () => {
+  it('le lot de la note embarqué après l’ouverture de B n’entre pas dans le journal de B', async () => {
     writeReadingNotes(A);
     const svc = readingNotesService();
     const { embedder, entered, release, calls } = heldEmbedder();
@@ -226,13 +232,14 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation des notes 
     const report = await pending;
     usageJournalService.close();
 
-    expect(report.indexed).toBe(2);
+    // Le second lot de la première note est passé après `init(B)` ; la passe s'arrête ensuite.
+    expect(report.abandoned).toBe('project-changed');
     expect(calls()).toBe(2);
     expect(eventsOf(B)).toEqual([]);
     expect(warnings()).toContain(A);
   });
 
-  it('« Tout réindexer » : la note embarquée après l’ouverture de B n’entre pas dans le journal de B', async () => {
+  it('« Tout réindexer » : le lot de la note embarqué après l’ouverture de B n’entre pas dans le journal de B', async () => {
     writeReadingNotes(A);
     const svc = readingNotesService();
     const { embedder, entered, release, calls } = heldEmbedder();
@@ -245,15 +252,16 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation des notes 
     usageJournalService.init(B);
     svc.configure(B);
     release();
-    await pending;
+    const report = await pending;
     usageJournalService.close();
 
+    expect(report.abandoned).toBe('project-changed');
     expect(calls()).toBe(2);
     expect(eventsOf(B)).toEqual([]);
     expect(warnings()).toContain(A);
   });
 
-  it('témoin : sans bascule, les deux appels entrent dans le journal de A, sous sa racine', async () => {
+  it('témoin : sans bascule, les trois appels entrent dans le journal de A, sous sa racine', async () => {
     writeReadingNotes(A);
     const svc = readingNotesService();
     const { embedder, release } = heldEmbedder();
@@ -265,6 +273,7 @@ describe.skipIf(!sqliteAvailable)('journal d’usage : l’indexation des notes 
 
     expect(report.indexed).toBe(2);
     expect(eventsOf(A).map((e) => [e.kind, e.workspace])).toEqual([
+      ['embedding', A],
       ['embedding', A],
       ['embedding', A],
     ]);

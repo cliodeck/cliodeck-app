@@ -770,8 +770,19 @@ class PDFService {
    */
   async analyzeTopics(options?: AnalyzeTopicsOptions): Promise<TopicAnalysisResult> {
     this.ensureStore();
+    // Le magasin du projet où l'analyse a commencé (S03-1-21). Le calcul dure des minutes, et
+    // `this.vectorStore` relu à la fin était celui du projet ouvert entre-temps : l'analyse de A y
+    // remplaçait celle de B. Après chaque attente, un autre magasin installé (bascule, fermeture)
+    // arrête l'analyse sans rien lire ni écrire de plus ; celui d'avant est peut-être déjà fermé.
+    // Comparé par identité : revenir à A après B ouvre un autre magasin, et l'abandonne aussi. Le
+    // dossier ouvert rechoisi garde le sien (seul le manifeste se relit) : l'analyse va au bout.
+    const store = this.vectorStore!;
+    const assertSameStore = (): void => {
+      if (this.vectorStore !== store) throw new ProjectChangedError();
+    };
 
-    const documents = await this.vectorStore!.getAllDocuments();
+    const documents = await store.getAllDocuments();
+    assertSameStore();
 
     if (documents.length < 5) {
       throw new Error('Topic modeling requires at least 5 documents');
@@ -795,7 +806,7 @@ class PDFService {
       if (doc.summaryEmbedding) {
         embedding = doc.summaryEmbedding;
       } else {
-        const chunks = this.vectorStore!.getChunksForDocument(doc.id);
+        const chunks = store.getChunksForDocument(doc.id);
         if (chunks.length > 0 && chunks[0].embedding) {
           embedding = chunks[0].embedding;
         }
@@ -854,6 +865,7 @@ class PDFService {
 
     // Utiliser le singleton du service Topic Modeling (importé depuis topic-modeling-service)
     const { topicModelingService } = await import('./topic-modeling-service.js');
+    assertSameStore();
 
     // Démarrer le service s'il n'est pas déjà en cours d'exécution
     // Le service reste en mémoire entre les analyses pour de meilleures performances
@@ -868,6 +880,7 @@ class PDFService {
     } else {
       console.log('✅ Topic modeling service already running (using cached instance)');
     }
+    assertSameStore();
 
     // Paramètres par défaut optimisés pour de meilleurs résultats
     // Heuristique intelligente pour le nombre de topics basée sur la taille du corpus:
@@ -919,9 +932,10 @@ class PDFService {
       documentIds,
       analysisOptions
     );
+    assertSameStore();
 
     // Sauvegarder les résultats dans la base de données
-    this.vectorStore!.saveTopicAnalysis(result, analysisOptions);
+    store.saveTopicAnalysis(result, analysisOptions);
     console.log('✅ Topic analysis saved to database');
 
     // NOTE: Le service reste en cours d'exécution pour de futures analyses
@@ -930,7 +944,7 @@ class PDFService {
     // L'analyse enregistrée, pas le résultat brut : un document retiré pendant le calcul en est
     // écarté, ses thèmes recomptés. Renvoyer le brut montrait d'autres cartes et d'autres exports
     // que la frise (relue dans brain.db) et que la réouverture du projet.
-    const saved: TopicAnalysisResult | null = this.vectorStore!.loadLatestTopicAnalysis();
+    const saved: TopicAnalysisResult | null = store.loadLatestTopicAnalysis();
     return saved ?? result;
   }
 

@@ -428,6 +428,164 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
   });
 
   /**
+   * S02-1-13 : la passe prenait son store après `listPieces`, par `getStore()`, qui relit le projet
+   * courant. Un autre projet ouvert pendant cette lecture recevait le texte du premier, et la purge
+   * finale y retirait ce que le premier n'avait pas. La passe prend désormais le store de son
+   * projet avant toute attente, et s'arrête dès que le projet a changé, sans écrire ni purger.
+   */
+  describe('un autre projet ouvert pendant la passe', () => {
+    let other = '';
+
+    beforeEach(() => {
+      other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-mindex-b-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(other, { recursive: true, force: true });
+      other = '';
+    });
+
+    /** Ce qu'une autre connexion lit dans le brain.db d'un projet : ce que la recherche y verra. */
+    function indexOf(root: string): { chapters: string[]; hits: (word: string) => number } {
+      const store = new ManuscriptStore({ dbPath: path.join(root, '.cliodeck', 'brain.db') });
+      try {
+        const chapters = store.listChapters().map((c) => c.relativePath).sort();
+        const texts = new Map<string, number>();
+        for (const word of ['Dantzig', 'Gdynia', 'Sopot', 'Lyon', 'revu']) {
+          texts.set(word, store.searchLexical(word, 10).length);
+        }
+        return { chapters, hits: (word) => texts.get(word) ?? 0 };
+      } finally {
+        store.close();
+      }
+    }
+
+    const BOOK_A = [
+      { file: '01.md', title: 'Dantzig', body: '# Dantzig\n\nTexte du projet A sur Dantzig.\n' },
+      { file: '02.md', title: 'Gdynia', body: '# Gdynia\n\nTexte du projet A sur Gdynia.\n' },
+      { file: '03.md', title: 'Sopot', body: '# Sopot\n\nTexte du projet A sur Sopot.\n' },
+    ];
+    const BOOK_B = [{ file: '01.md', title: 'Lyon', body: '# Lyon\n\nTexte du projet B sur Lyon.\n' }];
+    const ALL_A = ['chapters/01.md', 'chapters/02.md', 'chapters/03.md'];
+
+    async function indexed(root: string, chapters: typeof BOOK_A): Promise<void> {
+      writeProject(root, chapters);
+      manuscriptIndexService.configure(root);
+      await manuscriptIndexService.index(fakeEmbedder());
+    }
+
+    it('B ouvert pendant la lecture du manifeste de A : rien de A n’entre dans B, rien de B n’en sort', async () => {
+      await indexed(other, BOOK_B);
+      writeProject(tmp, BOOK_A);
+      manuscriptIndexService.configure(tmp);
+      const embedder = fakeEmbedder();
+
+      const pass = manuscriptIndexService.index(embedder);
+      manuscriptIndexService.configure(other); // pendant `listPieces`
+      const report = await pass;
+
+      const b = indexOf(other);
+      expect(b.hits('Dantzig')).toBe(0);
+      expect(b.hits('Lyon')).toBe(1);
+      expect(b.chapters).toEqual(['chapters/01.md']);
+      expect(report.abandoned).toBe('project-changed');
+      expect(embedder.calls).toBe(0);
+      expect(indexOf(tmp).chapters).toEqual([]);
+      // La passe de A n'a pas ouvert la base de B : le service n'en tient aucune.
+      expect(manuscriptIndexService.stats()).toBeNull();
+    });
+
+    it('B ouvert pendant la boucle de A : la passe s’arrête, et sa purge n’a pas lieu', async () => {
+      await indexed(tmp, BOOK_A);
+      writeProject(other, BOOK_B);
+      // Le premier chapitre de A change : la passe s'arrête à son embedding.
+      fs.writeFileSync(path.join(tmp, 'chapters', '01.md'), '# Dantzig\n\nTexte du projet A sur Dantzig, revu.\n');
+      const embedder = heldEmbedder();
+
+      const pass = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.configure(other);
+      embedder.release();
+      const report = await pass;
+
+      // Aucun chapitre de A retiré : la purge d'une passe interrompue n'a vu qu'une partie du livre.
+      expect(indexOf(tmp).chapters).toEqual(ALL_A);
+      // Et rien de plus ne s'écrit après la bascule : le chapitre revu le sera à la passe suivante de A.
+      expect(indexOf(tmp).hits('revu')).toBe(0);
+      expect(report.abandoned).toBe('project-changed');
+      expect(fs.existsSync(path.join(other, '.cliodeck', 'brain.db'))).toBe(false);
+    });
+
+    it('A → B → A pendant la boucle : rien dans B, aucun chapitre de A purgé, la passe de la première ouverture s’arrête', async () => {
+      await indexed(other, BOOK_B);
+      await indexed(tmp, BOOK_A);
+      fs.writeFileSync(path.join(tmp, 'chapters', '01.md'), '# Dantzig\n\nTexte du projet A sur Dantzig, revu.\n');
+      const embedder = heldEmbedder();
+
+      const pass = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.configure(other);
+      manuscriptIndexService.configure(tmp);
+      embedder.release();
+      const report = await pass;
+
+      const b = indexOf(other);
+      expect(b.hits('Dantzig')).toBe(0);
+      expect(b.chapters).toEqual(['chapters/01.md']);
+      expect(b.hits('Lyon')).toBe(1);
+      expect(indexOf(tmp).chapters).toEqual(ALL_A);
+      expect(report.abandoned).toBe('project-changed');
+
+      // La passe suivante de A, elle, embarque le chapitre revu.
+      expect(await manuscriptIndexService.index(fakeEmbedder())).toMatchObject({ indexed: 1, unchanged: 2, removed: 0 });
+      expect(indexOf(tmp).hits('revu')).toBe(1);
+    });
+
+    it('A → B → A pendant la lecture du manifeste : rien n’est écrit, ni dans A ni dans B', async () => {
+      await indexed(other, BOOK_B);
+      await indexed(tmp, BOOK_A);
+      fs.writeFileSync(path.join(tmp, 'chapters', '01.md'), '# Dantzig\n\nTexte du projet A sur Dantzig, revu.\n');
+      const embedder = fakeEmbedder();
+
+      const pass = manuscriptIndexService.index(embedder);
+      manuscriptIndexService.configure(other);
+      manuscriptIndexService.configure(tmp);
+      const report = await pass;
+
+      expect(report.abandoned).toBe('project-changed');
+      expect(embedder.calls).toBe(0);
+      expect(indexOf(tmp).chapters).toEqual(ALL_A);
+      expect(indexOf(tmp).hits('revu')).toBe(0);
+      expect(indexOf(other).chapters).toEqual(['chapters/01.md']);
+    });
+
+    it('la section des réglages de B ne montre pas le compte rendu de la passe de A', async () => {
+      writeProject(tmp, BOOK_A);
+      writeProject(other, BOOK_B);
+      manuscriptIndexService.configure(tmp);
+      const inA = heldEmbedder();
+      const passA = manuscriptIndexService.index(inA);
+      await inA.entered;
+      manuscriptIndexService.configure(other);
+      // Un enregistrement dans B pendant la passe de A : la passe de B la suit.
+      const inB = heldEmbedder();
+      const passB = manuscriptIndexService.index(inB);
+      inA.release();
+      await inB.entered;
+
+      // La passe de A est finie, celle de B en cours : ce que lit la section des réglages de B.
+      const duringB = manuscriptIndexService.stats()?.lastReport;
+      inB.release();
+      await Promise.all([passA, passB]);
+
+      expect(duringB).toBeNull();
+      const last = manuscriptIndexService.stats()?.lastReport;
+      expect(last).toMatchObject({ indexed: 1, removed: 0, failures: [] });
+      expect(last?.abandoned).toBeUndefined();
+    });
+  });
+
+  /**
    * Décision Q16 : un chapitre lié hors du projet n'est ni lu ni indexé. Et s'il l'a été
    * avant, ses extraits sortent de `brain.db` à la passe suivante : sinon il continue
    * d'alimenter les prompts, et rien n'est gagné.
