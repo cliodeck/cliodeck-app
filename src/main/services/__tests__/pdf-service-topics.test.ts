@@ -15,15 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import Database from 'better-sqlite3';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { VectorStore } from '../../../../backend/core/vector-store/VectorStore.js';
+import { ProjectChangedError } from '../../../../backend/types/project-handle.js';
 import type { PDFDocument } from '../../../../backend/types/pdf-document.js';
 import type { TopicAnalysisResult } from '../../../../backend/core/analysis/TopicModelingService.js';
 
 const state = vi.hoisted(() => ({
   store: null as VectorStore | null,
   /** Ce que fait le calcul pendant qu'il tourne, avant de rendre son résultat. */
-  duringAnalysis: (() => undefined) as () => void,
+  duringAnalysis: (() => undefined) as () => void | Promise<void>,
   result: null as TopicAnalysisResult | null,
 }));
 
@@ -62,7 +64,7 @@ vi.mock('../topic-modeling-service.js', () => ({
     getStatus: () => ({ isRunning: true, isStarting: false }),
     start: vi.fn(),
     analyzeTopics: async () => {
-      state.duringAnalysis();
+      await state.duringAnalysis();
       return structuredClone(state.result);
     },
   },
@@ -158,5 +160,100 @@ describe.skipIf(!sqliteAvailable)('pdfService.analyzeTopics : ce que reçoit l�
         .sort((x, y) => x.id - y.id)
         .map((t) => ({ ...t, documents: [...t.documents].sort() }));
     expect(byId(shown.topics)).toEqual(byId(computed.topics));
+  });
+
+  /*
+   * S03-1-21 : le calcul dure des minutes, et l'analyse s'enregistrait dans `this.vectorStore` relu à
+   * la fin, celui du projet ouvert entre-temps. Depuis L02-10, un résultat dont aucun document n'est
+   * dans B lève avant d'écrire ; mais B copié de A (mêmes id de documents) recevait l'analyse de A,
+   * qui y remplaçait la sienne.
+   */
+  describe('un autre projet ouvert pendant le calcul', () => {
+    let dirB: string;
+    let storeB: VectorStore;
+
+    /** Les analyses d'un brain.db, lues par une autre connexion : ce que l'Explorer relira. */
+    function analysesIn(projectDir: string): Array<{ current: number; labels: string }> {
+      const db = new Database(path.join(projectDir, '.cliodeck', 'brain.db'), { readonly: true });
+      try {
+        return db
+          .prepare(
+            `SELECT a.is_current AS current,
+               (SELECT group_concat(t.label, ' | ') FROM pdf_topics t WHERE t.analysis_id = a.id) AS labels
+             FROM pdf_topic_analyses a ORDER BY a.analysis_date`
+          )
+          .all() as Array<{ current: number; labels: string }>;
+      } finally {
+        db.close();
+      }
+    }
+
+    const analysisOf = (owner: string, ids: string[]): TopicAnalysisResult => ({
+      topics: [{ id: 0, label: `${owner} - avant`, keywords: [owner], documents: ids, size: ids.length }],
+      topicAssignments: Object.fromEntries(ids.map((id) => [id, 0])),
+      outliers: [],
+      statistics: { totalDocuments: ids.length, numTopics: 1, numOutliers: 0, numDocumentsInTopics: ids.length },
+    });
+
+    beforeEach(() => {
+      // A : l'analyse d'avant, courante.
+      state.store!.saveTopicAnalysis(analysisOf('A', ['a', 'b', 'c', 'd', 'e', 'f', 'g']));
+      // B : copié de A (a à e), deux documents à lui, son analyse à lui.
+      dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-service-topics-b-'));
+      storeB = new VectorStore(dirB);
+      ['a', 'b', 'c', 'd', 'e', 'h', 'i'].forEach((id, i) => {
+        storeB.saveDocument(doc(id, String(2000 + i)));
+        storeB.saveChunk(
+          { id: `${id}-0`, documentId: id, content: `texte ${id}`, pageNumber: 1, chunkIndex: 0, startPosition: 0, endPosition: 7 },
+          new Float32Array(8).fill(i + 1)
+        );
+      });
+      storeB.saveTopicAnalysis(analysisOf('B', ['a', 'b', 'c', 'd', 'e', 'h', 'i']));
+    });
+
+    afterEach(() => {
+      fs.rmSync(dirB, { recursive: true, force: true });
+    });
+
+    it('B ouvert pendant le calcul : rien ne s’écrit dans B, son analyse reste courante, et l’analyse lève project-changed', async () => {
+      state.duringAnalysis = async () => {
+        state.store = storeB;
+        await pdfService.init(dirB);
+      };
+
+      const failure = await pdfService.analyzeTopics().catch((e: unknown) => e);
+
+      expect(analysesIn(dirB)).toEqual([{ current: 1, labels: 'B - avant' }]);
+      expect(pdfService.loadTopicAnalysis()?.topics.map((topic: { label: string }) => topic.label)).toEqual(['B - avant']);
+      expect(failure).toBeInstanceOf(ProjectChangedError);
+      // Et A, rouvert, garde son analyse d'avant.
+      expect(analysesIn(dir)).toEqual([{ current: 1, labels: 'A - avant' }]);
+    });
+
+    it('le projet fermé pendant le calcul : project-changed, ni erreur SQLite ni TypeError', async () => {
+      state.duringAnalysis = async () => {
+        await pdfService.close();
+      };
+
+      const failure = await pdfService.analyzeTopics().catch((e: unknown) => e);
+
+      expect(failure).toBeInstanceOf(ProjectChangedError);
+      expect((failure as Error).message).toBe('project-changed');
+      expect(analysesIn(dir)).toEqual([{ current: 1, labels: 'A - avant' }]);
+    });
+
+    it('comportement assumé : A rouvert pendant le calcul (A → B → A) est une autre ouverture, l’analyse est abandonnée', async () => {
+      state.duringAnalysis = async () => {
+        state.store = storeB;
+        await pdfService.init(dirB);
+        state.store = new VectorStore(dir);
+        await pdfService.init(dir);
+      };
+
+      await expect(pdfService.analyzeTopics()).rejects.toBeInstanceOf(ProjectChangedError);
+
+      expect(analysesIn(dir)).toEqual([{ current: 1, labels: 'A - avant' }]);
+      expect(analysesIn(dirB)).toEqual([{ current: 1, labels: 'B - avant' }]);
+    });
   });
 });

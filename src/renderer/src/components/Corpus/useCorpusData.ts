@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { projectLifecycle } from '../../lifecycle/projectLifecycle';
+import { refusedAsProjectChanged } from '../../services/still-in-project';
 import type { GraphData, GraphNode, CorpusStatistics, TopicAnalysisResult } from './corpus-types';
 
 interface Filters {
@@ -142,6 +144,10 @@ export function useCorpusData() {
   };
 
   const loadTopics = async (t: (key: string) => string) => {
+    // Le projet du clic. Le calcul dure des minutes : ni son résultat ni son échec ne s'affichent
+    // dans un projet ouvert entre-temps (S03-1-21), où le main l'a de toute façon refusé
+    // (`project-changed`). Remonter l'Explorer par projet ne suffit pas : l'alerte est globale.
+    const shown = projectLifecycle.capture();
     setLoadingTopics(true);
     try {
       const result = await window.electron.corpus.analyzeTopics({
@@ -150,6 +156,7 @@ export function useCorpusData() {
         nGramRange: [1, 3],
         nrTopics: numTopics,
       });
+      if (refusedAsProjectChanged(result) || !shown?.isCurrent()) return;
 
       if (result.success) {
         setTopicAnalysis(result);
@@ -170,6 +177,7 @@ export function useCorpusData() {
         }
       }
     } catch (err: unknown) {
+      if (!shown?.isCurrent()) return;
       const errorMsg = err instanceof Error ? err.message : '';
       if (errorMsg.includes('not available') || errorMsg.includes('not start') || errorMsg.includes('timeout')) {
         await useDialogStore.getState().showAlert(t('corpus.topicServiceUnavailable'));
