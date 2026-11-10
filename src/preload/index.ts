@@ -291,6 +291,8 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:open', reference) as Promise<{
           success: boolean;
           file?: string;
+          /** Le dossier du projet a disparu : rien n'a été écrit. */
+          code?: 'project_root_missing';
           error?: string;
         }>,
       setTags: (options: {
@@ -304,8 +306,11 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:set-tags', options) as Promise<{
           success: boolean;
           note?: { file: string; citekey: string; zoteroKey?: string; tags: string[] };
-          /** Note qu'on ne sait pas lire : elle n'a pas été touchée, et `reason` dit pourquoi. */
-          code?: 'unreadable';
+          /**
+           * `unreadable` : note qu'on ne sait pas lire, elle n'a pas été touchée, et `reason` dit
+           * pourquoi. `project_root_missing` : le dossier du projet a disparu, rien n'a été écrit.
+           */
+          code?: 'unreadable' | 'project_root_missing';
           reason?: string;
           error?: string;
         }>,

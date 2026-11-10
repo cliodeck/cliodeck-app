@@ -240,6 +240,10 @@ export async function appendSecurityEvent(
 ): Promise<void> {
   const fs = await import('fs/promises');
   const path = await import('path');
-  await fs.mkdir(path.dirname(logPath), { recursive: true });
+  // `.cliodeck` se crée au besoin, mais pas son parent : le dossier du projet disparu (parent
+  // renommé, volume débranché) renaîtrait vide à son ancien chemin avec ce seul journal.
+  await fs.mkdir(path.dirname(logPath)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') throw error;
+  });
   await fs.appendFile(logPath, JSON.stringify(event) + '\n', 'utf8');
 }

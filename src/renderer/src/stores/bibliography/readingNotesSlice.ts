@@ -1,6 +1,16 @@
 import type { BibliographySliceCreator, ReadingNotesSliceState } from './types';
 import { readingNoteOf } from './referenceTags';
 import { EditorFileError } from '../editorStore';
+import i18n from '../../i18n';
+
+/**
+ * Le dossier du projet a disparu (parent renommé, volume débranché) : le main n'a rien écrit, et son
+ * refus porte un code. L'auteur lit sa traduction, jamais le code.
+ */
+function refusalMessage(result: { error?: string; code?: string }, fallback: string): string {
+  if (result.code === 'project_root_missing') return i18n.t('project.rootMissing');
+  return result.error ?? fallback;
+}
 
 /** Préférence d'affichage, par poste : un gros utilisateur des tags automatiques ne doit pas les réactiver à chaque lancement. */
 const SHOW_AUTOMATIC_KEY = 'cliodeck.bibliography.showAutomaticZoteroTags';
@@ -53,7 +63,7 @@ export const createReadingNotesSlice: BibliographySliceCreator<ReadingNotesSlice
       throw new EditorFileError('unreadable', result.reason, result.error ?? 'set_tags_failed');
     }
     if (!result.success || !result.note) {
-      throw new Error(result.error ?? 'set_tags_failed');
+      throw new Error(refusalMessage(result, 'set_tags_failed'));
     }
     const note = result.note;
     set((state) => {
@@ -74,7 +84,7 @@ export const createReadingNotesSlice: BibliographySliceCreator<ReadingNotesSlice
       year: citation.year || undefined,
     });
     if (!result.success || !result.file) {
-      throw new Error(result.error ?? 'open_failed');
+      throw new Error(refusalMessage(result, 'open_failed'));
     }
     // La note existe désormais : la liste doit le savoir.
     await get().loadReadingNotes();

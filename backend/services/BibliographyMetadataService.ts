@@ -4,6 +4,7 @@ import type { Citation, ZoteroAttachmentInfo, ZoteroNote, ZoteroTag } from '../t
 import { isPdfPath } from '../core/bibliography/pdf-attachment';
 import { fromStoredPath, projectCopyOf, toStoredPath } from '../core/bibliography/stored-path';
 import { workspaceLinkOutsideSync } from '../core/workspace/link-guard';
+import { assertProjectRootSync } from '../core/workspace/project-root';
 import { atomicWriteFile, parseUserJson, readUserFile, withFileLock } from '../core/fs/user-files';
 
 /**
@@ -166,14 +167,16 @@ export class BibliographyMetadataService {
   /**
    * Relit le fichier, le change et le réécrit, un écrivain à la fois : chacun part de ce qu'a
    * écrit le précédent. `.cliodeck` est créé avant le verrou, dont la clé est le chemin réel du
-   * fichier. Illisible : `MetadataUnreadableError`, et rien n'est écrit, ni fichier neuf ni mise
-   * de côté : l'historien le répare ou en remet une copie (L05-3).
+   * fichier ; jamais le projet, qui renaîtrait vide à son ancien chemin s'il a disparu
+   * (`project_root_missing`). Illisible : `MetadataUnreadableError`, et rien n'est écrit, ni
+   * fichier neuf ni mise de côté : l'historien le répare ou en remet une copie (L05-3).
    */
   private static updateMetadataFile(
     projectPath: string,
     change: (current: BibliographyMetadataFile | null) => Record<string, CitationMetadata>
   ): Promise<Record<string, CitationMetadata>> {
     const metadataPath = this.getMetadataPath(projectPath);
+    assertProjectRootSync(projectPath);
     fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
     return withFileLock(metadataPath, async () => {
       const citations = change(await this.loadMetadata(projectPath));

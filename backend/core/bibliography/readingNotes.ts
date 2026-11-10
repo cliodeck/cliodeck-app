@@ -4,6 +4,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { atomicWriteFile, UnreadableFileError, updateFile, withFileLock } from '../fs/user-files.js';
 import { isInside } from '../vector-store/file-identity.js';
+import { assertProjectRoot } from '../workspace/project-root.js';
 
 /**
  * Notes de lecture : un fichier Markdown par référence, dans un dossier
@@ -109,7 +110,12 @@ export function noteFileName(citekey: string): string {
   return `${safe || 'reference'}.md`;
 }
 
-async function writeAtomically(file: string, content: string): Promise<void> {
+/**
+ * Le dossier des notes se crée au besoin, jamais le projet : disparu (parent renommé, volume
+ * débranché), il renaîtrait à son ancien chemin avec cette seule note (`project_root_missing`).
+ */
+async function writeAtomically(projectPath: string, file: string, content: string): Promise<void> {
+  await assertProjectRoot(projectPath);
   await mkdir(path.dirname(file), { recursive: true });
   await atomicWriteFile(file, content);
 }
@@ -245,7 +251,11 @@ export async function ensureReadingNote(projectPath: string, reference: Referenc
   for (let n = 2; existsSync(file) || !isInside(projectPath, file); n++) {
     file = path.join(dir, noteFileName(`${reference.citekey}-${n}`));
   }
-  await writeAtomically(file, serializeNote({ frontMatter: identityFrontMatter(reference), body: template(reference) }));
+  await writeAtomically(
+    projectPath,
+    file,
+    serializeNote({ frontMatter: identityFrontMatter(reference), body: template(reference) })
+  );
   return file;
 }
 

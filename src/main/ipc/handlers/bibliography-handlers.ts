@@ -47,6 +47,7 @@ import {
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { isInsideAsync, sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { PDF_DIR, toStoredPath } from '../../../../backend/core/bibliography/stored-path.js';
+import { ProjectRootMissingError } from '../../../../backend/core/workspace/project-root.js';
 
 /**
  * Confine renderer-supplied orphan-PDF paths to the current project. Rejected
@@ -407,7 +408,7 @@ export function setupBibliographyHandlers() {
       console.error('❌ bibliography:update-attachment error:', error);
       // Illisibles, les métadonnées ne sont pas réécrites : le PDF reste dans PDFs/ sans rattachement,
       // et le renderer le dit dans les mots du bandeau.
-      return error instanceof MetadataUnreadableError
+      return error instanceof MetadataUnreadableError || error instanceof ProjectRootMissingError
         ? { ...errorResponse(error), code: error.code }
         : errorResponse(error);
     }
@@ -483,7 +484,9 @@ export function setupBibliographyHandlers() {
       return successResponse({ file });
     } catch (error: unknown) {
       console.error('❌ bibliography:reading-notes:open error:', error);
-      return errorResponse(error);
+      return error instanceof ProjectRootMissingError
+        ? { ...errorResponse(error), code: error.code }
+        : errorResponse(error);
     }
   });
 
@@ -498,6 +501,7 @@ export function setupBibliographyHandlers() {
       return successResponse({ note });
     } catch (error: unknown) {
       console.error('❌ bibliography:reading-notes:set-tags error:', error);
+      if (error instanceof ProjectRootMissingError) return { ...errorResponse(error), code: error.code };
       return error instanceof UnreadableFileError
         ? { ...errorResponse(error), code: 'unreadable', reason: error.reason }
         : errorResponse(error);

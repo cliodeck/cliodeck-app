@@ -61,7 +61,8 @@ const notAttachedOf = (citation: Citation, filePath: string, response: AttachRes
   title: citation.title,
   filePath,
   metadataUnreadable: response.code === 'metadata-unreadable',
-  detail: response.error ?? '',
+  // Le dossier du projet a disparu : sa traduction, jamais le code du refus.
+  detail: response.code === 'project_root_missing' ? i18n.t('project.rootMissing') : (response.error ?? ''),
 });
 
 /**
