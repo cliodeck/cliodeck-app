@@ -120,7 +120,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index HNSW relu
 
     expect(await relaunched.rebuildIndexesInSlices()).toBe(true);
     expect(relaunched.search(unit(300), 3)[0]?.chunk.id).toBe('new-3-0');
-    expect(relaunched.checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false });
+    expect(relaunched.checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false, dimension: 768 });
   });
 
   it('toutes les sources refaites, l’app quittée pendant la reconstruction finale : la relance voit que l’index ne sert plus rien', () => {
@@ -133,7 +133,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index HNSW relu
 
     const relaunched = open();
     expect(relaunched.search(unit(300), 3)).toEqual([]);
-    expect(relaunched.checkHnswIndex()).toEqual({ missing: 10, stale: 10, needsRebuild: true });
+    expect(relaunched.checkHnswIndex()).toEqual({ missing: 10, stale: 10, needsRebuild: true, dimension: 768 });
   });
 
   it('un index écrit à la fermeture n’est pas à reconstruire', () => {
@@ -141,7 +141,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index HNSW relu
     fillOld(first, 10);
     first.close();
 
-    expect(open().checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false });
+    expect(open().checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false, dimension: 768 });
   });
 
   it('les points des extraits remplacés : à compacter au-delà de 10 % des points utiles, pas en deçà', () => {
@@ -151,13 +151,13 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index HNSW relu
     redo(first, 2);
     first.close();
     const second = open();
-    expect(second.checkHnswIndex()).toEqual({ missing: 0, stale: 2, needsRebuild: false });
+    expect(second.checkHnswIndex()).toEqual({ missing: 0, stale: 2, needsRebuild: false, dimension: 768 });
 
     redo(second, 3);
     redo(second, 4);
     redo(second, 5);
     second.close();
-    expect(open().checkHnswIndex()).toEqual({ missing: 0, stale: 5, needsRebuild: true });
+    expect(open().checkHnswIndex()).toEqual({ missing: 0, stale: 5, needsRebuild: true, dimension: 768 });
   });
 
   it('pendant une reconstruction par tranches, la recherche ne reconstruit pas d’un bloc, même à plus de 10 % d’écart', async () => {
@@ -223,7 +223,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — graphe HNSW ple
     expect(await store.rebuildIndexesInSlices(4)).toBe(true);
 
     expect(store.getIndexStats().hnswSize).toBe(15);
-    expect(store.checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false });
+    expect(store.checkHnswIndex()).toEqual({ missing: 0, stale: 0, needsRebuild: false, dimension: 768 });
     expect(store.search(unit(14), 1)[0]?.chunk.id).toBe('old-14');
   });
 });

@@ -140,12 +140,16 @@
 
 /* Réindexation complète (H7) : un travail en cours, pas un avertissement ; son arrêt en est un. */
 .reindex-notice--running,
-.reindex-notice--done {
+.reindex-notice--done,
+.reindex-notice--rebuilding-index,
+.reindex-notice--index-rebuilt {
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .reindex-notice--running svg,
-.reindex-notice--done svg {
+.reindex-notice--done svg,
+.reindex-notice--rebuilding-index svg,
+.reindex-notice--index-rebuilt svg {
   color: var(--color-accent);
 }
 

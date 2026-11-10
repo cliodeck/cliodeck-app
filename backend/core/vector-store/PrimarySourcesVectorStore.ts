@@ -313,6 +313,14 @@ export class PrimarySourcesVectorStore {
    */
   private loadHNSWIndex(): void {
     try {
+      // À la dimension du fichier, lue dans ses métadonnées, pas à celle de la première ligne de la
+      // base. Après un changement de modèle d'embeddings, la base mêle deux dimensions jusqu'à la
+      // fin de la réindexation complète (H7) : un index relu à une autre dimension que la sienne
+      // levait au premier ajout, extraits déjà écrits en base. Le format ne change pas.
+      const metadataPath = this.hnswIndexPath + '.meta.json';
+      const metadata = existsSync(metadataPath) ? JSON.parse(readFileSync(metadataPath, 'utf-8')) : null;
+      if (metadata?.dimension) this.hnswDimension = metadata.dimension;
+
       this.hnswIndex = new HierarchicalNSW('cosine', this.hnswDimension);
       this.hnswIndex.readIndexSync(this.hnswIndexPath);
       this.hnswCurrentSize = this.hnswIndex.getCurrentCount();
@@ -324,13 +332,7 @@ export class PrimarySourcesVectorStore {
         this.hnswIndex.resizeIndex(this.hnswMaxElements);
       }
 
-      // Load metadata
-      const metadataPath = this.hnswIndexPath + '.meta.json';
-      if (existsSync(metadataPath)) {
-        const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
-        this.hnswLabelMap = new Map(metadata.labelMap || []);
-        this.hnswDimension = metadata.dimension || this.hnswDimension;
-      }
+      if (metadata) this.hnswLabelMap = new Map(metadata.labelMap || []);
 
       this.hnswInitialized = true;
       console.log(`✅ Primary sources: Loaded HNSW index with ${this.hnswCurrentSize} vectors`);
@@ -1292,21 +1294,45 @@ export class PrimarySourcesVectorStore {
    * retirés, que le graphe garde jusqu'à la reconstruction). À reconstruire dès qu'un extrait
    * manque, ou quand les points inutiles passent 10 % des points utiles. Une quinzaine de
    * millisecondes sur 40 650 extraits (mesuré) : les seuls identifiants sont lus.
+   *
+   * `dimension` : celle du fournisseur d'embeddings, à laquelle le chat interroge l'index. Après un
+   * changement de modèle, l'index relu peut être de l'ancienne dimension alors que des extraits
+   * sont déjà refaits à la nouvelle (app quittée en pleine passe) : il ne sert alors aucun d'eux, et
+   * il est à refaire à la nouvelle. Sans aucun extrait à cette dimension, l'index garde la sienne et
+   * se contrôle à elle. `dimension` en retour : celle à laquelle le reconstruire.
    */
-  checkHnswIndex(): { missing: number; stale: number; needsRebuild: boolean } {
-    const inBase = new Set(
-      this.db
-        .prepare('SELECT id FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?')
-        .pluck()
-        .all(this.hnswDimension * 4) as string[]
-    );
+  checkHnswIndex(dimension = this.hnswDimension): {
+    missing: number;
+    stale: number;
+    needsRebuild: boolean;
+    dimension: number;
+  } {
+    let target = dimension;
+    let inBase = this.embeddedChunkIds(target);
+    if (inBase.size === 0 && target !== this.hnswDimension) {
+      target = this.hnswDimension;
+      inBase = this.embeddedChunkIds(target);
+    }
+    // Un index d'une autre dimension ne sert aucun extrait de celle-ci.
     const served = new Set<string>();
-    for (const chunkId of this.hnswLabelMap.values()) {
-      if (inBase.has(chunkId)) served.add(chunkId);
+    if (target === this.hnswDimension) {
+      for (const chunkId of this.hnswLabelMap.values()) {
+        if (inBase.has(chunkId)) served.add(chunkId);
+      }
     }
     const missing = inBase.size - served.size;
     const stale = Math.max(0, this.hnswCurrentSize - served.size);
-    return { missing, stale, needsRebuild: missing > 0 || stale > served.size * 0.1 };
+    return { missing, stale, needsRebuild: missing > 0 || stale > served.size * 0.1, dimension: target };
+  }
+
+  /** Les extraits embarqués à `dimension` : un vecteur de float32, 4 octets par composante. */
+  private embeddedChunkIds(dimension: number): Set<string> {
+    return new Set(
+      this.db
+        .prepare('SELECT id FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?')
+        .pluck()
+        .all(dimension * 4) as string[]
+    );
   }
 
   /**
@@ -1438,32 +1464,41 @@ export class PrimarySourcesVectorStore {
   search(queryEmbedding: Float32Array, topK: number = 10, query?: string): PrimarySourceSearchResult[] {
     const startTime = Date.now();
 
-    // DEBUG: Log index state at search time
-    const dbChunkCount = (this.db.prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL').get() as any).count;
-    console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize}, BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings=${dbChunkCount}`);
+    // Les extraits à la dimension de la question, celle du fournisseur d'embeddings : après un
+    // changement de modèle, la base en mêle deux jusqu'à la fin de la réindexation complète (H7),
+    // et l'index n'en sert qu'une.
+    const dimension = queryEmbedding.length;
+    const dbChunkCount = (
+      this.db
+        .prepare('SELECT COUNT(*) as count FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?')
+        .get(dimension * 4) as { count: number }
+    ).count;
+    const sameDimension = this.hnswDimension === dimension;
+    console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize} (dimension ${this.hnswDimension}), BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings of dimension ${dimension}=${dbChunkCount}`);
 
     // Check if indexes are out of sync with database. Les vecteurs vivants
     // (`hnswLabelMap`), pas tous les points du graphe : un extrait remplacé y
     // laisse le sien jusqu'à la reconstruction (`forgetIndexedChunks`, H7).
-    // Jamais pendant une reconstruction par tranches, qui remplacera l'index :
-    // l'ancien sert en attendant, plutôt que de geler le processus principal.
-    const needsRebuild = this.rebuildLogs.size === 0 && (this.hnswCurrentSize === 0 ||
-      (dbChunkCount > 0 && Math.abs(this.hnswLabelMap.size - dbChunkCount) > dbChunkCount * 0.1)); // More than 10% difference
-
-    if (needsRebuild) {
-      console.log('📜 Primary sources: Indexes out of sync, rebuilding...');
-      this.rebuildAllIndexes();
-
-      if (this.hnswCurrentSize === 0) {
-        console.log('⚠️ [DEBUG] After rebuild: still 0 chunks. DB has ' + dbChunkCount + ' chunks with embeddings');
-        return [];
-      }
+    // Reconstruit par tranches, en arrière-plan, jamais d'un bloc : une
+    // centaine de secondes de gel du processus principal sur 40 000 extraits,
+    // à chaque question tant que l'écart demeure. L'index courant sert en
+    // attendant ; une reconstruction déjà en cours n'en lance pas une autre.
+    const liveVectors = sameDimension ? this.hnswLabelMap.size : 0;
+    const outOfSync = dbChunkCount > 0 && Math.abs(liveVectors - dbChunkCount) > dbChunkCount * 0.1; // More than 10% difference
+    if (outOfSync && this.rebuildLogs.size === 0) {
+      console.log('📜 Primary sources: Indexes out of sync, rebuilding in slices...');
+      this.rebuildIndexesInSlices(undefined, dimension).catch((error: unknown) => {
+        console.warn('⚠️ Primary sources: rebuild in slices failed:', error);
+      });
     }
 
     const candidateSize = Math.max(topK * 5, 50);
 
-    // 1. Dense retrieval (HNSW)
-    const denseResults = this.searchHNSW(queryEmbedding, candidateSize);
+    // 1. Dense retrieval (HNSW). Un index d'une autre dimension ne peut servir la question : en
+    // reconstruction vers la sienne, il ne rend rien d'ici là. Sans aucun extrait à la dimension
+    // de la question (tout le corpus embarqué avec un autre modèle), la recherche lève, comme
+    // avant : le corpus est dit en panne, pas vide.
+    const denseResults = sameDimension || dbChunkCount === 0 ? this.searchHNSW(queryEmbedding, candidateSize) : [];
 
     // 2. Sparse retrieval (BM25) - only if query text is provided
     let sparseResults: Array<{ chunk: PrimarySourceChunk; score: number }> = [];
@@ -1746,10 +1781,12 @@ export class PrimarySourcesVectorStore {
       this.initNewHNSWIndex();
     }
 
-    // Add to HNSW
+    // Add to HNSW. Une seule dimension : un extrait d'une autre réinitialisait
+    // l'index (`addToHNSWIndex`), et une base qui en mêle deux, après un
+    // changement de modèle d'embeddings, n'en gardait que la dernière série.
     let addedCount = 0;
     for (const { chunk, embedding } of chunks) {
-      if (embedding.length > 0) {
+      if (embedding.length === this.hnswDimension) {
         this.addToHNSWIndex(chunk.id, embedding);
         addedCount++;
       }
@@ -1782,14 +1819,20 @@ export class PrimarySourcesVectorStore {
    * puis il le remplace. BM25, quelques secondes, se refait d'un bloc à la fin,
    * comme à l'ouverture du magasin.
    *
-   * En cours dès l'appel : la recherche ne reconstruit plus d'un bloc d'ici le
+   * En cours dès l'appel : la recherche n'en lance pas d'autre d'ici le
    * remplacement. La base n'est lue qu'au tour suivant de la boucle
    * d'événements, une demi-seconde sur 40 650 extraits : à l'ouverture d'un
    * projet, l'appelant ne l'attend pas.
    *
+   * À `dimension`, par défaut celle de l'index courant, que le dernier vecteur
+   * ajouté a fixée ; les extraits d'une autre dimension n'y entrent pas. Après
+   * un changement de modèle d'embeddings, la base en mêle deux jusqu'à la fin
+   * de la réindexation complète, et la première ligne lue, qui décidait
+   * jusqu'ici, est le plus souvent de l'ancienne.
+   *
    * Rend faux, sans rien remplacer, si le magasin a été fermé en route.
    */
-  async rebuildIndexesInSlices(sliceSize = 256): Promise<boolean> {
+  async rebuildIndexesInSlices(sliceSize = 256, dimension = this.hnswDimension): Promise<boolean> {
     const startTime = Date.now();
     const log: RebuildLogEntry[] = [];
     this.rebuildLogs.add(log);
@@ -1797,7 +1840,6 @@ export class PrimarySourcesVectorStore {
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (this.closed) return false;
       const chunks = this.getAllChunksWithEmbeddings();
-      const dimension = chunks.find((c) => c.embedding.length > 0)?.embedding.length ?? this.hnswDimension;
       const index = new HierarchicalNSW('cosine', dimension);
       index.initIndex(Math.max(this.hnswMaxElements, chunks.length), this.hnswM, this.hnswEfConstruction);
       const labelMap = new Map<number, string>();

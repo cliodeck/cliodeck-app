@@ -29,7 +29,9 @@ type TropyReindexStatusShape =
   | { phase: 'idle' }
   | { phase: 'running'; done: number; total: number; chunks: number; waitingForSync: boolean }
   | { phase: 'stopped'; reason: 'no-embedding-provider' | 'embedding-failed'; total: number; remaining: number }
-  | { phase: 'done'; total: number };
+  | { phase: 'done'; total: number }
+  | { phase: 'rebuilding-index'; missing: number }
+  | { phase: 'index-rebuilt' };
 
 // API exposée au renderer process
 const api = {

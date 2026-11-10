@@ -14,8 +14,9 @@ export const TropyReindexNotice: React.FC = () => {
   const text = describeReindexStatus(t, status, i18n.language);
   if (!text) return null;
 
-  const Icon = status.phase === 'stopped' ? AlertTriangle : status.phase === 'done' ? CheckCircle : RefreshCw;
-  const spinning = status.phase === 'running' && !status.waitingForSync;
+  const finished = status.phase === 'done' || status.phase === 'index-rebuilt';
+  const Icon = status.phase === 'stopped' ? AlertTriangle : finished ? CheckCircle : RefreshCw;
+  const spinning = (status.phase === 'running' && !status.waitingForSync) || status.phase === 'rebuilding-index';
   return (
     <div className={`sync-notice reindex-notice reindex-notice--${status.phase}`} role="status">
       <Icon size={14} strokeWidth={1.5} className={spinning ? 'spinning' : undefined} />

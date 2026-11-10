@@ -9,7 +9,7 @@ import { useProjectStore } from './projectStore';
  * barre d'état : une passe de plusieurs heures se voit même panneau fermé.
  */
 
-/** Combien de temps « Réindexation … terminée » reste affiché avant de s'effacer. */
+/** Combien de temps « Réindexation … terminée » (ou « Index … reconstruit ») reste affiché avant de s'effacer. */
 export const REINDEX_DONE_NOTICE_MS = 10_000;
 
 interface TropyReindexState {
@@ -41,8 +41,9 @@ export const useTropyReindexStore = create<TropyReindexState>((set, get) => ({
     revision += 1;
     cancelDoneTimer();
     set({ status });
-    // La fin se dit brièvement, puis s'efface d'elle-même.
-    if (status.phase === 'done') {
+    // La fin se dit brièvement, puis s'efface d'elle-même : celle d'une passe,
+    // comme celle de la reconstruction de l'index à l'ouverture.
+    if (status.phase === 'done' || status.phase === 'index-rebuilt') {
       doneTimer = setTimeout(() => {
         doneTimer = null;
         if (get().status === status) set({ status: { phase: 'idle' } });
@@ -58,6 +59,11 @@ export const useTropyReindexStore = create<TropyReindexState>((set, get) => ({
     try {
       const result = await getReindexStatus();
       if (startedAt !== revision || !result?.success || !result.status) return;
+      // Le main oublie la fin dès qu'il l'a dite : la relire (le panneau qui
+      // s'ouvre) n'efface pas avant son heure le message que la barre d'état
+      // affiche encore. Un changement de projet l'efface (`clear`).
+      const shown = get().status.phase;
+      if (result.status.phase === 'idle' && (shown === 'done' || shown === 'index-rebuilt')) return;
       get().receive(result.status);
     } catch (error) {
       console.warn('Réindexation des sources primaires : état illisible', error);

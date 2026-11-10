@@ -22,4 +22,13 @@ export type TropyReindexStatus =
    */
   | { phase: 'stopped'; reason: 'no-embedding-provider' | 'embedding-failed'; total: number; remaining: number }
   /** Finie : `total` sources refaites. Le renderer le dit un moment, puis l'efface. */
-  | { phase: 'done'; total: number };
+  | { phase: 'done'; total: number }
+  /**
+   * Plus aucune source à refaire, mais l'index de recherche relu du disque n'a pas `missing`
+   * extraits de la base : l'app a été quittée sans l'enregistrer, par exemple pendant la
+   * reconstruction finale d'une passe. Il se reconstruit par tranches ; d'ici là, la recherche par
+   * le sens ne trouve pas ces extraits.
+   */
+  | { phase: 'rebuilding-index'; missing: number }
+  /** L'index de recherche reconstruit. Le renderer le dit un moment, puis l'efface. */
+  | { phase: 'index-rebuilt' };

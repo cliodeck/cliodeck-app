@@ -1315,6 +1315,12 @@ class TropyService {
     await Promise.all([...this.reindexRuns]);
   }
 
+  /** La dimension du fournisseur d'embeddings, s'il y en a un et qu'il la connaît. */
+  private embeddingDimension(): number | undefined {
+    const dimension = this.embedding?.dimension;
+    return dimension && dimension > 0 ? dimension : undefined;
+  }
+
   private startFullReindex(): void {
     const store = this.vectorStore;
     const projectPath = this.projectPath;
@@ -1367,7 +1373,10 @@ class TropyService {
    * plantée en pleine passe laissait celui d'avant : les sources refaites
    * échappaient à la recherche dense, toutes et pour de bon si la sortie
    * tombait pendant la reconstruction finale. En retard, il est reconstruit par
-   * tranches avant la suite.
+   * tranches avant la suite, à la dimension du fournisseur d'embeddings : après
+   * un changement de modèle, la base mêle deux dimensions jusqu'à la fin de la
+   * passe. Plus aucune source à refaire, cette reconstruction est dite à
+   * l'écran si des extraits manquent à l'index, puis sa fin.
    *
    * Au journal d'usage IA, un lot d'embeddings par source, inscrit dès qu'elle
    * est finie, et lié au projet de la passe : une passe interrompue laisse la
@@ -1381,16 +1390,36 @@ class TropyService {
       const chunks = outdated.reduce((sum, source) => sum + source.chunks, 0);
 
       // Contrôlé avant la première attente : la reconstruction en cours retient
-      // la recherche du chat de tout reconstruire d'un bloc.
-      const index = store.checkHnswIndex();
+      // la recherche du chat d'en lancer une autre. À la dimension du
+      // fournisseur d'embeddings, celle des questions du chat : après un
+      // changement de modèle, l'index relu peut être de l'ancienne alors que
+      // des extraits sont déjà refaits à la nouvelle (app quittée en pleine
+      // passe).
+      const index = store.checkHnswIndex(this.embeddingDimension());
       if (index.needsRebuild) {
         console.log(
-          `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches`
+          `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches, dimension ${index.dimension}`
         );
-        if (total > 0) this.reportReindex(store, { phase: 'running', done: 0, total, chunks, waitingForSync: false });
-        const rebuild = store.rebuildIndexesInSlices();
+        // Plus aucune source à refaire, mais des extraits manquent à l'index
+        // (app quittée pendant la reconstruction finale, ou après une
+        // transcription) : la recherche par le sens ne les trouve pas avant la
+        // fin, une centaine de secondes sur 40 000 extraits. Dit à l'écran,
+        // comme sa fin. Des points inutiles seuls ne changent rien à la
+        // recherche : leur compactage se tait.
+        const announced = total === 0 && index.missing > 0;
+        if (total > 0) {
+          this.reportReindex(store, { phase: 'running', done: 0, total, chunks, waitingForSync: false });
+        } else if (announced) {
+          this.reportReindex(store, { phase: 'rebuilding-index', missing: index.missing });
+        }
+        const rebuild = store.rebuildIndexesInSlices(undefined, index.dimension);
         this.reindexStep = rebuild;
         if (!(await rebuild) || this.vectorStore !== store) return;
+        if (announced) {
+          this.reportReindex(store, { phase: 'index-rebuilt' });
+          // Dit une fois, comme la fin d'une passe.
+          this.reindexStatus = { phase: 'idle' };
+        }
       }
 
       if (total === 0) return;

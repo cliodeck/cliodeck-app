@@ -7,7 +7,7 @@ import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useUsageJournalStore } from '../../stores/usageJournalStore';
 import { useTropyReindexStatus } from '../../stores/tropyReindexStore';
-import { describeReindexStatus } from '../PrimarySources/reindex-status';
+import { describeReindexStatus, reindexStatusLabel } from '../PrimarySources/reindex-status';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -228,12 +228,10 @@ export const StatusBar: React.FC = () => {
             className={`status-bar__item ${reindex.phase === 'stopped' ? 'status-bar__item--warning' : 'status-bar__item--active'}`}
             title={describeReindexStatus(t, reindex, i18n.language) ?? undefined}
           >
-            {reindex.phase === 'running' && !reindex.waitingForSync && <span className="status-bar__spinner" />}
-            {reindex.phase === 'running'
-              ? t('statusBar.tropyReindex', { done: reindex.done, total: reindex.total })
-              : reindex.phase === 'stopped'
-                ? t('statusBar.tropyReindexStopped')
-                : t('statusBar.tropyReindexDone')}
+            {((reindex.phase === 'running' && !reindex.waitingForSync) || reindex.phase === 'rebuilding-index') && (
+              <span className="status-bar__spinner" />
+            )}
+            {reindexStatusLabel(t, reindex)}
           </span>
         )}
 

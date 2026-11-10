@@ -66,16 +66,17 @@ const provider = vi.hoisted(() => ({
   gateOn: '',
   gated: false,
   reached: null as (() => void) | null,
+  /** La dimension du modèle : les Paramètres proposent 768, 1024 et 1536. */
+  dimension: 768,
 }));
 
-const DIMENSION = 768;
-function hashedVector(text: string): number[] {
-  const v = new Array<number>(DIMENSION).fill(0);
+function hashedVector(text: string, dimension = provider.dimension): number[] {
+  const v = new Array<number>(dimension).fill(0);
   for (const word of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
     if (!word) continue;
     let h = 2166136261;
     for (let i = 0; i < word.length; i++) h = Math.imul(h ^ word.charCodeAt(i), 16777619);
-    v[Math.abs(h) % DIMENSION] += 1;
+    v[Math.abs(h) % dimension] += 1;
   }
   const norm = Math.hypot(...v) || 1;
   return v.map((x) => x / norm);
@@ -92,7 +93,9 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
         id: 'local-test',
         name: 'local-test',
         model: 'hashed-bag-of-words',
-        dimension: DIMENSION,
+        get dimension() {
+          return provider.dimension;
+        },
         getStatus: () => ({ state: 'ready' }),
         healthCheck: async () => ({ state: 'ready' }),
         embed: async (texts: string[]) => {
@@ -111,7 +114,7 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
               throw Object.assign(new Error('fetch failed'), { cause: new Error('read ECONNRESET') });
             }
           }
-          return texts.map(hashedVector);
+          return texts.map((text) => hashedVector(text));
         },
         dispose: async () => undefined,
       }, 'ollama', 'http://127.0.0.1:1'),
@@ -399,6 +402,7 @@ beforeEach(() => {
   provider.gateOn = '';
   provider.gated = false;
   provider.reached = null;
+  provider.dimension = 768;
 });
 
 afterEach(async () => {
@@ -706,7 +710,7 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : une interruption ne
     expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
   });
 
-  it('l’app quittée pendant la reconstruction finale : à la relance, l’index est refait sans geler l’app ni rien réembarquer, et la recherche dense trouve toutes les sources', async () => {
+  it('l’app quittée pendant la reconstruction finale : à la relance, l’index est refait sans geler l’app ni rien réembarquer, en le disant, et la recherche dense trouve toutes les sources', async () => {
     await linkSyncAndClose();
     compactIndex();
     makeBaseFromBefore();
@@ -750,7 +754,120 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : une interruption ne
     for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
     expect(blockingRebuild).not.toHaveBeenCalled();
     expect(provider.texts).toEqual([]);
+    // Plus aucune source marquée, mais la recherche par le sens ne trouve aucun extrait tant que
+    // l'index n'est pas refait (une centaine de secondes sur 40 000 extraits) : l'écran le dit,
+    // puis dit la fin, au lieu de rester sur « 3 / 3 » de la session d'avant.
+    expect(reindexEvents(since)).toEqual([
+      { phase: 'rebuilding-index', missing: redone.length },
+      { phase: 'index-rebuilt' },
+    ]);
+    expect(tropyService.getReindexStatus()).toEqual({ phase: 'idle' });
+  });
+
+  it('témoin : un index en retard d’un seul point inutile n’est pas refait, et l’ouverture ne dit rien', async () => {
+    await linkSyncAndClose();
+    compactIndex();
+    const since = sent.length;
+
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
     expect(reindexEvents(since)).toEqual([]);
+  });
+});
+
+// MARK: - Modèle d'embeddings changé
+
+describe.skipIf(!sqliteAvailable)('réindexation complète : modèle d’embeddings changé de dimension (1024 → 768)', () => {
+  /**
+   * La base embarquée à 1024 dimensions (mxbai, mistral-embed), le modèle passé à 768 (nomic) :
+   * la passe refait les extraits à la nouvelle dimension, et jusqu'à sa fin la base en mêle deux.
+   */
+  async function baseAt1024ThenModelAt768(): Promise<void> {
+    provider.dimension = 1024;
+    await linkSyncAndClose();
+    compactIndex();
+    makeBaseFromBefore();
+    provider.dimension = 768;
+  }
+
+  it('pendant la passe, puis après son arrêt, les questions du chat ne reconstruisent jamais l’index d’un bloc, et la source refaite est trouvée par la recherche dense ; la passe suivante finit', async () => {
+    await baseAt1024ThenModelAt768();
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    // D'un bloc, une centaine de secondes de gel du processus principal sur 40 000 extraits, à
+    // chaque question tant que 90 % des extraits ne sont pas refaits.
+    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+    const ask = async (): Promise<void> => {
+      for (let q = 0; q < 3; q++) {
+        await tropyService.search('maire interdit les réunions publiques cours Saint-Pierre', { topK: 3 });
+      }
+    };
+
+    // L'arrêté est refait, puis la passe s'arrête un moment sur la lettre.
+    const gate = gateFirstEmbed(LETTRE_X);
+    await tropyService.init(projectDir);
+    let arrete: Array<{ id: string; content: string }> = [];
+    try {
+      await gate.reached;
+      await ask();
+      arrete = chunks(ids[0]);
+      for (const c of arrete) expect(denseIds(c.content)).toContain(c.id);
+      expect(blockingRebuild).not.toHaveBeenCalled();
+    } finally {
+      // Puis Ollama tombe sur la lettre : la passe s'arrête. Même en échec : une passe suspendue
+      // ferait attendre les tests suivants.
+      provider.mode = 'fail-on';
+      provider.failOn = LETTRE_X;
+      gate.open();
+    }
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'stopped' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+    await ask();
+    for (const c of arrete) expect(denseIds(c.content)).toContain(c.id);
+    expect(blockingRebuild).not.toHaveBeenCalled();
+    await tropyService.close();
+
+    // Ollama relancé, projet rouvert : la passe finit, à la nouvelle dimension.
+    await setProvider('ok');
+    await tropyService.init(projectDir);
+    await vi.waitFor(() => expect(reindexEvents().at(-1)?.phase).toMatch(/done|stopped/), WAIT);
+    await tropyService.whenFullReindexSettled();
+
+    expect(reindexEvents().at(-1)).toEqual({ phase: 'done', total: 2 });
+    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
+    expect(chunks(ids[0])).toEqual(arrete);
+    for (const c of ids.flatMap((id) => chunks(id))) expect(denseIds(c.content)).toContain(c.id);
+    expect(blockingRebuild).not.toHaveBeenCalled();
+  });
+
+  it('l’app quittée en pleine passe : à la relance, l’index relu, de l’ancienne dimension, est refait à la nouvelle avant la suite, et la source déjà refaite est trouvée par la recherche dense', async () => {
+    await baseAt1024ThenModelAt768();
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+
+    // Première session : l'arrêté est refait, puis l'app est quittée pendant la lettre.
+    const first = gateFirstEmbed(LETTRE_X);
+    await tropyService.init(projectDir);
+    await first.reached;
+    const redone = chunks(ids[0]);
+    await quitWithoutClosing(first.open);
+
+    // Relance : la passe reprend à la lettre, et s'y arrête un moment.
+    const resumed = gateFirstEmbed();
+    await tropyService.init(projectDir);
+    try {
+      await resumed.reached;
+      for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
+      expect(blockingRebuild).not.toHaveBeenCalled();
+    } finally {
+      resumed.open();
+    }
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'done' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+
+    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
+    for (const c of ids.flatMap((id) => chunks(id))) expect(denseIds(c.content)).toContain(c.id);
+    expect(blockingRebuild).not.toHaveBeenCalled();
   });
 });
 

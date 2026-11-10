@@ -158,7 +158,7 @@ describe('StatusBar : le fichier ouvert est nommé (G7)', () => {
 
 /** L'élément de la réindexation complète des sources primaires, s'il y en a un. */
 const reindexLabel = (): HTMLElement | null =>
-  screen.queryByText(/^statusBar\.tropyReindex/)?.closest('.status-bar__item') ?? null;
+  screen.queryByText(/^statusBar\.tropy(Reindex|IndexRebuil)/)?.closest('.status-bar__item') ?? null;
 
 describe('StatusBar : la réindexation complète des sources primaires se voit, panneau fermé (H7)', () => {
   afterEach(() => {
@@ -202,6 +202,23 @@ describe('StatusBar : la réindexation complète des sources primaires se voit, 
       vi.advanceTimersByTime(REINDEX_DONE_NOTICE_MS);
     });
 
+    expect(reindexLabel()).toBeNull();
+  });
+
+  it('l’index de recherche relu incomplet, à l’ouverture : sa reconstruction se voit, puis sa fin, qui s’efface', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await mountWith({ filePath: null, isDirty: false });
+    act(() => useTropyReindexStore.getState().receive({ phase: 'rebuilding-index', missing: 40648 }));
+
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyIndexRebuilding');
+    expect(reindexLabel()).toHaveAttribute('title', 'primarySources.reindexAll.rebuildingIndex');
+    expect(reindexLabel()).toHaveClass('status-bar__item--active');
+
+    act(() => useTropyReindexStore.getState().receive({ phase: 'index-rebuilt' }));
+    expect(reindexLabel()).toHaveTextContent('statusBar.tropyIndexRebuilt');
+    act(() => {
+      vi.advanceTimersByTime(REINDEX_DONE_NOTICE_MS);
+    });
     expect(reindexLabel()).toBeNull();
   });
 

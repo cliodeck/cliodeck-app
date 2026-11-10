@@ -1483,7 +1483,10 @@
       "waitingForSync": "Paused during the synchronization: it will resume afterwards.",
       "stoppedNoProvider": "Full reindexing of primary sources interrupted: no semantic search model is available (check Settings). {{remaining}} source(s) keep their old extracts, which the assistant still uses. It will resume the next time the project is opened, where it stopped.",
       "stoppedFailed": "Full reindexing of primary sources interrupted: the semantic search model did not respond (check in Settings that it is available). {{remaining}} source(s) keep their old extracts, which the assistant still uses. It will resume the next time the project is opened, where it stopped.",
-      "done": "Full reindexing of primary sources finished: {{total}} source(s) redone."
+      "done": "Full reindexing of primary sources finished: {{total}} source(s) redone.",
+      "finishing": "Full reindexing of primary sources (once only, after a ClioDeck update): {{total}} / {{total}} source(s) redone. Last step, the search index is being rebuilt; the assistant already uses the new extracts.",
+      "rebuildingIndex": "The primary sources search index was not saved when ClioDeck was last closed: it is being rebuilt, {{missing}} extract(s) to put back into it. Until then, semantic search does not find them; the assistant only finds them by their words.",
+      "indexRebuilt": "Primary sources search index rebuilt: semantic search finds all extracts again."
     }
   },
   "modes": {
@@ -1916,7 +1919,9 @@
     "fileOutsideProjectTooltip": "Outside the project: {{path}}",
     "tropyReindex": "Reindexing {{done}}/{{total}}",
     "tropyReindexStopped": "Reindexing interrupted",
-    "tropyReindexDone": "Reindexing finished"
+    "tropyReindexDone": "Reindexing finished",
+    "tropyIndexRebuilding": "Rebuilding index",
+    "tropyIndexRebuilt": "Index rebuilt"
   },
   "security": {
     "revokeTitle": "Key revocation",

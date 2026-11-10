@@ -1483,7 +1483,10 @@
       "waitingForSync": "Während der Synchronisierung angehalten: Sie wird danach fortgesetzt.",
       "stoppedNoProvider": "Vollständige Neuindexierung der Primärquellen unterbrochen: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen). {{remaining}} Quelle(n) behalten ihre alten Auszüge, die der Assistent weiterhin nutzt. Sie wird beim nächsten Öffnen des Projekts dort fortgesetzt, wo sie stehen geblieben ist.",
       "stoppedFailed": "Vollständige Neuindexierung der Primärquellen unterbrochen: Das Modell der semantischen Suche hat nicht geantwortet (prüfen Sie in den Einstellungen, ob es verfügbar ist). {{remaining}} Quelle(n) behalten ihre alten Auszüge, die der Assistent weiterhin nutzt. Sie wird beim nächsten Öffnen des Projekts dort fortgesetzt, wo sie stehen geblieben ist.",
-      "done": "Vollständige Neuindexierung der Primärquellen abgeschlossen: {{total}} Quelle(n) neu erstellt."
+      "done": "Vollständige Neuindexierung der Primärquellen abgeschlossen: {{total}} Quelle(n) neu erstellt.",
+      "finishing": "Vollständige Neuindexierung der Primärquellen (einmalig, nach einem Update von ClioDeck): {{total}} / {{total}} Quelle(n) neu erstellt. Letzter Schritt: Der Suchindex wird neu aufgebaut; der Assistent nutzt bereits die neuen Auszüge.",
+      "rebuildingIndex": "Der Suchindex der Primärquellen wurde beim letzten Schließen von ClioDeck nicht gespeichert: Er wird neu aufgebaut, {{missing}} Auszüge sind wieder aufzunehmen. Bis dahin findet die semantische Suche sie nicht; der Assistent findet sie nur über ihre Wörter.",
+      "indexRebuilt": "Suchindex der Primärquellen neu aufgebaut: Die semantische Suche findet wieder alle Auszüge."
     }
   },
   "modes": {
@@ -1916,7 +1919,9 @@
     "fileOutsideProjectTooltip": "Außerhalb des Projekts: {{path}}",
     "tropyReindex": "Neuindexierung {{done}}/{{total}}",
     "tropyReindexStopped": "Neuindexierung unterbrochen",
-    "tropyReindexDone": "Neuindexierung abgeschlossen"
+    "tropyReindexDone": "Neuindexierung abgeschlossen",
+    "tropyIndexRebuilding": "Index wird neu aufgebaut",
+    "tropyIndexRebuilt": "Index neu aufgebaut"
   },
   "security": {
     "revokeTitle": "Schlüssel widerrufen",
