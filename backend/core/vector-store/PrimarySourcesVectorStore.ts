@@ -272,6 +272,13 @@ export class PrimarySourcesVectorStore {
       this.hnswIndex = new HierarchicalNSW('cosine', this.hnswDimension);
       this.hnswIndex.readIndexSync(this.hnswIndexPath);
       this.hnswCurrentSize = this.hnswIndex.getCurrentCount();
+      // hnswlib relit un index écrit vide avec une capacité nulle : `close()`
+      // en écrit un pour tout projet fermé sans extrait, et le premier ajout
+      // levait alors, après l'écriture des extraits en base (trouvé par H7).
+      // Le format du fichier ne change pas : seule la capacité en mémoire.
+      if (this.hnswIndex.getMaxElements() < this.hnswMaxElements) {
+        this.hnswIndex.resizeIndex(this.hnswMaxElements);
+      }
 
       // Load metadata
       const metadataPath = this.hnswIndexPath + '.meta.json';
