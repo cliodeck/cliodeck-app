@@ -401,6 +401,67 @@ describe('les idées du Brainstorm (L03-5)', () => {
     });
   });
 
+  /**
+   * Une sauvegarde déjà partie au main quand il ferme A : il a validé le chemin, puis attend
+   * l'écriture (`fs:write-file`), et la fermeture passe entre les deux, sur un disque lent. Au moment
+   * de `project:closed`, rien ne dit encore si elle aboutira : le message est posé, comme pour une
+   * idée non écrite. Il ne doit pas survivre à une écriture qui aboutit : il dirait le contraire du
+   * disque, et la sortie, qui n'a plus rien à écrire, ne le redirait pas.
+   */
+  describe('project:closed pendant une écriture des idées déjà partie au main', () => {
+    const TYPED = 'Tapé, champ quitté : la sauvegarde part.';
+    let notifications$: typeof import('../notificationStore');
+    let i18n$: typeof import('../../i18n');
+    let finishWrite: (error?: Error) => void;
+    let saving: Promise<void>;
+    const notices = () =>
+      notifications$.useNotificationStore
+        .getState()
+        .notifications.filter((n) => n.title === i18n$.default.t('ideas.closeSaveFailedTitle'));
+
+    beforeEach(async () => {
+      notifications$ = await import('../notificationStore');
+      i18n$ = await import('../../i18n');
+      writeFile.mockImplementation(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            finishWrite = (error) => (error ? reject(error) : resolve());
+          })
+      );
+      ideas().updateIdea('i1', { content: TYPED });
+      saving = ideas().saveIdeas('/tmp/A');
+      await vi.waitFor(() => expect(ideasWrites()).toHaveLength(1));
+
+      onClosed!({ path: '/tmp/A', code: 'project_unavailable', error: 'timeout' });
+      await vi.waitFor(() => expect(store().currentProject).toBeNull());
+      // Pas encore sur le disque : le message dit vrai à cet instant.
+      expect(notices()).toHaveLength(1);
+    });
+
+    it('l’écriture aboutit : le message part avec elle, et la sortie n’a plus rien à dire', async () => {
+      finishWrite();
+      await saving;
+
+      await vi.waitFor(() => expect(notices()).toEqual([]));
+      expect(ideas$.hasUnwrittenIdeas()).toBe(false);
+      expect(ideas().saveError).toBeNull();
+      expect(ideasWrites().map(([filePath]) => filePath)).toEqual(['/tmp/A/.cliodeck/ideas.json']);
+      expect(String(ideasWrites()[0][1])).toContain(TYPED);
+    });
+
+    it('l’écriture échoue : le message reste, et l’idée attend toujours A', async () => {
+      finishWrite(new Error('EIO: i/o error, write'));
+      await saving;
+      // Ce qui suit la fin de la file a eu son tour : la décision est prise.
+      await ideas$.ideasSettled();
+
+      expect(ideas().saveError).toContain('EIO');
+      expect(ideas$.hasUnwrittenIdeas()).toBe(true);
+      expect(ideas().loadedFor).toBe('/tmp/A');
+      expect(notices()).toHaveLength(1);
+    });
+  });
+
   it('fermeture d’office pendant une fermeture qui a déjà dit l’échec des idées : un seul message', async () => {
     writeFile.mockRejectedValue(new Error('ENOSPC: no space left on device, write'));
     ideas().updateIdea('i1', { content: 'Ne s’écrit pas.' });

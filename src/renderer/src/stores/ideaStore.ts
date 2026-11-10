@@ -319,6 +319,14 @@ function enqueue(job: () => Promise<void>): Promise<void> {
   return done;
 }
 
+/**
+ * Ce qui est déjà dans la file a abouti ou échoué : une écriture partie au main a sa réponse, et
+ * `hasUnwrittenIdeas` dit le disque. Ne rejette jamais.
+ */
+export function ideasSettled(): Promise<void> {
+  return queueTail;
+}
+
 // MARK: - Store
 
 export const useIdeaStore = create<IdeaState>()((set, get) => ({

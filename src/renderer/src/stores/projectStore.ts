@@ -8,7 +8,7 @@ import {
 } from '@backend/types/book';
 import i18n from '../i18n';
 import { useDialogStore } from './dialogStore';
-import { hasUnwrittenIdeas, useIdeaStore } from './ideaStore';
+import { hasUnwrittenIdeas, ideasSettled, useIdeaStore } from './ideaStore';
 import { useNotificationStore } from './notificationStore';
 import { useRebuildStore } from './rebuildStore';
 import { openFailureKey } from '../components/Project/open-failure';
@@ -333,6 +333,11 @@ function noticeIdeasNotWritten(details: string | undefined): void {
   });
 }
 
+function dismissIdeasNotWritten(): void {
+  if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
+  ideasNotWrittenNotice = null;
+}
+
 function dismissConfigIssue(): void {
   if (configIssueNotice) useNotificationStore.getState().dismiss(configIssueNotice);
   configIssueNotice = null;
@@ -470,8 +475,7 @@ async function openProjectContents(
 ): Promise<void> {
   dismissDocumentNotOpened();
   dismissConfigIssue();
-  if (ideasNotWrittenNotice) useNotificationStore.getState().dismiss(ideasNotWrittenNotice);
-  ideasNotWrittenNotice = null;
+  dismissIdeasNotWritten();
   // Le main a basculé : ce qui ne s'est pas écrit du sortant n'a plus où aller, et l'auteur le
   // sait. La sortie n'a pas à le lui redemander, y compris si le Brainstorm n'est pas ouvert et
   // que rien ne recharge la liste. Rouvrir ce même projet, au contraire, le réécrit.
@@ -707,7 +711,17 @@ async function closedByMain(
   // revenir (disque rebranché, partage retrouvé) : rouvert, il l'écrit. L'auteur l'apprend ici,
   // comme après une fermeture qu'il a demandée, et non à la sortie, qui le redira.
   const ideas = useIdeaStore.getState();
-  if (ideas.loadedFor === closed.path && hasUnwrittenIdeas()) noticeIdeasNotWritten(ideas.saveError ?? undefined);
+  if (ideas.loadedFor === closed.path && hasUnwrittenIdeas()) {
+    noticeIdeasNotWritten(ideas.saveError ?? undefined);
+    // Une sauvegarde déjà partie au main peut encore aboutir : il valide le chemin, puis écrit, et sa
+    // fermeture passe entre les deux sur un disque lent. Le message dirait alors le contraire du
+    // disque, et la sortie, qui n'aurait plus rien à écrire, ne le redirait pas. Il part donc quand
+    // la file a sa réponse, si plus rien n'attend. Ce rappel ne fait que retirer : il ne pose jamais
+    // un message tard, quand l'auteur a peut-être déjà rouvert un projet.
+    void ideasSettled().then(() => {
+      if (!hasUnwrittenIdeas()) dismissIdeasNotWritten();
+    });
+  }
   // Un changement de projet en cours, ou une fermeture demandée par l'auteur, garde la main : sa fin
   // posera l'état, et l'éditeur, détaché pour lui, en sortira par elle. Pour une fermeture, poser
   // `idle` ici laisserait passer une ouverture que la suite de la fermeture refermerait.
