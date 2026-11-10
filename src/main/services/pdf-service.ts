@@ -774,7 +774,8 @@ class PDFService {
     // `this.vectorStore` relu à la fin était celui du projet ouvert entre-temps : l'analyse de A y
     // remplaçait celle de B. Après chaque attente, un autre magasin installé (bascule, fermeture)
     // arrête l'analyse sans rien lire ni écrire de plus ; celui d'avant est peut-être déjà fermé.
-    // Comparé par identité : rouvrir le même projet ouvre un autre magasin, et l'abandonne aussi.
+    // Comparé par identité : revenir à A après B ouvre un autre magasin, et l'abandonne aussi. Le
+    // dossier ouvert rechoisi garde le sien (seul le manifeste se relit) : l'analyse va au bout.
     const store = this.vectorStore!;
     const assertSameStore = (): void => {
       if (this.vectorStore !== store) throw new ProjectChangedError();

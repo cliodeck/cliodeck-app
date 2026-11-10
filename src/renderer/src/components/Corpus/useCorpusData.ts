@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { projectLifecycle } from '../../lifecycle/projectLifecycle';
-import { refusedAsProjectChanged } from '../../services/still-in-project';
+import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
 import type { GraphData, GraphNode, CorpusStatistics, TopicAnalysisResult } from './corpus-types';
 
 interface Filters {
@@ -145,9 +144,16 @@ export function useCorpusData() {
 
   const loadTopics = async (t: (key: string) => string) => {
     // Le projet du clic. Le calcul dure des minutes : ni son résultat ni son échec ne s'affichent
-    // dans un projet ouvert entre-temps (S03-1-21), où le main l'a de toute façon refusé
-    // (`project-changed`). Remonter l'Explorer par projet ne suffit pas : l'alerte est globale.
-    const shown = projectLifecycle.capture();
+    // dans un projet ouvert entre-temps (S03-1-21). Remonter l'Explorer par projet ne suffit pas :
+    // l'alerte est globale.
+    // - Le main refuse dès que son magasin a changé (`project-changed`) : rien n'est enregistré, ni
+    //   montré, même si l'écran montre encore ce projet (fermé d'office, l'événement pas encore là).
+    // - Sinon l'analyse est enregistrée dans le projet du clic. Elle se montre s'il est à l'écran une
+    //   fois tranchée l'ouverture en cours (`stillIn`) : une ouverture refusée, ou le dossier ouvert
+    //   rechoisi, laissent ce projet à l'écran et son magasin au main. Le handle du projet ne convient
+    //   pas ici : il finit à toute demande au main, et le projet revenu en reçoit un neuf.
+    const path = useProjectStore.getState().currentProject?.path ?? null;
+    const stillHere = async (): Promise<boolean> => path !== null && (await stillIn(path));
     setLoadingTopics(true);
     try {
       const result = await window.electron.corpus.analyzeTopics({
@@ -156,7 +162,7 @@ export function useCorpusData() {
         nGramRange: [1, 3],
         nrTopics: numTopics,
       });
-      if (refusedAsProjectChanged(result) || !shown?.isCurrent()) return;
+      if (refusedAsProjectChanged(result) || !(await stillHere())) return;
 
       if (result.success) {
         setTopicAnalysis(result);
@@ -177,7 +183,7 @@ export function useCorpusData() {
         }
       }
     } catch (err: unknown) {
-      if (!shown?.isCurrent()) return;
+      if (!(await stillHere())) return;
       const errorMsg = err instanceof Error ? err.message : '';
       if (errorMsg.includes('not available') || errorMsg.includes('not start') || errorMsg.includes('timeout')) {
         await useDialogStore.getState().showAlert(t('corpus.topicServiceUnavailable'));
