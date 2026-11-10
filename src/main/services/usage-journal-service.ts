@@ -24,6 +24,7 @@ import {
   getJournalContext,
   setBatchSink,
   setInferenceSink,
+  setWorkspaceRootSource,
   type BatchAccumulator,
   type JournalContext,
 } from '../../../backend/core/usage-journal/context.js';
@@ -92,6 +93,8 @@ class UsageJournalService {
       this.session = null;
       setInferenceSink((input) => this.record(input));
       setBatchSink((acc, ctx) => this.recordBatch(acc, ctx));
+      // Le décorateur et `runBatch` lisent la racine au début de l'appel ou du lot.
+      setWorkspaceRootSource(() => this.workspaceRoot ?? undefined);
       console.log('🧾 Usage journal initialized:', dbPath);
     } catch (err) {
       // Best-effort : l'app fonctionne sans journal.
@@ -103,6 +106,7 @@ class UsageJournalService {
   close(): void {
     setInferenceSink(undefined);
     setBatchSink(undefined);
+    setWorkspaceRootSource(undefined);
     this.flush();
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -263,11 +267,14 @@ class UsageJournalService {
   /**
    * L'événement est-il de ce projet ? Un appel ou un lot lancé dans un projet
    * quitté finit parfois après l'ouverture du suivant : la réindexation des
-   * sources primaires (H7), un tour de chat, une indexation PDF (S10-1-33). Il
+   * sources primaires (H7), un tour de chat, une indexation (S10-1-33). Il
    * n'entre pas dans ce journal, qui se copie et se publie seul (ADR 0007) :
    * mieux vaut un événement perdu, et dit, qu'un événement attribué au mauvais
    * projet. Le même dossier par un lien ou une autre casse reste ce projet.
-   * Sans racine connue, l'événement reste ici, comme avant.
+   *
+   * La racine est celle de l'opération qui a lancé l'appel, sinon celle du
+   * journal ouvert quand l'appel ou le lot a commencé (`originWorkspaceRoot`).
+   * Sans racine connue (appel lancé sans journal ouvert), l'événement reste ici.
    */
   private belongsHere(root: string | undefined): boolean {
     if (!root || !this.workspaceRoot || root === this.workspaceRoot) return true;
@@ -290,7 +297,7 @@ class UsageJournalService {
       status: acc.anyError ? 'error' : 'ok',
       corpus: ctx.corpus ?? acc.corpus,
       recipeId: ctx.recipeId,
-      workspaceRoot: ctx.workspaceRoot,
+      workspaceRoot: acc.workspaceRoot ?? ctx.workspaceRoot,
       mode: ctx.mode,
       isLocal: acc.isLocal,
     });

@@ -959,3 +959,56 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : le reste de l’app
     expect(rapport.every((c) => c.content.includes(RAPPORT_COPIE))).toBe(true);
   });
 });
+
+// MARK: - La synchro
+
+describe.skipIf(!sqliteAvailable)('synchro Tropy : son lot d’embeddings reste au journal d’usage du projet qui l’a lancée (S10-1-33)', () => {
+  /** Deux sources à embarquer à la première synchro : leur note est leur texte. */
+  const NOTED: TpyItemSpec[] = [
+    { id: 10, title: ARRETE, notes: [{ text: BODIES[10] }] },
+    { id: 20, title: LETTRE_X, notes: [{ text: BODIES[20] }] },
+  ];
+
+  it('projet B ouvert pendant l’embarquement de la synchro de A : le journal d’usage de B ne reçoit pas son lot', async () => {
+    const projectB = path.join(root, 'projet-B');
+    fs.mkdirSync(projectB);
+    tpy = makeTpy(tropyDir, { projectId: 'projet-tropy-greves', name: 'Grèves nantaises', items: NOTED });
+    usageJournalService.init(projectDir);
+    try {
+      await tropyService.init(projectDir);
+      expect((await tropyService.openProject(tpy)).success).toBe(true);
+      const gate = gateFirstEmbed();
+      const syncing = tropyService.sync({ performOCR: false, ocrLanguage: 'fra' });
+      await gate.reached;
+
+      // `project:load` : le journal de B d'abord, puis Tropy.
+      usageJournalService.init(projectB);
+      await tropyService.init(projectB);
+      gate.open();
+      await syncing;
+      await tropyService.whenFullReindexSettled();
+    } finally {
+      usageJournalService.close();
+    }
+
+    // `journal.db` se copie et se publie seul (ADR 0007) : rien de A dans celui de B.
+    expect(journalBatches(projectB)).toEqual([]);
+  });
+
+  it('témoin : finie dans A, la synchro inscrit son lot au journal d’usage de A', async () => {
+    tpy = makeTpy(tropyDir, { projectId: 'projet-tropy-greves', name: 'Grèves nantaises', items: NOTED });
+    usageJournalService.init(projectDir);
+    try {
+      await tropyService.init(projectDir);
+      expect((await tropyService.openProject(tpy)).success).toBe(true);
+      const result = await tropyService.sync({ performOCR: false, ocrLanguage: 'fra' });
+      expect(result.issues).toEqual([]);
+    } finally {
+      usageJournalService.close();
+    }
+
+    const total = query<{ n: number }>('SELECT COUNT(*) AS n FROM tropy_chunks')[0].n;
+    expect(total).toBeGreaterThan(0);
+    expect(journalBatches(projectDir)).toEqual([{ corpus: 'tropy', chunk_count: total, workspace: projectDir }]);
+  });
+});

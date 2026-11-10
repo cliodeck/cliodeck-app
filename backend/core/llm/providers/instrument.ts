@@ -13,6 +13,10 @@
  *
  * Agrégation des indexations en masse : à l'intérieur d'un scope `runBatch`, `embed()`
  * accumule dans le contexte au lieu d'émettre un événement par chunk.
+ *
+ * L'événement s'émet à la fin de l'appel, mais porte la racine du projet lue à son début
+ * (`originWorkspaceRoot`) : un appel fini après l'ouverture d'un autre projet n'entre pas dans
+ * le journal de celui-ci (S10-1-33).
  */
 
 import type {
@@ -25,7 +29,11 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
-import { getJournalContext, recordInference } from '../../usage-journal/context.js';
+import {
+  getJournalContext,
+  originWorkspaceRoot,
+  recordInference,
+} from '../../usage-journal/context.js';
 import { isLocalProvider } from '../../usage-journal/is-local.js';
 import { resolveEmbeddingProvider } from './fallback.js';
 
@@ -73,6 +81,7 @@ class InstrumentedLLM implements LLMProvider {
     opts?: ChatOptions
   ): AsyncIterable<ChatChunk> {
     const start = Date.now();
+    const workspaceRoot = originWorkspaceRoot();
     const promptChars = messages.reduce((s, m) => s + m.content.length, 0);
     let completionChars = 0;
     let usage: ChatChunk['usage'];
@@ -87,7 +96,7 @@ class InstrumentedLLM implements LLMProvider {
       errored = true;
       throw err;
     } finally {
-      this.emitCompletion(start, promptChars, completionChars, usage, errored);
+      this.emitCompletion(start, workspaceRoot, promptChars, completionChars, usage, errored);
     }
   }
 
@@ -95,6 +104,7 @@ class InstrumentedLLM implements LLMProvider {
     // Les providers implémentent complete() en consommant leur propre chat() et
     // jettent l'usage ; on reproduit ce comportement mais on capture les tokens.
     const start = Date.now();
+    const workspaceRoot = originWorkspaceRoot();
     const promptChars = prompt.length;
     let out = '';
     let usage: ChatChunk['usage'];
@@ -111,13 +121,14 @@ class InstrumentedLLM implements LLMProvider {
       errored = true;
       throw err;
     } finally {
-      this.emitCompletion(start, promptChars, out.length, usage, errored);
+      this.emitCompletion(start, workspaceRoot, promptChars, out.length, usage, errored);
     }
     return out;
   }
 
   private emitCompletion(
     startMs: number,
+    workspaceRoot: string | undefined,
     promptChars: number,
     completionChars: number,
     usage: ChatChunk['usage'],
@@ -139,6 +150,7 @@ class InstrumentedLLM implements LLMProvider {
       tokensEstimated: estimated,
       status: errored ? 'error' : 'ok',
       isLocal: this.isLocal,
+      workspaceRoot,
     });
   }
 }
@@ -192,6 +204,7 @@ class InstrumentedEmbedding implements EmbeddingProvider {
     opts?: { signal?: AbortSignal }
   ): Promise<number[][]> {
     const start = Date.now();
+    const workspaceRoot = originWorkspaceRoot();
     const tokens = texts.reduce((s, t) => s + estimateTokens(t.length), 0);
     let errored = false;
     try {
@@ -220,6 +233,7 @@ class InstrumentedEmbedding implements EmbeddingProvider {
           chunkCount: texts.length,
           status: errored ? 'error' : 'ok',
           isLocal: this.isLocal,
+          workspaceRoot,
         });
       }
     }

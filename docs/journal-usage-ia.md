@@ -72,6 +72,12 @@ Cas particuliers :
 - **Indexations en masse** — agrégées en un seul `embedding_batch` (compte de chunks +
   total de tokens) par run, via un scope ouvert aux trois frontières d'indexation (PDF,
   Obsidian, Tropy), plutôt qu'un événement par chunk.
+- **Projet de l'appel** — l'événement s'écrit à la fin de l'appel, mais il appartient au
+  projet de son début : celui de l'opération qui l'a lancé (tour de chat, recette,
+  indexation, synchro Tropy), sinon celui du journal ouvert quand l'appel ou le lot a
+  commencé. Un appel lancé dans A et fini après l'ouverture de B n'entre pas dans le
+  journal de B, qui se publie seul : il est perdu, et un avertissement le dit dans la
+  console (S10-1-33). Le même dossier par un lien ou une autre casse reste le même projet.
 - **Mode applicatif** — le mode (`explore|brainstorm|write|export`) vit dans le renderer ;
   il est miroité vers le main via `usage:set-mode`. Les contextes backend posent leur
   littéral : `recipe` (runner, avec `recipeId` — il écrase le `cli` parent quand une

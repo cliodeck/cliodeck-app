@@ -388,7 +388,11 @@ class TropyService {
    * Inclut la génération des embeddings pour la recherche vectorielle
    */
   async sync(options: TropySyncOptions): Promise<TropySyncResult> {
-    if (!this.tropySync || !this.vectorStore || !this.currentTPYPath) {
+    // Le projet de la synchro, pris à l'entrée : ses appels au modèle et son lot
+    // d'embeddings vont au journal d'usage de ce projet, même finis après
+    // l'ouverture d'un autre (S10-1-33).
+    const { tropySync, vectorStore, currentTPYPath, projectPath } = this;
+    if (!tropySync || !vectorStore || !currentTPYPath || !projectPath) {
       return {
         success: false,
         projectName: '',
@@ -410,7 +414,9 @@ class TropyService {
     // plusieurs heures.
     this.syncsRunning += 1;
     try {
-      return await this.runSync(this.tropySync, this.vectorStore, this.currentTPYPath, options);
+      return await runWithJournalContext({ workspaceRoot: projectPath }, () =>
+        this.runSync(tropySync, vectorStore, currentTPYPath, options)
+      );
     } finally {
       this.syncsRunning -= 1;
       if (this.syncsRunning === 0) {

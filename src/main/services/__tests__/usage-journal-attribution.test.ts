@@ -234,3 +234,70 @@ describe('journal d’usage : un lot d’embeddings reste dans son projet (H7, S
     fs.unlinkSync(link);
   });
 });
+
+/**
+ * Sans contexte qui porte la racine du projet : la génération de diapositives, l'analyse de
+ * similarité, l'indexation du vault Obsidian ou la synchro Tropy n'en posaient pas. La racine
+ * d'un appel ou d'un lot est celle du journal ouvert quand il commence, pas quand il finit.
+ */
+describe('journal d’usage : sans racine posée par l’appelant, le projet est celui du début (S10-1-33)', () => {
+  it('un appel démarré dans A et fini après l’ouverture de B n’entre pas dans le journal de B', async () => {
+    usageJournalService.init(A);
+    const { llm, running, release } = heldLLM();
+    const call = drain(llm.chat([{ role: 'user', content: 'question' }]));
+    await running;
+
+    usageJournalService.init(B);
+    release();
+    await call;
+    usageJournalService.close();
+
+    expect(eventsOf(B)).toEqual([]);
+    expect(warnings()).toContain(A);
+  });
+
+  it('un embedding isolé démarré dans A et fini après l’ouverture de B n’entre pas dans le journal de B', async () => {
+    usageJournalService.init(A);
+    const { embedding, running, release } = heldEmbedding();
+    const call = embedding.embed(['une question']);
+    await running;
+
+    usageJournalService.init(B);
+    release();
+    await call;
+    usageJournalService.close();
+
+    expect(eventsOf(B)).toEqual([]);
+    expect(warnings()).toContain(A);
+  });
+
+  it('un lot démarré dans A et fini après l’ouverture de B n’entre pas dans le journal de B', async () => {
+    usageJournalService.init(A);
+    const { embedding, running, release } = heldEmbedding();
+    const batch = runBatch('obsidian', () => embedding.embed(['une note', 'une autre']));
+    await running;
+
+    usageJournalService.init(B);
+    release();
+    await batch;
+    usageJournalService.close();
+
+    expect(eventsOf(B)).toEqual([]);
+    expect(warnings()).toContain(A);
+  });
+
+  it('témoin : fini dans A, l’appel et le lot entrent dans le journal de A, sous sa racine', async () => {
+    usageJournalService.init(A);
+    const { llm, release: releaseLLM } = heldLLM();
+    const { embedding, release: releaseEmbedding } = heldEmbedding();
+    releaseLLM();
+    releaseEmbedding();
+    await drain(llm.chat([{ role: 'user', content: 'question' }]));
+    await runBatch('obsidian', () => embedding.embed(['une note']));
+    usageJournalService.close();
+
+    expect(eventsOf(A)).toHaveLength(2);
+    expect(eventsOf(A)[0]).toMatchObject({ kind: 'completion', workspace: A });
+    expect(eventsOf(A)[1]).toMatchObject({ kind: 'embedding_batch', workspace: A, corpus: 'obsidian' });
+  });
+});

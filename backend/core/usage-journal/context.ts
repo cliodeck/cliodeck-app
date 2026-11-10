@@ -30,6 +30,11 @@ export interface BatchAccumulator {
   tokensEstimated: boolean;
   startedAt: number;
   anyError: boolean;
+  /**
+   * Racine du projet à l'ouverture du lot (`originWorkspaceRoot`) : un lot fini après
+   * l'ouverture d'un autre projet reste celui du projet qui l'a lancé (S10-1-33).
+   */
+  workspaceRoot?: string;
 }
 
 export interface JournalContext {
@@ -57,6 +62,26 @@ export function runWithJournalContext<T>(ctx: JournalContext, fn: () => T): T {
   const parent = storage.getStore();
   const merged: JournalContext = { ...parent, ...ctx };
   return storage.run(merged, fn);
+}
+
+/**
+ * Racine du projet dont le journal est ouvert, donnée par le service qui l'ouvre. Elle se lit au
+ * début d'un appel ou d'un lot (`originWorkspaceRoot`), jamais à sa fin : un appel lancé dans A et
+ * fini après l'ouverture de B porte la racine de A, et le journal de B l'écarte (S10-1-33).
+ */
+type WorkspaceRootSource = () => string | undefined;
+let workspaceRootSource: WorkspaceRootSource | undefined;
+
+export function setWorkspaceRootSource(source: WorkspaceRootSource | undefined): void {
+  workspaceRootSource = source;
+}
+
+/**
+ * Racine d'un appel ou d'un lot qui commence : celle du contexte, posée par l'opération qui l'a
+ * lancé, sinon celle du journal ouvert à cet instant. `undefined` sans l'une ni l'autre.
+ */
+export function originWorkspaceRoot(): string | undefined {
+  return storage.getStore()?.workspaceRoot ?? workspaceRootSource?.();
 }
 
 /** Modifie le contexte courant en place (no-op hors scope). */
@@ -114,6 +139,7 @@ export async function runBatch<T>(
     tokensEstimated: true,
     startedAt: nowMs(),
     anyError: false,
+    workspaceRoot: originWorkspaceRoot(),
   };
   const ctx: JournalContext = { corpus, batch: acc };
   try {

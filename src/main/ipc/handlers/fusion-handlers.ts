@@ -94,7 +94,7 @@ import {
 } from '../../../../backend/integrations/obsidian/ObsidianVaultIndexer.js';
 import { importVaultAsIdeas } from '../../../../backend/integrations/obsidian/obsidian-to-ideas.js';
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
-import { runBatch } from '../../../../backend/core/usage-journal/context.js';
+import { runBatch, runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 
@@ -983,29 +983,33 @@ export function setupFusionHandlers(): void {
 
       try {
         // Scope de batch : agrège les embeddings du vault en un seul
-        // `embedding_batch` (journal d'usage IA) pour cette indexation.
-        const report = await runBatch('obsidian', () =>
-          reader.scan().then(() =>
-            new ObsidianVaultIndexer(reader, store, embedder).indexAll({
-              force: !!opts.force,
-              onProgress: (p) => {
-                try {
-                  if (!event.sender.isDestroyed()) {
-                    // Le job est scopé par `root` (capturé en tête de
-                    // handler) mais l'événement ne l'était pas : des
-                    // Settings rouverts sur un AUTRE projet affichaient
-                    // les chiffres de ce job (#35). Le renderer filtre
-                    // sur projectRoot.
-                    event.sender.send('fusion:vault:progress', {
-                      ...p,
-                      projectRoot: root,
-                    });
+        // `embedding_batch` (journal d'usage IA) pour cette indexation. Il porte
+        // `root`, pris en tête de handler : finie après l'ouverture d'un autre
+        // projet, l'indexation n'entre pas dans son journal (S10-1-33).
+        const report = await runWithJournalContext({ workspaceRoot: root }, () =>
+          runBatch('obsidian', () =>
+            reader.scan().then(() =>
+              new ObsidianVaultIndexer(reader, store, embedder).indexAll({
+                force: !!opts.force,
+                onProgress: (p) => {
+                  try {
+                    if (!event.sender.isDestroyed()) {
+                      // Le job est scopé par `root` (capturé en tête de
+                      // handler) mais l'événement ne l'était pas : des
+                      // Settings rouverts sur un AUTRE projet affichaient
+                      // les chiffres de ce job (#35). Le renderer filtre
+                      // sur projectRoot.
+                      event.sender.send('fusion:vault:progress', {
+                        ...p,
+                        projectRoot: root,
+                      });
+                    }
+                  } catch {
+                    // Renderer gone — continue indexing anyway.
                   }
-                } catch {
-                  // Renderer gone — continue indexing anyway.
-                }
-              },
-            })
+                },
+              })
+            )
           )
         );
         return successResponse({
