@@ -216,6 +216,80 @@ describe('le même projet, ou le projet d’avant qui revient', () => {
     expect(lifecycle$.projectLifecycle.capture()?.path).toBe('/tmp/A');
   });
 
+  /**
+   * Un `.bib` reçu pendant la session (import, synchronisation Zotero) : le main l'écrit dans
+   * `project.json`, le panneau le relit, mais `currentProject` reste la copie prise à l'ouverture.
+   * Le parcours d'un nouvel utilisateur : créer le projet, puis importer sa bibliographie.
+   */
+  async function openAThenImportBibliography(): Promise<void> {
+    projects.A = project('A');
+    await open('A');
+    projects.A = project('A', 'zotero-export.bib');
+    await bibliography().loadBibliographyWithMetadata('/tmp/A/zotero-export.bib', '/tmp/A');
+    expect(bibliography().citations.map((c) => c.id)).toEqual(['Dupont_1990']);
+    expect(store().currentProject?.bibliographySource).toBeUndefined();
+    loadWithMetadata.mockClear();
+  }
+
+  const electronProject = () =>
+    (window as unknown as { electron: { project: Record<string, ReturnType<typeof vi.fn>> } }).electron.project;
+
+  it('.bib importé après l’ouverture, B échoue et A revient : la bibliographie renvoyée est celle du manifeste d’aujourd’hui', async () => {
+    await openAThenImportBibliography();
+    projects.B = project('B');
+    loadResults['/tmp/B/project.json'] = { success: false, code: 'services_failed', error: 'panne', restoredPath: '/tmp/A' };
+
+    await expect(store().loadProject('/tmp/B/project.json')).rejects.toThrow();
+
+    expect(store().currentProject?.path).toBe('/tmp/A');
+    expect(loadWithMetadata).toHaveBeenCalledWith({ filePath: '/tmp/A/zotero-export.bib', projectPath: '/tmp/A' });
+    expect(bibliography().citations.map((c) => c.id)).toEqual(['Dupont_1990']);
+  });
+
+  it('.bib importé après l’ouverture, création refusée avant toute bascule (nom déjà pris) : rien à relire, rien de vidé', async () => {
+    await openAThenImportBibliography();
+    // Le main refuse avant la séquence d'ouverture : aucun `restoredPath`, rien n'a été fermé.
+    electronProject().create.mockResolvedValueOnce({ success: false, error: 'project_exists' });
+
+    await expect(store().createProject('A', 'article', '/tmp')).rejects.toThrow();
+
+    expect(store().currentProject?.path).toBe('/tmp/A');
+    expect(loadWithMetadata).not.toHaveBeenCalled();
+    expect(bibliography().citations.map((c) => c.id)).toEqual(['Dupont_1990']);
+    expect(lifecycle$.projectLifecycle.capture()?.path).toBe('/tmp/A');
+  });
+
+  it('.bib importé après l’ouverture, projet créé mais en panne, A revient : sa bibliographie est renvoyée au main', async () => {
+    await openAThenImportBibliography();
+    electronProject().create.mockResolvedValueOnce({
+      success: false,
+      code: 'services_failed',
+      error: 'panne',
+      restoredPath: '/tmp/A',
+    });
+
+    await expect(store().createProject('C', 'article', '/tmp')).rejects.toThrow();
+
+    expect(store().currentProject?.path).toBe('/tmp/A');
+    expect(loadWithMetadata).toHaveBeenCalledWith({ filePath: '/tmp/A/zotero-export.bib', projectPath: '/tmp/A' });
+    expect(bibliography().citations.map((c) => c.id)).toEqual(['Dupont_1990']);
+  });
+
+  it('A revient mais son manifeste ne se relit pas : la liste à l’écran n’est pas vidée', async () => {
+    await openAThenImportBibliography();
+    projects.B = project('B');
+    loadResults['/tmp/B/project.json'] = { success: false, code: 'services_failed', error: 'panne', restoredPath: '/tmp/A' };
+    electronProject().getMetadata.mockImplementation(async (p: string) =>
+      p === '/tmp/A/project.json' ? { success: false, code: 'manifest_unreadable', error: 'EIO' } : { success: true, project: byPath(p) }
+    );
+
+    await expect(store().loadProject('/tmp/B/project.json')).rejects.toThrow();
+
+    expect(store().currentProject?.path).toBe('/tmp/A');
+    expect(loadWithMetadata).not.toHaveBeenCalled();
+    expect(bibliography().citations.map((c) => c.id)).toEqual(['Dupont_1990']);
+  });
+
   it('un refus de B avant toute bascule (fichier qui n’est pas un projet) : rien à renvoyer, rien de vidé', async () => {
     await openAWithEverything();
     loadWithMetadata.mockClear();

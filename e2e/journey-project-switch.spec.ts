@@ -77,7 +77,24 @@ async function createProject(app: ElectronApplication, window: Page, parent: str
 }
 
 const bibliographyCards = (window: Page) => window.locator('#left-tabpanel-bibliography .citation-card');
+const bibliographySearch = (window: Page) => window.locator('#left-tabpanel-bibliography .search-input');
 const chat = (window: Page) => window.locator('.right-panel');
+
+/**
+ * L'aperçu d'une citation, tel que le main le résout (Réglages → style de citation). Il lit la
+ * bibliographie du main, celle des exports : pas celle du panneau.
+ */
+async function previewInMain(window: Page, key: string): Promise<{ success: boolean; error?: string }> {
+  return window.evaluate(
+    (bibKey) =>
+      (
+        window as unknown as {
+          electron: { citation: { preview: (k: string, s: string, l: string) => Promise<{ success: boolean; error?: string }> } };
+        }
+      ).electron.citation.preview(bibKey, 'chicago-note-bibliography', 'fr-FR'),
+    key,
+  );
+}
 
 async function showBibliography(window: Page): Promise<void> {
   await window.locator('#left-tab-bibliography').click();
@@ -102,6 +119,10 @@ test('B sans .bib, après A : ni bibliographie ni conversation de A ; revenir à
     await openProject(app, window, projectA, 'Thèse');
     await showBibliography(window);
     await expect(bibliographyCards(window).filter({ hasText: REFERENCE })).toHaveCount(1, { timeout: 20_000 });
+    // Une recherche dans la bibliographie de A, et une clé de A que le main résout.
+    await bibliographySearch(window).fill('préfet');
+    await expect(bibliographyCards(window).filter({ hasText: REFERENCE })).toHaveCount(1);
+    expect(await previewInMain(window, 'Dupont_1990')).toMatchObject({ success: true });
 
     // Une vraie question au vrai chat, dans A.
     await window.locator('.right-panel #right-tab-chat').click();
@@ -114,6 +135,13 @@ test('B sans .bib, après A : ni bibliographie ni conversation de A ; revenir à
     await showBibliography(window);
     await expect(bibliographyCards(window)).toHaveCount(0);
     await expect(window.locator('#left-tabpanel-bibliography')).not.toContainText(REFERENCE);
+    // Ces deux-là, seule la remise à zéro les rend vrais : un projet sans `.bib` vidait déjà la liste
+    // (Q22), pas la recherche de A, et le main gardait la bibliographie de A pour les exports de B.
+    await expect(bibliographySearch(window)).toHaveValue('');
+    expect(await previewInMain(window, 'Dupont_1990')).toMatchObject({
+      success: false,
+      error: expect.stringContaining('unknown bibKey'),
+    });
     await expect(chat(window)).not.toContainText(QUESTION);
     await expect(chat(window)).not.toContainText(ANSWER);
 
@@ -121,6 +149,7 @@ test('B sans .bib, après A : ni bibliographie ni conversation de A ; revenir à
     await openProject(app, window, projectA, 'Thèse');
     await showBibliography(window);
     await expect(bibliographyCards(window).filter({ hasText: REFERENCE })).toHaveCount(1, { timeout: 20_000 });
+    expect(await previewInMain(window, 'Dupont_1990')).toMatchObject({ success: true });
     await expect(chat(window)).not.toContainText(QUESTION);
   } finally {
     await app.close().catch(() => undefined);

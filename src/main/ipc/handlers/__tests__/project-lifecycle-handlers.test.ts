@@ -428,6 +428,17 @@ describe('la bibliographie du main suit le projet (S07-1-31)', () => {
     expect(bibliographyService.getCitations()).toEqual([]);
   });
 
+  it('« Nouveau projet » au nom de A, refusé : le main garde la bibliographie de A, et la réponse ne porte pas restoredPath', async () => {
+    await openAWithBibliography();
+
+    const refused = await call<Reply>('project:create', { name: 'A', type: 'article', path: workDir });
+
+    expect(refused).toMatchObject({ success: false, error: 'project_exists' });
+    // Le renderer ne relit rien sans `restoredPath` : `projectStore`, `restorePreviousProject`.
+    expect(refused).not.toHaveProperty('restoredPath');
+    expect(bibliographyService.getByCitationKey('Dupont_1990')?.title).toBe('Le préfet et la grève');
+  });
+
   it('la table : les journaux s’ouvrent en premier, les opérations en dernier, la bibliographie entre les deux', () => {
     const names = projectServices().map((service) => service.name);
 
